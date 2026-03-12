@@ -1,0 +1,30 @@
+# CCS 配置文件
+# 复制到 ~/.config/ccs/config.toml 后修改
+
+[api]
+base_url = "https://your-api.example.com"
+api_key = "sk-xxx"  # 替换为你的 API Key
+
+[user]
+role = "dev"  # dev: 全部模型 | ops: 只看推荐+预设
+
+[recommend]
+# 管理员标记的推荐模型（ops 角色只看到这些）
+models = ["claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini"]
+
+# ── 预设 ──────────────────────────────────────────────
+
+[presets.coding]
+cli = "claude"
+opus = "claude-opus-4-6"
+sonnet = "claude-sonnet-4-6"
+haiku = "claude-haiku-4-5-20251001"
+subagent = "claude-sonnet-4-6"
+
+[presets.cheap]
+cli = "qwen"
+model = "qwen3-coder-plus"
+
+[presets.codex-gpt]
+cli = "codex"
+model = "gpt-5.4"

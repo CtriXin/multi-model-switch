@@ -1,0 +1,12 @@
+#!/opt/homebrew/bin/python3
+"""CCS — AI Coding CLI 统一启动器"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from ccs_core import main
+
+if __name__ == "__main__":
+    main()
