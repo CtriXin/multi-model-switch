@@ -47,6 +47,8 @@ OVERRIDE_PATHS = [
 DEFAULT_BASE_URL = "https://your-api.example.com"
 API_URL_ENV_NAME = "CCS_API_BASE_URL"
 API_KEY_ENV_NAME = "CCS_API_KEY"
+DEFAULT_PROVIDER_ID = "default"
+DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 
 CATEGORIES = {
     "Claude 系 ⭐": ["claude-"],
@@ -225,6 +227,102 @@ def export_command_hint(cli_name):
     return f"{current_command()} --export {cli_name} --apply"
 
 
+def _default_provider():
+    return {
+        "id": DEFAULT_PROVIDER_ID,
+        "name": "Default Gateway",
+        "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
+        "supported_clis": list(CLI_NAMES),
+        "enabled": True,
+    }
+
+
+def _sanitize_provider_id(provider_id):
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id).upper())
+    cleaned = cleaned.strip("_")
+    return cleaned or DEFAULT_PROVIDER_ID.upper()
+
+
+def _provider_env_name(provider_id, field):
+    return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
+
+
+def _normalize_provider(provider):
+    merged = dict(_default_provider())
+    merged.update(provider)
+    merged["id"] = str(merged.get("id") or DEFAULT_PROVIDER_ID).strip() or DEFAULT_PROVIDER_ID
+    merged["name"] = str(merged.get("name") or merged["id"]).strip() or merged["id"]
+
+    protocols = merged.get("protocols", DEFAULT_PROVIDER_PROTOCOLS)
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    merged["protocols"] = [str(item).strip() for item in protocols if str(item).strip()]
+    if not merged["protocols"]:
+        merged["protocols"] = list(DEFAULT_PROVIDER_PROTOCOLS)
+
+    supported_clis = merged.get("supported_clis", CLI_NAMES)
+    if isinstance(supported_clis, str):
+        supported_clis = [supported_clis]
+    merged["supported_clis"] = [str(item).strip() for item in supported_clis if str(item).strip()]
+    if not merged["supported_clis"]:
+        merged["supported_clis"] = list(CLI_NAMES)
+
+    merged["enabled"] = bool(merged.get("enabled", True))
+    return merged
+
+
+def _ensure_provider_config(cfg):
+    cfg = dict(cfg)
+    raw_providers = cfg.get("providers")
+    normalized = []
+    seen_ids = set()
+
+    if isinstance(raw_providers, list):
+        for item in raw_providers:
+            if not isinstance(item, dict):
+                continue
+            provider = _normalize_provider(item)
+            if provider["id"] in seen_ids:
+                continue
+            normalized.append(provider)
+            seen_ids.add(provider["id"])
+
+    if not normalized:
+        normalized = [_default_provider()]
+
+    provider_cfg = cfg.get("provider", {})
+    default_provider = DEFAULT_PROVIDER_ID
+    if isinstance(provider_cfg, dict):
+        default_provider = str(provider_cfg.get("default") or DEFAULT_PROVIDER_ID).strip() or DEFAULT_PROVIDER_ID
+    if default_provider not in seen_ids and default_provider not in {p["id"] for p in normalized}:
+        default_provider = normalized[0]["id"]
+
+    new_cfg = dict(cfg)
+    new_cfg["providers"] = normalized
+    new_cfg["provider"] = {"default": default_provider}
+    changed = new_cfg != cfg
+    return new_cfg, changed
+
+
+def _provider_map(cfg):
+    providers = cfg.get("providers", [])
+    return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
+
+
+def get_provider_definition(cfg, provider_id=None):
+    providers = _provider_map(cfg)
+    resolved_id = provider_id or cfg.get("provider", {}).get("default") or DEFAULT_PROVIDER_ID
+    provider = providers.get(resolved_id)
+    if provider:
+        return provider
+    if provider_id:
+        console.print(f"[red]未找到 provider: {provider_id}[/red]")
+        sys.exit(1)
+    if providers:
+        return next(iter(providers.values()))
+    return _default_provider()
+
+
 # ── Config ──────────────────────────────────────────────
 
 def load_config():
@@ -232,7 +330,11 @@ def load_config():
         return None
     with open(CONFIG_PATH, "rb") as f:
         cfg = tomllib.load(f)
-    return _migrate_legacy_api_config(cfg)
+    cfg = _migrate_legacy_api_config(cfg)
+    cfg, changed = _ensure_provider_config(cfg)
+    if changed:
+        save_config(cfg)
+    return cfg
 
 
 def load_runtime_config():
@@ -322,16 +424,25 @@ def _load_env_file(path):
     return values
 
 
-def load_api_credentials():
-    base_url = os.environ.get(API_URL_ENV_NAME, "").strip()
-    api_key = os.environ.get(API_KEY_ENV_NAME, "").strip()
+def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
+    base_key = _provider_env_name(provider_id, "BASE_URL")
+    api_key_name = _provider_env_name(provider_id, "API_KEY")
+    base_url = os.environ.get(base_key, "").strip()
+    api_key = os.environ.get(api_key_name, "").strip()
+
+    if provider_id == DEFAULT_PROVIDER_ID:
+        base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip()
+        api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip()
 
     if os.path.exists(CREDENTIALS_PATH):
         file_values = _load_env_file(CREDENTIALS_PATH)
-        base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
-        api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
+        base_url = base_url or file_values.get(base_key, "").strip()
+        api_key = api_key or file_values.get(api_key_name, "").strip()
+        if provider_id == DEFAULT_PROVIDER_ID:
+            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
+            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
 
-    if (not base_url or not api_key) and os.path.exists(CONFIG_PATH):
+    if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "rb") as f:
             legacy_cfg = tomllib.load(f)
         legacy_api = legacy_cfg.get("api", {})
@@ -342,23 +453,48 @@ def load_api_credentials():
     return (base_url.rstrip("/") if base_url else "", api_key)
 
 
-def save_api_credentials(base_url, api_key):
+def save_provider_credentials(provider_id, base_url, api_key):
     os.makedirs(CONFIG_DIR, exist_ok=True)
+    values = _load_env_file(CREDENTIALS_PATH) if os.path.exists(CREDENTIALS_PATH) else {}
     base_url = base_url.rstrip("/")
-    lines = [
-        "# Generated by CCS",
-        f"export {API_URL_ENV_NAME}={_shell_quote(base_url)}",
-        f"export {API_KEY_ENV_NAME}={_shell_quote(api_key)}",
-        "",
-    ]
+    values[_provider_env_name(provider_id, "BASE_URL")] = base_url
+    values[_provider_env_name(provider_id, "API_KEY")] = api_key
+
+    if provider_id == DEFAULT_PROVIDER_ID:
+        values[API_URL_ENV_NAME] = base_url
+        values[API_KEY_ENV_NAME] = api_key
+
+    lines = ["# Generated by MMS"]
+    for key in sorted(values):
+        lines.append(f"export {key}={_shell_quote(str(values[key]))}")
+    lines.append("")
+
     with open(CREDENTIALS_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     os.chmod(CREDENTIALS_PATH, 0o600)
 
 
+def load_api_credentials():
+    return load_provider_credentials(DEFAULT_PROVIDER_ID)
+
+
+def save_api_credentials(base_url, api_key):
+    save_provider_credentials(DEFAULT_PROVIDER_ID, base_url, api_key)
+
+
+def resolve_provider_context(cfg, provider_id=None):
+    provider = dict(get_provider_definition(cfg, provider_id))
+    base_url, api_key = load_provider_credentials(provider["id"])
+    provider["base_url"] = base_url
+    provider["api_key"] = api_key
+    return provider
+
+
 def _default_config(role="dev"):
     return {
         "user": {"role": role},
+        "provider": {"default": DEFAULT_PROVIDER_ID},
+        "providers": [_default_provider()],
         "recommend": {"models": [
             "claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini",
         ]},
@@ -378,32 +514,38 @@ def _default_config(role="dev"):
 
 def _migrate_legacy_api_config(cfg):
     api_cfg = cfg.get("api")
-    if not isinstance(api_cfg, dict):
-        return cfg
+    updated_cfg = dict(cfg)
 
-    base_url = str(api_cfg.get("base_url", "")).strip()
-    api_key = str(api_cfg.get("api_key", "")).strip()
-    file_base_url, file_api_key = load_api_credentials()
+    if isinstance(api_cfg, dict):
+        base_url = str(api_cfg.get("base_url", "")).strip()
+        api_key = str(api_cfg.get("api_key", "")).strip()
+        file_base_url, file_api_key = load_api_credentials()
 
-    if base_url and api_key and (not file_base_url or not file_api_key):
+        if base_url and api_key and (not file_base_url or not file_api_key):
+            try:
+                save_api_credentials(base_url, api_key)
+                console.print(f"[yellow]已将 API 凭据迁移到 {CREDENTIALS_PATH}[/yellow]")
+            except OSError as exc:
+                console.print(f"[yellow]无法迁移 API 凭据到 {CREDENTIALS_PATH}: {exc}[/yellow]")
+                return cfg
+
+        updated_cfg.pop("api", None)
+
+    updated_cfg, changed = _ensure_provider_config(updated_cfg)
+    if changed or updated_cfg != cfg:
         try:
-            save_api_credentials(base_url, api_key)
-            console.print(f"[yellow]已将 API 凭据迁移到 {CREDENTIALS_PATH}[/yellow]")
+            save_config(updated_cfg)
         except OSError as exc:
-            console.print(f"[yellow]无法迁移 API 凭据到 {CREDENTIALS_PATH}: {exc}[/yellow]")
+            console.print(f"[yellow]无法更新 {CONFIG_PATH}: {exc}[/yellow]")
             return cfg
-
-    cfg = dict(cfg)
-    cfg.pop("api", None)
-    try:
-        save_config(cfg)
-    except OSError as exc:
-        console.print(f"[yellow]无法更新 {CONFIG_PATH}: {exc}[/yellow]")
-        return cfg
-    return cfg
+    return updated_cfg
 
 
-def _prompt_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
+def _provider_label(provider):
+    return provider.get("name", provider.get("id", DEFAULT_PROVIDER_ID))
+
+
+def _prompt_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
     if not sys.stdin.isatty():
         console.print(
             f"[red]当前不是交互终端，无法输入 API URL / API Key，请在终端里运行 {current_command()} "
@@ -412,11 +554,11 @@ def _prompt_api_credentials(existing_base_url="", existing_api_key="", allow_kee
         sys.exit(1)
 
     base_default = existing_base_url or DEFAULT_BASE_URL
-    base_url = Prompt.ask("请输入 API 地址", default=base_default).rstrip("/")
+    base_url = Prompt.ask(f"请输入 API 地址（provider: {_provider_label(provider)}）", default=base_default).rstrip("/")
 
-    key_prompt = "请输入你的 API Key"
+    key_prompt = f"请输入 API Key（provider: {_provider_label(provider)}）"
     if allow_keep and existing_api_key:
-        key_prompt = "请输入你的 API Key（留空保持不变）"
+        key_prompt = f"请输入 API Key（provider: {_provider_label(provider)}，留空保持不变）"
 
     prompt_kwargs = {"password": True}
     if allow_keep:
@@ -432,53 +574,19 @@ def _prompt_api_credentials(existing_base_url="", existing_api_key="", allow_kee
     return base_url, api_key
 
 
-def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
-    base_url, api_key = _prompt_api_credentials(existing_base_url, existing_api_key, allow_keep)
-
-    console.print("\n正在测试连接...", style="dim")
-    models = fetch_models(base_url, api_key)
-    if models is None:
-        console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
-    else:
-        console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
-
-    save_api_credentials(base_url, api_key)
-    console.print(f"[green]✓ API 凭据已保存到 {CREDENTIALS_PATH}[/green]")
-    console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
-    return base_url, api_key
-
-
-def ensure_api_credentials():
-    base_url, api_key = load_api_credentials()
-    if base_url and api_key:
-        return base_url, api_key
-    return setup_api_credentials(base_url, api_key, allow_keep=bool(api_key))
-
-
-def setup_wizard():
-    title = display_title()
-    console.print(Panel(
-        f"[bold cyan]欢迎使用 {title} — AI Coding CLI 统一启动器[/bold cyan]\n\n"
-        f"{title} 帮你一键启动 AI 编程助手\n"
-        "首次使用，需要配置 API 地址和认证信息",
-        title=f"{title} Setup",
-    ))
-
-    setup_api_credentials()
-
-    role = Prompt.ask("你的角色", choices=["dev", "ops"], default="dev")
-    cfg = _default_config(role)
-    save_config(cfg)
-    console.print(f"\n[green]✓ 配置已保存到 {CONFIG_PATH}[/green]\n")
-    return cfg
-
-
-# ── Model Fetching ──────────────────────────────────────
-
-def fetch_models(base_url, api_key):
+def fetch_models(provider):
+    if "openai_chat_completions" not in provider.get("protocols", []):
+        console.print(f"[yellow]provider '{provider['id']}' 不支持 OpenAI models 列表探测，跳过连接测试[/yellow]")
+        return None
     if httpx is None:
         console.print("[red]缺少 httpx，请执行: pip install httpx[/red]")
         return None
+
+    base_url = provider.get("base_url", "").rstrip("/")
+    api_key = provider.get("api_key", "")
+    if not base_url or not api_key:
+        return None
+
     try:
         r = httpx.get(
             f"{base_url}/v1/models",
@@ -495,10 +603,69 @@ def fetch_models(base_url, api_key):
         return None
 
 
-def ensure_models_ready(base_url, api_key):
-    models = fetch_models(base_url, api_key)
+def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
+    base_url, api_key = _prompt_provider_credentials(provider, existing_base_url, existing_api_key, allow_keep)
+    provider_ctx = dict(provider)
+    provider_ctx["base_url"] = base_url
+    provider_ctx["api_key"] = api_key
+
+    console.print("\n正在测试连接...", style="dim")
+    models = fetch_models(provider_ctx)
+    if models is None:
+        console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
+    else:
+        console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
+
+    save_provider_credentials(provider["id"], base_url, api_key)
+    console.print(f"[green]✓ provider '{provider['id']}' 的凭据已保存到 {CREDENTIALS_PATH}[/green]")
+    console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
+    return resolve_provider_context({"providers": [provider], "provider": {"default": provider["id"]}}, provider["id"])
+
+
+def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
+    provider = _default_provider()
+    provider_ctx = setup_provider_credentials(provider, existing_base_url, existing_api_key, allow_keep)
+    return provider_ctx["base_url"], provider_ctx["api_key"]
+
+
+def ensure_provider_credentials(cfg, provider_id=None):
+    provider = get_provider_definition(cfg, provider_id)
+    base_url, api_key = load_provider_credentials(provider["id"])
+    if base_url and api_key:
+        return resolve_provider_context(cfg, provider["id"])
+    return setup_provider_credentials(provider, base_url, api_key, allow_keep=bool(api_key))
+
+
+def ensure_api_credentials():
+    provider_ctx = ensure_provider_credentials(_default_config())
+    return provider_ctx["base_url"], provider_ctx["api_key"]
+
+
+def setup_wizard():
+    title = display_title()
+    console.print(Panel(
+        f"[bold cyan]欢迎使用 {title} — AI Coding CLI 统一启动器[/bold cyan]\n\n"
+        f"{title} 帮你一键启动 AI 编程助手\n"
+        "首次使用，需要配置 API 地址和认证信息",
+        title=f"{title} Setup",
+    ))
+
+    cfg = _default_config()
+    setup_provider_credentials(get_provider_definition(cfg))
+
+    role = Prompt.ask("你的角色", choices=["dev", "ops"], default="dev")
+    cfg = _default_config(role)
+    save_config(cfg)
+    console.print(f"\n[green]✓ 配置已保存到 {CONFIG_PATH}[/green]\n")
+    return cfg
+
+
+# ── Model Fetching ──────────────────────────────────────
+
+def ensure_models_ready(provider):
+    models = fetch_models(provider)
     if models:
-        return base_url, api_key, models
+        return provider, models
 
     if not sys.stdin.isatty():
         console.print(f"[red]模型校验失败，请执行 {config_command_hint()} 后重试[/red]")
@@ -508,10 +675,15 @@ def ensure_models_ready(base_url, api_key):
         retry = Confirm.ask("模型校验失败，是否立即重新输入 API URL / API Key？", default=True)
         if not retry:
             sys.exit(1)
-        base_url, api_key = setup_api_credentials(base_url, api_key, allow_keep=True)
-        models = fetch_models(base_url, api_key)
+        provider = setup_provider_credentials(
+            provider,
+            provider.get("base_url", ""),
+            provider.get("api_key", ""),
+            allow_keep=True,
+        )
+        models = fetch_models(provider)
         if models:
-            return base_url, api_key, models
+            return provider, models
 
 
 def categorize_models(models):
@@ -565,6 +737,12 @@ def select_model_interactive(models_list):
 
 def _scene_model_info(scene):
     return {k: v for k, v in scene.items() if k not in SCENE_META_KEYS}
+
+
+def _clean_model_info(model_info):
+    if not isinstance(model_info, dict):
+        return model_info
+    return {k: v for k, v in model_info.items() if k != "provider"}
 
 
 def _tier_label(tier):
@@ -723,7 +901,7 @@ def _use_tui():
         return False
 
 
-def _handle_tui_scene_selection(cfg, base_url, api_key, once):
+def _handle_tui_scene_selection(cfg, provider, once):
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
@@ -743,7 +921,7 @@ def _handle_tui_scene_selection(cfg, base_url, api_key, once):
 
         if scene_name is None:
             # 自定义模式：用 TUI 选模型
-            models = fetch_models(base_url, api_key)
+            models = fetch_models(provider)
             if not models:
                 return True
             model = select_model_tui(models, title=f"为 {cli} 选择模型")
@@ -754,19 +932,20 @@ def _handle_tui_scene_selection(cfg, base_url, api_key, once):
             console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
             cli = "claude"
 
-        env_vars = get_export_env(cli, base_url, api_key)
-        action = confirm_tui(cli, model_info, env_vars=env_vars, once=once)
+        clean_model_info = _clean_model_info(model_info)
+        env_vars = get_export_env(cli, provider)
+        action = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
         if action == "q":
             return True
         if action == "b":
             continue
-        launch_cli(cli, model_info, base_url, api_key, once=once)
+        launch_cli(cli, clean_model_info, provider, once=once)
         return True
 
 
 # ── Export command ──────────────────────────────────────
 
-def handle_export(cli_name, base_url, api_key, apply=False):
+def handle_export(cli_name, provider, apply=False):
     """输出指定 CLI 的 export 命令，或写入独立 env 文件。"""
     from ccs_launchers import get_export_env
 
@@ -775,7 +954,7 @@ def handle_export(cli_name, base_url, api_key, apply=False):
         console.print(f"支持: {', '.join(CLI_NAMES)}")
         return
 
-    exports = get_export_env(cli_name, base_url, api_key)
+    exports = get_export_env(cli_name, provider)
     if not exports:
         console.print(f"[yellow]{cli_name} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
         return
@@ -790,7 +969,7 @@ def handle_export(cli_name, base_url, api_key, apply=False):
         os.makedirs(ENV_DIR, exist_ok=True)
         env_path = _env_file_path(cli_name)
         with open(env_path, "w") as f:
-            f.write("# Generated by CCS\n")
+            f.write(f"# Generated by {display_title()}\n")
             f.write(export_block + "\n")
 
         console.print(f"\n[green]✓ 已写入 {env_path}[/green]")
@@ -811,9 +990,17 @@ def handle_config(cfg, args_rest):
         return
 
     key_path = args_rest[0]
+    if key_path == "provider.list":
+        _display_providers(cfg)
+        return
     if key_path in ("api.setup", "api.edit"):
-        base_url, api_key = load_api_credentials()
-        setup_api_credentials(base_url, api_key, allow_keep=True)
+        provider = resolve_provider_context(cfg)
+        setup_provider_credentials(
+            provider,
+            provider.get("base_url", ""),
+            provider.get("api_key", ""),
+            allow_keep=True,
+        )
         return
 
     if key_path.startswith("api."):
@@ -873,16 +1060,48 @@ def _handle_api_config(key_path, args_rest):
     console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
 
 
+def _display_providers(cfg):
+    providers = cfg.get("providers", [])
+    if not providers:
+        console.print("[yellow]未配置 provider[/yellow]")
+        return
+
+    table = Table(title="Providers", show_lines=True)
+    table.add_column("ID", style="cyan")
+    table.add_column("名称", style="green")
+    table.add_column("协议", style="yellow")
+    table.add_column("CLI", style="magenta")
+    table.add_column("状态", style="white")
+    table.add_column("地址", style="blue")
+
+    default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
+    for provider in providers:
+        provider_ctx = resolve_provider_context(cfg, provider.get("id"))
+        status = "默认" if provider.get("id") == default_id else ""
+        status = f"{status} 启用" if provider.get("enabled", True) else f"{status} 禁用".strip()
+        table.add_row(
+            str(provider.get("id", "")),
+            str(provider.get("name", "")),
+            ", ".join(provider.get("protocols", [])),
+            ", ".join(provider.get("supported_clis", [])),
+            status.strip(),
+            provider_ctx.get("base_url") or "(未设置)",
+        )
+    console.print(table)
+
+
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
-        base_url, api_key = load_api_credentials()
-        console.print("[bold]api:[/bold]")
-        console.print(f"  [cyan]base_url[/cyan] = {base_url or '(未设置)'}")
-        key_display = _mask_key(api_key) if api_key else "(未设置)"
+        provider = resolve_provider_context(cfg)
+        console.print("[bold]provider:[/bold]")
+        console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
+        console.print(f"  [cyan]base_url[/cyan] = {provider.get('base_url') or '(未设置)'}")
+        key_display = _mask_key(provider.get("api_key", "")) if provider.get("api_key") else "(未设置)"
         console.print(f"  [cyan]api_key[/cyan] = {key_display}")
         console.print(f"  [cyan]credentials_file[/cyan] = {CREDENTIALS_PATH}")
         console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
+        _display_providers(cfg)
         active_overrides = _existing_override_paths()
         if active_overrides:
             console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
@@ -892,6 +1111,8 @@ def _display_config(cfg, prefix="", depth=0):
             console.print("  [dim]如需团队共享默认值，可在以上路径创建 override.toml。[/dim]")
 
     for k, v in cfg.items():
+        if depth == 0 and k in {"providers", "provider"}:
+            continue
         full_key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
         if isinstance(v, dict):
             console.print(f"{'  ' * depth}[bold]{k}:[/bold]")
@@ -964,7 +1185,7 @@ def main():
 
     cfg = apply_local_overrides(user_cfg)
 
-    base_url, api_key = ensure_api_credentials()
+    default_provider = ensure_provider_credentials(cfg)
     role = cfg.get("user", {}).get("role", "dev")
     recommend = cfg.get("recommend", {}).get("models", [])
 
@@ -977,10 +1198,11 @@ def main():
             table = Table(title="已保存预设")
             table.add_column("名称", style="cyan")
             table.add_column("CLI", style="green")
+            table.add_column("Provider", style="magenta")
             table.add_column("模型", style="yellow")
             for name, p in presets.items():
                 model_str = p.get("model", f"opus={p.get('opus','')}, sonnet={p.get('sonnet','')}")
-                table.add_row(name, p.get("cli", "?"), str(model_str))
+                table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str))
             console.print(table)
         console.print("\n[bold]内置场景:[/bold]")
         for i, (name, s) in enumerate(SCENES.items(), 1):
@@ -989,10 +1211,10 @@ def main():
 
     # --export
     if args.export is not None:
-        handle_export(args.export, base_url, api_key, apply=args.apply)
+        handle_export(args.export, default_provider, apply=args.apply)
         return
 
-    base_url, api_key, models_cache = ensure_models_ready(base_url, api_key)
+    default_provider, models_cache = ensure_models_ready(default_provider)
 
     # --list
     if args.list:
@@ -1008,9 +1230,10 @@ def main():
             return
         p = presets[args.preset]
         cli = p["cli"]
-        model_info = {k: v for k, v in p.items() if k != "cli"}
+        provider = ensure_provider_credentials(cfg, p.get("provider"))
+        model_info = {k: v for k, v in p.items() if k not in {"cli", "provider"}}
         once = bool(args.once)
-        launch_cli(cli, model_info, base_url, api_key, once=once)
+        launch_cli(cli, model_info, provider, once=once)
         return
 
     # Determine once mode
@@ -1039,7 +1262,7 @@ def main():
                     return
                 if action == "s":
                     save_preset_interactive(user_cfg, cli, model_info)
-                launch_cli(cli, model_info, base_url, api_key, once=once)
+                launch_cli(cli, _clean_model_info(model_info), default_provider, once=once)
                 return
         except ValueError:
             pass
@@ -1057,7 +1280,7 @@ def main():
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, base_url, api_key, once=once)
+            launch_cli(cli, {"model": model}, default_provider, once=once)
             return
 
         console.print(f"[red]未知目标: {target}[/red]")
@@ -1073,12 +1296,12 @@ def main():
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, base_url, api_key, once=once)
+        launch_cli(cli, {"model": model}, default_provider, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
     if _use_tui():
-        handled = _handle_tui_scene_selection(cfg, base_url, api_key, once)
+        handled = _handle_tui_scene_selection(cfg, default_provider, once)
         if handled:
             return
         # fallback if curses failed
@@ -1089,16 +1312,15 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli()
-        models = fetch_models(base_url, api_key)
-        if models:
-            models_list = display_models(models, role, recommend)
+        if models_cache:
+            models_list = display_models(models_cache, role, recommend)
             model = select_model_interactive(models_list)
             action = confirm_launch(cli, model, once)
             if action == "q":
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, base_url, api_key, once=once)
+            launch_cli(cli, {"model": model}, default_provider, once=once)
         return
 
     scene = SCENES[scene_name]
@@ -1115,4 +1337,4 @@ def main():
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    launch_cli(cli, model_info, base_url, api_key, once=once)
+    launch_cli(cli, _clean_model_info(model_info), default_provider, once=once)
