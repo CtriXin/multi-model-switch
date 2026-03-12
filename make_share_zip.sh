@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
-PKG_NAME="CCS-Package"
+PKG_NAME="MMS-Package"
 TMP_DIR="$(mktemp -d)"
 PKG_DIR="$TMP_DIR/$PKG_NAME"
 ZIP_PATH="$DIST_DIR/${PKG_NAME}.zip"
@@ -13,6 +13,8 @@ mkdir -p "$PKG_DIR" "$DIST_DIR"
 
 FILES=(
     "CCS Installer.command"
+    "MMS Installer.command"
+    "mms"
     "README.md"
     "ccs"
     "ccs_core.py"
