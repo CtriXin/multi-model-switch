@@ -49,6 +49,8 @@ API_URL_ENV_NAME = "CCS_API_BASE_URL"
 API_KEY_ENV_NAME = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
+MODE_ALL = "全部模型"
+MODE_RECOMMENDED = "推荐模型"
 
 CATEGORIES = {
     "Claude 系 ⭐": ["claude-"],
@@ -227,6 +229,15 @@ def export_command_hint(cli_name):
     return f"{current_command()} --export {cli_name} --apply"
 
 
+def normalize_user_role(role):
+    value = str(role or "").strip()
+    if value in {"dev", "all", MODE_ALL}:
+        return MODE_ALL
+    if value in {"ops", "recommended", MODE_RECOMMENDED}:
+        return MODE_RECOMMENDED
+    return MODE_ALL
+
+
 def _default_provider():
     return {
         "id": DEFAULT_PROVIDER_ID,
@@ -304,6 +315,24 @@ def _ensure_provider_config(cfg):
     return new_cfg, changed
 
 
+def _normalize_user_config(cfg):
+    user_cfg = cfg.get("user", {})
+    if not isinstance(user_cfg, dict):
+        new_cfg = dict(cfg)
+        new_cfg["user"] = {"role": MODE_ALL}
+        return new_cfg, True
+
+    normalized_role = normalize_user_role(user_cfg.get("role", MODE_ALL))
+    if user_cfg.get("role") == normalized_role:
+        return cfg, False
+
+    new_cfg = dict(cfg)
+    new_user = dict(user_cfg)
+    new_user["role"] = normalized_role
+    new_cfg["user"] = new_user
+    return new_cfg, True
+
+
 def _provider_map(cfg):
     providers = cfg.get("providers", [])
     return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
@@ -332,6 +361,8 @@ def load_config():
         cfg = tomllib.load(f)
     cfg = _migrate_legacy_api_config(cfg)
     cfg, changed = _ensure_provider_config(cfg)
+    cfg, role_changed = _normalize_user_config(cfg)
+    changed = changed or role_changed
     if changed:
         save_config(cfg)
     return cfg
@@ -490,9 +521,9 @@ def resolve_provider_context(cfg, provider_id=None):
     return provider
 
 
-def _default_config(role="dev"):
+def _default_config(role=MODE_ALL):
     return {
-        "user": {"role": role},
+        "user": {"role": normalize_user_role(role)},
         "provider": {"default": DEFAULT_PROVIDER_ID},
         "providers": [_default_provider()],
         "recommend": {"models": [
@@ -532,7 +563,8 @@ def _migrate_legacy_api_config(cfg):
         updated_cfg.pop("api", None)
 
     updated_cfg, changed = _ensure_provider_config(updated_cfg)
-    if changed or updated_cfg != cfg:
+    updated_cfg, role_changed = _normalize_user_config(updated_cfg)
+    if changed or role_changed or updated_cfg != cfg:
         try:
             save_config(updated_cfg)
         except OSError as exc:
@@ -653,7 +685,7 @@ def setup_wizard():
     cfg = _default_config()
     setup_provider_credentials(get_provider_definition(cfg))
 
-    role = Prompt.ask("你的角色", choices=["dev", "ops"], default="dev")
+    role = Prompt.ask("模型模式", choices=[MODE_ALL, MODE_RECOMMENDED], default=MODE_ALL)
     cfg = _default_config(role)
     save_config(cfg)
     console.print(f"\n[green]✓ 配置已保存到 {CONFIG_PATH}[/green]\n")
@@ -701,7 +733,7 @@ def categorize_models(models):
     return {k: v for k, v in categorized.items() if v}
 
 
-def display_models(models, role="dev", recommend=None):
+def display_models(models, role=MODE_ALL, recommend=None):
     categorized = categorize_models(models)
     table = Table(title="可用模型", show_lines=True)
     table.add_column("#", style="cyan", width=4)
@@ -713,7 +745,7 @@ def display_models(models, role="dev", recommend=None):
         for m in cat_models:
             flat.append((m, cat))
 
-    if role == "ops" and recommend:
+    if normalize_user_role(role) == MODE_RECOMMENDED and recommend:
         flat = [(m, c) for m, c in flat if m in recommend]
 
     for i, (m, c) in enumerate(flat, 1):
@@ -993,6 +1025,9 @@ def handle_config(cfg, args_rest):
     if key_path == "provider.list":
         _display_providers(cfg)
         return
+    if key_path == "provider.default":
+        _handle_provider_default_config(cfg, args_rest[1:])
+        return
     if key_path in ("api.setup", "api.edit"):
         provider = resolve_provider_context(cfg)
         setup_provider_credentials(
@@ -1025,6 +1060,8 @@ def handle_config(cfg, args_rest):
     elif len(args_rest) == 2:
         # 修改某个值
         new_val = args_rest[1]
+        if key_path == "user.role":
+            new_val = _validate_user_role(new_val)
         _set_nested(cfg, parts, new_val)
         save_config(cfg)
         if "key" in key_path.lower():
@@ -1060,6 +1097,35 @@ def _handle_api_config(key_path, args_rest):
     console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
 
 
+def _validate_user_role(raw_value):
+    normalized = normalize_user_role(raw_value)
+    if str(raw_value).strip() not in {"dev", "ops", "all", "recommended", MODE_ALL, MODE_RECOMMENDED}:
+        console.print(
+            f"[red]不支持的模型模式: {raw_value}[/red]\n[dim]可用值: {MODE_ALL} / {MODE_RECOMMENDED}[/dim]"
+        )
+        sys.exit(1)
+    return normalized
+
+
+def _handle_provider_default_config(cfg, args_rest):
+    default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
+    if not args_rest:
+        console.print(f"[cyan]provider.default[/cyan] = {default_id}")
+        return
+
+    requested_id = args_rest[0].strip()
+    providers = _provider_map(cfg)
+    if requested_id not in providers:
+        console.print(f"[red]未找到 provider: {requested_id}[/red]")
+        console.print(f"[dim]可用 provider: {', '.join(providers.keys())}[/dim]")
+        return
+
+    cfg.setdefault("provider", {})
+    cfg["provider"]["default"] = requested_id
+    save_config(cfg)
+    console.print(f"[green]✓ provider.default = {requested_id}[/green]")
+
+
 def _display_providers(cfg):
     providers = cfg.get("providers", [])
     if not providers:
@@ -1088,6 +1154,9 @@ def _display_providers(cfg):
             provider_ctx.get("base_url") or "(未设置)",
         )
     console.print(table)
+    console.print(
+        f"[dim]提示: 可用 {current_command()} config provider.default <id> 切换默认 provider。[/dim]"
+    )
 
 
 def _display_config(cfg, prefix="", depth=0):
@@ -1186,7 +1255,7 @@ def main():
     cfg = apply_local_overrides(user_cfg)
 
     default_provider = ensure_provider_credentials(cfg)
-    role = cfg.get("user", {}).get("role", "dev")
+    role = normalize_user_role(cfg.get("user", {}).get("role", MODE_ALL))
     recommend = cfg.get("recommend", {}).get("models", [])
 
     from ccs_launchers import launch_cli

@@ -32,6 +32,7 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 - `mms` 新入口
 - 安装脚本里的 `mms` / `ccs` 双命令链接
 - `providers` 配置骨架，兼容旧的单网关用法
+- 中文模型模式：`全部模型` / `推荐模型`
 
 后续版本会继续补上：
 
@@ -60,6 +61,15 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 这样做是为了兼容一种很常见的现实情况：同一个网关地址同时暴露 Anthropic 和 OpenAI 两种协议。
 
+## 中文模式
+
+用户模式已经改成中文配置：
+
+- `全部模型`：展示全部可用模型
+- `推荐模型`：只展示推荐列表里的模型
+
+旧配置里的 `dev` / `ops` 仍会自动兼容，并在读取时迁移到中文模式。
+
 ## 本地 override
 
 v1 已支持本地单文件 override，用于团队内部下发共享默认配置，而不污染公开仓库。
@@ -74,6 +84,15 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 加载顺序是先 `~/.config/ccs/override.toml`，再 `~/.config/mms/override.toml`，后者优先级更高。
 
 这个文件只应该存在于本地或私有分发流程中，不应直接提交到公共仓库。override 只在运行时叠加，不会反写到用户自己的 `config.toml`。
+
+## Provider 命令
+
+当前已经支持这些基础命令：
+
+- `mms config provider.list`：查看当前 provider 列表
+- `mms config provider.default`：查看默认 provider
+- `mms config provider.default <id>`：切换默认 provider
+- `mms config api.edit`：编辑默认 provider 的地址和凭据
 
 ## 现在能做什么
 

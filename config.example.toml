@@ -12,7 +12,7 @@ supported_clis = ["claude", "codex", "qwen", "kimi"]
 enabled = true
 
 [user]
-role = "dev"  # dev: 全部模型 | ops: 只看推荐+预设
+role = "全部模型"  # 可选: 全部模型 / 推荐模型
 
 [recommend]
 models = ["claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini"]
