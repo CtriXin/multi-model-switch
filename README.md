@@ -12,7 +12,7 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 - 一个统一入口启动多个 AI coding CLI
 - 保持默认“单次注入”的环境变量策略
-- 允许后续演进到多 provider 配置
+- 已切到最小可用的 `providers` 配置结构
 - 为团队/公司保留一个本地单文件 override 入口
 - 把旧版 `ccs` 的逻辑迁到新的 GitHub 仓库里继续迭代
 
@@ -31,19 +31,34 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 - `mms` 新入口
 - 安装脚本里的 `mms` / `ccs` 双命令链接
+- `providers` 配置骨架，兼容旧的单网关用法
 
 后续版本会继续补上：
 
 - `mms` 配置目录
 - 兼容迁移脚本
-- 更清晰的 provider / credential 结构
+- 更完整的 provider 选择与多平台管理
 
 ## 设计原则
 
 - 默认不把环境变量写进全局 shell
 - 默认不把 API Key 明文写进公开配置文件
+- provider 元数据和 provider 凭据物理分离
 - 兼容个人使用和团队共享，但团队定制通过本地 override 文件完成
 - 公开仓库不携带公司内部接入说明、公司网关地址或私有凭据
+
+## Provider 结构
+
+当前配置已经从旧的单一 `[api]` 演进到 `[[providers]]`。
+
+- `config.toml` 保存 provider 元数据，例如 `id`、`name`、`protocols`、`supported_clis`
+- `credentials.sh` 继续保存真实 `base_url` 和 `api_key`
+- 默认 provider 仍兼容旧的 `CCS_API_BASE_URL` / `CCS_API_KEY`
+- 一个 provider 可以同时声明多种协议，例如：
+  - `anthropic_messages`
+  - `openai_chat_completions`
+
+这样做是为了兼容一种很常见的现实情况：同一个网关地址同时暴露 Anthropic 和 OpenAI 两种协议。
 
 ## 本地 override
 
