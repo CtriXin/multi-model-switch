@@ -1,8 +1,8 @@
 #!/opt/homebrew/bin/python3
-"""CCS 兼容入口，转发到共享核心逻辑。"""
+"""MMS — Multi-Model Switch 入口"""
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

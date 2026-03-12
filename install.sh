@@ -1,5 +1,5 @@
 #!/bin/bash
-# CCS 一键安装脚本
+# MMS 一键安装脚本（兼容 ccs）
 # 用法: curl -fsSL <url>/install.sh | bash
 #   或: bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]
 
@@ -84,9 +84,9 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-echo "==============================="
-echo "  CCS 一键安装"
-echo "==============================="
+echo "===================================="
+echo "  MMS 一键安装（兼容 ccs）"
+echo "===================================="
 echo ""
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
@@ -126,6 +126,7 @@ echo ""
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/ccs_core.py" ]; then
     # 从本地安装
     cp "$SCRIPT_DIR"/ccs "$CCS_HOME/ccs"
+    cp "$SCRIPT_DIR"/mms "$CCS_HOME/mms"
     cp "$SCRIPT_DIR"/ccs_core.py "$CCS_HOME/"
     cp "$SCRIPT_DIR"/ccs_tui.py "$CCS_HOME/"
     cp "$SCRIPT_DIR"/ccs_launchers.py "$CCS_HOME/"
@@ -133,16 +134,18 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/ccs_core.py" ]; then
     [ -f "$SCRIPT_DIR/config.example.toml" ] && cp "$SCRIPT_DIR/config.example.toml" "$CCS_HOME/"
     echo "✓ 文件已复制到 $CCS_HOME"
 else
-    echo "❌ 找不到 CCS 源文件，请在 ccs 目录下运行此脚本"
+    echo "❌ 找不到 MMS/CCS 源文件，请在仓库目录下运行此脚本"
     exit 1
 fi
 
 chmod +x "$CCS_HOME/ccs"
+chmod +x "$CCS_HOME/mms"
 
-# ── 4. 修正 ccs 入口的 Python 路径 ──
+# ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
 sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$CCS_HOME/ccs" && rm -f "$CCS_HOME/ccs.bak"
+sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$CCS_HOME/mms" && rm -f "$CCS_HOME/mms.bak"
 
 # ── 5. 建立命令入口 ──
 echo ""
@@ -150,7 +153,8 @@ mkdir -p "$BIN_DIR"
 
 # 创建 symlink
 ln -sf "$CCS_HOME/ccs" "$BIN_DIR/ccs"
-echo "✓ 命令已链接到 $BIN_DIR/ccs"
+ln -sf "$CCS_HOME/mms" "$BIN_DIR/mms"
+echo "✓ 命令已链接到 $BIN_DIR/mms 和 $BIN_DIR/ccs"
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -166,7 +170,7 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
             SHELL_RC="$HOME/.bash_profile"
         fi
 
-        MARKER="# Added by CCS"
+        MARKER="# Added by MMS"
         if [ -n "$SHELL_RC" ]; then
             if ! grep -q "$MARKER" "$SHELL_RC" 2>/dev/null; then
                 echo "" >> "$SHELL_RC"
@@ -189,30 +193,33 @@ fi
 
 # ── 6. 验证 ──
 echo ""
-if [ -x "$BIN_DIR/ccs" ]; then
+if [ -x "$BIN_DIR/mms" ] && [ -x "$BIN_DIR/ccs" ]; then
     DID_LAUNCH=0
-    echo "==============================="
-    echo "  ✅ CCS 安装完成！"
-    echo "==============================="
+    echo "===================================="
+    echo "  ✅ MMS 安装完成（兼容 ccs）"
+    echo "===================================="
     echo ""
-    echo "  运行 $BIN_DIR/ccs 开始使用"
+    echo "  运行 $BIN_DIR/mms 开始使用"
+    echo "  如需兼容旧习惯，也可以继续用 $BIN_DIR/ccs"
     echo ""
     echo "  常用命令:"
-    echo "    ccs              交互选择场景"
-    echo "    ccs 1            快速启动场景 1"
-    echo "    ccs --preset coding  使用预设"
-    echo "    ccs config       查看/修改配置"
-    echo "    ccs --export claude  导出环境变量"
+    echo "    mms              交互选择场景"
+    echo "    mms 1            快速启动场景 1"
+    echo "    mms --preset coding  使用预设"
+    echo "    mms config       查看/修改配置"
+    echo "    mms --export claude  导出环境变量"
+    echo "    ccs ...          旧命令仍可继续使用"
     echo ""
 
     if [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
         echo "检测到首次使用，启动配置向导..."
         echo ""
-        "$BIN_DIR/ccs" || true
+        "$BIN_DIR/mms" || true
         DID_LAUNCH=1
     elif [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
         echo "  首次配置请手动运行:"
         echo "    $BIN_DIR/ccs"
+        echo "    或 $BIN_DIR/mms"
         echo ""
         echo "  如需安装完成后立即进入配置向导，可执行:"
         echo "    bash install.sh --run-setup"
@@ -220,8 +227,8 @@ if [ -x "$BIN_DIR/ccs" ]; then
 
     if [ "$LAUNCH_AFTER_INSTALL" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ]; then
         echo ""
-        echo "启动 CCS..."
-        "$BIN_DIR/ccs" || true
+        echo "启动 MMS..."
+        "$BIN_DIR/mms" || true
     fi
 else
     echo "❌ 安装似乎失败了，请检查上面的错误信息"

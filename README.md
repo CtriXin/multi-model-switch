@@ -4,6 +4,8 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 这个仓库是 `MMS` 的新公开仓库。当前代码还处在从旧版 `ccs` 命名迁移到 `mms` 命名的过程中，所以你会在现有脚本和文件里看到一些旧名字。这是迁移阶段的兼容层，不代表长期品牌方向。
 
+目前已经可以直接使用 `mms` 命令，`ccs` 继续作为兼容入口保留。
+
 ## v1 状态
 
 当前 v1 的目标不是“一次性做完整框架”，而是先把基础能力稳定下来：
@@ -18,14 +20,20 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 目前仓库里仍保留旧版文件名，例如：
 
+- `mms`
 - `ccs`
 - `ccs_core.py`
 - `ccs_launchers.py`
+- `MMS Installer.command`
 - `CCS Installer.command`
 
-这是为了保证迁移期间不把现有使用方式一下子打断。后续版本会逐步补上：
+这是为了保证迁移期间不把现有使用方式一下子打断。当前已经补上：
 
 - `mms` 新入口
+- 安装脚本里的 `mms` / `ccs` 双命令链接
+
+后续版本会继续补上：
+
 - `mms` 配置目录
 - 兼容迁移脚本
 - 更清晰的 provider / credential 结构

@@ -1,4 +1,4 @@
-"""CCS 核心逻辑：交互选择、模型拉取、分类、预设管理"""
+"""MMS/CCS 核心逻辑：交互选择、模型拉取、分类、预设管理"""
 
 import sys
 import os
@@ -31,6 +31,10 @@ except ImportError:
     sys.exit(1)
 
 console = Console()
+
+APP_NAME = "Multi-Model Switch"
+LEGACY_COMMAND = "ccs"
+PRIMARY_COMMAND = "mms"
 
 CONFIG_DIR = os.path.expanduser("~/.config/ccs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
@@ -200,6 +204,25 @@ SCENES = {
 
 CLI_NAMES = ["claude", "codex", "qwen", "kimi"]
 SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier"}
+
+
+def current_command():
+    invoked = os.path.basename(sys.argv[0] or "").strip().lower()
+    if invoked in {PRIMARY_COMMAND, LEGACY_COMMAND}:
+        return invoked
+    return PRIMARY_COMMAND
+
+
+def display_title():
+    return "MMS" if current_command() == PRIMARY_COMMAND else "CCS"
+
+
+def config_command_hint():
+    return f"{current_command()} config api.edit"
+
+
+def export_command_hint(cli_name):
+    return f"{current_command()} --export {cli_name} --apply"
 
 
 # ── Config ──────────────────────────────────────────────
@@ -382,7 +405,10 @@ def _migrate_legacy_api_config(cfg):
 
 def _prompt_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
     if not sys.stdin.isatty():
-        console.print("[red]当前不是交互终端，无法输入 API URL / API Key，请在终端里运行 ccs 或执行 ccs config api.edit[/red]")
+        console.print(
+            f"[red]当前不是交互终端，无法输入 API URL / API Key，请在终端里运行 {current_command()} "
+            f"或执行 {config_command_hint()}[/red]"
+        )
         sys.exit(1)
 
     base_default = existing_base_url or DEFAULT_BASE_URL
@@ -430,11 +456,12 @@ def ensure_api_credentials():
 
 
 def setup_wizard():
+    title = display_title()
     console.print(Panel(
-        "[bold cyan]欢迎使用 CCS — AI Coding CLI 统一启动器[/bold cyan]\n\n"
-        "CCS 帮你一键启动 AI 编程助手\n"
+        f"[bold cyan]欢迎使用 {title} — AI Coding CLI 统一启动器[/bold cyan]\n\n"
+        f"{title} 帮你一键启动 AI 编程助手\n"
         "首次使用，需要配置 API 地址和认证信息",
-        title="CCS Setup",
+        title=f"{title} Setup",
     ))
 
     setup_api_credentials()
@@ -474,7 +501,7 @@ def ensure_models_ready(base_url, api_key):
         return base_url, api_key, models
 
     if not sys.stdin.isatty():
-        console.print("[red]模型校验失败，请执行 ccs config api.edit 后重试[/red]")
+        console.print(f"[red]模型校验失败，请执行 {config_command_hint()} 后重试[/red]")
         sys.exit(1)
 
     while True:
@@ -592,7 +619,7 @@ def show_scenes():
     lines.append("  ─" * 20)
     lines.append(f"  {len(scene_list) + 1}. 🔧 自定义    手动选 CLI + 模型")
 
-    console.print(Panel("\n".join(lines), title="CCS — 选择场景"))
+    console.print(Panel("\n".join(lines), title=f"{display_title()} — 选择场景"))
     return scene_list
 
 
@@ -771,14 +798,14 @@ def handle_export(cli_name, base_url, api_key, apply=False):
         console.print(f"[dim]需要时手动执行: source {env_path}[/dim]")
     else:
         console.print(
-            f"\n[dim]复制上面的命令临时使用，或执行 ccs --export {cli_name} --apply 生成独立 env 文件[/dim]"
+            f"\n[dim]复制上面的命令临时使用，或执行 {export_command_hint(cli_name)} 生成独立 env 文件[/dim]"
         )
 
 
 # ── Config command ─────────────────────────────────────
 
 def handle_config(cfg, args_rest):
-    """处理 ccs config 子命令"""
+    """处理 config 子命令"""
     if not args_rest:
         _display_config(cfg)
         return
@@ -905,8 +932,8 @@ def main():
         return
 
     parser = argparse.ArgumentParser(
-        prog="ccs",
-        description="CCS — AI Coding CLI 统一启动器",
+        prog=current_command(),
+        description=f"{display_title()} — AI Coding CLI 统一启动器",
     )
     parser.add_argument("target", nargs="?", default=None,
                         help="场景编号(1-6) 或 CLI 名称(claude/codex/qwen/kimi)")
