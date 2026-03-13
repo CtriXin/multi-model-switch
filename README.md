@@ -33,6 +33,7 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 - 安装脚本里的 `mms` / `ccs` 双命令链接
 - `providers` 配置骨架，兼容旧的单网关用法
 - 中文模型模式：`全部模型` / `推荐模型`
+- 模型校验失败时的“发现后处理”交互层
 
 后续版本会继续补上：
 
@@ -93,6 +94,19 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config provider.default`：查看默认 provider
 - `mms config provider.default <id>`：切换默认 provider
 - `mms config api.edit`：编辑默认 provider 的地址和凭据
+
+## 失败恢复交互
+
+当默认 provider 的模型校验失败时，MMS 会进入一个“发现后处理”交互层。
+
+- TUI 环境下可用 `Space` 勾选处理动作，`Enter` 执行
+- 当前支持的动作包括：
+  - 重新输入地址和 Key
+  - 切换到其他已配置 provider
+  - 查看详细错误
+  - 跳过校验并继续
+
+“跳过校验并继续”只影响当前启动流程，不会自动改写你的配置；但在这次运行里，模型浏览列表会暂时不可用。
 
 ## 现在能做什么
 

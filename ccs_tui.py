@@ -420,6 +420,112 @@ def select_model_tui(models, title="选择模型"):
         return None
 
 
+def select_actions_tui(findings, actions, title="处理发现"):
+    if not actions:
+        return []
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+
+        idx = 0
+        scroll = 0
+        selected = set()
+        message = ""
+
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+            findings_lines = []
+            for finding in findings:
+                findings_lines.append(f"- {finding['title']}: {finding['summary']}")
+            visible = max(3, max_y - len(findings_lines) - 7)
+
+            try:
+                stdscr.addstr(0, 2, title, curses.color_pair(1) | curses.A_BOLD)
+                stdscr.addstr(1, 2, "发现", curses.color_pair(4) | curses.A_BOLD)
+            except curses.error:
+                pass
+
+            for line_idx, line in enumerate(findings_lines[:3], start=2):
+                try:
+                    stdscr.addstr(line_idx, 2, line[:max_w - 4], curses.color_pair(2))
+                except curses.error:
+                    pass
+
+            list_y = min(max_y - 4, len(findings_lines[:3]) + 3)
+            try:
+                stdscr.addstr(list_y, 2, "动作", curses.color_pair(5) | curses.A_BOLD)
+            except curses.error:
+                pass
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            for action_idx in range(scroll, min(scroll + visible, len(actions))):
+                action = actions[action_idx]
+                y = list_y + 1 + action_idx - scroll
+                checked = "[x]" if action["id"] in selected else "[ ]"
+                recommended = " 推荐" if action.get("recommended") else ""
+                prefix = "▸ " if action_idx == idx else "  "
+                line = f"{prefix}{checked} {action['title']}{recommended}  {action['summary']}"
+                attr = curses.color_pair(3) | curses.A_BOLD if action_idx == idx else curses.color_pair(2)
+                try:
+                    stdscr.addstr(y, 1, line[:max_w - 2], attr)
+                except curses.error:
+                    pass
+
+            footer = " ↑↓ 移动   Space 勾选   Enter 下一步   D 详情   Q 退出 "
+            try:
+                stdscr.addstr(max_y - 2, max(1, (max_w - len(footer)) // 2), footer, curses.color_pair(1) | curses.A_BOLD)
+            except curses.error:
+                pass
+            if message:
+                try:
+                    stdscr.addstr(max_y - 1, 2, message[:max_w - 4], curses.color_pair(6))
+                except curses.error:
+                    pass
+
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(actions)
+                message = ""
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(actions)
+                message = ""
+            elif key == ord(" "):
+                action_id = actions[idx]["id"]
+                if action_id in selected:
+                    selected.remove(action_id)
+                else:
+                    selected.add(action_id)
+                message = ""
+            elif key in (10, 13, curses.KEY_ENTER):
+                if selected:
+                    return [action["id"] for action in actions if action["id"] in selected]
+                message = "请至少勾选一个动作"
+            elif key in (ord("d"), ord("D")):
+                action = actions[idx]
+                message = action.get("summary", "")
+            elif key in (ord("q"), ord("Q"), 27):
+                return []
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return "fallback"
+
+
 def confirm_tui(cli, model_info, env_vars=None, once=False):
     if isinstance(model_info, dict):
         model_display = ", ".join(f"{k}={v}" for k, v in model_info.items()
