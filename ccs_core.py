@@ -1345,12 +1345,7 @@ def _runtime_choice_label(runtime):
     return f"模型源 / {_provider_label(runtime)}"
 
 
-def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
-    if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
-        return _resolve_launch_runtime(
-            cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
-        )
-
+def _list_runtime_sources(cfg, cli_name, default_provider, default_models):
     options = []
     default_choice = None
 
@@ -1358,9 +1353,13 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
     if provider_runtime is not None:
         options.append({
             "kind": "provider",
+            "id": provider_runtime.get("id"),
             "runtime": provider_runtime,
             "models": provider_models,
             "label": _runtime_choice_label(provider_runtime),
+            "title": _provider_label(provider_runtime),
+            "desc": "API 网关",
+            "icon": "🌐",
         })
         default_choice = len(options) - 1
 
@@ -1370,12 +1369,27 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
         runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=cli_name)
         options.append({
             "kind": "account",
+            "id": runtime.get("id"),
             "runtime": runtime,
             "models": list(default_models or []),
             "label": _runtime_choice_label(runtime),
+            "title": _account_label(runtime),
+            "desc": "官方登录态",
+            "icon": "🔑",
         })
         if runtime.get("id") == default_account_id:
             default_choice = len(options) - 1
+
+    return options, default_choice
+
+
+def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
+    if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
+        return _resolve_launch_runtime(
+            cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
+        )
+
+    options, default_choice = _list_runtime_sources(cfg, cli_name, default_provider, default_models)
 
     if not options:
         return None, []
@@ -1409,6 +1423,17 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
                 chosen = options[selected - 1]
                 return chosen["runtime"], chosen["models"]
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
+
+
+def _source_choices_for_tui(cfg, cli_names, default_provider, default_models):
+    mapping = {}
+    for cli_name in cli_names:
+        options, default_index = _list_runtime_sources(cfg, cli_name, default_provider, default_models)
+        mapping[cli_name] = {
+            "options": options,
+            "default_index": default_index or 0,
+        }
+    return mapping
 
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
@@ -1639,9 +1664,15 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
+    source_choices = _source_choices_for_tui(
+        cfg,
+        cli_names,
+        provider,
+        _probe_models(provider, emit_output=False).get("models"),
+    )
 
     while True:
-        result = select_scene_tui(scenes, cli_names)
+        result = select_scene_tui(scenes, cli_names, source_choices=source_choices)
 
         # curses 失败，fallback
         if result == "fallback":
@@ -1651,15 +1682,22 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         if result is None:
             return True
 
-        scene_name, cli, model_info = result
+        scene_name, cli, model_info, selected_source = result
+        selected_account_id = None
+        selected_provider_id = None
+        if isinstance(selected_source, dict):
+            if selected_source.get("kind") == "account":
+                selected_account_id = selected_source.get("id")
+            elif selected_source.get("kind") == "provider":
+                selected_provider_id = selected_source.get("id")
 
         runtime_runtime, family_models = _choose_runtime_source(
             cfg,
             cli,
             provider,
             _probe_models(provider, emit_output=False).get("models"),
-            account_id=account_id,
-            provider_id=provider_id,
+            account_id=selected_account_id or account_id,
+            provider_id=selected_provider_id or provider_id,
         )
         if runtime_runtime is None:
             console.print(f"[yellow]{cli} 当前没有可用运行来源[/yellow]")
@@ -1673,14 +1711,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         elif scene_name == "__direct_kimi__":
             model_info = {"model": DEFAULT_KIMI_MODEL}
         if scene_name is None:
-            # 自定义模式：用 TUI 选模型
-            models = family_models or _probe_models(provider, emit_output=False).get("models")
-            if not models:
-                return True
-            model = select_model_tui(models, title=f"为 {cli} 选择模型")
-            if model is None:
-                return True
-            model_info = {"model": model}
+            if _uses_native_account_entry(runtime_runtime, cli):
+                model_info = {}
+            else:
+                # 自定义模式：用 TUI 选模型
+                models = family_models or _probe_models(provider, emit_output=False).get("models")
+                if not models:
+                    return True
+                model = select_model_tui(models, title=f"为 {cli} 选择模型")
+                if model is None:
+                    return True
+                model_info = {"model": model}
         if not check_cli_installed(cli):
             console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
             cli = "claude"
