@@ -270,6 +270,15 @@ def _normalize_account(account):
     }
 
 
+def _normalize_provider_id_input(provider_id):
+    value = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "-"
+        for ch in str(provider_id or "").strip().lower()
+    )
+    value = value.strip("-_")
+    return value or DEFAULT_PROVIDER_ID
+
+
 def _sanitize_provider_id(provider_id):
     cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id).upper())
     cleaned = cleaned.strip("_")
@@ -989,6 +998,119 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
         sys.exit(1)
 
     return base_url, api_key
+
+
+def _quick_connect_gateway(cfg, preset_id=None):
+    _ensure_interactive_terminal("网关通道接入")
+    console.print(Panel(
+        "[bold]网关通道[/bold]\n\n输入一个兼容 OpenAI / Anthropic 的 API 地址和 Key。\n"
+        "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。",
+        title="快速接入",
+        border_style="cyan",
+    ))
+    providers = _provider_map(cfg)
+    suggested_name = preset_id or "My Gateway"
+    name = Prompt.ask("通道名称", default=suggested_name).strip() or suggested_name
+    suggested_id = _normalize_provider_id_input(name)
+    provider_id = _normalize_provider_id_input(Prompt.ask("通道 ID", default=preset_id or suggested_id).strip() or suggested_id)
+    if provider_id in providers:
+        console.print(f"[red]通道 ID '{provider_id}' 已存在，请换一个，或使用 {current_command()} config provider.edit {provider_id}[/red]")
+        return cfg, False
+
+    provider = _normalize_provider({
+        "id": provider_id,
+        "name": name,
+        "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
+        "supported_clis": list(CLI_NAMES),
+        "enabled": True,
+        "priority": DEFAULT_PRIORITY,
+        "cost_level": "medium",
+    })
+    updated_cfg = _upsert_provider(cfg, provider)
+    save_config(updated_cfg)
+    setup_provider_credentials(provider)
+    console.print(f"[green]✓ 已接入网关通道: {provider_id}[/green]")
+    return load_config(), True
+
+
+def _quick_connect_official(cfg, preset_cli=None):
+    _ensure_interactive_terminal("官方通道接入")
+    console.print(Panel(
+        "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
+        "适合多个 ChatGPT / Claude Plan 并行使用。",
+        title="快速接入",
+        border_style="cyan",
+    ))
+    choices = {
+        "1": ("codex", "ChatGPT / Codex"),
+        "2": ("claude", "Claude"),
+    }
+    if preset_cli in OAUTH_CAPABLE_CLIS:
+        cli_name = preset_cli
+    else:
+        console.print("  1. ChatGPT / Codex")
+        console.print("  2. Claude")
+        cli_name = choices[Prompt.ask("选择官方通道类型", choices=list(choices.keys()), default="1")][0]
+
+    suggested_name = f"{cli_name}-main"
+    name = Prompt.ask("通道名称", default=suggested_name).strip() or suggested_name
+    account_id = _normalize_account_id(Prompt.ask("通道 ID", default=_normalize_account_id(name)))
+    accounts = _account_map(cfg)
+    if account_id in accounts:
+        console.print(f"[red]通道 ID '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
+        return cfg, False
+
+    account = _normalize_account({
+        "id": account_id,
+        "name": name,
+        "cli": cli_name,
+        "home_dir": _default_account_home(account_id),
+        "enabled": True,
+        "priority": DEFAULT_PRIORITY,
+        "cost_level": "medium",
+    })
+    updated_cfg = dict(cfg)
+    updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已添加官方通道: {account_id}[/green]")
+    if Confirm.ask("现在去登录这个官方通道？", default=True):
+        _run_account_login(account)
+    if Confirm.ask(f"设为 {cli_name} 的默认官方通道？", default=True):
+        updated_cfg = load_config()
+        updated_cfg.setdefault("account", {}).setdefault("defaults", {})
+        updated_cfg["account"]["defaults"][cli_name] = account_id
+        save_config(updated_cfg)
+        console.print(f"[green]✓ {cli_name} 默认官方通道已更新为 {account_id}[/green]")
+    return load_config(), True
+
+
+def run_connect_wizard(cfg):
+    _ensure_interactive_terminal("新通道接入")
+    action_id = None
+    if _use_tui():
+        try:
+            from ccs_tui import select_connect_tui
+        except ImportError:
+            select_connect_tui = None
+        if select_connect_tui is not None:
+            action_id = select_connect_tui()
+    if action_id == "fallback":
+        action_id = None
+    if not action_id:
+        console.print("\n[bold]接入新通道[/bold]")
+        console.print("  1. 添加网关通道")
+        console.print("  2. 添加官方通道")
+        console.print("  3. 返回")
+        action_id = Prompt.ask("选择操作", choices=["1", "2", "3"], default="1")
+        action_id = {"1": "connect_gateway", "2": "connect_official", "3": "cancel"}[action_id]
+
+    if action_id == "connect_gateway":
+        return _quick_connect_gateway(cfg)
+    if action_id == "connect_official":
+        return _quick_connect_official(cfg)
+    console.print("[yellow]已取消接入[/yellow]")
+    return cfg, False
 
 
 def _probe_models(provider, emit_output=True):
@@ -1895,20 +2017,33 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
-    source_choices = _source_choices_for_tui(
-        cfg,
-        scenes,
-        cli_names,
-        provider,
-        _probe_models(provider, emit_output=False).get("models"),
-    )
+    current_cfg = cfg
+    current_provider = provider
+    current_cli_names = cli_names
+    current_scenes = scenes
 
     while True:
-        result = select_scene_tui(scenes, cli_names, source_choices=source_choices)
+        source_choices = _source_choices_for_tui(
+            current_cfg,
+            current_scenes,
+            current_cli_names,
+            current_provider,
+            _probe_models(current_provider, emit_output=False).get("models"),
+        )
+        result = select_scene_tui(current_scenes, current_cli_names, source_choices=source_choices)
 
         # curses 失败，fallback
         if result == "fallback":
             return False
+
+        if result == "__connect__":
+            current_cfg, changed = run_connect_wizard(current_cfg)
+            if changed:
+                current_provider = ensure_provider_credentials(current_cfg)
+                current_models = ensure_models_ready(current_cfg, current_provider)[1]
+                current_cli_names = _resolve_visible_clis(current_cfg, current_provider, current_models)
+                current_scenes = _filter_scenes_by_visible_clis(current_cli_names)
+            continue
 
         # 用户取消
         if result is None:
@@ -1923,10 +2058,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             cli = selected_source.get("launch_cli", cli)
         if runtime_runtime is None:
             runtime_runtime, family_models, cli = _choose_runtime_source(
-                cfg,
+                current_cfg,
                 cli,
-                provider,
-                _probe_models(provider, emit_output=False).get("models"),
+                current_provider,
+                _probe_models(current_provider, emit_output=False).get("models"),
                 account_id=account_id,
                 provider_id=provider_id,
                 model_info=model_info,
@@ -2030,6 +2165,9 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "unset":
         _handle_config_unset(cfg, args_rest[1:])
+        return
+    if key_path == "connect":
+        run_connect_wizard(cfg)
         return
     if key_path == "provider.list":
         _display_providers(cfg)
@@ -2155,16 +2293,7 @@ def _handle_provider_default_config(cfg, args_rest):
 
 def _handle_provider_add_config(cfg, args_rest):
     preset_id = args_rest[0].strip() if args_rest else None
-    provider = _prompt_provider_metadata(preset_id=preset_id)
-    providers = _provider_map(cfg)
-    if provider["id"] in providers:
-        console.print(f"[red]模型源 '{provider['id']}' 已存在，请使用 provider.edit[/red]")
-        return
-    updated_cfg = _upsert_provider(cfg, provider)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ 已新增模型源: {provider['id']}[/green]")
-    if Confirm.ask("现在配置这个模型源的地址和 Key？", default=True):
-        setup_provider_credentials(provider)
+    _quick_connect_gateway(cfg, preset_id=preset_id)
 
 
 def _handle_provider_edit_config(cfg, args_rest):
@@ -2256,17 +2385,7 @@ def _handle_account_default_config(cfg, args_rest):
 
 def _handle_account_add_config(cfg, args_rest):
     preset_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() in OAUTH_CAPABLE_CLIS else None
-    account = _prompt_account_metadata(preset_cli=preset_cli)
-    accounts = _account_map(cfg)
-    if account["id"] in accounts:
-        console.print(f"[red]账号档案 '{account['id']}' 已存在，请使用 account.edit[/red]")
-        return
-    updated_cfg = dict(cfg)
-    updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
-    updated_cfg, _ = _ensure_account_config(updated_cfg)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ 已新增账号档案: {account['id']}[/green]")
-    console.print(f"[dim]下一步可执行: {current_command()} config account.login {account['id']}[/dim]")
+    _quick_connect_official(cfg, preset_cli=preset_cli)
 
 
 def _handle_account_edit_config(cfg, args_rest):

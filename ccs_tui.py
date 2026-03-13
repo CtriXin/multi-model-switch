@@ -60,6 +60,19 @@ DIRECT_CLI_ITEMS = {
     },
 }
 
+CONNECT_ACTIONS = [
+    {
+        "id": "connect_gateway",
+        "title": "添加网关通道",
+        "summary": "输入 API URL 和 API Key，接入 newapi 或兼容网关",
+    },
+    {
+        "id": "connect_official",
+        "title": "添加官方通道",
+        "summary": "创建 OAuth 账号并进入官方登录流程",
+    },
+]
+
 
 def _sort_scenes_for_cli(scenes, cli_name):
     return list(scenes.keys())
@@ -360,16 +373,16 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
             # ── Footer（醒目）──
             footer = " ← → 切换    Enter 确认 "
             if direct_cli_item:
-                footer = " ← → 切换    Enter 直达    Q 退出 "
+                footer = " ← → 切换    Enter 直达    O 接入    Q 退出 "
             elif auto_default_scene:
-                footer += "   Q 退出 "
+                footer += "   O 接入    Q 退出 "
             elif in_source_mode:
-                footer = " ← → 切换    ↑ ↓ 通道    Enter 确认    Esc 返回    Q 退出 "
+                footer = " ← → 切换    ↑ ↓ 通道    Enter 确认    O 接入    Esc 返回    Q 退出 "
             elif in_variant_mode and not forced_variant_scene:
-                footer = " ← → 切换    ↑ ↓ 选择    Enter 确认 "
+                footer = " ← → 切换    ↑ ↓ 选择    Enter 确认    O 接入 "
                 footer += "   Esc 返回    Q 退出 "
             else:
-                footer = " ← → 切换    ↑ ↓ 选择    Enter 确认 "
+                footer = " ← → 切换    ↑ ↓ 选择    Enter 确认    O 接入 "
                 footer += "   Q 退出 "
             _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
 
@@ -487,6 +500,8 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
             elif key == 27 and in_variant_mode and not forced_variant_scene:
                 variant_scene_name = None
                 variant_idx = 0
+            elif key in (ord('o'), ord('O')):
+                return "__connect__"
             elif key in (ord('q'), ord('Q'), 27):
                 return None
 
@@ -649,6 +664,56 @@ def select_actions_tui(findings, actions, title="处理发现"):
                 message = action.get("summary", "")
             elif key in (ord("q"), ord("Q"), 27):
                 return []
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return "fallback"
+
+
+def select_connect_tui():
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+            w = max(54, min(max_w - 2, int(max_w * 0.78)))
+            h = len(CONNECT_ACTIONS) + 8
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+            _draw_box(stdscr, sy, sx, h, w, "接入新通道")
+            _center_text(stdscr, sy + 2, cx, "你想接入哪一类通道？", curses.color_pair(5) | curses.A_BOLD)
+
+            for action_idx, action in enumerate(CONNECT_ACTIONS):
+                y = sy + 4 + action_idx
+                line = f"{'▸ ' if action_idx == idx else '  '}{action['title']}  {action['summary']}"
+                attr = curses.color_pair(3) | curses.A_BOLD if action_idx == idx else curses.color_pair(2)
+                try:
+                    stdscr.addstr(y, sx + 2, line[:w - 4], attr)
+                except curses.error:
+                    pass
+
+            footer = " ↑ ↓ 选择    Enter 进入    Esc 返回 "
+            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(CONNECT_ACTIONS)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(CONNECT_ACTIONS)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return CONNECT_ACTIONS[idx]["id"]
+            elif key in (27, ord("q"), ord("Q")):
+                return None
 
     try:
         return curses.wrapper(_inner)
