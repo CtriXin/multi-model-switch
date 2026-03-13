@@ -629,12 +629,12 @@ def _delete_provider_credentials(provider_id):
 
 
 def _prompt_provider_metadata(existing=None, preset_id=None):
-    _ensure_interactive_terminal("provider 配置编辑")
+    _ensure_interactive_terminal("模型源配置编辑")
     current = _normalize_provider(existing or {})
     provider_id = preset_id or current.get("id") or DEFAULT_PROVIDER_ID
     if not preset_id:
-        provider_id = Prompt.ask("Provider ID", default=provider_id).strip() or DEFAULT_PROVIDER_ID
-    name = Prompt.ask("Provider 名称", default=current.get("name") or provider_id).strip() or provider_id
+        provider_id = Prompt.ask("模型源 ID", default=provider_id).strip() or DEFAULT_PROVIDER_ID
+    name = Prompt.ask("模型源名称", default=current.get("name") or provider_id).strip() or provider_id
     protocols = _prompt_csv_values(
         "协议（逗号分隔）",
         current.get("protocols", list(DEFAULT_PROVIDER_PROTOCOLS)),
@@ -645,7 +645,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         current.get("supported_clis", list(CLI_NAMES)),
         list(CLI_NAMES),
     )
-    enabled = Confirm.ask("启用这个 provider？", default=bool(current.get("enabled", True)))
+    enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
         "id": provider_id,
         "name": name,
@@ -664,11 +664,11 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
         sys.exit(1)
 
     base_default = existing_base_url or DEFAULT_BASE_URL
-    base_url = Prompt.ask(f"请输入 API 地址（provider: {_provider_label(provider)}）", default=base_default).rstrip("/")
+    base_url = Prompt.ask(f"请输入 API 地址（模型源: {_provider_label(provider)}）", default=base_default).rstrip("/")
 
-    key_prompt = f"请输入 API Key（provider: {_provider_label(provider)}）"
+    key_prompt = f"请输入 API Key（模型源: {_provider_label(provider)}）"
     if allow_keep and existing_api_key:
-        key_prompt = f"请输入 API Key（provider: {_provider_label(provider)}，留空保持不变）"
+        key_prompt = f"请输入 API Key（模型源: {_provider_label(provider)}，留空保持不变）"
 
     prompt_kwargs = {"password": True}
     if allow_keep:
@@ -1440,6 +1440,21 @@ def handle_config(cfg, args_rest):
         return
 
     key_path = args_rest[0]
+    if key_path == "file":
+        _handle_config_file()
+        return
+    if key_path == "validate":
+        _handle_config_validate(cfg)
+        return
+    if key_path == "get":
+        _handle_config_get(cfg, args_rest[1:])
+        return
+    if key_path == "set":
+        _handle_config_set(cfg, args_rest[1:])
+        return
+    if key_path == "unset":
+        _handle_config_unset(cfg, args_rest[1:])
+        return
     if key_path == "provider.list":
         _display_providers(cfg)
         return
@@ -1473,32 +1488,12 @@ def handle_config(cfg, args_rest):
         return
 
     parts = key_path.split(".")
-
     if len(args_rest) == 1:
-        val = cfg
-        for p in parts:
-            if isinstance(val, dict) and p in val:
-                val = val[p]
-            else:
-                console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
-                return
-        if "key" in key_path.lower():
-            display = _mask_key(str(val))
-        else:
-            display = str(val)
-        console.print(f"[cyan]{key_path}[/cyan] = {display}")
-    elif len(args_rest) == 2:
-        # 修改某个值
-        new_val = args_rest[1]
-        if key_path == "user.role":
-            new_val = _validate_user_role(new_val)
-        _set_nested(cfg, parts, new_val)
-        save_config(cfg)
-        if "key" in key_path.lower():
-            display = _mask_key(new_val)
-        else:
-            display = new_val
-        console.print(f"[green]✓ {key_path} = {display}[/green]")
+        _handle_config_get(cfg, [key_path])
+        return
+    if len(args_rest) == 2:
+        _handle_config_set(cfg, [key_path, args_rest[1]])
+        return
 
 
 def _handle_api_config(key_path, args_rest):
@@ -1541,6 +1536,7 @@ def _handle_provider_default_config(cfg, args_rest):
     default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
     if not args_rest:
         console.print(f"[cyan]provider.default[/cyan] = {default_id}")
+        console.print("[dim]当前默认模型源[/dim]")
         return
 
     requested_id = args_rest[0].strip()
@@ -1554,6 +1550,7 @@ def _handle_provider_default_config(cfg, args_rest):
     cfg["provider"]["default"] = requested_id
     save_config(cfg)
     console.print(f"[green]✓ provider.default = {requested_id}[/green]")
+    console.print("[dim]默认模型源已更新[/dim]")
 
 
 def _handle_provider_add_config(cfg, args_rest):
@@ -1561,12 +1558,12 @@ def _handle_provider_add_config(cfg, args_rest):
     provider = _prompt_provider_metadata(preset_id=preset_id)
     providers = _provider_map(cfg)
     if provider["id"] in providers:
-        console.print(f"[red]provider '{provider['id']}' 已存在，请使用 provider.edit[/red]")
+        console.print(f"[red]模型源 '{provider['id']}' 已存在，请使用 provider.edit[/red]")
         return
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
-    console.print(f"[green]✓ 已新增 provider: {provider['id']}[/green]")
-    if Confirm.ask("现在配置这个 provider 的地址和 Key？", default=True):
+    console.print(f"[green]✓ 已新增模型源: {provider['id']}[/green]")
+    if Confirm.ask("现在配置这个模型源的地址和 Key？", default=True):
         setup_provider_credentials(provider)
 
 
@@ -1577,12 +1574,12 @@ def _handle_provider_edit_config(cfg, args_rest):
     provider_id = args_rest[0].strip()
     providers = _provider_map(cfg)
     if provider_id not in providers:
-        console.print(f"[red]未找到 provider: {provider_id}[/red]")
+        console.print(f"[red]未找到模型源: {provider_id}[/red]")
         return
     provider = _prompt_provider_metadata(existing=providers[provider_id], preset_id=provider_id)
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
-    console.print(f"[green]✓ 已更新 provider: {provider_id}[/green]")
+    console.print(f"[green]✓ 已更新模型源: {provider_id}[/green]")
 
 
 def _handle_provider_remove_config(cfg, args_rest):
@@ -1592,12 +1589,12 @@ def _handle_provider_remove_config(cfg, args_rest):
     provider_id = args_rest[0].strip()
     providers = _provider_map(cfg)
     if provider_id not in providers:
-        console.print(f"[red]未找到 provider: {provider_id}[/red]")
+        console.print(f"[red]未找到模型源: {provider_id}[/red]")
         return
     if len(providers) == 1:
-        console.print("[red]至少需要保留一个 provider，无法删除最后一个[/red]")
+        console.print("[red]至少需要保留一个模型源，无法删除最后一个[/red]")
         return
-    if not Confirm.ask(f"确认删除 provider '{provider_id}'？", default=False):
+    if not Confirm.ask(f"确认删除模型源 '{provider_id}'？", default=False):
         console.print("[yellow]已取消删除[/yellow]")
         return
 
@@ -1611,14 +1608,14 @@ def _handle_provider_remove_config(cfg, args_rest):
         updated_cfg["provider"] = {"default": updated_cfg["providers"][0]["id"]}
     save_config(updated_cfg)
     _delete_provider_credentials(provider_id)
-    console.print(f"[green]✓ 已删除 provider: {provider_id}[/green]")
+    console.print(f"[green]✓ 已删除模型源: {provider_id}[/green]")
 
 
 def _handle_provider_credentials_config(cfg, args_rest):
     target_id = args_rest[0].strip() if args_rest else cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
     providers = _provider_map(cfg)
     if target_id not in providers:
-        console.print(f"[red]未找到 provider: {target_id}[/red]")
+        console.print(f"[red]未找到模型源: {target_id}[/red]")
         return
     provider = resolve_provider_context(cfg, target_id)
     setup_provider_credentials(
@@ -1632,10 +1629,10 @@ def _handle_provider_credentials_config(cfg, args_rest):
 def _display_providers(cfg):
     providers = cfg.get("providers", [])
     if not providers:
-        console.print("[yellow]未配置 provider[/yellow]")
+        console.print("[yellow]未配置模型源[/yellow]")
         return
 
-    table = Table(title="Providers", show_lines=True)
+    table = Table(title="模型源列表", show_lines=True)
     table.add_column("ID", style="cyan")
     table.add_column("名称", style="green")
     table.add_column("协议", style="yellow")
@@ -1658,7 +1655,7 @@ def _display_providers(cfg):
         )
     console.print(table)
     console.print(
-        f"[dim]提示: 可用 {current_command()} config provider.default <id> 切换默认 provider。[/dim]"
+        f"[dim]提示: 可用 {current_command()} config provider.default <id> 切换默认模型源。[/dim]"
     )
 
 
@@ -1666,7 +1663,7 @@ def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
         provider = resolve_provider_context(cfg)
-        console.print("[bold]provider:[/bold]")
+        console.print("[bold]模型源:[/bold]")
         console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
         console.print(f"  [cyan]base_url[/cyan] = {provider.get('base_url') or '(未设置)'}")
         key_display = _mask_key(provider.get("api_key", "")) if provider.get("api_key") else "(未设置)"
@@ -1710,6 +1707,139 @@ def _set_nested(d, parts, val):
             d[p] = {}
         d = d[p]
     d[parts[-1]] = val
+
+
+def _get_nested(d, parts):
+    current = d
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return None, False
+        current = current[part]
+    return current, True
+
+
+def _unset_nested(d, parts):
+    current = d
+    for part in parts[:-1]:
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    if not isinstance(current, dict) or parts[-1] not in current:
+        return False
+    current.pop(parts[-1], None)
+    return True
+
+
+def _coerce_config_value(key_path, raw_value):
+    if key_path == "user.role":
+        return _validate_user_role(raw_value)
+    if key_path == "provider.default":
+        return str(raw_value).strip()
+    if key_path.startswith("provider.") and key_path.endswith(".enabled"):
+        return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return raw_value
+
+
+def _validate_config(cfg):
+    errors = []
+    providers = cfg.get("providers", [])
+    if not isinstance(providers, list) or not providers:
+        errors.append("providers 不能为空")
+    else:
+        seen_ids = set()
+        for item in providers:
+            if not isinstance(item, dict):
+                errors.append("providers 中存在非对象条目")
+                continue
+            provider_id = str(item.get("id", "")).strip()
+            if not provider_id:
+                errors.append("存在缺少 id 的模型源")
+                continue
+            if provider_id in seen_ids:
+                errors.append(f"模型源 ID 重复: {provider_id}")
+            seen_ids.add(provider_id)
+
+            protocols = item.get("protocols", [])
+            if isinstance(protocols, str):
+                protocols = [protocols]
+            invalid_protocols = [value for value in protocols if value not in DEFAULT_PROVIDER_PROTOCOLS]
+            if invalid_protocols:
+                errors.append(f"模型源 {provider_id} 存在不支持的协议: {', '.join(invalid_protocols)}")
+
+            supported_clis = item.get("supported_clis", [])
+            if isinstance(supported_clis, str):
+                supported_clis = [supported_clis]
+            invalid_clis = [value for value in supported_clis if value not in CLI_NAMES]
+            if invalid_clis:
+                errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
+
+    default_id = cfg.get("provider", {}).get("default")
+    provider_ids = {item.get("id") for item in providers if isinstance(item, dict)}
+    if default_id and default_id not in provider_ids:
+        errors.append(f"默认模型源不存在: {default_id}")
+
+    role = cfg.get("user", {}).get("role", MODE_ALL)
+    if normalize_user_role(role) not in {MODE_ALL, MODE_RECOMMENDED}:
+        errors.append(f"不支持的模型模式: {role}")
+
+    return errors
+
+
+def _handle_config_get(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config get <dot.path>[/red]")
+        return
+    key_path = args_rest[0]
+    value, found = _get_nested(cfg, key_path.split("."))
+    if not found:
+        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+        return
+    display = _mask_key(str(value)) if "key" in key_path.lower() else str(value)
+    console.print(f"[cyan]{key_path}[/cyan] = {display}")
+
+
+def _handle_config_set(cfg, args_rest):
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {current_command()} config set <dot.path> <value>[/red]")
+        return
+    key_path = args_rest[0]
+    raw_value = args_rest[1]
+    new_val = _coerce_config_value(key_path, raw_value)
+    updated_cfg = dict(cfg)
+    _set_nested(updated_cfg, key_path.split("."), new_val)
+    updated_cfg, _ = _ensure_provider_config(updated_cfg)
+    save_config(updated_cfg)
+    display = _mask_key(str(new_val)) if "key" in key_path.lower() else str(new_val)
+    console.print(f"[green]✓ {key_path} = {display}[/green]")
+
+
+def _handle_config_unset(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config unset <dot.path>[/red]")
+        return
+    key_path = args_rest[0]
+    updated_cfg = dict(cfg)
+    removed = _unset_nested(updated_cfg, key_path.split("."))
+    if not removed:
+        console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
+        return
+    updated_cfg, _ = _ensure_provider_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已移除 {key_path}[/green]")
+
+
+def _handle_config_file():
+    console.print(CONFIG_PATH)
+
+
+def _handle_config_validate(cfg):
+    errors = _validate_config(cfg)
+    if errors:
+        console.print("[red]配置校验失败:[/red]")
+        for item in errors:
+            console.print(f"  - {item}")
+        sys.exit(1)
+    console.print("[green]✓ 配置校验通过[/green]")
 
 
 # ── Main ────────────────────────────────────────────────

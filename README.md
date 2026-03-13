@@ -40,13 +40,13 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 - `mms` 配置目录
 - 兼容迁移脚本
-- 更完整的 provider 选择与多平台管理
+- 更完整的模型源选择与多平台管理
 
 ## 设计原则
 
 - 默认不把环境变量写进全局 shell
 - 默认不把 API Key 明文写进公开配置文件
-- provider 元数据和 provider 凭据物理分离
+- 模型源元数据和模型源凭据物理分离
 - 兼容个人使用和团队共享，但团队定制通过本地 override 文件完成
 - 公开仓库不携带公司内部接入说明、公司网关地址或私有凭据
 
@@ -54,10 +54,10 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 当前配置已经从旧的单一 `[api]` 演进到 `[[providers]]`。
 
-- `config.toml` 保存 provider 元数据，例如 `id`、`name`、`protocols`、`supported_clis`
+- `config.toml` 保存模型源元数据，例如 `id`、`name`、`protocols`、`supported_clis`
 - `credentials.sh` 继续保存真实 `base_url` 和 `api_key`
-- 默认 provider 仍兼容旧的 `CCS_API_BASE_URL` / `CCS_API_KEY`
-- 一个 provider 可以同时声明多种协议，例如：
+- 默认模型源仍兼容旧的 `CCS_API_BASE_URL` / `CCS_API_KEY`
+- 一个模型源可以同时声明多种协议，例如：
   - `anthropic_messages`
   - `openai_chat_completions`
 
@@ -91,23 +91,28 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 
 当前已经支持这些基础命令：
 
-- `mms config provider.list`：查看当前 provider 列表
-- `mms config provider.default`：查看默认 provider
-- `mms config provider.default <id>`：切换默认 provider
-- `mms config provider.add [id]`：新增 provider 元数据
-- `mms config provider.edit <id>`：编辑 provider 元数据
-- `mms config provider.remove <id>`：删除 provider 和本地凭据
-- `mms config provider.credentials [id]`：编辑指定 provider 的地址和 Key
-- `mms config api.edit`：编辑默认 provider 的地址和凭据
+- `mms config file`：查看当前配置文件路径
+- `mms config validate`：校验当前配置
+- `mms config get <dot.path>`：读取配置项
+- `mms config set <dot.path> <value>`：修改配置项
+- `mms config unset <dot.path>`：移除配置项
+- `mms config provider.list`：查看当前模型源列表
+- `mms config provider.default`：查看默认模型源
+- `mms config provider.default <id>`：切换默认模型源
+- `mms config provider.add [id]`：新增模型源元数据
+- `mms config provider.edit <id>`：编辑模型源元数据
+- `mms config provider.remove <id>`：删除模型源和本地凭据
+- `mms config provider.credentials [id]`：编辑指定模型源的地址和 Key
+- `mms config api.edit`：编辑默认模型源的地址和凭据
 
 ## 失败恢复交互
 
-当默认 provider 的模型校验失败时，MMS 会进入一个“发现后处理”交互层。
+当默认模型源的模型校验失败时，MMS 会进入一个“发现后处理”交互层。
 
 - TUI 环境下可用 `Space` 勾选处理动作，`Enter` 执行
 - 当前支持的动作包括：
   - 重新输入地址和 Key
-  - 切换到其他已配置 provider
+  - 切换到其他已配置模型源
   - 查看详细错误
   - 跳过校验并继续
 
@@ -117,17 +122,17 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 
 `qwen` 和 `kimi` 现在不再使用“常规任务 / 中文主力”这类场景交互。
 
-- `qwen`：直接进入当前可用 provider 的全部 `qwen*` 模型列表
+- `qwen`：直接进入当前可用模型源的全部 `qwen*` 模型列表
 - `kimi`：直接使用默认模型 `kimi-k2.5`
 - 它们不会再出现在内置场景列表里
 
 ## CLI 可见性
 
-MMS 启动时会先读取已配置 provider，并用可拉取到的模型列表做一次轻量筛选。
+MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表做一次轻量筛选。
 
-- `qwen`：只有当 provider 里明确探测到 `qwen*` 模型时才显示
-- `kimi`：只有当 provider 里明确探测到 `kimi*` 模型时才显示
-- `claude` / `codex`：仍按 provider 的 `supported_clis` 决定是否显示
+- `qwen`：只有当模型源里明确探测到 `qwen*` 模型时才显示
+- `kimi`：只有当模型源里明确探测到 `kimi*` 模型时才显示
+- `claude` / `codex`：仍按模型源的 `supported_clis` 决定是否显示
 
 这层筛选会同时作用到顶部 CLI 入口和内置场景可见性，不会只隐藏 tab 留下失效入口。
 
