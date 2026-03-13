@@ -5,7 +5,7 @@ import sys
 import subprocess
 import tempfile
 
-from ccs_account_state import seed_claude_state
+from ccs_account_state import activated_claude_account_state, seed_claude_state
 
 try:
     from rich.console import Console
@@ -74,9 +74,10 @@ def _account_env(account):
         sys.exit(1)
     if account.get("cli") == "claude":
         seed_claude_state(home_dir)
-    xdg_config_home = os.path.join(home_dir, ".config")
-    env["HOME"] = home_dir
-    env["XDG_CONFIG_HOME"] = xdg_config_home
+    else:
+        xdg_config_home = os.path.join(home_dir, ".config")
+        env["HOME"] = home_dir
+        env["XDG_CONFIG_HOME"] = xdg_config_home
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
 
@@ -152,7 +153,8 @@ def launch_claude(model_info, runtime, once=False):
         env["CLAUDE_CODE_SUBAGENT_MODEL"] = m
 
     cmd = ["claude"]
-    _exec_or_run(cmd, env, once)
+    state_home = runtime.get("home_dir") if auth_mode == "oauth" else None
+    _exec_or_run(cmd, env, once, state_home=state_home if auth_mode == "oauth" else None)
 
 
 def launch_codex(model_info, runtime, once=False):
@@ -290,7 +292,7 @@ def _write_runtime_config(prefix, content):
     return path
 
 
-def _exec_or_run(cmd, env, once, cleanup_path=None):
+def _exec_or_run(cmd, env, once, cleanup_path=None, state_home=None):
     """默认用 execvp；需要清理临时文件时回退到 subprocess。"""
     from shutil import which
     exe = which(cmd[0])
@@ -298,9 +300,13 @@ def _exec_or_run(cmd, env, once, cleanup_path=None):
         console.print(f"[red]{cmd[0]} 未找到，请先安装[/red]")
         sys.exit(1)
 
-    if once or cleanup_path:
+    if once or cleanup_path or state_home:
         try:
-            result = subprocess.run(cmd, env=env)
+            if state_home:
+                with activated_claude_account_state(state_home):
+                    result = subprocess.run(cmd, env=env)
+            else:
+                result = subprocess.run(cmd, env=env)
             sys.exit(result.returncode)
         except KeyboardInterrupt:
             sys.exit(0)
