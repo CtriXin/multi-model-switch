@@ -431,14 +431,33 @@ def _do_discuss_converge(provider_ctx, selected_models, original_task, final_tex
 
 
 def _do_discuss_handoff(original_task, final_text):
-    """H: print synthesis + suggested next commands."""
-    import shlex
-    safe_task = shlex.quote(original_task)
+    """H: write handoff brief to file, print it, then exec claude/codex interactively."""
+    import os
+    import shutil
+    from pathlib import Path
+
     console.print("\n[bold cyan]── 执行交付简报 ──[/bold cyan]")
     console.print(Panel(final_text[:800], title="综合结论", border_style="yellow"))
-    console.print(f"\n[dim]下一步建议：[/dim]")
-    console.print(f"  [green]mms discuss {safe_task}[/green]  [dim]# 重新讨论[/dim]")
-    console.print(f"  [green]mms chat {safe_task}[/green]     [dim]# 并排比较[/dim]")
+
+    # Write handoff file so the execution CLI can reference it
+    handoff_dir = Path.home() / ".mms"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    handoff_path = handoff_dir / "handoff.md"
+    handoff_path.write_text(
+        f"# 任务\n{original_task}\n\n# 综合结论\n{final_text}\n",
+        encoding="utf-8",
+    )
+
+    # Try to exec claude or codex, replacing this process entirely
+    for cli in ("claude", "codex"):
+        if shutil.which(cli):
+            console.print(f"\n[cyan]→ 正在移交给 {cli}...[/cyan]")
+            console.print(f"[dim](简报已写入 {handoff_path}，可引用)[/dim]\n")
+            # Hand off: exec replaces the process, no return
+            os.execvp(cli, [cli, f"请阅读以下执行简报并确认你的执行计划：\n\n{final_text[:2000]}"])
+
+    # Fallback if no execution CLI found
+    console.print(f"\n[yellow]未找到 claude/codex CLI。简报已写入 {handoff_path}[/yellow]")
 
 
 def _discuss_post_action(provider_ctx, selected_models, original_task, final_text, cross):
