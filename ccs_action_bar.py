@@ -640,21 +640,32 @@ def _handle_converge(provider_ctx, session, selected, briefs) -> str:
         return asyncio.run(_run_synthesize(provider_ctx, session, selected, summaries)) or ""
 
 
-def _handle_handoff(session, selected, display_texts):
-    """H = 打印 action brief，给出可直接执行的 mms 命令。"""
+def _handle_handoff(session, selected, display_texts) -> str:
+    """H = auto-save session, print action brief + ready-to-run commands. Returns session id."""
+    import shlex
+
     task = session["task"]["goal"]
     selected_text = strip_markdown(display_texts.get(selected, ""))[:800]
+    brief = session["branch"].get("brief") or {}
+
+    # Auto-save so the user can resume later
+    path = save_session(session)
+    sid = session["id"]
 
     console.print("\n[bold cyan]── 执行交付简报 ──[/bold cyan]")
     console.print(Panel(selected_text or "(无内容)", title=f"选中方案 · {selected}", border_style="yellow"))
 
-    # 打印可复用的命令
-    import shlex
+    if brief.get("next_step"):
+        console.print(f"[dim]建议下一步:[/dim] {brief['next_step']}")
+
     safe_task = shlex.quote(task)
-    console.print(f"\n[dim]下一步建议：[/dim]")
-    console.print(f"  [green]mms discuss {safe_task}[/green]  [dim]# 多模型综合裁定[/dim]")
-    console.print(f"  [green]mms chat {safe_task}[/green]     [dim]# 重新比较[/dim]")
+    console.print(f"\n[dim]Session 已保存 → {path}[/dim]")
+    console.print(f"[dim]可用命令 (复制运行):[/dim]")
+    console.print(f"  [green]mms discuss {safe_task}[/green]         [dim]# 多模型综合裁定[/dim]")
+    console.print(f"  [green]mms chat --resume {sid}[/green]         [dim]# 恢复此 session[/dim]")
+    console.print(f"  [green]mms chat {safe_task}[/green]             [dim]# 重新比较[/dim]")
     console.print()
+    return sid
 
 
 def _pick_event(models, display_texts, initial_focus, session=None):
@@ -702,20 +713,11 @@ def _on_continue(session, models, selected, briefs, display_texts, provider_ctx,
 
 
 def _on_handoff(session, models, selected, briefs, display_texts, task_text):
-    """Handle CONVERGE_HANDOFF. Returns next prompt, '' to retry, or None to quit."""
+    """Handle CONVERGE_HANDOFF: save session, print commands, exit loop immediately."""
     brief = briefs.get(selected) or _fallback_brief(display_texts.get(selected, ""))
     advance_round(session, selected, brief, display_texts.get(selected, ""), round_models=list(models))
     _handle_handoff(session, selected, display_texts)
-    context = strip_markdown(display_texts.get(selected, ""))
-    try:
-        follow_up = _readline("继续追问", "Enter=退出  R=重新", context=context)
-    except (EOFError, KeyboardInterrupt):
-        return None
-    if not follow_up or follow_up.lower() == "q":
-        return None
-    if follow_up.lower() == "r":
-        return task_text
-    return build_continuation_prompt(session, follow_up)
+    return None  # exit chat loop — user is back in shell to run printed commands
 
 
 def _on_converge(provider_ctx, session, models, selected, briefs, display_texts, task_text):
