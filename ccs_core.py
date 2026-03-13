@@ -606,33 +606,262 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
     return base_url, api_key
 
 
-def fetch_models(provider):
-    if "openai_chat_completions" not in provider.get("protocols", []):
-        console.print(f"[yellow]provider '{provider['id']}' 不支持 OpenAI models 列表探测，跳过连接测试[/yellow]")
-        return None
-    if httpx is None:
-        console.print("[red]缺少 httpx，请执行: pip install httpx[/red]")
-        return None
-
+def _probe_models(provider, emit_output=True):
+    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+    protocols = provider.get("protocols", [])
     base_url = provider.get("base_url", "").rstrip("/")
     api_key = provider.get("api_key", "")
-    if not base_url or not api_key:
+    result = {
+        "provider_id": provider_id,
+        "models": None,
+        "error": None,
+        "error_kind": None,
+        "details": [],
+    }
+
+    if "openai_chat_completions" not in protocols:
+        result["error_kind"] = "protocol_unsupported"
+        result["error"] = f"provider '{provider_id}' 未声明 openai_chat_completions，无法探测 /v1/models"
+    elif httpx is None:
+        result["error_kind"] = "missing_httpx"
+        result["error"] = "缺少 httpx，请执行: pip install httpx"
+    elif not base_url and not api_key:
+        result["error_kind"] = "missing_credentials"
+        result["error"] = "当前 provider 还没有配置 API 地址和 API Key"
+    elif not base_url:
+        result["error_kind"] = "missing_base_url"
+        result["error"] = "当前 provider 缺少 API 地址"
+    elif not api_key:
+        result["error_kind"] = "missing_api_key"
+        result["error"] = "当前 provider 缺少 API Key"
+    else:
+        try:
+            response = httpx.get(
+                f"{base_url}/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=15,
+            )
+            response.raise_for_status()
+            data = response.json()
+            models = [m["id"] for m in data.get("data", [])]
+            models.sort()
+            result["models"] = models
+            if not models:
+                result["error_kind"] = "empty_models"
+                result["error"] = "接口返回成功，但模型列表为空"
+        except Exception as exc:
+            result["error_kind"] = "request_failed"
+            result["error"] = f"拉取模型列表失败: {exc}"
+
+    details = [
+        f"provider: {_provider_label(provider)} ({provider_id})",
+        f"base_url: {base_url or '(未设置)'}",
+        f"protocols: {', '.join(protocols) if protocols else '(未声明)'}",
+    ]
+    if result["error"]:
+        details.append(f"error: {result['error']}")
+    result["details"] = details
+
+    if emit_output and result["error"]:
+        style = "yellow" if result["error_kind"] == "protocol_unsupported" else "red"
+        console.print(f"[{style}]{result['error']}[/{style}]")
+    return result
+
+
+def fetch_models(provider):
+    return _probe_models(provider, emit_output=True).get("models")
+
+
+def _model_validation_findings(provider, probe):
+    findings = []
+    error_kind = probe.get("error_kind")
+    provider_name = _provider_label(provider)
+    if error_kind == "protocol_unsupported":
+        findings.append({
+            "severity": "high",
+            "title": "当前 provider 不支持模型探测",
+            "summary": f"{provider_name} 没有声明 openai_chat_completions，无法访问 /v1/models。",
+        })
+    elif error_kind in {"missing_credentials", "missing_base_url", "missing_api_key"}:
+        findings.append({
+            "severity": "high",
+            "title": "当前 provider 凭据不完整",
+            "summary": f"{provider_name} 还缺少地址或 Key，无法验证可用模型。",
+        })
+    elif error_kind == "empty_models":
+        findings.append({
+            "severity": "medium",
+            "title": "接口连通，但没有拿到模型列表",
+            "summary": f"{provider_name} 返回了空列表，可能是账号权限或网关映射问题。",
+        })
+    elif error_kind == "missing_httpx":
+        findings.append({
+            "severity": "high",
+            "title": "本地缺少依赖",
+            "summary": "当前环境缺少 httpx，暂时无法做模型探测。",
+        })
+    else:
+        findings.append({
+            "severity": "high",
+            "title": "模型校验失败",
+            "summary": probe.get("error") or f"{provider_name} 暂时无法拉取模型列表。",
+        })
+    if provider.get("id"):
+        findings.append({
+            "severity": "low",
+            "title": "可以跳过校验继续",
+            "summary": "场景和预设仍然可以继续使用，但模型浏览会受限。",
+        })
+    return findings
+
+
+def _rank_recovery_actions(actions):
+    return sorted(
+        actions,
+        key=lambda item: (
+            item.get("priority", 999),
+            0 if item.get("recommended") else 1,
+            item.get("title", ""),
+        ),
+    )
+
+
+def _build_model_recovery_actions(cfg, provider, probe):
+    providers = _provider_map(cfg)
+    active_provider_id = provider.get("id")
+    actions = [
+        {
+            "id": "edit_credentials",
+            "title": "重新输入地址和 Key",
+            "summary": "修复当前 provider 的地址或认证信息。",
+            "priority": 10,
+            "recommended": probe.get("error_kind") != "protocol_unsupported",
+        },
+        {
+            "id": "show_details",
+            "title": "查看详细错误",
+            "summary": "展开本次校验的 provider、协议和错误明细。",
+            "priority": 20,
+            "recommended": False,
+        },
+        {
+            "id": "continue_without_validation",
+            "title": "跳过校验并继续",
+            "summary": "继续使用场景或预设，但不会有模型浏览列表。",
+            "priority": 30,
+            "recommended": False,
+        },
+    ]
+    if len(providers) > 1:
+        actions.insert(
+            1,
+            {
+                "id": "switch_provider",
+                "title": "切换到其他 provider",
+                "summary": f"当前可切到其他已配置 provider，避免卡在 {active_provider_id}。",
+                "priority": 12,
+                "recommended": probe.get("error_kind") == "protocol_unsupported",
+            },
+        )
+    return _rank_recovery_actions(actions)
+
+
+def _print_model_probe_details(probe):
+    lines = [f"- {line}" for line in probe.get("details", [])]
+    console.print(Panel("\n".join(lines), title="校验详情", border_style="yellow"))
+
+
+def _select_provider_interactive(cfg, current_provider_id):
+    providers = [
+        provider for provider in cfg.get("providers", [])
+        if provider.get("enabled", True) and provider.get("id") != current_provider_id
+    ]
+    if not providers:
+        console.print("[yellow]没有可切换的其他 provider[/yellow]")
         return None
 
-    try:
-        r = httpx.get(
-            f"{base_url}/v1/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=15,
+    table = Table(title="可切换的 Providers")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("ID", style="green")
+    table.add_column("名称", style="yellow")
+    table.add_column("协议", style="magenta")
+    for index, item in enumerate(providers, 1):
+        table.add_row(
+            str(index),
+            item.get("id", ""),
+            item.get("name", ""),
+            ", ".join(item.get("protocols", [])),
         )
-        r.raise_for_status()
-        data = r.json()
-        models = [m["id"] for m in data.get("data", [])]
-        models.sort()
-        return models
-    except Exception as e:
-        console.print(f"[red]拉取模型列表失败: {e}[/red]")
-        return None
+    console.print(table)
+
+    while True:
+        choice = Prompt.ask("切换到哪个 provider？输入编号，留空取消", default="")
+        if not choice:
+            return None
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(providers):
+                return resolve_provider_context(cfg, providers[idx - 1]["id"])
+        console.print(f"[red]请输入 1-{len(providers)} 的编号，或直接回车取消[/red]")
+
+
+def _pick_recovery_actions(findings, actions):
+    if _use_tui():
+        try:
+            from ccs_tui import select_actions_tui
+        except ImportError:
+            select_actions_tui = None
+        if select_actions_tui is not None:
+            selected = select_actions_tui(findings, actions, title="处理发现")
+            if selected != "fallback":
+                return selected
+
+    console.print(Panel(
+        "\n".join(f"- {item['title']}: {item['summary']}" for item in findings),
+        title="发现",
+        border_style="yellow",
+    ))
+    console.print("[bold]可处理动作：[/bold]")
+    for index, action in enumerate(actions, 1):
+        tag = " [推荐]" if action.get("recommended") else ""
+        console.print(f"  {index}. {action['title']}{tag} — {action['summary']}")
+    console.print("[dim]输入编号，支持逗号分隔多选；直接回车等于取消。[/dim]")
+
+    while True:
+        raw = Prompt.ask("选择动作", default="")
+        if not raw:
+            return []
+        try:
+            indexes = []
+            for chunk in raw.split(","):
+                value = int(chunk.strip())
+                if not 1 <= value <= len(actions):
+                    raise ValueError
+                if value not in indexes:
+                    indexes.append(value)
+            return [actions[index - 1]["id"] for index in indexes]
+        except ValueError:
+            console.print(f"[red]请输入 1-{len(actions)} 的编号，可用逗号分隔多选[/red]")
+
+
+def _run_recovery_action(cfg, provider, probe, action_id):
+    if action_id == "show_details":
+        _print_model_probe_details(probe)
+        return provider, False
+    if action_id == "edit_credentials":
+        return setup_provider_credentials(
+            provider,
+            provider.get("base_url", ""),
+            provider.get("api_key", ""),
+            allow_keep=True,
+        ), False
+    if action_id == "switch_provider":
+        selected = _select_provider_interactive(cfg, provider.get("id"))
+        return (selected or provider), False
+    if action_id == "continue_without_validation":
+        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但场景和预设仍可继续。[/yellow]")
+        return provider, True
+    return provider, False
 
 
 def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
@@ -694,8 +923,9 @@ def setup_wizard():
 
 # ── Model Fetching ──────────────────────────────────────
 
-def ensure_models_ready(provider):
-    models = fetch_models(provider)
+def ensure_models_ready(cfg, provider):
+    probe = _probe_models(provider, emit_output=True)
+    models = probe.get("models")
     if models:
         return provider, models
 
@@ -704,18 +934,20 @@ def ensure_models_ready(provider):
         sys.exit(1)
 
     while True:
-        retry = Confirm.ask("模型校验失败，是否立即重新输入 API URL / API Key？", default=True)
-        if not retry:
+        findings = _model_validation_findings(provider, probe)
+        actions = _build_model_recovery_actions(cfg, provider, probe)
+        selected_ids = _pick_recovery_actions(findings, actions)
+        if not selected_ids:
             sys.exit(1)
-        provider = setup_provider_credentials(
-            provider,
-            provider.get("base_url", ""),
-            provider.get("api_key", ""),
-            allow_keep=True,
-        )
-        models = fetch_models(provider)
-        if models:
-            return provider, models
+        ordered_actions = [item for item in actions if item["id"] in selected_ids]
+        for action in ordered_actions:
+            provider, skip_validation = _run_recovery_action(cfg, provider, probe, action["id"])
+            if skip_validation:
+                return provider, []
+            probe = _probe_models(provider, emit_output=True)
+            models = probe.get("models")
+            if models:
+                return provider, models
 
 
 def categorize_models(models):
@@ -754,6 +986,13 @@ def display_models(models, role=MODE_ALL, recommend=None):
 
     console.print(table)
     return [m for m, _ in flat]
+
+
+def _ensure_models_cache_available(models_cache):
+    if models_cache:
+        return True
+    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用场景 / 预设启动。[/yellow]")
+    return False
 
 
 def select_model_interactive(models_list):
@@ -1283,10 +1522,12 @@ def main():
         handle_export(args.export, default_provider, apply=args.apply)
         return
 
-    default_provider, models_cache = ensure_models_ready(default_provider)
+    default_provider, models_cache = ensure_models_ready(cfg, default_provider)
 
     # --list
     if args.list:
+        if not _ensure_models_cache_available(models_cache):
+            return
         display_models(models_cache, role, recommend)
         return
 
@@ -1342,6 +1583,8 @@ def main():
             if not check_cli_installed(cli):
                 from ccs_installer import check_and_offer_install
                 check_and_offer_install(cli)
+            if not _ensure_models_cache_available(models_cache):
+                return
             models_list = display_models(models_cache, role, recommend)
             model = select_model_interactive(models_list)
             action = confirm_launch(cli, model, once)
@@ -1358,6 +1601,8 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli()
+        if not _ensure_models_cache_available(models_cache):
+            return
         models_list = display_models(models_cache, role, recommend)
         model = select_model_interactive(models_list)
         action = confirm_launch(cli, model, once)
@@ -1381,15 +1626,16 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli()
-        if models_cache:
-            models_list = display_models(models_cache, role, recommend)
-            model = select_model_interactive(models_list)
-            action = confirm_launch(cli, model, once)
-            if action == "q":
-                return
-            if action == "s":
-                save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, default_provider, once=once)
+        if not _ensure_models_cache_available(models_cache):
+            return
+        models_list = display_models(models_cache, role, recommend)
+        model = select_model_interactive(models_list)
+        action = confirm_launch(cli, model, once)
+        if action == "q":
+            return
+        if action == "s":
+            save_preset_interactive(user_cfg, cli, model)
+        launch_cli(cli, {"model": model}, default_provider, once=once)
         return
 
     scene = SCENES[scene_name]
