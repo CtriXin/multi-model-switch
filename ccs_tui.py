@@ -1,6 +1,7 @@
 """CCS curses TUI：箭头键交互选择器"""
 
 import curses
+import json
 import locale
 import os
 import sys
@@ -138,6 +139,18 @@ def _format_variant_line(variant, is_selected):
     return f"{marker}{tier:<6}  {model}"
 
 
+def _source_choice_key(cli_name, model_info=None):
+    if not model_info:
+        return f"{cli_name}|__default__"
+    if isinstance(model_info, dict):
+        cleaned = {k: v for k, v in model_info.items() if k != "provider" and v}
+        if not cleaned:
+            return f"{cli_name}|__default__"
+        payload = json.dumps(cleaned, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return f"{cli_name}|{payload}"
+    return f"{cli_name}|{str(model_info).strip()}"
+
+
 def _default_variant_index(scene):
     variants = scene.get("variants", [])
     preferred_tier = scene.get("default_tier", "high")
@@ -181,9 +194,14 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
             stdscr.clear()
             max_y, max_w = stdscr.getmaxyx()
             cli = cli_names[cli_idx]
-            source_config = (source_choices or {}).get(cli, {})
-            available_sources = source_config.get("options", [])
-            default_source_idx = source_config.get("default_index", 0) or 0
+            default_source_config = (source_choices or {}).get(_source_choice_key(cli), {})
+            available_sources = default_source_config.get("options", [])
+            default_source_idx = default_source_config.get("default_index", 0) or 0
+            if source_scene_name is not None:
+                source_key = _source_choice_key(source_cli_name or cli, source_model_info)
+                source_config = (source_choices or {}).get(source_key, default_source_config)
+                available_sources = source_config.get("options", [])
+                default_source_idx = source_config.get("default_index", 0) or 0
 
             sorted_scenes = _sort_scenes_for_cli(scenes, cli)
             direct_cli_item = DIRECT_CLI_ITEMS.get(cli)
@@ -410,6 +428,10 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                     chosen = variants[variant_idx]
                     scene_name = active_variant_scene
                     model_info = dict(chosen.get("model_info", {}))
+                    source_key = _source_choice_key(cli, model_info)
+                    source_config = (source_choices or {}).get(source_key, default_source_config)
+                    available_sources = source_config.get("options", [])
+                    default_source_idx = source_config.get("default_index", 0) or 0
                     if len(available_sources) > 1:
                         source_scene_name = scene_name
                         source_cli_name = cli
@@ -437,6 +459,10 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                     continue
                 model_info = {k: v for k, v in info.items()
                               if k not in ("emoji", "desc", "cli", "variants")}
+                source_key = _source_choice_key(cli, model_info)
+                source_config = (source_choices or {}).get(source_key, default_source_config)
+                available_sources = source_config.get("options", [])
+                default_source_idx = source_config.get("default_index", 0) or 0
                 if len(available_sources) > 1:
                     source_scene_name = scene_name
                     source_cli_name = cli
