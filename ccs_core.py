@@ -2405,6 +2405,9 @@ def handle_config(cfg, args_rest):
         return
 
     key_path = args_rest[0]
+    if key_path in {"-h", "--help", "help"}:
+        _display_config_help()
+        return
     if key_path == "file":
         _handle_config_file()
         return
@@ -2781,6 +2784,39 @@ def _display_accounts(cfg):
     )
 
 
+def _display_config_help():
+    command = current_command()
+    console.print(f"[bold]{command} config[/bold] — 配置查看与管理")
+    console.print(f"[dim]用法: {command} config [子命令] [参数][/dim]")
+    console.print("\n[bold]常用子命令:[/bold]")
+    console.print(f"  {command} config")
+    console.print(f"  {command} config file")
+    console.print(f"  {command} config validate")
+    console.print(f"  {command} config get <dot.path>")
+    console.print(f"  {command} config set <dot.path> <value>")
+    console.print(f"  {command} config unset <dot.path>")
+    console.print(f"  {command} config connect")
+    console.print("\n[bold]Provider:[/bold]")
+    console.print(f"  {command} config provider.list")
+    console.print(f"  {command} config provider.default [id]")
+    console.print(f"  {command} config provider.add [id]")
+    console.print(f"  {command} config provider.edit <id>")
+    console.print(f"  {command} config provider.remove <id>")
+    console.print(f"  {command} config provider.credentials [id]")
+    console.print("\n[bold]Account:[/bold]")
+    console.print(f"  {command} config account.list")
+    console.print(f"  {command} config account.add [claude|codex]")
+    console.print(f"  {command} config account.edit <id>")
+    console.print(f"  {command} config account.remove <id>")
+    console.print(f"  {command} config account.status [id]")
+    console.print(f"  {command} config account.login <id>")
+    console.print(f"  {command} config account.default <cli> <id>")
+    console.print("\n[bold]其他:[/bold]")
+    console.print(f"  {command} config stats")
+    console.print(f"  {command} config api.edit")
+
+
+
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
@@ -3038,15 +3074,34 @@ def _handle_config_validate(cfg):
 
 # ── Main ────────────────────────────────────────────────
 
+def _load_command_config():
+    cfg = load_config()
+    if cfg is None:
+        cfg = _default_config()
+        save_config(cfg)
+    return apply_local_overrides(cfg)
+
+
 def main():
-    # 先检查是否是 config 子命令（argparse 前拦截）
-    if len(sys.argv) >= 2 and sys.argv[1] == "config":
-        cfg = load_config()
-        if cfg is None:
-            cfg = _default_config()
-            save_config(cfg)
-        handle_config(cfg, sys.argv[2:])
-        return
+    if len(sys.argv) >= 2:
+        command = sys.argv[1]
+        if command == "config":
+            cfg = load_config()
+            if cfg is None:
+                cfg = _default_config()
+                save_config(cfg)
+            handle_config(cfg, sys.argv[2:])
+            return
+        if command == "chat":
+            from ccs_chat import chat_main
+
+            chat_main(_load_command_config(), sys.argv[2:])
+            return
+        if command == "discuss":
+            from ccs_discuss import discuss_main
+
+            discuss_main(_load_command_config(), sys.argv[2:])
+            return
 
     parser = argparse.ArgumentParser(
         prog=current_command(),
