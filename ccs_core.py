@@ -5,6 +5,8 @@ import os
 import argparse
 import shlex
 import subprocess
+import json
+from datetime import datetime, timezone
 
 try:
     import tomllib
@@ -42,6 +44,7 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
 CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "credentials.sh")
 ENV_DIR = os.path.join(CONFIG_DIR, "env")
 ACCOUNTS_DIR = os.path.join(CONFIG_DIR, "accounts")
+USAGE_PATH = os.path.join(CONFIG_DIR, "usage.json")
 OVERRIDE_PATHS = [
     os.path.join(CONFIG_DIR, "override.toml"),
     os.path.expanduser("~/.config/mms/override.toml"),
@@ -52,6 +55,8 @@ API_KEY_ENV_NAME = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 OAUTH_CAPABLE_CLIS = ("claude", "codex")
+DEFAULT_PRIORITY = 100
+COST_LEVELS = ("low", "medium", "high")
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
 DIRECT_CLI_MODES = {"qwen", "kimi"}
@@ -227,6 +232,18 @@ def _default_account_home(account_id):
     return os.path.join(ACCOUNTS_DIR, account_id)
 
 
+def _normalize_priority(value):
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return DEFAULT_PRIORITY
+
+
+def _normalize_cost_level(value):
+    normalized = str(value or "medium").strip().lower()
+    return normalized if normalized in COST_LEVELS else "medium"
+
+
 def _normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")
@@ -246,6 +263,10 @@ def _normalize_account(account):
         "auth_mode": "oauth",
         "enabled": bool(account.get("enabled", True)),
         "home_dir": os.path.expanduser(home_dir),
+        "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
+        "cost_level": _normalize_cost_level(account.get("cost_level", "medium")),
+        "daily_budget": str(account.get("daily_budget", "")).strip(),
+        "note": str(account.get("note", "")).strip(),
     }
 
 
@@ -280,6 +301,10 @@ def _normalize_provider(provider):
         merged["supported_clis"] = list(CLI_NAMES)
 
     merged["enabled"] = bool(merged.get("enabled", True))
+    merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
+    merged["cost_level"] = _normalize_cost_level(merged.get("cost_level", "medium"))
+    merged["daily_budget"] = str(merged.get("daily_budget", "")).strip()
+    merged["note"] = str(merged.get("note", "")).strip()
     return merged
 
 
@@ -519,6 +544,77 @@ def _load_env_file(path):
                 continue
             values[key.strip()] = _parse_shell_value(raw_value)
     return values
+
+
+def _iso_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _load_usage_stats():
+    if not os.path.exists(USAGE_PATH):
+        return {"sources": {}}
+    try:
+        with open(USAGE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data.setdefault("sources", {})
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"sources": {}}
+
+
+def _save_usage_stats(data):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(USAGE_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.chmod(USAGE_PATH, 0o600)
+
+
+def _runtime_usage_key(runtime, cli_name):
+    kind = runtime.get("runtime_kind", "provider")
+    runtime_id = runtime.get("id", "default")
+    return f"{kind}:{cli_name}:{runtime_id}"
+
+
+def _resolve_model_name(model_info):
+    if isinstance(model_info, dict):
+        for key in ("model", "sonnet", "opus", "haiku"):
+            value = model_info.get(key)
+            if value:
+                return str(value)
+        return "official-default"
+    return str(model_info or "official-default")
+
+
+def _record_usage(runtime, cli_name, model_info):
+    stats = _load_usage_stats()
+    sources = stats.setdefault("sources", {})
+    key = _runtime_usage_key(runtime, cli_name)
+    model_name = _resolve_model_name(model_info)
+    entry = sources.setdefault(key, {
+        "runtime_kind": runtime.get("runtime_kind", "provider"),
+        "id": runtime.get("id", "default"),
+        "name": runtime.get("name", runtime.get("id", "default")),
+        "cli": cli_name,
+        "launches": 0,
+        "last_used_at": "",
+        "last_model": "",
+        "models": {},
+    })
+    entry["launches"] += 1
+    entry["last_used_at"] = _iso_now()
+    entry["last_model"] = model_name
+    models = entry.setdefault("models", {})
+    models[model_name] = int(models.get(model_name, 0)) + 1
+    _save_usage_stats(stats)
+
+
+def _launch_with_tracking(cli_name, model_info, runtime, once=False):
+    _record_usage(runtime, cli_name, model_info)
+    from ccs_launchers import launch_cli
+    launch_cli(cli_name, model_info, runtime, once=once)
 
 
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
@@ -816,12 +912,20 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         current.get("supported_clis", list(CLI_NAMES)),
         list(CLI_NAMES),
     )
+    priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    cost_level = Prompt.ask("成本等级", choices=list(COST_LEVELS), default=current.get("cost_level", "medium"))
+    daily_budget = Prompt.ask("日预算（可选）", default=current.get("daily_budget", "")).strip()
+    note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
         "id": provider_id,
         "name": name,
         "protocols": protocols,
         "supported_clis": supported_clis,
+        "priority": priority,
+        "cost_level": cost_level,
+        "daily_budget": daily_budget,
+        "note": note,
         "enabled": enabled,
     })
 
@@ -840,12 +944,20 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         "账号目录（用于隔离官方登录态）",
         default=current.get("home_dir") or _default_account_home(account_id),
     ).strip() or _default_account_home(account_id)
+    priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    cost_level = Prompt.ask("成本等级", choices=list(COST_LEVELS), default=current.get("cost_level", "medium"))
+    daily_budget = Prompt.ask("日预算（可选）", default=current.get("daily_budget", "")).strip()
+    note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
         "id": account_id,
         "name": name,
         "cli": cli_name,
         "home_dir": home_dir,
+        "priority": priority,
+        "cost_level": cost_level,
+        "daily_budget": daily_budget,
+        "note": note,
         "enabled": enabled,
     })
 
@@ -1347,7 +1459,6 @@ def _runtime_choice_label(runtime):
 
 def _list_runtime_sources(cfg, cli_name, default_provider, default_models):
     options = []
-    default_choice = None
 
     provider_runtime, provider_models = _resolve_provider_runtime(cfg, cli_name, default_provider, default_models)
     if provider_runtime is not None:
@@ -1360,8 +1471,9 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models):
             "title": _provider_label(provider_runtime),
             "desc": "API 网关",
             "icon": "🌐",
+            "priority": provider_runtime.get("priority", DEFAULT_PRIORITY),
+            "is_default": True,
         })
-        default_choice = len(options) - 1
 
     cli_accounts = _accounts_for_cli(cfg, cli_name)
     default_account_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
@@ -1376,9 +1488,12 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models):
             "title": _account_label(runtime),
             "desc": "官方登录态",
             "icon": "🔑",
+            "priority": runtime.get("priority", DEFAULT_PRIORITY),
+            "is_default": runtime.get("id") == default_account_id,
         })
-        if runtime.get("id") == default_account_id:
-            default_choice = len(options) - 1
+
+    options.sort(key=lambda item: (item.get("priority", DEFAULT_PRIORITY), 0 if item["kind"] == "account" else 1, item.get("title", "")))
+    default_choice = next((idx for idx, item in enumerate(options) if item.get("is_default")), 0)
 
     return options, default_choice
 
@@ -1733,7 +1848,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
         if action == "b":
             continue
-        launch_cli(cli, clean_model_info, runtime_runtime, once=once)
+        _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
 
@@ -1837,6 +1952,9 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "account.login":
         _handle_account_login_config(cfg, args_rest[1:])
+        return
+    if key_path in {"usage", "stats"}:
+        _display_usage_stats()
         return
     if key_path in ("api.setup", "api.edit"):
         provider = resolve_provider_context(cfg)
@@ -2111,6 +2229,8 @@ def _display_providers(cfg):
     table.add_column("名称", style="green")
     table.add_column("协议", style="yellow")
     table.add_column("CLI", style="magenta")
+    table.add_column("优先级", style="white")
+    table.add_column("成本", style="white")
     table.add_column("状态", style="white")
     table.add_column("地址", style="blue")
 
@@ -2124,6 +2244,8 @@ def _display_providers(cfg):
             str(provider.get("name", "")),
             ", ".join(provider.get("protocols", [])),
             ", ".join(provider.get("supported_clis", [])),
+            str(provider.get("priority", DEFAULT_PRIORITY)),
+            str(provider.get("cost_level", "medium")),
             status.strip(),
             provider_ctx.get("base_url") or "(未设置)",
         )
@@ -2144,6 +2266,8 @@ def _display_accounts(cfg):
     table.add_column("ID", style="cyan")
     table.add_column("名称", style="green")
     table.add_column("CLI", style="yellow")
+    table.add_column("优先级", style="white")
+    table.add_column("成本", style="white")
     table.add_column("状态", style="magenta")
     table.add_column("登录态", style="white")
     table.add_column("目录", style="blue")
@@ -2158,6 +2282,8 @@ def _display_accounts(cfg):
             str(account.get("id", "")),
             str(account.get("name", "")),
             str(account.get("cli", "")),
+            str(account.get("priority", DEFAULT_PRIORITY)),
+            str(account.get("cost_level", "medium")),
             " ".join(status).strip(),
             login_state.get("summary") or login_state.get("state", ""),
             str(account.get("home_dir", "")),
@@ -2182,6 +2308,8 @@ def _display_config(cfg, prefix="", depth=0):
         console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
         _display_providers(cfg)
         _display_accounts(cfg)
+        console.print(f"  [cyan]usage_file[/cyan] = {USAGE_PATH}")
+        console.print("  [dim]usage 只记录本地启动统计，不代表真实余额或官方剩余额度。[/dim]")
         active_overrides = _existing_override_paths()
         if active_overrides:
             console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
@@ -2202,6 +2330,38 @@ def _display_config(cfg, prefix="", depth=0):
         else:
             display = _mask_key(str(v)) if "key" in k.lower() else str(v)
             console.print(f"{'  ' * depth}[cyan]{k}[/cyan] = {display}")
+
+
+def _display_usage_stats():
+    stats = _load_usage_stats()
+    sources = stats.get("sources", {})
+    if not sources:
+        console.print("[yellow]还没有本地启动统计[/yellow]")
+        console.print(f"[dim]统计文件会写入 {USAGE_PATH}[/dim]")
+        return
+
+    table = Table(title="本地启动统计", show_lines=True)
+    table.add_column("来源", style="cyan")
+    table.add_column("CLI", style="green")
+    table.add_column("启动次数", style="yellow")
+    table.add_column("最近模型", style="magenta")
+    table.add_column("最近使用", style="white")
+
+    rows = sorted(
+        sources.values(),
+        key=lambda item: (item.get("last_used_at", ""), item.get("launches", 0)),
+        reverse=True,
+    )
+    for item in rows:
+        table.add_row(
+            f"{item.get('runtime_kind', 'source')} / {item.get('name', item.get('id', 'default'))}",
+            str(item.get("cli", "")),
+            str(item.get("launches", 0)),
+            str(item.get("last_model", "")),
+            str(item.get("last_used_at", "")),
+        )
+    console.print(table)
+    console.print("[dim]这是本地软统计，用于排序/推荐参考；不等于真实计费数据。[/dim]")
 
 
 def _mask_key(val):
@@ -2283,6 +2443,10 @@ def _validate_config(cfg):
             invalid_clis = [value for value in supported_clis if value not in CLI_NAMES]
             if invalid_clis:
                 errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
+            if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
+                errors.append(f"模型源 {provider_id} 的 priority 必须是正整数")
+            if _normalize_cost_level(item.get("cost_level", "medium")) != str(item.get("cost_level", "medium")).strip().lower():
+                errors.append(f"模型源 {provider_id} 的 cost_level 必须是 {', '.join(COST_LEVELS)}")
 
     default_id = cfg.get("provider", {}).get("default")
     provider_ids = {item.get("id") for item in providers if isinstance(item, dict)}
@@ -2313,6 +2477,10 @@ def _validate_config(cfg):
                 errors.append(f"账号档案 {account_id} 目前只支持 oauth 模式")
             if not str(item.get("home_dir", "")).strip():
                 errors.append(f"账号档案 {account_id} 缺少 home_dir")
+            if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
+                errors.append(f"账号档案 {account_id} 的 priority 必须是正整数")
+            if _normalize_cost_level(item.get("cost_level", "medium")) != str(item.get("cost_level", "medium")).strip().lower():
+                errors.append(f"账号档案 {account_id} 的 cost_level 必须是 {', '.join(COST_LEVELS)}")
 
     account_defaults = cfg.get("account", {}).get("defaults", {})
     if isinstance(account_defaults, dict):
@@ -2501,7 +2669,7 @@ def main():
         if runtime is None:
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
-        launch_cli(cli, model_info, runtime, once=once)
+        _launch_with_tracking(cli, model_info, runtime, once=once)
         return
 
     # Determine once mode
@@ -2536,7 +2704,7 @@ def main():
                     return
                 if action == "s":
                     save_preset_interactive(user_cfg, cli, model_info)
-                launch_cli(cli, _clean_model_info(model_info), runtime, once=once)
+                _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
                 return
         except ValueError:
             pass
@@ -2570,7 +2738,7 @@ def main():
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model_info)
-            launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+            _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
@@ -2606,7 +2774,7 @@ def main():
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model_info)
-        launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+        _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
@@ -2647,7 +2815,7 @@ def main():
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model_info)
-        launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+        _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
         return
 
     scene = visible_scenes[scene_name]
@@ -2670,4 +2838,4 @@ def main():
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    launch_cli(cli, _clean_model_info(model_info), runtime, once=once)
+    _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
