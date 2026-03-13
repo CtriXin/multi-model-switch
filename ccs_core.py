@@ -1332,6 +1332,85 @@ def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, acc
     return _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
 
 
+def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, provider_id=None):
+    if provider_id:
+        provider = resolve_provider_context(cfg, provider_id)
+        return _resolve_provider_for_cli(cfg, cli_name, provider, _probe_models(provider, emit_output=False).get("models"))
+    return _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+
+
+def _runtime_choice_label(runtime):
+    if runtime.get("auth_mode") == "oauth":
+        return f"账号档案 / {_account_label(runtime)}"
+    return f"模型源 / {_provider_label(runtime)}"
+
+
+def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
+    if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
+        return _resolve_launch_runtime(
+            cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
+        )
+
+    options = []
+    default_choice = None
+
+    provider_runtime, provider_models = _resolve_provider_runtime(cfg, cli_name, default_provider, default_models)
+    if provider_runtime is not None:
+        options.append({
+            "kind": "provider",
+            "runtime": provider_runtime,
+            "models": provider_models,
+            "label": _runtime_choice_label(provider_runtime),
+        })
+        default_choice = len(options) - 1
+
+    cli_accounts = _accounts_for_cli(cfg, cli_name)
+    default_account_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
+    for account_def in cli_accounts:
+        runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=cli_name)
+        options.append({
+            "kind": "account",
+            "runtime": runtime,
+            "models": list(default_models or []),
+            "label": _runtime_choice_label(runtime),
+        })
+        if runtime.get("id") == default_account_id:
+            default_choice = len(options) - 1
+
+    if not options:
+        return None, []
+    if len(options) == 1:
+        return options[0]["runtime"], options[0]["models"]
+
+    if not sys.stdin.isatty():
+        chosen = options[default_choice or 0]
+        return chosen["runtime"], chosen["models"]
+
+    table = Table(title=f"{cli_name} 启动来源", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("类型", style="green")
+    table.add_column("名称", style="yellow")
+    table.add_column("说明", style="magenta")
+    for idx, option in enumerate(options, 1):
+        runtime = option["runtime"]
+        source_type = "账号档案" if option["kind"] == "account" else "模型源"
+        desc = "官方登录态" if option["kind"] == "account" else "API 网关"
+        if idx - 1 == default_choice:
+            desc = f"{desc} / 默认"
+        table.add_row(str(idx), source_type, runtime.get("name", runtime.get("id", "")), desc)
+    console.print(table)
+
+    default_num = str((default_choice or 0) + 1)
+    while True:
+        raw = Prompt.ask(f"为 {cli_name} 选择本次启动来源", default=default_num)
+        if raw.isdigit():
+            selected = int(raw)
+            if 1 <= selected <= len(options):
+                chosen = options[selected - 1]
+                return chosen["runtime"], chosen["models"]
+        console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
+
+
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
@@ -1574,7 +1653,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         scene_name, cli, model_info = result
 
-        runtime_runtime, family_models = _resolve_launch_runtime(
+        runtime_runtime, family_models = _choose_runtime_source(
             cfg,
             cli,
             provider,
@@ -2368,7 +2447,7 @@ def main():
             return
         p = presets[args.preset]
         cli = p["cli"]
-        runtime, _ = _resolve_launch_runtime(
+        runtime, _ = _choose_runtime_source(
             cfg,
             cli,
             ensure_provider_credentials(cfg, p.get("provider")),
@@ -2400,7 +2479,7 @@ def main():
                 scene_name = scene_list[idx - 1]
                 scene = visible_scenes[scene_name]
                 cli = scene["cli"]
-                runtime, _ = _resolve_launch_runtime(
+                runtime, _ = _choose_runtime_source(
                     cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
                 )
                 if runtime is None:
@@ -2424,7 +2503,7 @@ def main():
         # Is it a CLI name?
         if target in visible_clis:
             cli = target
-            runtime, cli_models = _resolve_launch_runtime(
+            runtime, cli_models = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
             )
             if runtime is None:
@@ -2463,7 +2542,7 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
-        runtime, cli_models = _resolve_launch_runtime(
+        runtime, cli_models = _choose_runtime_source(
             cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
         )
         if runtime is None:
@@ -2504,7 +2583,7 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
-        runtime, cli_models = _resolve_launch_runtime(
+        runtime, cli_models = _choose_runtime_source(
             cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
         )
         if runtime is None:
@@ -2532,7 +2611,7 @@ def main():
 
     scene = visible_scenes[scene_name]
     cli = scene["cli"]
-    runtime, _ = _resolve_launch_runtime(
+    runtime, _ = _choose_runtime_source(
         cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
     )
     if runtime is None:
