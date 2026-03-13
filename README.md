@@ -113,17 +113,21 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 
 MMS 启动时会先读取已配置 provider，并用可拉取到的模型列表做一次轻量筛选。
 
-- `qwen`：只有当 provider 里确实存在 `qwen*` 模型时才显示
-- `kimi`：只有当 provider 里确实存在 `kimi*` 模型时才显示
+- `qwen`：只有当 provider 里明确探测到 `qwen*` 模型时才显示
+- `kimi`：只有当 provider 里明确探测到 `kimi*` 模型时才显示
 - `claude` / `codex`：仍按 provider 的 `supported_clis` 决定是否显示
 
-这层筛选只影响 CLI 入口可见性，不会限制你在 `qwen` / `kimi` CLI 里切换同一 provider 提供的其他模型。
+这层筛选会同时作用到顶部 CLI 入口和内置场景可见性，不会只隐藏 tab 留下失效场景。
+
+如果 `qwen` / `kimi` 被显示出来，你仍然可以在对应 CLI 里切换同一 provider 提供的其他模型；场景里的默认模型只是默认入口。
 
 ## Codex 说明
 
 `codex` 当前按它自己的 CLI 能力启动：使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL`，再通过 `-m/--model` 指定单个模型。
 
 它没有类似 Claude Code 的多 slot 默认模型环境变量机制，所以这里不会伪装成 `opus / sonnet / haiku` 那种多模型注入。
+
+但在交互层里，`codex` 不会再被强制绑定到固定的两档场景预设；你仍然可以走全量模型选择路径。
 
 ## 现在能做什么
 
