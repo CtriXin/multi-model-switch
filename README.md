@@ -234,9 +234,74 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 
 但在交互层里，`codex` 不会再被强制绑定到固定的两档场景预设；你仍然可以走全量模型选择路径。
 
-## 现在能做什么
+## `mms chat` / `mms discuss`
 
-如果你只是想快速了解当前仓库，可以先看这些文件：
+`mms chat` 和 `mms discuss` 都建立在同一套 provider / model 选择能力上：
+
+- 两者都会先选择 provider（可用 `--provider` 临时指定）
+- 两者都复用同一套模型多选 TUI
+- 两者都走相同的流式请求与 SSE 解析逻辑
+- 两者都适合拿来做“先选多个模型，再处理一个任务”的交互入口
+
+差异是：
+
+- `mms chat`：让多个模型并排实时输出，适合快速看不同模型的原始回答
+- `mms discuss`：先让多个模型输出压缩摘要，再做综合裁定，适合设计讨论、方案对比、review
+
+## `mms chat`
+
+`mms chat` 用来把同一个 prompt 同时发给多个模型，并在终端里并排流式展示结果。
+
+当前支持的用法：
+
+```bash
+mms chat
+mms chat "解释 Python GIL"
+mms chat --provider foo "为这个 CLI 设计配置结构"
+```
+
+交互流程是：
+
+1. 选择 provider
+2. 多选 2-5 个模型
+3. 输入任务（或直接从 CLI 读取）
+4. 并排查看多个模型的实时输出
+
+## `mms discuss`
+
+`mms discuss` 用来让多个模型围绕同一个任务先独立压缩思考，再统一做一次对抗式综合，目标是比简单并排回答更有碰撞感，但又不引入多轮群聊带来的上下文膨胀。
+
+默认是 **模式 B：摘要发散 + 对抗收敛**：
+
+- 多个模型并行输出短 JSON 摘要
+- 汇总表里快速对比核心方案、风险和下一步
+- 再由一个 synthesizer 基于所有摘要生成最终裁定
+
+如果加 `--cross`，会升级到 **模式 C：环形交叉审查 + 对抗收敛**：
+
+- 每个模型会额外审查下一个模型的摘要
+- 交叉阶段只看短摘要，不看完整长文，成本可控
+- 最终综合会同时吸收摘要和交叉质疑
+
+当前支持的用法：
+
+```bash
+mms discuss
+mms discuss "重构 auth 模块"
+mms discuss --cross "解释 Python GIL"
+mms discuss --provider foo "为这个 CLI 设计配置结构"
+```
+
+交互流程是：
+
+1. 选择 provider
+2. 单选或多选 1-5 个模型
+3. 输入任务（或直接从 CLI 读取）
+4. 查看 Phase 1 摘要发散
+5. 可选查看 Phase 2 环形交叉审查
+6. 查看最终综合结论
+
+## 现在能做什么
 
 - [README.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/README.md)
 - [install.sh](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/install.sh)
