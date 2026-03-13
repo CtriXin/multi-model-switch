@@ -712,12 +712,16 @@ def _on_continue(session, models, selected, briefs, display_texts, provider_ctx,
     return build_continuation_prompt(session, new_q) if new_q else ""
 
 
-def _on_handoff(session, models, selected, briefs, display_texts, task_text):
-    """Handle CONVERGE_HANDOFF: save session, print commands, exit loop immediately."""
+def _on_handoff(session, models, selected, briefs, display_texts, task_text, cfg=None):
+    """Handle CONVERGE_HANDOFF: save, print brief, auto-launch discuss in-process."""
     brief = briefs.get(selected) or _fallback_brief(display_texts.get(selected, ""))
     advance_round(session, selected, brief, display_texts.get(selected, ""), round_models=list(models))
     _handle_handoff(session, selected, display_texts)
-    return None  # exit chat loop — user is back in shell to run printed commands
+    if cfg is not None:
+        from ccs_discuss import discuss_main
+        console.print("[cyan]→ 自动进入 mms discuss...[/cyan]\n")
+        discuss_main(cfg, [task_text])
+    return None
 
 
 def _on_converge(provider_ctx, session, models, selected, briefs, display_texts, task_text):
@@ -789,7 +793,7 @@ def run_chat_loop(cfg, provider_ctx, models, task_text, session=None):
                 break
             prompt = next_prompt or task_text
         elif event == "CONVERGE_HANDOFF":
-            next_prompt = _on_handoff(session, models, selected, briefs, display_texts, task_text)
+            next_prompt = _on_handoff(session, models, selected, briefs, display_texts, task_text, cfg=cfg)
             if next_prompt is None:
                 break
             prompt = next_prompt
