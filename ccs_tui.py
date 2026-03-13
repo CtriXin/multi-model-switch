@@ -46,6 +46,12 @@ for _cli in CLI_LOGOS:
     CLI_LOGOS[_cli] = [""] * top_pad + lines + [""] * bot_pad
 
 
+DIRECT_CLI_ITEMS = {
+    "qwen": ("▸ 全部 Qwen 模型", "直接进入当前 provider 的 Qwen 模型列表"),
+    "kimi": ("▸ 默认 Kimi", "直接使用默认 Kimi 模型启动"),
+}
+
+
 def _sort_scenes_for_cli(scenes, cli_name):
     return list(scenes.keys())
 
@@ -164,11 +170,14 @@ def select_scene_tui(scenes, cli_names):
             cli = cli_names[cli_idx]
 
             sorted_scenes = _sort_scenes_for_cli(scenes, cli)
+            direct_cli_item = DIRECT_CLI_ITEMS.get(cli)
             auto_default_scene = _auto_default_scene_for_cli(scenes, cli)
             forced_variant_scene = _auto_variant_scene_for_cli(scenes, cli)
             active_variant_scene = variant_scene_name or forced_variant_scene
             in_variant_mode = active_variant_scene is not None
-            if auto_default_scene:
+            if direct_cli_item:
+                list_count = 1
+            elif auto_default_scene:
                 list_count = 1
             elif not in_variant_mode:
                 scene_count = len(sorted_scenes) + 1
@@ -220,7 +229,12 @@ def select_scene_tui(scenes, cli_names):
             # ── 场景列表（居中）──
             list_y = tab_y + 2
 
-            if auto_default_scene:
+            if direct_cli_item:
+                title = direct_cli_item[1]
+                _center_text(stdscr, list_y - 1, cx, title, curses.color_pair(5) | curses.A_BOLD)
+                item_lines = [(direct_cli_item[0], True)]
+                extra_line = None
+            elif auto_default_scene:
                 scene = scenes[auto_default_scene]
                 chosen = scene["variants"][_default_variant_index(scene)]
                 title = f"{auto_default_scene} 默认模型"
@@ -286,7 +300,9 @@ def select_scene_tui(scenes, cli_names):
 
             # ── Footer（醒目）──
             footer = " ← → 切换    Enter 确认 "
-            if auto_default_scene:
+            if direct_cli_item:
+                footer += "   Q 退出 "
+            elif auto_default_scene:
                 footer += "   Q 退出 "
             elif in_variant_mode and not forced_variant_scene:
                 footer = " ← → 切换    ↑ ↓ 选择    Enter 确认 "
@@ -315,17 +331,20 @@ def select_scene_tui(scenes, cli_names):
                 auto_scene = _auto_variant_scene_for_cli(scenes, next_cli)
                 variant_idx = 0 if auto_default_scene else (_default_variant_index(scenes[auto_scene]) if auto_scene else 0)
                 variant_scene_name = None
-            elif key == curses.KEY_UP and not auto_default_scene:
+            elif key == curses.KEY_UP and not auto_default_scene and not direct_cli_item:
                 if in_variant_mode:
                     variant_idx = (variant_idx - 1) % len(variants)
                 else:
                     scene_idx = (scene_idx - 1) % scene_count
-            elif key == curses.KEY_DOWN and not auto_default_scene:
+            elif key == curses.KEY_DOWN and not auto_default_scene and not direct_cli_item:
                 if in_variant_mode:
                     variant_idx = (variant_idx + 1) % len(variants)
                 else:
                     scene_idx = (scene_idx + 1) % scene_count
             elif key in (10, 13, curses.KEY_ENTER):
+                if direct_cli_item:
+                    scene_name = "__direct_qwen__" if cli == "qwen" else "__direct_kimi__"
+                    return (scene_name, cli, None)
                 if auto_default_scene:
                     scene = scenes[auto_default_scene]
                     chosen = scene["variants"][_default_variant_index(scene)]

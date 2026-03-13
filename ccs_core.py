@@ -51,6 +51,8 @@ DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
+DIRECT_CLI_MODES = {"qwen", "kimi"}
+DEFAULT_KIMI_MODEL = "kimi-k2.5"
 
 CATEGORIES = {
     "Claude 系 ⭐": ["claude-"],
@@ -971,43 +973,59 @@ def _model_matches_cli_family(cli_name, model_name):
     return any(hint in normalized for hint in hints)
 
 
-def _resolve_visible_clis(cfg, default_provider, default_models):
-    visible = []
-    supported = {name: False for name in CLI_NAMES}
-    family_found = {name: False for name in CLI_MODEL_FAMILY_HINTS}
+def _models_for_cli_family(cli_name, models):
+    if cli_name not in CLI_MODEL_FAMILY_HINTS:
+        return list(models or [])
+    return [model_name for model_name in (models or []) if _model_matches_cli_family(cli_name, model_name)]
+
+
+def _provider_supports_cli_name(provider, cli_name):
+    supported_clis = provider.get("supported_clis", [])
+    if isinstance(supported_clis, str):
+        supported_clis = [supported_clis]
+    return cli_name in supported_clis
+
+
+def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
+    candidates = []
+    default_candidate = (default_provider, list(default_models or []))
+    candidates.append(default_candidate)
 
     for provider_def in cfg.get("providers", []):
-        if not provider_def.get("enabled", True):
+        provider_id = provider_def.get("id")
+        if not provider_id or provider_id == default_provider.get("id"):
             continue
-        provider = resolve_provider_context(cfg, provider_def.get("id"))
+        provider = resolve_provider_context(cfg, provider_id)
+        candidates.append((provider, None))
+
+    for provider, cached_models in candidates:
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_supports_cli_name(provider, cli_name):
+            continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
+        if cli_name not in CLI_MODEL_FAMILY_HINTS:
+            return provider, cached_models
 
-        supported_clis = provider.get("supported_clis", [])
-        for cli_name in supported_clis:
-            if cli_name in supported:
-                supported[cli_name] = True
-
-        family_targets = [name for name in supported_clis if name in CLI_MODEL_FAMILY_HINTS]
-        if not family_targets:
-            continue
-
-        if provider.get("id") == default_provider.get("id"):
-            models = list(default_models or [])
-        else:
-            models = _probe_models(provider, emit_output=False).get("models")
-
+        models = cached_models
         if models is None:
-            continue
+            models = _probe_models(provider, emit_output=False).get("models")
+        family_models = _models_for_cli_family(cli_name, models)
+        if family_models:
+            return provider, family_models
 
-        for cli_name in family_targets:
-            if any(_model_matches_cli_family(cli_name, model_name) for model_name in models):
-                family_found[cli_name] = True
+    return None, []
+
+
+def _resolve_visible_clis(cfg, default_provider, default_models):
+    visible = []
 
     for cli_name in CLI_NAMES:
-        if not supported.get(cli_name):
+        provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+        if provider is None:
             continue
-        if cli_name in CLI_MODEL_FAMILY_HINTS and not family_found[cli_name]:
+        if cli_name in CLI_MODEL_FAMILY_HINTS and not family_models:
             continue
         visible.append(cli_name)
 
@@ -1018,7 +1036,14 @@ def _filter_scenes_by_visible_clis(cli_names):
     visible = set(cli_names)
     return {
         name: scene for name, scene in SCENES.items()
-        if scene.get("cli") in visible
+        if scene.get("cli") in visible and scene.get("cli") not in DIRECT_CLI_MODES
+    }
+
+
+def _builtin_scene_catalog():
+    return {
+        name: scene for name, scene in SCENES.items()
+        if scene.get("cli") not in DIRECT_CLI_MODES
     }
 
 
@@ -1221,9 +1246,26 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
 
         scene_name, cli, model_info = result
 
+        runtime_provider, family_models = _resolve_provider_for_cli(
+            cfg,
+            cli,
+            provider,
+            _probe_models(provider, emit_output=False).get("models"),
+        )
+        if runtime_provider is None:
+            console.print(f"[yellow]{cli} 当前没有可用 provider[/yellow]")
+            return True
+
+        if scene_name == "__direct_qwen__":
+            model = select_model_tui(family_models, title="选择 Qwen 模型")
+            if model is None:
+                return True
+            model_info = {"model": model}
+        elif scene_name == "__direct_kimi__":
+            model_info = {"model": DEFAULT_KIMI_MODEL}
         if scene_name is None:
             # 自定义模式：用 TUI 选模型
-            models = fetch_models(provider)
+            models = fetch_models(runtime_provider)
             if not models:
                 return True
             model = select_model_tui(models, title=f"为 {cli} 选择模型")
@@ -1235,13 +1277,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
             cli = "claude"
 
         clean_model_info = _clean_model_info(model_info)
-        env_vars = get_export_env(cli, provider)
+        env_vars = get_export_env(cli, runtime_provider)
         action = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
         if action == "q":
             return True
         if action == "b":
             continue
-        launch_cli(cli, clean_model_info, provider, once=once)
+        launch_cli(cli, clean_model_info, runtime_provider, once=once)
         return True
 
 
@@ -1544,7 +1586,7 @@ def main():
                 table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str))
             console.print(table)
         console.print("\n[bold]内置场景:[/bold]")
-        for i, (name, s) in enumerate(SCENES.items(), 1):
+        for i, (name, s) in enumerate(_builtin_scene_catalog().items(), 1):
             console.print(f"  {i}. {s['emoji']} {name} — {s['desc']}")
         return
 
@@ -1595,6 +1637,10 @@ def main():
                 scene_name = scene_list[idx - 1]
                 scene = visible_scenes[scene_name]
                 cli = scene["cli"]
+                runtime_provider, _ = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
+                if runtime_provider is None:
+                    console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+                    return
                 model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
                 if not check_cli_installed(cli):
                     console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
@@ -1605,7 +1651,7 @@ def main():
                     return
                 if action == "s":
                     save_preset_interactive(user_cfg, cli, model_info)
-                launch_cli(cli, _clean_model_info(model_info), default_provider, once=once)
+                launch_cli(cli, _clean_model_info(model_info), runtime_provider, once=once)
                 return
         except ValueError:
             pass
@@ -1613,19 +1659,27 @@ def main():
         # Is it a CLI name?
         if target in visible_clis:
             cli = target
+            runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
+            if runtime_provider is None:
+                console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+                return
             if not check_cli_installed(cli):
                 from ccs_installer import check_and_offer_install
                 check_and_offer_install(cli)
-            if not _ensure_models_cache_available(models_cache):
-                return
-            models_list = display_models(models_cache, role, recommend)
-            model = select_model_interactive(models_list)
+            if cli == "kimi":
+                model = DEFAULT_KIMI_MODEL
+            else:
+                if not _ensure_models_cache_available(cli_models or models_cache):
+                    return
+                base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+                models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
+                model = select_model_interactive(models_list)
             action = confirm_launch(cli, model, once)
             if action == "q":
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, default_provider, once=once)
+            launch_cli(cli, {"model": model}, runtime_provider, once=once)
             return
         if target in CLI_NAMES:
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
@@ -1638,16 +1692,24 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
-        if not _ensure_models_cache_available(models_cache):
+        runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
+        if runtime_provider is None:
+            console.print(f"[red]{cli} 当前没有可用 provider[/red]")
             return
-        models_list = display_models(models_cache, role, recommend)
-        model = select_model_interactive(models_list)
+        if cli == "kimi":
+            model = DEFAULT_KIMI_MODEL
+        else:
+            base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+            if not _ensure_models_cache_available(base_models):
+                return
+            models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
+            model = select_model_interactive(models_list)
         action = confirm_launch(cli, model, once)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, default_provider, once=once)
+        launch_cli(cli, {"model": model}, runtime_provider, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
@@ -1663,20 +1725,32 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
-        if not _ensure_models_cache_available(models_cache):
+        runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
+        if runtime_provider is None:
+            console.print(f"[red]{cli} 当前没有可用 provider[/red]")
             return
-        models_list = display_models(models_cache, role, recommend)
-        model = select_model_interactive(models_list)
+        if cli == "kimi":
+            model = DEFAULT_KIMI_MODEL
+        else:
+            base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+            if not _ensure_models_cache_available(base_models):
+                return
+            models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
+            model = select_model_interactive(models_list)
         action = confirm_launch(cli, model, once)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, default_provider, once=once)
+        launch_cli(cli, {"model": model}, runtime_provider, once=once)
         return
 
     scene = visible_scenes[scene_name]
     cli = scene["cli"]
+    runtime_provider, _ = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
+    if runtime_provider is None:
+        console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+        return
     model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
 
     if not check_cli_installed(cli):
@@ -1689,4 +1763,4 @@ def main():
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    launch_cli(cli, _clean_model_info(model_info), default_provider, once=once)
+    launch_cli(cli, _clean_model_info(model_info), runtime_provider, once=once)
