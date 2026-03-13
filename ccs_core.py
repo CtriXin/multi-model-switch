@@ -1459,7 +1459,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
             "models": option_models,
             "label": _runtime_choice_label(provider),
             "title": _provider_label(provider),
-            "desc": f"API 网关 / {cli_name}",
+            "desc": "网关通道",
             "icon": "🌐",
             "priority": provider.get("priority", DEFAULT_PRIORITY),
             "is_default": provider.get("id") == default_provider.get("id"),
@@ -1491,7 +1491,7 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
             "models": [selected_model] if selected_model else list(default_models or []),
             "label": _runtime_choice_label(runtime),
             "title": _account_label(runtime),
-            "desc": f"官方登录态 / {account_cli}",
+            "desc": "官方通道",
             "icon": "🔑",
             "priority": runtime.get("priority", DEFAULT_PRIORITY),
             "is_default": runtime.get("id") == defaults.get(account_cli),
@@ -1552,8 +1552,8 @@ def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, p
 
 def _runtime_choice_label(runtime):
     if runtime.get("auth_mode") == "oauth":
-        return f"账号档案 / {_account_label(runtime)}"
-    return f"模型源 / {_provider_label(runtime)}"
+        return f"官方通道 / {_account_label(runtime)}"
+    return f"网关通道 / {_provider_label(runtime)}"
 
 
 def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None):
@@ -1589,15 +1589,15 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
         chosen = options[default_choice or 0]
         return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
 
-    table = Table(title=f"{cli_name} 启动来源", show_lines=True)
+    table = Table(title=f"{cli_name} 执行通道", show_lines=True)
     table.add_column("#", style="cyan", width=4)
-    table.add_column("类型", style="green")
+    table.add_column("来源", style="green")
     table.add_column("名称", style="yellow")
-    table.add_column("启动器", style="cyan")
+    table.add_column("执行器", style="cyan")
     table.add_column("说明", style="magenta")
     for idx, option in enumerate(options, 1):
         runtime = option["runtime"]
-        source_type = "账号档案" if option["kind"] == "account" else "模型源"
+        source_type = "官方" if option["kind"] == "account" else "网关"
         desc = option.get("desc", "")
         if idx - 1 == default_choice:
             desc = f"{desc} / 默认"
@@ -1612,7 +1612,7 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
 
     default_num = str((default_choice or 0) + 1)
     while True:
-        raw = Prompt.ask(f"为 {cli_name} 选择本次启动来源", default=default_num)
+        raw = Prompt.ask(f"为 {cli_name} 选择本次执行通道", default=default_num)
         if raw.isdigit():
             selected = int(raw)
             if 1 <= selected <= len(options):
@@ -1805,7 +1805,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
     source_line = ""
     if runtime:
-        source_kind = "账号档案" if runtime.get("auth_mode") == "oauth" else "模型源"
+        source_kind = "官方通道" if runtime.get("auth_mode") == "oauth" else "网关通道"
         source_label = runtime.get("name", runtime.get("id", "default"))
         source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
     panel_text = (
