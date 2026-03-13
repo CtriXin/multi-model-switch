@@ -706,7 +706,7 @@ def select_connect_tui():
                 except curses.error:
                     pass
 
-            footer = " ↑ ↓ 选择    Enter 进入    Esc 返回 "
+            footer = " ↑ ↓ 选择    Enter 进入    Esc/Q 返回 "
             _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
             stdscr.refresh()
 
