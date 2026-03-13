@@ -58,7 +58,6 @@ DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 OAUTH_CAPABLE_CLIS = ("claude", "codex")
 DEFAULT_PRIORITY = 100
-COST_LEVELS = ("low", "medium", "high")
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
 DIRECT_CLI_MODES = {"qwen", "kimi"}
@@ -241,11 +240,6 @@ def _normalize_priority(value):
         return DEFAULT_PRIORITY
 
 
-def _normalize_cost_level(value):
-    normalized = str(value or "medium").strip().lower()
-    return normalized if normalized in COST_LEVELS else "medium"
-
-
 def _normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")
@@ -266,8 +260,6 @@ def _normalize_account(account):
         "enabled": bool(account.get("enabled", True)),
         "home_dir": os.path.expanduser(home_dir),
         "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
-        "cost_level": _normalize_cost_level(account.get("cost_level", "medium")),
-        "daily_budget": str(account.get("daily_budget", "")).strip(),
         "note": str(account.get("note", "")).strip(),
     }
 
@@ -294,6 +286,8 @@ def _provider_env_name(provider_id, field):
 def _normalize_provider(provider):
     merged = dict(_default_provider())
     merged.update(provider)
+    merged.pop("cost_level", None)
+    merged.pop("daily_budget", None)
     merged["id"] = str(merged.get("id") or DEFAULT_PROVIDER_ID).strip() or DEFAULT_PROVIDER_ID
     merged["name"] = str(merged.get("name") or merged["id"]).strip() or merged["id"]
 
@@ -313,8 +307,6 @@ def _normalize_provider(provider):
 
     merged["enabled"] = bool(merged.get("enabled", True))
     merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
-    merged["cost_level"] = _normalize_cost_level(merged.get("cost_level", "medium"))
-    merged["daily_budget"] = str(merged.get("daily_budget", "")).strip()
     merged["note"] = str(merged.get("note", "")).strip()
     return merged
 
@@ -935,8 +927,6 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         list(CLI_NAMES),
     )
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
-    cost_level = Prompt.ask("成本等级", choices=list(COST_LEVELS), default=current.get("cost_level", "medium"))
-    daily_budget = Prompt.ask("日预算（可选）", default=current.get("daily_budget", "")).strip()
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
@@ -945,8 +935,6 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         "protocols": protocols,
         "supported_clis": supported_clis,
         "priority": priority,
-        "cost_level": cost_level,
-        "daily_budget": daily_budget,
         "note": note,
         "enabled": enabled,
     })
@@ -967,8 +955,6 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         default=current.get("home_dir") or _default_account_home(account_id),
     ).strip() or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
-    cost_level = Prompt.ask("成本等级", choices=list(COST_LEVELS), default=current.get("cost_level", "medium"))
-    daily_budget = Prompt.ask("日预算（可选）", default=current.get("daily_budget", "")).strip()
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
@@ -977,8 +963,6 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         "cli": cli_name,
         "home_dir": home_dir,
         "priority": priority,
-        "cost_level": cost_level,
-        "daily_budget": daily_budget,
         "note": note,
         "enabled": enabled,
     })
@@ -1039,7 +1023,6 @@ def _quick_connect_gateway(cfg, preset_id=None):
         "supported_clis": list(CLI_NAMES),
         "enabled": True,
         "priority": DEFAULT_PRIORITY,
-        "cost_level": "medium",
     })
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
@@ -1091,7 +1074,6 @@ def _quick_connect_official(cfg, preset_cli=None):
         "home_dir": home_dir,
         "enabled": True,
         "priority": DEFAULT_PRIORITY,
-        "cost_level": "medium",
     })
     updated_cfg = dict(cfg)
     updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
@@ -1301,7 +1283,7 @@ def _manage_account_target(cfg, account_id):
         console.print(Panel(
             f"[bold]官方通道[/bold]  {account.get('name', account_id)}\n"
             f"[bold]账号标识:[/bold]  {account_id}\n"
-            f"[bold]执行器:[/bold]    {account.get('cli', '').upper()}\n"
+            f"[bold]对应 CLI:[/bold]  {account.get('cli', '').upper()}\n"
             f"[bold]默认通道:[/bold]  {default_tag}\n"
             f"[bold]登录状态:[/bold]  {login_state.get('summary') or login_state.get('state', '')}\n"
             f"[bold]登录目录:[/bold]  {account.get('home_dir', '')}\n"
@@ -1853,7 +1835,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
             "models": option_models,
             "label": _runtime_choice_label(provider),
             "title": _provider_label(provider),
-            "desc": "网关通道",
+            "desc": "网关",
             "icon": "🌐",
             "priority": provider.get("priority", DEFAULT_PRIORITY),
             "is_default": provider.get("id") == default_provider.get("id"),
@@ -1885,7 +1867,7 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
             "models": [selected_model] if selected_model else list(default_models or []),
             "label": _runtime_choice_label(runtime),
             "title": _account_label(runtime),
-            "desc": "官方通道",
+            "desc": "官方",
             "icon": "🔑",
             "priority": runtime.get("priority", DEFAULT_PRIORITY),
             "is_default": runtime.get("id") == defaults.get(account_cli),
@@ -1946,8 +1928,8 @@ def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, p
 
 def _runtime_choice_label(runtime):
     if runtime.get("auth_mode") == "oauth":
-        return f"官方通道 / {_account_label(runtime)}"
-    return f"网关通道 / {_provider_label(runtime)}"
+        return f"官方 / {_account_label(runtime)}"
+    return f"网关 / {_provider_label(runtime)}"
 
 
 def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None):
@@ -1983,11 +1965,11 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
         chosen = options[default_choice or 0]
         return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
 
-    table = Table(title=f"{cli_name} 执行通道", show_lines=True)
+    table = Table(title=f"{cli_name} 使用入口", show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("来源", style="green")
     table.add_column("名称", style="yellow")
-    table.add_column("执行器", style="cyan")
+    table.add_column("调用", style="cyan")
     table.add_column("说明", style="magenta")
     for idx, option in enumerate(options, 1):
         runtime = option["runtime"]
@@ -2006,7 +1988,7 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
 
     default_num = str((default_choice or 0) + 1)
     while True:
-        raw = Prompt.ask(f"为 {cli_name} 选择本次执行通道", default=default_num)
+        raw = Prompt.ask(f"为 {cli_name} 选择这次使用的入口", default=default_num)
         if raw.isdigit():
             selected = int(raw)
             if 1 <= selected <= len(options):
@@ -2199,7 +2181,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
     source_line = ""
     if runtime:
-        source_kind = "官方通道" if runtime.get("auth_mode") == "oauth" else "网关通道"
+        source_kind = "官方" if runtime.get("auth_mode") == "oauth" else "网关"
         source_label = runtime.get("name", runtime.get("id", "default"))
         source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
     panel_text = (
@@ -2738,7 +2720,6 @@ def _display_providers(cfg):
     table.add_column("协议", style="yellow")
     table.add_column("CLI", style="magenta")
     table.add_column("优先级", style="white")
-    table.add_column("成本", style="white")
     table.add_column("状态", style="white")
     table.add_column("地址", style="blue")
 
@@ -2753,7 +2734,6 @@ def _display_providers(cfg):
             ", ".join(provider.get("protocols", [])),
             ", ".join(provider.get("supported_clis", [])),
             str(provider.get("priority", DEFAULT_PRIORITY)),
-            str(provider.get("cost_level", "medium")),
             status.strip(),
             provider_ctx.get("base_url") or "(未设置)",
         )
@@ -2775,7 +2755,6 @@ def _display_accounts(cfg):
     table.add_column("名称", style="green")
     table.add_column("CLI", style="yellow")
     table.add_column("优先级", style="white")
-    table.add_column("成本", style="white")
     table.add_column("状态", style="magenta")
     table.add_column("登录态", style="white")
     table.add_column("目录", style="blue")
@@ -2791,7 +2770,6 @@ def _display_accounts(cfg):
             str(account.get("name", "")),
             str(account.get("cli", "")),
             str(account.get("priority", DEFAULT_PRIORITY)),
-            str(account.get("cost_level", "medium")),
             " ".join(status).strip(),
             login_state.get("summary") or login_state.get("state", ""),
             str(account.get("home_dir", "")),
@@ -2953,9 +2931,6 @@ def _validate_config(cfg):
                 errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"模型源 {provider_id} 的 priority 必须是正整数")
-            if _normalize_cost_level(item.get("cost_level", "medium")) != str(item.get("cost_level", "medium")).strip().lower():
-                errors.append(f"模型源 {provider_id} 的 cost_level 必须是 {', '.join(COST_LEVELS)}")
-
     default_id = cfg.get("provider", {}).get("default")
     provider_ids = {item.get("id") for item in providers if isinstance(item, dict)}
     if default_id and default_id not in provider_ids:
@@ -2987,9 +2962,6 @@ def _validate_config(cfg):
                 errors.append(f"账号档案 {account_id} 缺少 home_dir")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"账号档案 {account_id} 的 priority 必须是正整数")
-            if _normalize_cost_level(item.get("cost_level", "medium")) != str(item.get("cost_level", "medium")).strip().lower():
-                errors.append(f"账号档案 {account_id} 的 cost_level 必须是 {', '.join(COST_LEVELS)}")
-
     account_defaults = cfg.get("account", {}).get("defaults", {})
     if isinstance(account_defaults, dict):
         for cli_name, account_id in account_defaults.items():
