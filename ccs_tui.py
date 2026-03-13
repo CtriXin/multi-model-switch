@@ -151,6 +151,14 @@ def _source_choice_key(cli_name, model_info=None):
     return f"{cli_name}|{str(model_info).strip()}"
 
 
+def _format_source_line(source, is_selected):
+    marker = "▸ " if is_selected else "  "
+    badge = "官方通道" if source.get("kind") == "account" else "网关通道"
+    launcher = str(source.get("launch_cli", "")).upper()
+    default_tag = " · 默认" if source.get("is_default") else ""
+    return f"{marker}{source.get('icon', '•')} {source.get('title', '')}  {badge} · {launcher}{default_tag}"
+
+
 def _default_variant_index(scene):
     variants = scene.get("variants", [])
     preferred_tier = scene.get("default_tier", "high")
@@ -277,18 +285,13 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                 extra_line = None
             elif in_source_mode:
                 title_name = source_scene_name if source_scene_name is not None else "自定义"
-                title = f"为 {title_name} 选择启动来源"
+                title = f"为 {title_name} 选择执行通道"
                 _center_text(stdscr, list_y - 1, cx, title, curses.color_pair(5) | curses.A_BOLD)
                 if source_idx >= len(available_sources):
                     source_idx = default_source_idx if available_sources else 0
                 item_lines = []
                 for i, source in enumerate(available_sources):
-                    marker = "▸ " if i == source_idx else "  "
-                    desc = source.get("desc", "")
-                    line = f"{marker}{source.get('icon', '•')} {source.get('title', '')}"
-                    if desc:
-                        line = f"{line}  {desc}"
-                    item_lines.append((line, i == source_idx))
+                    item_lines.append((_format_source_line(source, i == source_idx), i == source_idx))
                 extra_line = None
             elif auto_default_scene:
                 scene = scenes[auto_default_scene]
@@ -361,7 +364,7 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
             elif auto_default_scene:
                 footer += "   Q 退出 "
             elif in_source_mode:
-                footer = " ← → 切换    ↑ ↓ 来源    Enter 确认    Esc 返回    Q 退出 "
+                footer = " ← → 切换    ↑ ↓ 通道    Enter 确认    Esc 返回    Q 退出 "
             elif in_variant_mode and not forced_variant_scene:
                 footer = " ← → 切换    ↑ ↓ 选择    Enter 确认 "
                 footer += "   Esc 返回    Q 退出 "
