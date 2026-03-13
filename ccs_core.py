@@ -1392,6 +1392,17 @@ def _models_for_cli_family(cli_name, models):
     return [model_name for model_name in (models or []) if _model_matches_cli_family(cli_name, model_name)]
 
 
+def _model_matches_account_cli(cli_name, model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return False
+    if cli_name == "claude":
+        return normalized.startswith("claude-")
+    if cli_name == "codex":
+        return normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
+    return False
+
+
 def _provider_supports_cli_name(provider, cli_name):
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
@@ -1399,36 +1410,124 @@ def _provider_supports_cli_name(provider, cli_name):
     return cli_name in supported_clis
 
 
-def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
-    candidates = []
-    default_candidate = (default_provider, list(default_models or []))
-    candidates.append(default_candidate)
-
+def _provider_candidates(cfg, default_provider, default_models):
+    candidates = [(default_provider, list(default_models or []))]
+    seen_ids = {default_provider.get("id")}
     for provider_def in cfg.get("providers", []):
         provider_id = provider_def.get("id")
-        if not provider_id or provider_id == default_provider.get("id"):
+        if not provider_id or provider_id in seen_ids:
             continue
-        provider = resolve_provider_context(cfg, provider_id)
-        candidates.append((provider, None))
+        candidates.append((resolve_provider_context(cfg, provider_id), None))
+        seen_ids.add(provider_id)
+    return candidates
 
-    for provider, cached_models in candidates:
+
+def _provider_models_for_cli(cli_name, models):
+    if cli_name in CLI_MODEL_FAMILY_HINTS:
+        return _models_for_cli_family(cli_name, models)
+    return list(models or [])
+
+
+def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
+    selected_model = _resolve_model_name(model_info) if model_info else ""
+    options = []
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
         if not _provider_supports_cli_name(provider, cli_name):
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
-        if cli_name not in CLI_MODEL_FAMILY_HINTS:
-            return provider, cached_models
 
         models = cached_models
         if models is None:
             models = _probe_models(provider, emit_output=False).get("models")
-        family_models = _models_for_cli_family(cli_name, models)
-        if family_models:
-            return provider, family_models
+        models = list(models or [])
+        cli_models = _provider_models_for_cli(cli_name, models)
 
+        if selected_model:
+            if selected_model not in models:
+                continue
+            option_models = [selected_model]
+        else:
+            option_models = cli_models
+
+        options.append({
+            "kind": "provider",
+            "id": provider.get("id"),
+            "runtime": provider,
+            "models": option_models,
+            "label": _runtime_choice_label(provider),
+            "title": _provider_label(provider),
+            "desc": f"API 网关 / {cli_name}",
+            "icon": "🌐",
+            "priority": provider.get("priority", DEFAULT_PRIORITY),
+            "is_default": provider.get("id") == default_provider.get("id"),
+            "launch_cli": cli_name,
+        })
+    return options
+
+
+def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
+    selected_model = _resolve_model_name(model_info) if model_info else ""
+    options = []
+    defaults = cfg.get("account", {}).get("defaults", {})
+
+    for account_def in cfg.get("accounts", []):
+        if not isinstance(account_def, dict) or not account_def.get("enabled", True):
+            continue
+        account_cli = account_def.get("cli")
+        if account_cli not in OAUTH_CAPABLE_CLIS:
+            continue
+        if selected_model and not _model_matches_account_cli(account_cli, selected_model):
+            continue
+        if not selected_model and account_cli != cli_name:
+            continue
+        runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=account_cli)
+        options.append({
+            "kind": "account",
+            "id": runtime.get("id"),
+            "runtime": runtime,
+            "models": [selected_model] if selected_model else list(default_models or []),
+            "label": _runtime_choice_label(runtime),
+            "title": _account_label(runtime),
+            "desc": f"官方登录态 / {account_cli}",
+            "icon": "🔑",
+            "priority": runtime.get("priority", DEFAULT_PRIORITY),
+            "is_default": runtime.get("id") == defaults.get(account_cli),
+            "launch_cli": account_cli,
+        })
+    return options
+
+
+def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
+    options = _provider_options_for_model(cfg, cli_name, default_provider, default_models)
+    for option in options:
+        runtime = option["runtime"]
+        models = option["models"]
+        if cli_name not in CLI_MODEL_FAMILY_HINTS:
+            return runtime, models
+        if models:
+            return runtime, models
     return None, []
+
+
+def _resolve_source_default_index(options, preferred_cli):
+    if not options:
+        return 0
+    for idx, option in enumerate(options):
+        if option.get("kind") == "provider" and option.get("launch_cli") == preferred_cli and option.get("is_default"):
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("launch_cli") == preferred_cli and option.get("is_default"):
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("launch_cli") == preferred_cli:
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("is_default"):
+            return idx
+    return 0
 
 
 def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
@@ -1457,76 +1556,58 @@ def _runtime_choice_label(runtime):
     return f"模型源 / {_provider_label(runtime)}"
 
 
-def _list_runtime_sources(cfg, cli_name, default_provider, default_models):
-    options = []
-
-    provider_runtime, provider_models = _resolve_provider_runtime(cfg, cli_name, default_provider, default_models)
-    if provider_runtime is not None:
-        options.append({
-            "kind": "provider",
-            "id": provider_runtime.get("id"),
-            "runtime": provider_runtime,
-            "models": provider_models,
-            "label": _runtime_choice_label(provider_runtime),
-            "title": _provider_label(provider_runtime),
-            "desc": "API 网关",
-            "icon": "🌐",
-            "priority": provider_runtime.get("priority", DEFAULT_PRIORITY),
-            "is_default": True,
-        })
-
-    cli_accounts = _accounts_for_cli(cfg, cli_name)
-    default_account_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
-    for account_def in cli_accounts:
-        runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=cli_name)
-        options.append({
-            "kind": "account",
-            "id": runtime.get("id"),
-            "runtime": runtime,
-            "models": list(default_models or []),
-            "label": _runtime_choice_label(runtime),
-            "title": _account_label(runtime),
-            "desc": "官方登录态",
-            "icon": "🔑",
-            "priority": runtime.get("priority", DEFAULT_PRIORITY),
-            "is_default": runtime.get("id") == default_account_id,
-        })
-
-    options.sort(key=lambda item: (item.get("priority", DEFAULT_PRIORITY), 0 if item["kind"] == "account" else 1, item.get("title", "")))
-    default_choice = next((idx for idx, item in enumerate(options) if item.get("is_default")), 0)
-
+def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None):
+    options = _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=model_info)
+    options.extend(_account_options_for_model(cfg, cli_name, default_models, model_info=model_info))
+    options.sort(key=lambda item: (
+        item.get("priority", DEFAULT_PRIORITY),
+        0 if item.get("launch_cli") == cli_name else 1,
+        0 if item["kind"] == "provider" else 1,
+        item.get("title", ""),
+    ))
+    default_choice = _resolve_source_default_index(options, cli_name)
     return options, default_choice
 
 
-def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
+def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None, model_info=None):
     if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
-        return _resolve_launch_runtime(
+        runtime, models = _resolve_launch_runtime(
             cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
         )
+        return runtime, models, cli_name
 
-    options, default_choice = _list_runtime_sources(cfg, cli_name, default_provider, default_models)
+    options, default_choice = _list_runtime_sources(
+        cfg, cli_name, default_provider, default_models, model_info=model_info
+    )
 
     if not options:
-        return None, []
+        return None, [], cli_name
     if len(options) == 1:
-        return options[0]["runtime"], options[0]["models"]
+        return options[0]["runtime"], options[0]["models"], options[0].get("launch_cli", cli_name)
 
     if not sys.stdin.isatty():
         chosen = options[default_choice or 0]
-        return chosen["runtime"], chosen["models"]
+        return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
 
     table = Table(title=f"{cli_name} 启动来源", show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("类型", style="green")
     table.add_column("名称", style="yellow")
+    table.add_column("启动器", style="cyan")
     table.add_column("说明", style="magenta")
     for idx, option in enumerate(options, 1):
         runtime = option["runtime"]
         source_type = "账号档案" if option["kind"] == "account" else "模型源"
-        desc = "官方登录态" if option["kind"] == "account" else "API 网关"
+        desc = option.get("desc", "")
         if idx - 1 == default_choice:
             desc = f"{desc} / 默认"
-        table.add_row(str(idx), source_type, runtime.get("name", runtime.get("id", "")), desc)
+        table.add_row(
+            str(idx),
+            source_type,
+            runtime.get("name", runtime.get("id", "")),
+            option.get("launch_cli", cli_name),
+            desc,
+        )
     console.print(table)
 
     default_num = str((default_choice or 0) + 1)
@@ -1536,15 +1617,38 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
             selected = int(raw)
             if 1 <= selected <= len(options):
                 chosen = options[selected - 1]
-                return chosen["runtime"], chosen["models"]
+                return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
-def _source_choices_for_tui(cfg, cli_names, default_provider, default_models):
+def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_models):
     mapping = {}
     for cli_name in cli_names:
         options, default_index = _list_runtime_sources(cfg, cli_name, default_provider, default_models)
-        mapping[cli_name] = {
+        mapping[_source_choice_key(cli_name)] = {
+            "options": options,
+            "default_index": default_index or 0,
+        }
+    for scene in scenes.values():
+        cli_name = scene.get("cli")
+        if cli_name not in cli_names:
+            continue
+        if scene.get("variants"):
+            for variant in scene["variants"]:
+                model_info = dict(variant.get("model_info", {}))
+                options, default_index = _list_runtime_sources(
+                    cfg, cli_name, default_provider, default_models, model_info=model_info
+                )
+                mapping[_source_choice_key(cli_name, model_info)] = {
+                    "options": options,
+                    "default_index": default_index or 0,
+                }
+            continue
+        model_info = _scene_model_info(scene)
+        options, default_index = _list_runtime_sources(
+            cfg, cli_name, default_provider, default_models, model_info=model_info
+        )
+        mapping[_source_choice_key(cli_name, model_info)] = {
             "options": options,
             "default_index": default_index or 0,
         }
@@ -1602,6 +1706,18 @@ def _clean_model_info(model_info):
     if not isinstance(model_info, dict):
         return model_info
     return {k: v for k, v in model_info.items() if k != "provider"}
+
+
+def _source_choice_key(cli_name, model_info=None):
+    if not model_info:
+        return f"{cli_name}|__default__"
+    if isinstance(model_info, dict):
+        cleaned = _clean_model_info(model_info)
+        if not cleaned:
+            return f"{cli_name}|__default__"
+        payload = json.dumps(cleaned, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return f"{cli_name}|{payload}"
+    return f"{cli_name}|{str(model_info).strip()}"
 
 
 def _tier_label(tier):
@@ -1781,6 +1897,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     from ccs_launchers import launch_cli, get_export_env
     source_choices = _source_choices_for_tui(
         cfg,
+        scenes,
         cli_names,
         provider,
         _probe_models(provider, emit_output=False).get("models"),
@@ -1798,22 +1915,22 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
 
         scene_name, cli, model_info, selected_source = result
-        selected_account_id = None
-        selected_provider_id = None
+        runtime_runtime = None
+        family_models = []
         if isinstance(selected_source, dict):
-            if selected_source.get("kind") == "account":
-                selected_account_id = selected_source.get("id")
-            elif selected_source.get("kind") == "provider":
-                selected_provider_id = selected_source.get("id")
-
-        runtime_runtime, family_models = _choose_runtime_source(
-            cfg,
-            cli,
-            provider,
-            _probe_models(provider, emit_output=False).get("models"),
-            account_id=selected_account_id or account_id,
-            provider_id=selected_provider_id or provider_id,
-        )
+            runtime_runtime = selected_source.get("runtime")
+            family_models = list(selected_source.get("models") or [])
+            cli = selected_source.get("launch_cli", cli)
+        if runtime_runtime is None:
+            runtime_runtime, family_models, cli = _choose_runtime_source(
+                cfg,
+                cli,
+                provider,
+                _probe_models(provider, emit_output=False).get("models"),
+                account_id=account_id,
+                provider_id=provider_id,
+                model_info=model_info,
+            )
         if runtime_runtime is None:
             console.print(f"[yellow]{cli} 当前没有可用运行来源[/yellow]")
             return True
@@ -2656,15 +2773,16 @@ def main():
             return
         p = presets[args.preset]
         cli = p["cli"]
-        runtime, _ = _choose_runtime_source(
+        model_info = {k: v for k, v in p.items() if k not in {"cli", "provider"}}
+        runtime, _, cli = _choose_runtime_source(
             cfg,
             cli,
             ensure_provider_credentials(cfg, p.get("provider")),
             models_cache,
             account_id=args.account,
             provider_id=args.provider,
+            model_info=model_info,
         )
-        model_info = {k: v for k, v in p.items() if k not in {"cli", "provider"}}
         once = bool(args.once)
         if runtime is None:
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
@@ -2688,13 +2806,19 @@ def main():
                 scene_name = scene_list[idx - 1]
                 scene = visible_scenes[scene_name]
                 cli = scene["cli"]
-                runtime, _ = _choose_runtime_source(
-                    cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+                model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
+                runtime, _, cli = _choose_runtime_source(
+                    cfg,
+                    cli,
+                    default_provider,
+                    models_cache,
+                    account_id=args.account,
+                    provider_id=args.provider,
+                    model_info=model_info,
                 )
                 if runtime is None:
                     console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                     return
-                model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
                 if not check_cli_installed(cli):
                     console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
                     cli = "claude"
@@ -2712,7 +2836,7 @@ def main():
         # Is it a CLI name?
         if target in visible_clis:
             cli = target
-            runtime, cli_models = _choose_runtime_source(
+            runtime, cli_models, cli = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
             )
             if runtime is None:
@@ -2751,7 +2875,7 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
-        runtime, cli_models = _choose_runtime_source(
+        runtime, cli_models, cli = _choose_runtime_source(
             cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
         )
         if runtime is None:
@@ -2792,7 +2916,7 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
-        runtime, cli_models = _choose_runtime_source(
+        runtime, cli_models, cli = _choose_runtime_source(
             cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
         )
         if runtime is None:
@@ -2820,13 +2944,19 @@ def main():
 
     scene = visible_scenes[scene_name]
     cli = scene["cli"]
-    runtime, _ = _choose_runtime_source(
-        cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+    model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
+    runtime, _, cli = _choose_runtime_source(
+        cfg,
+        cli,
+        default_provider,
+        models_cache,
+        account_id=args.account,
+        provider_id=args.provider,
+        model_info=model_info,
     )
     if runtime is None:
         console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
         return
-    model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
 
     if not check_cli_installed(cli):
         fallback = scene.get("fallback_cli", "claude")
