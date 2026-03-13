@@ -448,16 +448,26 @@ def _do_discuss_handoff(original_task, final_text):
         encoding="utf-8",
     )
 
-    # Try to exec claude or codex, replacing this process entirely
-    for cli in ("claude", "codex"):
-        if shutil.which(cli):
-            console.print(f"\n[cyan]→ 正在移交给 {cli}...[/cyan]")
-            console.print(f"[dim](简报已写入 {handoff_path}，可引用)[/dim]\n")
-            # Hand off: exec replaces the process, no return
-            os.execvp(cli, [cli, f"请阅读以下执行简报并确认你的执行计划：\n\n{final_text[:2000]}"])
+    # Determine which execution CLIs are available
+    available = [cli for cli in ("claude", "codex") if shutil.which(cli)]
+    if not available:
+        console.print(f"\n[yellow]未找到 claude/codex CLI。简报已写入 {handoff_path}[/yellow]")
+        return
 
-    # Fallback if no execution CLI found
-    console.print(f"\n[yellow]未找到 claude/codex CLI。简报已写入 {handoff_path}[/yellow]")
+    if len(available) == 1:
+        cli = available[0]
+    else:
+        console.print(f"\n进入 [[cyan]C[/cyan]]laude  [[cyan]X[/cyan]]Codex (默认 c): ", end="")
+        try:
+            choice = input().strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            choice = "c"
+        cli = "codex" if choice.startswith("x") else "claude"
+
+    console.print(f"[cyan]→ 正在移交给 {cli}...[/cyan]")
+    console.print(f"[dim](简报已写入 {handoff_path}，可引用)[/dim]\n")
+    # os.execvp replaces this process — no return
+    os.execvp(cli, [cli, f"请阅读以下执行简报并确认你的执行计划：\n\n{final_text[:2000]}"])
 
 
 def _discuss_post_action(provider_ctx, selected_models, original_task, final_text, cross):
