@@ -16,11 +16,12 @@ from ccs_session import (
     build_continuation_prompt,
     create_session,
     extract_brief_footer,
+    save_session,
 )
 
 _KEY_HINT = (
     "←/→ 切换  ↑/↓ 滚动  Enter 选择此回答  M 选择&换模型继续  "
-    "P 并排查看  E 收敛  H 交付  R 重新  Q 退出"
+    "P 并排查看  E 收敛  H 交付  S 保存  R 重新  Q 退出"
 )
 
 
@@ -540,6 +541,8 @@ def post_action_bar(models, display_texts, preselect_model=None) -> tuple:  # RE
                 return ("CONVERGE_CONCLUSION", valid_models[focus_idx])
             elif key in (ord("h"), ord("H")):
                 return ("CONVERGE_HANDOFF", valid_models[focus_idx])
+            elif key in (ord("s"), ord("S")):
+                return ("SAVE_SESSION", valid_models[focus_idx])
             elif key in (ord("r"), ord("R")):
                 return ("RETRY_TASK", None)
             elif key in (ord("q"), ord("Q"), 27):
@@ -654,8 +657,8 @@ def _handle_handoff(session, selected, display_texts):
     console.print()
 
 
-def _pick_event(models, display_texts, initial_focus):
-    """Run action bar, re-entering on PRINT_ALL. Returns (event, selected)."""
+def _pick_event(models, display_texts, initial_focus, session=None):
+    """Run action bar, re-entering on PRINT_ALL or SAVE_SESSION. Returns (event, selected)."""
     event, selected, preselect = "__init__", None, initial_focus
     terminal_events = {
         "CONTINUE_BRANCH", "CHANGE_MODELS_THEN_CONTINUE",
@@ -671,6 +674,11 @@ def _pick_event(models, display_texts, initial_focus):
             return "QUIT", None
         if event == "PRINT_ALL":
             _print_all_columns(models, display_texts)
+            event = "__init__"
+        elif event == "SAVE_SESSION":
+            if session is not None:
+                path = save_session(session)
+                console.print(f"\n[green]Session 已保存: {path}[/green]  [dim]id={session['id']}[/dim]")
             event = "__init__"
     return event, selected
 
@@ -731,11 +739,12 @@ def _on_converge(provider_ctx, session, models, selected, briefs, display_texts,
     return build_continuation_prompt(session, follow_up)
 
 
-def run_chat_loop(cfg, provider_ctx, models, task_text):
+def run_chat_loop(cfg, provider_ctx, models, task_text, session=None):
     """Main interactive chat loop with session state machine."""
     import ccs_chat as _ccs_chat_mod
 
-    session = create_session(task_text, models)
+    if session is None:
+        session = create_session(task_text, models)
     prompt = task_text
 
     while True:
@@ -760,7 +769,7 @@ def run_chat_loop(cfg, provider_ctx, models, task_text):
             display_texts[m], briefs[m] = extract_brief_footer(raw)
 
         initial_focus = models[_chat_view_state.get("focus", 0) % max(len(models), 1)]
-        event, selected = _pick_event(models, display_texts, initial_focus)
+        event, selected = _pick_event(models, display_texts, initial_focus, session=session)
 
         if event == "QUIT":
             break

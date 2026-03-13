@@ -1,7 +1,54 @@
-"""Session envelope, brief extraction, and continuation prompt assembly."""
+"""Session envelope, brief extraction, continuation prompt, and persistence."""
 import json
+import os
 import re
+from pathlib import Path
 from uuid import uuid4
+
+_SESSIONS_DIR = Path.home() / ".mms" / "sessions"
+
+
+def _sessions_dir() -> Path:
+    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    return _SESSIONS_DIR
+
+
+def save_session(session: dict) -> Path:
+    """Persist session to ~/.mms/sessions/<id>.json. Returns the file path."""
+    path = _sessions_dir() / f"{session['id']}.json"
+    path.write_text(json.dumps(session, ensure_ascii=False, indent=2))
+    return path
+
+
+def load_session(session_id: str) -> dict | None:
+    """Load a session by id. Returns None if not found."""
+    path = _sessions_dir() / f"{session_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def list_sessions(limit: int = 10) -> list[dict]:
+    """Return the most recently modified sessions (summary only)."""
+    d = _sessions_dir()
+    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    results = []
+    for f in files[:limit]:
+        try:
+            data = json.loads(f.read_text())
+            results.append({
+                "id": data.get("id", f.stem),
+                "mode": data.get("mode", "?"),
+                "goal": data.get("task", {}).get("goal", "")[:60],
+                "round": data.get("round", 0),
+                "mtime": f.stat().st_mtime,
+            })
+        except (json.JSONDecodeError, OSError):
+            pass
+    return results
 
 
 def create_session(task_text, models, mode="chat"):
