@@ -944,13 +944,13 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
     current = _normalize_account(existing or {"cli": preset_cli or "claude", "id": preset_id or ""})
     account_id = preset_id or current.get("id") or "claude-main"
     if not preset_id:
-        account_id = _normalize_account_id(Prompt.ask("账号档案 ID", default=account_id))
+        account_id = _normalize_account_id(Prompt.ask("账号标识", default=account_id))
     cli_name = preset_cli or current.get("cli", "claude")
     if not preset_cli:
         cli_name = Prompt.ask("绑定的 CLI", choices=list(OAUTH_CAPABLE_CLIS), default=cli_name)
-    name = Prompt.ask("账号档案名称", default=current.get("name") or account_id).strip() or account_id
+    name = Prompt.ask("账号备注", default=current.get("name") or account_id).strip() or account_id
     home_dir = Prompt.ask(
-        "账号目录（用于隔离官方登录态）",
+        "登录目录（用于隔离官方登录态）",
         default=current.get("home_dir") or _default_account_home(account_id),
     ).strip() or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
@@ -1010,9 +1010,11 @@ def _quick_connect_gateway(cfg, preset_id=None):
     ))
     providers = _provider_map(cfg)
     suggested_name = preset_id or "My Gateway"
-    name = Prompt.ask("通道名称", default=suggested_name).strip() or suggested_name
+    name = Prompt.ask("显示名称（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
     suggested_id = _normalize_provider_id_input(name)
-    provider_id = _normalize_provider_id_input(Prompt.ask("通道 ID", default=preset_id or suggested_id).strip() or suggested_id)
+    provider_id = _normalize_provider_id_input(
+        Prompt.ask("内部标识（用于配置和命令）", default=preset_id or suggested_id).strip() or suggested_id
+    )
     if provider_id in providers:
         console.print(f"[red]通道 ID '{provider_id}' 已存在，请换一个，或使用 {current_command()} config provider.edit {provider_id}[/red]")
         return cfg, False
@@ -1053,18 +1055,27 @@ def _quick_connect_official(cfg, preset_cli=None):
         cli_name = choices[Prompt.ask("选择官方通道类型", choices=list(choices.keys()), default="1")][0]
 
     suggested_name = f"{cli_name}-main"
-    name = Prompt.ask("通道名称", default=suggested_name).strip() or suggested_name
-    account_id = _normalize_account_id(Prompt.ask("通道 ID", default=_normalize_account_id(name)))
+    name = Prompt.ask("账号备注（给自己看的名字）", default=suggested_name).strip() or suggested_name
+    account_id = _normalize_account_id(
+        Prompt.ask(
+            "账号标识（内部区分用，例如 apple / work / personal）",
+            default=_normalize_account_id(name),
+        ).strip()
+    )
     accounts = _account_map(cfg)
     if account_id in accounts:
-        console.print(f"[red]通道 ID '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
+        console.print(f"[red]账号标识 '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
         return cfg, False
 
+    home_dir = Prompt.ask(
+        "登录目录（用于隔离这个账号的官方登录态）",
+        default=_default_account_home(account_id),
+    ).strip() or _default_account_home(account_id)
     account = _normalize_account({
         "id": account_id,
         "name": name,
         "cli": cli_name,
-        "home_dir": _default_account_home(account_id),
+        "home_dir": home_dir,
         "enabled": True,
         "priority": DEFAULT_PRIORITY,
         "cost_level": "medium",
