@@ -103,7 +103,43 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config provider.edit <id>`：编辑模型源元数据
 - `mms config provider.remove <id>`：删除模型源和本地凭据
 - `mms config provider.credentials [id]`：编辑指定模型源的地址和 Key
+- `mms config account.list`：查看当前账号档案列表
+- `mms config account.add [claude|codex]`：新增官方账号档案
+- `mms config account.edit <id>`：编辑账号档案
+- `mms config account.remove <id>`：删除账号档案
+- `mms config account.status [id]`：查看账号档案登录状态
+- `mms config account.login <id>`：进入该账号档案对应的官方登录流程
+- `mms config account.default <cli> <id>`：设置 `claude` / `codex` 默认账号
 - `mms config api.edit`：编辑默认模型源的地址和凭据
+
+## 多 OAuth 账号
+
+MMS 现在开始支持 `claude` / `codex` 的多账号档案。
+
+- `provider` 仍然表示模型源 / 网关
+- `account` 表示官方 OAuth 账号档案
+- 每个账号档案都绑定一个独立 `home_dir`
+- 启动时会把 `HOME` / `XDG_CONFIG_HOME` 切到对应目录，实现不同账号的登录态隔离
+
+当前优先级是先把“多绑、多选、不互相污染”做稳，所以首轮支持两种方式：
+
+- `mms config account.default <cli> <id>`：配置默认账号
+- `mms <cli> --account <id>`：本次启动临时切换账号
+- `mms <cli> --provider <id>`：即使配置了默认账号，也临时强制走模型源
+
+最小试验：
+
+```bash
+./mms config account.add claude
+./mms config account.login <id>
+./mms config account.status <id>
+./mms config account.default claude <id>
+./mms claude --account <id>
+```
+
+更完整的落地说明和四象限 todo 见：
+
+- [docs/OAUTH_ACCOUNTS.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/OAUTH_ACCOUNTS.md)
 
 ## 失败恢复交互
 

@@ -4,6 +4,7 @@ import sys
 import os
 import argparse
 import shlex
+import subprocess
 
 try:
     import tomllib
@@ -40,6 +41,7 @@ CONFIG_DIR = os.path.expanduser("~/.config/ccs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
 CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "credentials.sh")
 ENV_DIR = os.path.join(CONFIG_DIR, "env")
+ACCOUNTS_DIR = os.path.join(CONFIG_DIR, "accounts")
 OVERRIDE_PATHS = [
     os.path.join(CONFIG_DIR, "override.toml"),
     os.path.expanduser("~/.config/mms/override.toml"),
@@ -49,6 +51,7 @@ API_URL_ENV_NAME = "CCS_API_BASE_URL"
 API_KEY_ENV_NAME = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
+OAUTH_CAPABLE_CLIS = ("claude", "codex")
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
 DIRECT_CLI_MODES = {"qwen", "kimi"}
@@ -220,6 +223,32 @@ def _default_provider():
     }
 
 
+def _default_account_home(account_id):
+    return os.path.join(ACCOUNTS_DIR, account_id)
+
+
+def _normalize_account_id(account_id):
+    value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
+    value = value.strip("-_")
+    return value or "account"
+
+
+def _normalize_account(account):
+    cli = str(account.get("cli") or "claude").strip().lower()
+    if cli not in OAUTH_CAPABLE_CLIS:
+        cli = "claude"
+    account_id = _normalize_account_id(account.get("id") or f"{cli}-account")
+    home_dir = str(account.get("home_dir") or _default_account_home(account_id)).strip() or _default_account_home(account_id)
+    return {
+        "id": account_id,
+        "name": str(account.get("name") or account_id).strip() or account_id,
+        "cli": cli,
+        "auth_mode": "oauth",
+        "enabled": bool(account.get("enabled", True)),
+        "home_dir": os.path.expanduser(home_dir),
+    }
+
+
 def _sanitize_provider_id(provider_id):
     cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id).upper())
     cleaned = cleaned.strip("_")
@@ -287,6 +316,44 @@ def _ensure_provider_config(cfg):
     return new_cfg, changed
 
 
+def _ensure_account_config(cfg):
+    cfg = dict(cfg)
+    raw_accounts = cfg.get("accounts")
+    normalized = []
+    seen_ids = set()
+
+    if isinstance(raw_accounts, list):
+        for item in raw_accounts:
+            if not isinstance(item, dict):
+                continue
+            account = _normalize_account(item)
+            if account["id"] in seen_ids:
+                continue
+            normalized.append(account)
+            seen_ids.add(account["id"])
+
+    raw_defaults = cfg.get("account", {})
+    defaults = {}
+    if isinstance(raw_defaults, dict):
+        raw_cli_defaults = raw_defaults.get("defaults", raw_defaults)
+        if isinstance(raw_cli_defaults, dict):
+            for cli in OAUTH_CAPABLE_CLIS:
+                account_id = str(raw_cli_defaults.get(cli, "")).strip()
+                if account_id:
+                    defaults[cli] = account_id
+
+    defaults = {
+        cli: account_id for cli, account_id in defaults.items()
+        if account_id in seen_ids
+    }
+
+    new_cfg = dict(cfg)
+    new_cfg["accounts"] = normalized
+    new_cfg["account"] = {"defaults": defaults}
+    changed = new_cfg != cfg
+    return new_cfg, changed
+
+
 def _normalize_user_config(cfg):
     user_cfg = cfg.get("user", {})
     if not isinstance(user_cfg, dict):
@@ -310,6 +377,18 @@ def _provider_map(cfg):
     return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
 
 
+def _account_map(cfg):
+    accounts = cfg.get("accounts", [])
+    return {account["id"]: account for account in accounts if isinstance(account, dict) and account.get("id")}
+
+
+def _accounts_for_cli(cfg, cli_name):
+    return [
+        account for account in _account_map(cfg).values()
+        if account.get("cli") == cli_name and account.get("enabled", True)
+    ]
+
+
 def get_provider_definition(cfg, provider_id=None):
     providers = _provider_map(cfg)
     resolved_id = provider_id or cfg.get("provider", {}).get("default") or DEFAULT_PROVIDER_ID
@@ -324,6 +403,20 @@ def get_provider_definition(cfg, provider_id=None):
     return _default_provider()
 
 
+def get_account_definition(cfg, account_id=None, cli_name=None):
+    accounts = _account_map(cfg)
+    resolved_id = account_id
+    if not resolved_id and cli_name:
+        resolved_id = cfg.get("account", {}).get("defaults", {}).get(cli_name)
+    if resolved_id:
+        account = accounts.get(resolved_id)
+        if account:
+            return account
+        console.print(f"[red]未找到账号档案: {resolved_id}[/red]")
+        sys.exit(1)
+    return None
+
+
 # ── Config ──────────────────────────────────────────────
 
 def load_config():
@@ -333,8 +426,9 @@ def load_config():
         cfg = tomllib.load(f)
     cfg = _migrate_legacy_api_config(cfg)
     cfg, changed = _ensure_provider_config(cfg)
+    cfg, account_changed = _ensure_account_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
-    changed = changed or role_changed
+    changed = changed or account_changed or role_changed
     if changed:
         save_config(cfg)
     return cfg
@@ -490,7 +584,20 @@ def resolve_provider_context(cfg, provider_id=None):
     base_url, api_key = load_provider_credentials(provider["id"])
     provider["base_url"] = base_url
     provider["api_key"] = api_key
+    provider["auth_mode"] = "api_key"
+    provider["runtime_kind"] = "provider"
     return provider
+
+
+def resolve_account_context(cfg, account_id=None, cli_name=None):
+    account = get_account_definition(cfg, account_id=account_id, cli_name=cli_name)
+    if account is None:
+        return None
+    resolved = dict(account)
+    resolved["auth_mode"] = "oauth"
+    resolved["runtime_kind"] = "account"
+    resolved["home_dir"] = os.path.expanduser(resolved.get("home_dir", ""))
+    return resolved
 
 
 def _default_config(role=MODE_ALL):
@@ -498,6 +605,8 @@ def _default_config(role=MODE_ALL):
         "user": {"role": normalize_user_role(role)},
         "provider": {"default": DEFAULT_PROVIDER_ID},
         "providers": [_default_provider()],
+        "account": {"defaults": {}},
+        "accounts": [],
         "recommend": {"models": [
             "claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini",
         ]},
@@ -535,8 +644,9 @@ def _migrate_legacy_api_config(cfg):
         updated_cfg.pop("api", None)
 
     updated_cfg, changed = _ensure_provider_config(updated_cfg)
+    updated_cfg, account_changed = _ensure_account_config(updated_cfg)
     updated_cfg, role_changed = _normalize_user_config(updated_cfg)
-    if changed or role_changed or updated_cfg != cfg:
+    if changed or account_changed or role_changed or updated_cfg != cfg:
         try:
             save_config(updated_cfg)
         except OSError as exc:
@@ -547,6 +657,67 @@ def _migrate_legacy_api_config(cfg):
 
 def _provider_label(provider):
     return provider.get("name", provider.get("id", DEFAULT_PROVIDER_ID))
+
+
+def _account_label(account):
+    return account.get("name", account.get("id", "account"))
+
+
+def _account_env(account):
+    home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+    xdg_config_home = os.path.join(home_dir, ".config")
+    env = os.environ.copy()
+    env["HOME"] = home_dir
+    env["XDG_CONFIG_HOME"] = xdg_config_home
+    env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
+    return env
+
+
+def _account_status_command(cli_name):
+    if cli_name == "claude":
+        return ["claude", "auth", "status"]
+    if cli_name == "codex":
+        return ["codex", "login", "status"]
+    return None
+
+
+def _probe_account_status(account):
+    cli_name = account.get("cli")
+    command = _account_status_command(cli_name)
+    if command is None:
+        return {"state": "unsupported", "summary": "不支持状态探测"}
+    try:
+        result = subprocess.run(
+            command,
+            env=_account_env(account),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        return {"state": "cli_missing", "summary": f"{cli_name} 未安装"}
+    except subprocess.TimeoutExpired:
+        return {"state": "timeout", "summary": "状态探测超时"}
+
+    output = (result.stdout or result.stderr or "").strip().splitlines()
+    summary = output[0].strip() if output else ""
+    if result.returncode == 0:
+        return {"state": "logged_in", "summary": summary or "已登录"}
+    return {"state": "logged_out", "summary": summary or "未登录"}
+
+
+def _run_account_login(account):
+    cli_name = account.get("cli")
+    env = _account_env(account)
+    os.makedirs(account.get("home_dir", ""), exist_ok=True)
+    command = ["claude", "auth", "login"] if cli_name == "claude" else ["codex", "login"]
+    console.print(
+        f"[cyan]正在为账号档案 {_account_label(account)} 打开 {cli_name} 登录流程[/cyan]\n"
+        f"[dim]HOME={account.get('home_dir')}[/dim]"
+    )
+    result = subprocess.run(command, env=env)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def _ensure_interactive_terminal(action_hint):
@@ -651,6 +822,30 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         "name": name,
         "protocols": protocols,
         "supported_clis": supported_clis,
+        "enabled": enabled,
+    })
+
+
+def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
+    _ensure_interactive_terminal("账号档案配置编辑")
+    current = _normalize_account(existing or {"cli": preset_cli or "claude", "id": preset_id or ""})
+    account_id = preset_id or current.get("id") or "claude-main"
+    if not preset_id:
+        account_id = _normalize_account_id(Prompt.ask("账号档案 ID", default=account_id))
+    cli_name = preset_cli or current.get("cli", "claude")
+    if not preset_cli:
+        cli_name = Prompt.ask("绑定的 CLI", choices=list(OAUTH_CAPABLE_CLIS), default=cli_name)
+    name = Prompt.ask("账号档案名称", default=current.get("name") or account_id).strip() or account_id
+    home_dir = Prompt.ask(
+        "账号目录（用于隔离官方登录态）",
+        default=current.get("home_dir") or _default_account_home(account_id),
+    ).strip() or _default_account_home(account_id)
+    enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
+    return _normalize_account({
+        "id": account_id,
+        "name": name,
+        "cli": cli_name,
+        "home_dir": home_dir,
         "enabled": enabled,
     })
 
@@ -1124,10 +1319,26 @@ def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
     return None, []
 
 
+def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
+    if provider_id:
+        provider = resolve_provider_context(cfg, provider_id)
+        return _resolve_provider_for_cli(cfg, cli_name, provider, _probe_models(provider, emit_output=False).get("models"))
+    if cli_name in OAUTH_CAPABLE_CLIS:
+        account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
+        if account_id and account is not None:
+            return account, list(default_models or [])
+        if account is not None and account.get("enabled", True):
+            return account, list(default_models or [])
+    return _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
+
+
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
     for cli_name in CLI_NAMES:
+        if cli_name in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, cli_name):
+            visible.append(cli_name)
+            continue
         provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
         if provider is None:
             continue
@@ -1248,7 +1459,7 @@ def select_scene_fallback(scenes):
 
 # ── Confirmation ────────────────────────────────────────
 
-def confirm_launch(cli, model_info, once=False):
+def confirm_launch(cli, model_info, once=False, runtime=None):
     if isinstance(model_info, dict):
         model_display = ", ".join(f"{k}={v}" for k, v in model_info.items() if k != "subagent")
     else:
@@ -1256,9 +1467,15 @@ def confirm_launch(cli, model_info, once=False):
 
     mode_str = "一次性命令" if once else "交互会话"
     env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
+    source_line = ""
+    if runtime:
+        source_kind = "账号档案" if runtime.get("auth_mode") == "oauth" else "模型源"
+        source_label = runtime.get("name", runtime.get("id", "default"))
+        source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
     panel_text = (
         f"[bold]CLI:[/bold]    {cli}\n"
         f"[bold]模型:[/bold]   {model_display}\n"
+        f"{source_line}"
         f"[bold]启动:[/bold]   {mode_str}\n"
         f"[bold]环境:[/bold]   {env_str}\n"
         f"\n"
@@ -1334,7 +1551,7 @@ def _use_tui():
         return False
 
 
-def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
+def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
@@ -1352,14 +1569,16 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
 
         scene_name, cli, model_info = result
 
-        runtime_provider, family_models = _resolve_provider_for_cli(
+        runtime_runtime, family_models = _resolve_launch_runtime(
             cfg,
             cli,
             provider,
             _probe_models(provider, emit_output=False).get("models"),
+            account_id=account_id,
+            provider_id=provider_id,
         )
-        if runtime_provider is None:
-            console.print(f"[yellow]{cli} 当前没有可用 provider[/yellow]")
+        if runtime_runtime is None:
+            console.print(f"[yellow]{cli} 当前没有可用运行来源[/yellow]")
             return True
 
         if scene_name == "__direct_qwen__":
@@ -1371,7 +1590,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
             model_info = {"model": DEFAULT_KIMI_MODEL}
         if scene_name is None:
             # 自定义模式：用 TUI 选模型
-            models = fetch_models(runtime_provider)
+            models = family_models or _probe_models(provider, emit_output=False).get("models")
             if not models:
                 return True
             model = select_model_tui(models, title=f"为 {cli} 选择模型")
@@ -1383,13 +1602,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
             cli = "claude"
 
         clean_model_info = _clean_model_info(model_info)
-        env_vars = get_export_env(cli, runtime_provider)
+        env_vars = get_export_env(cli, runtime_runtime)
         action = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
         if action == "q":
             return True
         if action == "b":
             continue
-        launch_cli(cli, clean_model_info, runtime_provider, once=once)
+        launch_cli(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
 
@@ -1472,6 +1691,27 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "provider.credentials":
         _handle_provider_credentials_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.list":
+        _display_accounts(cfg)
+        return
+    if key_path == "account.default":
+        _handle_account_default_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.add":
+        _handle_account_add_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.edit":
+        _handle_account_edit_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.remove":
+        _handle_account_remove_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.status":
+        _handle_account_status_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.login":
+        _handle_account_login_config(cfg, args_rest[1:])
         return
     if key_path in ("api.setup", "api.edit"):
         provider = resolve_provider_context(cfg)
@@ -1626,6 +1866,115 @@ def _handle_provider_credentials_config(cfg, args_rest):
     )
 
 
+def _handle_account_default_config(cfg, args_rest):
+    defaults = cfg.get("account", {}).get("defaults", {})
+    if not args_rest:
+        for cli_name in OAUTH_CAPABLE_CLIS:
+            value = defaults.get(cli_name, "(未设置)")
+            console.print(f"[cyan]account.default.{cli_name}[/cyan] = {value}")
+        return
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {current_command()} config account.default <cli> <account_id>[/red]")
+        return
+    cli_name, account_id = args_rest[0].strip(), args_rest[1].strip()
+    if cli_name not in OAUTH_CAPABLE_CLIS:
+        console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
+        return
+    accounts = _account_map(cfg)
+    account = accounts.get(account_id)
+    if not account:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if account.get("cli") != cli_name:
+        console.print(f"[red]账号档案 '{account_id}' 绑定的是 {account.get('cli')}，不能设为 {cli_name} 默认账号[/red]")
+        return
+    cfg.setdefault("account", {}).setdefault("defaults", {})
+    cfg["account"]["defaults"][cli_name] = account_id
+    save_config(cfg)
+    console.print(f"[green]✓ account.default.{cli_name} = {account_id}[/green]")
+
+
+def _handle_account_add_config(cfg, args_rest):
+    preset_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() in OAUTH_CAPABLE_CLIS else None
+    account = _prompt_account_metadata(preset_cli=preset_cli)
+    accounts = _account_map(cfg)
+    if account["id"] in accounts:
+        console.print(f"[red]账号档案 '{account['id']}' 已存在，请使用 account.edit[/red]")
+        return
+    updated_cfg = dict(cfg)
+    updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已新增账号档案: {account['id']}[/green]")
+    console.print(f"[dim]下一步可执行: {current_command()} config account.login {account['id']}[/dim]")
+
+
+def _handle_account_edit_config(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config account.edit <id>[/red]")
+        return
+    account_id = args_rest[0].strip()
+    accounts = _account_map(cfg)
+    if account_id not in accounts:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    account = _prompt_account_metadata(existing=accounts[account_id], preset_id=account_id)
+    updated_cfg = dict(cfg)
+    updated_accounts = []
+    for item in cfg.get("accounts", []):
+        updated_accounts.append(account if item.get("id") == account_id else item)
+    updated_cfg["accounts"] = updated_accounts
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已更新账号档案: {account_id}[/green]")
+
+
+def _handle_account_remove_config(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config account.remove <id>[/red]")
+        return
+    account_id = args_rest[0].strip()
+    accounts = _account_map(cfg)
+    if account_id not in accounts:
+        console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if not Confirm.ask(f"确认删除账号档案 '{account_id}'？", default=False):
+        console.print("[yellow]已取消删除[/yellow]")
+        return
+    updated_cfg = dict(cfg)
+    updated_cfg["accounts"] = [
+        item for item in cfg.get("accounts", [])
+        if item.get("id") != account_id
+    ]
+    defaults = dict(cfg.get("account", {}).get("defaults", {}))
+    for cli_name, value in list(defaults.items()):
+        if value == account_id:
+            defaults.pop(cli_name, None)
+    updated_cfg["account"] = {"defaults": defaults}
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已删除账号档案: {account_id}[/green]")
+
+
+def _handle_account_status_config(cfg, args_rest):
+    if args_rest:
+        account = resolve_account_context(cfg, account_id=args_rest[0].strip())
+        status = _probe_account_status(account)
+        console.print(f"[cyan]{account['id']}[/cyan] = {status['state']}")
+        if status.get("summary"):
+            console.print(f"[dim]{status['summary']}[/dim]")
+        return
+    _display_accounts(cfg)
+
+
+def _handle_account_login_config(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config account.login <id>[/red]")
+        return
+    account = resolve_account_context(cfg, account_id=args_rest[0].strip())
+    _run_account_login(account)
+
+
 def _display_providers(cfg):
     providers = cfg.get("providers", [])
     if not providers:
@@ -1659,6 +2008,42 @@ def _display_providers(cfg):
     )
 
 
+def _display_accounts(cfg):
+    accounts = cfg.get("accounts", [])
+    if not accounts:
+        console.print("[yellow]未配置账号档案[/yellow]")
+        return
+
+    defaults = cfg.get("account", {}).get("defaults", {})
+    table = Table(title="账号档案列表", show_lines=True)
+    table.add_column("ID", style="cyan")
+    table.add_column("名称", style="green")
+    table.add_column("CLI", style="yellow")
+    table.add_column("状态", style="magenta")
+    table.add_column("登录态", style="white")
+    table.add_column("目录", style="blue")
+
+    for account in accounts:
+        login_state = _probe_account_status(account)
+        status = []
+        if defaults.get(account.get("cli")) == account.get("id"):
+            status.append("默认")
+        status.append("启用" if account.get("enabled", True) else "禁用")
+        table.add_row(
+            str(account.get("id", "")),
+            str(account.get("name", "")),
+            str(account.get("cli", "")),
+            " ".join(status).strip(),
+            login_state.get("summary") or login_state.get("state", ""),
+            str(account.get("home_dir", "")),
+        )
+    console.print(table)
+    console.print(
+        f"[dim]提示: 可用 {current_command()} config account.default <cli> <id> 设置默认账号，"
+        f"{current_command()} config account.login <id> 进入官方登录。[/dim]"
+    )
+
+
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
@@ -1671,6 +2056,7 @@ def _display_config(cfg, prefix="", depth=0):
         console.print(f"  [cyan]credentials_file[/cyan] = {CREDENTIALS_PATH}")
         console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
         _display_providers(cfg)
+        _display_accounts(cfg)
         active_overrides = _existing_override_paths()
         if active_overrides:
             console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
@@ -1680,7 +2066,7 @@ def _display_config(cfg, prefix="", depth=0):
             console.print("  [dim]如需团队共享默认值，可在以上路径创建 override.toml。[/dim]")
 
     for k, v in cfg.items():
-        if depth == 0 and k in {"providers", "provider"}:
+        if depth == 0 and k in {"providers", "provider", "accounts", "account"}:
             continue
         full_key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
         if isinstance(v, dict):
@@ -1778,6 +2164,39 @@ def _validate_config(cfg):
     if default_id and default_id not in provider_ids:
         errors.append(f"默认模型源不存在: {default_id}")
 
+    accounts = cfg.get("accounts", [])
+    seen_account_ids = set()
+    if not isinstance(accounts, list):
+        errors.append("accounts 必须是列表")
+    else:
+        for item in accounts:
+            if not isinstance(item, dict):
+                errors.append("accounts 中存在非对象条目")
+                continue
+            account_id = str(item.get("id", "")).strip()
+            if not account_id:
+                errors.append("存在缺少 id 的账号档案")
+                continue
+            if account_id in seen_account_ids:
+                errors.append(f"账号档案 ID 重复: {account_id}")
+            seen_account_ids.add(account_id)
+            cli_name = str(item.get("cli", "")).strip()
+            if cli_name not in OAUTH_CAPABLE_CLIS:
+                errors.append(f"账号档案 {account_id} 绑定了不支持的 CLI: {cli_name}")
+            auth_mode = str(item.get("auth_mode", "oauth")).strip()
+            if auth_mode != "oauth":
+                errors.append(f"账号档案 {account_id} 目前只支持 oauth 模式")
+            if not str(item.get("home_dir", "")).strip():
+                errors.append(f"账号档案 {account_id} 缺少 home_dir")
+
+    account_defaults = cfg.get("account", {}).get("defaults", {})
+    if isinstance(account_defaults, dict):
+        for cli_name, account_id in account_defaults.items():
+            if cli_name not in OAUTH_CAPABLE_CLIS:
+                errors.append(f"存在不支持的默认账号 CLI: {cli_name}")
+            elif account_id not in seen_account_ids:
+                errors.append(f"{cli_name} 的默认账号不存在: {account_id}")
+
     role = cfg.get("user", {}).get("role", MODE_ALL)
     if normalize_user_role(role) not in {MODE_ALL, MODE_RECOMMENDED}:
         errors.append(f"不支持的模型模式: {role}")
@@ -1808,6 +2227,7 @@ def _handle_config_set(cfg, args_rest):
     updated_cfg = dict(cfg)
     _set_nested(updated_cfg, key_path.split("."), new_val)
     updated_cfg, _ = _ensure_provider_config(updated_cfg)
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
     save_config(updated_cfg)
     display = _mask_key(str(new_val)) if "key" in key_path.lower() else str(new_val)
     console.print(f"[green]✓ {key_path} = {display}[/green]")
@@ -1824,6 +2244,7 @@ def _handle_config_unset(cfg, args_rest):
         console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
         return
     updated_cfg, _ = _ensure_provider_config(updated_cfg)
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
     save_config(updated_cfg)
     console.print(f"[green]✓ 已移除 {key_path}[/green]")
 
@@ -1871,8 +2292,14 @@ def main():
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
                         help="配合 --export 使用，写入 ~/.config/ccs/env/<cli>.sh")
+    parser.add_argument("--account", help="临时使用指定账号档案启动 claude/codex")
+    parser.add_argument("--provider", help="临时使用指定模型源启动")
 
     args = parser.parse_args()
+
+    if args.account and args.provider:
+        console.print("[red]--account 和 --provider 不能同时使用[/red]")
+        sys.exit(1)
 
     # --install
     if args.install:
@@ -1936,10 +2363,20 @@ def main():
             return
         p = presets[args.preset]
         cli = p["cli"]
-        provider = ensure_provider_credentials(cfg, p.get("provider"))
+        runtime, _ = _resolve_launch_runtime(
+            cfg,
+            cli,
+            ensure_provider_credentials(cfg, p.get("provider")),
+            models_cache,
+            account_id=args.account,
+            provider_id=args.provider,
+        )
         model_info = {k: v for k, v in p.items() if k not in {"cli", "provider"}}
         once = bool(args.once)
-        launch_cli(cli, model_info, provider, once=once)
+        if runtime is None:
+            console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+            return
+        launch_cli(cli, model_info, runtime, once=once)
         return
 
     # Determine once mode
@@ -1958,21 +2395,23 @@ def main():
                 scene_name = scene_list[idx - 1]
                 scene = visible_scenes[scene_name]
                 cli = scene["cli"]
-                runtime_provider, _ = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
-                if runtime_provider is None:
-                    console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+                runtime, _ = _resolve_launch_runtime(
+                    cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+                )
+                if runtime is None:
+                    console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                     return
                 model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
                 if not check_cli_installed(cli):
                     console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
                     cli = "claude"
                 console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
-                action = confirm_launch(cli, model_info, once)
+                action = confirm_launch(cli, model_info, once, runtime=runtime)
                 if action == "q":
                     return
                 if action == "s":
                     save_preset_interactive(user_cfg, cli, model_info)
-                launch_cli(cli, _clean_model_info(model_info), runtime_provider, once=once)
+                launch_cli(cli, _clean_model_info(model_info), runtime, once=once)
                 return
         except ValueError:
             pass
@@ -1980,9 +2419,11 @@ def main():
         # Is it a CLI name?
         if target in visible_clis:
             cli = target
-            runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
-            if runtime_provider is None:
-                console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+            runtime, cli_models = _resolve_launch_runtime(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                 return
             if not check_cli_installed(cli):
                 from ccs_installer import check_and_offer_install
@@ -1995,12 +2436,12 @@ def main():
                 base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
                 models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
                 model = select_model_interactive(models_list)
-            action = confirm_launch(cli, model, once)
+            action = confirm_launch(cli, model, once, runtime=runtime)
             if action == "q":
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, runtime_provider, once=once)
+            launch_cli(cli, {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
@@ -2013,9 +2454,11 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
-        runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
-        if runtime_provider is None:
-            console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+        runtime, cli_models = _resolve_launch_runtime(
+            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+        )
+        if runtime is None:
+            console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
         if cli == "kimi":
             model = DEFAULT_KIMI_MODEL
@@ -2025,17 +2468,19 @@ def main():
                 return
             models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
             model = select_model_interactive(models_list)
-        action = confirm_launch(cli, model, once)
+        action = confirm_launch(cli, model, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, runtime_provider, once=once)
+        launch_cli(cli, {"model": model}, runtime, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
     if _use_tui():
-        handled = _handle_tui_scene_selection(cfg, visible_scenes, default_provider, once, visible_clis)
+        handled = _handle_tui_scene_selection(
+            cfg, visible_scenes, default_provider, once, visible_clis, account_id=args.account, provider_id=args.provider
+        )
         if handled:
             return
         # fallback if curses failed
@@ -2046,9 +2491,11 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
-        runtime_provider, cli_models = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
-        if runtime_provider is None:
-            console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+        runtime, cli_models = _resolve_launch_runtime(
+            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+        )
+        if runtime is None:
+            console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
         if cli == "kimi":
             model = DEFAULT_KIMI_MODEL
@@ -2058,19 +2505,21 @@ def main():
                 return
             models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
             model = select_model_interactive(models_list)
-        action = confirm_launch(cli, model, once)
+        action = confirm_launch(cli, model, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, runtime_provider, once=once)
+        launch_cli(cli, {"model": model}, runtime, once=once)
         return
 
     scene = visible_scenes[scene_name]
     cli = scene["cli"]
-    runtime_provider, _ = _resolve_provider_for_cli(cfg, cli, default_provider, models_cache)
-    if runtime_provider is None:
-        console.print(f"[red]{cli} 当前没有可用 provider[/red]")
+    runtime, _ = _resolve_launch_runtime(
+        cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+    )
+    if runtime is None:
+        console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
         return
     model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
 
@@ -2079,9 +2528,9 @@ def main():
         console.print(f"[yellow]{cli} 未安装，使用 {fallback} 代替[/yellow]")
         cli = fallback
 
-    action = confirm_launch(cli, model_info, once)
+    action = confirm_launch(cli, model_info, once, runtime=runtime)
     if action == "q":
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    launch_cli(cli, _clean_model_info(model_info), runtime_provider, once=once)
+    launch_cli(cli, _clean_model_info(model_info), runtime, once=once)
