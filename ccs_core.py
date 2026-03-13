@@ -33,6 +33,8 @@ except ImportError:
     print("缺少依赖，请执行: pip install rich httpx tomli-w")
     sys.exit(1)
 
+from ccs_account_state import seed_claude_state
+
 console = Console()
 
 APP_NAME = "Multi-Model Switch"
@@ -770,6 +772,8 @@ def _account_label(account):
 
 def _account_env(account):
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+    if account.get("cli") == "claude":
+        seed_claude_state(home_dir)
     xdg_config_home = os.path.join(home_dir, ".config")
     env = os.environ.copy()
     env["HOME"] = home_dir
@@ -804,8 +808,17 @@ def _probe_account_status(account):
     except subprocess.TimeoutExpired:
         return {"state": "timeout", "summary": "状态探测超时"}
 
-    output = (result.stdout or result.stderr or "").strip().splitlines()
+    output_text = (result.stdout or result.stderr or "").strip()
+    output = output_text.splitlines()
     summary = output[0].strip() if output else ""
+    if cli_name == "claude" and output_text.startswith("{"):
+        try:
+            payload = json.loads(output_text)
+            email = payload.get("email", "")
+            sub = payload.get("subscriptionType", "")
+            summary = " / ".join(part for part in [email, sub] if part) or summary
+        except json.JSONDecodeError:
+            pass
     if result.returncode == 0:
         return {"state": "logged_in", "summary": summary or "已登录"}
     return {"state": "logged_out", "summary": summary or "未登录"}
