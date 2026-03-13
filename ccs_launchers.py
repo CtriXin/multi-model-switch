@@ -5,6 +5,8 @@ import sys
 import subprocess
 import tempfile
 
+from ccs_account_state import seed_claude_state
+
 try:
     from rich.console import Console
 except ImportError:
@@ -70,6 +72,8 @@ def _account_env(account):
     if not home_dir:
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
         sys.exit(1)
+    if account.get("cli") == "claude":
+        seed_claude_state(home_dir)
     xdg_config_home = os.path.join(home_dir, ".config")
     env["HOME"] = home_dir
     env["XDG_CONFIG_HOME"] = xdg_config_home
