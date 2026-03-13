@@ -1461,9 +1461,10 @@ def select_scene_fallback(scenes):
 
 def confirm_launch(cli, model_info, once=False, runtime=None):
     if isinstance(model_info, dict):
-        model_display = ", ".join(f"{k}={v}" for k, v in model_info.items() if k != "subagent")
+        model_items = [f"{k}={v}" for k, v in model_info.items() if k != "subagent" and v]
+        model_display = ", ".join(model_items) if model_items else "官方默认"
     else:
-        model_display = model_info
+        model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
     env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
@@ -1499,6 +1500,10 @@ def save_preset_interactive(cfg, cli, model_info):
     cfg["presets"][name] = preset
     save_config(cfg)
     console.print(f"[green]✓ 预设 '{name}' 已保存[/green]")
+
+
+def _uses_native_account_entry(runtime, cli):
+    return bool(runtime and runtime.get("auth_mode") == "oauth" and cli in OAUTH_CAPABLE_CLIS)
 
 
 # ── CLI Selection (fallback) ───────────────────────────
@@ -2428,7 +2433,10 @@ def main():
             if not check_cli_installed(cli):
                 from ccs_installer import check_and_offer_install
                 check_and_offer_install(cli)
-            if cli == "kimi":
+            if _uses_native_account_entry(runtime, cli):
+                console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
+                model = None
+            elif cli == "kimi":
                 model = DEFAULT_KIMI_MODEL
             else:
                 if not _ensure_models_cache_available(cli_models or models_cache):
@@ -2436,12 +2444,13 @@ def main():
                 base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
                 models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
                 model = select_model_interactive(models_list)
-            action = confirm_launch(cli, model, once, runtime=runtime)
+            model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
             if action == "s":
-                save_preset_interactive(user_cfg, cli, model)
-            launch_cli(cli, {"model": model}, runtime, once=once)
+                save_preset_interactive(user_cfg, cli, model_info)
+            launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
@@ -2460,7 +2469,10 @@ def main():
         if runtime is None:
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
-        if cli == "kimi":
+        if _uses_native_account_entry(runtime, cli):
+            console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
+            model = None
+        elif cli == "kimi":
             model = DEFAULT_KIMI_MODEL
         else:
             base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
@@ -2468,12 +2480,13 @@ def main():
                 return
             models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
             model = select_model_interactive(models_list)
-        action = confirm_launch(cli, model, once, runtime=runtime)
+        model_info = {} if _uses_native_account_entry(runtime, cli) else model
+        action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
-            save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, runtime, once=once)
+            save_preset_interactive(user_cfg, cli, model_info)
+        launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
@@ -2497,7 +2510,10 @@ def main():
         if runtime is None:
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
-        if cli == "kimi":
+        if _uses_native_account_entry(runtime, cli):
+            console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
+            model = None
+        elif cli == "kimi":
             model = DEFAULT_KIMI_MODEL
         else:
             base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
@@ -2505,12 +2521,13 @@ def main():
                 return
             models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
             model = select_model_interactive(models_list)
-        action = confirm_launch(cli, model, once, runtime=runtime)
+        model_info = {} if _uses_native_account_entry(runtime, cli) else model
+        action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
-            save_preset_interactive(user_cfg, cli, model)
-        launch_cli(cli, {"model": model}, runtime, once=once)
+            save_preset_interactive(user_cfg, cli, model_info)
+        launch_cli(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
         return
 
     scene = visible_scenes[scene_name]

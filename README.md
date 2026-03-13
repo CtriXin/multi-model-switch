@@ -127,6 +127,13 @@ MMS 现在开始支持 `claude` / `codex` 的多账号档案。
 - `mms <cli> --account <id>`：本次启动临时切换账号
 - `mms <cli> --provider <id>`：即使配置了默认账号，也临时强制走模型源
 
+当前 OAuth 账号路径的规则是：
+
+- 先检查登录态是否可用
+- 启动时使用该账号的隔离目录
+- 不复用 provider 的 `/v1/models` 列表
+- `codex` / `claude` 走账号档案时，默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
+
 最小试验：
 
 ```bash
