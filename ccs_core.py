@@ -64,27 +64,7 @@ SCENES = {
         "emoji": "⚡",
         "desc": "简单问答、日常杂活",
         "cli": "qwen",
-        "default_tier": "high",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Qwen",
-                "desc": "轻量",
-                "model_info": {"model": "qwen3.5-plus"},
-            },
-            {
-                "tier": "high",
-                "name": "Qwen Max",
-                "desc": "默认",
-                "model_info": {"model": "qwen3-max-2026-01-23"},
-            },
-            {
-                "tier": "xhigh",
-                "name": "GLM",
-                "desc": "备用",
-                "model_info": {"model": "glm-5"},
-            },
-        ],
+        "model": "qwen3-max-2026-01-23",
     },
     "主力编码": {
         "emoji": "💻",
@@ -142,21 +122,7 @@ SCENES = {
         "emoji": "🇨🇳",
         "desc": "中文内容、国内业务",
         "cli": "kimi",
-        "default_tier": "med",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Kimi",
-                "desc": "默认中文",
-                "model_info": {"model": "kimi-k2.5"},
-            },
-            {
-                "tier": "high",
-                "name": "MiniMax",
-                "desc": "更稳一点",
-                "model_info": {"model": "MiniMax-M2.5"},
-            },
-        ],
+        "model": "kimi-k2.5",
     },
     "英文主力": {
         "emoji": "🇺🇸",
@@ -207,6 +173,10 @@ SCENES = {
 }
 
 CLI_NAMES = ["claude", "codex", "qwen", "kimi"]
+CLI_MODEL_FAMILY_HINTS = {
+    "qwen": ("qwen",),
+    "kimi": ("kimi",),
+}
 SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier"}
 
 
@@ -995,6 +965,57 @@ def _ensure_models_cache_available(models_cache):
     return False
 
 
+def _model_matches_cli_family(cli_name, model_name):
+    hints = CLI_MODEL_FAMILY_HINTS.get(cli_name, ())
+    normalized = str(model_name or "").lower()
+    return any(hint in normalized for hint in hints)
+
+
+def _resolve_visible_clis(cfg, default_provider, default_models):
+    visible = []
+    supported = {name: False for name in CLI_NAMES}
+    family_probeable = {name: False for name in CLI_MODEL_FAMILY_HINTS}
+    family_found = {name: False for name in CLI_MODEL_FAMILY_HINTS}
+
+    for provider_def in cfg.get("providers", []):
+        if not provider_def.get("enabled", True):
+            continue
+        provider = resolve_provider_context(cfg, provider_def.get("id"))
+        if not provider.get("base_url") or not provider.get("api_key"):
+            continue
+
+        supported_clis = provider.get("supported_clis", [])
+        for cli_name in supported_clis:
+            if cli_name in supported:
+                supported[cli_name] = True
+
+        family_targets = [name for name in supported_clis if name in CLI_MODEL_FAMILY_HINTS]
+        if not family_targets:
+            continue
+
+        if provider.get("id") == default_provider.get("id"):
+            models = list(default_models or [])
+        else:
+            models = _probe_models(provider, emit_output=False).get("models")
+
+        if models is None:
+            continue
+
+        for cli_name in family_targets:
+            family_probeable[cli_name] = True
+            if any(_model_matches_cli_family(cli_name, model_name) for model_name in models):
+                family_found[cli_name] = True
+
+    for cli_name in CLI_NAMES:
+        if not supported.get(cli_name):
+            continue
+        if cli_name in CLI_MODEL_FAMILY_HINTS and family_probeable[cli_name] and not family_found[cli_name]:
+            continue
+        visible.append(cli_name)
+
+    return visible or list(CLI_NAMES)
+
+
 def select_model_interactive(models_list):
     while True:
         try:
@@ -1133,14 +1154,18 @@ def check_cli_installed(cli_name):
     return which(cli_name) is not None
 
 
-def select_cli():
+def select_cli(cli_names=None):
     from ccs_installer import check_and_offer_install
+    cli_names = cli_names or CLI_NAMES
+    if not cli_names:
+        console.print("[red]当前没有可用的 CLI。请先检查 provider 配置和模型探测结果。[/red]")
+        sys.exit(1)
     table = Table(title="选择 CLI")
     table.add_column("#", style="cyan", width=4)
     table.add_column("CLI", style="green")
     table.add_column("状态", style="yellow")
 
-    for i, name in enumerate(CLI_NAMES, 1):
+    for i, name in enumerate(cli_names, 1):
         status = "[green]已安装[/green]" if check_cli_installed(name) else "[red]未安装[/red]"
         table.add_row(str(i), name, status)
 
@@ -1149,12 +1174,12 @@ def select_cli():
     while True:
         try:
             choice = IntPrompt.ask("选择 CLI 编号")
-            if 1 <= choice <= len(CLI_NAMES):
-                cli = CLI_NAMES[choice - 1]
+            if 1 <= choice <= len(cli_names):
+                cli = cli_names[choice - 1]
                 if not check_cli_installed(cli):
                     check_and_offer_install(cli)
                 return cli
-            console.print(f"[red]请输入 1-{len(CLI_NAMES)}[/red]")
+            console.print(f"[red]请输入 1-{len(cli_names)}[/red]")
         except KeyboardInterrupt:
             sys.exit(0)
 
@@ -1172,13 +1197,13 @@ def _use_tui():
         return False
 
 
-def _handle_tui_scene_selection(cfg, provider, once):
+def _handle_tui_scene_selection(cfg, provider, once, cli_names):
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
 
     while True:
-        result = select_scene_tui(SCENES, CLI_NAMES)
+        result = select_scene_tui(SCENES, cli_names)
 
         # curses 失败，fallback
         if result == "fallback":
@@ -1523,6 +1548,7 @@ def main():
         return
 
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    visible_clis = _resolve_visible_clis(cfg, default_provider, models_cache)
 
     # --list
     if args.list:
@@ -1578,7 +1604,7 @@ def main():
             pass
 
         # Is it a CLI name?
-        if target in CLI_NAMES:
+        if target in visible_clis:
             cli = target
             if not check_cli_installed(cli):
                 from ccs_installer import check_and_offer_install
@@ -1594,13 +1620,17 @@ def main():
                 save_preset_interactive(user_cfg, cli, model)
             launch_cli(cli, {"model": model}, default_provider, once=once)
             return
+        if target in CLI_NAMES:
+            console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
+            console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
+            return
 
         console.print(f"[red]未知目标: {target}[/red]")
         return
 
     # --custom: manual CLI + model selection
     if args.custom:
-        cli = select_cli()
+        cli = select_cli(visible_clis)
         if not _ensure_models_cache_available(models_cache):
             return
         models_list = display_models(models_cache, role, recommend)
@@ -1615,7 +1645,7 @@ def main():
 
     # Default: TUI scene selection (with fallback)
     if _use_tui():
-        handled = _handle_tui_scene_selection(cfg, default_provider, once)
+        handled = _handle_tui_scene_selection(cfg, default_provider, once, visible_clis)
         if handled:
             return
         # fallback if curses failed
@@ -1625,7 +1655,7 @@ def main():
 
     if scene_name is None:
         # Custom mode
-        cli = select_cli()
+        cli = select_cli(visible_clis)
         if not _ensure_models_cache_available(models_cache):
             return
         models_list = display_models(models_cache, role, recommend)
