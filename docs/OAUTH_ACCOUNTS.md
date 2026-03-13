@@ -23,6 +23,8 @@
   - 指定了 `--account` 就优先走账号档案
   - 没指定但配置了默认账号时，走默认账号
   - 否则回退到原有模型源路径
+- `OAuth account` 路径当前不复用 provider 的 `/v1/models` 列表
+- `codex --account <id>` / `claude --account <id>` 默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
 
 ## 账号隔离方式
 
@@ -77,4 +79,8 @@
 - 还没做“启动前交互选账号”，首轮先用 `account.default` + `--account`
 - 还没做自动配额切换
 - 还没把 OAuth 登录流程做成图形/向导化，仍然依赖官方 CLI 自己的登录命令
+- OAuth 账号当前只做两类检查：
+  - 登录态是否可用
+  - 官方 CLI 是否能正常启动
+- 当前不做 provider 式 model list；后续如果某个官方 CLI 能稳定枚举模型，再单独加
 - `qwen` / `kimi` 继续保持当前直达路径，不进入这个抽象层
