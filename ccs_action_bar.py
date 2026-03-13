@@ -154,7 +154,6 @@ def _readline(prompt_text="继续提问", hint="Enter=跳过  Ctrl+V=粘贴图�
         sys.stdout.write("\x1b[?2004h")
         sys.stdout.flush()
 
-        prompt = f"〉{prompt_text} ({hint}): "
         buf: list[str] = []
         cur = 0     # cursor char index in buf
         vp = 0      # viewport start char index
@@ -166,6 +165,13 @@ def _readline(prompt_text="继续提问", hint="Enter=跳过  Ctrl+V=粘贴图�
         if context:
             ctx_lines = _wrap_lines(strip_markdown(context), 200)  # will re-wrap per width
 
+        # Context scroll state (mutable so draw and key sections share it)
+        ctx_scroll = [None]   # None → jump to bottom on first render
+
+        # Auto-add scroll hint when context present
+        _hint = ("↑↓/PgUp/Dn 翻看  " + hint) if ctx_lines else hint
+        prompt = f"〉{prompt_text} ({_hint}): "
+
         try:
             while True:
                 stdscr.clear()
@@ -176,20 +182,51 @@ def _readline(prompt_text="继续提问", hint="Enter=跳过  Ctrl+V=粘贴图�
                 #   ctx_rows         : divider  (if context)
                 #   input_row        : input line
                 #   input_row+1      : status
+                # Context-scroll bookkeeping (reset each draw; used by key handler below)
+                _ctx_max_scroll = 0
+                _ctx_page_rows = 1
+
                 if ctx_lines:
                     # Reserve bottom 2 rows for input+status; rest is context
                     ctx_rows = max(0, max_y - 2)
                     input_row = max_y - 2
                     # Re-wrap to current terminal width
                     wrapped = _wrap_lines(strip_markdown(context), max(10, max_w - 2))
-                    # Show the last ctx_rows-1 lines (tail), leaving row ctx_rows-1 for divider
-                    visible_ctx_rows = max(0, ctx_rows - 1)
-                    tail = wrapped[max(0, len(wrapped) - visible_ctx_rows):]
-                    for i, line in enumerate(tail):
+                    total_ctx = len(wrapped)
+                    visible_ctx_rows = max(1, ctx_rows - 1)  # -1 for divider row
+                    max_scroll = max(0, total_ctx - visible_ctx_rows)
+                    _ctx_max_scroll = max_scroll
+                    _ctx_page_rows = visible_ctx_rows
+
+                    # First render: jump to bottom so user sees the end of output
+                    if ctx_scroll[0] is None:
+                        ctx_scroll[0] = max_scroll
+                    ctx_scroll[0] = max(0, min(ctx_scroll[0], max_scroll))
+
+                    start = ctx_scroll[0]
+                    visible = wrapped[start:start + visible_ctx_rows]
+                    for i, line in enumerate(visible):
                         try:
                             stdscr.addstr(i, 1, line[:max_w - 2], curses.color_pair(2))
                         except curses.error:
                             pass
+
+                    # Scroll indicators (top-right / bottom-right)
+                    if ctx_scroll[0] > 0:
+                        ind = f" ↑{ctx_scroll[0]} "
+                        try:
+                            stdscr.addstr(0, max(0, max_w - len(ind) - 1), ind, curses.A_DIM)
+                        except curses.error:
+                            pass
+                    if ctx_scroll[0] < max_scroll:
+                        remaining = total_ctx - ctx_scroll[0] - visible_ctx_rows
+                        ind = f" ↓{remaining} "
+                        try:
+                            row_ind = max(0, visible_ctx_rows - 1)
+                            stdscr.addstr(row_ind, max(0, max_w - len(ind) - 1), ind, curses.A_DIM)
+                        except curses.error:
+                            pass
+
                     # Divider
                     try:
                         stdscr.addstr(ctx_rows - 1, 0, "─" * max_w, curses.A_DIM)
@@ -330,7 +367,19 @@ def _readline(prompt_text="继续提问", hint="Enter=跳过  Ctrl+V=粘贴图�
                         buf.insert(cur, key)
                         cur += 1
                 elif isinstance(key, int):
-                    if key == curses.KEY_LEFT:
+                    if key == curses.KEY_UP:
+                        if ctx_lines:
+                            ctx_scroll[0] = max(0, (ctx_scroll[0] or 0) - 1)
+                    elif key == curses.KEY_DOWN:
+                        if ctx_lines:
+                            ctx_scroll[0] = min(_ctx_max_scroll, (ctx_scroll[0] or 0) + 1)
+                    elif key == curses.KEY_PPAGE:
+                        if ctx_lines:
+                            ctx_scroll[0] = max(0, (ctx_scroll[0] or 0) - _ctx_page_rows)
+                    elif key == curses.KEY_NPAGE:
+                        if ctx_lines:
+                            ctx_scroll[0] = min(_ctx_max_scroll, (ctx_scroll[0] or 0) + _ctx_page_rows)
+                    elif key == curses.KEY_LEFT:
                         cur = max(0, cur - 1)
                     elif key == curses.KEY_RIGHT:
                         cur = min(len(buf), cur + 1)
