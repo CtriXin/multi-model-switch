@@ -25,6 +25,7 @@
   - 否则回退到原有模型源路径
 - `OAuth account` 路径当前不复用 provider 的 `/v1/models` 列表
 - `codex --account <id>` / `claude --account <id>` 默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
+- 如果同一个 CLI 同时有多个可用启动来源，MMS 会在启动前先让你选“账号档案”还是“模型源”
 
 ## 账号隔离方式
 
@@ -64,6 +65,30 @@
 ./mms codex --account <id>
 ./mms claude --provider default
 ```
+
+### 5. 交互式选择启动来源
+
+当某个 CLI 同时存在：
+
+- 一个或多个账号档案
+- 以及一个可用模型源
+
+直接执行：
+
+```bash
+./mms codex
+```
+
+或
+
+```bash
+./mms claude
+```
+
+会先弹出“启动来源”选择表，让你决定这次走：
+
+- 某个账号档案
+- 还是模型源
 
 ## 四象限 Todo
 
