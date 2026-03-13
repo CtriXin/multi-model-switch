@@ -112,6 +112,13 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config account.default <cli> <id>`：设置 `claude` / `codex` 默认账号
 - `mms config stats`：查看本地启动统计
 - `mms config api.edit`：编辑默认模型源的地址和凭据
+- `mms config connect`：打开统一接入向导
+
+现在也支持从主界面直接接入：
+
+- 进入 `mms` 后按 `O`
+- 选择 `添加网关通道` 或 `添加官方通道`
+- 完成后会自动回到主界面并刷新可用通道
 
 ## 多 OAuth 账号
 

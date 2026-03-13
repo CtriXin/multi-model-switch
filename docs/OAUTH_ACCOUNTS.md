@@ -14,6 +14,9 @@
   - `mms config account.default <cli> <id>`
 - 启动时支持 `--account <id>` 临时切换账号档案
 - 不托管 OAuth token 明文；账号隔离依赖每个账号独立的 `home_dir`
+- 已支持统一接入向导：
+  - `mms config connect`
+  - 主界面按 `O`
 
 ## 运行模型
 
@@ -44,6 +47,12 @@
 ```bash
 ./mms config account.add claude
 ./mms config account.list
+```
+
+也可以直接：
+
+```bash
+./mms config connect
 ```
 
 ### 2. 进入官方登录
@@ -107,7 +116,7 @@
 
 - 还没做“启动前交互选账号”，首轮先用 `account.default` + `--account`
 - 还没做自动配额切换
-- 还没把 OAuth 登录流程做成图形/向导化，仍然依赖官方 CLI 自己的登录命令
+- 已经有统一接入向导，但真正的登录动作仍然调用官方 CLI 自己的登录命令
 - OAuth 账号当前只做两类检查：
   - 登录态是否可用
   - 官方 CLI 是否能正常启动
