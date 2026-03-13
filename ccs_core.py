@@ -126,9 +126,9 @@ SCENES = {
         "cli": "kimi",
         "model": "kimi-k2.5",
     },
-    "英文主力": {
+    "文字产出": {
         "emoji": "🇺🇸",
-        "desc": "英文内容、海外业务",
+        "desc": "长文撰写、内容输出",
         "cli": "codex",
         "default_tier": "med",
         "variants": [
