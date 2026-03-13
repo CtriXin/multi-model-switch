@@ -110,6 +110,7 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config account.status [id]`：查看账号档案登录状态
 - `mms config account.login <id>`：进入该账号档案对应的官方登录流程
 - `mms config account.default <cli> <id>`：设置 `claude` / `codex` 默认账号
+- `mms config stats`：查看本地启动统计
 - `mms config api.edit`：编辑默认模型源的地址和凭据
 
 ## 多 OAuth 账号
@@ -134,6 +135,33 @@ MMS 现在开始支持 `claude` / `codex` 的多账号档案。
 - 不复用 provider 的 `/v1/models` 列表
 - `codex` / `claude` 走账号档案时，默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
 - 如果同一个 CLI 同时存在多个账号档案或模型源，TUI 会在选完场景后同屏展开“启动来源”列表
+
+## 元数据与本地统计
+
+`provider` / `account` 现在都支持这些手工元数据：
+
+- `priority`
+- `cost_level`
+- `daily_budget`
+- `note`
+
+同时，MMS 会把本地启动统计写到：
+
+```text
+~/.config/ccs/usage.json
+```
+
+当前记录的是软统计：
+
+- 启动次数
+- 最近使用时间
+- 最近模型
+
+它们适合做排序和推荐参考，但**不等于真实余额或官方剩余额度**。
+
+更完整的后续计划见：
+
+- [docs/USAGE_AND_QUOTA_PLAN.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/USAGE_AND_QUOTA_PLAN.md)
 
 最小试验：
 
