@@ -1,4 +1,4 @@
-"""MMS/CCS 启动器：按 provider 配置四个 CLI 的环境变量和命令行映射"""
+"""MMS/CCS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
 import os
 import sys
@@ -18,6 +18,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "qwen": "openai_chat_completions",
     "kimi": "openai_chat_completions",
 }
+OAUTH_CAPABLE_CLIS = {"claude", "codex"}
 
 
 def _provider_protocols(provider):
@@ -63,6 +64,36 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
 
 
+def _account_env(account):
+    env = os.environ.copy()
+    home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+    if not home_dir:
+        console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
+        sys.exit(1)
+    xdg_config_home = os.path.join(home_dir, ".config")
+    env["HOME"] = home_dir
+    env["XDG_CONFIG_HOME"] = xdg_config_home
+    env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
+    return env
+
+
+def validate_account_for_cli(cli, account):
+    account_id = account.get("id", "account")
+    account_cli = account.get("cli")
+    if cli not in OAUTH_CAPABLE_CLIS:
+        console.print(f"[red]{cli} 当前不支持 OAuth 账号档案[/red]")
+        sys.exit(1)
+    if not account.get("enabled", True):
+        console.print(f"[red]账号档案 '{account_id}' 已禁用[/red]")
+        sys.exit(1)
+    if account_cli and account_cli != cli:
+        console.print(f"[red]账号档案 '{account_id}' 绑定的是 {account_cli}，不能用于 {cli}[/red]")
+        sys.exit(1)
+    if not str(account.get("home_dir", "")).strip():
+        console.print(f"[red]账号档案 '{account_id}' 缺少 home_dir[/red]")
+        sys.exit(1)
+
+
 def _openai_base_url(provider):
     return f"{provider['base_url'].rstrip('/')}/v1"
 
@@ -74,14 +105,18 @@ def _resolve_model(model_info):
     return model_info.get("model", model_info.get("sonnet", ""))
 
 
-def launch_claude(model_info, provider, once=False):
-    """启动 Claude Code，通过环境变量配置"""
-    env = os.environ.copy()
-    base_url = provider["base_url"]
-    api_key = provider["api_key"]
+def launch_claude(model_info, runtime, once=False):
+    """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode == "oauth":
+        env = _account_env(runtime)
+    else:
+        env = os.environ.copy()
+        base_url = runtime["base_url"]
+        api_key = runtime["api_key"]
+        env["ANTHROPIC_BASE_URL"] = base_url
+        env["ANTHROPIC_AUTH_TOKEN"] = api_key
 
-    env["ANTHROPIC_BASE_URL"] = base_url
-    env["ANTHROPIC_AUTH_TOKEN"] = api_key
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["API_TIMEOUT_MS"] = "3000000"
 
@@ -116,12 +151,16 @@ def launch_claude(model_info, provider, once=False):
     _exec_or_run(cmd, env, once)
 
 
-def launch_codex(model_info, provider, once=False):
-    """启动 Codex，通过环境变量 + -m flag"""
-    env = os.environ.copy()
-    api_key = provider["api_key"]
-    env["OPENAI_API_KEY"] = api_key
-    env["OPENAI_BASE_URL"] = _openai_base_url(provider)
+def launch_codex(model_info, runtime, once=False):
+    """启动 Codex，支持 provider 和 OAuth 账号档案两种模式。"""
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode == "oauth":
+        env = _account_env(runtime)
+    else:
+        env = os.environ.copy()
+        api_key = runtime["api_key"]
+        env["OPENAI_API_KEY"] = api_key
+        env["OPENAI_BASE_URL"] = _openai_base_url(runtime)
 
     model = _resolve_model(model_info)
     cmd = ["codex"]
@@ -187,11 +226,15 @@ LAUNCHERS = {
 }
 
 
-def get_export_env(cli, provider):
+def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
-    validate_provider_for_cli(cli, provider)
-    base_url = provider["base_url"]
-    api_key = provider["api_key"]
+    if runtime.get("auth_mode") == "oauth":
+        validate_account_for_cli(cli, runtime)
+        return {}
+
+    validate_provider_for_cli(cli, runtime)
+    base_url = runtime["base_url"]
+    api_key = runtime["api_key"]
     exports = {}
     if cli == "claude":
         exports["ANTHROPIC_BASE_URL"] = base_url
@@ -200,30 +243,38 @@ def get_export_env(cli, provider):
         exports["API_TIMEOUT_MS"] = "3000000"
     elif cli == "codex":
         exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _openai_base_url(provider)
+        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     elif cli == "kimi":
         exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _openai_base_url(provider)
+        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     return exports
 
 
-def launch_cli(cli, model_info, provider, once=False):
+def launch_cli(cli, model_info, runtime, once=False):
     """统一启动入口"""
     launcher = LAUNCHERS.get(cli)
     if not launcher:
         console.print(f"[red]不支持的 CLI: {cli}[/red]")
         sys.exit(1)
-    validate_provider_for_cli(cli, provider)
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode == "oauth":
+        validate_account_for_cli(cli, runtime)
+        source_label = runtime.get("name", runtime.get("id", "account"))
+        source_kind = "账号档案"
+    else:
+        validate_provider_for_cli(cli, runtime)
+        source_label = runtime.get("name", runtime.get("id", "provider"))
+        source_kind = "模型源"
 
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))
-    provider_label = provider.get("name", provider.get("id", "provider"))
 
     console.print(f"\n[bold green]🚀 启动 {cli}[/bold green] — {model_display}")
-    console.print(f"[dim]provider: {provider_label} ({provider.get('id', 'default')})[/dim]")
+    console.print(f"[dim]{source_kind}: {source_label} ({runtime.get('id', 'default')})[/dim]")
+    console.print(f"[dim]认证方式: {auth_mode}[/dim]")
     console.print("[dim]─" * 40 + "[/dim]\n")
 
-    launcher(model_info, provider, once=once)
+    launcher(model_info, runtime, once=once)
 
 
 def _write_runtime_config(prefix, content):
