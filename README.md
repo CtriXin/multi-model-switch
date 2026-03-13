@@ -34,6 +34,7 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 - `providers` 配置骨架，兼容旧的单网关用法
 - 中文模型模式：`全部模型` / `推荐模型`
 - 模型校验失败时的“发现后处理”交互层
+- `qwen` / `kimi` 场景改为单默认模型，不再展示大杯中杯
 
 后续版本会继续补上：
 
@@ -107,6 +108,22 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
   - 跳过校验并继续
 
 “跳过校验并继续”只影响当前启动流程，不会自动改写你的配置；但在这次运行里，模型浏览列表会暂时不可用。
+
+## CLI 可见性
+
+MMS 启动时会先读取已配置 provider，并用可拉取到的模型列表做一次轻量筛选。
+
+- `qwen`：只有当 provider 里确实存在 `qwen*` 模型时才显示
+- `kimi`：只有当 provider 里确实存在 `kimi*` 模型时才显示
+- `claude` / `codex`：仍按 provider 的 `supported_clis` 决定是否显示
+
+这层筛选只影响 CLI 入口可见性，不会限制你在 `qwen` / `kimi` CLI 里切换同一 provider 提供的其他模型。
+
+## Codex 说明
+
+`codex` 当前按它自己的 CLI 能力启动：使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL`，再通过 `-m/--model` 指定单个模型。
+
+它没有类似 Claude Code 的多 slot 默认模型环境变量机制，所以这里不会伪装成 `opus / sonnet / haiku` 那种多模型注入。
 
 ## 现在能做什么
 
