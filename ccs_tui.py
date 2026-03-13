@@ -147,7 +147,7 @@ def _default_variant_index(scene):
     return 0
 
 
-def select_scene_tui(scenes, cli_names):
+def select_scene_tui(scenes, cli_names, source_choices=None):
     """主 TUI：左右切 CLI tab，上下选场景，Enter 确认，Q 退出"""
 
     def _inner(stdscr):
@@ -171,11 +171,19 @@ def select_scene_tui(scenes, cli_names):
         scene_idx = 0
         variant_idx = 0
         variant_scene_name = None
+        source_idx = 0
+        source_scene_name = None
+        source_cli_name = None
+        source_model_info = None
+        source_back_mode = None
 
         while True:
             stdscr.clear()
             max_y, max_w = stdscr.getmaxyx()
             cli = cli_names[cli_idx]
+            source_config = (source_choices or {}).get(cli, {})
+            available_sources = source_config.get("options", [])
+            default_source_idx = source_config.get("default_index", 0) or 0
 
             sorted_scenes = _sort_scenes_for_cli(scenes, cli)
             direct_cli_item = DIRECT_CLI_ITEMS.get(cli)
@@ -183,8 +191,11 @@ def select_scene_tui(scenes, cli_names):
             forced_variant_scene = _auto_variant_scene_for_cli(scenes, cli)
             active_variant_scene = variant_scene_name or forced_variant_scene
             in_variant_mode = active_variant_scene is not None
+            in_source_mode = source_scene_name is not None
             if direct_cli_item:
                 list_count = 3
+            elif in_source_mode:
+                list_count = max(1, len(available_sources))
             elif auto_default_scene:
                 list_count = 1
             elif not in_variant_mode:
@@ -245,6 +256,21 @@ def select_scene_tui(scenes, cli_names):
                     (direct_cli_item["primary"], True),
                     (f"  {direct_cli_item['secondary']}", False),
                 ]
+                extra_line = None
+            elif in_source_mode:
+                title_name = source_scene_name if source_scene_name is not None else "自定义"
+                title = f"为 {title_name} 选择启动来源"
+                _center_text(stdscr, list_y - 1, cx, title, curses.color_pair(5) | curses.A_BOLD)
+                if source_idx >= len(available_sources):
+                    source_idx = default_source_idx if available_sources else 0
+                item_lines = []
+                for i, source in enumerate(available_sources):
+                    marker = "▸ " if i == source_idx else "  "
+                    desc = source.get("desc", "")
+                    line = f"{marker}{source.get('icon', '•')} {source.get('title', '')}"
+                    if desc:
+                        line = f"{line}  {desc}"
+                    item_lines.append((line, i == source_idx))
                 extra_line = None
             elif auto_default_scene:
                 scene = scenes[auto_default_scene]
@@ -316,6 +342,8 @@ def select_scene_tui(scenes, cli_names):
                 footer = " ← → 切换    Enter 直达    Q 退出 "
             elif auto_default_scene:
                 footer += "   Q 退出 "
+            elif in_source_mode:
+                footer = " ← → 切换    ↑ ↓ 来源    Enter 确认    Esc 返回    Q 退出 "
             elif in_variant_mode and not forced_variant_scene:
                 footer = " ← → 切换    ↑ ↓ 选择    Enter 确认 "
                 footer += "   Esc 返回    Q 退出 "
@@ -335,6 +363,11 @@ def select_scene_tui(scenes, cli_names):
                 auto_scene = _auto_variant_scene_for_cli(scenes, next_cli)
                 variant_idx = 0 if auto_default_scene else (_default_variant_index(scenes[auto_scene]) if auto_scene else 0)
                 variant_scene_name = None
+                source_idx = 0
+                source_scene_name = None
+                source_cli_name = None
+                source_model_info = None
+                source_back_mode = None
             elif key == curses.KEY_RIGHT:
                 cli_idx = (cli_idx + 1) % len(cli_names)
                 scene_idx = 0
@@ -343,29 +376,59 @@ def select_scene_tui(scenes, cli_names):
                 auto_scene = _auto_variant_scene_for_cli(scenes, next_cli)
                 variant_idx = 0 if auto_default_scene else (_default_variant_index(scenes[auto_scene]) if auto_scene else 0)
                 variant_scene_name = None
+                source_idx = 0
+                source_scene_name = None
+                source_cli_name = None
+                source_model_info = None
+                source_back_mode = None
             elif key == curses.KEY_UP and not auto_default_scene and not direct_cli_item:
-                if in_variant_mode:
+                if in_source_mode:
+                    source_idx = (source_idx - 1) % max(1, len(available_sources))
+                elif in_variant_mode:
                     variant_idx = (variant_idx - 1) % len(variants)
                 else:
                     scene_idx = (scene_idx - 1) % scene_count
             elif key == curses.KEY_DOWN and not auto_default_scene and not direct_cli_item:
-                if in_variant_mode:
+                if in_source_mode:
+                    source_idx = (source_idx + 1) % max(1, len(available_sources))
+                elif in_variant_mode:
                     variant_idx = (variant_idx + 1) % len(variants)
                 else:
                     scene_idx = (scene_idx + 1) % scene_count
             elif key in (10, 13, curses.KEY_ENTER):
                 if direct_cli_item:
                     scene_name = "__direct_qwen__" if cli == "qwen" else "__direct_kimi__"
-                    return (scene_name, cli, None)
+                    return (scene_name, cli, None, None)
                 if auto_default_scene:
                     scene = scenes[auto_default_scene]
                     chosen = scene["variants"][_default_variant_index(scene)]
-                    return (auto_default_scene, cli, dict(chosen.get("model_info", {})))
+                    return (auto_default_scene, cli, dict(chosen.get("model_info", {})), None)
+                if in_source_mode:
+                    selected_source = available_sources[source_idx] if available_sources else None
+                    return (source_scene_name, source_cli_name, source_model_info, selected_source)
                 if in_variant_mode:
                     chosen = variants[variant_idx]
-                    return (active_variant_scene, cli, dict(chosen.get("model_info", {})))
+                    scene_name = active_variant_scene
+                    model_info = dict(chosen.get("model_info", {}))
+                    if len(available_sources) > 1:
+                        source_scene_name = scene_name
+                        source_cli_name = cli
+                        source_model_info = model_info
+                        source_back_mode = "variant"
+                        source_idx = default_source_idx
+                        continue
+                    selected_source = available_sources[0] if len(available_sources) == 1 else None
+                    return (scene_name, cli, model_info, selected_source)
                 if scene_idx == custom_idx:
-                    return (None, cli, None)
+                    if len(available_sources) > 1:
+                        source_scene_name = None
+                        source_cli_name = cli
+                        source_model_info = None
+                        source_back_mode = "scene"
+                        source_idx = default_source_idx
+                        continue
+                    selected_source = available_sources[0] if len(available_sources) == 1 else None
+                    return (None, cli, None, selected_source)
                 scene_name = sorted_scenes[scene_idx]
                 info = scenes[scene_name]
                 if info.get("variants"):
@@ -374,7 +437,24 @@ def select_scene_tui(scenes, cli_names):
                     continue
                 model_info = {k: v for k, v in info.items()
                               if k not in ("emoji", "desc", "cli", "variants")}
-                return (scene_name, cli, model_info)
+                if len(available_sources) > 1:
+                    source_scene_name = scene_name
+                    source_cli_name = cli
+                    source_model_info = model_info
+                    source_back_mode = "scene"
+                    source_idx = default_source_idx
+                    continue
+                selected_source = available_sources[0] if len(available_sources) == 1 else None
+                return (scene_name, cli, model_info, selected_source)
+            elif key == 27 and in_source_mode:
+                source_scene_name = None
+                source_cli_name = None
+                source_model_info = None
+                source_idx = 0
+                if source_back_mode == "scene":
+                    variant_scene_name = None
+                    variant_idx = 0
+                source_back_mode = None
             elif key == 27 and in_variant_mode and not forced_variant_scene:
                 variant_scene_name = None
                 variant_idx = 0
