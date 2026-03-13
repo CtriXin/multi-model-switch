@@ -51,20 +51,10 @@ def _sort_scenes_for_cli(scenes, cli_name):
 
 
 def _auto_variant_scene_for_cli(scenes, cli_name):
-    if cli_name != "codex":
-        return None
-    for name, info in scenes.items():
-        if info.get("cli") == cli_name and info.get("variants"):
-            return name
     return None
 
 
 def _auto_default_scene_for_cli(scenes, cli_name):
-    if cli_name not in ("qwen", "kimi"):
-        return None
-    for name, info in scenes.items():
-        if info.get("cli") == cli_name and info.get("variants"):
-            return name
     return None
 
 

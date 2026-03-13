@@ -974,7 +974,6 @@ def _model_matches_cli_family(cli_name, model_name):
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
     supported = {name: False for name in CLI_NAMES}
-    family_probeable = {name: False for name in CLI_MODEL_FAMILY_HINTS}
     family_found = {name: False for name in CLI_MODEL_FAMILY_HINTS}
 
     for provider_def in cfg.get("providers", []):
@@ -1002,18 +1001,25 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
             continue
 
         for cli_name in family_targets:
-            family_probeable[cli_name] = True
             if any(_model_matches_cli_family(cli_name, model_name) for model_name in models):
                 family_found[cli_name] = True
 
     for cli_name in CLI_NAMES:
         if not supported.get(cli_name):
             continue
-        if cli_name in CLI_MODEL_FAMILY_HINTS and family_probeable[cli_name] and not family_found[cli_name]:
+        if cli_name in CLI_MODEL_FAMILY_HINTS and not family_found[cli_name]:
             continue
         visible.append(cli_name)
 
-    return visible or list(CLI_NAMES)
+    return visible
+
+
+def _filter_scenes_by_visible_clis(cli_names):
+    visible = set(cli_names)
+    return {
+        name: scene for name, scene in SCENES.items()
+        if scene.get("cli") in visible
+    }
 
 
 def select_model_interactive(models_list):
@@ -1080,11 +1086,11 @@ def _select_scene_model_info(scene_name, scene, use_tui=False):
 
 # ── Scene Selection (fallback for non-TTY) ─────────────
 
-def show_scenes():
-    scene_list = list(SCENES.keys())
+def show_scenes(scenes):
+    scene_list = list(scenes.keys())
     lines = []
     for i, name in enumerate(scene_list, 1):
-        s = SCENES[name]
+        s = scenes[name]
         lines.append(f"  {i}. {s['emoji']} {name}  {s['desc']}")
     lines.append("  ─" * 20)
     lines.append(f"  {len(scene_list) + 1}. 🔧 自定义    手动选 CLI + 模型")
@@ -1093,9 +1099,9 @@ def show_scenes():
     return scene_list
 
 
-def select_scene_fallback():
+def select_scene_fallback(scenes):
     """非 TTY 环境的 fallback：数字选择"""
-    scene_list = show_scenes()
+    scene_list = show_scenes(scenes)
     total = len(scene_list) + 1
     while True:
         try:
@@ -1197,13 +1203,13 @@ def _use_tui():
         return False
 
 
-def _handle_tui_scene_selection(cfg, provider, once, cli_names):
+def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names):
     """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
     from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
     from ccs_launchers import launch_cli, get_export_env
 
     while True:
-        result = select_scene_tui(SCENES, cli_names)
+        result = select_scene_tui(scenes, cli_names)
 
         # curses 失败，fallback
         if result == "fallback":
@@ -1549,6 +1555,7 @@ def main():
 
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
     visible_clis = _resolve_visible_clis(cfg, default_provider, models_cache)
+    visible_scenes = _filter_scenes_by_visible_clis(visible_clis)
 
     # --list
     if args.list:
@@ -1581,12 +1588,12 @@ def main():
 
     if target:
         # Is it a scene number?
-        scene_list = list(SCENES.keys())
+        scene_list = list(visible_scenes.keys())
         try:
             idx = int(target)
             if 1 <= idx <= len(scene_list):
                 scene_name = scene_list[idx - 1]
-                scene = SCENES[scene_name]
+                scene = visible_scenes[scene_name]
                 cli = scene["cli"]
                 model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
                 if not check_cli_installed(cli):
@@ -1645,13 +1652,13 @@ def main():
 
     # Default: TUI scene selection (with fallback)
     if _use_tui():
-        handled = _handle_tui_scene_selection(cfg, default_provider, once, visible_clis)
+        handled = _handle_tui_scene_selection(cfg, visible_scenes, default_provider, once, visible_clis)
         if handled:
             return
         # fallback if curses failed
 
     # Fallback: number-based selection
-    scene_name = select_scene_fallback()
+    scene_name = select_scene_fallback(visible_scenes)
 
     if scene_name is None:
         # Custom mode
@@ -1668,7 +1675,7 @@ def main():
         launch_cli(cli, {"model": model}, default_provider, once=once)
         return
 
-    scene = SCENES[scene_name]
+    scene = visible_scenes[scene_name]
     cli = scene["cli"]
     model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
 
