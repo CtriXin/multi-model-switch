@@ -1119,6 +1119,13 @@ def _usage_rows_for_runtime(runtime_kind, runtime_id):
     return rows
 
 
+def _usage_summary_for_runtime(runtime_kind, runtime_id):
+    rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
+    launches = sum(int(item.get("launches", 0)) for item in rows)
+    last_used_at = rows[0].get("last_used_at", "") if rows else ""
+    return launches, last_used_at
+
+
 def _display_runtime_usage(runtime_kind, runtime_id, title):
     rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
     if not rows:
@@ -1153,11 +1160,17 @@ def _list_manage_targets(cfg):
         provider_id = str(provider.get("id", "")).strip()
         if not provider_id:
             continue
+        provider_ctx = resolve_provider_context(cfg, provider_id)
+        launches, last_used_at = _usage_summary_for_runtime("provider", provider_id)
         targets.append({
             "kind": "provider",
             "id": provider_id,
             "title": provider.get("name", provider_id),
             "summary": "默认网关通道" if provider_id == default_provider_id else "网关通道",
+            "is_default": provider_id == default_provider_id,
+            "status": "已配置" if provider_ctx.get("base_url") and provider_ctx.get("api_key") else "未配置",
+            "launches": launches,
+            "last_used_at": last_used_at,
         })
 
     for account in cfg.get("accounts", []):
@@ -1167,6 +1180,8 @@ def _list_manage_targets(cfg):
         if not account_id:
             continue
         cli_name = str(account.get("cli", "")).strip()
+        launches, last_used_at = _usage_summary_for_runtime("account", account_id)
+        login_state = _probe_account_status(account)
         default_tag = " / 默认" if account_defaults.get(cli_name) == account_id else ""
         targets.append({
             "kind": "account",
@@ -1174,7 +1189,20 @@ def _list_manage_targets(cfg):
             "cli": cli_name,
             "title": account.get("name", account_id),
             "summary": f"官方通道 · {cli_name.upper()}{default_tag}",
+            "is_default": account_defaults.get(cli_name) == account_id,
+            "status": login_state.get("summary") or login_state.get("state", ""),
+            "launches": launches,
+            "last_used_at": last_used_at,
         })
+    targets.sort(
+        key=lambda item: (
+            0 if item.get("is_default") else 1,
+            0 if item.get("kind") == "account" else 1,
+            -int(item.get("launches", 0)),
+            item.get("last_used_at", ""),
+            item.get("title", ""),
+        )
+    )
     return targets
 
 
@@ -1184,15 +1212,36 @@ def _select_manage_target(cfg):
         console.print("[yellow]当前还没有可管理的通道[/yellow]")
         return None
 
-    table = Table(title="管理现有通道", show_lines=True)
+    provider_count = sum(1 for item in targets if item.get("kind") == "provider")
+    account_count = sum(1 for item in targets if item.get("kind") == "account")
+    console.print(Panel(
+        f"[bold]网关通道:[/bold] {provider_count} 个    "
+        f"[bold]官方通道:[/bold] {account_count} 个\n"
+        f"[dim]这里展示的是概览；本地统计可直接帮助你判断最近常用通道。[/dim]",
+        title="管理现有通道",
+        border_style="cyan",
+    ))
+    table = Table(show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("类型", style="green")
     table.add_column("名称", style="yellow")
-    table.add_column("说明", style="magenta")
+    table.add_column("默认", style="white", width=6)
+    table.add_column("状态", style="magenta")
+    table.add_column("启动", style="cyan", width=6)
+    table.add_column("最近使用", style="white")
     for index, target in enumerate(targets, 1):
         target_type = "官方" if target.get("kind") == "account" else "网关"
-        table.add_row(str(index), target_type, target.get("title", ""), target.get("summary", ""))
+        table.add_row(
+            str(index),
+            target_type,
+            target.get("title", ""),
+            "默认" if target.get("is_default") else "",
+            target.get("status", ""),
+            str(target.get("launches", 0)),
+            target.get("last_used_at", "") or "未使用",
+        )
     console.print(table)
+    console.print("[dim]进入后可继续查看本地统计、设默认、重新登录或删除。官方真实用量暂不支持统一查询。[/dim]")
 
     while True:
         raw = Prompt.ask("选择要管理的通道，直接回车返回", default="")
