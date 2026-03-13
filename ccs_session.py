@@ -105,20 +105,63 @@ def advance_round(session, selected_model, brief, display_text, round_models=Non
     return session
 
 
+_BUDGET_FULL = 3000     # chars; below this → full tier
+_BUDGET_COMPACT = 6000  # chars; below this → compact tier; above → minimal
+
+
+def _estimate_chars(parts: list[str]) -> int:
+    return sum(len(p) for p in parts) + len(parts) * 2  # separator overhead
+
+
 def build_continuation_prompt(session, new_question):
-    """Assemble a state-first continuation prompt. Token count is bounded."""
-    parts = [f"## 任务目标\n{session['task']['goal']}"]
+    """Assemble a state-first continuation prompt with token-governor tiers.
 
-    if session["task"]["invariants"]:
-        parts.append("## 不可忽略的约束\n" + "\n".join(f"- {c}" for c in session["task"]["invariants"]))
+    Tiers (estimated chars, ~4 chars per token):
+      full    (<3000): task + invariants + full brief JSON + last 5 decisions + question
+      compact (3000-6000): task + approach+next_step only + last 3 decisions + question
+      minimal (>6000): task + next_step hint only + question
+    """
+    task = session["task"]["goal"]
+    invariants = session["task"]["invariants"]
+    brief = session["branch"]["brief"] or {}
+    log = session["decision_log"]
 
-    if session["branch"]["brief"]:
-        parts.append("## 当前方向\n" + json.dumps(session["branch"]["brief"], ensure_ascii=False))
+    # ── full tier attempt ──
+    parts = [f"## 任务目标\n{task}"]
+    if invariants:
+        parts.append("## 不可忽略的约束\n" + "\n".join(f"- {c}" for c in invariants))
+    if brief:
+        parts.append("## 当前方向\n" + json.dumps(brief, ensure_ascii=False))
+    recent = log[-5:]
+    if recent:
+        parts.append("## 已做决策\n" + "\n".join(f"- R{d['round']}: {d['reason']}" for d in recent))
+    parts.append(f"## 新问题\n{new_question}")
 
-    recent_log = session["decision_log"][-3:]
-    if recent_log:
-        parts.append("## 已做决策\n" + "\n".join(f"- R{d['round']}: {d['reason']}" for d in recent_log))
+    if _estimate_chars(parts) <= _BUDGET_FULL:
+        return "\n\n".join(parts)
 
+    # ── compact tier ──
+    compact_brief = {}
+    if brief.get("approach"):
+        compact_brief["approach"] = brief["approach"]
+    if brief.get("next_step"):
+        compact_brief["next_step"] = brief["next_step"]
+
+    parts = [f"## 任务目标\n{task}"]
+    if compact_brief:
+        parts.append("## 当前方向\n" + json.dumps(compact_brief, ensure_ascii=False))
+    recent3 = log[-3:]
+    if recent3:
+        parts.append("## 已做决策\n" + "\n".join(f"- R{d['round']}: {d['reason']}" for d in recent3))
+    parts.append(f"## 新问题\n{new_question}")
+
+    if _estimate_chars(parts) <= _BUDGET_COMPACT:
+        return "\n\n".join(parts)
+
+    # ── minimal tier ──
+    parts = [f"## 任务目标\n{task}"]
+    if brief.get("next_step"):
+        parts.append(f"## 当前下一步\n{brief['next_step']}")
     parts.append(f"## 新问题\n{new_question}")
     return "\n\n".join(parts)
 
