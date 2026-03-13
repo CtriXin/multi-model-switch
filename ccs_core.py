@@ -1096,6 +1096,202 @@ def _quick_connect_official(cfg, preset_cli=None):
     return load_config(), True
 
 
+def _usage_rows_for_runtime(runtime_kind, runtime_id):
+    stats = _load_usage_stats()
+    rows = []
+    for item in stats.get("sources", {}).values():
+        if item.get("runtime_kind") == runtime_kind and item.get("id") == runtime_id:
+            rows.append(item)
+    rows.sort(key=lambda item: (item.get("last_used_at", ""), item.get("launches", 0)), reverse=True)
+    return rows
+
+
+def _display_runtime_usage(runtime_kind, runtime_id, title):
+    rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
+    if not rows:
+        console.print(f"[yellow]{title} 还没有本地启动统计[/yellow]")
+        console.print(f"[dim]统计文件: {USAGE_PATH}[/dim]")
+        return
+
+    table = Table(title=f"{title} · 本地统计", show_lines=True)
+    table.add_column("CLI", style="cyan")
+    table.add_column("启动次数", style="green")
+    table.add_column("最近模型", style="yellow")
+    table.add_column("最近使用", style="magenta")
+    for item in rows:
+        table.add_row(
+            str(item.get("cli", "")),
+            str(item.get("launches", 0)),
+            str(item.get("last_model", "")),
+            str(item.get("last_used_at", "")),
+        )
+    console.print(table)
+    console.print("[dim]这里只是本地启动统计，不代表官方真实余额或剩余额度。[/dim]")
+
+
+def _list_manage_targets(cfg):
+    targets = []
+    default_provider_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
+    account_defaults = cfg.get("account", {}).get("defaults", {})
+
+    for provider in cfg.get("providers", []):
+        if not isinstance(provider, dict):
+            continue
+        provider_id = str(provider.get("id", "")).strip()
+        if not provider_id:
+            continue
+        targets.append({
+            "kind": "provider",
+            "id": provider_id,
+            "title": provider.get("name", provider_id),
+            "summary": "默认网关通道" if provider_id == default_provider_id else "网关通道",
+        })
+
+    for account in cfg.get("accounts", []):
+        if not isinstance(account, dict):
+            continue
+        account_id = str(account.get("id", "")).strip()
+        if not account_id:
+            continue
+        cli_name = str(account.get("cli", "")).strip()
+        default_tag = " / 默认" if account_defaults.get(cli_name) == account_id else ""
+        targets.append({
+            "kind": "account",
+            "id": account_id,
+            "cli": cli_name,
+            "title": account.get("name", account_id),
+            "summary": f"官方通道 · {cli_name.upper()}{default_tag}",
+        })
+    return targets
+
+
+def _select_manage_target(cfg):
+    targets = _list_manage_targets(cfg)
+    if not targets:
+        console.print("[yellow]当前还没有可管理的通道[/yellow]")
+        return None
+
+    table = Table(title="管理现有通道", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("类型", style="green")
+    table.add_column("名称", style="yellow")
+    table.add_column("说明", style="magenta")
+    for index, target in enumerate(targets, 1):
+        target_type = "官方" if target.get("kind") == "account" else "网关"
+        table.add_row(str(index), target_type, target.get("title", ""), target.get("summary", ""))
+    console.print(table)
+
+    while True:
+        raw = Prompt.ask("选择要管理的通道，直接回车返回", default="")
+        if not raw:
+            return None
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(targets):
+                return targets[idx - 1]
+        console.print(f"[red]请输入 1-{len(targets)} 的编号[/red]")
+
+
+def _manage_provider_target(cfg, provider_id):
+    provider = resolve_provider_context(cfg, provider_id)
+    while True:
+        default_tag = "是" if cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID) == provider_id else "否"
+        console.print(Panel(
+            f"[bold]网关通道[/bold]  {provider.get('name', provider_id)}\n"
+            f"[bold]内部标识:[/bold]  {provider_id}\n"
+            f"[bold]默认通道:[/bold]  {default_tag}\n"
+            f"[bold]地址:[/bold]      {provider.get('base_url') or '(未设置)'}\n"
+            f"[bold]协议:[/bold]      {', '.join(provider.get('protocols', []))}\n"
+            f"[bold]CLI:[/bold]       {', '.join(provider.get('supported_clis', []))}",
+            title="通道详情",
+            border_style="cyan",
+        ))
+        console.print("  1. 查看本地统计")
+        console.print("  2. 设为默认网关")
+        console.print("  3. 编辑地址和 Key")
+        console.print("  4. 删除这个通道")
+        console.print("  5. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5"], default="5")
+        if choice == "1":
+            _display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
+            continue
+        if choice == "2":
+            cfg.setdefault("provider", {})["default"] = provider_id
+            save_config(cfg)
+            console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
+            return load_config(), True
+        if choice == "3":
+            _handle_provider_credentials_config(cfg, [provider_id])
+            return load_config(), True
+        if choice == "4":
+            before = set(_provider_map(cfg).keys())
+            _handle_provider_remove_config(cfg, [provider_id])
+            after_cfg = load_config()
+            return after_cfg, set(_provider_map(after_cfg).keys()) != before
+        return cfg, False
+
+
+def _manage_account_target(cfg, account_id):
+    account = resolve_account_context(cfg, account_id=account_id)
+    while True:
+        login_state = _probe_account_status(account)
+        default_tag = "是" if cfg.get("account", {}).get("defaults", {}).get(account.get("cli")) == account_id else "否"
+        console.print(Panel(
+            f"[bold]官方通道[/bold]  {account.get('name', account_id)}\n"
+            f"[bold]账号标识:[/bold]  {account_id}\n"
+            f"[bold]执行器:[/bold]    {account.get('cli', '').upper()}\n"
+            f"[bold]默认通道:[/bold]  {default_tag}\n"
+            f"[bold]登录状态:[/bold]  {login_state.get('summary') or login_state.get('state', '')}\n"
+            f"[bold]登录目录:[/bold]  {account.get('home_dir', '')}\n"
+            f"[dim]官方真实用量暂不支持统一查询；这里只能查看本地统计。[/dim]",
+            title="通道详情",
+            border_style="cyan",
+        ))
+        console.print("  1. 查看本地统计")
+        console.print("  2. 重新登录")
+        console.print("  3. 设为默认官方通道")
+        console.print("  4. 编辑这个通道")
+        console.print("  5. 删除这个通道")
+        console.print("  6. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6"], default="6")
+        if choice == "1":
+            _display_runtime_usage("account", account_id, account.get("name", account_id))
+            continue
+        if choice == "2":
+            _run_account_login(account)
+            return load_config(), True
+        if choice == "3":
+            cfg.setdefault("account", {}).setdefault("defaults", {})
+            cfg["account"]["defaults"][account.get("cli")] = account_id
+            save_config(cfg)
+            console.print(f"[green]✓ {account.get('cli')} 默认官方通道已更新为 {account_id}[/green]")
+            return load_config(), True
+        if choice == "4":
+            _handle_account_edit_config(cfg, [account_id])
+            return load_config(), True
+        if choice == "5":
+            before = set(_account_map(cfg).keys())
+            _handle_account_remove_config(cfg, [account_id])
+            after_cfg = load_config()
+            return after_cfg, set(_account_map(after_cfg).keys()) != before
+        return cfg, False
+
+
+def run_manage_channels(cfg):
+    _ensure_interactive_terminal("通道管理")
+    changed = False
+    current_cfg = cfg
+    while True:
+        target = _select_manage_target(current_cfg)
+        if target is None:
+            return current_cfg, changed
+        if target.get("kind") == "provider":
+            current_cfg, did_change = _manage_provider_target(current_cfg, target["id"])
+        else:
+            current_cfg, did_change = _manage_account_target(current_cfg, target["id"])
+        changed = changed or did_change
+
+
 def run_connect_wizard(cfg):
     _ensure_interactive_terminal("新通道接入")
     action_id = None
@@ -1112,14 +1308,17 @@ def run_connect_wizard(cfg):
         console.print("\n[bold]接入新通道[/bold]")
         console.print("  1. 添加网关通道")
         console.print("  2. 添加官方通道")
-        console.print("  3. 返回")
-        action_id = Prompt.ask("选择操作", choices=["1", "2", "3"], default="1")
-        action_id = {"1": "connect_gateway", "2": "connect_official", "3": "cancel"}[action_id]
+        console.print("  3. 管理现有通道")
+        console.print("  4. 返回")
+        action_id = Prompt.ask("选择操作", choices=["1", "2", "3", "4"], default="1")
+        action_id = {"1": "connect_gateway", "2": "connect_official", "3": "manage_channels", "4": "cancel"}[action_id]
 
     if action_id == "connect_gateway":
         return _quick_connect_gateway(cfg)
     if action_id == "connect_official":
         return _quick_connect_official(cfg)
+    if action_id == "manage_channels":
+        return run_manage_channels(cfg)
     console.print("[yellow]已取消接入[/yellow]")
     return cfg, False
 
