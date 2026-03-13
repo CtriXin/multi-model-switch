@@ -94,6 +94,10 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config provider.list`：查看当前 provider 列表
 - `mms config provider.default`：查看默认 provider
 - `mms config provider.default <id>`：切换默认 provider
+- `mms config provider.add [id]`：新增 provider 元数据
+- `mms config provider.edit <id>`：编辑 provider 元数据
+- `mms config provider.remove <id>`：删除 provider 和本地凭据
+- `mms config provider.credentials [id]`：编辑指定 provider 的地址和 Key
 - `mms config api.edit`：编辑默认 provider 的地址和凭据
 
 ## 失败恢复交互
