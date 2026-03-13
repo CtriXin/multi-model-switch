@@ -549,6 +549,8 @@ def parse_chat_args(argv):
         description=f"{display_title()} chat — 多模型并发对比",
     )
     parser.add_argument("--provider", help="临时使用指定模型源")
+    parser.add_argument("--resume", metavar="SESSION_ID", help="恢复已保存的 session")
+    parser.add_argument("--list-sessions", action="store_true", help="列出最近保存的 sessions")
     parser.add_argument("prompt", nargs="*", help="聊天任务")
     return parser.parse_args(argv)
 
@@ -588,31 +590,73 @@ def chat_main(cfg, argv):
         sys.exit(1)
 
     args = parse_chat_args(argv)
+
+    if args.list_sessions:
+        from ccs_session import list_sessions
+        sessions = list_sessions(limit=10)
+        if not sessions:
+            console.print("[dim]暂无保存的 session[/dim]")
+            return
+        from rich.table import Table
+        t = Table(title="最近保存的 Sessions")
+        t.add_column("ID", style="cyan", width=14)
+        t.add_column("模式", width=6)
+        t.add_column("轮次", width=4)
+        t.add_column("目标", style="green")
+        import datetime
+        for s in sessions:
+            ts = datetime.datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
+            t.add_row(s["id"], s["mode"], str(s["round"]), f"{s['goal']}  [dim]{ts}[/dim]")
+        console.print(t)
+        return
+
     provider_ctx = ensure_provider_credentials(cfg, args.provider)
+
+    resumed_session = None
+    if args.resume:
+        from ccs_session import load_session
+        resumed_session = load_session(args.resume)
+        if resumed_session is None:
+            console.print(f"[red]找不到 session: {args.resume}[/red]")
+            return
+        console.print(f"[cyan]恢复 session {args.resume}[/cyan]  "
+                      f"[dim]轮次 {resumed_session['round']}，目标: {resumed_session['task']['goal'][:60]}[/dim]")
+
     models = fetch_models(provider_ctx)
     if not models:
         console.print("[red]当前 provider 没有可用模型，无法执行 chat。[/red]")
         return
 
-    selected_models = select_models_tui(models, min_select=2)
-    if selected_models == "fallback":
-        selected_models = _fallback_select_models(models, min_select=2)
-    if not selected_models:
-        return
+    if resumed_session:
+        # Use the models from the saved session if they are still available
+        saved_models = [m for m in resumed_session.get("models", []) if m in models]
+        selected_models = saved_models if saved_models else None
+        if not selected_models:
+            console.print("[yellow]保存的模型已不可用，请重新选择[/yellow]")
 
-    task_text = " ".join(args.prompt).strip()
-    if not task_text:
-        from ccs_action_bar import _readline
-        task_text = _readline("You", "@/path/img.png 可附图")
-    if not task_text:
-        console.print("[red]聊天任务不能为空[/red]")
-        return
+    if not resumed_session or not selected_models:
+        selected_models = select_models_tui(models, min_select=2)
+        if selected_models == "fallback":
+            selected_models = _fallback_select_models(models, min_select=2)
+        if not selected_models:
+            return
+
+    if resumed_session:
+        task_text = resumed_session["task"]["goal"]
+    else:
+        task_text = " ".join(args.prompt).strip()
+        if not task_text:
+            from ccs_action_bar import _readline
+            task_text = _readline("You", "@/path/img.png 可附图")
+        if not task_text:
+            console.print("[red]聊天任务不能为空[/red]")
+            return
 
     console.print(f"[cyan]开始 chat 并发对比[/cyan]")
     console.print(f"[dim]模型: {', '.join(selected_models)}[/dim]")
 
     try:
         from ccs_action_bar import run_chat_loop
-        run_chat_loop(cfg, provider_ctx, selected_models, task_text)
+        run_chat_loop(cfg, provider_ctx, selected_models, task_text, session=resumed_session)
     except KeyboardInterrupt:
         console.print("\n[yellow]已取消 chat[/yellow]")
