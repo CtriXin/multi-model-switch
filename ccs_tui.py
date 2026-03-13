@@ -71,6 +71,11 @@ CONNECT_ACTIONS = [
         "title": "添加官方通道",
         "summary": "创建 OAuth 账号并进入官方登录流程",
     },
+    {
+        "id": "manage_channels",
+        "title": "管理现有通道",
+        "summary": "查看状态、设默认、删除通道、查看本地统计",
+    },
 ]
 
 
