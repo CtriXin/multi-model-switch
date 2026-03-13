@@ -47,8 +47,16 @@ for _cli in CLI_LOGOS:
 
 
 DIRECT_CLI_ITEMS = {
-    "qwen": ("▸ 全部 Qwen 模型", "直接进入当前 provider 的 Qwen 模型列表"),
-    "kimi": ("▸ 默认 Kimi", "直接使用默认 Kimi 模型启动"),
+    "qwen": {
+        "title": "直达模式",
+        "primary": "▸ 全部 Qwen 模型",
+        "secondary": "不进入场景选择，直接列出当前 provider 的 qwen* 模型",
+    },
+    "kimi": {
+        "title": "直达模式",
+        "primary": "▸ 默认 Kimi",
+        "secondary": "不进入场景选择，直接使用默认 Kimi 模型启动",
+    },
 }
 
 
@@ -176,7 +184,7 @@ def select_scene_tui(scenes, cli_names):
             active_variant_scene = variant_scene_name or forced_variant_scene
             in_variant_mode = active_variant_scene is not None
             if direct_cli_item:
-                list_count = 1
+                list_count = 3
             elif auto_default_scene:
                 list_count = 1
             elif not in_variant_mode:
@@ -230,9 +238,13 @@ def select_scene_tui(scenes, cli_names):
             list_y = tab_y + 2
 
             if direct_cli_item:
-                title = direct_cli_item[1]
+                title = direct_cli_item["title"]
                 _center_text(stdscr, list_y - 1, cx, title, curses.color_pair(5) | curses.A_BOLD)
-                item_lines = [(direct_cli_item[0], True)]
+                item_lines = [
+                    ("  快速入口", False),
+                    (direct_cli_item["primary"], True),
+                    (f"  {direct_cli_item['secondary']}", False),
+                ]
                 extra_line = None
             elif auto_default_scene:
                 scene = scenes[auto_default_scene]
@@ -275,7 +287,7 @@ def select_scene_tui(scenes, cli_names):
             content_x = cx - max_line_w // 2
 
             for i, (line, is_selected) in enumerate(item_lines):
-                attr = curses.color_pair(3) | curses.A_BOLD if is_selected else curses.color_pair(2)
+                attr = curses.color_pair(3) | curses.A_BOLD if is_selected else curses.color_pair(5 if direct_cli_item else 2)
                 try:
                     stdscr.addstr(list_y + i, max(sx + 2, content_x), line[:w - 4], attr)
                 except curses.error:
@@ -301,7 +313,7 @@ def select_scene_tui(scenes, cli_names):
             # ── Footer（醒目）──
             footer = " ← → 切换    Enter 确认 "
             if direct_cli_item:
-                footer += "   Q 退出 "
+                footer = " ← → 切换    Enter 直达    Q 退出 "
             elif auto_default_scene:
                 footer += "   Q 退出 "
             elif in_variant_mode and not forced_variant_scene:
