@@ -402,6 +402,70 @@ async def run_discussion(provider_ctx, models, task_text, cross=False):
         return {"summaries": summaries, "reviews": reviews, "final": final_text}
 
 
+def _build_discuss_followup_prompt(original_task, final_text, new_question):
+    """Build a follow-up prompt that carries forward the synthesis as context."""
+    parts = [
+        f"## 原始任务\n{original_task}",
+        f"## 上轮综合结论（摘要）\n{final_text[:600].rstrip()}{'…' if len(final_text) > 600 else ''}",
+        f"## 追问\n{new_question}",
+    ]
+    return "\n\n".join(parts)
+
+
+def _do_discuss_converge(provider_ctx, selected_models, original_task, final_text, cross):
+    """E: refine synthesis into a stronger conclusion, then re-enter post-action."""
+    from ccs_action_bar import _handle_converge
+    from ccs_session import create_session, advance_round
+    import traceback
+
+    session = create_session(original_task, selected_models, mode="discuss")
+    brief = {"approach": final_text[:300], "reasoning": "", "risks": [], "key_decisions": [], "next_step": ""}
+    advance_round(session, selected_models[0], brief, final_text, round_models=list(selected_models))
+    try:
+        converge_text = _handle_converge(provider_ctx, session, selected_models[0], {})
+    except Exception:
+        console.print("\n[red]收敛出错:[/red]")
+        console.print(traceback.format_exc())
+        return None
+    return _discuss_post_action(provider_ctx, selected_models, original_task, converge_text, cross)
+
+
+def _do_discuss_handoff(original_task, final_text):
+    """H: print synthesis + suggested next commands."""
+    import shlex
+    safe_task = shlex.quote(original_task)
+    console.print("\n[bold cyan]── 执行交付简报 ──[/bold cyan]")
+    console.print(Panel(final_text[:800], title="综合结论", border_style="yellow"))
+    console.print(f"\n[dim]下一步建议：[/dim]")
+    console.print(f"  [green]mms discuss {safe_task}[/green]  [dim]# 重新讨论[/dim]")
+    console.print(f"  [green]mms chat {safe_task}[/green]     [dim]# 并排比较[/dim]")
+
+
+def _discuss_post_action(provider_ctx, selected_models, original_task, final_text, cross):
+    """Post-discuss prompt. Returns next task prompt, or None to exit."""
+    from ccs_action_bar import _readline
+
+    try:
+        user_input = _readline(
+            "继续追问", "Enter=退出  E=收敛  H=交付  R=重新  或直接输入追问",
+            context=final_text,
+        )
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+    cmd = user_input.strip().lower()
+    if not user_input or cmd == "q":
+        return None
+    if cmd == "r":
+        return original_task
+    if cmd == "e":
+        return _do_discuss_converge(provider_ctx, selected_models, original_task, final_text, cross)
+    if cmd == "h":
+        _do_discuss_handoff(original_task, final_text)
+        return None
+    return _build_discuss_followup_prompt(original_task, final_text, user_input)
+
+
 def discuss_main(cfg, argv):
     args = parse_discuss_args(argv)
     provider_ctx = ensure_provider_credentials(cfg, args.provider)
@@ -414,10 +478,10 @@ def discuss_main(cfg, argv):
     if not selected_models:
         return
 
-    task_text = " ".join(args.prompt).strip()
-    if not task_text:
-        task_text = Prompt.ask("You").strip()
-    if not task_text:
+    original_task = " ".join(args.prompt).strip()
+    if not original_task:
+        original_task = Prompt.ask("You").strip()
+    if not original_task:
         console.print("[red]讨论任务不能为空[/red]")
         return
 
@@ -425,7 +489,17 @@ def discuss_main(cfg, argv):
     console.print(f"[cyan]开始 {mode_label}[/cyan]")
     console.print(f"[dim]模型: {', '.join(selected_models)}[/dim]")
 
-    try:
-        asyncio.run(run_discussion(provider_ctx, selected_models, task_text, cross=args.cross))
-    except KeyboardInterrupt:
-        console.print("\n[yellow]已取消 discuss[/yellow]")
+    prompt = original_task
+    while prompt:
+        try:
+            result = asyncio.run(
+                run_discussion(provider_ctx, selected_models, prompt, cross=args.cross)
+            )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]已取消 discuss[/yellow]")
+            break
+
+        final_text = result.get("final", "")
+        prompt = _discuss_post_action(
+            provider_ctx, selected_models, original_task, final_text, args.cross
+        )
