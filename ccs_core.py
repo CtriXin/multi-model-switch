@@ -56,12 +56,20 @@ API_URL_ENV_NAME = "CCS_API_BASE_URL"
 API_KEY_ENV_NAME = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
-OAUTH_CAPABLE_CLIS = ("claude", "codex")
+OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
 DEFAULT_PRIORITY = 100
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
 DIRECT_CLI_MODES = {"qwen", "kimi"}
 DEFAULT_KIMI_MODEL = "kimi-k2.5"
+
+
+class WizardBack(Exception):
+    pass
+
+
+class WizardCancel(Exception):
+    pass
 
 CATEGORIES = {
     "Claude 系 ⭐": ["claude-"],
@@ -244,6 +252,24 @@ def _normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")
     return value or "account"
+
+
+def _wizard_prompt(label, default="", password=False, required=False):
+    prompt = f"{label}（输入 b 返回，q 退出）"
+    kwargs = {"password": password}
+    if default != "":
+        kwargs["default"] = default
+    value = Prompt.ask(prompt, **kwargs)
+    trimmed = value.strip()
+    lowered = trimmed.lower()
+    if lowered in {"b", "back"}:
+        raise WizardBack()
+    if lowered in {"q", "quit", "exit"}:
+        raise WizardCancel()
+    if required and not trimmed:
+        console.print("[red]这个字段不能为空[/red]")
+        return _wizard_prompt(label, default=default, password=password, required=required)
+    return value
 
 
 def _normalize_account(account):
@@ -779,11 +805,25 @@ def _account_status_command(cli_name):
         return ["claude", "auth", "status"]
     if cli_name == "codex":
         return ["codex", "login", "status"]
+    if cli_name == "gemini":
+        return None
     return None
 
 
 def _probe_account_status(account):
     cli_name = account.get("cli")
+    if cli_name == "gemini":
+        home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+        config_dir = os.path.join(home_dir, ".config")
+        has_state = os.path.isdir(home_dir) and any(
+            name.startswith("gemini") for name in os.listdir(home_dir)
+        ) if os.path.isdir(home_dir) else False
+        if not has_state and os.path.isdir(config_dir):
+            has_state = any("gemini" in name.lower() for name in os.listdir(config_dir))
+        return {
+            "state": "manual",
+            "summary": "已配置，建议打开 Gemini 验证" if has_state else "待登录",
+        }
     command = _account_status_command(cli_name)
     if command is None:
         return {"state": "unsupported", "summary": "不支持状态探测"}
@@ -820,11 +860,21 @@ def _run_account_login(account):
     cli_name = account.get("cli")
     env = _account_env(account)
     os.makedirs(account.get("home_dir", ""), exist_ok=True)
-    command = ["claude", "auth", "login"] if cli_name == "claude" else ["codex", "login"]
+    if cli_name == "claude":
+        command = ["claude", "auth", "login"]
+    elif cli_name == "codex":
+        command = ["codex", "login"]
+    elif cli_name == "gemini":
+        command = ["gemini"]
+    else:
+        console.print(f"[red]不支持的官方账号类型: {cli_name}[/red]")
+        sys.exit(1)
     console.print(
         f"[cyan]正在为账号档案 {_account_label(account)} 打开 {cli_name} 登录流程[/cyan]\n"
         f"[dim]HOME={account.get('home_dir')}[/dim]"
     )
+    if cli_name == "gemini":
+        console.print("[dim]Gemini 会在自己的 CLI 内引导 Google 登录；完成后直接退出即可。[/dim]")
     result = subprocess.run(command, env=env)
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -1001,17 +1051,25 @@ def _quick_connect_gateway(cfg, preset_id=None):
     _ensure_interactive_terminal("网关通道接入")
     console.print(Panel(
         "[bold]网关通道[/bold]\n\n输入一个兼容 OpenAI / Anthropic 的 API 地址和 Key。\n"
-        "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。",
+        "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
+        "[dim]输入 b 返回，q 退出。[/dim]",
         title="快速接入",
         border_style="cyan",
     ))
     providers = _provider_map(cfg)
     suggested_name = preset_id or "My Gateway"
-    name = Prompt.ask("显示名称（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
-    suggested_id = _normalize_provider_id_input(name)
-    provider_id = _normalize_provider_id_input(
-        Prompt.ask("内部标识（用于配置和命令）", default=preset_id or suggested_id).strip() or suggested_id
-    )
+    try:
+        name = _wizard_prompt("显示名称（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
+        suggested_id = _normalize_provider_id_input(name)
+        provider_id = _normalize_provider_id_input(
+            _wizard_prompt("内部标识（用于配置和命令）", default=preset_id or suggested_id).strip() or suggested_id
+        )
+    except WizardBack:
+        console.print("[yellow]已返回上一层[/yellow]")
+        return cfg, False
+    except WizardCancel:
+        console.print("[yellow]已退出接入[/yellow]")
+        return cfg, False
     if provider_id in providers:
         console.print(f"[red]通道 ID '{provider_id}' 已存在，请换一个，或使用 {current_command()} config provider.edit {provider_id}[/red]")
         return cfg, False
@@ -1035,38 +1093,66 @@ def _quick_connect_official(cfg, preset_cli=None):
     _ensure_interactive_terminal("官方通道接入")
     console.print(Panel(
         "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
-        "适合多个 ChatGPT / Claude Plan 并行使用。",
+        "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
+        "[dim]输入 b 返回，q 退出。[/dim]",
         title="快速接入",
         border_style="cyan",
     ))
     choices = {
         "1": ("codex", "ChatGPT / Codex"),
         "2": ("claude", "Claude"),
+        "3": ("gemini", "Gemini"),
     }
     if preset_cli in OAUTH_CAPABLE_CLIS:
         cli_name = preset_cli
     else:
         console.print("  1. ChatGPT / Codex")
         console.print("  2. Claude")
-        cli_name = choices[Prompt.ask("选择官方通道类型", choices=list(choices.keys()), default="1")][0]
+        console.print("  3. Gemini")
+        try:
+            selected = _wizard_prompt("选择官方通道类型", default="1")
+        except WizardBack:
+            console.print("[yellow]已返回上一层[/yellow]")
+            return cfg, False
+        except WizardCancel:
+            console.print("[yellow]已退出接入[/yellow]")
+            return cfg, False
+        if selected not in choices:
+            console.print("[red]请输入 1-3[/red]")
+            return cfg, False
+        cli_name = choices[selected][0]
 
     suggested_name = f"{cli_name}-main"
-    name = Prompt.ask("账号备注（给自己看的名字）", default=suggested_name).strip() or suggested_name
-    account_id = _normalize_account_id(
-        Prompt.ask(
-            "账号标识（内部区分用，例如 apple / work / personal）",
-            default=_normalize_account_id(name),
-        ).strip()
-    )
+    try:
+        name = _wizard_prompt("账号备注（给自己看的名字）", default=suggested_name).strip() or suggested_name
+        account_id = _normalize_account_id(
+            _wizard_prompt(
+                "账号标识（内部区分用，例如 apple / work / personal）",
+                default=_normalize_account_id(name),
+            ).strip()
+        )
+    except WizardBack:
+        console.print("[yellow]已返回上一层[/yellow]")
+        return cfg, False
+    except WizardCancel:
+        console.print("[yellow]已退出接入[/yellow]")
+        return cfg, False
     accounts = _account_map(cfg)
     if account_id in accounts:
         console.print(f"[red]账号标识 '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
         return cfg, False
 
-    home_dir = Prompt.ask(
-        "登录目录（用于隔离这个账号的官方登录态）",
-        default=_default_account_home(account_id),
-    ).strip() or _default_account_home(account_id)
+    try:
+        home_dir = _wizard_prompt(
+            "登录目录（用于隔离这个账号的官方登录态）",
+            default=_default_account_home(account_id),
+        ).strip() or _default_account_home(account_id)
+    except WizardBack:
+        console.print("[yellow]已返回上一层[/yellow]")
+        return cfg, False
+    except WizardCancel:
+        console.print("[yellow]已退出接入[/yellow]")
+        return cfg, False
     account = _normalize_account({
         "id": account_id,
         "name": name,
@@ -1776,6 +1862,8 @@ def _model_matches_account_cli(cli_name, model_name):
         return normalized.startswith("claude-")
     if cli_name == "codex":
         return normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
+    if cli_name == "gemini":
+        return normalized.startswith("gemini-")
     return False
 
 
@@ -2344,8 +2432,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     return True
                 model_info = {"model": model}
         if not check_cli_installed(cli):
-            console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
-            cli = "claude"
+            from ccs_installer import check_and_offer_install
+            if not check_and_offer_install(cli):
+                return True
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
@@ -3053,7 +3142,7 @@ def main():
         description=f"{display_title()} — AI Coding CLI 统一启动器",
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/qwen/kimi)")
+                        help="场景编号(1-6) 或 CLI 名称(claude/codex/qwen/kimi/gemini)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带场景编号）")
@@ -3065,7 +3154,7 @@ def main():
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
                         help="配合 --export 使用，写入 ~/.config/ccs/env/<cli>.sh")
-    parser.add_argument("--account", help="临时使用指定账号档案启动 claude/codex")
+    parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
 
     args = parser.parse_args()
@@ -3183,8 +3272,9 @@ def main():
                     console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                     return
                 if not check_cli_installed(cli):
-                    console.print(f"[yellow]{cli} 未安装，使用 claude 代替[/yellow]")
-                    cli = "claude"
+                    from ccs_installer import check_and_offer_install
+                    if not check_and_offer_install(cli):
+                        return
                 console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
                 action = confirm_launch(cli, model_info, once, runtime=runtime)
                 if action == "q":
@@ -3238,6 +3328,34 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
+        if target in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, target):
+            cli = target
+            runtime, cli_models, cli = _choose_runtime_source(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+                return
+            if not check_cli_installed(cli):
+                from ccs_installer import check_and_offer_install
+                if not check_and_offer_install(cli):
+                    return
+            if _uses_native_account_entry(runtime, cli):
+                console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 自己处理。[/cyan]")
+                model = None
+            else:
+                if not _ensure_models_cache_available(cli_models or models_cache):
+                    return
+                models_list = display_models(cli_models or models_cache, role, recommend)
+                model = select_model_interactive(models_list)
+            model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            action = confirm_launch(cli, model_info, once, runtime=runtime)
+            if action == "q":
+                return
+            if action == "s":
+                save_preset_interactive(user_cfg, cli, model_info)
+            _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+            return
         runtime, cli_models, cli = _choose_runtime_source(
             cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
         )
@@ -3322,9 +3440,9 @@ def main():
         return
 
     if not check_cli_installed(cli):
-        fallback = scene.get("fallback_cli", "claude")
-        console.print(f"[yellow]{cli} 未安装，使用 {fallback} 代替[/yellow]")
-        cli = fallback
+        from ccs_installer import check_and_offer_install
+        if not check_and_offer_install(cli):
+            return
 
     action = confirm_launch(cli, model_info, once, runtime=runtime)
     if action == "q":

@@ -20,7 +20,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "qwen": "openai_chat_completions",
     "kimi": "openai_chat_completions",
 }
-OAUTH_CAPABLE_CLIS = {"claude", "codex"}
+OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 
 
 def _provider_protocols(provider):
@@ -224,11 +224,27 @@ def launch_kimi(model_info, provider, once=False):
     _exec_or_run(cmd, env, once)
 
 
+def launch_gemini(model_info, runtime, once=False):
+    """启动 Gemini，当前只支持官方账号档案模式。"""
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode != "oauth":
+        console.print("[red]Gemini 当前只支持官方账号入口，不支持直接使用模型源启动[/red]")
+        sys.exit(1)
+
+    env = _account_env(runtime)
+    model = _resolve_model(model_info)
+    cmd = ["gemini"]
+    if model:
+        cmd += ["-m", model]
+    _exec_or_run(cmd, env, once)
+
+
 LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "qwen": launch_qwen,
     "kimi": launch_kimi,
+    "gemini": launch_gemini,
 }
 
 

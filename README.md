@@ -109,7 +109,7 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config account.remove <id>`：删除账号档案
 - `mms config account.status [id]`：查看账号档案登录状态
 - `mms config account.login <id>`：进入该账号档案对应的官方登录流程
-- `mms config account.default <cli> <id>`：设置 `claude` / `codex` 默认账号
+- `mms config account.default <cli> <id>`：设置 `claude` / `codex` / `gemini` 默认账号
 - `mms config stats`：查看本地启动统计
 - `mms config api.edit`：编辑默认模型源的地址和凭据
 - `mms config connect`：打开统一接入向导
@@ -118,6 +118,7 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 
 - 进入 `mms` 后按 `O`
 - 选择 `添加网关通道`、`添加官方通道` 或 `管理现有通道`
+- 接入填写页支持 `b` 返回、`q` 退出
 - 完成后会自动回到主界面并刷新可用通道
 
 官方通道接入时有 3 个关键字段：
@@ -138,7 +139,7 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 
 ## 多 OAuth 账号
 
-MMS 现在开始支持 `claude` / `codex` 的多账号档案。
+MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
 
 - `provider` 仍然表示模型源 / 网关
 - `account` 表示官方 OAuth 账号档案
@@ -156,10 +157,13 @@ MMS 现在开始支持 `claude` / `codex` 的多账号档案。
 - 先检查登录态是否可用
 - 启动时使用该账号的隔离目录
 - 不复用 provider 的 `/v1/models` 列表
-- `codex` / `claude` 走账号档案时，默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
+- `codex` / `claude` / `gemini` 走账号档案时，默认直接进入官方 CLI，模型选择交给官方 CLI 自己处理
 - 来源选择不是只看当前 tab，而是按你已经选中的模型动态过滤
 - 只会展示真正能承载当前模型的来源
 - 同一个模型如果同时命中多个模型源和官方账号，TUI 会在选完模型后同屏展开“使用入口”列表
+- `gemini` 当前不占用主界面 tab，但支持：
+  - 作为 `gemini-*` 模型的官方入口出现在来源列表
+  - 直接使用 `mms gemini --account <id>` 启动
 
 ## 本地统计
 
