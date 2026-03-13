@@ -171,7 +171,7 @@ def _source_choice_key(cli_name, model_info=None):
 
 def _format_source_line(source, is_selected):
     marker = "▸ " if is_selected else "  "
-    badge = "官方通道" if source.get("kind") == "account" else "网关通道"
+    badge = "官方" if source.get("kind") == "account" else "网关"
     launcher = str(source.get("launch_cli", "")).upper()
     default_tag = " · 默认" if source.get("is_default") else ""
     return f"{marker}{source.get('icon', '•')} {source.get('title', '')}  {badge} · {launcher}{default_tag}"
@@ -303,7 +303,7 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                 extra_line = None
             elif in_source_mode:
                 title_name = source_scene_name if source_scene_name is not None else "自定义"
-                title = f"为 {title_name} 选择执行通道"
+                title = f"为 {title_name} 选择使用入口"
                 _center_text(stdscr, list_y - 1, cx, title, curses.color_pair(5) | curses.A_BOLD)
                 if source_idx >= len(available_sources):
                     source_idx = default_source_idx if available_sources else 0
