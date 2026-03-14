@@ -96,16 +96,17 @@ def _auto_default_scene_for_cli(scenes, cli_name):
     return None
 
 
-def _draw_box(stdscr, y, x, h, w, title=""):
+def _draw_box(stdscr, y, x, h, w, title="", color=None):
+    attr = color if color is not None else 0
     try:
-        stdscr.addstr(y, x, "╭" + "─" * (w - 2) + "╮")
+        stdscr.addstr(y, x, "╭" + "─" * (w - 2) + "╮", attr)
         for i in range(1, h - 1):
-            stdscr.addstr(y + i, x, "│" + " " * (w - 2) + "│")
-        stdscr.addstr(y + h - 1, x, "╰" + "─" * (w - 2) + "╯")
+            stdscr.addstr(y + i, x, "│" + " " * (w - 2) + "│", attr)
+        stdscr.addstr(y + h - 1, x, "╰" + "─" * (w - 2) + "╯", attr)
         if title:
             t = f" {title} "
             tx = x + (w - len(t)) // 2
-            stdscr.addstr(y, tx, t, curses.A_BOLD)
+            stdscr.addstr(y, tx, t, curses.A_BOLD | attr)
     except curses.error:
         pass
 
@@ -191,8 +192,9 @@ def _default_variant_index(scene):
     return 0
 
 
-def select_scene_tui(scenes, cli_names, source_choices=None):
+def select_scene_tui(scenes, cli_names, source_choices=None, last_used=None, scene_counts=None):
     """主 TUI：左右切 CLI tab，上下选场景，Enter 确认，Q 退出"""
+    scene_counts = scene_counts or {}
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -248,10 +250,24 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
             elif auto_default_scene:
                 list_count = 1
             elif not in_variant_mode:
-                scene_count = len(sorted_scenes) + 1
-                if scene_idx >= scene_count:
+                # 预计算虚拟列表行数
+                has_last = (last_used and last_used.get("scene") in scenes
+                            and last_used["scene"] in sorted_scenes)
+                ranked = [(name, scene_counts.get(name, 0))
+                          for name in sorted_scenes if scene_counts.get(name, 0) > 0]
+                ranked.sort(key=lambda x: x[1], reverse=True)
+                # 行数 = 上次使用(1+sep) + 场景 + 排行(sep+N) + 自定义(sep+1)
+                virt_count = len(sorted_scenes) + 1  # scenes + custom
+                virt_count += 1  # sep_custom
+                if has_last:
+                    virt_count += 2  # last + sep_last
+                if ranked:
+                    virt_count += 1 + len(ranked)  # sep_ranked + ranked items
+                selectable_count = virt_count - 1 - (1 if has_last else 0) - (1 if ranked else 0)  # minus separators
+                if scene_idx >= selectable_count:
                     scene_idx = 0
-                list_count = scene_count
+                list_count = virt_count
+                scene_count = selectable_count
             else:
                 variants = scenes[active_variant_scene].get("variants", [])
                 if variant_idx >= len(variants):
@@ -333,30 +349,92 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                 ]
                 extra_line = None
             else:
+                # ── 构建虚拟列表：上次使用 + 场景 + 启动排行 + 自定义 ──
+                # virt_items: list of (type, scene_name_or_none)
+                # types: "last", "scene", "ranked", "custom", "sep_last", "sep_ranked"
+                virt_items = []
+
+                # 上次使用（仅当存在且场景在当前列表中）
+                has_last = (last_used and last_used.get("scene") in scenes
+                            and last_used["scene"] in sorted_scenes)
+                if has_last:
+                    virt_items.append(("last", last_used["scene"]))
+                    virt_items.append(("sep_last", None))
+
+                # 正常场景
+                for name in sorted_scenes:
+                    virt_items.append(("scene", name))
+
+                # 启动排行（有启动记录的场景，按次数降序，排除上次使用已显示的）
+                ranked = [(name, scene_counts.get(name, 0))
+                          for name in sorted_scenes if scene_counts.get(name, 0) > 0]
+                ranked.sort(key=lambda x: x[1], reverse=True)
+                if ranked:
+                    virt_items.append(("sep_ranked", None))
+                    for name, _ in ranked:
+                        virt_items.append(("ranked", name))
+
+                # 自定义
+                virt_items.append(("sep_custom", None))
+                virt_items.append(("custom", None))
+
+                # 可选中的索引列表（跳过分隔符）
+                selectable_indices = [i for i, (t, _) in enumerate(virt_items) if t not in ("sep_last", "sep_ranked", "sep_custom")]
+                scene_count = len(selectable_indices)
+                if scene_idx >= scene_count:
+                    scene_idx = 0
+
                 item_lines = []
-                for i, name in enumerate(sorted_scenes):
-                    info = scenes[name]
-                    is_selected = (i == scene_idx)
-                    marker = "▸ " if is_selected else "  "
-                    name_w = _display_width(name)
-                    padding = max(8, 18 - name_w)
-                    full_line = f"{marker}{info['emoji']} {name}{' ' * padding}{info['desc']}"
-                    item_lines.append((full_line, is_selected))
+                for vi, (vtype, vname) in enumerate(virt_items):
+                    # 当前选中的 selectable 位置
+                    sel_pos = selectable_indices.index(vi) if vi in selectable_indices else -1
+                    is_selected = (sel_pos == scene_idx)
 
-                custom_idx = len(sorted_scenes)
-                is_custom_sel = (scene_idx == custom_idx)
-                custom_marker = "▸ " if is_custom_sel else "  "
-                extra_line = (f"{custom_marker}🔧 自定义", is_custom_sel)
+                    if vtype == "last":
+                        marker = "▸ " if is_selected else "  "
+                        model_str = last_used.get("model", "")
+                        line = f"{marker}⏱ 上次使用          {model_str}"
+                        item_lines.append((line, is_selected))
+                    elif vtype in ("sep_last", "sep_ranked", "sep_custom"):
+                        item_lines.append(("", False))
+                    elif vtype == "scene":
+                        info = scenes[vname]
+                        marker = "▸ " if is_selected else "  "
+                        name_w = _display_width(vname)
+                        padding = max(8, 18 - name_w)
+                        full_line = f"{marker}{info['emoji']} {vname}{' ' * padding}{info['desc']}"
+                        item_lines.append((full_line, is_selected))
+                    elif vtype == "ranked":
+                        info = scenes[vname]
+                        marker = "▸ " if is_selected else "  "
+                        count = scene_counts.get(vname, 0)
+                        line = f"{marker}{info['emoji']} {vname}  ×{count}"
+                        item_lines.append((line, is_selected))
+                    elif vtype == "custom":
+                        marker = "▸ " if is_selected else "  "
+                        item_lines.append((f"{marker}🔧 自定义", is_selected))
 
-            all_lines = [line for line, _ in item_lines]
+                extra_line = None
+
+            all_lines = [line for line, _ in item_lines if line]
             if extra_line:
                 all_lines.append(extra_line[0])
-            max_line_w = max(_display_width(l) for l in all_lines)
+            max_line_w = max((_display_width(l) for l in all_lines), default=20)
 
             # 整体居中的起始 x
             content_x = cx - max_line_w // 2
 
             for i, (line, is_selected) in enumerate(item_lines):
+                if not line:
+                    # 分隔符
+                    sep_w = max_line_w - 4
+                    sep_x = cx - sep_w // 2
+                    try:
+                        stdscr.addstr(list_y + i, max(sx + 2, sep_x), "─" * max(1, sep_w),
+                                      curses.color_pair(5) | curses.A_DIM)
+                    except curses.error:
+                        pass
+                    continue
                 attr = curses.color_pair(3) | curses.A_BOLD if is_selected else curses.color_pair(5 if direct_cli_item else 2)
                 try:
                     stdscr.addstr(list_y + i, max(sx + 2, content_x), line[:w - 4], attr)
@@ -467,9 +545,34 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                         continue
                     selected_source = available_sources[0] if len(available_sources) == 1 else None
                     return (scene_name, cli, model_info, selected_source)
-                if scene_idx == custom_idx:
+                # 通过 virt_items 和 selectable_indices 查找当前选中项
+                virt_idx = selectable_indices[scene_idx] if scene_idx < len(selectable_indices) else 0
+                vtype, vname = virt_items[virt_idx]
+
+                if vtype == "custom":
                     return (None, cli, None, None)
-                scene_name = sorted_scenes[scene_idx]
+                if vtype == "last":
+                    # 直接用上次的 model_info 启动
+                    scene_name = last_used["scene"]
+                    model_info = dict(last_used.get("model_info") or {})
+                    if not model_info:
+                        model_info = {"model": last_used.get("model", "")}
+                    source_key = _source_choice_key(cli, model_info)
+                    source_config = (source_choices or {}).get(source_key, default_source_config)
+                    available_sources = source_config.get("options", [])
+                    default_source_idx = source_config.get("default_index", 0) or 0
+                    if len(available_sources) > 1:
+                        source_scene_name = scene_name
+                        source_cli_name = cli
+                        source_model_info = model_info
+                        source_back_mode = "scene"
+                        source_idx = default_source_idx
+                        continue
+                    selected_source = available_sources[0] if len(available_sources) == 1 else None
+                    return (scene_name, cli, model_info, selected_source)
+
+                # scene 或 ranked 类型：都是正常场景
+                scene_name = vname
                 info = scenes[scene_name]
                 if info.get("variants"):
                     variant_scene_name = scene_name
@@ -567,110 +670,157 @@ def select_model_tui(models, title="选择模型"):
         return None
 
 
-def select_actions_tui(findings, actions, title="处理发现"):
-    if not actions:
-        return []
+# ── 负载模式 TUI ──────────────────────────────────────────────
+
+_LB_HISTORY_PATH = os.path.expanduser("~/.config/mms/lb_history.json")
+
+# 默认预设
+_LB_PRESETS = [
+    {"label": "Opus + Haiku",   "heavy": "claude-opus-4-6",   "light": "claude-haiku-4-5"},
+    {"label": "Sonnet + Haiku", "heavy": "claude-sonnet-4-6", "light": "claude-haiku-4-5"},
+    {"label": "GPT + Mini",     "heavy": "gpt-5.4",           "light": "gpt-4.1-mini"},
+]
+
+
+def _load_lb_history():
+    """读取负载模式历史。返回 {"default": {...}, "recent": [{...}, ...]}"""
+    fallback = {"default": _LB_PRESETS[0], "recent": []}
+    if not os.path.exists(_LB_HISTORY_PATH):
+        return fallback
+    try:
+        with open(_LB_HISTORY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return fallback
+        return data
+    except Exception:
+        return fallback
+
+
+def save_lb_history(heavy, light):
+    """保存一条负载模式选择到历史。保留最近 2 条。"""
+    entry = {"heavy": heavy, "light": light, "label": f"{heavy} + {light}"}
+    history = _load_lb_history()
+    recent = history.get("recent", [])
+    # 去重：相同 heavy+light 的不重复添加
+    recent = [r for r in recent if not (r.get("heavy") == heavy and r.get("light") == light)]
+    recent.insert(0, entry)
+    history["recent"] = recent[:2]
+    try:
+        os.makedirs(os.path.dirname(_LB_HISTORY_PATH), exist_ok=True)
+        with open(_LB_HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def select_load_balance_tui(available_models=None):
+    """负载模式 TUI：选择 heavy + light 模型组合。
+
+    返回 {"model": heavy, "lb_light": light} 或 None（取消）。
+    """
+    history = _load_lb_history()
+    recent = history.get("recent", [])
+
+    def _build_options():
+        """构建选项列表：最近使用 + 预设 + 自定义"""
+        opts = []
+        seen = set()
+        # 最近使用（最多 2 条）
+        for r in recent[:2]:
+            key = (r["heavy"], r["light"])
+            if key not in seen:
+                seen.add(key)
+                opts.append({"label": f"🕐 {r['heavy']} + {r['light']}", "heavy": r["heavy"], "light": r["light"], "type": "recent"})
+        # 预设
+        for p in _LB_PRESETS:
+            key = (p["heavy"], p["light"])
+            if key not in seen:
+                seen.add(key)
+                opts.append({"label": f"   {p['label']}", "heavy": p["heavy"], "light": p["light"], "type": "preset"})
+        # 自定义
+        opts.append({"label": "   ✏️  自定义...", "type": "custom"})
+        return opts
 
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
-        curses.init_pair(2, curses.COLOR_WHITE, -1)
         curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
-        curses.init_pair(5, curses.COLOR_GREEN, -1)
-        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
+        options = _build_options()
         idx = 0
-        scroll = 0
-        selected = set()
-        message = ""
 
         while True:
             stdscr.clear()
             max_y, max_w = stdscr.getmaxyx()
-            findings_lines = []
-            for finding in findings:
-                findings_lines.append(f"- {finding['title']}: {finding['summary']}")
-            visible = max(3, max_y - len(findings_lines) - 7)
 
             try:
-                stdscr.addstr(0, 2, title, curses.color_pair(1) | curses.A_BOLD)
-                stdscr.addstr(1, 2, "发现", curses.color_pair(4) | curses.A_BOLD)
+                stdscr.addstr(0, 2, "⚖️ 负载模式 — 选择模型组合", curses.color_pair(1) | curses.A_BOLD)
+                stdscr.addstr(1, 2, "heavy 处理复杂任务，light 处理简单任务", curses.A_DIM)
+                stdscr.addstr(2, 2, "─" * min(40, max_w - 4), curses.A_DIM)
             except curses.error:
                 pass
 
-            for line_idx, line in enumerate(findings_lines[:3], start=2):
-                try:
-                    stdscr.addstr(line_idx, 2, line[:max_w - 4], curses.color_pair(2))
-                except curses.error:
-                    pass
-
-            list_y = min(max_y - 4, len(findings_lines[:3]) + 3)
-            try:
-                stdscr.addstr(list_y, 2, "动作", curses.color_pair(5) | curses.A_BOLD)
-            except curses.error:
-                pass
-
-            if idx < scroll:
-                scroll = idx
-            elif idx >= scroll + visible:
-                scroll = idx - visible + 1
-
-            for action_idx in range(scroll, min(scroll + visible, len(actions))):
-                action = actions[action_idx]
-                y = list_y + 1 + action_idx - scroll
-                checked = "[x]" if action["id"] in selected else "[ ]"
-                recommended = " 推荐" if action.get("recommended") else ""
-                prefix = "▸ " if action_idx == idx else "  "
-                line = f"{prefix}{checked} {action['title']}{recommended}  {action['summary']}"
-                attr = curses.color_pair(3) | curses.A_BOLD if action_idx == idx else curses.color_pair(2)
+            for i, opt in enumerate(options):
+                y = 4 + i
+                if y >= max_y - 2:
+                    break
+                prefix = " ▸" if i == idx else "  "
+                line = f"{prefix} {opt['label']}"
+                attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.A_NORMAL
+                if opt.get("type") == "recent":
+                    attr = curses.color_pair(4) | curses.A_BOLD if i == idx else curses.color_pair(4)
                 try:
                     stdscr.addstr(y, 1, line[:max_w - 2], attr)
                 except curses.error:
                     pass
 
-            footer = " ↑↓ 移动   Space 勾选   Enter 下一步   D 详情   Q 退出 "
+            footer = " ↑↓ 选择   Enter 确认   Q 取消 "
             try:
-                stdscr.addstr(max_y - 2, max(1, (max_w - len(footer)) // 2), footer, curses.color_pair(1) | curses.A_BOLD)
+                stdscr.addstr(max_y - 1, max(1, (max_w - len(footer)) // 2), footer, curses.A_DIM)
             except curses.error:
                 pass
-            if message:
-                try:
-                    stdscr.addstr(max_y - 1, 2, message[:max_w - 4], curses.color_pair(6))
-                except curses.error:
-                    pass
 
             stdscr.refresh()
             key = stdscr.getch()
 
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(actions)
-                message = ""
+                idx = (idx - 1) % len(options)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(actions)
-                message = ""
-            elif key == ord(" "):
-                action_id = actions[idx]["id"]
-                if action_id in selected:
-                    selected.remove(action_id)
-                else:
-                    selected.add(action_id)
-                message = ""
+                idx = (idx + 1) % len(options)
             elif key in (10, 13, curses.KEY_ENTER):
-                if selected:
-                    return [action["id"] for action in actions if action["id"] in selected]
-                message = "请至少勾选一个动作"
-            elif key in (ord("d"), ord("D")):
-                action = actions[idx]
-                message = action.get("summary", "")
-            elif key in (ord("q"), ord("Q"), 27):
-                return []
+                chosen = options[idx]
+                if chosen["type"] == "custom":
+                    return "custom"
+                return {"model": chosen["heavy"], "lb_light": chosen["light"]}
+            elif key in (ord('q'), ord('Q'), 27):
+                return None
 
     try:
-        return curses.wrapper(_inner)
+        result = curses.wrapper(_inner)
     except curses.error:
-        return "fallback"
+        return None
+
+    if result == "custom":
+        # 自定义流程：先选 heavy，再选 light
+        models = available_models or []
+        if not models:
+            # 无可用模型列表时提供默认选项
+            models = [
+                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
+                "gpt-5.4", "gpt-4.1-mini",
+            ]
+        heavy = select_model_tui(models, title="选择 Heavy 模型（复杂任务）")
+        if heavy is None:
+            return None
+        light = select_model_tui(models, title="选择 Light 模型（简单任务）")
+        if light is None:
+            return None
+        return {"model": heavy, "lb_light": light}
+
+    return result
 
 
 def select_connect_tui():
@@ -724,6 +874,10 @@ def select_connect_tui():
 
 
 def confirm_tui(cli, model_info, env_vars=None, once=False):
+    """确认启动 TUI。返回 (action, bypass) 二元组。
+    action: "" = 启动, "b" = 返回, "q" = 取消
+    bypass: bool, 仅 codex 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
+    """
     if isinstance(model_info, dict):
         model_display = ", ".join(f"{k}={v}" for k, v in model_info.items()
                                   if k != "subagent")
@@ -739,6 +893,8 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                 display_v = v
             env_lines.append(f"{k}={display_v}")
 
+    has_bypass = cli in ("codex", "claude")
+
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
@@ -747,61 +903,82 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
         curses.init_pair(3, curses.COLOR_YELLOW, -1)
         curses.init_pair(4, curses.COLOR_WHITE, -1)
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(7, curses.COLOR_RED, -1)
 
-        stdscr.clear()
-        max_y, max_w = stdscr.getmaxyx()
-
-        w = max(54, min(max_w - 2, int(max_w * 0.85)))
-        env_h = len(env_lines) + 1 if env_lines else 0
-        h = 7 + env_h
-        sx = (max_w - w) // 2
-        sy = (max_y - h) // 2
-        cx = sx + w // 2
-        pad = sx + 4
-
-        _draw_box(stdscr, sy, sx, h, w, "确认启动")
-
-        row = sy + 2
-        try:
-            stdscr.addstr(row, pad, f"CLI   {cli}", curses.color_pair(2) | curses.A_BOLD)
-            row += 1
-            mdl = model_display[:w - 12]
-            stdscr.addstr(row, pad, f"模型  {mdl}", curses.color_pair(2))
-            row += 1
-            scope = "一次性命令" if once else "交互会话"
-            stdscr.addstr(row, pad, f"启动  {scope}", curses.color_pair(2))
-            row += 1
-            if env_lines:
-                stdscr.addstr(row, pad, "环境  临时注入，仅当前 CLI 进程可见",
-                              curses.color_pair(3) | curses.A_DIM)
-                row += 1
-                stdscr.addstr(row, pad, "ENV", curses.color_pair(3) | curses.A_BOLD)
-                row += 1
-                for line in env_lines:
-                    stdscr.addstr(row, pad + 2, line[:w - 10],
-                                  curses.color_pair(4) | curses.A_DIM)
-                    row += 1
-            else:
-                stdscr.addstr(row, pad, "环境  无需额外注入",
-                              curses.color_pair(3) | curses.A_DIM)
-                row += 1
-        except curses.error:
-            pass
-
-        footer = " Enter 启动  B 返回  Q 取消 "
-        _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1))
-        stdscr.refresh()
+        bypass_mode = False
 
         while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+
+            w = max(54, min(max_w - 2, int(max_w * 0.85)))
+            bypass_h = 1 if has_bypass else 0
+            env_h = len(env_lines) + 1 if env_lines else 0
+            h = 7 + env_h + bypass_h
+            sx = (max_w - w) // 2
+            sy = (max_y - h) // 2
+            cx = sx + w // 2
+            pad = sx + 4
+
+            box_color = curses.color_pair(7) if bypass_mode else None
+            title = "⚠ BYPASS 确认" if bypass_mode else "确认启动"
+            _draw_box(stdscr, sy, sx, h, w, title, color=box_color)
+
+            row = sy + 2
+            try:
+                stdscr.addstr(row, pad, f"CLI   {cli}", curses.color_pair(2) | curses.A_BOLD)
+                row += 1
+                mdl = model_display[:w - 12]
+                stdscr.addstr(row, pad, f"模型  {mdl}", curses.color_pair(2))
+                row += 1
+                scope = "一次性命令" if once else "交互会话"
+                stdscr.addstr(row, pad, f"启动  {scope}", curses.color_pair(2))
+                row += 1
+                if has_bypass:
+                    if bypass_mode:
+                        mode_text = "模式  [Tab] ⚠ BYPASS（跳过审批）"
+                        stdscr.addstr(row, pad, mode_text,
+                                      curses.color_pair(7) | curses.A_BOLD)
+                    else:
+                        mode_text = "模式  [Tab] 正常"
+                        stdscr.addstr(row, pad, mode_text, curses.color_pair(2))
+                    row += 1
+                if env_lines:
+                    stdscr.addstr(row, pad, "环境  临时注入，仅当前 CLI 进程可见",
+                                  curses.color_pair(3) | curses.A_DIM)
+                    row += 1
+                    stdscr.addstr(row, pad, "ENV", curses.color_pair(3) | curses.A_BOLD)
+                    row += 1
+                    for line in env_lines:
+                        stdscr.addstr(row, pad + 2, line[:w - 10],
+                                      curses.color_pair(4) | curses.A_DIM)
+                        row += 1
+                else:
+                    stdscr.addstr(row, pad, "环境  无需额外注入",
+                                  curses.color_pair(3) | curses.A_DIM)
+                    row += 1
+            except curses.error:
+                pass
+
+            footer_color = curses.color_pair(7) if bypass_mode else curses.color_pair(1)
+            if has_bypass:
+                footer = " Enter 启动  Tab 切换模式  B 返回  Q 取消 "
+            else:
+                footer = " Enter 启动  B 返回  Q 取消 "
+            _center_text(stdscr, sy + h - 1, cx, footer, footer_color)
+            stdscr.refresh()
+
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ""
+                return ("", bypass_mode)
             elif key in (ord('b'), ord('B')):
-                return "b"
+                return ("b", False)
             elif key in (ord('q'), ord('Q'), 27):
-                return "q"
+                return ("q", False)
+            elif key == 9 and has_bypass:  # Tab
+                bypass_mode = not bypass_mode
 
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return "q"
+        return ("q", False)
