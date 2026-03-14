@@ -105,11 +105,19 @@ _STATIC_MODELS: dict[str, list[str]] = {
     "MMS_MINIMAX_KEY": [
         "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2",
     ],
-    # Bailian CodingPlan (sk-sp-*): 千问 + 第三方模型
+    # Bailian CodingPlan (sk-sp-*): 千问 + 第三方模型，统一加 bailian/ 前缀区分来源
     "MMS_BAILIAN_KEY": [
-        "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus",
-        "glm-5", "glm-4.7", "kimi-k2.5", "MiniMax-M2.5",
+        "bailian/qwen3.5-plus", "bailian/qwen3-max-2026-01-23",
+        "bailian/qwen3-coder-next", "bailian/qwen3-coder-plus",
+        "bailian/glm-5", "bailian/glm-4.7",
+        "bailian/kimi-k2.5", "bailian/MiniMax-M2.5",
     ],
+}
+
+
+# Provider prefix applied to live-fetched model IDs (so routing knows which endpoint to use)
+_PROVIDER_MODEL_PREFIX: dict[str, str] = {
+    "MMS_BAILIAN_KEY": "bailian/",
 }
 
 
@@ -134,10 +142,12 @@ async def _refresh_provider_models_async() -> dict:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for env_var, result in zip(keys_fetched, results):
+        prefix = _PROVIDER_MODEL_PREFIX.get(env_var, "")
         if isinstance(result, list) and result:
-            # Live fetch succeeded — store with current timestamp
-            cache[env_var] = {"models": result, "updated_at": now}
-            console.print(f"  [green]✓[/green] {env_var}: {len(result)} 个模型（联网）")
+            # Live fetch succeeded — apply prefix and store with current timestamp
+            models = [f"{prefix}{m}" for m in result] if prefix else result
+            cache[env_var] = {"models": models, "updated_at": now}
+            console.print(f"  [green]✓[/green] {env_var}: {len(models)} 个模型（联网）")
         elif env_var in _STATIC_MODELS:
             # Live fetch failed — always overwrite with latest built-in static list
             cache[env_var] = {"models": _STATIC_MODELS[env_var], "updated_at": now}
@@ -534,7 +544,7 @@ async def _check_provider_endpoint(
 
             elif check_type == "chat_probe":
                 # Generic: send a chat request; 401 = bad key, anything else = key ok
-                _BAILIAN_MODELS = "qwen3.5-plus, qwen3-coder-next, glm-5, glm-4.7, kimi-k2.5, MiniMax-M2.5"
+                _BAILIAN_MODELS = "bailian/qwen3.5-plus, bailian/qwen3-coder-next, bailian/glm-5, bailian/kimi-k2.5, bailian/MiniMax-M2.5"
                 r = await c.post(
                     base_url + "/v1/chat/completions",
                     headers={**h, "Content-Type": "application/json"},
