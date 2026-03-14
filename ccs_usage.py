@@ -135,10 +135,13 @@ async def _refresh_provider_models_async() -> dict:
 
     for env_var, result in zip(keys_fetched, results):
         if isinstance(result, list) and result:
+            # Live fetch succeeded — store with current timestamp
             cache[env_var] = {"models": result, "updated_at": now}
-        elif env_var in _STATIC_MODELS and env_var not in cache:
-            # seed with static list if never fetched before
-            cache[env_var] = {"models": _STATIC_MODELS[env_var], "updated_at": 0}
+            console.print(f"  [green]✓[/green] {env_var}: {len(result)} 个模型（联网）")
+        elif env_var in _STATIC_MODELS:
+            # Live fetch failed — always overwrite with latest built-in static list
+            cache[env_var] = {"models": _STATIC_MODELS[env_var], "updated_at": now}
+            console.print(f"  [yellow]~[/yellow] {env_var}: 联网失败，已更新内置列表")
 
     _save_models_cache(cache)
     return cache
