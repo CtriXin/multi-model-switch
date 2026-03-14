@@ -3,7 +3,14 @@
 支持:
   - Claude OAuth 账号 → Anthropic /api/oauth/usage (5h/7d 利用率)
   - Codex  OAuth 账号 → JWT 解码出 plan 类型 + 有效期（OpenAI 无公开利用率 API）
+  - API Key 厂商     → Kimi 余额 / GLM·CN|EN key 校验 / Minimax·CN|EN key 校验
   - 本地 MMS 启动统计 → ~/.config/ccs/usage.json
+
+API key 环境变量（在 shell 里 export 后运行 mms usage）:
+  MMS_KIMI_KEY      Kimi (Moonshot) — 支持余额查询
+  MMS_GLM_KEY       智谱 GLM — key 校验，CN + EN 双端点
+  MMS_MINIMAX_KEY   Minimax — key 校验，CN + EN 双端点
+  MMS_BAILIAN_KEY   阿里百炼 — key 校验（无公开余额 API）
 """
 import asyncio
 import base64
@@ -273,6 +280,129 @@ def _section_codex(accounts: list[dict]) -> None:
     console.print(table)
 
 
+# ─── Provider API-key balance/check ──────────────────────────────────────────
+
+# Each entry: (display_name, env_var, [(region_label, base_url, balance_path_or_None)])
+# balance_path=None → fall back to models-list key-validity check
+_PROVIDER_DEFS = [
+    (
+        "Kimi (Moonshot)",
+        "MMS_KIMI_KEY",
+        [
+            ("CN", "https://api.moonshot.cn", "/v1/users/me/balance"),
+        ],
+    ),
+    (
+        "GLM (智谱)",
+        "MMS_GLM_KEY",
+        [
+            ("CN", "https://open.bigmodel.cn", None),          # balance N/A → models check
+            ("EN", "https://api.bigmodel.cn",  None),
+        ],
+    ),
+    (
+        "Minimax",
+        "MMS_MINIMAX_KEY",
+        [
+            ("CN", "https://api.minimax.chat",   None),
+            ("EN", "https://api.minimaxi.chat",  None),
+        ],
+    ),
+    (
+        "百炼 (DashScope)",
+        "MMS_BAILIAN_KEY",
+        [
+            ("CN",  "https://dashscope.aliyuncs.com/compatible-mode",    None),
+            ("EN",  "https://dashscope-intl.aliyuncs.com/compatible-mode", None),
+        ],
+    ),
+]
+
+# GLM models path differs from OpenAI-compat
+_GLM_MODELS_PATH = "/api/paas/v4/models"
+_OAI_MODELS_PATH = "/v1/models"
+
+
+async def _check_provider_endpoint(
+    key: str, base_url: str, balance_path: str | None, is_glm: bool = False
+) -> tuple[str, str]:
+    """Returns (status_label, detail). status_label: '余额', 'key 有效', 'key 无效', '超时'."""
+    if not _httpx:
+        return "N/A", "缺少 httpx"
+    headers = {"Authorization": f"Bearer {key}"}
+    try:
+        async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+            if balance_path:
+                r = await c.get(base_url + balance_path, headers=headers)
+                if r.status_code == 200:
+                    d = r.json()
+                    data = d.get("data") or d
+                    avail = data.get("available_balance") or data.get("balance") or data.get("total")
+                    if avail is not None:
+                        return "余额", f"¥{float(avail):.2f}"
+                    return "key 有效", r.text[:40]
+                return "key 无效", f"HTTP {r.status_code}"
+            else:
+                # models-list check
+                path = _GLM_MODELS_PATH if is_glm else _OAI_MODELS_PATH
+                r = await c.get(base_url + path, headers=headers)
+                if r.status_code == 200:
+                    try:
+                        n = len(r.json().get("data", []))
+                        return "key 有效", f"{n} 个模型"
+                    except Exception:
+                        return "key 有效", ""
+                return "key 无效", f"HTTP {r.status_code}"
+    except _httpx.TimeoutException:
+        return "超时", ""
+    except Exception as e:
+        return "错误", str(e)[:40]
+
+
+async def _section_providers_async() -> None:
+    rows: list[tuple] = []
+
+    tasks: list = []
+    meta: list[tuple[str, str, str]] = []  # (provider_name, region, key_env)
+
+    for pname, env, endpoints in _PROVIDER_DEFS:
+        key = os.environ.get(env, "").strip()
+        if not key:
+            continue
+        is_glm = "GLM" in pname or "智谱" in pname
+        for region, base_url, balance_path in endpoints:
+            tasks.append(_check_provider_endpoint(key, base_url, balance_path, is_glm))
+            meta.append((pname, region, env))
+
+    if not tasks:
+        return
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    table = Table(title="API Key 厂商查询", border_style="magenta", show_lines=False)
+    table.add_column("厂商", style="bold")
+    table.add_column("区域")
+    table.add_column("结果")
+    table.add_column("详情", style="dim")
+
+    for (pname, region, env), res in zip(meta, results):
+        if isinstance(res, Exception):
+            status, detail = "错误", str(res)[:40]
+        else:
+            status, detail = res
+        color = {
+            "余额": "green", "key 有效": "green",
+            "key 无效": "red", "超时": "yellow", "错误": "red",
+        }.get(status, "dim")
+        table.add_row(pname, region, f"[{color}]{status}[/{color}]", detail)
+
+    console.print(table)
+
+
+def _section_providers() -> None:
+    asyncio.run(_section_providers_async())
+
+
 def _section_local_stats() -> None:
     path = _active_usage_path()
     if not path:
@@ -312,4 +442,5 @@ def usage_main(cfg: dict) -> None:
     accounts = cfg.get("accounts", [])
     asyncio.run(_section_claude(accounts))
     _section_codex(accounts)
+    _section_providers()
     _section_local_stats()
