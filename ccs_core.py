@@ -623,8 +623,10 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     base_key = _provider_env_name(provider_id, "BASE_URL")
     api_key_name = _provider_env_name(provider_id, "API_KEY")
+    openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
     base_url = os.environ.get(base_key, "").strip()
     api_key = os.environ.get(api_key_name, "").strip()
+    openai_api_key = os.environ.get(openai_api_key_name, "").strip()
 
     if provider_id == DEFAULT_PROVIDER_ID:
         base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip()
@@ -634,6 +636,7 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
         file_values = _load_env_file(CREDENTIALS_PATH)
         base_url = base_url or file_values.get(base_key, "").strip()
         api_key = api_key or file_values.get(api_key_name, "").strip()
+        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip()
         if provider_id == DEFAULT_PROVIDER_ID:
             base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
             api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
@@ -646,7 +649,7 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
             base_url = base_url or str(legacy_api.get("base_url", "")).strip()
             api_key = api_key or str(legacy_api.get("api_key", "")).strip()
 
-    return (base_url.rstrip("/") if base_url else "", api_key)
+    return (base_url.rstrip("/") if base_url else "", api_key, openai_api_key)
 
 
 def save_provider_credentials(provider_id, base_url, api_key):
@@ -680,9 +683,10 @@ def save_api_credentials(base_url, api_key):
 
 def resolve_provider_context(cfg, provider_id=None):
     provider = dict(get_provider_definition(cfg, provider_id))
-    base_url, api_key = load_provider_credentials(provider["id"])
+    base_url, api_key, openai_api_key = load_provider_credentials(provider["id"])
     provider["base_url"] = base_url
     provider["api_key"] = api_key
+    provider["openai_api_key"] = openai_api_key
     provider["auth_mode"] = "api_key"
     provider["runtime_kind"] = "provider"
     return provider
@@ -730,7 +734,7 @@ def _migrate_legacy_api_config(cfg):
     if isinstance(api_cfg, dict):
         base_url = str(api_cfg.get("base_url", "")).strip()
         api_key = str(api_cfg.get("api_key", "")).strip()
-        file_base_url, file_api_key = load_api_credentials()
+        file_base_url, file_api_key, _ = load_api_credentials()
 
         if base_url and api_key and (not file_base_url or not file_api_key):
             try:
@@ -1377,6 +1381,7 @@ def _probe_models(provider, emit_output=True):
         "models": None,
         "error": None,
         "error_kind": None,
+        "working_url": None,
         "details": [],
     }
 
@@ -1396,21 +1401,30 @@ def _probe_models(provider, emit_output=True):
         result["error_kind"] = "missing_api_key"
         result["error"] = "当前 provider 缺少 API Key"
     else:
-        try:
-            response = httpx.get(
-                f"{base_url}/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=15,
-            )
-            response.raise_for_status()
-            data = response.json()
-            models = [m["id"] for m in data.get("data", [])]
-            models.sort()
-            result["models"] = models
-            if not models:
-                result["error_kind"] = "empty_models"
-                result["error"] = "接口返回成功，但模型列表为空"
-        except Exception as exc:
+        alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
+        last_exc = None
+        for try_url in [base_url, alt_url]:
+            try:
+                response = httpx.get(
+                    f"{try_url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                data = response.json()
+                models = [m["id"] for m in data.get("data", [])]
+                models.sort()
+                result["models"] = models
+                result["working_url"] = try_url
+                if try_url != base_url and emit_output:
+                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
+                if not models:
+                    result["error_kind"] = "empty_models"
+                    result["error"] = "接口返回成功，但模型列表为空"
+                break
+            except Exception as exc:
+                last_exc = exc
+        if result["models"] is None and last_exc is not None:
             result["error_kind"] = "request_failed"
             result["error"] = f"拉取模型列表失败: {exc}"
 
@@ -1652,7 +1666,7 @@ def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=
 
 def ensure_provider_credentials(cfg, provider_id=None):
     provider = get_provider_definition(cfg, provider_id)
-    base_url, api_key = load_provider_credentials(provider["id"])
+    base_url, api_key, _ = load_provider_credentials(provider["id"])
     if base_url and api_key:
         return resolve_provider_context(cfg, provider["id"])
     return setup_provider_credentials(provider, base_url, api_key, allow_keep=bool(api_key))
@@ -2492,7 +2506,7 @@ def handle_config(cfg, args_rest):
 
 
 def _handle_api_config(key_path, args_rest):
-    base_url, api_key = load_api_credentials()
+    base_url, api_key, _ = load_api_credentials()
 
     if key_path == "api.base_url":
         if not args_rest:
@@ -3105,7 +3119,7 @@ def main():
         if command == "usage":
             from ccs_usage import usage_main
 
-            usage_main(_load_command_config())
+            usage_main(_load_command_config(), sys.argv[2:])
             return
 
     parser = argparse.ArgumentParser(
