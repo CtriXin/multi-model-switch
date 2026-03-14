@@ -374,6 +374,37 @@ def _select_discuss_models(models):
 _P1_VIEW_KEY_HINT = "←/→ 切换模型  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
 _P2_VIEW_KEY_HINT = "←/→ 切换审查  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
 
+# Model cost-tier heuristic: lower = cheaper
+# Sorted by specificity so longer patterns are matched first
+_TIER_KEYWORDS: list[tuple[int, list[str]]] = [
+    (0, ["haiku", "nano", "mini", "flash", "lite", "small", "3.5-haiku"]),
+    (1, ["plus", "3.5-sonnet", "3.5", "sonnet", "gpt-4o-mini", "gpt-4o"]),
+    (2, ["opus", "max", "turbo", "ultra", "o1", "o3", "4-turbo", "coder-next", "coder-plus"]),
+]
+
+
+def _model_tier(name: str) -> int:
+    """Estimate model cost tier from name. Lower = cheaper."""
+    n = name.lower()
+    for tier, keywords in _TIER_KEYWORDS:
+        if any(k in n for k in keywords):
+            return tier
+    return 1  # unknown → medium tier
+
+
+def _auto_synthesizer(phase1_models: list[str], all_models: list[str]) -> tuple[str, str]:
+    """Pick neutral + cheapest synthesizer. Returns (model, reason)."""
+    # Sort all candidates: cheapest tier first, non-Phase1 preferred when tied
+    def _key(m):
+        return (_model_tier(m), 1 if m in phase1_models else 0)
+
+    best = min(all_models, key=_key)
+    if best not in phase1_models:
+        return best, "中立+低成本"
+    # best is in phase1; is there a cheaper non-phase1 with same tier?
+    # (already handled by sort key — if we're here, all non-phase1 are ≥ tier of best)
+    return best, "最低成本"
+
 
 def _phase_review_bar(display_texts: dict, hint: str) -> None:
     """Read-only curses tab viewer for phase results. Any key exits."""
@@ -387,7 +418,8 @@ def _phase_review_bar(display_texts: dict, hint: str) -> None:
         pass  # fallback: user already saw Rich output
 
 
-async def run_discussion(provider_ctx, models, task_text, cross=False, synthesizer_model=None):
+async def run_discussion(provider_ctx, models, task_text, cross=False,
+                         synthesizer_model=None, all_models=None):
     if httpx is None:
         raise StreamError("当前环境缺少 httpx，请先安装 rich/httpx 依赖")
 
@@ -409,10 +441,13 @@ async def run_discussion(provider_ctx, models, task_text, cross=False, synthesiz
             console.print("[red]Phase 1 没有任何模型成功返回摘要，已跳过最终综合。[/red]")
             return {"summaries": summaries, "reviews": reviews, "final": ""}
 
-        # Synthesizer = CLI-specified (if valid) or first successful model — transparent, no prompt
-        if not (synthesizer_model and synthesizer_model in successful_models):
-            synthesizer_model = successful_models[0]
-        console.print(f"[dim]Phase 3 综合者: {synthesizer_model}[/dim]")
+        # Synthesizer selection: CLI-specified > auto (neutral+cheapest)
+        if synthesizer_model and synthesizer_model in (all_models or successful_models):
+            reason = "指定"
+        else:
+            candidates = all_models if all_models else successful_models
+            synthesizer_model, reason = _auto_synthesizer(successful_models, candidates)
+        console.print(f"[dim]Phase 3 综合者: {synthesizer_model}  ({reason})[/dim]")
         final_text = await phase3_synthesize(
             provider_ctx,
             client,
@@ -624,7 +659,8 @@ def discuss_main(cfg, argv):
         try:
             result = asyncio.run(
                 run_discussion(provider_ctx, selected_models, prompt, cross=args.cross,
-                               synthesizer_model=getattr(args, "synthesizer", None))
+                               synthesizer_model=getattr(args, "synthesizer", None),
+                               all_models=models)
             )
         except KeyboardInterrupt:
             console.print("\n[yellow]已取消 discuss[/yellow]")
