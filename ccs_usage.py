@@ -466,17 +466,28 @@ async def _section_providers_async() -> None:
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    # Build rows and auto-suppress failing regions when at least one region succeeds
+    _VALID_STATUSES = {"余额", "有效"}
+    rows: list[tuple[str, str, str, str]] = []  # (pname, region, status, detail)
+    for (pname, region), res in zip(meta, results):
+        if isinstance(res, Exception):
+            status, detail = "错误", str(res)[:40]
+        else:
+            status, detail = res
+        rows.append((pname, region, status, detail))
+
+    # Per-provider: if any row is valid, hide the invalid/error ones (CN key shown as CN-only)
+    valid_providers: set[str] = {pname for pname, _, status, _ in rows if status in _VALID_STATUSES}
+
     table = Table(title="第三方厂商账号", border_style="magenta", show_lines=False)
     table.add_column("厂商", style="bold")
     table.add_column("区域")
     table.add_column("状态")
     table.add_column("详情", style="dim")
 
-    for (pname, region), res in zip(meta, results):
-        if isinstance(res, Exception):
-            status, detail = "错误", str(res)[:40]
-        else:
-            status, detail = res
+    for pname, region, status, detail in rows:
+        if pname in valid_providers and status not in _VALID_STATUSES:
+            continue  # hide failing regions when another region is valid
         color = {
             "余额": "green", "有效": "green",
             "无效": "red", "超时": "yellow", "错误": "red",
