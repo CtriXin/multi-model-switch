@@ -338,8 +338,42 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     return None, "failed"
 
 
+def _pick_gateway_model(runtime, base_url):
+    """Fetch /models from gateway and return the best model ID for Claude slots.
+
+    Priority: opus-4 > opus > sonnet-4 > sonnet > first available > None
+    """
+    try:
+        import httpx as _httpx
+    except ImportError:
+        return None
+    api_key = runtime.get("api_key", "")
+    if not base_url or not api_key:
+        return None
+    url_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    try:
+        r = _httpx.get(f"{url_v1}/models",
+                       headers={"Authorization": f"Bearer {api_key}"},
+                       timeout=8, follow_redirects=True)
+        if r.status_code != 200:
+            return None
+        models = [m.get("id", "") for m in r.json().get("data", [])]
+    except Exception:
+        return None
+    if not models:
+        return None
+    for keyword in ("opus-4", "opus", "sonnet-4", "sonnet"):
+        for m in models:
+            if keyword in m.lower():
+                return m
+    return models[0]
+
+
 def _claude_gateway_env(runtime, base_url=None):
-    """Gateway api_key 模式独立 HOME：剥离 ~/.claude.json 的 migration 标记，防止 claude-sonnet-4-6[1m] 自动升级。
+    """Gateway api_key 模式独立 HOME：
+    - 剥离 migration 标记，防止 claude-sonnet-4-6[1m] 自动升级
+    - 自动拉取 gateway 模型列表，填入所有 ANTHROPIC_*_MODEL slot
+    - 写入 settings.json：teams 模式 / 隐藏 AI 署名 / 扩展思考
     base_url: 由 _resolve_anthropic_base_url() 探测后传入；
               为 None 时从 runtime 推断并去掉 /v1 后缀（保底兼容）。
     """
@@ -347,7 +381,14 @@ def _claude_gateway_env(runtime, base_url=None):
     gateway_home = os.path.expanduser("~/.config/mms/claude-gateway")
     os.makedirs(gateway_home, exist_ok=True)
 
-    # 每次写入，移除会导致模型自动升级的 migration flags
+    # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
+    # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
+    if base_url is None:
+        base_url = _anthropic_base_url(runtime)
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+
+    # ── .claude.json：剥离 migration flags + 写入 thinking/attribution ──
     real_json = os.path.expanduser("~/.claude.json")
     data: dict = {}
     if os.path.exists(real_json):
@@ -358,28 +399,58 @@ def _claude_gateway_env(runtime, base_url=None):
             data = {}
     data.pop("sonnet1m45MigrationComplete", None)
     data.pop("opusProMigrationComplete", None)
+    data["alwaysThinkingEnabled"] = True
     gw_json = os.path.join(gateway_home, ".claude.json")
     with open(gw_json, "w", encoding="utf-8") as f:
         _json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
-    # 软链 ~/.claude 目录，保留 settings / MCP / projects
+    # ── ~/.claude 目录：创建真实目录，分项 symlink 子目录，单独写 settings.json ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
     real_claude_dir = os.path.expanduser("~/.claude")
-    if os.path.exists(real_claude_dir) and not os.path.exists(gw_claude_dir):
-        os.symlink(real_claude_dir, gw_claude_dir)
+    os.makedirs(gw_claude_dir, exist_ok=True)
+    # symlink all real subdirs/files except settings.json
+    if os.path.isdir(real_claude_dir):
+        for entry in os.listdir(real_claude_dir):
+            if entry == "settings.json":
+                continue
+            src = os.path.join(real_claude_dir, entry)
+            dst = os.path.join(gw_claude_dir, entry)
+            if not os.path.exists(dst) and not os.path.islink(dst):
+                os.symlink(src, dst)
 
-    # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
-    # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
-    if base_url is None:
-        base_url = _anthropic_base_url(runtime)
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
+    # ── settings.json：model slots + teams + attribution ──
+    best_model = _pick_gateway_model(runtime, base_url)
+    settings_env: dict = {
+        "ANTHROPIC_AUTH_TOKEN": runtime["api_key"],
+        "ANTHROPIC_BASE_URL": base_url,
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    }
+    if best_model:
+        for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                    "ANTHROPIC_REASONING_MODEL"):
+            settings_env[key] = best_model
+    settings_data = {
+        "env": settings_env,
+        "includeCoAuthoredBy": False,
+        "attribution": {"commit": "", "pr": ""},
+    }
+    gw_settings = os.path.join(gw_claude_dir, "settings.json")
+    with open(gw_settings, "w", encoding="utf-8") as f:
+        _json.dump(settings_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
 
     env = os.environ.copy()
     env["HOME"] = gateway_home
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = runtime["api_key"]
+    if best_model:
+        for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                    "ANTHROPIC_REASONING_MODEL"):
+            env[key] = best_model
+    env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
     return env
 
 
