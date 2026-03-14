@@ -103,6 +103,10 @@ def validate_provider_for_cli(cli, provider):
     provider_id = provider.get("id", "provider")
     required_protocol = CLI_PROTOCOL_REQUIREMENTS.get(cli)
 
+    if cli == "codex" and str(provider_id).strip().lower().startswith("kimi"):
+        console.print(f"[red]provider '{provider_id}' 当前不支持直接驱动 codex；请改走 claude 路径[/red]")
+        sys.exit(1)
+
     if not provider.get("enabled", True):
         console.print(f"[red]provider '{provider_id}' 已禁用，无法用于 {cli}[/red]")
         sys.exit(1)

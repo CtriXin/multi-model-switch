@@ -59,6 +59,7 @@ HOME=/Users/xin python3 scripts/doctor_claude_models.py
 - `ok`
 - `auth_failed`
 - `no_access`
+- `agent_only`
 - `model_missing`
 - `endpoint_missing`
 - `timeout`
@@ -71,6 +72,15 @@ HOME=/Users/xin python3 scripts/doctor_claude_models.py --skip-claude-cli
 ```
 
 只有在要验真实 CLI 链路时，再去掉 `--skip-claude-cli`。
+
+### Lessons Learned
+
+- 不要只看 `/models`：`/models` 能返回，不代表模型真的能 chat，更不代表能挂到 Claude 上。
+- 先抽样，再全量：日常回归优先 `--max-models 3`，先把坏掉的 provider 类型分出来，再跑全量。
+- 先协议层，再 CLI 层：先用 `--skip-claude-cli` 跑协议兼容性，只有确认协议层健康后，再跑真实 Claude CLI。
+- Claude 回归要看两张表：`Model Chat Availability` 看模型本身能不能聊，`Claude Compatibility` 看这批模型能不能真正走 Claude 路径。
+- `agent_only` 不等于模型不可用：这通常表示它不能按普通 OpenAI chat 直连，但可能仍然能走 Claude-compatible / Coding Agent 路径。
+- 诊断脚本必须独立：不要把这种高频网络探测塞进正常启动路径，否则会拖慢 TUI 和日常启动。
 
 ## 当前仓库说明
 

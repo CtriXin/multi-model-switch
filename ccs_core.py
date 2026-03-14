@@ -2543,6 +2543,10 @@ def _model_matches_account_cli(cli_name, model_name):
 
 
 def _provider_supports_cli_name(provider, cli_name):
+    provider_id = str(provider.get("id", "")).strip().lower()
+    # Kimi coding endpoints currently work on Claude-compatible paths, but not in Codex runtime.
+    if cli_name == "codex" and provider_id.startswith("kimi"):
+        return False
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
