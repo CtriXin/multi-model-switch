@@ -6,6 +6,7 @@ import argparse
 import shlex
 import subprocess
 import json
+import shutil
 from datetime import datetime, timezone
 
 try:
@@ -33,7 +34,8 @@ except ImportError:
     print("缺少依赖，请执行: pip install rich httpx tomli-w")
     sys.exit(1)
 
-from ccs_account_state import seed_claude_state
+from ccs_account_state import seed_claude_state, seed_gemini_state
+from ccs_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 
 console = Console()
 
@@ -41,15 +43,21 @@ APP_NAME = "Multi-Model Switch"
 LEGACY_COMMAND = "ccs"
 PRIMARY_COMMAND = "mms"
 
-CONFIG_DIR = os.path.expanduser("~/.config/ccs")
-CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
-CREDENTIALS_PATH = os.path.join(CONFIG_DIR, "credentials.sh")
-ENV_DIR = os.path.join(CONFIG_DIR, "env")
-ACCOUNTS_DIR = os.path.join(CONFIG_DIR, "accounts")
-USAGE_PATH = os.path.join(CONFIG_DIR, "usage.json")
+PRIMARY_CONFIG_DIR = os.path.expanduser("~/.config/mms")
+LEGACY_CONFIG_DIR = os.path.expanduser("~/.config/ccs")
+CONFIG_DIR = PRIMARY_CONFIG_DIR
+CONFIG_PATH = os.path.join(PRIMARY_CONFIG_DIR, "config.toml")
+CREDENTIALS_PATH = os.path.join(PRIMARY_CONFIG_DIR, "credentials.sh")
+ENV_DIR = os.path.join(PRIMARY_CONFIG_DIR, "env")
+ACCOUNTS_DIR = os.path.join(PRIMARY_CONFIG_DIR, "accounts")
+USAGE_PATH = os.path.join(PRIMARY_CONFIG_DIR, "usage.json")
+LEGACY_CONFIG_PATH = os.path.join(LEGACY_CONFIG_DIR, "config.toml")
+LEGACY_CREDENTIALS_PATH = os.path.join(LEGACY_CONFIG_DIR, "credentials.sh")
+LEGACY_ENV_DIR = os.path.join(LEGACY_CONFIG_DIR, "env")
+LEGACY_USAGE_PATH = os.path.join(LEGACY_CONFIG_DIR, "usage.json")
 OVERRIDE_PATHS = [
-    os.path.join(CONFIG_DIR, "override.toml"),
-    os.path.expanduser("~/.config/mms/override.toml"),
+    os.path.join(LEGACY_CONFIG_DIR, "override.toml"),
+    os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
 DEFAULT_BASE_URL = "https://your-api.example.com"
 API_URL_ENV_NAME = "CCS_API_BASE_URL"
@@ -77,6 +85,16 @@ CATEGORIES = {
     "国产系": ["qwen", "glm-", "deepseek-", "kimi-", "minimax", "MiniMax"],
     "Google 系": ["gemini-"],
 }
+
+CUSTOM_MODEL_FAMILIES = [
+    ("Claude", ("claude-",)),
+    ("GPT", ("gpt-", "o1-", "o3-", "o4-", "codex-")),
+    ("Gemini", ("gemini-",)),
+    ("Qwen", ("qwen",)),
+    ("MiniMax", ("minimax",)),
+    ("Kimi", ("kimi-",)),
+    ("GLM", ("glm-",)),
+]
 
 SCENES = {
     "常规任务": {
@@ -334,6 +352,8 @@ def _normalize_provider(provider):
     merged["enabled"] = bool(merged.get("enabled", True))
     merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
     merged["note"] = str(merged.get("note", "")).strip()
+    merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
+    merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
     return merged
 
 
@@ -473,17 +493,36 @@ def get_account_definition(cfg, account_id=None, cli_name=None):
 
 # ── Config ──────────────────────────────────────────────
 
+def _first_existing_path(*paths):
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return paths[0] if paths else ""
+
+
+def _active_config_path():
+    return _first_existing_path(CONFIG_PATH, LEGACY_CONFIG_PATH)
+
+
+def _active_credentials_path():
+    return _first_existing_path(CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH)
+
+
+def _active_usage_path():
+    return _first_existing_path(USAGE_PATH, LEGACY_USAGE_PATH)
+
 def load_config():
-    if not os.path.exists(CONFIG_PATH):
+    config_path = _active_config_path()
+    if not os.path.exists(config_path):
         return None
-    with open(CONFIG_PATH, "rb") as f:
+    with open(config_path, "rb") as f:
         cfg = tomllib.load(f)
     cfg = _migrate_legacy_api_config(cfg)
     cfg, changed = _ensure_provider_config(cfg)
     cfg, account_changed = _ensure_account_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
     changed = changed or account_changed or role_changed
-    if changed:
+    if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
 
@@ -579,11 +618,16 @@ def _iso_now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _local_now_slug():
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
 def _load_usage_stats():
-    if not os.path.exists(USAGE_PATH):
+    usage_path = _active_usage_path()
+    if not os.path.exists(usage_path):
         return {"sources": {}}
     try:
-        with open(USAGE_PATH, "r", encoding="utf-8") as f:
+        with open(usage_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             data.setdefault("sources", {})
@@ -599,6 +643,22 @@ def _save_usage_stats(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.chmod(USAGE_PATH, 0o600)
+
+
+def _backup_config_tree(label):
+    backup_root = os.path.expanduser("~/.config/mms-backups")
+    os.makedirs(backup_root, exist_ok=True)
+    backup_dir = os.path.join(backup_root, f"{label}-{_local_now_slug()}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for source in {PRIMARY_CONFIG_DIR, LEGACY_CONFIG_DIR}:
+        if os.path.exists(source):
+            shutil.copytree(
+                source,
+                os.path.join(backup_dir, os.path.basename(source)),
+                symlinks=True,
+                ignore_dangling_symlinks=True,
+            )
+    return backup_dir
 
 
 def _runtime_usage_key(runtime, cli_name):
@@ -648,38 +708,62 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
 
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     base_key = _provider_env_name(provider_id, "BASE_URL")
+    openai_base_key = _provider_env_name(provider_id, "OPENAI_BASE_URL")
+    anthropic_base_key = _provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
     api_key_name = _provider_env_name(provider_id, "API_KEY")
+    openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
     base_url = os.environ.get(base_key, "").strip()
+    openai_base_url = os.environ.get(openai_base_key, "").strip()
+    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip()
     api_key = os.environ.get(api_key_name, "").strip()
+    openai_api_key = os.environ.get(openai_api_key_name, "").strip()
 
     if provider_id == DEFAULT_PROVIDER_ID:
         base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip()
         api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip()
 
-    if os.path.exists(CREDENTIALS_PATH):
-        file_values = _load_env_file(CREDENTIALS_PATH)
+    for credentials_path in (CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
+        if not os.path.exists(credentials_path):
+            continue
+        file_values = _load_env_file(credentials_path)
         base_url = base_url or file_values.get(base_key, "").strip()
+        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip()
+        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip()
         api_key = api_key or file_values.get(api_key_name, "").strip()
+        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip()
         if provider_id == DEFAULT_PROVIDER_ID:
             base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
             api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
 
-    if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "rb") as f:
+    config_path = _active_config_path()
+    if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(config_path):
+        with open(config_path, "rb") as f:
             legacy_cfg = tomllib.load(f)
         legacy_api = legacy_cfg.get("api", {})
         if isinstance(legacy_api, dict):
             base_url = base_url or str(legacy_api.get("base_url", "")).strip()
             api_key = api_key or str(legacy_api.get("api_key", "")).strip()
 
-    return (base_url.rstrip("/") if base_url else "", api_key)
+    return {
+        "base_url": base_url.rstrip("/") if base_url else "",
+        "openai_base_url": openai_base_url.rstrip("/") if openai_base_url else "",
+        "anthropic_base_url": anthropic_base_url.rstrip("/") if anthropic_base_url else "",
+        "api_key": api_key,
+        "openai_api_key": openai_api_key,
+    }
 
 
-def save_provider_credentials(provider_id, base_url, api_key):
+def save_provider_credentials(provider_id, base_url, api_key, openai_base_url="", anthropic_base_url=""):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     values = _load_env_file(CREDENTIALS_PATH) if os.path.exists(CREDENTIALS_PATH) else {}
     base_url = base_url.rstrip("/")
+    openai_base_url = openai_base_url.rstrip("/")
+    anthropic_base_url = anthropic_base_url.rstrip("/")
     values[_provider_env_name(provider_id, "BASE_URL")] = base_url
+    if openai_base_url:
+        values[_provider_env_name(provider_id, "OPENAI_BASE_URL")] = openai_base_url
+    if anthropic_base_url:
+        values[_provider_env_name(provider_id, "ANTHROPIC_BASE_URL")] = anthropic_base_url
     values[_provider_env_name(provider_id, "API_KEY")] = api_key
 
     if provider_id == DEFAULT_PROVIDER_ID:
@@ -697,7 +781,8 @@ def save_provider_credentials(provider_id, base_url, api_key):
 
 
 def load_api_credentials():
-    return load_provider_credentials(DEFAULT_PROVIDER_ID)
+    provider_creds = load_provider_credentials(DEFAULT_PROVIDER_ID)
+    return provider_creds["base_url"], provider_creds["api_key"]
 
 
 def save_api_credentials(base_url, api_key):
@@ -706,9 +791,12 @@ def save_api_credentials(base_url, api_key):
 
 def resolve_provider_context(cfg, provider_id=None):
     provider = dict(get_provider_definition(cfg, provider_id))
-    base_url, api_key = load_provider_credentials(provider["id"])
-    provider["base_url"] = base_url
-    provider["api_key"] = api_key
+    credentials = load_provider_credentials(provider["id"])
+    provider["base_url"] = credentials["base_url"]
+    provider["openai_base_url"] = credentials["openai_base_url"] or provider.get("default_openai_base_url", "")
+    provider["anthropic_base_url"] = credentials["anthropic_base_url"] or provider.get("default_anthropic_base_url", "")
+    provider["api_key"] = credentials["api_key"]
+    provider["openai_api_key"] = credentials.get("openai_api_key", "")
     provider["auth_mode"] = "api_key"
     provider["runtime_kind"] = "provider"
     return provider
@@ -784,18 +872,42 @@ def _provider_label(provider):
     return provider.get("name", provider.get("id", DEFAULT_PROVIDER_ID))
 
 
+def _provider_openai_base_url(provider):
+    explicit = str(provider.get("openai_base_url", "")).strip().rstrip("/")
+    if explicit:
+        return explicit
+    base_url = str(provider.get("base_url", "")).strip().rstrip("/")
+    if not base_url:
+        return ""
+    if base_url.endswith("/v1"):
+        return base_url
+    return f"{base_url}/v1"
+
+
+def _provider_anthropic_base_url(provider):
+    explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
+    if explicit:
+        return explicit
+    return str(provider.get("base_url", "")).strip().rstrip("/")
+
+
 def _account_label(account):
     return account.get("name", account.get("id", "account"))
 
 
 def _account_env(account):
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
-    if account.get("cli") == "claude":
+    cli_name = account.get("cli")
+    if cli_name == "claude":
         seed_claude_state(home_dir)
-    xdg_config_home = os.path.join(home_dir, ".config")
     env = os.environ.copy()
-    env["HOME"] = home_dir
-    env["XDG_CONFIG_HOME"] = xdg_config_home
+    if cli_name == "gemini":
+        seed_gemini_state(home_dir)
+        env["GEMINI_CLI_HOME"] = home_dir
+    else:
+        xdg_config_home = os.path.join(home_dir, ".config")
+        env["HOME"] = home_dir
+        env["XDG_CONFIG_HOME"] = xdg_config_home
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
 
@@ -814,15 +926,19 @@ def _probe_account_status(account):
     cli_name = account.get("cli")
     if cli_name == "gemini":
         home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
-        config_dir = os.path.join(home_dir, ".config")
-        has_state = os.path.isdir(home_dir) and any(
-            name.startswith("gemini") for name in os.listdir(home_dir)
-        ) if os.path.isdir(home_dir) else False
-        if not has_state and os.path.isdir(config_dir):
-            has_state = any("gemini" in name.lower() for name in os.listdir(config_dir))
+        gemini_dir = os.path.join(home_dir, ".gemini")
+        oauth_path = os.path.join(gemini_dir, "oauth_creds.json")
+        accounts_path = os.path.join(gemini_dir, "google_accounts.json")
+        settings_path = os.path.join(gemini_dir, "settings.json")
+        if os.path.exists(oauth_path) or os.path.exists(accounts_path):
+            return {
+                "state": "configured",
+                "summary": "已配置 OAuth，建议直接启动 Gemini 验证",
+            }
+        has_state = os.path.exists(settings_path)
         return {
             "state": "manual",
-            "summary": "已配置，建议打开 Gemini 验证" if has_state else "待登录",
+            "summary": "已初始化，待登录" if has_state else "待登录",
         }
     command = _account_status_command(cli_name)
     if command is None:
@@ -869,12 +985,15 @@ def _run_account_login(account):
     else:
         console.print(f"[red]不支持的官方账号类型: {cli_name}[/red]")
         sys.exit(1)
+    env_hint = f"HOME={account.get('home_dir')}"
+    if cli_name == "gemini":
+        env_hint = f"GEMINI_CLI_HOME={account.get('home_dir')}"
     console.print(
         f"[cyan]正在为账号档案 {_account_label(account)} 打开 {cli_name} 登录流程[/cyan]\n"
-        f"[dim]HOME={account.get('home_dir')}[/dim]"
+        f"[dim]{env_hint}[/dim]"
     )
     if cli_name == "gemini":
-        console.print("[dim]Gemini 会在自己的 CLI 内引导 Google 登录；完成后直接退出即可。[/dim]")
+        console.print("[dim]Gemini 会在自己的 CLI 内引导 Google 登录；登录完成后按提示重启即可。[/dim]")
     result = subprocess.run(command, env=env)
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -939,6 +1058,8 @@ def _delete_provider_credentials(provider_id):
     values = _load_env_file(CREDENTIALS_PATH)
     keys_to_remove = {
         _provider_env_name(provider_id, "BASE_URL"),
+        _provider_env_name(provider_id, "OPENAI_BASE_URL"),
+        _provider_env_name(provider_id, "ANTHROPIC_BASE_URL"),
         _provider_env_name(provider_id, "API_KEY"),
     }
     if provider_id == DEFAULT_PROVIDER_ID:
@@ -990,20 +1111,56 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     })
 
 
+def _provider_template_names():
+    return {
+        "1": "generic",
+        "2": "qwen",
+        "3": "kimi",
+        "4": "glm-cn",
+        "5": "glm-en",
+        "6": "minimax-cn",
+        "7": "minimax-en",
+    }
+
+
+def _provider_template_payload(template_key):
+    template = PROVIDER_TEMPLATES.get(template_key) or PROVIDER_TEMPLATES["generic"]
+    return {
+        "id": template["id"],
+        "name": template["name"],
+        "protocols": list(template["protocols"]),
+        "supported_clis": list(template["supported_clis"]),
+        "enabled": True,
+        "priority": template["priority"],
+        "note": template["note"],
+    }
+
+
+def _select_provider_template(preset_id=None):
+    if preset_id in PROVIDER_TEMPLATES:
+        return preset_id
+    console.print("  1. 通用兼容网关")
+    console.print("  2. Qwen")
+    console.print("  3. Kimi")
+    console.print("  4. GLM CN (智谱 BigModel)")
+    console.print("  5. GLM EN (Z.ai)")
+    console.print("  6. MiniMax CN")
+    console.print("  7. MiniMax EN")
+    selected = Prompt.ask("选择网关通道类型", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
+    return _provider_template_names()[selected]
+
+
 def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
     _ensure_interactive_terminal("账号档案配置编辑")
     current = _normalize_account(existing or {"cli": preset_cli or "claude", "id": preset_id or ""})
     account_id = preset_id or current.get("id") or "claude-main"
     if not preset_id:
-        account_id = _normalize_account_id(Prompt.ask("账号标识", default=account_id))
+        account_id = _normalize_account_id(Prompt.ask("文件夹名（用于目录和命令）", default=account_id))
     cli_name = preset_cli or current.get("cli", "claude")
     if not preset_cli:
         cli_name = Prompt.ask("绑定的 CLI", choices=list(OAUTH_CAPABLE_CLIS), default=cli_name)
-    name = Prompt.ask("账号备注", default=current.get("name") or account_id).strip() or account_id
-    home_dir = Prompt.ask(
-        "登录目录（用于隔离官方登录态）",
-        default=current.get("home_dir") or _default_account_home(account_id),
-    ).strip() or _default_account_home(account_id)
+    name = Prompt.ask("显示名", default=current.get("name") or account_id).strip() or account_id
+    home_dir = current.get("home_dir") or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
@@ -1026,8 +1183,48 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
         )
         sys.exit(1)
 
-    base_default = existing_base_url or DEFAULT_BASE_URL
-    base_url = Prompt.ask(f"请输入 API 地址（模型源: {_provider_label(provider)}）", default=base_default).rstrip("/")
+    default_openai = provider.get("default_openai_base_url", "")
+    default_anthropic = provider.get("default_anthropic_base_url", "")
+    current_openai = provider.get("openai_base_url", "") or existing_base_url
+    current_anthropic = provider.get("anthropic_base_url", "") or existing_base_url
+    protocols = provider.get("protocols", [])
+    needs_openai = "openai_chat_completions" in protocols
+    needs_anthropic = "anthropic_messages" in protocols
+
+    base_url = ""
+    openai_base_url = ""
+    anthropic_base_url = ""
+
+    if needs_openai and needs_anthropic and default_openai and default_anthropic and default_openai != default_anthropic:
+        openai_base_url = Prompt.ask(
+            f"请输入 OpenAI API 地址（模型源: {_provider_label(provider)}）",
+            default=current_openai or default_openai,
+        ).rstrip("/")
+        anthropic_base_url = Prompt.ask(
+            f"请输入 Anthropic API 地址（模型源: {_provider_label(provider)}）",
+            default=current_anthropic or default_anthropic,
+        ).rstrip("/")
+        base_url = anthropic_base_url or openai_base_url
+    elif needs_openai and not needs_anthropic:
+        openai_base_url = Prompt.ask(
+            f"请输入 OpenAI API 地址（模型源: {_provider_label(provider)}）",
+            default=current_openai or default_openai or existing_base_url or DEFAULT_BASE_URL,
+        ).rstrip("/")
+        base_url = openai_base_url
+    elif needs_anthropic and not needs_openai:
+        anthropic_base_url = Prompt.ask(
+            f"请输入 Anthropic API 地址（模型源: {_provider_label(provider)}）",
+            default=current_anthropic or default_anthropic or existing_base_url or DEFAULT_BASE_URL,
+        ).rstrip("/")
+        base_url = anthropic_base_url
+    else:
+        base_default = existing_base_url or DEFAULT_BASE_URL
+        base_url = Prompt.ask(
+            f"请输入 API 地址（模型源: {_provider_label(provider)}）",
+            default=base_default,
+        ).rstrip("/")
+        openai_base_url = base_url if needs_openai else ""
+        anthropic_base_url = base_url if needs_anthropic else ""
 
     key_prompt = f"请输入 API Key（模型源: {_provider_label(provider)}）"
     if allow_keep and existing_api_key:
@@ -1044,11 +1241,13 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
         console.print("[red]API Key 不能为空[/red]")
         sys.exit(1)
 
-    return base_url, api_key
+    return base_url, api_key, openai_base_url, anthropic_base_url
 
 
 def _quick_connect_gateway(cfg, preset_id=None):
     _ensure_interactive_terminal("网关通道接入")
+    template_key = _select_provider_template(preset_id=preset_id)
+    template = _provider_template_payload(template_key)
     console.print(Panel(
         "[bold]网关通道[/bold]\n\n输入一个兼容 OpenAI / Anthropic 的 API 地址和 Key。\n"
         "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
@@ -1057,12 +1256,12 @@ def _quick_connect_gateway(cfg, preset_id=None):
         border_style="cyan",
     ))
     providers = _provider_map(cfg)
-    suggested_name = preset_id or "My Gateway"
+    suggested_name = template["name"]
     try:
         name = _wizard_prompt("显示名称（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
         suggested_id = _normalize_provider_id_input(name)
         provider_id = _normalize_provider_id_input(
-            _wizard_prompt("内部标识（用于配置和命令）", default=preset_id or suggested_id).strip() or suggested_id
+            _wizard_prompt("内部标识（用于配置和命令）", default=template["id"] or suggested_id).strip() or suggested_id
         )
     except WizardBack:
         console.print("[yellow]已返回上一层[/yellow]")
@@ -1075,12 +1274,9 @@ def _quick_connect_gateway(cfg, preset_id=None):
         return cfg, False
 
     provider = _normalize_provider({
+        **template,
         "id": provider_id,
         "name": name,
-        "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
-        "supported_clis": list(CLI_NAMES),
-        "enabled": True,
-        "priority": DEFAULT_PRIORITY,
     })
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
@@ -1124,10 +1320,10 @@ def _quick_connect_official(cfg, preset_cli=None):
 
     suggested_name = f"{cli_name}-main"
     try:
-        name = _wizard_prompt("账号备注（给自己看的名字）", default=suggested_name).strip() or suggested_name
+        name = _wizard_prompt("显示名（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
         account_id = _normalize_account_id(
             _wizard_prompt(
-                "账号标识（内部区分用，例如 apple / work / personal）",
+                "文件夹名（用于目录和命令，例如 apple / work / personal）",
                 default=_normalize_account_id(name),
             ).strip()
         )
@@ -1139,20 +1335,10 @@ def _quick_connect_official(cfg, preset_cli=None):
         return cfg, False
     accounts = _account_map(cfg)
     if account_id in accounts:
-        console.print(f"[red]账号标识 '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
+        console.print(f"[red]文件夹名 '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
         return cfg, False
 
-    try:
-        home_dir = _wizard_prompt(
-            "登录目录（用于隔离这个账号的官方登录态）",
-            default=_default_account_home(account_id),
-        ).strip() or _default_account_home(account_id)
-    except WizardBack:
-        console.print("[yellow]已返回上一层[/yellow]")
-        return cfg, False
-    except WizardCancel:
-        console.print("[yellow]已退出接入[/yellow]")
-        return cfg, False
+    home_dir = _default_account_home(account_id)
     account = _normalize_account({
         "id": account_id,
         "name": name,
@@ -1166,6 +1352,7 @@ def _quick_connect_official(cfg, preset_cli=None):
     updated_cfg, _ = _ensure_account_config(updated_cfg)
     save_config(updated_cfg)
     console.print(f"[green]✓ 已添加官方通道: {account_id}[/green]")
+    console.print(f"[dim]文件夹目录: {home_dir}[/dim]")
     if Confirm.ask("现在去登录这个官方通道？", default=True):
         _run_account_login(account)
     if Confirm.ask(f"设为 {cli_name} 的默认官方通道？", default=True):
@@ -1198,7 +1385,7 @@ def _display_runtime_usage(runtime_kind, runtime_id, title):
     rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
     if not rows:
         console.print(f"[yellow]{title} 还没有本地启动统计[/yellow]")
-        console.print(f"[dim]统计文件: {USAGE_PATH}[/dim]")
+        console.print(f"[dim]统计文件: {_active_usage_path()}[/dim]")
         return
 
     table = Table(title=f"{title} · 本地统计", show_lines=True)
@@ -1236,6 +1423,7 @@ def _list_manage_targets(cfg):
             "title": provider.get("name", provider_id),
             "summary": "默认网关通道" if provider_id == default_provider_id else "网关通道",
             "is_default": provider_id == default_provider_id,
+            "default_label": "网关" if provider_id == default_provider_id else "备选",
             "status": "已配置" if provider_ctx.get("base_url") and provider_ctx.get("api_key") else "未配置",
             "launches": launches,
             "last_used_at": last_used_at,
@@ -1258,6 +1446,7 @@ def _list_manage_targets(cfg):
             "title": account.get("name", account_id),
             "summary": f"官方通道 · {cli_name.upper()}{default_tag}",
             "is_default": account_defaults.get(cli_name) == account_id,
+            "default_label": cli_name.upper() if account_defaults.get(cli_name) == account_id else "备选",
             "status": login_state.get("summary") or login_state.get("state", ""),
             "launches": launches,
             "last_used_at": last_used_at,
@@ -1292,8 +1481,8 @@ def _select_manage_target(cfg):
     table = Table(show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("类型", style="green")
-    table.add_column("名称", style="yellow")
-    table.add_column("默认", style="white", width=6)
+    table.add_column("显示名", style="yellow")
+    table.add_column("默认入口", style="white", width=10)
     table.add_column("状态", style="magenta")
     table.add_column("启动", style="cyan", width=6)
     table.add_column("最近使用", style="white")
@@ -1303,13 +1492,13 @@ def _select_manage_target(cfg):
             str(index),
             target_type,
             target.get("title", ""),
-            "默认" if target.get("is_default") else "",
+            target.get("default_label", ""),
             target.get("status", ""),
             str(target.get("launches", 0)),
             target.get("last_used_at", "") or "未使用",
         )
     console.print(table)
-    console.print("[dim]进入后可继续查看本地统计、设默认、重新登录或删除。官方真实用量暂不支持统一查询。[/dim]")
+    console.print("[dim]进入后可继续查看本地统计、设默认、重命名、重新登录或删除。官方真实用量暂不支持统一查询。[/dim]")
 
     while True:
         raw = Prompt.ask("选择要管理的通道，直接回车返回", default="")
@@ -1330,7 +1519,8 @@ def _manage_provider_target(cfg, provider_id):
             f"[bold]网关通道[/bold]  {provider.get('name', provider_id)}\n"
             f"[bold]内部标识:[/bold]  {provider_id}\n"
             f"[bold]默认通道:[/bold]  {default_tag}\n"
-            f"[bold]地址:[/bold]      {provider.get('base_url') or '(未设置)'}\n"
+            f"[bold]OpenAI 地址:[/bold]      {_provider_openai_base_url(provider) or '(未设置)'}\n"
+            f"[bold]Anthropic 地址:[/bold]   {_provider_anthropic_base_url(provider) or '(未设置)'}\n"
             f"[bold]协议:[/bold]      {', '.join(provider.get('protocols', []))}\n"
             f"[bold]CLI:[/bold]       {', '.join(provider.get('supported_clis', []))}",
             title="通道详情",
@@ -1338,10 +1528,11 @@ def _manage_provider_target(cfg, provider_id):
         ))
         console.print("  1. 查看本地统计")
         console.print("  2. 设为默认网关")
-        console.print("  3. 编辑地址和 Key")
-        console.print("  4. 删除这个通道")
-        console.print("  5. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5"], default="5")
+        console.print("  3. 重命名这个通道")
+        console.print("  4. 编辑地址和 Key")
+        console.print("  5. 删除这个通道")
+        console.print("  6. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6"], default="6")
         if choice == "1":
             _display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
             continue
@@ -1351,14 +1542,36 @@ def _manage_provider_target(cfg, provider_id):
             console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
             return load_config(), True
         if choice == "3":
-            _handle_provider_credentials_config(cfg, [provider_id])
+            new_id = _normalize_provider_id_input(Prompt.ask("新的内部标识", default=provider_id).strip())
+            new_name = Prompt.ask("新的显示名", default=provider.get("name", provider_id)).strip() or new_id
+            if new_id == provider_id and new_name == provider.get("name", provider_id):
+                console.print("[yellow]名称和标识都未变化，已取消重命名[/yellow]")
+                return cfg, False
+            _handle_provider_rename_config(cfg, [provider_id, new_id, new_name])
             return load_config(), True
         if choice == "4":
+            _handle_provider_credentials_config(cfg, [provider_id])
+            return load_config(), True
+        if choice == "5":
             before = set(_provider_map(cfg).keys())
             _handle_provider_remove_config(cfg, [provider_id])
             after_cfg = load_config()
             return after_cfg, set(_provider_map(after_cfg).keys()) != before
         return cfg, False
+
+
+def _prompt_account_rename(cfg, account_id):
+    console.print(f"[cyan]准备重命名官方通道: {account_id}[/cyan]")
+    new_id = Prompt.ask("新的文件夹名", default=account_id).strip()
+    if not new_id or new_id == account_id:
+        console.print("[yellow]文件夹名未变化，已取消重命名[/yellow]")
+        return cfg, False
+    before_ids = set(_account_map(cfg).keys())
+    _handle_account_rename_config(cfg, [account_id, new_id])
+    updated_cfg = load_config()
+    after_ids = set(_account_map(updated_cfg).keys())
+    changed = new_id in after_ids and before_ids != after_ids
+    return updated_cfg, changed
 
 
 def _manage_account_target(cfg, account_id):
@@ -1368,11 +1581,11 @@ def _manage_account_target(cfg, account_id):
         default_tag = "是" if cfg.get("account", {}).get("defaults", {}).get(account.get("cli")) == account_id else "否"
         console.print(Panel(
             f"[bold]官方通道[/bold]  {account.get('name', account_id)}\n"
-            f"[bold]账号标识:[/bold]  {account_id}\n"
+            f"[bold]文件夹名:[/bold]  {account_id}\n"
             f"[bold]对应 CLI:[/bold]  {account.get('cli', '').upper()}\n"
-            f"[bold]默认通道:[/bold]  {default_tag}\n"
+            f"[bold]默认入口:[/bold]  {default_tag}（{account.get('cli', '').upper()}）\n"
             f"[bold]登录状态:[/bold]  {login_state.get('summary') or login_state.get('state', '')}\n"
-            f"[bold]登录目录:[/bold]  {account.get('home_dir', '')}\n"
+            f"[bold]文件夹目录:[/bold]  {account.get('home_dir', '')}\n"
             f"[dim]官方真实用量暂不支持统一查询；这里只能查看本地统计。[/dim]",
             title="通道详情",
             border_style="cyan",
@@ -1380,10 +1593,11 @@ def _manage_account_target(cfg, account_id):
         console.print("  1. 查看本地统计")
         console.print("  2. 重新登录")
         console.print("  3. 设为默认官方通道")
-        console.print("  4. 编辑这个通道")
-        console.print("  5. 删除这个通道")
-        console.print("  6. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6"], default="6")
+        console.print("  4. 重命名这个通道")
+        console.print("  5. 编辑这个通道")
+        console.print("  6. 删除这个通道")
+        console.print("  7. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7"], default="7")
         if choice == "1":
             _display_runtime_usage("account", account_id, account.get("name", account_id))
             continue
@@ -1397,9 +1611,11 @@ def _manage_account_target(cfg, account_id):
             console.print(f"[green]✓ {account.get('cli')} 默认官方通道已更新为 {account_id}[/green]")
             return load_config(), True
         if choice == "4":
+            return _prompt_account_rename(cfg, account_id)
+        if choice == "5":
             _handle_account_edit_config(cfg, [account_id])
             return load_config(), True
-        if choice == "5":
+        if choice == "6":
             before = set(_account_map(cfg).keys())
             _handle_account_remove_config(cfg, [account_id])
             after_cfg = load_config()
@@ -1439,9 +1655,16 @@ def run_connect_wizard(cfg):
         console.print("  1. 添加网关通道")
         console.print("  2. 添加官方通道")
         console.print("  3. 管理现有通道")
-        console.print("  4. 返回")
-        action_id = Prompt.ask("选择操作", choices=["1", "2", "3", "4"], default="1")
-        action_id = {"1": "connect_gateway", "2": "connect_official", "3": "manage_channels", "4": "cancel"}[action_id]
+        console.print("  4. 迁移配置到 mms")
+        console.print("  5. 返回")
+        action_id = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5"], default="1")
+        action_id = {
+            "1": "connect_gateway",
+            "2": "connect_official",
+            "3": "manage_channels",
+            "4": "migrate_config",
+            "5": "cancel",
+        }[action_id]
 
     if action_id == "connect_gateway":
         return _quick_connect_gateway(cfg)
@@ -1449,6 +1672,9 @@ def run_connect_wizard(cfg):
         return _quick_connect_official(cfg)
     if action_id == "manage_channels":
         return run_manage_channels(cfg)
+    if action_id == "migrate_config":
+        _handle_config_migrate()
+        return load_config() or cfg, True
     console.print("[yellow]已取消接入[/yellow]")
     return cfg, False
 
@@ -1456,7 +1682,7 @@ def run_connect_wizard(cfg):
 def _probe_models(provider, emit_output=True):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
     protocols = provider.get("protocols", [])
-    base_url = provider.get("base_url", "").rstrip("/")
+    base_url = _provider_openai_base_url(provider)
     api_key = provider.get("api_key", "")
     result = {
         "provider_id": provider_id,
@@ -1464,6 +1690,7 @@ def _probe_models(provider, emit_output=True):
         "error": None,
         "error_kind": None,
         "details": [],
+        "working_url": None,
     }
 
     if "openai_chat_completions" not in protocols:
@@ -1482,27 +1709,38 @@ def _probe_models(provider, emit_output=True):
         result["error_kind"] = "missing_api_key"
         result["error"] = "当前 provider 缺少 API Key"
     else:
-        try:
-            response = httpx.get(
-                f"{base_url}/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=15,
-            )
-            response.raise_for_status()
-            data = response.json()
-            models = [m["id"] for m in data.get("data", [])]
-            models.sort()
-            result["models"] = models
-            if not models:
-                result["error_kind"] = "empty_models"
-                result["error"] = "接口返回成功，但模型列表为空"
-        except Exception as exc:
+        # base_url from _provider_openai_base_url already ends with /v1
+        # try both {url}/models and fallback {url_without_v1}/models for non-standard gateways
+        alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
+        last_exc = None
+        for try_url in [base_url, alt_url]:
+            try:
+                response = httpx.get(
+                    f"{try_url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                data = response.json()
+                models = [m["id"] for m in data.get("data", [])]
+                models.sort()
+                result["models"] = models
+                result["working_url"] = try_url
+                if not models:
+                    result["error_kind"] = "empty_models"
+                    result["error"] = "接口返回成功，但模型列表为空"
+                elif try_url != base_url and emit_output:
+                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
+                break
+            except Exception as exc:
+                last_exc = exc
+        if result["models"] is None:
             result["error_kind"] = "request_failed"
-            result["error"] = f"拉取模型列表失败: {exc}"
+            result["error"] = f"拉取模型列表失败: {last_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
-        f"base_url: {base_url or '(未设置)'}",
+        f"openai_base_url: {base_url or '(未设置)'}",
         f"protocols: {', '.join(protocols) if protocols else '(未声明)'}",
     ]
     if result["error"]:
@@ -1712,19 +1950,33 @@ def _run_recovery_action(cfg, provider, probe, action_id):
 
 
 def setup_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
-    base_url, api_key = _prompt_provider_credentials(provider, existing_base_url, existing_api_key, allow_keep)
+    base_url, api_key, openai_base_url, anthropic_base_url = _prompt_provider_credentials(
+        provider, existing_base_url, existing_api_key, allow_keep
+    )
     provider_ctx = dict(provider)
     provider_ctx["base_url"] = base_url
+    provider_ctx["openai_base_url"] = openai_base_url
+    provider_ctx["anthropic_base_url"] = anthropic_base_url
     provider_ctx["api_key"] = api_key
 
     console.print("\n正在测试连接...", style="dim")
-    models = fetch_models(provider_ctx)
+    probe = _probe_models(provider_ctx)
+    models = probe.get("models")
     if models is None:
         console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
     else:
         console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
+        # Auto-fix: if probe succeeded with a different URL, update saved URL
+        working_url = probe.get("working_url")
+        computed_openai = _provider_openai_base_url(provider_ctx)
+        if working_url and working_url != computed_openai:
+            # working_url differs from what was computed → fix the stored base_url
+            fixed_base = working_url  # working_url is already the correct /v1 URL
+            console.print(f"[yellow]→ 自动修正地址为 {fixed_base}[/yellow]")
+            openai_base_url = fixed_base
+            base_url = fixed_base
 
-    save_provider_credentials(provider["id"], base_url, api_key)
+    save_provider_credentials(provider["id"], base_url, api_key, openai_base_url, anthropic_base_url)
     console.print(f"[green]✓ provider '{provider['id']}' 的凭据已保存到 {CREDENTIALS_PATH}[/green]")
     console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
     return resolve_provider_context({"providers": [provider], "provider": {"default": provider["id"]}}, provider["id"])
@@ -1738,10 +1990,16 @@ def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=
 
 def ensure_provider_credentials(cfg, provider_id=None):
     provider = get_provider_definition(cfg, provider_id)
-    base_url, api_key = load_provider_credentials(provider["id"])
-    if base_url and api_key:
+    credentials = load_provider_credentials(provider["id"])
+    if (credentials["base_url"] or credentials["openai_base_url"] or credentials["anthropic_base_url"]) and credentials["api_key"]:
         return resolve_provider_context(cfg, provider["id"])
-    return setup_provider_credentials(provider, base_url, api_key, allow_keep=bool(api_key))
+    existing_base = credentials["base_url"] or credentials["openai_base_url"] or credentials["anthropic_base_url"]
+    return setup_provider_credentials(
+        provider,
+        existing_base,
+        credentials["api_key"],
+        allow_keep=bool(credentials["api_key"]),
+    )
 
 
 def ensure_api_credentials():
@@ -1835,6 +2093,92 @@ def display_models(models, role=MODE_ALL, recommend=None):
     return [m for m, _ in flat]
 
 
+def _filter_models_for_display(models, role=MODE_ALL, recommend=None):
+    categorized = categorize_models(models)
+    flat = []
+    for cat, cat_models in categorized.items():
+        for model_name in cat_models:
+            flat.append((model_name, cat))
+    if normalize_user_role(role) == MODE_RECOMMENDED and recommend:
+        allowed = set(recommend)
+        flat = [(model_name, cat) for model_name, cat in flat if model_name in allowed]
+    return flat
+
+
+def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
+    grouped = {}
+    order = []
+    for model_name, _ in _filter_models_for_display(models, role, recommend):
+        normalized = str(model_name or "").strip().lower()
+        family = "其他"
+        for family_name, prefixes in CUSTOM_MODEL_FAMILIES:
+            if any(normalized.startswith(prefix.lower()) for prefix in prefixes):
+                family = family_name
+                break
+        if family not in grouped:
+            grouped[family] = []
+            order.append(family)
+        grouped[family].append(model_name)
+    return [(family, grouped[family]) for family in order]
+
+
+def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tui=False):
+    groups = _group_models_for_custom(models, role, recommend)
+    if not groups:
+        return None
+    if len(groups) == 1:
+        selected_family, family_models = groups[0]
+    else:
+        family_labels = [f"{family} ({len(items)})" for family, items in groups]
+        if use_tui:
+            from ccs_tui import select_model_tui
+            selected_label = select_model_tui(family_labels, title=f"为 {cli_name} 选择模型品牌")
+            if selected_label is None:
+                return None
+            family_index = family_labels.index(selected_label)
+        else:
+            family_index = None
+            while family_index is None:
+                table = Table(title=f"{cli_name} · 选择模型品牌", show_lines=True)
+                table.add_column("#", style="cyan", width=4)
+                table.add_column("品牌", style="green")
+                table.add_column("数量", style="yellow", width=6)
+                for idx, (family, items) in enumerate(groups, 1):
+                    table.add_row(str(idx), family, str(len(items)))
+                console.print(table)
+                try:
+                    picked = IntPrompt.ask("选择模型品牌编号") - 1
+                except KeyboardInterrupt:
+                    sys.exit(0)
+                if 0 <= picked < len(groups):
+                    family_index = picked
+                else:
+                    console.print(f"[red]请输入 1-{len(groups)}[/red]")
+            if family_index is None:
+                console.print(f"[red]请输入 1-{len(groups)}[/red]")
+                return None
+        selected_family, family_models = groups[family_index]
+
+    if use_tui:
+        from ccs_tui import select_model_tui
+        return select_model_tui(family_models, title=f"{selected_family} · 选择子模型")
+
+    while True:
+        table = Table(title=f"{cli_name} · {selected_family}", show_lines=True)
+        table.add_column("#", style="cyan", width=4)
+        table.add_column("模型", style="green")
+        for idx, model_name in enumerate(family_models, 1):
+            table.add_row(str(idx), model_name)
+        console.print(table)
+        try:
+            model_index = IntPrompt.ask("选择子模型编号") - 1
+        except KeyboardInterrupt:
+            sys.exit(0)
+        if 0 <= model_index < len(family_models):
+            return family_models[model_index]
+        console.print(f"[red]请输入 1-{len(family_models)}[/red]")
+
+
 def _ensure_models_cache_available(models_cache):
     if models_cache:
         return True
@@ -1892,6 +2236,28 @@ def _provider_models_for_cli(cli_name, models):
     return list(models or [])
 
 
+def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models):
+    merged = []
+    seen = set()
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_supports_cli_name(provider, cli_name):
+            continue
+        if not provider.get("base_url") or not provider.get("api_key"):
+            continue
+        models = list(cached_models or [])
+        if cached_models is None:
+            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
     options = []
@@ -1932,7 +2298,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
     return options
 
 
-def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
+def _account_options_for_model(cfg, cli_name, default_models, model_info=None, allow_selected_model=False):
     selected_model = _resolve_model_name(model_info) if model_info else ""
     options = []
     defaults = cfg.get("account", {}).get("defaults", {})
@@ -1943,11 +2309,30 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
         account_cli = account_def.get("cli")
         if account_cli not in OAUTH_CAPABLE_CLIS:
             continue
+        bridgeable_to_claude = (
+            bool(selected_model)
+            and cli_name == "claude"
+            and account_cli in {"codex", "gemini"}
+        )
+        if selected_model and not allow_selected_model and not bridgeable_to_claude:
+            continue
         if selected_model and not _model_matches_account_cli(account_cli, selected_model):
             continue
         if not selected_model and account_cli != cli_name:
             continue
         runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=account_cli)
+        launch_cli = account_cli
+        desc = "官方"
+        if bridgeable_to_claude:
+            bridged = dict(runtime)
+            bridged["auth_mode"] = "oauth_bridge"
+            bridged["bridge_source_cli"] = account_cli
+            bridged["bridge_target_cli"] = "claude"
+            bridged["bridge_model"] = selected_model
+            bridged["bridge_account_id"] = runtime.get("id")
+            runtime = bridged
+            launch_cli = "claude"
+            desc = "官方桥接"
         options.append({
             "kind": "account",
             "id": runtime.get("id"),
@@ -1955,11 +2340,11 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None):
             "models": [selected_model] if selected_model else list(default_models or []),
             "label": _runtime_choice_label(runtime),
             "title": _account_label(runtime),
-            "desc": "官方",
+            "desc": desc,
             "icon": "🔑",
             "priority": runtime.get("priority", DEFAULT_PRIORITY),
             "is_default": runtime.get("id") == defaults.get(account_cli),
-            "launch_cli": account_cli,
+            "launch_cli": launch_cli,
         })
     return options
 
@@ -2015,14 +2400,24 @@ def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, p
 
 
 def _runtime_choice_label(runtime):
+    if runtime.get("auth_mode") == "oauth_bridge":
+        return f"官方桥接 / {_account_label(runtime)}"
     if runtime.get("auth_mode") == "oauth":
         return f"官方 / {_account_label(runtime)}"
     return f"网关 / {_provider_label(runtime)}"
 
 
-def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None):
+def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None, allow_selected_model_accounts=False):
     options = _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=model_info)
-    options.extend(_account_options_for_model(cfg, cli_name, default_models, model_info=model_info))
+    options.extend(
+        _account_options_for_model(
+            cfg,
+            cli_name,
+            default_models,
+            model_info=model_info,
+            allow_selected_model=allow_selected_model_accounts,
+        )
+    )
     options.sort(key=lambda item: (
         item.get("priority", DEFAULT_PRIORITY),
         0 if item.get("launch_cli") == cli_name else 1,
@@ -2033,7 +2428,16 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
     return options, default_choice
 
 
-def _choose_runtime_source(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None, model_info=None):
+def _choose_runtime_source(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    account_id=None,
+    provider_id=None,
+    model_info=None,
+    allow_selected_model_accounts=False,
+):
     if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
         runtime, models = _resolve_launch_runtime(
             cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
@@ -2041,7 +2445,12 @@ def _choose_runtime_source(cfg, cli_name, default_provider, default_models, acco
         return runtime, models, cli_name
 
     options, default_choice = _list_runtime_sources(
-        cfg, cli_name, default_provider, default_models, model_info=model_info
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        model_info=model_info,
+        allow_selected_model_accounts=allow_selected_model_accounts,
     )
 
     if not options:
@@ -2101,7 +2510,12 @@ def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_mo
             for variant in scene["variants"]:
                 model_info = dict(variant.get("model_info", {}))
                 options, default_index = _list_runtime_sources(
-                    cfg, cli_name, default_provider, default_models, model_info=model_info
+                    cfg,
+                    cli_name,
+                    default_provider,
+                    default_models,
+                    model_info=model_info,
+                    allow_selected_model_accounts=True,
                 )
                 mapping[_source_choice_key(cli_name, model_info)] = {
                     "options": options,
@@ -2110,7 +2524,12 @@ def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_mo
             continue
         model_info = _scene_model_info(scene)
         options, default_index = _list_runtime_sources(
-            cfg, cli_name, default_provider, default_models, model_info=model_info
+            cfg,
+            cli_name,
+            default_provider,
+            default_models,
+            model_info=model_info,
+            allow_selected_model_accounts=True,
         )
         mapping[_source_choice_key(cli_name, model_info)] = {
             "options": options,
@@ -2394,7 +2813,36 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         scene_name, cli, model_info, selected_source = result
         runtime_runtime = None
         family_models = []
-        if isinstance(selected_source, dict):
+        if scene_name is None:
+            custom_models = _all_provider_models_for_cli(
+                current_cfg, cli, current_provider, _probe_models(current_provider, emit_output=False).get("models")
+            )
+            if not _ensure_models_cache_available(custom_models):
+                return True
+            model = _select_custom_model(
+                custom_models,
+                cli,
+                role=current_cfg.get("user", {}).get("role", MODE_ALL),
+                recommend=current_cfg.get("recommend", {}).get("models"),
+                use_tui=True,
+            )
+            if model is None:
+                continue
+            model_info = {"model": model}
+            runtime_runtime, family_models, cli = _choose_runtime_source(
+                current_cfg,
+                cli,
+                current_provider,
+                _probe_models(current_provider, emit_output=False).get("models"),
+                account_id=account_id,
+                provider_id=provider_id,
+                model_info=model_info,
+                allow_selected_model_accounts=True,
+            )
+            if runtime_runtime is None:
+                console.print(f"[yellow]{cli} 当前没有可承载模型 {model} 的使用入口[/yellow]")
+                continue
+        elif isinstance(selected_source, dict):
             runtime_runtime = selected_source.get("runtime")
             family_models = list(selected_source.get("models") or [])
             cli = selected_source.get("launch_cli", cli)
@@ -2407,6 +2855,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 account_id=account_id,
                 provider_id=provider_id,
                 model_info=model_info,
+                allow_selected_model_accounts=True,
             )
         if runtime_runtime is None:
             console.print(f"[yellow]{cli} 当前没有可用运行来源[/yellow]")
@@ -2419,18 +2868,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             model_info = {"model": model}
         elif scene_name == "__direct_kimi__":
             model_info = {"model": DEFAULT_KIMI_MODEL}
-        if scene_name is None:
-            if _uses_native_account_entry(runtime_runtime, cli):
-                model_info = {}
-            else:
-                # 自定义模式：用 TUI 选模型
-                models = family_models or _probe_models(provider, emit_output=False).get("models")
-                if not models:
-                    return True
-                model = select_model_tui(models, title=f"为 {cli} 选择模型")
-                if model is None:
-                    return True
-                model_info = {"model": model}
         if not check_cli_installed(cli):
             from ccs_installer import check_and_offer_install
             if not check_and_offer_install(cli):
@@ -2494,6 +2931,9 @@ def handle_config(cfg, args_rest):
         return
 
     key_path = args_rest[0]
+    if key_path == "migrate":
+        _handle_config_migrate()
+        return
     if key_path == "file":
         _handle_config_file()
         return
@@ -2512,6 +2952,9 @@ def handle_config(cfg, args_rest):
     if key_path == "connect":
         run_connect_wizard(cfg)
         return
+    if key_path in {"adapter.registry", "source.registry", "source.top10"}:
+        _display_adapter_registry()
+        return
     if key_path == "provider.list":
         _display_providers(cfg)
         return
@@ -2523,6 +2966,9 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "provider.edit":
         _handle_provider_edit_config(cfg, args_rest[1:])
+        return
+    if key_path == "provider.rename":
+        _handle_provider_rename_config(cfg, args_rest[1:])
         return
     if key_path == "provider.remove":
         _handle_provider_remove_config(cfg, args_rest[1:])
@@ -2544,6 +2990,9 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "account.remove":
         _handle_account_remove_config(cfg, args_rest[1:])
+        return
+    if key_path == "account.rename":
+        _handle_account_rename_config(cfg, args_rest[1:])
         return
     if key_path == "account.status":
         _handle_account_status_config(cfg, args_rest[1:])
@@ -2797,6 +3246,232 @@ def _handle_account_login_config(cfg, args_rest):
     _run_account_login(account)
 
 
+def _usage_key(runtime_kind, cli_name, runtime_id):
+    return f"{runtime_kind}:{cli_name}:{runtime_id}"
+
+
+def _rename_usage_account(old_id, new_id, new_name, cli_name):
+    usage_path = _active_usage_path()
+    if not os.path.exists(usage_path):
+        return False
+    stats = _load_usage_stats()
+    sources = stats.get("sources", {})
+    old_key = _usage_key("account", cli_name, old_id)
+    entry = sources.pop(old_key, None)
+    if entry is None:
+        return False
+    entry["id"] = new_id
+    entry["name"] = new_name
+    sources[_usage_key("account", cli_name, new_id)] = entry
+    _save_usage_stats(stats)
+    return True
+
+
+def _rename_usage_provider(old_id, new_id, new_name):
+    usage_path = _active_usage_path()
+    if not os.path.exists(usage_path):
+        return False
+    stats = _load_usage_stats()
+    sources = stats.get("sources", {})
+    changed = False
+    rewritten = {}
+    for key, entry in list(sources.items()):
+        if entry.get("runtime_kind") != "provider" or entry.get("id") != old_id:
+            continue
+        sources.pop(key, None)
+        updated = dict(entry)
+        updated["id"] = new_id
+        updated["name"] = new_name
+        cli_name = str(updated.get("cli", "default")).strip() or "default"
+        rewritten[_usage_key("provider", cli_name, new_id)] = updated
+        changed = True
+    sources.update(rewritten)
+    if not changed:
+        return False
+    _save_usage_stats(stats)
+    return True
+
+
+def _target_account_home(old_home, new_id):
+    expanded = os.path.expanduser(str(old_home or "").strip())
+    if not expanded:
+        return _default_account_home(new_id)
+    known_roots = {
+        os.path.realpath(ACCOUNTS_DIR),
+        os.path.realpath(os.path.join(LEGACY_CONFIG_DIR, "accounts")),
+    }
+    parent = os.path.realpath(os.path.dirname(expanded))
+    if parent in known_roots:
+        return os.path.join(ACCOUNTS_DIR, new_id)
+    return os.path.join(os.path.dirname(expanded), new_id)
+
+
+def _handle_provider_rename_config(cfg, args_rest):
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {current_command()} config provider.rename <old_id> <new_id> [new_name][/red]")
+        return
+    old_id = args_rest[0].strip()
+    new_id = _normalize_provider_id_input(args_rest[1].strip())
+    providers = _provider_map(cfg)
+    provider = providers.get(old_id)
+    if not provider:
+        console.print(f"[red]未找到模型源: {old_id}[/red]")
+        return
+    if old_id == new_id and len(args_rest) < 3:
+        console.print("[yellow]名称和标识都未变化，无需重命名[/yellow]")
+        return
+    if new_id != old_id and new_id in providers:
+        console.print(f"[red]目标模型源标识已存在: {new_id}[/red]")
+        return
+
+    new_name = args_rest[2].strip() if len(args_rest) >= 3 else new_id
+    backup_dir = _backup_config_tree("provider-rename")
+    updated_cfg = dict(cfg)
+    updated_providers = []
+    for item in cfg.get("providers", []):
+        if item.get("id") != old_id:
+            updated_providers.append(item)
+            continue
+        renamed = dict(item)
+        renamed["id"] = new_id
+        renamed["name"] = new_name
+        updated_providers.append(_normalize_provider(renamed))
+    updated_cfg["providers"] = updated_providers
+
+    provider_cfg = dict(cfg.get("provider", {}))
+    if provider_cfg.get("default") == old_id:
+        provider_cfg["default"] = new_id
+    updated_cfg["provider"] = provider_cfg
+    save_config(updated_cfg)
+    _rename_usage_provider(old_id, new_id, new_name)
+    console.print(f"[green]✓ 已重命名模型源: {old_id} -> {new_id}[/green]")
+    console.print(f"[dim]显示名: {new_name}[/dim]")
+    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+
+
+def _handle_account_rename_config(cfg, args_rest):
+    if len(args_rest) < 2:
+        console.print(f"[red]用法: {current_command()} config account.rename <old_id> <new_id>[/red]")
+        return
+    old_id = args_rest[0].strip()
+    new_id = _normalize_account_id(args_rest[1].strip())
+    accounts = _account_map(cfg)
+    account = accounts.get(old_id)
+    if not account:
+        console.print(f"[red]未找到账号档案: {old_id}[/red]")
+        return
+    if old_id == new_id:
+        console.print("[yellow]新旧文件夹名相同，无需重命名[/yellow]")
+        return
+    if new_id in accounts:
+        console.print(f"[red]目标文件夹名已存在: {new_id}[/red]")
+        return
+
+    backup_dir = _backup_config_tree("account-rename")
+    old_home = os.path.expanduser(str(account.get("home_dir", "")).strip())
+    new_home = _target_account_home(old_home, new_id)
+    if os.path.exists(new_home):
+        console.print(f"[red]目标目录已存在: {new_home}[/red]")
+        console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+        return
+
+    updated_cfg = dict(cfg)
+    updated_accounts = []
+    for item in cfg.get("accounts", []):
+        if item.get("id") != old_id:
+            updated_accounts.append(item)
+            continue
+        renamed = dict(item)
+        renamed["id"] = new_id
+        renamed["name"] = new_id
+        renamed["home_dir"] = new_home
+        updated_accounts.append(_normalize_account(renamed))
+    updated_cfg["accounts"] = updated_accounts
+
+    defaults = dict(cfg.get("account", {}).get("defaults", {}))
+    for cli_name, value in defaults.items():
+        if value == old_id:
+            defaults[cli_name] = new_id
+    updated_cfg["account"] = {"defaults": defaults}
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+
+    if os.path.exists(old_home):
+        os.makedirs(os.path.dirname(new_home), exist_ok=True)
+        shutil.move(old_home, new_home)
+
+    save_config(updated_cfg)
+    _rename_usage_account(old_id, new_id, new_id, account.get("cli", ""))
+    console.print(f"[green]✓ 已重命名账号档案: {old_id} -> {new_id}[/green]")
+    console.print(f"[dim]新目录: {new_home}[/dim]")
+    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+
+
+def _migrate_accounts_dirs(cfg):
+    changed = False
+    updated_accounts = []
+    legacy_accounts_dir = os.path.join(LEGACY_CONFIG_DIR, "accounts")
+    for item in cfg.get("accounts", []):
+        if not isinstance(item, dict):
+            continue
+        account = dict(item)
+        home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+        target_home = _target_account_home(home_dir, account.get("id", "account"))
+        if os.path.realpath(home_dir) != os.path.realpath(target_home):
+            if os.path.exists(home_dir) and not os.path.exists(target_home):
+                os.makedirs(os.path.dirname(target_home), exist_ok=True)
+                shutil.move(home_dir, target_home)
+            account["home_dir"] = target_home
+            changed = True
+        updated_accounts.append(_normalize_account(account))
+
+    if os.path.isdir(legacy_accounts_dir):
+        for leftover in os.listdir(legacy_accounts_dir):
+            source = os.path.join(legacy_accounts_dir, leftover)
+            target = os.path.join(ACCOUNTS_DIR, leftover)
+            if os.path.isdir(source) and not os.path.exists(target):
+                os.makedirs(ACCOUNTS_DIR, exist_ok=True)
+                shutil.move(source, target)
+                changed = True
+    return updated_accounts, changed
+
+
+def _copy_if_missing(source, target):
+    if not os.path.exists(source) or os.path.exists(target):
+        return False
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.copy2(source, target)
+    return True
+
+
+def _handle_config_migrate():
+    backup_dir = _backup_config_tree("config-migrate")
+    copied = []
+    if _copy_if_missing(LEGACY_CREDENTIALS_PATH, CREDENTIALS_PATH):
+        copied.append(CREDENTIALS_PATH)
+    if _copy_if_missing(LEGACY_USAGE_PATH, USAGE_PATH):
+        copied.append(USAGE_PATH)
+
+    cfg = load_config()
+    if cfg is None:
+        console.print("[yellow]未找到可迁移配置，当前无需执行 migrate[/yellow]")
+        console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+        return
+
+    updated_cfg = dict(cfg)
+    updated_accounts, moved_accounts = _migrate_accounts_dirs(cfg)
+    if moved_accounts:
+        updated_cfg["accounts"] = updated_accounts
+    save_config(updated_cfg)
+
+    console.print("[green]✓ 配置迁移完成[/green]")
+    console.print(f"[dim]config: {CONFIG_PATH}[/dim]")
+    console.print(f"[dim]credentials: {_active_credentials_path()}[/dim]")
+    console.print(f"[dim]usage: {_active_usage_path()}[/dim]")
+    if copied:
+        console.print(f"[dim]复制的文件: {copied}[/dim]")
+    console.print(f"[dim]备份目录: {backup_dir}[/dim]")
+
+
 def _display_providers(cfg):
     providers = cfg.get("providers", [])
     if not providers:
@@ -2824,7 +3499,7 @@ def _display_providers(cfg):
             ", ".join(provider.get("supported_clis", [])),
             str(provider.get("priority", DEFAULT_PRIORITY)),
             status.strip(),
-            provider_ctx.get("base_url") or "(未设置)",
+            _provider_openai_base_url(provider_ctx) or _provider_anthropic_base_url(provider_ctx) or "(未设置)",
         )
     console.print(table)
     console.print(
@@ -2840,13 +3515,13 @@ def _display_accounts(cfg):
 
     defaults = cfg.get("account", {}).get("defaults", {})
     table = Table(title="账号档案列表", show_lines=True)
-    table.add_column("ID", style="cyan")
-    table.add_column("名称", style="green")
+    table.add_column("文件夹名", style="cyan")
+    table.add_column("显示名", style="green")
     table.add_column("CLI", style="yellow")
     table.add_column("优先级", style="white")
     table.add_column("状态", style="magenta")
     table.add_column("登录态", style="white")
-    table.add_column("目录", style="blue")
+    table.add_column("文件夹目录", style="blue")
 
     for account in accounts:
         login_state = _probe_account_status(account)
@@ -2876,14 +3551,15 @@ def _display_config(cfg, prefix="", depth=0):
         provider = resolve_provider_context(cfg)
         console.print("[bold]模型源:[/bold]")
         console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
-        console.print(f"  [cyan]base_url[/cyan] = {provider.get('base_url') or '(未设置)'}")
+        console.print(f"  [cyan]openai_base_url[/cyan] = {_provider_openai_base_url(provider) or '(未设置)'}")
+        console.print(f"  [cyan]anthropic_base_url[/cyan] = {_provider_anthropic_base_url(provider) or '(未设置)'}")
         key_display = _mask_key(provider.get("api_key", "")) if provider.get("api_key") else "(未设置)"
         console.print(f"  [cyan]api_key[/cyan] = {key_display}")
-        console.print(f"  [cyan]credentials_file[/cyan] = {CREDENTIALS_PATH}")
+        console.print(f"  [cyan]credentials_file[/cyan] = {_active_credentials_path()}")
         console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
         _display_providers(cfg)
         _display_accounts(cfg)
-        console.print(f"  [cyan]usage_file[/cyan] = {USAGE_PATH}")
+        console.print(f"  [cyan]usage_file[/cyan] = {_active_usage_path()}")
         console.print("  [dim]usage 只记录本地启动统计，不代表真实余额或官方剩余额度。[/dim]")
         active_overrides = _existing_override_paths()
         if active_overrides:
@@ -2937,6 +3613,35 @@ def _display_usage_stats():
         )
     console.print(table)
     console.print("[dim]这是本地软统计，用于排序/推荐参考；不等于真实计费数据。[/dim]")
+
+
+def _display_adapter_registry():
+    table = Table(title="来源公司 / Adapter Registry (Top 10)", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("公司/品牌", style="green")
+    table.add_column("模型族", style="yellow")
+    table.add_column("推荐 Adapter", style="magenta")
+    table.add_column("当前状态", style="white")
+    table.add_column("OAuth", style="white")
+    table.add_column("默认 Claude Bridge", style="white")
+
+    for idx, item in enumerate(TOP_SOURCE_COMPANIES, 1):
+        table.add_row(
+            str(idx),
+            f"{item.get('company', '')} / {item.get('brand', '')}",
+            ", ".join(item.get("families", [])),
+            str(item.get("default_adapter", "")),
+            str(item.get("current_support", "")),
+            "yes" if item.get("oauth_native") else "no",
+            "yes" if item.get("claude_bridge_default") else "no",
+        )
+    console.print(table)
+    console.print("[bold]默认策略:[/bold]")
+    for key, text in DEFAULT_ADAPTER_POLICY.items():
+        console.print(f"  [cyan]{key}[/cyan]: {text}")
+    console.print(
+        f"[dim]详情文档: docs/ADAPTER_REGISTRY.md；命令: {current_command()} config adapter.registry[/dim]"
+    )
 
 
 def _mask_key(val):
@@ -3137,6 +3842,17 @@ def main():
         handle_config(cfg, sys.argv[2:])
         return
 
+    if len(sys.argv) >= 2 and sys.argv[1] == "discuss":
+        from ccs_discuss import discuss_main
+
+        cfg = load_config()
+        if cfg is None:
+            cfg = _default_config()
+            save_config(cfg)
+        cfg = apply_local_overrides(cfg)
+        discuss_main(cfg, sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(
         prog=current_command(),
         description=f"{display_title()} — AI Coding CLI 统一启动器",
@@ -3153,7 +3869,7 @@ def main():
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
                         help="输出指定 CLI 的 export 环境变量命令")
     parser.add_argument("--apply", action="store_true",
-                        help="配合 --export 使用，写入 ~/.config/ccs/env/<cli>.sh")
+                        help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
 
@@ -3234,6 +3950,7 @@ def main():
             account_id=args.account,
             provider_id=args.provider,
             model_info=model_info,
+            allow_selected_model_accounts=True,
         )
         once = bool(args.once)
         if runtime is None:
@@ -3267,6 +3984,7 @@ def main():
                     account_id=args.account,
                     provider_id=args.provider,
                     model_info=model_info,
+                    allow_selected_model_accounts=True,
                 )
                 if runtime is None:
                     console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
@@ -3317,17 +4035,6 @@ def main():
                 save_preset_interactive(user_cfg, cli, model_info)
             _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
-        if target in CLI_NAMES:
-            console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
-            console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
-            return
-
-        console.print(f"[red]未知目标: {target}[/red]")
-        return
-
-    # --custom: manual CLI + model selection
-    if args.custom:
-        cli = select_cli(visible_clis)
         if target in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, target):
             cli = target
             runtime, cli_models, cli = _choose_runtime_source(
@@ -3356,30 +4063,52 @@ def main():
                 save_preset_interactive(user_cfg, cli, model_info)
             _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
-        runtime, cli_models, cli = _choose_runtime_source(
-            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
-        )
-        if runtime is None:
-            console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+        if target in CLI_NAMES:
+            console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")
+            console.print(f"[dim]当前可用 CLI: {', '.join(visible_clis)}[/dim]")
             return
-        if _uses_native_account_entry(runtime, cli):
-            console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
-            model = None
-        elif cli == "kimi":
+
+        console.print(f"[red]未知目标: {target}[/red]")
+        return
+
+    # --custom: manual CLI + model selection
+    if args.custom:
+        cli = select_cli(visible_clis)
+        if cli == "kimi":
+            runtime, cli_models, cli = _choose_runtime_source(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+                return
             model = DEFAULT_KIMI_MODEL
         else:
-            base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+            base_models = _all_provider_models_for_cli(cfg, cli, default_provider, models_cache)
             if not _ensure_models_cache_available(base_models):
                 return
-            models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
-            model = select_model_interactive(models_list)
-        model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            model = _select_custom_model(
+                base_models,
+                cli,
+                role=role,
+                recommend=recommend if cli != "qwen" else None,
+                use_tui=False,
+            )
+            if model is None:
+                return
+            runtime, cli_models, cli = _choose_runtime_source(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider,
+                model_info={"model": model}
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
+                return
+        model_info = model
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model_info)
-        _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+        _launch_with_tracking(cli, {"model": model}, runtime, once=once)
         return
 
     # Default: TUI scene selection (with fallback)
@@ -3397,30 +4126,41 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
-        runtime, cli_models, cli = _choose_runtime_source(
-            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
-        )
-        if runtime is None:
-            console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-            return
-        if _uses_native_account_entry(runtime, cli):
-            console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
-            model = None
-        elif cli == "kimi":
+        if cli == "kimi":
+            runtime, cli_models, cli = _choose_runtime_source(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+                return
             model = DEFAULT_KIMI_MODEL
         else:
-            base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+            base_models = _all_provider_models_for_cli(cfg, cli, default_provider, models_cache)
             if not _ensure_models_cache_available(base_models):
                 return
-            models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
-            model = select_model_interactive(models_list)
-        model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            model = _select_custom_model(
+                base_models,
+                cli,
+                role=role,
+                recommend=recommend if cli != "qwen" else None,
+                use_tui=False,
+            )
+            if model is None:
+                return
+            runtime, cli_models, cli = _choose_runtime_source(
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider,
+                model_info={"model": model}
+            )
+            if runtime is None:
+                console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
+                return
+        model_info = model
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
         if action == "s":
             save_preset_interactive(user_cfg, cli, model_info)
-        _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+        _launch_with_tracking(cli, {"model": model}, runtime, once=once)
         return
 
     scene = visible_scenes[scene_name]
@@ -3434,6 +4174,7 @@ def main():
         account_id=args.account,
         provider_id=args.provider,
         model_info=model_info,
+        allow_selected_model_accounts=True,
     )
     if runtime is None:
         console.print(f"[red]{cli} 当前没有可用运行来源[/red]")

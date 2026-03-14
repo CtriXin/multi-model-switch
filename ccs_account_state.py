@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import tempfile
 from contextlib import contextmanager
 
@@ -41,6 +42,33 @@ def seed_claude_state(home_dir):
         json.dump(merged, f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.chmod(target_path, 0o600)
+
+
+def seed_gemini_state(home_dir):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    if not home_dir:
+        return
+
+    source_dir = os.path.expanduser("~/.gemini")
+    target_dir = os.path.join(home_dir, ".gemini")
+    os.makedirs(target_dir, exist_ok=True)
+    if not os.path.isdir(source_dir):
+        return
+
+    for filename in ("settings.json", ".env", "GEMINI.md"):
+        source_path = os.path.join(source_dir, filename)
+        target_path = os.path.join(target_dir, filename)
+        if not os.path.exists(source_path) or os.path.exists(target_path):
+            continue
+        try:
+            shutil.copy2(source_path, target_path)
+        except OSError:
+            continue
+        if filename in {"settings.json", ".env"}:
+            try:
+                os.chmod(target_path, 0o600)
+            except OSError:
+                pass
 
 
 def _claude_state_path(home_dir=None):

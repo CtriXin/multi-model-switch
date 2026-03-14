@@ -79,11 +79,11 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 支持的路径是：
 
 ```text
-~/.config/ccs/override.toml
 ~/.config/mms/override.toml
+~/.config/ccs/override.toml
 ```
 
-加载顺序是先 `~/.config/ccs/override.toml`，再 `~/.config/mms/override.toml`，后者优先级更高。
+加载顺序是先兼容读取 `~/.config/ccs/override.toml`，再读取 `~/.config/mms/override.toml`，后者优先级更高。
 
 这个文件只应该存在于本地或私有分发流程中，不应直接提交到公共仓库。override 只在运行时叠加，不会反写到用户自己的 `config.toml`。
 
@@ -92,6 +92,7 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 当前已经支持这些基础命令：
 
 - `mms config file`：查看当前配置文件路径
+- `mms config migrate`：把旧 `ccs` 配置和账号目录迁到 `mms` 路径
 - `mms config validate`：校验当前配置
 - `mms config get <dot.path>`：读取配置项
 - `mms config set <dot.path> <value>`：修改配置项
@@ -101,11 +102,13 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config provider.default <id>`：切换默认模型源
 - `mms config provider.add [id]`：新增模型源元数据
 - `mms config provider.edit <id>`：编辑模型源元数据
+- `mms config provider.rename <old_id> <new_id> [new_name]`：重命名网关通道的内部标识和显示名
 - `mms config provider.remove <id>`：删除模型源和本地凭据
 - `mms config provider.credentials [id]`：编辑指定模型源的地址和 Key
 - `mms config account.list`：查看当前账号档案列表
-- `mms config account.add [claude|codex]`：新增官方账号档案
+- `mms config account.add [claude|codex|gemini]`：新增官方账号档案
 - `mms config account.edit <id>`：编辑账号档案
+- `mms config account.rename <old_id> <new_id>`：重命名账号的文件夹名、显示名和目录
 - `mms config account.remove <id>`：删除账号档案
 - `mms config account.status [id]`：查看账号档案登录状态
 - `mms config account.login <id>`：进入该账号档案对应的官方登录流程
@@ -113,19 +116,36 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - `mms config stats`：查看本地启动统计
 - `mms config api.edit`：编辑默认模型源的地址和凭据
 - `mms config connect`：打开统一接入向导
+- `mms config adapter.registry`：查看当前前 10 来源公司与默认 adapter 策略（别名：`source.registry`）
+
+`provider.add` 现在也支持来源模板：
+
+- `mms config provider.add qwen`
+- `mms config provider.add kimi`
+- `mms config provider.add zai-glm`
+- `mms config provider.add bigmodel-glm`
 
 现在也支持从主界面直接接入：
 
 - 进入 `mms` 后按 `O`
-- 选择 `添加网关通道`、`添加官方通道` 或 `管理现有通道`
+- 选择 `添加网关通道`、`添加官方通道`、`管理现有通道` 或 `迁移配置到 mms`
 - 接入填写页支持 `b` 返回、`q` 退出
 - 完成后会自动回到主界面并刷新可用通道
 
 官方通道接入时有 3 个关键字段：
 
-- `账号备注`：主界面里显示给你看的名字
-- `账号标识`：内部区分用，适合写成 `apple`、`work`、`personal`
-- `登录目录`：这个账号独立保存官方登录态的位置
+官方通道接入时现在只需要记两个名字：
+
+- `显示名`：主界面里显示给你看的名字
+- `文件夹名`：同时用作目录名和命令里的账号 ID，适合写成 `apple`、`work`、`personal`
+
+对应的目录会自动生成在：
+
+```text
+~/.config/mms/accounts/<文件夹名>
+```
+
+如果你本地还在用旧版，MMS 仍会兼容读取 `~/.config/ccs/...` 下的旧配置，但新写入会优先落到 `~/.config/mms/...`。
 
 管理现有通道时，可以直接：
 
@@ -133,7 +153,16 @@ v1 已支持本地单文件 override，用于团队内部下发共享默认配�
 - 查看登录状态
 - 查看本地启动统计
 - 设为默认
+- 重命名网关的显示名 / 内部标识，或重命名官方通道的 `文件夹名`
 - 删除账号或网关
+
+如果你之前已经在用旧版 `ccs`，建议执行一次：
+
+```bash
+./mms config migrate
+```
+
+它会把旧的 `~/.config/ccs` 配置、凭据、统计和账号目录整理到 `~/.config/mms`，并自动备份原目录。
 
 目前 `官方真实用量 / 剩余额度` 还不支持统一查询；`mms config stats` 和管理页里展示的是本地启动统计。
 
@@ -144,7 +173,8 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
 - `provider` 仍然表示模型源 / 网关
 - `account` 表示官方 OAuth 账号档案
 - 每个账号档案都绑定一个独立 `home_dir`
-- 启动时会把 `HOME` / `XDG_CONFIG_HOME` 切到对应目录，实现不同账号的登录态隔离
+- `codex` 会通过隔离 `HOME` / `XDG_CONFIG_HOME` 实现登录态分离
+- `claude` / `gemini` 会保留真实系统用户上下文，只切换各自应用的本地状态目录，避免 macOS Keychain 和首次引导异常
 
 当前优先级是先把“多绑、多选、不互相污染”做稳，所以首轮支持两种方式：
 
@@ -161,16 +191,29 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
 - 来源选择不是只看当前 tab，而是按你已经选中的模型动态过滤
 - 只会展示真正能承载当前模型的来源
 - 同一个模型如果同时命中多个模型源和官方账号，TUI 会在选完模型后同屏展开“使用入口”列表
+- `自定义` 现在会先按品牌分组，再选子模型，最后才按该子模型过滤可用入口
+- 场景/预设里如果你选到 `Claude / GPT / Gemini` 这类官方品牌模型，仍然可以继续选择 `官方 / gateway`
+- 在 `claude` 场景里，如果你选择了 `GPT` 或 `Gemini` 品牌并改走官方账号，MMS 会自动启一个本地 bridge：
+  - 仍然启动 `claude`
+  - 不会切去对应的官方 CLI
+  - `claude` 请求会转到本地 bridge，再由 bridge 复用官方 OAuth 去请求上游
+- 这条 `官方桥接` 当前已支持：
+  - `claude <- codex`
+  - `claude <- gemini`
+  主要解决“没有 provider，但想继续留在 Claude 里用 GPT / Gemini”的场景
 - `gemini` 当前不占用主界面 tab，但支持：
   - 作为 `gemini-*` 模型的官方入口出现在来源列表
   - 直接使用 `mms gemini --account <id>` 启动
+- 当前默认维护的来源公司/品牌和 adapter 策略见：
+  - [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)
+  - 后续新增 `official OAuth` 来源时，默认应同时评估并补上 `claude bridge`
 
 ## 本地统计
 
 MMS 会把本地启动统计写到：
 
 ```text
-~/.config/ccs/usage.json
+~/.config/mms/usage.json
 ```
 
 当前记录的是软统计：
@@ -198,6 +241,8 @@ MMS 会把本地启动统计写到：
 更完整的落地说明和四象限 todo 见：
 
 - [docs/OAUTH_ACCOUNTS.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/OAUTH_ACCOUNTS.md)
+- [docs/MIGRATION_AND_WORKTREE.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/MIGRATION_AND_WORKTREE.md)
+- [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)
 
 ## 失败恢复交互
 
@@ -218,6 +263,7 @@ MMS 会把本地启动统计写到：
 
 - `qwen`：直接进入当前可用模型源的全部 `qwen*` 模型列表
 - `kimi`：直接使用默认模型 `kimi-k2.5`
+- `glm`：不单独新增一个本地 CLI；当前按 provider 入口完成，主要在 `claude / codex / 自定义` 路径里消费 `glm-*`
 - 它们不会再出现在内置场景列表里
 
 ## CLI 可见性
@@ -227,6 +273,7 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 - `qwen`：只有当模型源里明确探测到 `qwen*` 模型时才显示
 - `kimi`：只有当模型源里明确探测到 `kimi*` 模型时才显示
 - `claude` / `codex`：仍按模型源的 `supported_clis` 决定是否显示
+- `glm`：当前通过 `zai-glm` / `bigmodel-glm` 这类 provider 模板接入，不单独占用主界面 tab
 
 这层筛选会同时作用到顶部 CLI 入口和内置场景可见性，不会只隐藏 tab 留下失效入口。
 
@@ -237,6 +284,40 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 它没有类似 Claude Code 的多 slot 默认模型环境变量机制，所以这里不会伪装成 `opus / sonnet / haiku` 那种多模型注入。
 
 但在交互层里，`codex` 不会再被强制绑定到固定的两档场景预设；你仍然可以走全量模型选择路径。
+
+## `mms discuss`
+
+`mms discuss` 用来让多个模型围绕同一个任务先独立压缩思考，再统一做一次对抗式综合，目标是比简单并排回答更有碰撞感，但又不引入多轮群聊带来的上下文膨胀。
+
+默认是 **模式 B：摘要发散 + 对抗收敛**：
+
+- 多个模型并行输出短 JSON 摘要
+- 汇总表里快速对比核心方案、风险和下一步
+- 再由一个 synthesizer 基于所有摘要生成最终裁定
+
+如果加 `--cross`，会升级到 **模式 C：环形交叉审查 + 对抗收敛**：
+
+- 每个模型会额外审查下一个模型的摘要
+- 交叉阶段只看短摘要，不看完整长文，成本可控
+- 最终综合会同时吸收摘要和交叉质疑
+
+当前支持的用法：
+
+```bash
+mms discuss
+mms discuss "重构 auth 模块"
+mms discuss --cross "解释 Python GIL"
+mms discuss --provider foo "为这个 CLI 设计配置结构"
+```
+
+交互流程是：
+
+1. 选择 provider
+2. 单选或多选 1-5 个模型
+3. 输入任务（或直接从 CLI 读取）
+4. 查看 Phase 1 摘要发散
+5. 可选查看 Phase 2 环形交叉审查
+6. 查看最终综合结论
 
 ## 现在能做什么
 

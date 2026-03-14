@@ -5,11 +5,11 @@
 
 set -e
 
-CCS_HOME="$HOME/.ccs"
+CCS_HOME="$HOME/.mms"
 BIN_DIR="$HOME/.local/bin"
 VENV_DIR="$CCS_HOME/.venv"
-CREDENTIALS_PATH="$HOME/.config/ccs/credentials.sh"
-CONFIG_PATH="$HOME/.config/ccs/config.toml"
+CREDENTIALS_PATH="$HOME/.config/mms/credentials.sh"
+CONFIG_PATH="$HOME/.config/mms/config.toml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
 WRITE_SHELL_RC=0
 RUN_SETUP=0
@@ -119,7 +119,7 @@ python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --quiet rich httpx tomli-w
 echo "✓ 依赖已安装到 $VENV_DIR"
 
-# ── 3. 复制文件到 ~/.ccs ──
+# ── 3. 复制文件到 ~/.mms ──
 echo ""
 
 # 判断来源：本地目录 or 远程
