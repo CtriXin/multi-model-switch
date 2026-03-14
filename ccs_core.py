@@ -3102,6 +3102,11 @@ def main():
 
             discuss_main(_load_command_config(), sys.argv[2:])
             return
+        if command == "usage":
+            from ccs_usage import usage_main
+
+            usage_main(_load_command_config())
+            return
 
     parser = argparse.ArgumentParser(
         prog=current_command(),
