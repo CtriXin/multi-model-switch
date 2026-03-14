@@ -371,25 +371,20 @@ def _select_discuss_models(models):
     return selected
 
 
-def _pick_synthesizer(successful_models: list[str]) -> str:
-    """After Phase 1, let user choose which model does Phase 3 synthesis."""
-    if len(successful_models) == 1:
-        return successful_models[0]
-    console.print("\n[bold]选择 Phase 3 综合模型：[/bold]")
-    for i, m in enumerate(successful_models, 1):
-        console.print(f"  [cyan]{i}[/cyan]. {m}")
-    default = successful_models[0]
-    raw = CorePrompt.ask(
-        f"编号 [1-{len(successful_models)}]，直接回车=默认 ({default})",
-        default="",
-    ).strip()
+_P1_VIEW_KEY_HINT = "←/→ 切换模型  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
+_P2_VIEW_KEY_HINT = "←/→ 切换审查  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
+
+
+def _phase_review_bar(display_texts: dict, hint: str) -> None:
+    """Read-only curses tab viewer for phase results. Any key exits."""
+    from ccs_action_bar import post_action_bar
+    tabs = list(display_texts.keys())
+    if not tabs:
+        return
     try:
-        idx = int(raw) - 1
-        if 0 <= idx < len(successful_models):
-            return successful_models[idx]
-    except ValueError:
-        pass
-    return default
+        post_action_bar(tabs, display_texts, key_hint=hint)
+    except Exception:
+        pass  # fallback: user already saw Rich output
 
 
 async def run_discussion(provider_ctx, models, task_text, cross=False, synthesizer_model=None):
@@ -399,23 +394,24 @@ async def run_discussion(provider_ctx, models, task_text, cross=False, synthesiz
     timeout = httpx.Timeout(connect=10, write=10, read=60, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
         summaries = await phase1_diverge(provider_ctx, client, models, task_text)
-        _render_summaries_table(summaries)
+        # Replace truncated Rich table with scrollable tab viewer
+        p1_tabs = {m: _format_p1_tab(summaries, m) for m in models if m in summaries}
+        _phase_review_bar(p1_tabs, _P1_VIEW_KEY_HINT)
 
         reviews = {}
         if cross:
             reviews = await phase2_cross_review(provider_ctx, client, models, summaries)
-            _render_reviews_table(reviews)
+            p2_tabs = {m: _format_p2_tab(reviews, m) for m in models if m in reviews}
+            _phase_review_bar(p2_tabs, _P2_VIEW_KEY_HINT)
 
         successful_models = [model for model in models if summaries.get(model, {}).get("ok")]
         if not successful_models:
             console.print("[red]Phase 1 没有任何模型成功返回摘要，已跳过最终综合。[/red]")
             return {"summaries": summaries, "reviews": reviews, "final": ""}
 
-        # Let user choose synthesizer (or use CLI-specified / only available model)
-        if synthesizer_model and synthesizer_model in successful_models:
-            pass  # use as-is
-        else:
-            synthesizer_model = _pick_synthesizer(successful_models)
+        # Synthesizer = CLI-specified (if valid) or first successful model — transparent, no prompt
+        if not (synthesizer_model and synthesizer_model in successful_models):
+            synthesizer_model = successful_models[0]
         console.print(f"[dim]Phase 3 综合者: {synthesizer_model}[/dim]")
         final_text = await phase3_synthesize(
             provider_ctx,
