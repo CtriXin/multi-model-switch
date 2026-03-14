@@ -341,8 +341,9 @@ _PROVIDER_DEFS = [
         "百炼 (DashScope)",
         "MMS_BAILIAN_KEY",
         [
-            ("CN", "https://dashscope.aliyuncs.com/compatible-mode",      "models", None),
-            ("EN", "https://dashscope-intl.aliyuncs.com/compatible-mode", "models", None),
+            # sk-sp- coding plan keys use coding.dashscope endpoint
+            # /v1/models returns 404; validate via a chat probe (400=key ok, 401=key invalid)
+            ("CN", "https://coding.dashscope.aliyuncs.com", "chat_probe", None),
         ],
     ),
 ]
@@ -402,6 +403,23 @@ async def _check_provider_endpoint(
                     # 2049 = invalid key; 0 = ok; other errors = ok for auth
                     if code == 2049:
                         return "无效", "key 被拒"
+                    return "有效", "codingplan ✓"
+                return "无效", f"HTTP {r.status_code}"
+
+            elif check_type == "chat_probe":
+                # Generic: send a chat request; 401 = bad key, anything else = key ok
+                r = await c.post(
+                    base_url + "/v1/chat/completions",
+                    headers={**h, "Content-Type": "application/json"},
+                    json={"model": "_probe", "messages": [{"role": "user", "content": "hi"}],
+                          "max_tokens": 1},
+                )
+                if r.status_code == 401:
+                    return "无效", "认证失败"
+                if r.status_code in (400, 404, 422):
+                    # auth passed, just wrong model/path — key is valid
+                    return "有效", "codingplan ✓"
+                if r.status_code == 200:
                     return "有效", "codingplan ✓"
                 return "无效", f"HTTP {r.status_code}"
 
