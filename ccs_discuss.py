@@ -82,6 +82,7 @@ def parse_discuss_args(argv):
     )
     parser.add_argument("--provider", help="临时使用指定模型源")
     parser.add_argument("--cross", action="store_true", help="启用环形交叉审查")
+    parser.add_argument("--synthesizer", metavar="MODEL", help="指定 Phase 3 综合模型（跳过交互选择）")
     parser.add_argument("prompt", nargs="*", help="讨论任务")
     return parser.parse_args(argv)
 
@@ -370,7 +371,28 @@ def _select_discuss_models(models):
     return selected
 
 
-async def run_discussion(provider_ctx, models, task_text, cross=False):
+def _pick_synthesizer(successful_models: list[str]) -> str:
+    """After Phase 1, let user choose which model does Phase 3 synthesis."""
+    if len(successful_models) == 1:
+        return successful_models[0]
+    console.print("\n[bold]选择 Phase 3 综合模型：[/bold]")
+    for i, m in enumerate(successful_models, 1):
+        console.print(f"  [cyan]{i}[/cyan]. {m}")
+    default = successful_models[0]
+    raw = CorePrompt.ask(
+        f"编号 [1-{len(successful_models)}]，直接回车=默认 ({default})",
+        default="",
+    ).strip()
+    try:
+        idx = int(raw) - 1
+        if 0 <= idx < len(successful_models):
+            return successful_models[idx]
+    except ValueError:
+        pass
+    return default
+
+
+async def run_discussion(provider_ctx, models, task_text, cross=False, synthesizer_model=None):
     if httpx is None:
         raise StreamError("当前环境缺少 httpx，请先安装 rich/httpx 依赖")
 
@@ -389,7 +411,11 @@ async def run_discussion(provider_ctx, models, task_text, cross=False):
             console.print("[red]Phase 1 没有任何模型成功返回摘要，已跳过最终综合。[/red]")
             return {"summaries": summaries, "reviews": reviews, "final": ""}
 
-        synthesizer_model = successful_models[0]
+        # Let user choose synthesizer (or use CLI-specified / only available model)
+        if synthesizer_model and synthesizer_model in successful_models:
+            pass  # use as-is
+        else:
+            synthesizer_model = _pick_synthesizer(successful_models)
         console.print(f"[dim]Phase 3 综合者: {synthesizer_model}[/dim]")
         final_text = await phase3_synthesize(
             provider_ctx,
@@ -601,7 +627,8 @@ def discuss_main(cfg, argv):
     while prompt:
         try:
             result = asyncio.run(
-                run_discussion(provider_ctx, selected_models, prompt, cross=args.cross)
+                run_discussion(provider_ctx, selected_models, prompt, cross=args.cross,
+                               synthesizer_model=getattr(args, "synthesizer", None))
             )
         except KeyboardInterrupt:
             console.print("\n[yellow]已取消 discuss[/yellow]")
