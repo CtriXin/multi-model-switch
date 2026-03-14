@@ -303,79 +303,110 @@ def _section_codex(accounts: list[dict]) -> None:
     console.print(table)
 
 
-# ─── Provider API-key balance/check ──────────────────────────────────────────
-
-# Each entry: (display_name, env_var, [(region_label, base_url, balance_path_or_None)])
-# balance_path=None → fall back to models-list key-validity check
+# ─── Provider API-key / codingplan balance/check ─────────────────────────────
+#
+# check_type per endpoint:
+#   "balance"   GET balance_path → show ¥ amount
+#   "models"    GET /v1/models (OpenAI-compat)
+#   "glm"       GET /api/paas/v4/models  (GLM-specific path)
+#   "chat_mini" POST /v1/text/chatcompletion_v2 (Minimax — no models endpoint)
+#
+# Entry format: (display_name, env_var, [(region, base_url, check_type, extra_path)])
 _PROVIDER_DEFS = [
     (
         "Kimi (Moonshot)",
         "MMS_KIMI_KEY",
         [
-            ("CN", "https://api.moonshot.cn", "/v1/users/me/balance"),
+            ("CN", "https://api.moonshot.cn", "balance", "/v1/users/me/balance"),
         ],
     ),
     (
         "GLM (智谱)",
         "MMS_GLM_KEY",
         [
-            ("CN", "https://open.bigmodel.cn", None),          # balance N/A → models check
-            ("EN", "https://api.bigmodel.cn",  None),
+            ("CN", "https://open.bigmodel.cn", "glm",     None),
+            ("EN", "https://api.bigmodel.cn",  "glm",     None),
         ],
     ),
     (
         "Minimax",
         "MMS_MINIMAX_KEY",
         [
-            ("CN", "https://api.minimax.chat",   None),
-            ("EN", "https://api.minimaxi.chat",  None),
+            # Minimax has no /v1/models — validate via a lightweight chat probe
+            ("CN", "https://api.minimax.chat",  "chat_mini", None),
+            ("EN", "https://api.minimaxi.chat", "chat_mini", None),
         ],
     ),
     (
         "百炼 (DashScope)",
         "MMS_BAILIAN_KEY",
         [
-            ("CN",  "https://dashscope.aliyuncs.com/compatible-mode",    None),
-            ("EN",  "https://dashscope-intl.aliyuncs.com/compatible-mode", None),
+            ("CN", "https://dashscope.aliyuncs.com/compatible-mode",      "models", None),
+            ("EN", "https://dashscope-intl.aliyuncs.com/compatible-mode", "models", None),
         ],
     ),
 ]
 
-# GLM models path differs from OpenAI-compat
-_GLM_MODELS_PATH = "/api/paas/v4/models"
-_OAI_MODELS_PATH = "/v1/models"
-
 
 async def _check_provider_endpoint(
-    key: str, base_url: str, balance_path: str | None, is_glm: bool = False
+    key: str, base_url: str, check_type: str, extra_path: str | None
 ) -> tuple[str, str]:
-    """Returns (status_label, detail). status_label: '余额', 'key 有效', 'key 无效', '超时'."""
+    """Returns (status_label, detail)."""
     if not _httpx:
         return "N/A", "缺少 httpx"
-    headers = {"Authorization": f"Bearer {key}"}
+    h = {"Authorization": f"Bearer {key}"}
     try:
         async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
-            if balance_path:
-                r = await c.get(base_url + balance_path, headers=headers)
+            if check_type == "balance":
+                r = await c.get(base_url + extra_path, headers=h)
                 if r.status_code == 200:
                     d = r.json()
                     data = d.get("data") or d
-                    avail = data.get("available_balance") or data.get("balance") or data.get("total")
+                    avail = (data.get("available_balance") or data.get("balance")
+                             or data.get("total"))
                     if avail is not None:
                         return "余额", f"¥{float(avail):.2f}"
-                    return "key 有效", r.text[:40]
-                return "key 无效", f"HTTP {r.status_code}"
-            else:
-                # models-list check
-                path = _GLM_MODELS_PATH if is_glm else _OAI_MODELS_PATH
-                r = await c.get(base_url + path, headers=headers)
+                    return "有效", r.text[:40]
+                return "无效", f"HTTP {r.status_code}"
+
+            elif check_type == "glm":
+                r = await c.get(base_url + "/api/paas/v4/models", headers=h)
                 if r.status_code == 200:
                     try:
                         n = len(r.json().get("data", []))
-                        return "key 有效", f"{n} 个模型"
+                        return "有效", f"{n} 个模型" if n else "有效"
                     except Exception:
-                        return "key 有效", ""
-                return "key 无效", f"HTTP {r.status_code}"
+                        return "有效", ""
+                return "无效", f"HTTP {r.status_code}"
+
+            elif check_type == "models":
+                r = await c.get(base_url + "/v1/models", headers=h)
+                if r.status_code == 200:
+                    n = len((r.json()).get("data", []))
+                    return "有效", f"{n} 个模型" if n else ""
+                return "无效", f"HTTP {r.status_code}"
+
+            elif check_type == "chat_mini":
+                # Minimax has no models endpoint; probe with a minimal chat call
+                r = await c.post(
+                    base_url + "/v1/text/chatcompletion_v2",
+                    headers={**h, "Content-Type": "application/json"},
+                    json={"model": "MiniMax-Text-01",
+                          "messages": [{"role": "user", "content": "hi"}],
+                          "max_tokens": 1},
+                )
+                if r.status_code == 200:
+                    body = r.json()
+                    base_resp = body.get("base_resp") or {}
+                    code = base_resp.get("status_code", 0)
+                    # 2049 = invalid key; 0 = ok; other errors = ok for auth
+                    if code == 2049:
+                        return "无效", "key 被拒"
+                    return "有效", "codingplan ✓"
+                return "无效", f"HTTP {r.status_code}"
+
+            return "N/A", check_type
+
     except _httpx.TimeoutException:
         return "超时", ""
     except Exception as e:
@@ -383,39 +414,36 @@ async def _check_provider_endpoint(
 
 
 async def _section_providers_async() -> None:
-    rows: list[tuple] = []
-
     tasks: list = []
-    meta: list[tuple[str, str, str]] = []  # (provider_name, region, key_env)
+    meta: list[tuple[str, str]] = []  # (provider_name, region)
 
     for pname, env, endpoints in _PROVIDER_DEFS:
         key = os.environ.get(env, "").strip()
         if not key:
             continue
-        is_glm = "GLM" in pname or "智谱" in pname
-        for region, base_url, balance_path in endpoints:
-            tasks.append(_check_provider_endpoint(key, base_url, balance_path, is_glm))
-            meta.append((pname, region, env))
+        for region, base_url, check_type, extra_path in endpoints:
+            tasks.append(_check_provider_endpoint(key, base_url, check_type, extra_path))
+            meta.append((pname, region))
 
     if not tasks:
         return
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    table = Table(title="API Key 厂商查询", border_style="magenta", show_lines=False)
+    table = Table(title="第三方厂商账号", border_style="magenta", show_lines=False)
     table.add_column("厂商", style="bold")
     table.add_column("区域")
-    table.add_column("结果")
+    table.add_column("状态")
     table.add_column("详情", style="dim")
 
-    for (pname, region, env), res in zip(meta, results):
+    for (pname, region), res in zip(meta, results):
         if isinstance(res, Exception):
             status, detail = "错误", str(res)[:40]
         else:
             status, detail = res
         color = {
-            "余额": "green", "key 有效": "green",
-            "key 无效": "red", "超时": "yellow", "错误": "red",
+            "余额": "green", "有效": "green",
+            "无效": "red", "超时": "yellow", "错误": "red",
         }.get(status, "dim")
         table.add_row(pname, region, f"[{color}]{status}[/{color}]", detail)
 
