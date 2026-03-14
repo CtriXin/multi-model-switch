@@ -487,7 +487,7 @@ def _print_all_columns(models, display_texts):
         pass
 
 
-def post_action_bar(models, display_texts, preselect_model=None) -> tuple:  # REDLINE_EXCEPTION: curses event loop
+def post_action_bar(models, display_texts, preselect_model=None, key_hint=None) -> tuple:  # REDLINE_EXCEPTION: curses event loop
     """Interactive curses action bar.
 
     Returns (event_name, selected_model_or_None).
@@ -561,7 +561,8 @@ def post_action_bar(models, display_texts, preselect_model=None) -> tuple:  # RE
 
             # Hint
             try:
-                stdscr.addstr(max_y - 1, 1, _KEY_HINT[: max_w - 2], curses.A_DIM)
+                hint_text = (key_hint or _KEY_HINT)[: max_w - 2]
+                stdscr.addstr(max_y - 1, 1, hint_text, curses.A_DIM)
             except curses.error:
                 pass
 
