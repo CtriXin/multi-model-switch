@@ -374,36 +374,129 @@ def _select_discuss_models(models):
 _P1_VIEW_KEY_HINT = "←/→ 切换模型  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
 _P2_VIEW_KEY_HINT = "←/→ 切换审查  ↑/↓ 滚动  Q/Enter 继续到 Phase 3"
 
-# Model cost-tier heuristic: lower = cheaper
-# Sorted by specificity so longer patterns are matched first
-_TIER_KEYWORDS: list[tuple[int, list[str]]] = [
-    (0, ["haiku", "nano", "mini", "flash", "lite", "small", "3.5-haiku"]),
-    (1, ["plus", "3.5-sonnet", "3.5", "sonnet", "gpt-4o-mini", "gpt-4o"]),
-    (2, ["opus", "max", "turbo", "ultra", "o1", "o3", "4-turbo", "coder-next", "coder-plus"]),
+# Model pricing database: prefix → (tier, approx input $/1M tokens)
+# Tier 0 ≈ $0.05-$1.00,  Tier 1 ≈ $1.25-$5.00,  Tier 2 ≈ $5+
+# Source: official pricing pages, March 2026
+_MODEL_PRICE_DB: dict[str, tuple[int, float]] = {
+    # ── Tier 0 ──────────────────────────────────────────────────────────────
+    "qwen-turbo":           (0, 0.05),
+    "gpt-4.1-nano":         (0, 0.10),
+    "gemini-2.0-flash":     (0, 0.10),
+    "gemini-flash":         (0, 0.10),
+    "gpt-4o-mini":          (0, 0.15),
+    "gpt-4.1-mini":         (0, 0.40),
+    "qwen3-coder-plus":     (0, 0.22),
+    "qwen3.5-plus":         (0, 0.26),
+    "gemini-2.5-flash":     (0, 0.30),
+    "deepseek-chat":        (0, 0.28),
+    "deepseek-v3":          (0, 0.28),
+    "o3-mini":              (0, 1.10),   # reasoning at low price
+    "claude-haiku-4-5":     (0, 1.00),
+    "claude-haiku-3-5":     (0, 0.80),
+    "claude-haiku":         (0, 0.80),
+    # ── Tier 1 ──────────────────────────────────────────────────────────────
+    "deepseek-r1":          (1, 0.55),
+    "qwen-plus":            (1, 0.80),
+    "qwen3-coder-next":     (1, 1.00),   # estimated
+    "gemini-2.5-pro":       (1, 1.25),
+    "qwen-max":             (1, 1.60),
+    "gpt-4.1":              (1, 2.00),
+    "gpt-4o":               (1, 2.50),
+    "claude-3-5-sonnet":    (1, 3.00),
+    "claude-3-7-sonnet":    (1, 3.00),
+    "claude-sonnet-4-5":    (1, 3.00),
+    "claude-sonnet-4-6":    (1, 3.00),
+    # ── Tier 2 ──────────────────────────────────────────────────────────────
+    "claude-opus-4-5":      (2, 5.00),
+    "o1-mini":              (2, 3.00),
+    "o1":                   (2, 15.00),
+    "o3":                   (2, 10.00),
+    "claude-opus-4":        (2, 15.00),
+}
+
+# Keyword fallback for unknown models (matched in order, longer keys take priority)
+_TIER_FALLBACK: list[tuple[int, list[str]]] = [
+    (0, ["haiku", "nano", "mini", "flash", "turbo", "lite", "small"]),
+    (1, ["sonnet", "plus", "gpt-4o", "gpt-4.1", "qwen-max"]),
+    (2, ["opus", "ultra", "o1", "o3"]),
 ]
 
 
 def _model_tier(name: str) -> int:
-    """Estimate model cost tier from name. Lower = cheaper."""
+    """Return cost tier (0=cheapest, 1=mid, 2=premium) based on pricing DB then keywords."""
     n = name.lower()
-    for tier, keywords in _TIER_KEYWORDS:
+    # Longest prefix match in DB wins
+    for prefix in sorted(_MODEL_PRICE_DB, key=len, reverse=True):
+        if prefix in n:
+            return _MODEL_PRICE_DB[prefix][0]
+    # Keyword fallback
+    for tier, keywords in _TIER_FALLBACK:
         if any(k in n for k in keywords):
             return tier
-    return 1  # unknown → medium tier
+    return 1  # unknown → mid
 
 
-def _auto_synthesizer(phase1_models: list[str], all_models: list[str]) -> tuple[str, str]:
-    """Pick neutral + cheapest synthesizer. Returns (model, reason)."""
-    # Sort all candidates: cheapest tier first, non-Phase1 preferred when tied
-    def _key(m):
-        return (_model_tier(m), 1 if m in phase1_models else 0)
+def _model_price(name: str) -> float:
+    """Return approximate input price per 1M tokens."""
+    n = name.lower()
+    for prefix in sorted(_MODEL_PRICE_DB, key=len, reverse=True):
+        if prefix in n:
+            return _MODEL_PRICE_DB[prefix][1]
+    return 3.00  # unknown → mid price
 
-    best = min(all_models, key=_key)
-    if best not in phase1_models:
-        return best, "中立+低成本"
-    # best is in phase1; is there a cheaper non-phase1 with same tier?
-    # (already handled by sort key — if we're here, all non-phase1 are ≥ tier of best)
-    return best, "最低成本"
+
+def _synthesizer_candidates(phase1_models: list[str], all_models: list[str]) -> list[str]:
+    """Return ordered synthesis candidates with per-tier fallback cap.
+
+    Rules:
+    - Prefer cheapest non-Phase1 models (neutral + cost-effective)
+    - Max 2 attempts per tier before escalating to next tier
+    - Never escalate above cheapest-Phase1-tier (would cost more than Phase1 itself)
+    - Always append cheapest Phase1 model as the final guaranteed fallback
+    """
+    min_phase1_tier = min(_model_tier(m) for m in phase1_models)
+    cheapest_phase1 = min(phase1_models, key=lambda m: (_model_price(m), m))
+
+    # Group all models by tier, cap at min_phase1_tier
+    by_tier: dict[int, list[str]] = {}
+    for m in all_models:
+        t = _model_tier(m)
+        if t <= min_phase1_tier:
+            by_tier.setdefault(t, []).append(m)
+
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for tier in sorted(by_tier):
+        tier_models = sorted(by_tier[tier], key=lambda m: (_model_price(m), m))
+        non_phase1 = [m for m in tier_models if m not in phase1_models]
+        in_phase1   = [m for m in tier_models if m in phase1_models]
+        # Max 2 per tier total (non-phase1 preferred)
+        for m in (non_phase1 + in_phase1)[:2]:
+            if m not in seen:
+                candidates.append(m)
+                seen.add(m)
+
+    # Guaranteed fallback: cheapest Phase1 model
+    if cheapest_phase1 not in seen:
+        candidates.append(cheapest_phase1)
+    return candidates
+
+
+async def _run_phase3_with_fallback(provider_ctx, client, candidates, phase1_models,
+                                    task_text, summaries, reviews):
+    """Try Phase 3 synthesis candidates in order. Returns (final_text, used_model)."""
+    last_exc = None
+    for model in candidates:
+        label = "" if model in phase1_models else " (中立)"
+        tier_label = f"tier{_model_tier(model)}"
+        console.print(f"[dim]Phase 3 尝试: {model}{label}  [{tier_label}, ~${_model_price(model):.2f}/1M][/dim]")
+        try:
+            text = await phase3_synthesize(provider_ctx, client, model, task_text, summaries, reviews=reviews)
+            return text, model
+        except Exception as exc:
+            last_exc = exc
+            console.print(f"[yellow]  ✗ {model} 失败: {exc}[/yellow]")
+    raise StreamError(f"所有候选综合者均失败。最后错误: {last_exc}")
 
 
 def _phase_review_bar(display_texts: dict, hint: str) -> None:
@@ -441,20 +534,14 @@ async def run_discussion(provider_ctx, models, task_text, cross=False,
             console.print("[red]Phase 1 没有任何模型成功返回摘要，已跳过最终综合。[/red]")
             return {"summaries": summaries, "reviews": reviews, "final": ""}
 
-        # Synthesizer selection: CLI-specified > auto (neutral+cheapest)
+        # Synthesizer selection: CLI-specified (pinned) or auto fallback chain
         if synthesizer_model and synthesizer_model in (all_models or successful_models):
-            reason = "指定"
+            candidates = [synthesizer_model]
         else:
-            candidates = all_models if all_models else successful_models
-            synthesizer_model, reason = _auto_synthesizer(successful_models, candidates)
-        console.print(f"[dim]Phase 3 综合者: {synthesizer_model}  ({reason})[/dim]")
-        final_text = await phase3_synthesize(
-            provider_ctx,
-            client,
-            synthesizer_model,
-            task_text,
-            summaries,
-            reviews=reviews,
+            candidates = _synthesizer_candidates(successful_models, all_models or successful_models)
+        final_text, synthesizer_model = await _run_phase3_with_fallback(
+            provider_ctx, client, candidates, successful_models,
+            task_text, summaries, reviews
         )
         console.print(Panel(final_text or "综合阶段没有返回内容。", title=f"最终综合结论 · by {synthesizer_model}", border_style="green"))
         return {"summaries": summaries, "reviews": reviews, "final": final_text, "synthesizer": synthesizer_model}
