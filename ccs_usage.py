@@ -3,11 +3,11 @@
 支持:
   - Claude OAuth 账号 → Anthropic /api/oauth/usage (5h/7d 利用率)
   - Codex  OAuth 账号 → JWT 解码出 plan 类型 + 有效期（OpenAI 无公开利用率 API）
-  - API Key 厂商     → Kimi 余额 / GLM·CN|EN key 校验 / Minimax·CN|EN key 校验
+  - API Key 厂商     → Kimi codingplan key 校验 / GLM·CN|EN key 校验 / Minimax·CN|EN key 校验
   - 本地 MMS 启动统计 → ~/.config/ccs/usage.json
 
 API key 环境变量（在 shell 里 export 后运行 mms usage）:
-  MMS_KIMI_KEY      Kimi (Moonshot) — 支持余额查询
+  MMS_KIMI_KEY      Kimi — coding plan key (sk-kimi-*), endpoint: api.kimi.com/coding/v1
   MMS_GLM_KEY       智谱 GLM — key 校验，CN + EN 双端点
   MMS_MINIMAX_KEY   Minimax — key 校验，CN + EN 双端点
   MMS_BAILIAN_KEY   阿里百炼 — key 校验（无公开余额 API）
@@ -307,9 +307,10 @@ def _section_codex(accounts: list[dict]) -> None:
 #
 # check_type per endpoint:
 #   "balance"   GET balance_path → show ¥ amount
-#   "models"    GET /v1/models (OpenAI-compat)
-#   "glm"       GET /api/paas/v4/models  (GLM-specific path)
-#   "chat_mini" POST /v1/text/chatcompletion_v2 (Minimax — no models endpoint)
+#   "models"       GET /v1/models (OpenAI-compat)
+#   "models_kimi"  GET /models  (Kimi coding plan — path is /models not /v1/models)
+#   "glm"          GET /api/paas/v4/models  (GLM-specific path)
+#   "chat_mini"    POST /v1/text/chatcompletion_v2 (Minimax — no models endpoint)
 #
 # Entry format: (display_name, env_var, [(region, base_url, check_type, extra_path)])
 _PROVIDER_DEFS = [
@@ -317,7 +318,9 @@ _PROVIDER_DEFS = [
         "Kimi (Moonshot)",
         "MMS_KIMI_KEY",
         [
-            ("CN", "https://api.moonshot.cn", "balance", "/v1/users/me/balance"),
+            # sk-kimi-* keys use coding plan endpoint (not api.moonshot.cn)
+            # GET /models returns {"data":[{"id":"kimi-for-coding"}]} on valid key
+            ("CN", "https://api.kimi.com/coding/v1", "models_kimi", None),
         ],
     ),
     (
@@ -385,6 +388,17 @@ async def _check_provider_endpoint(
                 if r.status_code == 200:
                     n = len((r.json()).get("data", []))
                     return "有效", f"{n} 个模型" if n else ""
+                return "无效", f"HTTP {r.status_code}"
+
+            elif check_type == "models_kimi":
+                # Kimi coding plan: /models (not /v1/models)
+                r = await c.get(base_url + "/models", headers=h)
+                if r.status_code == 200:
+                    models = r.json().get("data", [])
+                    names = [m.get("id", "") for m in models[:3]]
+                    return "有效", ", ".join(names) if names else "codingplan ✓"
+                if r.status_code == 401:
+                    return "无效", "认证失败"
                 return "无效", f"HTTP {r.status_code}"
 
             elif check_type == "chat_mini":
