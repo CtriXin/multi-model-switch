@@ -76,6 +76,11 @@ CONNECT_ACTIONS = [
         "title": "管理现有通道",
         "summary": "查看状态、设默认、删除通道、查看本地统计",
     },
+    {
+        "id": "migrate_config",
+        "title": "迁移配置到 mms",
+        "summary": "把旧 ccs 配置、账号目录和统计统一迁到 mms 路径",
+    },
 ]
 
 
@@ -463,15 +468,7 @@ def select_scene_tui(scenes, cli_names, source_choices=None):
                     selected_source = available_sources[0] if len(available_sources) == 1 else None
                     return (scene_name, cli, model_info, selected_source)
                 if scene_idx == custom_idx:
-                    if len(available_sources) > 1:
-                        source_scene_name = None
-                        source_cli_name = cli
-                        source_model_info = None
-                        source_back_mode = "scene"
-                        source_idx = default_source_idx
-                        continue
-                    selected_source = available_sources[0] if len(available_sources) == 1 else None
-                    return (None, cli, None, selected_source)
+                    return (None, cli, None, None)
                 scene_name = sorted_scenes[scene_idx]
                 info = scenes[scene_name]
                 if info.get("variants"):
