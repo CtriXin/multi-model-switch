@@ -32,6 +32,38 @@ CLI_PROTOCOL_REQUIREMENTS = {
 }
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 
+# agent-im daemon 路径（auto-start on mms launch）
+_AGENT_IM_DIR = os.path.expanduser("~/auto-skills/CtriXin-repo/agent-im")
+_AGENT_IM_SOCK = os.path.expanduser("~/.agent-im/agent-im.sock")
+
+
+def _ensure_agent_im():
+    """如果 agent-im daemon 未运行，自动后台拉起。"""
+    if os.path.exists(_AGENT_IM_SOCK):
+        return
+    main_js = os.path.join(_AGENT_IM_DIR, "dist", "main.js")
+    if not os.path.isfile(main_js):
+        return
+    log_dir = os.path.expanduser("~/.agent-im/logs")
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        subprocess.Popen(
+            ["node", main_js],
+            stdout=open(os.path.join(log_dir, "daemon.log"), "a"),
+            stderr=open(os.path.join(log_dir, "daemon.err.log"), "a"),
+            start_new_session=True,
+        )
+        # 等 socket 就绪（最多 2 秒）
+        import time
+        for _ in range(20):
+            if os.path.exists(_AGENT_IM_SOCK):
+                console.print("[dim]✓ agent-im daemon 已自动启动[/dim]")
+                return
+            time.sleep(0.1)
+        console.print("[dim]agent-im daemon 启动中（socket 未就绪，不影响启动）[/dim]")
+    except Exception:
+        pass  # daemon 启动失败不阻塞 CLI
+
 
 def _gateway_ping(base_url, api_key):
     """Quick connectivity check; returns True/False/None (None = can't determine)."""
@@ -614,11 +646,37 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None):
 
 
 def _codex_gateway_env(runtime, base_url):
-    """为 gateway api_key 模式创建独立 HOME，session 数据持久保留。"""
+    """为 gateway api_key 模式创建独立 HOME，per-PID session 隔离。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
-    gateway_home = os.path.expanduser("~/.config/mms/codex-gateway")
-    codex_dir = os.path.join(gateway_home, ".codex")
+    gateway_base = os.path.expanduser("~/.config/mms/codex-gateway")
+    os.makedirs(gateway_base, exist_ok=True)
+
+    # --- per-PID session 隔离（与 Claude gateway 对齐） ---
+    sessions_dir = os.path.join(gateway_base, "s")
+    session_home = os.path.join(sessions_dir, str(os.getpid()))
+    os.makedirs(session_home, exist_ok=True)
+    _cleanup_stale_sessions(sessions_dir)
+
+    # symlink gateway_base 下的非 s 子项到 session_home
+    for entry in os.listdir(gateway_base):
+        if entry == "s":
+            continue
+        src = os.path.join(gateway_base, entry)
+        dst = os.path.join(session_home, entry)
+        if not os.path.exists(dst) and not os.path.islink(dst):
+            os.symlink(src, dst)
+    # symlink Library（macOS Keychain）
+    real_library = os.path.expanduser("~/Library")
+    session_library = os.path.join(session_home, "Library")
+    if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
+        os.symlink(real_library, session_library)
+
+    # --- .codex 目录：auth + config 写入 session，其余从真实 ~/.codex symlink ---
+    codex_dir = os.path.join(session_home, ".codex")
+    # 如果上面 symlink 了 gateway_base/.codex，先去掉，改成真目录
+    if os.path.islink(codex_dir):
+        os.unlink(codex_dir)
     os.makedirs(codex_dir, exist_ok=True)
 
     auth_path = os.path.join(codex_dir, "auth.json")
@@ -646,8 +704,20 @@ def _codex_gateway_env(runtime, base_url):
         except Exception:
             shutil.copy2(real_config, gateway_config)
 
+    # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
+    real_codex_dir = os.path.expanduser("~/.codex")
+    if os.path.isdir(real_codex_dir):
+        skip = {"auth.json", "config.toml"}
+        for entry in os.listdir(real_codex_dir):
+            if entry in skip:
+                continue
+            src = os.path.join(real_codex_dir, entry)
+            dst = os.path.join(codex_dir, entry)
+            if not os.path.exists(dst) and not os.path.islink(dst):
+                os.symlink(src, dst)
+
     env = os.environ.copy()
-    env["HOME"] = gateway_home
+    env["HOME"] = session_home
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
     return env
@@ -863,6 +933,7 @@ def _show_launch_info(cli, runtime, auth_mode):
 
 def launch_cli(cli, model_info, runtime, once=False):
     """统一启动入口"""
+    _ensure_agent_im()
     launcher = LAUNCHERS.get(cli)
     if not launcher:
         console.print(f"[red]不支持的 CLI: {cli}[/red]")
