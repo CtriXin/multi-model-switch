@@ -97,9 +97,17 @@ _PROVIDER_MODELS_FETCH: dict[str, tuple[str, str]] = {
 }
 
 # Static fallback model lists (used when live fetch fails / no key)
+# Sources:
+#   Minimax: https://www.minimaxi.com/document/models
+#   Bailian CodingPlan: https://bailian.console.aliyun.com (Coding Plan 可用模型文档)
 _STATIC_MODELS: dict[str, list[str]] = {
-    "MMS_MINIMAX_KEY": ["MiniMax-Text-01", "MiniMax-M1", "abab6.5s-chat"],
-    "MMS_BAILIAN_KEY": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"],
+    "MMS_MINIMAX_KEY": ["MiniMax-M2.5", "MiniMax-M1", "MiniMax-Text-01"],
+    "MMS_BAILIAN_KEY": [
+        # 千问
+        "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus",
+        # 智谱 / Kimi / MiniMax (also available via Bailian CodingPlan key)
+        "glm-5", "glm-4.7", "kimi-k2.5", "MiniMax-M2.5",
+    ],
 }
 
 
@@ -501,7 +509,7 @@ async def _check_provider_endpoint(
 
             elif check_type == "chat_mini":
                 # Minimax has no models endpoint; probe with a minimal chat call
-                _MINIMAX_MODELS = "MiniMax-Text-01, MiniMax-M1, abab6.5s"
+                _MINIMAX_MODELS = "MiniMax-M2.5, MiniMax-M1, MiniMax-Text-01"
                 r = await c.post(
                     base_url + "/v1/text/chatcompletion_v2",
                     headers={**h, "Content-Type": "application/json"},
@@ -521,7 +529,7 @@ async def _check_provider_endpoint(
 
             elif check_type == "chat_probe":
                 # Generic: send a chat request; 401 = bad key, anything else = key ok
-                _BAILIAN_MODELS = "qwen-plus, qwen-turbo, qwen-max"
+                _BAILIAN_MODELS = "qwen3.5-plus, qwen3-coder-next, glm-5, kimi-k2.5, MiniMax-M2.5"
                 r = await c.post(
                     base_url + "/v1/chat/completions",
                     headers={**h, "Content-Type": "application/json"},
