@@ -11,6 +11,10 @@ API key 环境变量（在 shell 里 export 后运行 mms usage）:
   MMS_GLM_KEY       智谱 GLM — key 校验，CN + EN 双端点
   MMS_MINIMAX_KEY   Minimax — key 校验，CN + EN 双端点
   MMS_BAILIAN_KEY   阿里百炼 — key 校验（无公开余额 API）
+
+用法:
+  mms usage              显示所有账号/厂商状态（模型列表读缓存）
+  mms usage --refresh    联网重新拉取各厂商最新模型列表并更新缓存
 """
 import asyncio
 import base64
@@ -45,6 +49,98 @@ def _active_usage_path() -> str | None:
         if os.path.exists(p):
             return p
     return None
+
+
+_PROVIDER_MODELS_CACHE = os.path.expanduser("~/.mms/provider_models.json")
+_MODELS_CACHE_TTL = 24 * 3600  # seconds — refresh hint after 24h
+
+
+def _load_models_cache() -> dict:
+    try:
+        return json.loads(open(_PROVIDER_MODELS_CACHE).read())
+    except Exception:
+        return {}
+
+
+def _save_models_cache(data: dict) -> None:
+    os.makedirs(os.path.dirname(_PROVIDER_MODELS_CACHE), exist_ok=True)
+    with open(_PROVIDER_MODELS_CACHE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.chmod(_PROVIDER_MODELS_CACHE, 0o600)
+
+
+async def _fetch_models_live(key: str, base_url: str, models_path: str) -> list[str] | None:
+    """Fetch model list from provider. Returns list of model IDs or None on failure."""
+    if not _httpx:
+        return None
+    try:
+        async with _httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+            r = await c.get(base_url + models_path,
+                            headers={"Authorization": f"Bearer {key}"})
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                return [m.get("id", "") for m in data if m.get("id")]
+    except Exception:
+        pass
+    return None
+
+
+# Per-provider live fetch config: (models_path,)
+# Keyed by env var name
+_PROVIDER_MODELS_FETCH: dict[str, tuple[str, str]] = {
+    # env_var: (base_url_preferred, models_path)
+    # base_url_preferred = "" means use the first endpoint's base_url from _PROVIDER_DEFS
+    "MMS_KIMI_KEY":    ("https://api.kimi.com/coding/v1",            "/models"),
+    "MMS_GLM_KEY":     ("https://open.bigmodel.cn",                  "/api/paas/v4/models"),
+    "MMS_MINIMAX_KEY": ("https://api.minimax.chat",                  "/v1/models"),
+    "MMS_BAILIAN_KEY": ("https://coding.dashscope.aliyuncs.com",     "/v1/models"),
+}
+
+# Static fallback model lists (used when live fetch fails / no key)
+_STATIC_MODELS: dict[str, list[str]] = {
+    "MMS_MINIMAX_KEY": ["MiniMax-Text-01", "MiniMax-M1", "abab6.5s-chat"],
+    "MMS_BAILIAN_KEY": ["qwen-plus", "qwen-turbo", "qwen-max", "qwen-long"],
+}
+
+
+async def _refresh_provider_models_async() -> dict:
+    """Fetch live model lists for all configured providers. Returns updated cache dict."""
+    cache = _load_models_cache()
+    now = int(datetime.now(timezone.utc).timestamp())
+
+    tasks = []
+    keys_fetched: list[str] = []
+    for env_var, (base_url, path) in _PROVIDER_MODELS_FETCH.items():
+        key = os.environ.get(env_var, "").strip()
+        if not key:
+            continue
+        tasks.append(_fetch_models_live(key, base_url, path))
+        keys_fetched.append(env_var)
+
+    if not tasks:
+        return cache
+
+    console.print("[dim]正在联网查询各厂商最新模型列表…[/dim]")
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for env_var, result in zip(keys_fetched, results):
+        if isinstance(result, list) and result:
+            cache[env_var] = {"models": result, "updated_at": now}
+        elif env_var in _STATIC_MODELS and env_var not in cache:
+            # seed with static list if never fetched before
+            cache[env_var] = {"models": _STATIC_MODELS[env_var], "updated_at": 0}
+
+    _save_models_cache(cache)
+    return cache
+
+
+def _get_cached_models(env_var: str, cache: dict) -> tuple[list[str], bool]:
+    """Returns (model_ids, is_stale). is_stale=True when cache is older than TTL."""
+    entry = cache.get(env_var)
+    if not entry:
+        return _STATIC_MODELS.get(env_var, []), True
+    age = int(datetime.now(timezone.utc).timestamp()) - entry.get("updated_at", 0)
+    return entry.get("models", []), age > _MODELS_CACHE_TTL
 
 
 # ─── Token helpers ────────────────────────────────────────────────────────────
@@ -448,9 +544,9 @@ async def _check_provider_endpoint(
         return "错误", str(e)[:40]
 
 
-async def _section_providers_async() -> None:
+async def _section_providers_async(models_cache: dict | None = None) -> None:
     tasks: list = []
-    meta: list[tuple[str, str]] = []  # (provider_name, region)
+    meta: list[tuple[str, str, str]] = []  # (provider_name, region, env_var)
 
     for pname, env, endpoints in _PROVIDER_DEFS:
         key = os.environ.get(env, "").strip()
@@ -460,7 +556,7 @@ async def _section_providers_async() -> None:
             if key_prefix and not key.startswith(key_prefix):
                 continue
             tasks.append(_check_provider_endpoint(key, base_url, check_type, extra_path))
-            meta.append((pname, region))
+            meta.append((pname, region, env))
 
     if not tasks:
         return
@@ -469,37 +565,57 @@ async def _section_providers_async() -> None:
 
     # Build rows and auto-suppress failing regions when at least one region succeeds
     _VALID_STATUSES = {"余额", "有效"}
-    rows: list[tuple[str, str, str, str]] = []  # (pname, region, status, detail)
-    for (pname, region), res in zip(meta, results):
+    rows: list[tuple[str, str, str, str, str]] = []  # (pname, region, env, status, detail)
+    for (pname, region, env), res in zip(meta, results):
         if isinstance(res, Exception):
             status, detail = "错误", str(res)[:40]
         else:
             status, detail = res
-        rows.append((pname, region, status, detail))
+        rows.append((pname, region, env, status, detail))
 
-    # Per-provider: if any row is valid, hide the invalid/error ones (CN key shown as CN-only)
-    valid_providers: set[str] = {pname for pname, _, status, _ in rows if status in _VALID_STATUSES}
+    # Per-provider: if any row is valid, hide the invalid/error ones
+    valid_providers: set[str] = {pname for pname, _, _, status, _ in rows if status in _VALID_STATUSES}
 
     table = Table(title="第三方厂商账号", border_style="magenta", show_lines=False)
     table.add_column("厂商", style="bold")
     table.add_column("区域")
     table.add_column("状态")
-    table.add_column("详情", style="dim")
+    table.add_column("可用模型", style="dim")
 
-    for pname, region, status, detail in rows:
+    stale_hint = False
+    for pname, region, env, status, detail in rows:
         if pname in valid_providers and status not in _VALID_STATUSES:
             continue  # hide failing regions when another region is valid
         color = {
             "余额": "green", "有效": "green",
             "无效": "red", "超时": "yellow", "错误": "red",
         }.get(status, "dim")
-        table.add_row(pname, region, f"[{color}]{status}[/{color}]", detail)
+
+        # Show model list from cache if valid; else fall back to check detail
+        if status in _VALID_STATUSES and models_cache is not None:
+            model_ids, is_stale = _get_cached_models(env, models_cache)
+            if model_ids:
+                model_str = ", ".join(model_ids[:5])
+                if len(model_ids) > 5:
+                    model_str += f" …+{len(model_ids)-5}"
+                if is_stale:
+                    model_str += " [dim](旧)[/dim]"
+                    stale_hint = True
+                display_detail = model_str
+            else:
+                display_detail = detail
+        else:
+            display_detail = detail
+
+        table.add_row(pname, region, f"[{color}]{status}[/{color}]", display_detail)
 
     console.print(table)
+    if stale_hint:
+        console.print("[dim]  提示: 运行 [bold]mms usage --refresh[/bold] 更新模型列表缓存[/dim]")
 
 
-def _section_providers() -> None:
-    asyncio.run(_section_providers_async())
+def _section_providers(models_cache: dict | None = None) -> None:
+    asyncio.run(_section_providers_async(models_cache))
 
 
 def _section_local_stats() -> None:
@@ -537,14 +653,25 @@ def _section_local_stats() -> None:
 
 # ─── Public entry ─────────────────────────────────────────────────────────────
 
-def usage_main(cfg: dict) -> None:
+def usage_main(cfg: dict, argv: list[str] | None = None) -> None:
+    import sys
+    args = argv if argv is not None else sys.argv[2:]
+    refresh = "--refresh" in args or "-r" in args
+
     # Always cache the currently-active keychain token on each run,
     # so it's available for future runs even after account switching.
     from ccs_account_state import cache_current_claude_token
     cache_current_claude_token()
 
     accounts = cfg.get("accounts", [])
+
+    if refresh:
+        models_cache = asyncio.run(_refresh_provider_models_async())
+        console.print("[green]✓ 模型列表已更新[/green]")
+    else:
+        models_cache = _load_models_cache()
+
     asyncio.run(_section_claude(accounts))
     _section_codex(accounts)
-    _section_providers()
+    _section_providers(models_cache)
     _section_local_stats()
