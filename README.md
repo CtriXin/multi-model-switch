@@ -16,6 +16,62 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 - 为团队/公司保留一个本地单文件 override 入口
 - 把旧版 `ccs` 的逻辑迁到新的 GitHub 仓库里继续迭代
 
+## Claude 回归诊断
+
+> 如果你的核心诉求是“所有 provider 里的模型都能挂到 Claude 上使用”，优先跑这个诊断，不要只看 `/models`。
+
+仓库内提供了一个独立诊断脚本：
+
+```bash
+scripts/doctor_claude_models.py
+```
+
+它不会改正常启动逻辑，专门用来回归这 3 件事：
+
+- 所有 provider / OAuth 是否连得通
+- 所有模型是否能正常最小 chat
+- provider 里的模型是否能走 Claude 路径 `in & out`
+
+最常用命令：
+
+```bash
+# 抽样测一个 provider，跳过真实 Claude CLI
+HOME=/Users/xin python3 scripts/doctor_claude_models.py --provider anti --skip-claude-cli --max-models 5
+
+# 全量测所有 provider 的协议层和模型 chat
+HOME=/Users/xin python3 scripts/doctor_claude_models.py --skip-claude-cli
+
+# 把 OAuth 账号状态也带上
+HOME=/Users/xin python3 scripts/doctor_claude_models.py --include-oauth --skip-claude-cli
+
+# 全量跑，包括真实 Claude CLI 冒烟
+HOME=/Users/xin python3 scripts/doctor_claude_models.py
+```
+
+输出会分成 3 张表：
+
+- `Provider / OAuth Connectivity`
+- `Model Chat Availability`
+- `Claude Compatibility`
+
+常见状态包括：
+
+- `ok`
+- `auth_failed`
+- `no_access`
+- `model_missing`
+- `endpoint_missing`
+- `timeout`
+- `upstream_unstable`
+
+建议日常先跑：
+
+```bash
+HOME=/Users/xin python3 scripts/doctor_claude_models.py --skip-claude-cli
+```
+
+只有在要验真实 CLI 链路时，再去掉 `--skip-claude-cli`。
+
 ## 当前仓库说明
 
 目前仓库里仍保留旧版文件名，例如：
