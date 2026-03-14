@@ -1679,6 +1679,41 @@ def run_connect_wizard(cfg):
     return cfg, False
 
 
+def detect_working_base_url(configured_url, path, headers, body=None, timeout=5):
+    """
+    公共 URL 探测工具：自动兼容 /v1 有无后缀的 gateway。
+
+    原理：
+      候选1 = without_v1  (去掉 /v1，通常正确)
+      候选2 = with_v1     (保留/补上 /v1)
+      对每个候选发送 candidate + path，返回第一个 HTTP 200 的 candidate。
+
+    参数：
+      configured_url  用户配置的原始地址（可带也可不带 /v1）
+      path            请求路径，如 "/models" 或 "/v1/messages"
+      headers         请求头 dict
+      body            POST body bytes；为 None 时发 GET
+      timeout         单次超时（秒），默认 5s
+
+    返回：working_base_url (str) | None
+    """
+    if httpx is None:
+        return None
+    url = configured_url.rstrip("/")
+    candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
+    for candidate in candidates:
+        try:
+            if body is not None:
+                resp = httpx.post(f"{candidate}{path}", headers=headers, content=body, timeout=timeout)
+            else:
+                resp = httpx.get(f"{candidate}{path}", headers=headers, timeout=timeout)
+            if resp.status_code == 200:
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _probe_models(provider, emit_output=True):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
     protocols = provider.get("protocols", [])
@@ -1709,34 +1744,37 @@ def _probe_models(provider, emit_output=True):
         result["error_kind"] = "missing_api_key"
         result["error"] = "当前 provider 缺少 API Key"
     else:
-        # base_url from _provider_openai_base_url already ends with /v1
-        # try both {url}/models and fallback {url_without_v1}/models for non-standard gateways
-        alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
-        last_exc = None
-        for try_url in [base_url, alt_url]:
+        # 使用公共探测工具：自动兼容 /v1 有无后缀
+        working_url = detect_working_base_url(
+            base_url,
+            "/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+        )
+        if working_url is not None:
             try:
                 response = httpx.get(
-                    f"{try_url}/models",
+                    f"{working_url}/models",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=15,
+                    timeout=8,
                 )
                 response.raise_for_status()
                 data = response.json()
                 models = [m["id"] for m in data.get("data", [])]
                 models.sort()
                 result["models"] = models
-                result["working_url"] = try_url
+                result["working_url"] = working_url
                 if not models:
                     result["error_kind"] = "empty_models"
                     result["error"] = "接口返回成功，但模型列表为空"
-                elif try_url != base_url and emit_output:
-                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
-                break
+                elif working_url != base_url and emit_output:
+                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {working_url} 连接成功[/yellow]")
             except Exception as exc:
-                last_exc = exc
-        if result["models"] is None:
+                result["error_kind"] = "request_failed"
+                result["error"] = f"拉取模型列表失败: {exc}"
+        else:
             result["error_kind"] = "request_failed"
-            result["error"] = f"拉取模型列表失败: {last_exc}"
+            result["error"] = f"模型列表端点不可达（已尝试 {base_url}/models）"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
