@@ -1745,37 +1745,33 @@ def _probe_models(provider, emit_output=True):
         result["error_kind"] = "missing_api_key"
         result["error"] = "当前 provider 缺少 API Key"
     else:
-        # 使用公共探测工具：自动兼容 /v1 有无后缀
-        working_url = detect_working_base_url(
-            base_url,
-            "/models",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=8,
-        )
-        if working_url is not None:
+        # 尝试 base_url 和 alt_url（/v1 互转），以第一个能返回有效 JSON 的为准
+        alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
+        last_exc = None
+        for try_url in [base_url, alt_url]:
             try:
                 response = httpx.get(
-                    f"{working_url}/models",
+                    f"{try_url}/models",
                     headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=8,
+                    timeout=15,
                 )
                 response.raise_for_status()
                 data = response.json()
                 models = [m["id"] for m in data.get("data", [])]
                 models.sort()
                 result["models"] = models
-                result["working_url"] = working_url
+                result["working_url"] = try_url
+                if try_url != base_url and emit_output:
+                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
                 if not models:
                     result["error_kind"] = "empty_models"
                     result["error"] = "接口返回成功，但模型列表为空"
-                elif working_url != base_url and emit_output:
-                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {working_url} 连接成功[/yellow]")
+                break
             except Exception as exc:
-                result["error_kind"] = "request_failed"
-                result["error"] = f"拉取模型列表失败: {exc}"
-        else:
+                last_exc = exc
+        if result["models"] is None and last_exc is not None:
             result["error_kind"] = "request_failed"
-            result["error"] = f"模型列表端点不可达（已尝试 {base_url}/models）"
+            result["error"] = f"拉取模型列表失败: {last_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
