@@ -285,6 +285,59 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 
 但在交互层里，`codex` 不会再被强制绑定到固定的两档场景预设；你仍然可以走全量模型选择路径。
 
+## `mms chat` / `mms discuss`
+
+`mms chat` 和 `mms discuss` 都建立在同一套 provider / model 选择能力上：
+
+- 两者都会先选择 provider（可用 `--provider` 临时指定）
+- 两者都复用同一套模型多选 TUI
+- 两者都走相同的流式请求与 SSE 解析逻辑
+- 两者都适合拿来做“先选多个模型，再处理一个任务”的交互入口
+
+差异是：
+
+- `mms chat`：让多个模型并排实时输出，适合快速看不同模型的原始回答
+- `mms discuss`：先让多个模型输出压缩摘要，再做综合裁定，适合设计讨论、方案对比、review
+
+## `mms chat`
+
+`mms chat` 用来把同一个 prompt 同时发给多个模型，并在终端里并排流式展示结果。流式结束后进入一个可交互的 action bar，支持续聊、切模型、收敛和交付。
+
+```bash
+mms chat
+mms chat "解释 Python GIL"
+mms chat --provider foo "为这个 CLI 设计配置结构"
+```
+
+**流式阶段**：模型数 ≤3 时横向并排，>3 时纵向堆叠。流式过程中：
+
+- `←` / `→`：切换当前焦点列（Tab 模式）
+- `Ctrl+C`：中断并进入结果页（已输出内容不丢失）
+
+**action bar 键位**（流式结束后出现）：
+
+| 键 | 动作 |
+|----|------|
+| `←` / `→` | 切换模型 |
+| `↑` / `↓` | 滚动内容 |
+| `Enter` | 选择此回答，继续提问 |
+| `M` | 选择此回答 + 换模型继续 |
+| `E` | 收敛：多模型综合裁定 |
+| `H` | 交付：打印选中方案 + 可复用命令 |
+| `P` | 并排查看所有模型输出 |
+| `R` | 重新提问（清除上轮上下文） |
+| `Q` | 退出 |
+
+**输入框支持**：
+
+- `←` / `→` 光标移动，`Ctrl+A/E` 行首/行尾，`Ctrl+K` 清到行尾
+- `ESC`：第一次提示确认，第二次清空全部内容
+- `Ctrl+V`：粘贴剪贴板图片（Pillow），插入为 `@image1`
+- `Cmd+V`（iTerm2 bracketed paste）：图片优先；长文本（>60 字符）显示为 `[Pasted N chars]`，Backspace 整块删除
+- `@/path/to/image.png`：手动引用图片路径
+
+**session 机制**：续聊时携带已选方案的 brief + 最近 3 条决策记录，不携带完整历史 transcript，token 成本可控。
+
 ## `mms discuss`
 
 `mms discuss` 用来让多个模型围绕同一个任务先独立压缩思考，再统一做一次对抗式综合，目标是比简单并排回答更有碰撞感，但又不引入多轮群聊带来的上下文膨胀。
@@ -320,8 +373,6 @@ mms discuss --provider foo "为这个 CLI 设计配置结构"
 6. 查看最终综合结论
 
 ## 现在能做什么
-
-如果你只是想快速了解当前仓库，可以先看这些文件：
 
 - [README.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/README.md)
 - [install.sh](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/install.sh)

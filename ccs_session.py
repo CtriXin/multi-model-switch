@@ -1,0 +1,204 @@
+"""Session envelope, brief extraction, continuation prompt, and persistence."""
+import json
+import os
+import re
+from pathlib import Path
+from uuid import uuid4
+
+_SESSIONS_DIR = Path.home() / ".mms" / "sessions"
+
+
+def _sessions_dir() -> Path:
+    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+    return _SESSIONS_DIR
+
+
+def save_session(session: dict) -> Path:
+    """Persist session to ~/.mms/sessions/<id>.json. Returns the file path."""
+    path = _sessions_dir() / f"{session['id']}.json"
+    path.write_text(json.dumps(session, ensure_ascii=False, indent=2))
+    return path
+
+
+def load_session(session_id: str) -> dict | None:
+    """Load a session by id. Returns None if not found."""
+    path = _sessions_dir() / f"{session_id}.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def list_sessions(limit: int = 10) -> list[dict]:
+    """Return the most recently modified sessions (summary only)."""
+    d = _sessions_dir()
+    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    results = []
+    for f in files[:limit]:
+        try:
+            data = json.loads(f.read_text())
+            results.append({
+                "id": data.get("id", f.stem),
+                "mode": data.get("mode", "?"),
+                "goal": data.get("task", {}).get("goal", "")[:60],
+                "round": data.get("round", 0),
+                "mtime": f.stat().st_mtime,
+            })
+        except (json.JSONDecodeError, OSError):
+            pass
+    return results
+
+
+def create_session(task_text, models, mode="chat"):
+    return {
+        "id": uuid4().hex[:12],
+        "mode": mode,
+        "models": list(models),
+        "round": 0,
+        "task": {
+            "goal": task_text,
+            "invariants": [],
+        },
+        "branch": {
+            "selected_model": None,
+            "brief": None,
+            "display_text": None,
+        },
+        "decision_log": [],
+    }
+
+
+def advance_round(session, selected_model, brief, display_text, round_models=None, non_selected_reasons=None):
+    """Update session after user selects a branch.
+
+    round_models: the model set active during this round (may differ from
+    session["models"] when CHANGE_MODELS_THEN_CONTINUE switches models after
+    the user makes a selection).
+    """
+    current_round = session["round"]
+    models_this_round = round_models if round_models is not None else session["models"]
+
+    for model in models_this_round:
+        if model == selected_model:
+            reason = (non_selected_reasons or {}).get(model, f"选中 {model}")
+            session["decision_log"].append({
+                "round": current_round,
+                "type": "selected",
+                "model": model,
+                "reason": reason,
+            })
+        else:
+            reason = (non_selected_reasons or {}).get(model, f"未选中 {model}")
+            session["decision_log"].append({
+                "round": current_round,
+                "type": "not_selected",
+                "model": model,
+                "reason": reason,
+            })
+
+    session["branch"]["selected_model"] = selected_model
+    session["branch"]["brief"] = brief
+    session["branch"]["display_text"] = display_text
+    session["round"] += 1
+    return session
+
+
+_BUDGET_FULL = 3000     # chars; below this → full tier
+_BUDGET_COMPACT = 6000  # chars; below this → compact tier; above → minimal
+
+
+def _estimate_chars(parts: list[str]) -> int:
+    return sum(len(p) for p in parts) + len(parts) * 2  # separator overhead
+
+
+def build_continuation_prompt(session, new_question):
+    """Assemble a state-first continuation prompt with token-governor tiers.
+
+    Tiers (estimated chars, ~4 chars per token):
+      full    (<3000): task + invariants + full brief JSON + last 5 decisions + question
+      compact (3000-6000): task + approach+next_step only + last 3 decisions + question
+      minimal (>6000): task + next_step hint only + question
+    """
+    task = session["task"]["goal"]
+    invariants = session["task"]["invariants"]
+    brief = session["branch"]["brief"] or {}
+    log = session["decision_log"]
+
+    # ── full tier attempt ──
+    parts = [f"## 任务目标\n{task}"]
+    if invariants:
+        parts.append("## 不可忽略的约束\n" + "\n".join(f"- {c}" for c in invariants))
+    if brief:
+        parts.append("## 当前方向\n" + json.dumps(brief, ensure_ascii=False))
+    recent = log[-5:]
+    if recent:
+        parts.append("## 已做决策\n" + "\n".join(f"- R{d['round']}: {d['reason']}" for d in recent))
+    parts.append(f"## 新问题\n{new_question}")
+
+    if _estimate_chars(parts) <= _BUDGET_FULL:
+        return "\n\n".join(parts)
+
+    # ── compact tier ──
+    compact_brief = {}
+    if brief.get("approach"):
+        compact_brief["approach"] = brief["approach"]
+    if brief.get("next_step"):
+        compact_brief["next_step"] = brief["next_step"]
+
+    parts = [f"## 任务目标\n{task}"]
+    if compact_brief:
+        parts.append("## 当前方向\n" + json.dumps(compact_brief, ensure_ascii=False))
+    recent3 = log[-3:]
+    if recent3:
+        parts.append("## 已做决策\n" + "\n".join(f"- R{d['round']}: {d['reason']}" for d in recent3))
+    parts.append(f"## 新问题\n{new_question}")
+
+    if _estimate_chars(parts) <= _BUDGET_COMPACT:
+        return "\n\n".join(parts)
+
+    # ── minimal tier ──
+    parts = [f"## 任务目标\n{task}"]
+    if brief.get("next_step"):
+        parts.append(f"## 当前下一步\n{brief['next_step']}")
+    parts.append(f"## 新问题\n{new_question}")
+    return "\n\n".join(parts)
+
+
+def extract_brief_footer(raw_text: str) -> tuple:
+    """Parse hidden JSON footer from model output.
+
+    Takes the *last* valid ---BRIEF--- block to handle cases where
+    the model emits multiple footers (front-bad / back-good).
+    Returns (display_text, brief_dict_or_None).
+    """
+    pattern = re.compile(r"---BRIEF---\s*(.*?)\s*---BRIEF---", re.DOTALL)
+    last_valid = None
+    last_match = None
+
+    for match in pattern.finditer(raw_text):
+        json_str = match.group(1).strip()
+        try:
+            brief = json.loads(json_str)
+            if isinstance(brief, dict):
+                last_valid = brief
+                last_match = match
+        except json.JSONDecodeError:
+            pass
+
+    if last_match is None:
+        return raw_text, None
+
+    display_text = (raw_text[: last_match.start()] + raw_text[last_match.end():]).strip()
+    return display_text, last_valid
+
+
+FOOTER_INSTRUCTION = """
+
+---
+在你的回复末尾，请附加一个 JSON 块，用 ---BRIEF--- 分隔符包裹，格式如下：
+---BRIEF---
+{"approach": "...", "reasoning": "...", "risks": [...], "key_decisions": [...], "next_step": "..."}
+---BRIEF---
+仅输出分隔符之间合法的 JSON，不要任何额外解释。"""
