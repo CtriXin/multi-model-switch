@@ -2,8 +2,53 @@
 
 import json
 import os
+import subprocess
 import tempfile
 from contextlib import contextmanager
+
+
+def cache_claude_token_to_home(home_dir: str) -> bool:
+    """Read the current Claude OAuth token from macOS Keychain and cache it to
+    <home_dir>/.claude.json so that ``mms usage`` can query this account's plan
+    utilization without requiring the account to be currently active.
+
+    Returns True if a token was successfully written.
+    """
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    if not home_dir:
+        return False
+    try:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return False
+        raw_creds = json.loads(r.stdout.strip())
+        oauth = raw_creds.get("claudeAiOauth") or {}
+        token = oauth.get("accessToken")
+        if not token:
+            return False
+    except Exception:
+        return False
+
+    target = os.path.join(home_dir, ".claude.json")
+    try:
+        data: dict = {}
+        if os.path.exists(target):
+            try:
+                data = json.loads(open(target).read())
+            except Exception:
+                data = {}
+        data["claudeAiOauth"] = oauth
+        os.makedirs(home_dir, exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.chmod(target, 0o600)
+        return True
+    except Exception:
+        return False
 
 
 def seed_claude_state(home_dir):
@@ -73,6 +118,9 @@ def activated_claude_account_state(home_dir):
                 dst.write(src.read())
             os.chmod(live_path, 0o600)
         yield
+        # After CLI session: cache the (possibly refreshed) keychain token so that
+        # `mms usage` can query this account's plan utilization later.
+        cache_claude_token_to_home(home_dir)
     finally:
         try:
             if os.path.exists(live_path):
