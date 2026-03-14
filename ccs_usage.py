@@ -405,6 +405,7 @@ async def _check_provider_endpoint(
 
             elif check_type == "chat_mini":
                 # Minimax has no models endpoint; probe with a minimal chat call
+                _MINIMAX_MODELS = "MiniMax-Text-01, MiniMax-M1, abab6.5s"
                 r = await c.post(
                     base_url + "/v1/text/chatcompletion_v2",
                     headers={**h, "Content-Type": "application/json"},
@@ -419,11 +420,12 @@ async def _check_provider_endpoint(
                     # 2049 = invalid key; 0 = ok; other errors = ok for auth
                     if code == 2049:
                         return "无效", "key 被拒"
-                    return "有效", "codingplan ✓"
+                    return "有效", _MINIMAX_MODELS
                 return "无效", f"HTTP {r.status_code}"
 
             elif check_type == "chat_probe":
                 # Generic: send a chat request; 401 = bad key, anything else = key ok
+                _BAILIAN_MODELS = "qwen-plus, qwen-turbo, qwen-max"
                 r = await c.post(
                     base_url + "/v1/chat/completions",
                     headers={**h, "Content-Type": "application/json"},
@@ -433,10 +435,9 @@ async def _check_provider_endpoint(
                 if r.status_code == 401:
                     return "无效", "认证失败"
                 if r.status_code in (400, 404, 422):
-                    # auth passed, just wrong model/path — key is valid
-                    return "有效", "codingplan ✓"
+                    return "有效", _BAILIAN_MODELS
                 if r.status_code == 200:
-                    return "有效", "codingplan ✓"
+                    return "有效", _BAILIAN_MODELS
                 return "无效", f"HTTP {r.status_code}"
 
             return "N/A", check_type
