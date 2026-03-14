@@ -390,6 +390,7 @@ async def run_discussion(provider_ctx, models, task_text, cross=False):
             return {"summaries": summaries, "reviews": reviews, "final": ""}
 
         synthesizer_model = successful_models[0]
+        console.print(f"[dim]Phase 3 综合者: {synthesizer_model}[/dim]")
         final_text = await phase3_synthesize(
             provider_ctx,
             client,
@@ -398,8 +399,61 @@ async def run_discussion(provider_ctx, models, task_text, cross=False):
             summaries,
             reviews=reviews,
         )
-        console.print(Panel(final_text or "综合阶段没有返回内容。", title="最终综合结论", border_style="green"))
-        return {"summaries": summaries, "reviews": reviews, "final": final_text}
+        console.print(Panel(final_text or "综合阶段没有返回内容。", title=f"最终综合结论 · by {synthesizer_model}", border_style="green"))
+        return {"summaries": summaries, "reviews": reviews, "final": final_text, "synthesizer": synthesizer_model}
+
+
+_DISCUSS_KEY_HINT = (
+    "←/→ 切换  ↑/↓ 滚动  Enter 继续追问  P 并排查看  E 收敛  H 交付  R 重新  Q 退出"
+)
+
+
+def _format_p1_tab(summaries, model):
+    result = summaries.get(model, {})
+    if not result.get("ok"):
+        return f"[失败]\n{result.get('error', '未知错误')}"
+    d = result.get("data", {})
+    risks = "\n".join(f"- {r}" for r in (d.get("risks") or ["-"]))
+    decisions = "\n".join(f"- {k}" for k in (d.get("key_decisions") or ["-"]))
+    return (
+        f"# Phase 1 · {model}\n\n"
+        f"## 核心方案\n{d.get('approach', '-')}\n\n"
+        f"## 推理\n{d.get('reasoning', '-')}\n\n"
+        f"## 风险\n{risks}\n\n"
+        f"## 关键决策\n{decisions}\n\n"
+        f"## 建议下一步\n{d.get('next_step', '-')}"
+    )
+
+
+def _format_p2_tab(reviews, reviewer):
+    result = reviews.get(reviewer, {})
+    target = result.get("target", "?")
+    if result.get("skipped"):
+        return f"[跳过] {result.get('error', '')}"
+    if not result.get("ok"):
+        return f"[失败]\n{result.get('error', '未知错误')}"
+    d = result.get("data", {})
+    return (
+        f"# Phase 2 · {reviewer} 审查 {target}\n\n"
+        f"## 认可点\n{d.get('agreement', '-')}\n\n"
+        f"## 关键质疑\n{d.get('challenge', '-')}\n\n"
+        f"## 更优替代\n{d.get('better_option', '-')}"
+    )
+
+
+def _build_phase_tabs(summaries, reviews, final_text, synthesizer, models):
+    """Build ordered tab dict: Final first, then P1 per model, then P2 per reviewer."""
+    tabs = {}
+    label = f"Final·{synthesizer}" if synthesizer else "Final"
+    tabs[label] = final_text or "(无综合结论)"
+    for m in models:
+        if m in summaries:
+            tabs[f"P1·{m}"] = _format_p1_tab(summaries, m)
+    if reviews:
+        for m in models:
+            if m in reviews:
+                tabs[f"P2·{m}"] = _format_p2_tab(reviews, m)
+    return tabs
 
 
 def _build_discuss_followup_prompt(original_task, final_text, new_question):
@@ -427,7 +481,8 @@ def _do_discuss_converge(provider_ctx, selected_models, original_task, final_tex
         console.print("\n[red]收敛出错:[/red]")
         console.print(traceback.format_exc())
         return None
-    return _discuss_post_action(provider_ctx, selected_models, original_task, converge_text, cross)
+    return _discuss_post_action(provider_ctx, selected_models, original_task, converge_text, cross,
+                                 synthesizer="converge")
 
 
 def _do_discuss_handoff(original_task, final_text):
@@ -470,29 +525,53 @@ def _do_discuss_handoff(original_task, final_text):
     os.execvp(cli, [cli, f"请阅读以下执行简报并确认你的执行计划：\n\n{final_text[:2000]}"])
 
 
-def _discuss_post_action(provider_ctx, selected_models, original_task, final_text, cross):
-    """Post-discuss prompt. Returns next task prompt, or None to exit."""
-    from ccs_action_bar import _readline
+def _discuss_post_action(provider_ctx, selected_models, original_task, final_text, cross,
+                          summaries=None, reviews=None, synthesizer=None):
+    """Post-discuss: tab viewer (all phases) → action routing."""
+    import traceback
+    from ccs_action_bar import post_action_bar, _readline, _print_all_columns
 
+    tabs = _build_phase_tabs(
+        summaries or {}, reviews or {}, final_text, synthesizer, selected_models
+    )
+    tab_keys = list(tabs.keys())
+
+    # Run tab viewer — re-enter on PRINT_ALL; Exit on any terminal event
+    terminal_events = {"CONTINUE_BRANCH", "CONVERGE_CONCLUSION", "CONVERGE_HANDOFF", "RETRY_TASK", "QUIT"}
+    event, selected, preselect = "__init__", None, tab_keys[0]
+    while event not in terminal_events:
+        try:
+            event, selected = post_action_bar(
+                tab_keys, tabs, preselect_model=preselect, key_hint=_DISCUSS_KEY_HINT
+            )
+            preselect = selected
+        except Exception:
+            console.print(traceback.format_exc())
+            return None
+        if event == "PRINT_ALL":
+            _print_all_columns(tab_keys, tabs)
+            event = "__init__"
+
+    if event == "QUIT":
+        return None
+    if event == "RETRY_TASK":
+        return original_task
+    if event == "CONVERGE_CONCLUSION":
+        return _do_discuss_converge(provider_ctx, selected_models, original_task, final_text, cross)
+    if event == "CONVERGE_HANDOFF":
+        _do_discuss_handoff(original_task, final_text)
+        return None
+    # CONTINUE_BRANCH → ask for follow-up question
     try:
-        user_input = _readline(
-            "继续追问", "Enter=退出  E=收敛  H=交付  R=重新  或直接输入追问",
-            context=final_text,
-        )
+        follow_up = _readline("继续追问", "Enter=退出  或直接输入追问", context=final_text)
     except (EOFError, KeyboardInterrupt):
         return None
-
-    cmd = user_input.strip().lower()
-    if not user_input or cmd == "q":
+    cmd = follow_up.strip().lower()
+    if not follow_up or cmd == "q":
         return None
     if cmd == "r":
         return original_task
-    if cmd == "e":
-        return _do_discuss_converge(provider_ctx, selected_models, original_task, final_text, cross)
-    if cmd == "h":
-        _do_discuss_handoff(original_task, final_text)
-        return None
-    return _build_discuss_followup_prompt(original_task, final_text, user_input)
+    return _build_discuss_followup_prompt(original_task, final_text, follow_up)
 
 
 def discuss_main(cfg, argv):
@@ -530,5 +609,8 @@ def discuss_main(cfg, argv):
 
         final_text = result.get("final", "")
         prompt = _discuss_post_action(
-            provider_ctx, selected_models, original_task, final_text, args.cross
+            provider_ctx, selected_models, original_task, final_text, args.cross,
+            summaries=result.get("summaries"),
+            reviews=result.get("reviews"),
+            synthesizer=result.get("synthesizer"),
         )
