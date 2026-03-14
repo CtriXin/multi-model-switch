@@ -1,11 +1,23 @@
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
 import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class _SilentHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that silences BrokenPipeError/ConnectionResetError on client disconnect."""
+
+    def handle_error(self, request, client_address):
+        import sys
+        exc_type = sys.exc_info()[0]
+        if exc_type and issubclass(exc_type, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+            return  # 客户端断开（Ctrl+C / Escape），静默忽略
+        super().handle_error(request, client_address)
 
 try:
     import httpx
@@ -703,7 +715,7 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 def codex_claude_bridge(account, model_name):
     port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = ThreadingHTTPServer(("127.0.0.1", port), _BridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", port), _BridgeHandler)
     server.account = account
     server.model_name = model_name
     server.bridge_token = bridge_token
@@ -725,7 +737,7 @@ def codex_claude_bridge(account, model_name):
 def gemini_claude_bridge(account, model_name):
     port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = ThreadingHTTPServer(("127.0.0.1", port), _BridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", port), _BridgeHandler)
     server.account = account
     server.model_name = model_name
     server.bridge_token = bridge_token
@@ -743,6 +755,25 @@ def gemini_claude_bridge(account, model_name):
         thread.join(timeout=2)
 
 
+_SYSTEM_TAG_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+
+
+def _extract_user_text(content):
+    """从 Anthropic messages content 中提取纯用户文本（剥离 system-reminder 注入）。"""
+    if isinstance(content, str):
+        return _SYSTEM_TAG_RE.sub("", content).strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", ""))
+        raw = " ".join(parts)
+        return _SYSTEM_TAG_RE.sub("", raw).strip()
+    return ""
+
+
 class _GatewayBridgeHandler(BaseHTTPRequestHandler):
     """Proxy bridge: accepts /v1/messages and /v1/responses from Claude Code,
     translates /v1/responses → /v1/messages, then forwards to the real gateway."""
@@ -751,6 +782,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *_args):
         return
+
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except BrokenPipeError:
+            self.close_connection = True
 
     def _json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -766,6 +803,25 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         auth = self.headers.get("authorization", "").strip()
         bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
         return expected and expected in {key, bearer}
+
+    def do_GET(self):
+        """Handle /v1/models — advertise configured models so Claude Code validation passes."""
+        if not self._authorized():
+            self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid bridge token"}})
+            return
+        if self.path == "/v1/models":
+            # 动态构建模型列表：heavy + light + Claude 默认（兜底）
+            seen = set()
+            models = []
+            for m in (getattr(self.server, "heavy_model", None),
+                      getattr(self.server, "lb_light_model", None),
+                      "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"):
+                if m and m not in seen:
+                    seen.add(m)
+                    models.append({"id": m, "object": "model"})
+            self._json(200, {"object": "list", "data": models})
+            return
+        self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
 
     def do_POST(self):
         if not self._authorized():
@@ -786,7 +842,54 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if path == "/v1/responses":
             path = "/v1/messages"
 
-        if path not in ("/v1/messages", "/v1/messages/count_tokens"):
+        # ── debug: 记录每次 bridge 收到的请求 ──
+        _lb_debug = os.path.expanduser("~/.config/mms/lb_debug.log")
+        try:
+            os.makedirs(os.path.dirname(_lb_debug), exist_ok=True)
+            lb_light = getattr(self.server, "lb_light_model", None)
+            heavy_model = getattr(self.server, "heavy_model", None)
+            user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
+            with open(_lb_debug, "a") as _f:
+                _f.write(f"[POST {self.path}→{path}] heavy={heavy_model} light={lb_light} "
+                         f"user_msgs={len(user_msgs)} model={payload.get('model','?')}\n")
+                if user_msgs:
+                    raw = _extract_user_text(user_msgs[-1].get("content", ""))
+                    _f.write(f"  last_user_text({len(raw)}): {raw[:120]}\n")
+        except Exception:
+            pass
+
+        # ── 模型名映射：将 Claude Code 发来的 claude-* 替换为真实模型名 ──
+        heavy_model = getattr(self.server, "heavy_model", None)
+        if heavy_model and "model" in payload:
+            payload["model"] = heavy_model
+
+        # ── 负载路由：根据用户消息轻重自动切换模型 ──
+        lb_light = getattr(self.server, "lb_light_model", None)
+        path_no_qs = path.split("?")[0]
+        if lb_light and "/messages" in path_no_qs and path_no_qs != "/v1/messages/count_tokens":
+            user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
+            if user_msgs:
+                last_content = user_msgs[-1].get("content", "")
+                last_text = _extract_user_text(last_content)
+                if last_text:
+                    from ccs_router import classify_task, log_route
+                    # LLM 分类：用 gateway URL + key 调 light 模型判断
+                    gw_url = getattr(self.server, "gateway_url", None)
+                    gw_key = getattr(self.server, "gateway_key", None)
+                    level, reason = classify_task(
+                        last_text, api_url=gw_url, api_key=gw_key,
+                        light_model=lb_light,
+                    )
+                    if level == "light":
+                        payload["model"] = lb_light
+                        log_route(level, reason, lb_light, last_text)
+                    else:
+                        log_route(level, reason, payload.get("model", "?"), last_text)
+
+        # 剥离 query string 再匹配路由（Claude Code 会发 /v1/messages?beta=true）
+        path_bare = path.split("?")[0]
+
+        if path_bare not in ("/v1/messages", "/v1/messages/count_tokens"):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
@@ -831,22 +934,518 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body_out)))
                 self.end_headers()
                 self.wfile.write(body_out)
+        except BrokenPipeError:
+            return  # 客户端已断开（Ctrl+C），静默忽略
         except Exception as exc:
-            self._json(502, {"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+            try:
+                self._json(502, {"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+            except BrokenPipeError:
+                return
+
+
+########################################################################
+# Codex ↔ Chat Completions Bridge
+#   Codex CLI 硬绑 Responses API (/v1/responses)，但 gateway 对非 GPT
+#   模型只支持 Chat Completions (/v1/chat/completions)。
+#   此 bridge 在本地起 HTTP server，接受 Codex 的 Responses 请求，
+#   翻译为 Chat Completions 请求转发给 gateway，再把流式响应翻译回
+#   Responses SSE 事件。
+########################################################################
+
+
+def _responses_input_to_messages(instructions, input_items):
+    """Convert Responses API 'input' array to Chat Completions 'messages'."""
+    messages = []
+    if instructions:
+        messages.append({"role": "system", "content": instructions})
+
+    pending_tool_calls = []
+
+    for item in input_items or []:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        role = item.get("role")
+
+        if item_type == "function_call":
+            pending_tool_calls.append({
+                "id": item.get("call_id", item.get("id", "")),
+                "type": "function",
+                "function": {
+                    "name": item.get("name", ""),
+                    "arguments": item.get("arguments", "{}"),
+                },
+            })
+            continue
+
+        if item_type == "function_call_output":
+            # Flush any pending tool_calls first
+            if pending_tool_calls:
+                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                pending_tool_calls = []
+            messages.append({
+                "role": "tool",
+                "tool_call_id": item.get("call_id", ""),
+                "content": str(item.get("output", "")),
+            })
+            continue
+
+        if role in ("user", "assistant", "system"):
+            # Flush pending tool_calls before a new message
+            if pending_tool_calls:
+                messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+                pending_tool_calls = []
+
+            content_parts = item.get("content")
+            if isinstance(content_parts, list):
+                # Extract text from content parts
+                texts = []
+                for part in content_parts:
+                    if isinstance(part, dict):
+                        if part.get("type") == "input_text":
+                            texts.append(part.get("text", ""))
+                        elif part.get("type") == "output_text":
+                            texts.append(part.get("text", ""))
+                        elif part.get("type") == "text":
+                            texts.append(part.get("text", ""))
+                    elif isinstance(part, str):
+                        texts.append(part)
+                content = "\n".join(texts) if texts else ""
+            elif isinstance(content_parts, str):
+                content = content_parts
+            else:
+                content = ""
+
+            if role == "assistant" and item_type == "message":
+                # Check if this message also has tool_calls embedded
+                messages.append({"role": "assistant", "content": content})
+            else:
+                messages.append({"role": role, "content": content})
+            continue
+
+    # Flush remaining pending tool_calls
+    if pending_tool_calls:
+        messages.append({"role": "assistant", "tool_calls": list(pending_tool_calls)})
+
+    return messages
+
+
+def _responses_tools_to_chat(tools):
+    """Convert Responses API tools to Chat Completions format."""
+    converted = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("type") == "function":
+            converted.append({
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("parameters", {"type": "object", "properties": {}}),
+                },
+            })
+    return converted
+
+
+class _ChatCompletionsToResponsesTranslator:
+    """Translate Chat Completions streaming chunks to Responses API SSE events.
+    Matches the real OpenAI Responses API format that Codex expects."""
+
+    def __init__(self, model_name, response_id=None):
+        self.model_name = model_name
+        self.response_id = response_id or f"resp_{uuid.uuid4().hex[:24]}"
+        self.msg_item_id = f"msg_{uuid.uuid4().hex[:24]}"
+        self.text_content = ""
+        self.tool_calls = {}  # index -> {id, name, arguments}
+        self.started = False
+        self.text_part_added = False
+        self.output_index = 0
+        self._seq = 0
+
+    def _seq_num(self):
+        self._seq += 1
+        return self._seq
+
+    def _response_obj(self, status="in_progress", output=None):
+        return {
+            "id": self.response_id,
+            "object": "response",
+            "status": status,
+            "model": self.model_name,
+            "output": output or [],
+            "usage": None if status != "completed" else {
+                "input_tokens": 0,
+                "output_tokens": max(1, len(self.text_content) // 4),
+                "total_tokens": max(1, len(self.text_content) // 4),
+            },
+        }
+
+    def process_chunk(self, chunk):
+        """Process a single Chat Completions chunk and yield Responses SSE events."""
+        outgoing = []
+
+        if not self.started:
+            self.started = True
+            outgoing.append(("response.created", {
+                "type": "response.created",
+                "response": self._response_obj("in_progress"),
+            }))
+            outgoing.append(("response.in_progress", {
+                "type": "response.in_progress",
+                "response": self._response_obj("in_progress"),
+            }))
+            outgoing.append(("response.output_item.added", {
+                "type": "response.output_item.added",
+                "output_index": self.output_index,
+                "item": {
+                    "type": "message",
+                    "id": self.msg_item_id,
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": [],
+                },
+                "sequence_number": self._seq_num(),
+            }))
+
+        choices = chunk.get("choices", [])
+        if not choices:
+            return outgoing
+
+        choice = choices[0]
+        delta = choice.get("delta", {})
+        finish_reason = choice.get("finish_reason")
+
+        # Text content delta
+        content = delta.get("content")
+        if content is not None:
+            if not self.text_part_added:
+                self.text_part_added = True
+                outgoing.append(("response.content_part.added", {
+                    "type": "response.content_part.added",
+                    "item_id": self.msg_item_id,
+                    "output_index": self.output_index,
+                    "content_index": 0,
+                    "part": {"type": "output_text", "annotations": [], "text": ""},
+                    "sequence_number": self._seq_num(),
+                }))
+            self.text_content += content
+            outgoing.append(("response.output_text.delta", {
+                "type": "response.output_text.delta",
+                "item_id": self.msg_item_id,
+                "output_index": self.output_index,
+                "content_index": 0,
+                "delta": content,
+                "sequence_number": self._seq_num(),
+            }))
+
+        # Tool call deltas
+        tool_calls = delta.get("tool_calls")
+        if tool_calls:
+            for tc in tool_calls:
+                idx = tc.get("index", 0)
+                if idx not in self.tool_calls:
+                    tc_id = tc.get("id", f"call_{uuid.uuid4().hex[:24]}")
+                    tc_name = tc.get("function", {}).get("name", "")
+                    self.tool_calls[idx] = {
+                        "id": tc_id,
+                        "item_id": f"fc_{uuid.uuid4().hex[:24]}",
+                        "name": tc_name,
+                        "arguments": "",
+                    }
+                    # Close text part if open
+                    if self.text_part_added:
+                        outgoing.extend(self._close_text_part())
+                        self.output_index += 1
+                        self.text_part_added = False
+
+                    outgoing.append(("response.output_item.added", {
+                        "type": "response.output_item.added",
+                        "output_index": self.output_index + idx,
+                        "item": {
+                            "type": "function_call",
+                            "id": self.tool_calls[idx]["item_id"],
+                            "call_id": tc_id,
+                            "name": tc_name,
+                            "arguments": "",
+                            "status": "in_progress",
+                        },
+                        "sequence_number": self._seq_num(),
+                    }))
+
+                args_delta = tc.get("function", {}).get("arguments", "")
+                if args_delta:
+                    self.tool_calls[idx]["arguments"] += args_delta
+                    outgoing.append(("response.function_call_arguments.delta", {
+                        "type": "response.function_call_arguments.delta",
+                        "item_id": self.tool_calls[idx]["item_id"],
+                        "output_index": self.output_index + idx,
+                        "delta": args_delta,
+                        "sequence_number": self._seq_num(),
+                    }))
+
+        # Finish
+        if finish_reason is not None:
+            if self.text_part_added and not self.tool_calls:
+                outgoing.extend(self._close_text_part())
+
+            # Close open tool calls
+            for idx, tc_info in sorted(self.tool_calls.items()):
+                outgoing.append(("response.function_call_arguments.done", {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": tc_info["item_id"],
+                    "output_index": self.output_index + idx,
+                    "arguments": tc_info["arguments"],
+                    "sequence_number": self._seq_num(),
+                }))
+                outgoing.append(("response.output_item.done", {
+                    "type": "response.output_item.done",
+                    "output_index": self.output_index + idx,
+                    "item": {
+                        "type": "function_call",
+                        "id": tc_info["item_id"],
+                        "call_id": tc_info["id"],
+                        "name": tc_info["name"],
+                        "arguments": tc_info["arguments"],
+                        "status": "completed",
+                    },
+                    "sequence_number": self._seq_num(),
+                }))
+
+            # Build output for completed response
+            output_items = []
+            if self.text_content or not self.tool_calls:
+                output_items.append({
+                    "type": "message",
+                    "id": self.msg_item_id,
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
+                })
+            for idx, tc_info in sorted(self.tool_calls.items()):
+                output_items.append({
+                    "type": "function_call",
+                    "id": tc_info["item_id"],
+                    "call_id": tc_info["id"],
+                    "name": tc_info["name"],
+                    "arguments": tc_info["arguments"],
+                    "status": "completed",
+                })
+
+            outgoing.append(("response.completed", {
+                "type": "response.completed",
+                "response": self._response_obj("completed", output_items),
+            }))
+
+        return outgoing
+
+    def _close_text_part(self):
+        """Emit output_text.done + content_part.done + output_item.done for text."""
+        events = []
+        events.append(("response.output_text.done", {
+            "type": "response.output_text.done",
+            "item_id": self.msg_item_id,
+            "output_index": self.output_index,
+            "content_index": 0,
+            "text": self.text_content,
+            "sequence_number": self._seq_num(),
+        }))
+        events.append(("response.content_part.done", {
+            "type": "response.content_part.done",
+            "item_id": self.msg_item_id,
+            "output_index": self.output_index,
+            "content_index": 0,
+            "part": {"type": "output_text", "annotations": [], "text": self.text_content},
+            "sequence_number": self._seq_num(),
+        }))
+        events.append(("response.output_item.done", {
+            "type": "response.output_item.done",
+            "output_index": self.output_index,
+            "item": {
+                "type": "message",
+                "id": self.msg_item_id,
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
+            },
+            "sequence_number": self._seq_num(),
+        }))
+        return events
+
+
+class _ResponsesToChatHandler(BaseHTTPRequestHandler):
+    """Local bridge: accepts Codex's /v1/responses requests,
+    translates to /v1/chat/completions, forwards to gateway."""
+
+    server_version = "MMSCodexChatBridge/0.1"
+
+    def log_message(self, *_args):
+        return
+
+    def _json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _sse(self, event_name, payload):
+        body = (
+            f"event: {event_name}\n"
+            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        ).encode("utf-8")
+        self.wfile.write(body)
+        self.wfile.flush()
+
+    def _authorized(self):
+        expected = getattr(self.server, "bridge_token")
+        gateway_key = getattr(self.server, "gateway_key", "")
+        auth = self.headers.get("authorization", "").strip()
+        bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        key = self.headers.get("x-api-key", "").strip()
+        token = key or bearer
+        # Accept both bridge token and gateway key (Codex auth.json may use either)
+        return token and token in {expected, gateway_key}
+
+    def do_GET(self):
+        """Handle /v1/models for Codex model metadata queries."""
+        if self.path == "/v1/models":
+            model = getattr(self.server, "model_name", "unknown")
+            self._json(200, {
+                "object": "list",
+                "data": [{"id": model, "object": "model", "owned_by": "gateway"}],
+            })
+            return
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self._authorized():
+            self._json(401, {"error": {"message": "invalid token"}})
+            return
+
+        length = int(self.headers.get("content-length") or 0)
+        raw_body = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self._json(400, {"error": {"message": "invalid json"}})
+            return
+
+        if self.path not in ("/v1/responses", "/responses"):
+            self._json(404, {"error": {"message": f"unsupported path: {self.path}"}})
+            return
+
+        if httpx is None:
+            self._json(502, {"error": {"message": "缺少 httpx"}})
+            return
+
+        gateway_url = getattr(self.server, "gateway_url")
+        gateway_key = getattr(self.server, "gateway_key")
+        model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
+
+        # Translate Responses → Chat Completions request
+        chat_messages = _responses_input_to_messages(
+            payload.get("instructions", ""),
+            payload.get("input", []),
+        )
+        chat_payload = {
+            "model": model_name,
+            "messages": chat_messages,
+            "stream": True,
+        }
+        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        if chat_tools:
+            chat_payload["tools"] = chat_tools
+
+        # Forward to gateway /v1/chat/completions
+        target_url = gateway_url.rstrip("/") + "/chat/completions"
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {gateway_key}",
+        }
+
+        translator = _ChatCompletionsToResponsesTranslator(model_name)
+        try:
+            with httpx.stream("POST", target_url, headers=fwd_headers,
+                              json=chat_payload, timeout=300) as response:
+                if response.status_code >= 400:
+                    body = response.read().decode("utf-8", errors="replace")
+                    self._json(response.status_code, {"error": {"message": body}})
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+
+                for raw_line in response.iter_lines():
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        for event_name, event_payload in translator.process_chunk(chunk):
+                            self._sse(event_name, event_payload)
+
+        except Exception as exc:
+            self._json(502, {"error": {"message": str(exc)}})
 
 
 @contextmanager
-def gateway_claude_bridge(gateway_url, gateway_key):
+def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown"):
+    """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
+
+    Use this when the gateway only supports Chat Completions for non-GPT models
+    but Codex requires Responses API.
+    """
+    if httpx is None:
+        raise RuntimeError("缺少 httpx，无法启动 Codex Chat Completions bridge")
+    port = _find_free_port()
+    bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
+    server = _SilentHTTPServer(("127.0.0.1", port), _ResponsesToChatHandler)
+    server.gateway_url = gateway_url
+    server.gateway_key = gateway_key
+    server.model_name = model_name
+    server.bridge_token = bridge_token
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield {
+            "base_url": f"http://127.0.0.1:{port}",
+            "api_key": bridge_token,
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@contextmanager
+def gateway_claude_bridge(gateway_url, gateway_key, lb_light_model=None, heavy_model=None):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
-    then forwards to the real gateway so gateways that only support Messages API work correctly."""
+    then forwards to the real gateway so gateways that only support Messages API work correctly.
+
+    heavy_model: 所有请求默认使用的模型名（替换 Claude Code 发来的 claude-* 模型名）。
+    lb_light_model: 负载模式下的 light 模型名。设置后 bridge 会根据用户消息轻重自动切换。
+    """
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 gateway bridge")
     port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = ThreadingHTTPServer(("127.0.0.1", port), _GatewayBridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", port), _GatewayBridgeHandler)
     server.gateway_url = gateway_url
     server.gateway_key = gateway_key
     server.bridge_token = bridge_token
+    server.heavy_model = heavy_model
+    server.lb_light_model = lb_light_model
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

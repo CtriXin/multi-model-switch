@@ -79,22 +79,36 @@ class WizardBack(Exception):
 class WizardCancel(Exception):
     pass
 
-CATEGORIES = {
-    "Claude 系 ⭐": ["claude-"],
-    "GPT 系": ["gpt-", "o1-", "o3-", "o4-", "codex-"],
-    "国产系": ["qwen", "glm-", "deepseek-", "kimi-", "minimax", "MiniMax"],
-    "Google 系": ["gemini-"],
-}
-
-CUSTOM_MODEL_FAMILIES = [
-    ("Claude", ("claude-",)),
-    ("GPT", ("gpt-", "o1-", "o3-", "o4-", "codex-")),
-    ("Gemini", ("gemini-",)),
-    ("Qwen", ("qwen",)),
-    ("MiniMax", ("minimax",)),
-    ("Kimi", ("kimi-",)),
-    ("GLM", ("glm-",)),
+# 统一模型家族规则表（有序）。
+# keywords 匹配模型名任意部分（不限前缀），支持 provider/model 格式。
+# display_category 用于 Rich 表格的分类列。
+MODEL_FAMILIES = [
+    {"family": "Claude",  "keywords": ("claude",),                          "category": "Claude 系 ⭐"},
+    {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
+    {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
+    {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
+    {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
+    {"family": "Kimi",    "keywords": ("kimi",),                           "category": "国产系"},
+    {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
+    {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
 ]
+
+
+def _infer_model_family(model_name):
+    """从模型全名推断 (family, category)。
+
+    支持 provider/model 格式（如 bailian/kimi-2.5）：
+    先用完整名匹配，再用 '/' 后面的部分匹配。
+    """
+    raw = str(model_name or "").strip().lower()
+    # 拆出 '/' 后面的实际模型名
+    parts = raw.rsplit("/", 1)
+    candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
+    for entry in MODEL_FAMILIES:
+        for candidate in candidates:
+            if any(kw in candidate for kw in entry["keywords"]):
+                return entry["family"], entry["category"]
+    return "其他", "其他"
 
 SCENES = {
     "常规任务": {
@@ -181,6 +195,12 @@ SCENES = {
             },
         ],
     },
+    "负载模式": {
+        "emoji": "⚖️",
+        "desc": "自动按任务轻重切换模型",
+        "cli": "claude",
+        "load_balance": True,
+    },
     "视觉内容": {
         "emoji": "🎨",
         "desc": "图片理解、UI分析",
@@ -209,12 +229,12 @@ SCENES = {
     },
 }
 
-CLI_NAMES = ["claude", "codex", "qwen", "kimi"]
+CLI_NAMES = ["claude", "codex"]
 CLI_MODEL_FAMILY_HINTS = {
     "qwen": ("qwen",),
     "kimi": ("kimi",),
 }
-SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier"}
+SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
 
 
 def current_command():
@@ -700,6 +720,50 @@ def _record_usage(runtime, cli_name, model_info):
     _save_usage_stats(stats)
 
 
+def _record_scene_usage(scene_name, cli_name, model_info):
+    """记录场景级启动统计（用于 TUI 上次使用 + 启动次数排名）"""
+    if not scene_name or scene_name.startswith("__"):
+        return
+    stats = _load_usage_stats()
+    scene_stats = stats.setdefault("scenes", {})
+    model_name = _resolve_model_name(model_info)
+    entry = scene_stats.setdefault(scene_name, {
+        "launches": 0,
+        "last_used_at": "",
+        "last_cli": "",
+        "last_model": "",
+    })
+    entry["launches"] += 1
+    entry["last_used_at"] = _iso_now()
+    entry["last_cli"] = cli_name
+    entry["last_model"] = model_name
+    # 同时记录全局最后一次使用
+    stats["last_scene"] = scene_name
+    stats["last_cli"] = cli_name
+    stats["last_model"] = model_name
+    stats["last_model_info"] = model_info if isinstance(model_info, dict) else {"model": str(model_info)}
+    stats["last_used_at"] = _iso_now()
+    _save_usage_stats(stats)
+
+
+def _get_scene_usage():
+    """获取场景使用统计，返回 (last_info, scene_counts)"""
+    stats = _load_usage_stats()
+    last_info = None
+    if stats.get("last_scene"):
+        last_info = {
+            "scene": stats["last_scene"],
+            "cli": stats.get("last_cli", ""),
+            "model": stats.get("last_model", ""),
+            "model_info": stats.get("last_model_info"),
+            "last_used_at": stats.get("last_used_at", ""),
+        }
+    scene_counts = {}
+    for name, entry in stats.get("scenes", {}).items():
+        scene_counts[name] = entry.get("launches", 0)
+    return last_info, scene_counts
+
+
 def _launch_with_tracking(cli_name, model_info, runtime, once=False):
     _record_usage(runtime, cli_name, model_info)
     from ccs_launchers import launch_cli
@@ -1115,17 +1179,20 @@ def _provider_template_names():
     return {
         "1": "generic",
         "2": "qwen",
-        "3": "kimi",
-        "4": "glm-cn",
-        "5": "glm-en",
-        "6": "minimax-cn",
-        "7": "minimax-en",
+        "3": "bailian-codingplan",
+        "4": "kimi",
+        "5": "kimi-codingplan",
+        "6": "glm-cn",
+        "7": "glm-en",
+        "8": "minimax-cn",
+        "9": "minimax-codingplan",
+        "10": "minimax-en",
     }
 
 
 def _provider_template_payload(template_key):
     template = PROVIDER_TEMPLATES.get(template_key) or PROVIDER_TEMPLATES["generic"]
-    return {
+    payload = {
         "id": template["id"],
         "name": template["name"],
         "protocols": list(template["protocols"]),
@@ -1134,6 +1201,15 @@ def _provider_template_payload(template_key):
         "priority": template["priority"],
         "note": template["note"],
     }
+    if "default_openai_base_url" in template:
+        payload["default_openai_base_url"] = template["default_openai_base_url"]
+    if "default_anthropic_base_url" in template:
+        payload["default_anthropic_base_url"] = template["default_anthropic_base_url"]
+    if "key_prefix" in template:
+        payload["key_prefix"] = template["key_prefix"]
+    if "fallback_models" in template:
+        payload["fallback_models"] = list(template["fallback_models"])
+    return payload
 
 
 def _select_provider_template(preset_id=None):
@@ -1141,12 +1217,15 @@ def _select_provider_template(preset_id=None):
         return preset_id
     console.print("  1. 通用兼容网关")
     console.print("  2. Qwen")
-    console.print("  3. Kimi")
-    console.print("  4. GLM CN (智谱 BigModel)")
-    console.print("  5. GLM EN (Z.ai)")
-    console.print("  6. MiniMax CN")
-    console.print("  7. MiniMax EN")
-    selected = Prompt.ask("选择网关通道类型", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
+    console.print("  3. 百炼 CodingPlan (sk-sp-*)")
+    console.print("  4. Kimi")
+    console.print("  5. Kimi CodingPlan (sk-kimi-*)")
+    console.print("  6. GLM CN (智谱 BigModel)")
+    console.print("  7. GLM EN (Z.ai)")
+    console.print("  8. MiniMax CN")
+    console.print("  9. MiniMax CodingPlan")
+    console.print("  10. MiniMax EN")
+    selected = Prompt.ask("选择网关通道类型", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], default="1")
     return _provider_template_names()[selected]
 
 
@@ -1713,9 +1792,77 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5)
             continue
     return None
 
+# _probe_models 结果缓存：key = provider_id, value = (timestamp, result)
+_PROBE_CACHE = {}
+_PROBE_CACHE_TTL = 300  # 5 分钟内复用（内存）
+_PROBE_FILE_CACHE_DIR = os.path.join(PRIMARY_CONFIG_DIR, "cache")
+_PROBE_FILE_CACHE_TTL = 86400  # 文件缓存 24 小时
+
+
+def _probe_file_cache_path(provider_id):
+    return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
+
+
+def _load_probe_file_cache(provider_id):
+    """从文件读取 probe 缓存，TTL 内有效则返回 result dict，否则 None。"""
+    path = _probe_file_cache_path(provider_id)
+    try:
+        import time as _time
+        if not os.path.exists(path):
+            return None
+        age = _time.time() - os.path.getmtime(path)
+        if age > _PROBE_FILE_CACHE_TTL:
+            return None
+        with open(path, "r") as f:
+            data = json.load(f)
+        if data.get("models"):
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _save_probe_file_cache(provider_id, result):
+    """将成功的 probe 结果写入文件缓存。"""
+    if not result.get("models"):
+        return
+    try:
+        os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
+        path = _probe_file_cache_path(provider_id)
+        with open(path, "w") as f:
+            json.dump({"models": result["models"], "working_url": result.get("working_url")}, f)
+    except Exception:
+        pass
+
 
 def _probe_models(provider, emit_output=True):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+
+    # 1. 内存缓存命中
+    import time as _time
+    cached = _PROBE_CACHE.get(provider_id)
+    if cached:
+        cached_at, cached_result = cached
+        if _time.time() - cached_at < _PROBE_CACHE_TTL:
+            if emit_output and cached_result.get("error"):
+                style = "yellow" if cached_result.get("error_kind") == "protocol_unsupported" else "red"
+                console.print(f"[{style}]{cached_result['error']}[/{style}]")
+            return cached_result
+
+    # 2. 文件缓存命中（24h TTL）
+    file_cached = _load_probe_file_cache(provider_id)
+    if file_cached:
+        result = {
+            "provider_id": provider_id,
+            "models": file_cached["models"],
+            "error": None,
+            "error_kind": None,
+            "working_url": file_cached.get("working_url"),
+            "details": [],
+        }
+        _PROBE_CACHE[provider_id] = (_time.time(), result)
+        return result
+
     protocols = provider.get("protocols", [])
     base_url = _provider_openai_base_url(provider)
     api_key = provider.get("api_key", "")
@@ -1764,14 +1911,27 @@ def _probe_models(provider, emit_output=True):
                 if try_url != base_url and emit_output:
                     console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
                 if not models:
-                    result["error_kind"] = "empty_models"
-                    result["error"] = "接口返回成功，但模型列表为空"
+                    # 模型列表为空，继续尝试 alt URL 再判断
+                    continue
                 break
             except Exception as exc:
                 last_exc = exc
-        if result["models"] is None and last_exc is not None:
-            result["error_kind"] = "request_failed"
-            result["error"] = f"拉取模型列表失败: {last_exc}"
+        if result["models"] is not None and not result["models"]:
+            result["error_kind"] = "empty_models"
+            result["error"] = "接口返回成功，但模型列表为空"
+        elif result["models"] is None and last_exc is not None:
+            # 网络请求失败，尝试 fallback 到内置模型列表
+            fallback = provider.get("fallback_models")
+            if fallback:
+                result["models"] = list(fallback)
+                result["working_url"] = base_url
+                result["error"] = None
+                result["error_kind"] = None
+                if emit_output:
+                    console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
+            else:
+                result["error_kind"] = "request_failed"
+                result["error"] = f"拉取模型列表失败: {last_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
@@ -1785,7 +1945,36 @@ def _probe_models(provider, emit_output=True):
     if emit_output and result["error"]:
         style = "yellow" if result["error_kind"] == "protocol_unsupported" else "red"
         console.print(f"[{style}]{result['error']}[/{style}]")
+
+    # 写入缓存（成功或失败都缓存，避免重复请求）
+    _PROBE_CACHE[provider_id] = (_time.time(), result)
+    _save_probe_file_cache(provider_id, result)
     return result
+
+
+def _warm_probe_cache_async(cfg, default_provider):
+    """后台并行预热所有 provider 的 probe 文件缓存（无缓存的才 probe）。"""
+    providers_to_probe = []
+    default_id = default_provider.get("id")
+    for provider_def in cfg.get("providers", []):
+        pid = provider_def.get("id")
+        if not pid or pid == default_id:
+            continue
+        if _load_probe_file_cache(pid) is not None:
+            continue
+        providers_to_probe.append(resolve_provider_context(cfg, pid))
+    if not providers_to_probe:
+        return
+    from concurrent.futures import ThreadPoolExecutor
+    def _probe_one(p):
+        try:
+            _probe_models(p, emit_output=False)
+        except Exception:
+            pass
+    _executor = ThreadPoolExecutor(max_workers=min(4, len(providers_to_probe)))
+    for p in providers_to_probe:
+        _executor.submit(_probe_one, p)
+    # 不等待完成，后台运行；TUI 交互期间大概率已完成
 
 
 def fetch_models(provider):
@@ -2084,6 +2273,12 @@ def ensure_models_ready(cfg, provider):
             provider, skip_validation = _run_recovery_action(cfg, provider, probe, action["id"])
             if skip_validation:
                 return provider, []
+            # recovery 后清除缓存，强制重新探测
+            _PROBE_CACHE.pop(provider.get("id", DEFAULT_PROVIDER_ID), None)
+            try:
+                os.remove(_probe_file_cache_path(provider.get("id", DEFAULT_PROVIDER_ID)))
+            except OSError:
+                pass
             probe = _probe_models(provider, emit_output=True)
             models = probe.get("models")
             if models:
@@ -2091,18 +2286,11 @@ def ensure_models_ready(cfg, provider):
 
 
 def categorize_models(models):
-    categorized = {cat: [] for cat in CATEGORIES}
-    categorized["其他"] = []
+    categorized = {}
     for m in models:
-        placed = False
-        for cat, prefixes in CATEGORIES.items():
-            if any(m.lower().startswith(p.lower()) for p in prefixes):
-                categorized[cat].append(m)
-                placed = True
-                break
-        if not placed:
-            categorized["其他"].append(m)
-    return {k: v for k, v in categorized.items() if v}
+        _, category = _infer_model_family(m)
+        categorized.setdefault(category, []).append(m)
+    return categorized
 
 
 def display_models(models, role=MODE_ALL, recommend=None):
@@ -2144,12 +2332,7 @@ def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
     grouped = {}
     order = []
     for model_name, _ in _filter_models_for_display(models, role, recommend):
-        normalized = str(model_name or "").strip().lower()
-        family = "其他"
-        for family_name, prefixes in CUSTOM_MODEL_FAMILIES:
-            if any(normalized.startswith(prefix.lower()) for prefix in prefixes):
-                family = family_name
-                break
+        family, _ = _infer_model_family(model_name)
         if family not in grouped:
             grouped[family] = []
             order.append(family)
@@ -2157,19 +2340,88 @@ def _group_models_for_custom(models, role=MODE_ALL, recommend=None):
     return [(family, grouped[family]) for family in order]
 
 
-def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tui=False):
-    groups = _group_models_for_custom(models, role, recommend)
-    if not groups:
-        return None
-    if len(groups) == 1:
-        selected_family, family_models = groups[0]
+def _group_models_by_family_and_provider(aggregated_models, role=MODE_ALL, recommend=None):
+    """将聚合模型按 family → provider → models 分组。
+
+    Args:
+        aggregated_models: _aggregate_provider_models 返回的 List[dict]
+        role: 角色过滤
+        recommend: 推荐模型列表
+
+    Returns:
+        List[Tuple[str, Dict[str, List[str]]]]:
+        [(family_name, {provider_label: [model_names]}), ...]
+    """
+    plain_models = [entry["model"] for entry in aggregated_models]
+    allowed = set()
+    for model_name, _ in _filter_models_for_display(plain_models, role, recommend):
+        allowed.add(model_name)
+
+    family_order = []
+    family_providers = {}
+    for entry in aggregated_models:
+        model_name = entry["model"]
+        if model_name not in allowed:
+            continue
+        family, _ = _infer_model_family(model_name)
+        provider_label = entry["provider_name"]
+        provider_id = entry["provider_id"]
+        key = f"{provider_label}||{provider_id}"
+
+        if family not in family_providers:
+            family_providers[family] = {}
+            family_order.append(family)
+        providers = family_providers[family]
+        if key not in providers:
+            providers[key] = []
+        if model_name not in providers[key]:
+            providers[key].append(model_name)
+
+    result = []
+    for family in family_order:
+        provider_map = {}
+        for key, models in family_providers[family].items():
+            provider_map[key] = models
+        result.append((family, provider_map))
+    return result
+
+
+def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tui=False, cfg=None, default_provider=None, default_models=None):
+    """三步选择：Family → Provider（多源时）→ Model。
+
+    Args:
+        models: 可以是 List[str]（旧模式）或 List[dict]（聚合模式，含 model/provider_id/provider_name）
+        cfg/default_provider/default_models: 聚合模式下可选，用于构建聚合数据
+
+    Returns:
+        聚合模式: (model_name, provider_id) 或 (None, None)
+        旧模式（List[str]）: model_name 或 None（兼容）
+    """
+    is_aggregated = models and isinstance(models[0], dict)
+
+    if is_aggregated:
+        groups = _group_models_by_family_and_provider(models, role, recommend)
     else:
-        family_labels = [f"{family} ({len(items)})" for family, items in groups]
+        plain_groups = _group_models_for_custom(models, role, recommend)
+        groups = [(family, {"_default_||_default_": items}) for family, items in plain_groups]
+
+    if not groups:
+        return (None, None) if is_aggregated else None
+
+    # --- Step 1: 选 Family ---
+    if len(groups) == 1:
+        selected_family, provider_map = groups[0]
+    else:
+        total_per_family = []
+        for family, pmap in groups:
+            count = sum(len(m) for m in pmap.values())
+            total_per_family.append(count)
+        family_labels = [f"{family} ({total_per_family[i]})" for i, (family, _) in enumerate(groups)]
         if use_tui:
             from ccs_tui import select_model_tui
             selected_label = select_model_tui(family_labels, title=f"为 {cli_name} 选择模型品牌")
             if selected_label is None:
-                return None
+                return (None, None) if is_aggregated else None
             family_index = family_labels.index(selected_label)
         else:
             family_index = None
@@ -2178,8 +2430,8 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
                 table.add_column("#", style="cyan", width=4)
                 table.add_column("品牌", style="green")
                 table.add_column("数量", style="yellow", width=6)
-                for idx, (family, items) in enumerate(groups, 1):
-                    table.add_row(str(idx), family, str(len(items)))
+                for idx, (family, _) in enumerate(groups, 1):
+                    table.add_row(str(idx), family, str(total_per_family[idx - 1]))
                 console.print(table)
                 try:
                     picked = IntPrompt.ask("选择模型品牌编号") - 1
@@ -2189,29 +2441,73 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
                     family_index = picked
                 else:
                     console.print(f"[red]请输入 1-{len(groups)}[/red]")
-            if family_index is None:
-                console.print(f"[red]请输入 1-{len(groups)}[/red]")
-                return None
-        selected_family, family_models = groups[family_index]
+        selected_family, provider_map = groups[family_index]
 
+    # --- Step 2: 选 Provider（多源时）---
+    provider_keys = list(provider_map.keys())
+    if len(provider_keys) == 1:
+        selected_provider_key = provider_keys[0]
+    else:
+        provider_labels = []
+        for key in provider_keys:
+            label, _ = key.split("||", 1)
+            count = len(provider_map[key])
+            provider_labels.append(f"{label} ({count})")
+        if use_tui:
+            from ccs_tui import select_model_tui
+            selected_label = select_model_tui(provider_labels, title=f"{selected_family} · 选择 Provider")
+            if selected_label is None:
+                return (None, None) if is_aggregated else None
+            provider_index = provider_labels.index(selected_label)
+        else:
+            provider_index = None
+            while provider_index is None:
+                table = Table(title=f"{cli_name} · {selected_family} · 选择 Provider", show_lines=True)
+                table.add_column("#", style="cyan", width=4)
+                table.add_column("Provider", style="green")
+                table.add_column("模型数", style="yellow", width=6)
+                for idx, plabel in enumerate(provider_labels, 1):
+                    table.add_row(str(idx), plabel, "")
+                console.print(table)
+                try:
+                    picked = IntPrompt.ask("选择 Provider 编号") - 1
+                except KeyboardInterrupt:
+                    sys.exit(0)
+                if 0 <= picked < len(provider_keys):
+                    provider_index = picked
+                else:
+                    console.print(f"[red]请输入 1-{len(provider_keys)}[/red]")
+        selected_provider_key = provider_keys[provider_index]
+
+    family_models = provider_map[selected_provider_key]
+    _, selected_provider_id = selected_provider_key.split("||", 1)
+
+    # --- Step 3: 选 Model ---
     if use_tui:
         from ccs_tui import select_model_tui
-        return select_model_tui(family_models, title=f"{selected_family} · 选择子模型")
+        model = select_model_tui(family_models, title=f"{selected_family} · 选择子模型")
+    else:
+        model = None
+        while model is None:
+            table = Table(title=f"{cli_name} · {selected_family}", show_lines=True)
+            table.add_column("#", style="cyan", width=4)
+            table.add_column("模型", style="green")
+            for idx, model_name in enumerate(family_models, 1):
+                table.add_row(str(idx), model_name)
+            console.print(table)
+            try:
+                model_index = IntPrompt.ask("选择子模型编号") - 1
+            except KeyboardInterrupt:
+                sys.exit(0)
+            if 0 <= model_index < len(family_models):
+                model = family_models[model_index]
+            else:
+                console.print(f"[red]请输入 1-{len(family_models)}[/red]")
 
-    while True:
-        table = Table(title=f"{cli_name} · {selected_family}", show_lines=True)
-        table.add_column("#", style="cyan", width=4)
-        table.add_column("模型", style="green")
-        for idx, model_name in enumerate(family_models, 1):
-            table.add_row(str(idx), model_name)
-        console.print(table)
-        try:
-            model_index = IntPrompt.ask("选择子模型编号") - 1
-        except KeyboardInterrupt:
-            sys.exit(0)
-        if 0 <= model_index < len(family_models):
-            return family_models[model_index]
-        console.print(f"[red]请输入 1-{len(family_models)}[/red]")
+    if is_aggregated:
+        pid = selected_provider_id if selected_provider_id != "_default_" else None
+        return (model, pid) if model else (None, None)
+    return model
 
 
 def _ensure_models_cache_available(models_cache):
@@ -2260,7 +2556,10 @@ def _provider_candidates(cfg, default_provider, default_models):
         provider_id = provider_def.get("id")
         if not provider_id or provider_id in seen_ids:
             continue
-        candidates.append((resolve_provider_context(cfg, provider_id), None))
+        # 优先从文件缓存加载模型列表，避免网络请求
+        file_cached = _load_probe_file_cache(provider_id)
+        cached_models = file_cached["models"] if file_cached else None
+        candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
         seen_ids.add(provider_id)
     return candidates
 
@@ -2291,6 +2590,37 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
             seen.add(normalized)
             merged.append(normalized)
     return merged
+
+
+def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
+    """聚合所有 provider 的模型，保留来源信息（不去重）。
+
+    Returns:
+        List[dict]: [{"model": str, "provider_id": str, "provider_name": str}, ...]
+    """
+    aggregated = []
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_supports_cli_name(provider, cli_name):
+            continue
+        if not provider.get("base_url") or not provider.get("api_key"):
+            continue
+        models = list(cached_models or [])
+        if cached_models is None:
+            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        pid = provider.get("id", DEFAULT_PROVIDER_ID)
+        pname = _provider_label(provider)
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized:
+                continue
+            aggregated.append({
+                "model": normalized,
+                "provider_id": pid,
+                "provider_name": pname,
+            })
+    return aggregated
 
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
@@ -2529,48 +2859,70 @@ def _choose_runtime_source(
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
+class _LazySourceChoices(dict):
+    """惰性 source choices：key 首次被访问时才计算，避免预计算所有 scene/variant 的 provider 源。"""
+
+    def __init__(self, cfg, scenes, cli_names, default_provider, default_models):
+        super().__init__()
+        self._cfg = cfg
+        self._scenes = scenes
+        self._cli_names = cli_names
+        self._default_provider = default_provider
+        self._default_models = default_models
+
+    def _compute(self, key):
+        # 解析 key = "cli_name|model_or___default__"
+        parts = key.split("|", 1)
+        cli_name = parts[0]
+        model_key = parts[1] if len(parts) > 1 else "__default__"
+
+        if model_key == "__default__":
+            options, default_index = _list_runtime_sources(
+                self._cfg, cli_name, self._default_provider, self._default_models)
+        else:
+            # 从 scenes 中找到对应的 model_info
+            model_info = self._find_model_info(cli_name, key)
+            options, default_index = _list_runtime_sources(
+                self._cfg, cli_name, self._default_provider, self._default_models,
+                model_info=model_info, allow_selected_model_accounts=True)
+        result = {"options": options, "default_index": default_index or 0}
+        self[key] = result
+        return result
+
+    def _find_model_info(self, cli_name, key):
+        for scene in self._scenes.values():
+            if scene.get("cli") != cli_name:
+                continue
+            if scene.get("variants"):
+                for variant in scene["variants"]:
+                    mi = dict(variant.get("model_info", {}))
+                    if _source_choice_key(cli_name, mi) == key:
+                        return mi
+            else:
+                mi = _scene_model_info(scene)
+                if _source_choice_key(cli_name, mi) == key:
+                    return mi
+        return {}
+
+    def get(self, key, default=None):
+        if key in self:
+            return super().__getitem__(key)
+        try:
+            return self._compute(key)
+        except Exception:
+            return default
+
+    def __getitem__(self, key):
+        if key not in self:
+            return self._compute(key)
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        return super().__contains__(key)
+
+
 def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_models):
-    mapping = {}
-    for cli_name in cli_names:
-        options, default_index = _list_runtime_sources(cfg, cli_name, default_provider, default_models)
-        mapping[_source_choice_key(cli_name)] = {
-            "options": options,
-            "default_index": default_index or 0,
-        }
-    for scene in scenes.values():
-        cli_name = scene.get("cli")
-        if cli_name not in cli_names:
-            continue
-        if scene.get("variants"):
-            for variant in scene["variants"]:
-                model_info = dict(variant.get("model_info", {}))
-                options, default_index = _list_runtime_sources(
-                    cfg,
-                    cli_name,
-                    default_provider,
-                    default_models,
-                    model_info=model_info,
-                    allow_selected_model_accounts=True,
-                )
-                mapping[_source_choice_key(cli_name, model_info)] = {
-                    "options": options,
-                    "default_index": default_index or 0,
-                }
-            continue
-        model_info = _scene_model_info(scene)
-        options, default_index = _list_runtime_sources(
-            cfg,
-            cli_name,
-            default_provider,
-            default_models,
-            model_info=model_info,
-            allow_selected_model_accounts=True,
-        )
-        mapping[_source_choice_key(cli_name, model_info)] = {
-            "options": options,
-            "default_index": default_index or 0,
-        }
-    return mapping
+    return _LazySourceChoices(cfg, scenes, cli_names, default_provider, default_models)
 
 
 def _resolve_visible_clis(cfg, default_provider, default_models):
@@ -2826,7 +3178,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             current_provider,
             _probe_models(current_provider, emit_output=False).get("models"),
         )
-        result = select_scene_tui(current_scenes, current_cli_names, source_choices=source_choices)
+        last_info, scene_counts = _get_scene_usage()
+        result = select_scene_tui(current_scenes, current_cli_names, source_choices=source_choices,
+                                  last_used=last_info, scene_counts=scene_counts)
 
         # curses 失败，fallback
         if result == "fallback":
@@ -2835,6 +3189,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         if result == "__connect__":
             current_cfg, changed = run_connect_wizard(current_cfg)
             if changed:
+                _PROBE_CACHE.clear()  # 配置变更后清除探测缓存
+                # 同时清除文件缓存
+                import shutil as _shutil
+                _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
                 current_provider = ensure_provider_credentials(current_cfg)
                 current_models = ensure_models_ready(current_cfg, current_provider)[1]
                 current_cli_names = _resolve_visible_clis(current_cfg, current_provider, current_models)
@@ -2848,14 +3206,25 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         scene_name, cli, model_info, selected_source = result
         runtime_runtime = None
         family_models = []
+
+        # ── 负载模式：拦截，弹出 heavy+light 选择 TUI ──
+        if scene_name and scenes.get(scene_name, {}).get("load_balance"):
+            from ccs_tui import select_load_balance_tui, save_lb_history
+            probe_result = _probe_models(current_provider, emit_output=False).get("models")
+            lb_result = select_load_balance_tui(available_models=probe_result)
+            if lb_result is None:
+                continue
+            model_info = lb_result
+            save_lb_history(lb_result["model"], lb_result["lb_light"])
+
         if scene_name is None:
-            custom_models = _all_provider_models_for_cli(
+            aggregated = _aggregate_provider_models(
                 current_cfg, cli, current_provider, _probe_models(current_provider, emit_output=False).get("models")
             )
-            if not _ensure_models_cache_available(custom_models):
+            if not _ensure_models_cache_available(aggregated):
                 return True
-            model = _select_custom_model(
-                custom_models,
+            model, custom_provider_id = _select_custom_model(
+                aggregated,
                 cli,
                 role=current_cfg.get("user", {}).get("role", MODE_ALL),
                 recommend=current_cfg.get("recommend", {}).get("models"),
@@ -2870,7 +3239,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 current_provider,
                 _probe_models(current_provider, emit_output=False).get("models"),
                 account_id=account_id,
-                provider_id=provider_id,
+                provider_id=custom_provider_id or provider_id,
                 model_info=model_info,
                 allow_selected_model_accounts=True,
             )
@@ -2910,11 +3279,15 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
-        action = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
+        result = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
+        action, bypass = result if isinstance(result, tuple) else (result, False)
         if action == "q":
             return True
         if action == "b":
             continue
+        if bypass:
+            runtime_runtime["bypass"] = True
+        _record_scene_usage(scene_name, cli, clean_model_info)
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
@@ -4017,6 +4390,7 @@ def main():
         return
 
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    _warm_probe_cache_async(cfg, default_provider)
     visible_clis = _resolve_visible_clis(cfg, default_provider, models_cache)
     visible_scenes = _filter_scenes_by_visible_clis(visible_clis)
 
@@ -4178,11 +4552,11 @@ def main():
                 return
             model = DEFAULT_KIMI_MODEL
         else:
-            base_models = _all_provider_models_for_cli(cfg, cli, default_provider, models_cache)
-            if not _ensure_models_cache_available(base_models):
+            aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+            if not _ensure_models_cache_available(aggregated):
                 return
-            model = _select_custom_model(
-                base_models,
+            model, custom_provider_id = _select_custom_model(
+                aggregated,
                 cli,
                 role=role,
                 recommend=recommend if cli != "qwen" else None,
@@ -4191,7 +4565,7 @@ def main():
             if model is None:
                 return
             runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider,
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
                 model_info={"model": model}
             )
             if runtime is None:
@@ -4230,11 +4604,11 @@ def main():
                 return
             model = DEFAULT_KIMI_MODEL
         else:
-            base_models = _all_provider_models_for_cli(cfg, cli, default_provider, models_cache)
-            if not _ensure_models_cache_available(base_models):
+            aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+            if not _ensure_models_cache_available(aggregated):
                 return
-            model = _select_custom_model(
-                base_models,
+            model, custom_provider_id = _select_custom_model(
+                aggregated,
                 cli,
                 role=role,
                 recommend=recommend if cli != "qwen" else None,
@@ -4243,7 +4617,7 @@ def main():
             if model is None:
                 return
             runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider,
+                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
                 model_info={"model": model}
             )
             if runtime is None:
