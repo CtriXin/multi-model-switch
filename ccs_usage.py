@@ -183,22 +183,45 @@ async def _section_claude(accounts: list[dict]) -> None:
     table.add_column("7d 重置")
     table.add_column("状态", style="dim")
 
-    # keychain token (current active)
+    # Build token pool: keychain (current active) + all cached tokens
+    from ccs_account_state import load_cached_claude_tokens
     kc_token, kc_email = _keychain_claude_token()
-    kc_used = False
+    cached_tokens: list[dict] = load_cached_claude_tokens()
+    # Deduplicate: keyed by accessToken prefix
+    _seen_tokens: set[str] = set()
+    _token_pool: list[dict] = []
+    for oauth in ([{"accessToken": kc_token, "emailAddress": kc_email}]
+                  if kc_token else []) + cached_tokens:
+        tok = (oauth.get("accessToken") or "")[:20]
+        if tok and tok not in _seen_tokens:
+            _seen_tokens.add(tok)
+            _token_pool.append(oauth)
+
+    _pool_used: list[bool] = [False] * len(_token_pool)
+
+    def _pick_token(acc_name: str) -> tuple[str | None, str | None, str]:
+        """Return (token, email, source) for this account.
+        First match by home_dir file, then first unused pool token."""
+        # 1. Try account-specific file
+        home = next(
+            (a.get("home_dir", "") for a in accounts if a.get("id") == acc_name), ""
+        )
+        token, email = _file_claude_token(home)
+        if token:
+            return token, email, "file"
+        # 2. First unused pool token
+        for i, oauth in enumerate(_token_pool):
+            if not _pool_used[i]:
+                _pool_used[i] = True
+                return oauth.get("accessToken"), oauth.get("emailAddress"), "cached"
+        return None, None, "—"
 
     async def _row(acc) -> tuple:
-        nonlocal kc_used
         name = acc["id"] + (f" / {acc['name']}" if acc.get("name") else "")
-        token, email = _file_claude_token(acc.get("home_dir", ""))
-        src = "file"
-        if not token and not kc_used:
-            token, email = kc_token, kc_email
-            src = "keychain"
-            kc_used = True
+        token, email, src = _pick_token(acc["id"])
 
         if not token:
-            return (name, "—", "—", "—", "—", "—", "—", "无 token")
+            return (name, "—", "—", "—", "—", "—", "—", "[dim]无 token[/dim]")
 
         usage = await _anthropic_usage(token)
         if usage is None:
@@ -439,6 +462,11 @@ def _section_local_stats() -> None:
 # ─── Public entry ─────────────────────────────────────────────────────────────
 
 def usage_main(cfg: dict) -> None:
+    # Always cache the currently-active keychain token on each run,
+    # so it's available for future runs even after account switching.
+    from ccs_account_state import cache_current_claude_token
+    cache_current_claude_token()
+
     accounts = cfg.get("accounts", [])
     asyncio.run(_section_claude(accounts))
     _section_codex(accounts)
