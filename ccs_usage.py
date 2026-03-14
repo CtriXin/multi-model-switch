@@ -312,23 +312,25 @@ def _section_codex(accounts: list[dict]) -> None:
 #   "glm"          GET /api/paas/v4/models  (GLM-specific path)
 #   "chat_mini"    POST /v1/text/chatcompletion_v2 (Minimax — no models endpoint)
 #
-# Entry format: (display_name, env_var, [(region, base_url, check_type, extra_path)])
+# Entry format: (display_name, env_var, [(region, base_url, check_type, extra_path, key_prefix)])
+# key_prefix: only run this endpoint if the key starts with this prefix; None = always run
 _PROVIDER_DEFS = [
     (
         "Kimi (Moonshot)",
         "MMS_KIMI_KEY",
         [
-            # sk-kimi-* keys use coding plan endpoint (not api.moonshot.cn)
-            # GET /models returns {"data":[{"id":"kimi-for-coding"}]} on valid key
-            ("CN", "https://api.kimi.com/coding/v1", "models_kimi", None),
+            # sk-kimi-* → Coding Plan endpoint (api.kimi.com/coding/v1)
+            ("CodingPlan", "https://api.kimi.com/coding/v1", "models_kimi", None, "sk-kimi-"),
+            # other keys → standard API (api.moonshot.cn), shows balance
+            ("API",        "https://api.moonshot.cn",        "balance",     "/v1/users/me/balance", None),
         ],
     ),
     (
         "GLM (智谱)",
         "MMS_GLM_KEY",
         [
-            ("CN", "https://open.bigmodel.cn", "glm",     None),
-            ("EN", "https://api.bigmodel.cn",  "glm",     None),
+            ("CN", "https://open.bigmodel.cn", "glm",     None, None),
+            ("EN", "https://api.bigmodel.cn",  "glm",     None, None),
         ],
     ),
     (
@@ -336,8 +338,8 @@ _PROVIDER_DEFS = [
         "MMS_MINIMAX_KEY",
         [
             # Minimax has no /v1/models — validate via a lightweight chat probe
-            ("CN", "https://api.minimax.chat",  "chat_mini", None),
-            ("EN", "https://api.minimaxi.chat", "chat_mini", None),
+            ("CN", "https://api.minimax.chat",  "chat_mini", None, None),
+            ("EN", "https://api.minimaxi.chat", "chat_mini", None, None),
         ],
     ),
     (
@@ -346,7 +348,7 @@ _PROVIDER_DEFS = [
         [
             # sk-sp- coding plan keys use coding.dashscope endpoint
             # /v1/models returns 404; validate via a chat probe (400=key ok, 401=key invalid)
-            ("CN", "https://coding.dashscope.aliyuncs.com", "chat_probe", None),
+            ("CN", "https://coding.dashscope.aliyuncs.com", "chat_probe", None, None),
         ],
     ),
 ]
@@ -453,7 +455,9 @@ async def _section_providers_async() -> None:
         key = os.environ.get(env, "").strip()
         if not key:
             continue
-        for region, base_url, check_type, extra_path in endpoints:
+        for region, base_url, check_type, extra_path, key_prefix in endpoints:
+            if key_prefix and not key.startswith(key_prefix):
+                continue
             tasks.append(_check_provider_endpoint(key, base_url, check_type, extra_path))
             meta.append((pname, region))
 
