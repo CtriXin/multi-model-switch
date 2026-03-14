@@ -9,6 +9,7 @@ from datetime import datetime
 
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
 from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge
+from ccs_core import detect_working_base_url
 
 try:
     from rich.console import Console
@@ -312,48 +313,27 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         if age < 3600:
             return cached["url"], "cached"
 
-    # ---- 构造探测候选 ----
+    # ---- 使用公共工具探测（复用 ccs_core.detect_working_base_url）----
     url = configured.rstrip("/")
-    if url.endswith("/v1"):
-        candidates = [url[:-3], url]   # [without_v1, with_v1]
-    else:
-        candidates = [url, url + "/v1"]
-
-    # ---- 发请求探测 ----
-    try:
-        import httpx as _httpx
-    except ImportError:
-        # httpx 不可用，按 without-v1 保守猜测
-        return candidates[0], "fallback"
-
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
+    # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
     body = json.dumps({
         "model": probe_model,
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "hi"}],
     }).encode()
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    console.print("[dim]正在探测 Anthropic 端点...[/dim]")
+    candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5)
 
-    for candidate in candidates:
-        try:
-            resp = _httpx.post(
-                f"{candidate}/v1/messages",
-                headers=headers,
-                content=body,
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                _ANTHROPIC_URL_CACHE[provider_id] = {"url": candidate, "ts": datetime.now()}
-                if candidate != url:
-                    console.print(
-                        f"[dim]✓ Anthropic 端点自动修正: {url} → {candidate}[/dim]"
-                    )
-                return candidate, "probed"
-        except Exception:
-            continue
+    if candidate is not None:
+        _ANTHROPIC_URL_CACHE[provider_id] = {"url": candidate, "ts": datetime.now()}
+        if candidate != url:
+            console.print(f"[dim]✓ Anthropic 端点自动修正: {url} → {candidate}[/dim]")
+        return candidate, "probed"
 
     return None, "failed"
 
