@@ -280,12 +280,13 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
     try:
         url = api_url.rstrip("/")
         if url.endswith("/v1"):
-            endpoint = f"{url}/messages"
+            base_v1 = url
         else:
-            endpoint = f"{url}/v1/messages"
+            base_v1 = f"{url}/v1"
         body = {
             "model": model,
-            "max_tokens": 120,
+            "max_tokens": 1024,
+            "temperature": 0.01,
             "messages": [
                 {"role": "user", "content": _CLASSIFY_USER.format(task=text[:300])},
             ],
@@ -296,11 +297,26 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
-        r = _httpx.post(endpoint, headers=headers, json=body, timeout=5)
+        # 尝试 Anthropic messages → fallback OpenAI chat/completions
+        r = _httpx.post(f"{base_v1}/messages", headers=headers, json=body, timeout=8)
+        if r.status_code in (404, 405):
+            oai_body = {
+                "model": model,
+                "max_tokens": 1024,
+                "temperature": 0.01,
+                "messages": [
+                    {"role": "user", "content": _CLASSIFY_USER.format(task=text[:300])},
+                ],
+            }
+            r = _httpx.post(f"{base_v1}/chat/completions", headers=headers, json=oai_body, timeout=8)
         if r.status_code != 200:
-            _log_llm_error(f"status={r.status_code} url={endpoint} body={r.text[:200]}")
+            _log_llm_error(f"status={r.status_code} url={r.url} body={r.text[:200]}")
             return None
-        data = r.json()
+        try:
+            data = r.json()
+        except Exception:
+            _log_llm_error(f"invalid JSON from {r.url}: {r.text[:200]}")
+            return None
         reply = ""
         thinking_text = ""
         content = data.get("content", [])
@@ -318,12 +334,18 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             if choices and isinstance(choices, list):
                 msg = choices[0].get("message", {})
                 reply = msg.get("content", "") if isinstance(msg, dict) else ""
-        check_text = (reply or thinking_text).strip().upper()
+        # 优先用 text reply；fallback 到 thinking 最后 80 字符（避免中间推理干扰）
+        if reply:
+            check_text = reply.strip().upper()
+        elif thinking_text:
+            check_text = thinking_text.strip()[-80:].upper()
+        else:
+            check_text = ""
         tier = None
         confidence = "high"
-        if "LIGHT" in check_text:
+        if "LIGHT" in check_text or "轻" in check_text or "简单" in check_text:
             tier = "light"
-        elif "HEAVY" in check_text:
+        elif "HEAVY" in check_text or "重" in check_text or "复杂" in check_text:
             tier = "heavy"
         if tier is None:
             _log_llm_error(f"unexpected reply: {check_text[:100]} | raw={str(data)[:500]}")
