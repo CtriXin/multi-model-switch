@@ -29,6 +29,15 @@ export interface Phase2Result {
   }
 }
 
+export interface RollupResult {
+  finalPlan: string
+  keyRationale: string
+  tradeoffs: string
+  risks: string
+  whenNotToUse: string
+  nextSteps: string[]
+}
+
 const PHASE1_PROMPT = `你是一个技术专家。用户提出了一个技术问题，请给出你的独立分析。
 
 请严格按以下 JSON 格式输出（不要输出其他内容）：
@@ -62,6 +71,42 @@ const PHASE3_PROMPT = `你是一个技术总结专家。根据多个模型对以
 ### 建议行动计划（具体步骤）
 
 原始问题：`
+
+const ROLLUP_SYSTEM_PROMPT = `You are an independent synthesis agent.
+
+GOAL:
+Produce a single, actionable plan that integrates the most reliable elements of the discussion.
+
+RULES:
+- Do NOT summarize opinions.
+- Do NOT list viewpoints.
+- Produce ONE coherent solution.
+- Prefer practicality over theoretical optimality.
+- Resolve conflicts explicitly.
+- If uncertainty exists, propose a safe default.
+- The result must be immediately usable.
+
+OUTPUT REQUIREMENTS (use Markdown):
+
+## 行动计划
+A concrete, actionable solution.
+
+## 核心理由
+Why this plan is preferred.
+
+## 取舍
+What is sacrificed and why it's acceptable.
+
+## 风险与约束
+Situations where this may fail.
+
+## 失效条件
+When this plan should NOT be used.
+
+## 下一步
+Clear actions the user can take now (numbered list).
+
+If no viable plan exists, say so and explain what information is missing.`
 
 async function callModel(
   modelId: string,
@@ -118,6 +163,9 @@ export const useDiscussStore = defineStore('discuss', () => {
   const phase1Results = ref<Phase1Result[]>([])
   const phase2Results = ref<Phase2Result[]>([])
   const phase3Text = ref('')
+  const rollupText = ref('')
+  const rollupModel = ref('')
+  const rollupPhase = ref<'idle' | 'streaming' | 'done'>('idle')
   const topic = ref('')
   const abortController = ref<AbortController | null>(null)
 
@@ -249,19 +297,115 @@ export const useDiscussStore = defineStore('discuss', () => {
     useToastStore().info('已停止讨论')
   }
 
+  /** Pick a Rollup model: prefer non-participating, highest tier */
+  function pickRollupModel(participatingIds: string[]): string {
+    const appStore = useAppStore()
+    const participating = new Set(participatingIds)
+    const candidates = appStore.models
+      .filter((m) => !participating.has(m.id))
+      .sort((a, b) => b.tier - a.tier)
+    if (candidates.length) return candidates[0].id
+    // Fallback: highest-tier participating model
+    return participatingIds[0]
+  }
+
+  async function startRollup(modelIds: string[], overrideModelId?: string) {
+    if (streaming.value || rollupPhase.value === 'streaming') return
+    if (!phase3Text.value && phase1Results.value.length === 0) return
+
+    const toast = useToastStore()
+    rollupPhase.value = 'streaming'
+    rollupText.value = ''
+    abortController.value = new AbortController()
+    const signal = abortController.value.signal
+
+    // Select Rollup model
+    const rollupModelId = overrideModelId || pickRollupModel(modelIds)
+    const appStore = useAppStore()
+    const modelMeta = appStore.models.find((m) => m.id === rollupModelId)
+    rollupModel.value = modelMeta?.name ?? rollupModelId
+
+    // Build context from discussion results
+    const analysisContext = phase1Results.value
+      .map((r) => `[${r.model}] 方案: ${r.data.approach}; 理由: ${r.data.reasoning}; 风险: ${r.data.risks.join(', ')}`)
+      .join('\n')
+    const reviewContext = phase2Results.value
+      .map((r) => `[${r.reviewer} → ${r.target}] 同意: ${r.data.agreement}; 质疑: ${r.data.challenge}; 建议: ${r.data.betterOption}`)
+      .join('\n')
+    const synthesisContext = phase3Text.value ? `\n\n综合结论：\n${phase3Text.value}` : ''
+
+    const userPrompt = `原始问题：${topic.value}
+
+各模型独立分析：
+${analysisContext}
+
+交叉审查：
+${reviewContext}${synthesisContext}
+
+请根据以上讨论内容，生成一份统一的行动计划。`
+
+    try {
+      const providerStore = useProviderStore()
+      const model = appStore.models.find((m) => m.id === rollupModelId)
+      let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
+      if (!providerConfig) {
+        if (rollupModelId.startsWith('demo/')) {
+          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
+        }
+        if (!providerConfig) {
+          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
+        }
+      }
+      if (!providerConfig) throw new Error('未找到 Rollup 模型通道')
+
+      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
+      if (!apiKey) throw new Error('Rollup 模型的 API Key 未配置')
+
+      const stream = streamChat({
+        provider: providerConfig,
+        apiKey,
+        model: rollupModelId,
+        messages: [
+          { role: 'system', content: ROLLUP_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        signal,
+      })
+      for await (const chunk of stream) {
+        if (signal.aborted) return
+        rollupText.value += chunk
+      }
+      toast.success('行动计划已生成')
+    } catch (e: any) {
+      if (e.name !== 'AbortError' && !signal.aborted) {
+        toast.error('Rollup 失败: ' + e.message)
+        if (!rollupText.value) {
+          rollupText.value = `> Rollup 失败: ${e.message}`
+        }
+      }
+    } finally {
+      rollupPhase.value = 'done'
+      abortController.value = null
+    }
+  }
+
   function reset() {
     phase.value = 0
     phase1Results.value = []
     phase2Results.value = []
     phase3Text.value = ''
+    rollupText.value = ''
+    rollupModel.value = ''
+    rollupPhase.value = 'idle'
     topic.value = ''
     streaming.value = false
   }
 
   return {
     phase, streaming, depth, phase1Results, phase2Results, phase3Text,
+    rollupText, rollupModel, rollupPhase,
     topic, hasResults,
-    startDiscussion, stopDiscussion, reset,
+    startDiscussion, startRollup, stopDiscussion, reset,
   }
 })
 
