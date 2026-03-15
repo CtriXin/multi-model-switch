@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, inject } from 'vue'
-import { usePersonaStore, CATEGORY_META, buildPersonaSystemPrompt, type PersonaCategory } from '@/stores/persona'
+import { usePersonaStore, CATEGORY_META, buildPersonaSystemPrompt, getAvatarUrl, type PersonaCategory } from '@/stores/persona'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useProviderStore } from '@/stores/provider'
 import { streamChat } from '@/services/api'
 import { getApiKey } from '@/services/keychain'
-import PixelAvatar from '@/components/PixelAvatar.vue'
 import MarkdownIt from 'markdown-it'
 import {
   Users, Play, RotateCcw, ChevronDown, ChevronUp,
@@ -231,11 +230,11 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
                   ? 'border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/15'
                   : 'border-border-subtle hover:border-border-strong hover:bg-surface-2'"
               >
-                <!-- 像素头像 -->
-                <PixelAvatar
-                  :grid="persona.avatar.grid"
-                  :palette="persona.avatar.palette"
-                  :size="40"
+                <!-- 头像 -->
+                <img
+                  :src="getAvatarUrl(persona, 40)"
+                  :alt="persona.name"
+                  class="w-10 h-10 rounded-full bg-surface-3 shrink-0"
                 />
 
                 <div class="flex-1 min-w-0">
@@ -298,10 +297,10 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
           >
             <!-- 卡片头部 -->
             <div class="flex items-center gap-2.5 px-3 py-2.5 border-b border-border-subtle bg-surface-2/50">
-              <PixelAvatar
-                :grid="persona.avatar.grid"
-                :palette="persona.avatar.palette"
-                :size="32"
+              <img
+                :src="getAvatarUrl(persona, 32)"
+                :alt="persona.name"
+                class="w-8 h-8 rounded-full bg-surface-3 shrink-0"
               />
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
