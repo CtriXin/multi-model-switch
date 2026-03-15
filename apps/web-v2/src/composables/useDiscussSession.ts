@@ -68,11 +68,16 @@ async function callModelForSession(
   const model = appStore.models.find((m) => m.id === modelId)
   let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
   if (!providerConfig) {
-    providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
+    if (modelId.startsWith('demo/')) {
+      providerConfig = providerStore.providers.find((p) => p.type === 'mock')
+    }
+    if (!providerConfig) {
+      providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
+    }
   }
   if (!providerConfig) throw new Error('未找到 API 通道')
 
-  const apiKey = await getApiKey(providerConfig.id)
+  const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
   if (!apiKey) throw new Error('API Key 未配置')
 
   let result = ''
@@ -181,11 +186,16 @@ export function useDiscussSession() {
       const model = appStore.models.find((m) => m.id === synthesisModel)
       let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
       if (!providerConfig) {
-        providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
+        if (synthesisModel.startsWith('demo/')) {
+          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
+        }
+        if (!providerConfig) {
+          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
+        }
       }
       if (!providerConfig) throw new Error('未找到 API 通道')
 
-      const apiKey = await getApiKey(providerConfig.id)
+      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
       if (!apiKey) throw new Error('API Key 未配置')
 
       const stream = streamChat({

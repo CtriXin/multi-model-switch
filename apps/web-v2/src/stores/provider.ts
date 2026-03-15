@@ -6,7 +6,7 @@ import { useToastStore } from './toast'
 export interface ProviderConfig {
   id: string
   name: string
-  type: 'openrouter' | 'openai-compatible' | 'anthropic-compatible'
+  type: 'openrouter' | 'openai-compatible' | 'anthropic-compatible' | 'mock'
   baseUrl: string
   enabled: boolean
   builtIn: boolean
@@ -19,6 +19,14 @@ const BUILTIN_PROVIDERS: ProviderConfig[] = [
     name: 'OpenRouter',
     type: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
+    enabled: true,
+    builtIn: true,
+  },
+  {
+    id: 'demo',
+    name: 'Demo (模拟数据)',
+    type: 'mock',
+    baseUrl: '',
     enabled: true,
     builtIn: true,
   },
@@ -62,7 +70,7 @@ export const useProviderStore = defineStore('provider', () => {
   )
 
   const configuredProviders = computed(() =>
-    enabledProviders.value.filter((p) => keyStatus.value[p.id]),
+    enabledProviders.value.filter((p) => p.type === 'mock' || keyStatus.value[p.id]),
   )
 
   function save() {

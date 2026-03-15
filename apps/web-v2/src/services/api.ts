@@ -37,6 +37,12 @@ export class ApiError extends Error {
 export async function* streamChat(options: StreamChatOptions): AsyncGenerator<string> {
   const { provider, apiKey, model, messages, signal } = options
 
+  // Mock provider — simulate streaming without network
+  if (provider.type === 'mock') {
+    yield* mockStreamChat(model, messages, signal)
+    return
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
@@ -129,6 +135,10 @@ export async function fetchModels(
   provider: ProviderConfig,
   apiKey: string,
 ): Promise<ModelMeta[]> {
+  // Mock provider — return static model list
+  if (provider.type === 'mock') {
+    return MOCK_MODELS
+  }
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${apiKey}`,
   }
@@ -228,4 +238,61 @@ function deriveTags(raw: ApiModel): string[] {
   if (!tags.length) tags.push('general')
 
   return tags
+}
+
+// ─── Mock Provider ───────────────────────────────────────────────
+
+const MOCK_MODELS: ModelMeta[] = [
+  { id: 'demo/claude-sonnet', name: 'Claude Sonnet (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision'], contextWindow: 200000 },
+  { id: 'demo/gpt-4o', name: 'GPT-4o (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2.5, priceOutput: 10, tags: ['reasoning', 'vision', 'coding'], contextWindow: 128000 },
+  { id: 'demo/gemini-pro', name: 'Gemini Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 10, tags: ['reasoning', 'coding', 'vision'], contextWindow: 1000000 },
+  { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.19, tags: ['reasoning', 'coding'], contextWindow: 64000 },
+  { id: 'demo/haiku', name: 'Claude Haiku (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.25, tags: ['fast', 'coding'], contextWindow: 200000 },
+]
+
+const MOCK_RESPONSES: Record<string, string[]> = {
+  anthropic: [
+    '这是一个很好的问题。让我从几个角度来分析：\n\n**首先**，我们需要考虑整体架构的合理性。一个好的设计应该兼顾可扩展性和易用性。\n\n**其次**，从实现层面来看，推荐使用模块化的方式来组织代码，这样便于后续的维护和迭代。\n\n**最后**，建议在实现前做好充分的技术选型评估，避免后期的重构成本。',
+    '根据我的分析，这个场景适合使用事件驱动架构。核心思路是：\n\n1. 将业务流程拆分为独立的事件\n2. 通过消息队列解耦各个服务\n3. 使用幂等性设计保证数据一致性\n\n这样做的好处是系统的伸缩性更强，也更容易做故障隔离。',
+  ],
+  openai: [
+    '好的，我来帮你解答这个问题。\n\n这个问题的关键在于理解核心概念之间的关系。我建议采用以下策略：\n\n- 使用 **分层架构** 来降低复杂度\n- 引入 **依赖注入** 提高测试覆盖率\n- 利用 **缓存策略** 优化性能\n\n具体实现上，可以参考业界的最佳实践来落地。',
+    '这个需求可以通过以下方式实现：\n\n```typescript\nclass EventBus {\n  private handlers = new Map()\n  \n  on(event: string, handler: Function) {\n    this.handlers.set(event, handler)\n  }\n  \n  emit(event: string, data: any) {\n    this.handlers.get(event)?.(data)\n  }\n}\n```\n\n这个方案简洁高效，适合中小规模的应用场景。',
+  ],
+  google: [
+    '我来综合分析一下这个问题。\n\n从技术可行性来看，有以下几种方案：\n\n| 方案 | 优势 | 劣势 | 推荐度 |\n|------|------|------|--------|\n| 方案A | 实现简单 | 扩展性差 | ★★★ |\n| 方案B | 性能好 | 复杂度高 | ★★★★ |\n| 方案C | 均衡 | 需要学习成本 | ★★★★★ |\n\n综合考虑，我推荐方案C。',
+  ],
+  deepseek: [
+    '让我深入思考一下这个问题...\n\n经过分析，核心解决方案是：\n\n1. 使用有限状态机建模业务流程\n2. 通过状态转移表明确各状态间的跳转规则\n3. 结合响应式系统实现自动更新\n\n这个方案的时间复杂度是 O(n)，空间复杂度是 O(1)，效率很高。',
+  ],
+}
+
+function getMockResponse(provider: string): string {
+  const pool = MOCK_RESPONSES[provider] || MOCK_RESPONSES.openai
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+async function* mockStreamChat(
+  model: string,
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): AsyncGenerator<string> {
+  const provider = model.includes('claude') || model.includes('haiku')
+    ? 'anthropic'
+    : model.includes('gpt') ? 'openai'
+    : model.includes('gemini') ? 'google'
+    : model.includes('deepseek') ? 'deepseek'
+    : 'openai'
+
+  const fullText = getMockResponse(provider)
+
+  for (let i = 0; i < fullText.length; ) {
+    if (signal?.aborted) return
+    const chunkSize = Math.min(1 + Math.floor(Math.random() * 3), fullText.length - i)
+    yield fullText.slice(i, i + chunkSize)
+    i += chunkSize
+    const lastChar = fullText[i - 1]
+    const delay = '，。！？\n'.includes(lastChar) ? 40 : (5 + Math.random() * 10)
+    await new Promise((r) => setTimeout(r, delay))
+  }
 }
