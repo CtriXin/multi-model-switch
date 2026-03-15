@@ -21,10 +21,10 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 const session = useDiscussSession()
 
-const depthOptions: { value: DiscussDepth; label: string; desc: string; icon: typeof Zap }[] = [
+const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: string; icon: typeof Zap }[] = [
   { value: 'quick', label: '快速审查', desc: '指定 1-2 个模型审查，最快', icon: Rocket },
   { value: 'panel', label: '全局审查', desc: '每个模型综合评审全场（推荐）', icon: Zap },
-  { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，最精准', icon: Flame },
+  { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，适用于高风险或复杂决策', hint: '输出为结构化观点，非最终方案。可配合 Rollup 生成行动计划。', icon: Flame },
 ]
 
 const selectedDepth = ref<DiscussDepth>('panel')
@@ -93,6 +93,12 @@ watch(() => session.isActive.value, (active) => {
           <span class="text-[10px] text-text-tertiary leading-tight">{{ opt.desc }}</span>
         </button>
       </div>
+      <p
+        v-if="depthOptions.find(o => o.value === selectedDepth)?.hint"
+        class="text-[10px] text-text-tertiary mb-3 px-1 leading-relaxed"
+      >
+        {{ depthOptions.find(o => o.value === selectedDepth)?.hint }}
+      </p>
       <button
         @click="startDiscuss"
         class="w-full py-2 rounded-lg bg-purple-500 hover:bg-purple-600

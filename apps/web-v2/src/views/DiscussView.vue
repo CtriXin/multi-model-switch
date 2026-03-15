@@ -11,6 +11,7 @@ import MarkdownIt from 'markdown-it'
 import {
   MessageSquare, CheckCircle, AlertTriangle, Lightbulb,
   ArrowRight, RotateCcw, GitMerge, Zap, Flame, Rocket,
+  Gavel, Loader2,
 } from 'lucide-vue-next'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -27,10 +28,10 @@ const hasModels = computed(() => appStore.selectedModels.length >= 2)
 
 // Depth selector
 const selectedDepth = ref<DiscussDepth>('panel')
-const depthOptions: { value: DiscussDepth; label: string; desc: string; icon: typeof Zap }[] = [
+const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: string; icon: typeof Zap }[] = [
   { value: 'quick', label: '快速审查', desc: '指定 1-2 个模型审查，最快', icon: Rocket },
   { value: 'panel', label: '全局审查', desc: '每个模型综合评审全场（推荐）', icon: Zap },
-  { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，最精准', icon: Flame },
+  { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，适用于高风险或复杂决策', hint: '输出为结构化观点，非最终方案。可配合 Rollup 生成行动计划。', icon: Flame },
 ]
 
 // Pending topic — submitted but depth not chosen yet
@@ -79,10 +80,12 @@ function handleReset() {
 }
 
 function continueToChat() {
-  // Carry discuss context to chat — pass topic + synthesis as context
-  const context = discussStore.phase3Text
-    ? `[讨论结论] ${discussStore.topic}\n\n${discussStore.phase3Text}`
-    : discussStore.topic
+  // Carry discuss context to chat — prefer rollup if available, fallback to synthesis
+  const context = discussStore.rollupText
+    ? `[行动计划] ${discussStore.topic}\n\n${discussStore.rollupText}`
+    : discussStore.phase3Text
+      ? `[讨论结论] ${discussStore.topic}\n\n${discussStore.phase3Text}`
+      : discussStore.topic
   router.push({ path: '/chat', query: { context } })
 }
 
@@ -103,6 +106,11 @@ const depthLabel = computed(() => {
 })
 
 const synthesis = computed(() => md.render(discussStore.phase3Text || ''))
+const rollupHtml = computed(() => md.render(discussStore.rollupText || ''))
+
+function handleRollup() {
+  discussStore.startRollup(appStore.selectedModelIds)
+}
 </script>
 
 <template>
@@ -161,6 +169,14 @@ const synthesis = computed(() => md.render(discussStore.phase3Text || ''))
                 <span class="text-[10px] text-text-tertiary leading-tight">{{ opt.desc }}</span>
               </button>
             </div>
+
+            <!-- Depth hint -->
+            <p
+              v-if="depthOptions.find(o => o.value === selectedDepth)?.hint"
+              class="text-[10px] text-text-tertiary mb-4 px-1 leading-relaxed"
+            >
+              {{ depthOptions.find(o => o.value === selectedDepth)?.hint }}
+            </p>
 
             <!-- Participating models -->
             <div class="flex items-center gap-2 mb-4">
@@ -319,6 +335,60 @@ const synthesis = computed(() => md.render(discussStore.phase3Text || ''))
               </div>
               <span
                 v-if="discussStore.streaming && discussStore.phase3Text"
+                class="inline-block w-1.5 h-4 bg-amber-400 ml-0.5 animate-cursor_blink align-text-bottom"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Rollup: Action Plan -->
+        <div v-if="discussStore.hasResults && !discussStore.streaming" class="mt-6">
+          <!-- Rollup trigger button -->
+          <div
+            v-if="discussStore.rollupPhase === 'idle'"
+            class="rounded-xl border border-amber-500/20 bg-surface-1 overflow-hidden animate-slide-up"
+          >
+            <button
+              @click="handleRollup"
+              class="flex items-center justify-center gap-2 w-full px-4 py-3 cursor-pointer
+                     hover:bg-surface-2 transition-colors group"
+            >
+              <Gavel :size="14" class="text-amber-400 group-hover:scale-110 transition-transform" />
+              <span class="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
+                制定行动计划 — Rollup 综合出可落地方案
+              </span>
+            </button>
+            <p class="text-[10px] text-text-tertiary text-center pb-2 px-4">
+              将讨论观点综合为唯一方案，包含取舍、风险和下一步行动
+            </p>
+          </div>
+
+          <!-- Rollup streaming/done -->
+          <div
+            v-else
+            class="rounded-xl border border-amber-500/20 bg-surface-1 overflow-hidden animate-slide-up"
+          >
+            <div class="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
+              <Gavel :size="14" class="text-amber-400" />
+              <span class="text-sm font-medium text-text-primary">行动计划</span>
+              <span v-if="discussStore.rollupModel" class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">
+                由 {{ discussStore.rollupModel }} 制定
+              </span>
+              <Loader2
+                v-if="discussStore.rollupPhase === 'streaming'"
+                :size="12"
+                class="text-amber-400 animate-spin ml-auto"
+              />
+            </div>
+            <div class="p-4">
+              <div v-if="discussStore.rollupText" class="md-body text-sm" v-html="rollupHtml" />
+              <div v-else class="space-y-2">
+                <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
+                <div class="h-3 bg-surface-3 rounded animate-pulse w-4/5" />
+                <div class="h-3 bg-surface-3 rounded animate-pulse w-3/5" />
+              </div>
+              <span
+                v-if="discussStore.rollupPhase === 'streaming' && discussStore.rollupText"
                 class="inline-block w-1.5 h-4 bg-amber-400 ml-0.5 animate-cursor_blink align-text-bottom"
               />
             </div>
