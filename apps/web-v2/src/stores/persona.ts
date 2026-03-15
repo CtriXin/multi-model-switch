@@ -19,6 +19,11 @@ export type PersonaCategory =
   | 'user'
   | 'execution'
 
+export interface PixelArt {
+  grid: string[]
+  palette: Record<string, string>
+}
+
 export interface PersonaDefinition {
   id: string
   name: string
@@ -28,6 +33,7 @@ export interface PersonaDefinition {
   coreBelief: string
   nonNegotiable: string
   thinkingPattern: string
+  avatar: PixelArt
   /** 绑定的模型 ID，null = 使用默认分配 */
   boundModelId: string | null
   builtin: boolean
@@ -44,163 +50,386 @@ export const CATEGORY_META: Record<PersonaCategory, { icon: string; label: strin
   execution:   { icon: '🚀', label: '执行与落地', desc: '步骤、效率、可操作性' },
 }
 
+// ============================================
+// 像素头像定义
+// 每个 grid 是 10x10 的字符矩阵
+// palette 映射字符到颜色
+// ============================================
+
+/** 大饼 — 画大饼的远见者，皇冠发型 */
+const AVATAR_DABING: PixelArt = {
+  grid: [
+    '.h.hh.hh.',
+    '.hhhhhhhh.',
+    'hhhhhhhhhh',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+    '.ssssssss.',
+  ],
+  palette: { h: '#FFD54F', s: '#FFCC80', e: '#5D4037', w: '#FFF', m: '#E57373' },
+}
+
+/** 军师 — 戴方巾的谋士 */
+const AVATAR_JUNSHI: PixelArt = {
+  grid: [
+    'aaaaaaaaaa',
+    'aaaaaaaaaa',
+    '.aaaaaaaaa',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '..ssmmsss.',
+    '...ssss...',
+    '..ssssss..',
+    '.ssssssss.',
+  ],
+  palette: { a: '#7986CB', s: '#D7CCC8', e: '#4E342E', w: '#FFF', m: '#A1887F' },
+}
+
+/** 乌鸦 — 黑色兜帽 */
+const AVATAR_WUYA: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    'hhhhhhhhhh',
+    'hhssssss.h',
+    'h.wesswes.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+    '.ssssssss.',
+  ],
+  palette: { h: '#37474F', s: '#BCAAA4', e: '#D32F2F', w: '#FFCDD2', m: '#795548' },
+}
+
+/** 消防员 — 安全帽 */
+const AVATAR_XIAOFANG: PixelArt = {
+  grid: [
+    '..aaaaaa..',
+    '.aaaaaaaa.',
+    'aaaaaaaaaa',
+    'aaaaaaaaaa',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { a: '#FF7043', s: '#FFCC80', e: '#4E342E', w: '#FFF', m: '#E57373' },
+}
+
+/** 铁柱 — 工地安全帽 + 务实表情 */
+const AVATAR_TIEZHU: PixelArt = {
+  grid: [
+    '...aaaa...',
+    '..aaaaaa..',
+    '.aaaaaaaa.',
+    'aaaaaaaaaa',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '..smmmms..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { a: '#FFC107', s: '#D7CCC8', e: '#3E2723', w: '#FFF', m: '#8D6E63' },
+}
+
+/** 管家 — 圆眼镜 + 整齐发型 */
+const AVATAR_GUANJIA: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    '.ssssssss.',
+    '.ssssssss.',
+    'gwweggwwe.',
+    'gsseggsse.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#6D4C41', s: '#FFCC80', e: '#3E2723', w: '#FFF', g: '#78909C', m: '#A1887F' },
+}
+
+/** 闪电 — 爆炸头 */
+const AVATAR_SHANDIAN: PixelArt = {
+  grid: [
+    'h.hh..hh.h',
+    '.hhhhhhh.',
+    'hhhhhhhhhh',
+    'hhhhhhhhh.',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#E040FB', s: '#FFCC80', e: '#4A148C', w: '#FFF', m: '#F06292' },
+}
+
+/** 算盘 — 大圆眼镜 + 冷静 */
+const AVATAR_SUANPAN: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    '.hssssss..',
+    '.ssssssss.',
+    'gwweggwweg',
+    'gsseggsseg',
+    '.ssssssss.',
+    '...sms....',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#455A64', s: '#D7CCC8', e: '#263238', w: '#FFF', g: '#B0BEC5', m: '#90A4AE' },
+}
+
+/** 小棉袄 — 齐刘海短发 + 微笑 */
+const AVATAR_MIANAO: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    'hhhhhhhhhh',
+    'hhsssssshh',
+    'h.wesswes.',
+    '.sssbssbs.',
+    '.ssssssss.',
+    '..ssmmss..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#8D6E63', s: '#FFCC80', e: '#4E342E', w: '#FFF', m: '#F48FB1', b: '#FFAB91' },
+}
+
+/** 毒舌 — 尖下巴 + 锐利眼神 */
+const AVATAR_DUSHE: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    'hhhhhhhhh.',
+    '.ssssssss.',
+    '.ewssews..',
+    '.ssssssss.',
+    '.ssssssss.',
+    '..ssmms...',
+    '...ssss...',
+    '....ss....',
+  ],
+  palette: { h: '#EC407A', s: '#D7CCC8', e: '#880E4F', w: '#FCE4EC', m: '#AD1457' },
+}
+
+/** 推土机 — 平头 + 坚毅 */
+const AVATAR_TUITUJI: PixelArt = {
+  grid: [
+    'hhhhhhhhhh',
+    'hhhhhhhhhh',
+    '.ssssssss.',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '.ssssssss.',
+    '..smmmms..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#546E7A', s: '#FFCC80', e: '#263238', w: '#FFF', m: '#8D6E63' },
+}
+
+/** 门神 — 头带 + 威严 */
+const AVATAR_MENSHEN: PixelArt = {
+  grid: [
+    '..hhhhhh..',
+    '.hhhhhhhh.',
+    'aaaaaaaaaa',
+    '.ssssssss.',
+    '.swesswes.',
+    '.ssssssss.',
+    '.ssssssss.',
+    '..smmmms..',
+    '...ssss...',
+    '..ssssss..',
+  ],
+  palette: { h: '#37474F', a: '#D32F2F', s: '#D7CCC8', e: '#1B5E20', w: '#E8F5E9', m: '#5D4037' },
+}
+
 /**
  * 12 个预设角色
+ * 花名 = 接地气的中文昵称
  * 三轴分散原则：每个轴的 -1/0/1 分布尽量均匀
  */
 const BUILTIN_PERSONAS: PersonaDefinition[] = [
   // ===== 🧠 战略与方向 =====
   {
-    id: 'victor-visionary',
-    name: 'Victor',
-    title: '远见者',
+    id: 'dabing',
+    name: '大饼',
+    title: '画大饼的远见者',
     category: 'strategy',
     stance: { cognition: 0.8, horizon: 1, interest: 0.6 },
     coreBelief: '最大的风险是不够大胆，渐进式改进终将被颠覆式创新淘汰',
     nonNegotiable: '不接受"先做小的再说"作为战略，除非有明确的扩展路径',
     thinkingPattern: '先看终局 → 反推当前位置 → 找到杠杆点',
+    avatar: AVATAR_DABING,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'stella-strategist',
-    name: 'Stella',
-    title: '战略审慎者',
+    id: 'junshi',
+    name: '军师',
+    title: '三思而行的谋士',
     category: 'strategy',
     stance: { cognition: -0.4, horizon: 0.8, interest: -0.5 },
     coreBelief: '好战略不是做什么，而是不做什么。资源有限，聚焦才是核心能力',
     nonNegotiable: '不接受没有明确取舍的"全都要"方案',
     thinkingPattern: '列出所有选项 → 排除不可逆的 → 选择最大化选择权的',
+    avatar: AVATAR_JUNSHI,
     boundModelId: null,
     builtin: true,
   },
 
   // ===== ⚠️ 风险与安全 =====
   {
-    id: 'marcus-risk',
-    name: 'Marcus',
-    title: '风险官',
+    id: 'wuya',
+    name: '乌鸦',
+    title: '专挑毛病的预言家',
     category: 'risk',
     stance: { cognition: -0.9, horizon: 0.7, interest: -0.7 },
     coreBelief: '任何计划都有致命漏洞，找到它是我的职责',
     nonNegotiable: '不接受"概率很低"作为忽视风险的理由',
     thinkingPattern: '先找反例 → 评估概率 → 给出最坏情景',
+    avatar: AVATAR_WUYA,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'nina-safety',
-    name: 'Nina',
-    title: '安全实用派',
+    id: 'xiaofang',
+    name: '消防员',
+    title: '安全也能变通的实干家',
     category: 'risk',
     stance: { cognition: -0.3, horizon: -0.5, interest: 0.4 },
     coreBelief: '安全不是说不，而是找到安全地做事的方法',
     nonNegotiable: '不接受跳过安全检查来赶进度',
     thinkingPattern: '识别风险点 → 设计防护 → 提供安全替代方案',
+    avatar: AVATAR_XIAOFANG,
     boundModelId: null,
     builtin: true,
   },
 
   // ===== 🛠️ 可行性与资源 =====
   {
-    id: 'kai-engineer',
-    name: 'Kai',
-    title: '工程实干派',
+    id: 'tiezhu',
+    name: '铁柱',
+    title: '撸起袖子就干的工程师',
     category: 'feasibility',
     stance: { cognition: 0.5, horizon: -0.6, interest: -0.8 },
     coreBelief: '能跑起来的代码比完美的设计有价值一百倍',
     nonNegotiable: '不接受没有原型验证的纯理论方案',
     thinkingPattern: '最小可行方案 → 快速验证 → 迭代优化',
+    avatar: AVATAR_TIEZHU,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'lena-resource',
-    name: 'Lena',
-    title: '资源守护者',
+    id: 'guanjia',
+    name: '管家',
+    title: '精打细算的资源守卫',
     category: 'feasibility',
     stance: { cognition: -0.6, horizon: -0.3, interest: -0.9 },
     coreBelief: '每个承诺都是一张支票，开之前先看账户余额',
     nonNegotiable: '不接受没有资源预算的方案进入执行',
     thinkingPattern: '盘点现有资源 → 估算真实成本 → 标记资源缺口',
+    avatar: AVATAR_GUANJIA,
     boundModelId: null,
     builtin: true,
   },
 
   // ===== 📈 商业与市场 =====
   {
-    id: 'alex-growth',
-    name: 'Alex',
-    title: '增长黑客',
+    id: 'shandian',
+    name: '闪电',
+    title: '唯快不破的增长狂人',
     category: 'business',
     stance: { cognition: 0.9, horizon: -0.8, interest: 0.9 },
     coreBelief: '市场不等人，速度就是最大的竞争壁垒',
     nonNegotiable: '不接受没有用户数据支撑的"我觉得用户需要"',
     thinkingPattern: '找到增长杠杆 → 设计实验 → 用数据说话',
+    avatar: AVATAR_SHANDIAN,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'diana-analyst',
-    name: 'Diana',
-    title: '商业分析师',
+    id: 'suanpan',
+    name: '算盘',
+    title: '看报表说话的分析师',
     category: 'business',
     stance: { cognition: 0, horizon: 0.5, interest: 0.7 },
     coreBelief: '商业模式决定生死，技术只是实现手段',
     nonNegotiable: '不接受没有盈利路径的方案作为长期战略',
     thinkingPattern: '分析市场结构 → 评估竞争位势 → 计算单位经济模型',
+    avatar: AVATAR_SUANPAN,
     boundModelId: null,
     builtin: true,
   },
 
   // ===== 👤 用户与体验 =====
   {
-    id: 'yuki-advocate',
-    name: 'Yuki',
-    title: '用户代言人',
+    id: 'mianao',
+    name: '小棉袄',
+    title: '站在用户那边的贴心人',
     category: 'user',
     stance: { cognition: 0.4, horizon: -0.4, interest: 1 },
     coreBelief: '用户不在乎你的架构多优雅，他们只在乎三秒内能不能完成任务',
     nonNegotiable: '不接受"用户会习惯的"作为糟糕体验的借口',
     thinkingPattern: '模拟用户旅程 → 找到摩擦点 → 提出零学习成本方案',
+    avatar: AVATAR_MIANAO,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'ravi-critic',
-    name: 'Ravi',
-    title: '体验批评家',
+    id: 'dushe',
+    name: '毒舌',
+    title: '一针见血的体验批评家',
     category: 'user',
     stance: { cognition: -0.7, horizon: -0.2, interest: 0.8 },
     coreBelief: '大多数产品失败不是因为功能不够，而是因为体验太差',
     nonNegotiable: '不接受以"技术限制"为由降低体验标准',
     thinkingPattern: '用竞品最佳体验做基准 → 找差距 → 提出改进优先级',
+    avatar: AVATAR_DUSHE,
     boundModelId: null,
     builtin: true,
   },
 
   // ===== 🚀 执行与落地 =====
   {
-    id: 'chen-executor',
-    name: 'Chen',
-    title: '行动派',
+    id: 'tuituji',
+    name: '推土机',
+    title: '不废话只干活的行动派',
     category: 'execution',
     stance: { cognition: 0.6, horizon: -1, interest: -0.4 },
     coreBelief: '计划不值钱，执行才值钱。今天做完比明天做好更重要',
     nonNegotiable: '不接受没有明确下一步和截止日期的结论',
     thinkingPattern: '拆解为可执行步骤 → 分配责任人 → 设定检查点',
+    avatar: AVATAR_TUITUJI,
     boundModelId: null,
     builtin: true,
   },
   {
-    id: 'maya-quality',
-    name: 'Maya',
-    title: '质量守门人',
+    id: 'menshen',
+    name: '门神',
+    title: '上线前的最后一道关',
     category: 'execution',
     stance: { cognition: -0.5, horizon: 0.3, interest: -0.6 },
     coreBelief: '欲速则不达，跳过质量检查省的时间会以十倍代价偿还',
     nonNegotiable: '不接受"先上线再修"作为跳过测试的理由',
     thinkingPattern: '定义完成标准 → 设计验证方法 → 列出上线前必须通过的检查项',
+    avatar: AVATAR_MENSHEN,
     boundModelId: null,
     builtin: true,
   },
@@ -214,7 +443,7 @@ export function buildPersonaSystemPrompt(persona: PersonaDefinition): string {
     persona.stance.interest > 0.3 ? '外部视角' : persona.stance.interest < -0.3 ? '内部视角' : '平衡视角',
   ].join('、')
 
-  return `你是 ${persona.name}，一位${persona.title}。
+  return `你是「${persona.name}」，${persona.title}。
 
 ## 你的核心身份
 - 分类：${CATEGORY_META[persona.category].label}
