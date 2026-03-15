@@ -28,6 +28,21 @@ except ImportError:
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
 
+_ROUTE_STATUS_PATH = os.path.join(os.path.expanduser("~/.config/mms"), "route_status.json")
+
+
+def _write_route_status(tier, model, reason):
+    """写路由状态供 statusline 读取，非阻塞，失败静默。"""
+    try:
+        import time
+        data = json.dumps({"tier": tier, "model": model, "reason": reason, "ts": time.time()})
+        tmp = _ROUTE_STATUS_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(data)
+        os.replace(tmp, _ROUTE_STATUS_PATH)
+    except OSError:
+        pass
+
 
 def _find_free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -810,11 +825,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid bridge token"}})
             return
         if self.path == "/v1/models":
-            # 动态构建模型列表：heavy + light + Claude 默认（兜底）
+            # 动态构建模型列表：heavy + medium + light + Claude 默认（兜底）
             seen = set()
             models = []
             for m in (getattr(self.server, "heavy_model", None),
-                      getattr(self.server, "lb_light_model", None),
+                      getattr(self.server, "medium_model", None),
+                      getattr(self.server, "light_model", None),
                       "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"):
                 if m and m not in seen:
                     seen.add(m)
@@ -846,11 +862,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         _lb_debug = os.path.expanduser("~/.config/mms/lb_debug.log")
         try:
             os.makedirs(os.path.dirname(_lb_debug), exist_ok=True)
-            lb_light = getattr(self.server, "lb_light_model", None)
+            light_model = getattr(self.server, "light_model", None)
+            medium_model = getattr(self.server, "medium_model", None)
             heavy_model = getattr(self.server, "heavy_model", None)
             user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
             with open(_lb_debug, "a") as _f:
-                _f.write(f"[POST {self.path}→{path}] heavy={heavy_model} light={lb_light} "
+                _f.write(f"[POST {self.path}→{path}] heavy={heavy_model} medium={medium_model} light={light_model} "
                          f"user_msgs={len(user_msgs)} model={payload.get('model','?')}\n")
                 if user_msgs:
                     raw = _extract_user_text(user_msgs[-1].get("content", ""))
@@ -863,28 +880,63 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if heavy_model and "model" in payload:
             payload["model"] = heavy_model
 
-        # ── 负载路由：根据用户消息轻重自动切换模型 ──
-        lb_light = getattr(self.server, "lb_light_model", None)
+        # ── 智能路由：3-tier (light/medium/heavy) + sticky escalation ──
+        light_model = getattr(self.server, "light_model", None)
+        medium_model = getattr(self.server, "medium_model", None)
         path_no_qs = path.split("?")[0]
-        if lb_light and "/messages" in path_no_qs and path_no_qs != "/v1/messages/count_tokens":
+        has_routing = light_model or medium_model
+        if has_routing and "/messages" in path_no_qs and path_no_qs != "/v1/messages/count_tokens":
             user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
             if user_msgs:
                 last_content = user_msgs[-1].get("content", "")
                 last_text = _extract_user_text(last_content)
                 if last_text:
-                    from ccs_router import classify_task, log_route
-                    # LLM 分类：用 gateway URL + key 调 light 模型判断
+                    from ccs_router import classify_task, log_route, STICKY_DECAY_TURNS
                     gw_url = getattr(self.server, "gateway_url", None)
                     gw_key = getattr(self.server, "gateway_key", None)
                     level, reason = classify_task(
                         last_text, api_url=gw_url, api_key=gw_key,
-                        light_model=lb_light,
+                        light_model=light_model or medium_model,
                     )
-                    if level == "light":
-                        payload["model"] = lb_light
-                        log_route(level, reason, lb_light, last_text)
-                    else:
-                        log_route(level, reason, payload.get("model", "?"), last_text)
+                    # sticky escalation：heavy 后保持，但高置信 LIGHT 可 override
+                    sticky_floor = getattr(self.server, "_sticky_floor", None)
+                    sticky_remaining = getattr(self.server, "_sticky_remaining", 0)
+                    # 高置信 LIGHT 信号：关键词命中或 LLM 高置信
+                    _is_confident_light = (level == "light" and
+                        (reason.startswith("keyword:") or "high_confidence" in reason))
+                    if sticky_floor == "heavy" and sticky_remaining > 0:
+                        if _is_confident_light:
+                            # 高置信 LIGHT override sticky，允许降级
+                            self.server._sticky_floor = None
+                            self.server._sticky_remaining = 0
+                            reason = f"sticky_override({reason})"
+                        elif level != "heavy":
+                            level = "heavy"
+                            reason = f"sticky({sticky_remaining})"
+                            self.server._sticky_remaining = sticky_remaining - 1
+                            if self.server._sticky_remaining <= 0:
+                                self.server._sticky_floor = None
+                        else:
+                            self.server._sticky_remaining = sticky_remaining - 1
+                            if self.server._sticky_remaining <= 0:
+                                self.server._sticky_floor = None
+                    elif level == "heavy":
+                        self.server._sticky_floor = "heavy"
+                        self.server._sticky_remaining = STICKY_DECAY_TURNS
+
+                    # 按 tier 选模型
+                    if level == "light" and light_model:
+                        payload["model"] = light_model
+                    elif level == "medium" and medium_model:
+                        payload["model"] = medium_model
+                    # heavy 保持 payload["model"]（已设为 heavy_model）
+                    log_route(level, reason, payload.get("model", "?"), last_text)
+                    # 写状态文件供 statusline 读取
+                    _write_route_status(level, payload.get("model", ""), reason)
+
+        # 无论是否路由，都写 status 供 statusline 显示真实 model
+        if not has_routing and "/messages" in path.split("?")[0]:
+            _write_route_status("-", payload.get("model", ""), "direct")
 
         # 剥离 query string 再匹配路由（Claude Code 会发 /v1/messages?beta=true）
         path_bare = path.split("?")[0]
@@ -1429,12 +1481,13 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown")
 
 
 @contextmanager
-def gateway_claude_bridge(gateway_url, gateway_key, lb_light_model=None, heavy_model=None):
+def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
 
     heavy_model: 所有请求默认使用的模型名（替换 Claude Code 发来的 claude-* 模型名）。
-    lb_light_model: 负载模式下的 light 模型名。设置后 bridge 会根据用户消息轻重自动切换。
+    medium_model: 智能路由下的中档模型（LLM 分类低置信度时使用）。
+    light_model: 智能路由下的轻量模型（明确简单任务时使用）。
     """
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 gateway bridge")
@@ -1445,7 +1498,10 @@ def gateway_claude_bridge(gateway_url, gateway_key, lb_light_model=None, heavy_m
     server.gateway_key = gateway_key
     server.bridge_token = bridge_token
     server.heavy_model = heavy_model
-    server.lb_light_model = lb_light_model
+    server.medium_model = medium_model
+    server.light_model = light_model
+    server._sticky_floor = None
+    server._sticky_remaining = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

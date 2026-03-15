@@ -2543,6 +2543,10 @@ def _model_matches_account_cli(cli_name, model_name):
 
 
 def _provider_supports_cli_name(provider, cli_name):
+    provider_id = str(provider.get("id", "")).strip().lower()
+    # Kimi coding endpoints currently work on Claude-compatible paths, but not in Codex runtime.
+    if cli_name == "codex" and provider_id.startswith("kimi"):
+        return False
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
@@ -3207,7 +3211,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         runtime_runtime = None
         family_models = []
 
-        # ── 负载模式：拦截，弹出 heavy+light 选择 TUI ──
+        # ── 智能路由：拦截，弹出 heavy+medium+light 选择 TUI ──
         if scene_name and scenes.get(scene_name, {}).get("load_balance"):
             from ccs_tui import select_load_balance_tui, save_lb_history
             probe_result = _probe_models(current_provider, emit_output=False).get("models")
@@ -3215,7 +3219,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if lb_result is None:
                 continue
             model_info = lb_result
-            save_lb_history(lb_result["model"], lb_result["lb_light"])
+            save_lb_history(lb_result["model"], lb_result.get("lb_medium", ""), lb_result.get("lb_light", ""))
 
         if scene_name is None:
             aggregated = _aggregate_provider_models(
