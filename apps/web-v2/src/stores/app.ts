@@ -96,7 +96,7 @@ export const useAppStore = defineStore('app', () => {
     await Promise.allSettled(
       configured.map(async (provider) => {
         try {
-          const key = await getApiKey(provider.id)
+          const key = provider.type === 'mock' ? 'demo' : await getApiKey(provider.id)
           if (!key) return
           const fetched = await fetchModels(provider, key)
           allModels.push(...fetched)

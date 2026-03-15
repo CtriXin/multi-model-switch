@@ -82,12 +82,18 @@ export const useChatStore = defineStore('chat', () => {
       if (!msg || !model) return
 
       // Find the provider for this model
-      // For OpenRouter models, the provider ID is 'openrouter'
+      // For demo models, use demo provider
+      // For OpenRouter models, use openrouter provider
       // For direct providers, match by provider name
       let providerConfig = providerStore.providers.find(p => p.id === model.provider)
-      // Fallback: if model came from OpenRouter, use openrouter provider
       if (!providerConfig) {
-        providerConfig = providerStore.providers.find(p => p.type === 'openrouter')
+        // Check if model ID starts with 'demo/'
+        if (mid.startsWith('demo/')) {
+          providerConfig = providerStore.providers.find(p => p.type === 'mock')
+        }
+        if (!providerConfig) {
+          providerConfig = providerStore.providers.find(p => p.type === 'openrouter')
+        }
       }
       if (!providerConfig) {
         msg.error = '未找到对应的 API 通道'
@@ -95,7 +101,7 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
-      const apiKey = await getApiKey(providerConfig.id)
+      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
       if (!apiKey) {
         msg.error = 'API Key 未配置'
         msg.content = '> 错误: 请先在设置中配置 API Key'
