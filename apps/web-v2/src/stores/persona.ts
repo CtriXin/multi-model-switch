@@ -19,11 +19,6 @@ export type PersonaCategory =
   | 'user'
   | 'execution'
 
-export interface PixelArt {
-  grid: string[]
-  palette: Record<string, string>
-}
-
 export interface PersonaDefinition {
   id: string
   name: string
@@ -33,7 +28,8 @@ export interface PersonaDefinition {
   coreBelief: string
   nonNegotiable: string
   thinkingPattern: string
-  avatar: PixelArt
+  /** DiceBear Pixel Art URL 参数 */
+  avatarParams: string
   /** 绑定的模型 ID，null = 使用默认分配 */
   boundModelId: string | null
   builtin: boolean
@@ -50,214 +46,11 @@ export const CATEGORY_META: Record<PersonaCategory, { icon: string; label: strin
   execution:   { icon: '🚀', label: '执行与落地', desc: '步骤、效率、可操作性' },
 }
 
-// ============================================
-// 像素头像定义
-// 每个 grid 是 10x10 的字符矩阵
-// palette 映射字符到颜色
-// ============================================
+const DICEBEAR_BASE = 'https://api.dicebear.com/9.x/pixel-art/svg'
 
-/** 大饼 — 画大饼的远见者，皇冠发型 */
-const AVATAR_DABING: PixelArt = {
-  grid: [
-    '.h.hh.hh.',
-    '.hhhhhhhh.',
-    'hhhhhhhhhh',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-    '.ssssssss.',
-  ],
-  palette: { h: '#FFD54F', s: '#FFCC80', e: '#5D4037', w: '#FFF', m: '#E57373' },
-}
-
-/** 军师 — 戴方巾的谋士 */
-const AVATAR_JUNSHI: PixelArt = {
-  grid: [
-    'aaaaaaaaaa',
-    'aaaaaaaaaa',
-    '.aaaaaaaaa',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '..ssmmsss.',
-    '...ssss...',
-    '..ssssss..',
-    '.ssssssss.',
-  ],
-  palette: { a: '#7986CB', s: '#D7CCC8', e: '#4E342E', w: '#FFF', m: '#A1887F' },
-}
-
-/** 乌鸦 — 黑色兜帽 */
-const AVATAR_WUYA: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    'hhhhhhhhhh',
-    'hhssssss.h',
-    'h.wesswes.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-    '.ssssssss.',
-  ],
-  palette: { h: '#37474F', s: '#BCAAA4', e: '#D32F2F', w: '#FFCDD2', m: '#795548' },
-}
-
-/** 消防员 — 安全帽 */
-const AVATAR_XIAOFANG: PixelArt = {
-  grid: [
-    '..aaaaaa..',
-    '.aaaaaaaa.',
-    'aaaaaaaaaa',
-    'aaaaaaaaaa',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { a: '#FF7043', s: '#FFCC80', e: '#4E342E', w: '#FFF', m: '#E57373' },
-}
-
-/** 铁柱 — 工地安全帽 + 务实表情 */
-const AVATAR_TIEZHU: PixelArt = {
-  grid: [
-    '...aaaa...',
-    '..aaaaaa..',
-    '.aaaaaaaa.',
-    'aaaaaaaaaa',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '..smmmms..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { a: '#FFC107', s: '#D7CCC8', e: '#3E2723', w: '#FFF', m: '#8D6E63' },
-}
-
-/** 管家 — 圆眼镜 + 整齐发型 */
-const AVATAR_GUANJIA: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    '.ssssssss.',
-    '.ssssssss.',
-    'gwweggwwe.',
-    'gsseggsse.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#6D4C41', s: '#FFCC80', e: '#3E2723', w: '#FFF', g: '#78909C', m: '#A1887F' },
-}
-
-/** 闪电 — 爆炸头 */
-const AVATAR_SHANDIAN: PixelArt = {
-  grid: [
-    'h.hh..hh.h',
-    '.hhhhhhh.',
-    'hhhhhhhhhh',
-    'hhhhhhhhh.',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#E040FB', s: '#FFCC80', e: '#4A148C', w: '#FFF', m: '#F06292' },
-}
-
-/** 算盘 — 大圆眼镜 + 冷静 */
-const AVATAR_SUANPAN: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    '.hssssss..',
-    '.ssssssss.',
-    'gwweggwweg',
-    'gsseggsseg',
-    '.ssssssss.',
-    '...sms....',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#455A64', s: '#D7CCC8', e: '#263238', w: '#FFF', g: '#B0BEC5', m: '#90A4AE' },
-}
-
-/** 小棉袄 — 齐刘海短发 + 微笑 */
-const AVATAR_MIANAO: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    'hhhhhhhhhh',
-    'hhsssssshh',
-    'h.wesswes.',
-    '.sssbssbs.',
-    '.ssssssss.',
-    '..ssmmss..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#8D6E63', s: '#FFCC80', e: '#4E342E', w: '#FFF', m: '#F48FB1', b: '#FFAB91' },
-}
-
-/** 毒舌 — 尖下巴 + 锐利眼神 */
-const AVATAR_DUSHE: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    'hhhhhhhhh.',
-    '.ssssssss.',
-    '.ewssews..',
-    '.ssssssss.',
-    '.ssssssss.',
-    '..ssmms...',
-    '...ssss...',
-    '....ss....',
-  ],
-  palette: { h: '#EC407A', s: '#D7CCC8', e: '#880E4F', w: '#FCE4EC', m: '#AD1457' },
-}
-
-/** 推土机 — 平头 + 坚毅 */
-const AVATAR_TUITUJI: PixelArt = {
-  grid: [
-    'hhhhhhhhhh',
-    'hhhhhhhhhh',
-    '.ssssssss.',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '.ssssssss.',
-    '..smmmms..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#546E7A', s: '#FFCC80', e: '#263238', w: '#FFF', m: '#8D6E63' },
-}
-
-/** 门神 — 头带 + 威严 */
-const AVATAR_MENSHEN: PixelArt = {
-  grid: [
-    '..hhhhhh..',
-    '.hhhhhhhh.',
-    'aaaaaaaaaa',
-    '.ssssssss.',
-    '.swesswes.',
-    '.ssssssss.',
-    '.ssssssss.',
-    '..smmmms..',
-    '...ssss...',
-    '..ssssss..',
-  ],
-  palette: { h: '#37474F', a: '#D32F2F', s: '#D7CCC8', e: '#1B5E20', w: '#E8F5E9', m: '#5D4037' },
+/** 生成 DiceBear Pixel Art 头像 URL */
+export function getAvatarUrl(persona: PersonaDefinition, size = 64): string {
+  return `${DICEBEAR_BASE}?${persona.avatarParams}&size=${size}&radius=50&backgroundColor=transparent`
 }
 
 /**
@@ -276,7 +69,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '最大的风险是不够大胆，渐进式改进终将被颠覆式创新淘汰',
     nonNegotiable: '不接受"先做小的再说"作为战略，除非有明确的扩展路径',
     thinkingPattern: '先看终局 → 反推当前位置 → 找到杠杆点',
-    avatar: AVATAR_DABING,
+    avatarParams: 'seed=dabing&hair=short11&hairColor=d4a017&mouth=happy07&eyes=variant04&clothingColor=f9a825&skinColor=f5d0a9',
     boundModelId: null,
     builtin: true,
   },
@@ -289,7 +82,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '好战略不是做什么，而是不做什么。资源有限，聚焦才是核心能力',
     nonNegotiable: '不接受没有明确取舍的"全都要"方案',
     thinkingPattern: '列出所有选项 → 排除不可逆的 → 选择最大化选择权的',
-    avatar: AVATAR_JUNSHI,
+    avatarParams: 'seed=junshi&hair=short19&hairColor=5c6bc0&mouth=sad08&eyes=variant12&glasses=variant01&glassesColor=5c6bc0&clothingColor=7986cb&skinColor=e8d5b7',
     boundModelId: null,
     builtin: true,
   },
@@ -304,7 +97,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '任何计划都有致命漏洞，找到它是我的职责',
     nonNegotiable: '不接受"概率很低"作为忽视风险的理由',
     thinkingPattern: '先找反例 → 评估概率 → 给出最坏情景',
-    avatar: AVATAR_WUYA,
+    avatarParams: 'seed=wuya&hair=short06&hairColor=263238&mouth=sad01&eyes=variant09&clothingColor=37474f&skinColor=d7ccc8',
     boundModelId: null,
     builtin: true,
   },
@@ -317,7 +110,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '安全不是说不，而是找到安全地做事的方法',
     nonNegotiable: '不接受跳过安全检查来赶进度',
     thinkingPattern: '识别风险点 → 设计防护 → 提供安全替代方案',
-    avatar: AVATAR_XIAOFANG,
+    avatarParams: 'seed=xiaofang&hair=short04&hairColor=8d6e63&hat=variant01&hatColor=ff7043&mouth=happy01&eyes=variant01&clothingColor=ff8a65&skinColor=ffcc80',
     boundModelId: null,
     builtin: true,
   },
@@ -332,7 +125,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '能跑起来的代码比完美的设计有价值一百倍',
     nonNegotiable: '不接受没有原型验证的纯理论方案',
     thinkingPattern: '最小可行方案 → 快速验证 → 迭代优化',
-    avatar: AVATAR_TIEZHU,
+    avatarParams: 'seed=tiezhu&hair=short01&hairColor=5d4037&hat=variant02&hatColor=ffc107&mouth=happy05&eyes=variant05&clothingColor=795548&skinColor=d7ccc8',
     boundModelId: null,
     builtin: true,
   },
@@ -345,7 +138,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '每个承诺都是一张支票，开之前先看账户余额',
     nonNegotiable: '不接受没有资源预算的方案进入执行',
     thinkingPattern: '盘点现有资源 → 估算真实成本 → 标记资源缺口',
-    avatar: AVATAR_GUANJIA,
+    avatarParams: 'seed=guanjia&hair=short19&hairColor=6d4c41&glasses=variant02&glassesColor=78909c&mouth=sad07&eyes=variant02&clothingColor=607d8b&skinColor=ffcc80',
     boundModelId: null,
     builtin: true,
   },
@@ -360,7 +153,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '市场不等人，速度就是最大的竞争壁垒',
     nonNegotiable: '不接受没有用户数据支撑的"我觉得用户需要"',
     thinkingPattern: '找到增长杠杆 → 设计实验 → 用数据说话',
-    avatar: AVATAR_SHANDIAN,
+    avatarParams: 'seed=shandian&hair=short12&hairColor=e040fb&mouth=happy09&eyes=variant07&clothingColor=ce93d8&skinColor=ffcc80',
     boundModelId: null,
     builtin: true,
   },
@@ -373,7 +166,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '商业模式决定生死，技术只是实现手段',
     nonNegotiable: '不接受没有盈利路径的方案作为长期战略',
     thinkingPattern: '分析市场结构 → 评估竞争位势 → 计算单位经济模型',
-    avatar: AVATAR_SUANPAN,
+    avatarParams: 'seed=suanpan&hair=short15&hairColor=455a64&glasses=variant01&glassesColor=90a4ae&mouth=sad05&eyes=variant12&clothingColor=546e7a&skinColor=d7ccc8',
     boundModelId: null,
     builtin: true,
   },
@@ -388,7 +181,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '用户不在乎你的架构多优雅，他们只在乎三秒内能不能完成任务',
     nonNegotiable: '不接受"用户会习惯的"作为糟糕体验的借口',
     thinkingPattern: '模拟用户旅程 → 找到摩擦点 → 提出零学习成本方案',
-    avatar: AVATAR_MIANAO,
+    avatarParams: 'seed=mianao&hair=long09&hairColor=8d6e63&mouth=happy11&eyes=variant04&clothingColor=f48fb1&skinColor=ffcc80',
     boundModelId: null,
     builtin: true,
   },
@@ -401,7 +194,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '大多数产品失败不是因为功能不够，而是因为体验太差',
     nonNegotiable: '不接受以"技术限制"为由降低体验标准',
     thinkingPattern: '用竞品最佳体验做基准 → 找差距 → 提出改进优先级',
-    avatar: AVATAR_DUSHE,
+    avatarParams: 'seed=dushe&hair=long01&hairColor=ec407a&mouth=sad09&eyes=variant09&clothingColor=ad1457&skinColor=d7ccc8',
     boundModelId: null,
     builtin: true,
   },
@@ -416,7 +209,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '计划不值钱，执行才值钱。今天做完比明天做好更重要',
     nonNegotiable: '不接受没有明确下一步和截止日期的结论',
     thinkingPattern: '拆解为可执行步骤 → 分配责任人 → 设定检查点',
-    avatar: AVATAR_TUITUJI,
+    avatarParams: 'seed=tuituji&hair=short01&hairColor=37474f&mouth=happy05&eyes=variant05&beard=variant02&beardColor=37474f&clothingColor=455a64&skinColor=ffcc80',
     boundModelId: null,
     builtin: true,
   },
@@ -429,7 +222,7 @@ const BUILTIN_PERSONAS: PersonaDefinition[] = [
     coreBelief: '欲速则不达，跳过质量检查省的时间会以十倍代价偿还',
     nonNegotiable: '不接受"先上线再修"作为跳过测试的理由',
     thinkingPattern: '定义完成标准 → 设计验证方法 → 列出上线前必须通过的检查项',
-    avatar: AVATAR_MENSHEN,
+    avatarParams: 'seed=menshen&hair=short06&hairColor=263238&accessories=variant04&accessoriesColor=c62828&mouth=sad01&eyes=variant01&clothingColor=c62828&skinColor=d7ccc8',
     boundModelId: null,
     builtin: true,
   },
