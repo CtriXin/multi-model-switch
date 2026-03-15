@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useDiscussSession, type DiscussDepth } from '@/composables/useDiscussSession'
-import { X, Zap, Flame, Rocket } from 'lucide-vue-next'
+import { X, Zap, Flame, Rocket, Gavel, Loader2 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -45,6 +45,12 @@ function startDiscuss() {
     depth: selectedDepth.value,
   })
 }
+
+function handleRollup() {
+  session.startRollup(props.prompt, props.modelIds)
+}
+
+const rollupHtml = computed(() => md.render(session.rollupText.value || ''))
 
 // Auto-cleanup on unmount
 watch(() => session.isActive.value, (active) => {
@@ -163,7 +169,7 @@ watch(() => session.isActive.value, (active) => {
     </div>
 
     <!-- Phase 3: Synthesis -->
-    <div v-if="session.phase.value >= 3" class="p-4">
+    <div v-if="session.phase.value >= 3" class="p-4 border-b border-border-subtle">
       <h4 class="text-xs font-medium text-text-tertiary uppercase tracking-wide mb-3">
         Phase 3 · 综合结论
       </h4>
@@ -172,6 +178,51 @@ watch(() => session.isActive.value, (active) => {
         v-if="session.streaming.value && session.phase.value === 3"
         class="inline-block w-1.5 h-4 bg-purple-400 ml-0.5 animate-cursor_blink align-text-bottom"
       />
+    </div>
+
+    <!-- Rollup: Action Plan -->
+    <div v-if="session.phase.value >= 3 && !session.streaming.value" class="p-4">
+      <!-- Rollup trigger -->
+      <div v-if="session.rollupPhase.value === 'idle'">
+        <button
+          @click="handleRollup"
+          class="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg
+                 border border-amber-500/20 hover:bg-amber-500/5 transition-colors group"
+        >
+          <Gavel :size="13" class="text-amber-400 group-hover:scale-110 transition-transform" />
+          <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">
+            制定行动计划
+          </span>
+        </button>
+        <p class="text-[10px] text-text-tertiary text-center mt-1">
+          综合观点为唯一可落地方案
+        </p>
+      </div>
+
+      <!-- Rollup result -->
+      <div v-else>
+        <div class="flex items-center gap-2 mb-3">
+          <Gavel :size="13" class="text-amber-400" />
+          <span class="text-xs font-medium text-text-primary">行动计划</span>
+          <span v-if="session.rollupModel.value" class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">
+            由 {{ session.rollupModel.value }} 制定
+          </span>
+          <Loader2
+            v-if="session.rollupPhase.value === 'streaming'"
+            :size="12"
+            class="text-amber-400 animate-spin ml-auto"
+          />
+        </div>
+        <div v-if="session.rollupText.value" class="md-body text-sm" v-html="rollupHtml" />
+        <div v-else class="space-y-2">
+          <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
+          <div class="h-3 bg-surface-3 rounded animate-pulse w-4/5" />
+        </div>
+        <span
+          v-if="session.rollupPhase.value === 'streaming' && session.rollupText.value"
+          class="inline-block w-1.5 h-4 bg-amber-400 ml-0.5 animate-cursor_blink align-text-bottom"
+        />
+      </div>
     </div>
   </div>
 </template>
