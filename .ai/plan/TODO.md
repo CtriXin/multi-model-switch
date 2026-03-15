@@ -1,6 +1,8 @@
 # TODO
 
 ## Urgent + Important
+- [x] `apps/web-v2` Provider 多账户账户池：同一 provider 支持多个账户与默认账户，设置页改为按账户配置 key，真实请求失败时在同 provider 可用账户间自动 fallback。 (source: @user, created: 2026-03-16, completed: 2026-03-16)
+- [x] `apps/web-v2` 真实 API 体验收口：随机按钮改成“换一组”并支持重复重掷、失败模型按错误类型当天临时隐藏、`<think>` 默认隐藏、聊天支持终止并编辑恢复草稿、锦囊团结论支持 markdown 展开查看。 (source: @user, created: 2026-03-16, completed: 2026-03-16)
 - [x] `apps/web-v2` 锦囊团升级为完整“角色委员会”：首屏 Hero + 角色矩阵 + 独立 committee 模型池 + 广播/辩论/委员会三种真实运行模式。(source: @user, created: 2026-03-15, completed: 2026-03-15)
 - [x] 统一 `apps/web-v2` 输入区基线：`ModelChipBar` / `InputBar` / `Advisors` 底部输入区收口到同一条 `max-w-5xl + px-4` 容器，并对齐 textarea 与发送按钮位置。 (source: @user, created: 2026-03-15, completed: 2026-03-15)
 - [x] 修复 `apps/web-v2` 对话页卡片布局：移动端 carousel 切换后不再保留上一张卡片的高度占位；macOS grid 卡片统一固定高度，超长内容改为卡片内滚动。 (source: @user, created: 2026-03-15, completed: 2026-03-15)
