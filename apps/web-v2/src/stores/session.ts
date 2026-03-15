@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useChatStore, type ChatRound, type ChatMessage } from './chat'
+import { useChatStore, type ChatRound, type ChatMessage, type ImageAttachment, type ContextMode } from './chat'
 import { useDiscussStore, type Phase1Result, type Phase2Result } from './discuss'
 import { useAppStore } from './app'
 
 export interface SerializedChatRound {
   id: string
   prompt: string
+  attachments?: ImageAttachment[]
   responses: [string, ChatMessage][]
   activeModelId: string | null
   timestamp: number
@@ -20,6 +21,7 @@ export interface Session {
   createdAt: number
   updatedAt: number
   messageCount: number
+  contextMode?: ContextMode
   chatData?: SerializedChatRound[]
   discussData?: {
     phase: number
@@ -41,6 +43,7 @@ function serializeRounds(rounds: ChatRound[]): SerializedChatRound[] {
   return rounds.map(r => ({
     id: r.id,
     prompt: r.prompt,
+    attachments: r.attachments?.length ? r.attachments : undefined,
     responses: Array.from(r.responses.entries()),
     activeModelId: r.activeModelId,
     timestamp: r.timestamp,
@@ -51,6 +54,7 @@ function deserializeRounds(data: SerializedChatRound[]): ChatRound[] {
   return data.map(r => ({
     id: r.id,
     prompt: r.prompt,
+    attachments: r.attachments ?? [],
     responses: new Map(r.responses),
     activeModelId: r.activeModelId,
     timestamp: r.timestamp,
@@ -84,18 +88,21 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  function saveCurrentSession() {
+  function saveCurrentSession(options: { touchUpdatedAt?: boolean } = {}) {
     if (!currentSessionId.value) return
     const session = sessions.value.find(s => s.id === currentSessionId.value)
     if (!session) return
 
     const appStore = useAppStore()
     session.modelIds = [...appStore.selectedModelIds]
-    session.updatedAt = Date.now()
+    if (options.touchUpdatedAt !== false) {
+      session.updatedAt = Date.now()
+    }
 
     if (session.type === 'chat') {
       const chatStore = useChatStore()
       session.chatData = serializeRounds(chatStore.rounds)
+      session.contextMode = chatStore.contextMode
       session.messageCount = chatStore.rounds.length
       if (chatStore.rounds.length && !session.title.startsWith('新')) {
         // keep existing title
@@ -128,7 +135,7 @@ export const useSessionStore = defineStore('session', () => {
     }
 
     // Save current session first
-    saveCurrentSession()
+    saveCurrentSession({ touchUpdatedAt: false })
 
     // Clean up stale empty sessions (no messages ever sent)
     sessions.value = sessions.value.filter(s =>
@@ -162,7 +169,7 @@ export const useSessionStore = defineStore('session', () => {
     if (id === currentSessionId.value) return
 
     // Save current
-    saveCurrentSession()
+    saveCurrentSession({ touchUpdatedAt: false })
 
     const session = sessions.value.find(s => s.id === id)
     if (!session) return
@@ -181,6 +188,7 @@ export const useSessionStore = defineStore('session', () => {
 
     if (session.type === 'chat' && session.chatData) {
       chatStore.rounds = deserializeRounds(session.chatData)
+      chatStore.contextMode = session.contextMode ?? 'summary'
     } else if (session.type === 'discuss' && session.discussData) {
       discussStore.phase = session.discussData.phase
       discussStore.phase1Results = [...session.discussData.phase1Results]

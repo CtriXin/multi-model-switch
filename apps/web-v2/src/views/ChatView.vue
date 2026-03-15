@@ -11,7 +11,7 @@ import ModelResponseCard from '@/components/chat/ModelResponseCard.vue'
 import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
 import type { ImageAttachment } from '@/stores/chat'
-import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare } from 'lucide-vue-next'
+import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, History } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -275,6 +275,13 @@ function getModelName(id: string): string {
 function getProvider(id: string): string {
   return appStore.models.find(m => m.id === id)?.provider ?? 'unknown'
 }
+
+// --- Context mode chips ---
+const contextModes = [
+  { key: 'summary' as const, label: '摘要' },
+  { key: 'selected' as const, label: '仅选中' },
+  { key: 'full' as const, label: '全量' },
+]
 
 function getTier(id: string): number {
   return appStore.models.find(m => m.id === id)?.tier ?? 0
@@ -775,6 +782,27 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
 
     <!-- Model chip bar -->
     <ModelChipBar />
+
+    <!-- Context mode chips (only when there's history) -->
+    <div
+      v-if="chatStore.rounds.length > 0"
+      class="flex items-center gap-2 px-4 py-1.5"
+    >
+      <History :size="13" class="text-text-tertiary shrink-0" />
+      <div class="flex items-center gap-1">
+        <button
+          v-for="m in contextModes"
+          :key="m.key"
+          @click="chatStore.contextMode = m.key"
+          class="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+          :class="chatStore.contextMode === m.key
+            ? 'bg-accent/15 text-accent'
+            : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-2'"
+        >
+          {{ m.label }}
+        </button>
+      </div>
+    </div>
 
     <!-- Input -->
     <InputBar
