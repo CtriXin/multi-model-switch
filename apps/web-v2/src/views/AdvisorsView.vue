@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, inject } from 'vue'
-import { usePersonaStore, CATEGORY_META, buildPersonaSystemPrompt, type PersonaCategory, type PersonaDefinition } from '@/stores/persona'
+import { usePersonaStore, CATEGORY_META, buildPersonaSystemPrompt, type PersonaCategory } from '@/stores/persona'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useProviderStore } from '@/stores/provider'
 import { streamChat } from '@/services/api'
 import { getApiKey } from '@/services/keychain'
+import PixelAvatar from '@/components/PixelAvatar.vue'
 import MarkdownIt from 'markdown-it'
 import {
   Users, Play, RotateCcw, ChevronDown, ChevronUp,
-  Loader2, Zap, Swords, Crown,
+  Loader2, Square,
 } from 'lucide-vue-next'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -16,7 +17,6 @@ const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const personaStore = usePersonaStore()
 const appStore = useAppStore()
 const providerStore = useProviderStore()
-const platform = inject<import('vue').Ref<string>>('platform')
 
 const prompt = ref('')
 const streaming = ref(false)
@@ -44,26 +44,24 @@ function toggleCategory(key: string) {
   }
 }
 
-function stanceLabel(val: number, negative: string, positive: string): string {
-  if (val > 0.3) return positive
-  if (val < -0.3) return negative
-  return '中性'
+function stanceTag(val: number, neg: string, pos: string): { label: string; color: string } {
+  if (val > 0.3) return { label: pos, color: 'text-emerald-400 bg-emerald-500/10' }
+  if (val < -0.3) return { label: neg, color: 'text-rose-400 bg-rose-500/10' }
+  return { label: '中性', color: 'text-slate-400 bg-slate-500/10' }
 }
 
-/** 为每个 persona 分配模型：绑定的优先，否则轮转可用模型 */
+/** 为每个 persona 分配模型 */
 function assignModels(personaIds: string[]): Map<string, string> {
   const assignment = new Map<string, string>()
   const availableModels = appStore.selectedModelIds.length
     ? [...appStore.selectedModelIds]
     : appStore.models.map((m) => m.id)
-
   if (!availableModels.length) return assignment
 
   let modelIdx = 0
   for (const pid of personaIds) {
     const persona = personaStore.personas.find((p) => p.id === pid)
     if (!persona) continue
-
     if (persona.boundModelId && availableModels.includes(persona.boundModelId)) {
       assignment.set(pid, persona.boundModelId)
     } else {
@@ -84,75 +82,55 @@ function getProvider(modelId: string): string {
 
 async function startBroadcast() {
   if (streaming.value || !prompt.value.trim() || !hasActivePersonas.value) return
-
   streaming.value = true
   responses.value = new Map()
   showPersonaPanel.value = false
   abortController.value = new AbortController()
   const signal = abortController.value.signal
-
   const assignments = assignModels(personaStore.activePersonaIds)
 
   const tasks = personaStore.activePersonas.map(async (persona) => {
     const modelId = assignments.get(persona.id)
     if (!modelId) return
-
     responses.value.set(persona.id, { text: '', done: false })
 
     const model = appStore.models.find((m) => m.id === modelId)
     let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
     if (!providerConfig) {
-      if (modelId.startsWith('demo/')) {
-        providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-      }
-      if (!providerConfig) {
-        providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-      }
+      if (modelId.startsWith('demo/')) providerConfig = providerStore.providers.find((p) => p.type === 'mock')
+      if (!providerConfig) providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
     }
     if (!providerConfig) {
       responses.value.set(persona.id, { text: '> 未找到可用的 API 通道', done: true })
       return
     }
-
     const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
     if (!apiKey) {
       responses.value.set(persona.id, { text: '> API Key 未配置', done: true })
       return
     }
-
     try {
       const systemPrompt = buildPersonaSystemPrompt(persona)
       const stream = streamChat({
-        provider: providerConfig,
-        apiKey,
-        model: modelId,
+        provider: providerConfig, apiKey, model: modelId,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt.value },
         ],
         signal,
       })
-
       for await (const chunk of stream) {
         if (signal.aborted) return
-        const current = responses.value.get(persona.id)
-        if (current) {
-          responses.value.set(persona.id, { text: current.text + chunk, done: false })
-        }
+        const cur = responses.value.get(persona.id)
+        if (cur) responses.value.set(persona.id, { text: cur.text + chunk, done: false })
       }
     } catch (e: any) {
       if (e.name === 'AbortError' || signal.aborted) return
-      const current = responses.value.get(persona.id)
-      responses.value.set(persona.id, {
-        text: (current?.text || '') + `\n\n> 错误: ${e.message}`,
-        done: true,
-      })
+      const cur = responses.value.get(persona.id)
+      responses.value.set(persona.id, { text: (cur?.text || '') + `\n\n> ${e.message}`, done: true })
     }
-
-    const current = responses.value.get(persona.id)
-    if (current) {
-      responses.value.set(persona.id, { ...current, done: true })
-    }
+    const cur = responses.value.get(persona.id)
+    if (cur) responses.value.set(persona.id, { ...cur, done: true })
   })
 
   await Promise.allSettled(tasks)
@@ -178,180 +156,187 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
 <template>
   <div class="flex flex-col h-full">
     <div class="flex-1 overflow-y-auto">
-      <!-- Empty state -->
-      <div
-        v-if="!hasResults && !streaming"
-        class="max-w-4xl mx-auto px-4 py-6"
-      >
+      <!-- ============ 选角色 ============ -->
+      <div v-if="!hasResults && !streaming" class="max-w-4xl mx-auto px-4 py-6">
         <!-- Hero -->
-        <div class="text-center mb-6 animate-fade-in">
-          <div class="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mx-auto mb-4">
-            <Users :size="28" class="text-amber-400" />
-          </div>
-          <h2 class="text-lg font-semibold text-text-primary mb-1">锦囊团</h2>
-          <p class="text-sm text-text-secondary max-w-md mx-auto">
-            立场不同的 AI 角色，从多维度真实地思考你的问题
+        <div class="text-center mb-8 animate-fade-in">
+          <h2 class="text-xl font-bold text-text-primary mb-1">锦囊团</h2>
+          <p class="text-sm text-text-secondary">
+            选几位顾问，听听不同立场的真话
           </p>
         </div>
 
-        <!-- Quick presets -->
+        <!-- 快捷预设 -->
         <div class="flex items-center justify-center gap-2 mb-6 animate-slide-up" style="animation-delay: 50ms">
           <button
             @click="personaStore.activatePreset('tech')"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+            class="px-3 py-1.5 rounded-full text-xs font-medium border transition-all"
             :class="personaStore.activePersonaIds.length === 6 && personaStore.activePersonas.every(p => ['feasibility','risk','execution'].includes(p.category))
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-              : 'border-border-subtle text-text-secondary hover:border-border-strong'"
+              ? 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-sm shadow-amber-500/10'
+              : 'border-border-subtle text-text-secondary hover:border-amber-400/30 hover:text-text-primary'"
           >
-            🛠️ 技术决策组合
+            技术决策
           </button>
           <button
             @click="personaStore.activatePreset('business')"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+            class="px-3 py-1.5 rounded-full text-xs font-medium border transition-all"
             :class="personaStore.activePersonaIds.length === 6 && personaStore.activePersonas.every(p => ['strategy','business','user'].includes(p.category))
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-              : 'border-border-subtle text-text-secondary hover:border-border-strong'"
+              ? 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-sm shadow-amber-500/10'
+              : 'border-border-subtle text-text-secondary hover:border-amber-400/30 hover:text-text-primary'"
           >
-            📈 商业决策组合
+            商业决策
           </button>
           <button
             @click="personaStore.activatePreset('all')"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+            class="px-3 py-1.5 rounded-full text-xs font-medium border transition-all"
             :class="personaStore.activePersonaIds.length === 12
-              ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
-              : 'border-border-subtle text-text-secondary hover:border-border-strong'"
+              ? 'border-amber-400/50 bg-amber-500/10 text-amber-300 shadow-sm shadow-amber-500/10'
+              : 'border-border-subtle text-text-secondary hover:border-amber-400/30 hover:text-text-primary'"
           >
-            👥 全体出动
+            全体出动
           </button>
           <button
             v-if="hasActivePersonas"
             @click="personaStore.clearActive()"
-            class="px-3 py-1.5 rounded-lg text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+            class="px-2 py-1 text-[10px] text-text-tertiary hover:text-text-secondary transition-colors"
           >
             清除
           </button>
         </div>
 
-        <!-- Persona grid -->
-        <div v-if="showPersonaPanel" class="space-y-3 animate-slide-up" style="animation-delay: 100ms">
+        <!-- 角色卡片 -->
+        <div class="space-y-4 animate-slide-up" style="animation-delay: 100ms">
           <div v-for="cat in categories" :key="cat.key">
-            <!-- Category header -->
             <button
               @click="toggleCategory(cat.key)"
-              class="flex items-center gap-2 w-full px-2 py-1.5 text-left group"
+              class="flex items-center gap-2 w-full px-1 py-1 text-left group mb-2"
             >
-              <span class="text-sm">{{ cat.icon }}</span>
-              <span class="text-xs font-medium text-text-primary">{{ cat.label }}</span>
-              <span class="text-[10px] text-text-tertiary">{{ cat.desc }}</span>
+              <span class="text-base">{{ cat.icon }}</span>
+              <span class="text-xs font-semibold text-text-primary">{{ cat.label }}</span>
+              <span class="text-[10px] text-text-tertiary hidden sm:inline">{{ cat.desc }}</span>
               <component
                 :is="expandedCategories.has(cat.key) ? ChevronUp : ChevronDown"
                 :size="12"
-                class="ml-auto text-text-tertiary group-hover:text-text-secondary transition-colors"
+                class="ml-auto text-text-tertiary"
               />
             </button>
 
-            <!-- Persona cards -->
-            <div v-if="expandedCategories.has(cat.key)" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1 ml-6">
+            <div v-if="expandedCategories.has(cat.key)" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button
                 v-for="persona in cat.personas"
                 :key="persona.id"
                 @click="personaStore.togglePersona(persona.id)"
-                class="text-left p-3 rounded-lg border transition-all duration-150"
+                class="flex items-start gap-3 p-3 rounded-xl border transition-all duration-150 text-left group"
                 :class="personaStore.activePersonaIds.includes(persona.id)
-                  ? 'border-amber-500/40 bg-amber-500/5 ring-1 ring-amber-500/20'
-                  : 'border-border-subtle hover:border-border-strong'"
+                  ? 'border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/15'
+                  : 'border-border-subtle hover:border-border-strong hover:bg-surface-2'"
               >
-                <div class="flex items-center gap-2 mb-1.5">
-                  <span class="text-sm font-semibold text-text-primary">{{ persona.name }}</span>
-                  <span class="text-[10px] text-text-tertiary">· {{ persona.title }}</span>
-                </div>
-                <p class="text-[11px] text-text-secondary leading-relaxed mb-2">{{ persona.coreBelief }}</p>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">
-                    {{ stanceLabel(persona.stance.cognition, '悲观', '乐观') }}
-                  </span>
-                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">
-                    {{ stanceLabel(persona.stance.horizon, '短期', '长期') }}
-                  </span>
-                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">
-                    {{ stanceLabel(persona.stance.interest, '内部', '外部') }}
-                  </span>
+                <!-- 像素头像 -->
+                <PixelAvatar
+                  :grid="persona.avatar.grid"
+                  :palette="persona.avatar.palette"
+                  :size="40"
+                />
+
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-0.5">
+                    <span class="text-sm font-bold text-text-primary">{{ persona.name }}</span>
+                    <span class="text-[10px] text-text-tertiary">{{ persona.title }}</span>
+                  </div>
+                  <p class="text-[11px] text-text-secondary leading-relaxed line-clamp-2">
+                    「{{ persona.coreBelief }}」
+                  </p>
+                  <div class="flex items-center gap-1 mt-1.5">
+                    <span
+                      class="text-[9px] px-1.5 py-0.5 rounded-full"
+                      :class="stanceTag(persona.stance.cognition, '悲观', '乐观').color"
+                    >{{ stanceTag(persona.stance.cognition, '悲观', '乐观').label }}</span>
+                    <span
+                      class="text-[9px] px-1.5 py-0.5 rounded-full"
+                      :class="stanceTag(persona.stance.horizon, '短期', '长期').color"
+                    >{{ stanceTag(persona.stance.horizon, '短期', '长期').label }}</span>
+                    <span
+                      class="text-[9px] px-1.5 py-0.5 rounded-full"
+                      :class="stanceTag(persona.stance.interest, '内部', '外部').color"
+                    >{{ stanceTag(persona.stance.interest, '内部', '外部').label }}</span>
+                  </div>
                 </div>
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Active count + model assignment preview -->
-        <div v-if="hasActivePersonas" class="mt-4 px-2 animate-fade-in">
-          <div class="flex items-center gap-2 text-xs text-text-tertiary">
-            <span>已选 {{ personaStore.activePersonaIds.length }} 位角色</span>
-            <span>·</span>
-            <span>{{ appStore.selectedModelIds.length || appStore.models.length }} 个模型可用</span>
-          </div>
+        <!-- 已选数量 -->
+        <div v-if="hasActivePersonas" class="mt-5 text-center animate-fade-in">
+          <p class="text-xs text-text-tertiary">
+            已请 <span class="text-amber-400 font-bold">{{ personaStore.activePersonaIds.length }}</span> 位顾问就位
+          </p>
         </div>
       </div>
 
-      <!-- Results: broadcast output -->
+      <!-- ============ 输出结果 ============ -->
       <div v-if="hasResults || streaming" class="max-w-5xl mx-auto px-4 py-4">
-        <!-- Topic -->
-        <div class="mb-4 animate-slide-up">
-          <div class="flex items-center gap-2 mb-1">
+        <!-- 话题 -->
+        <div class="mb-5 animate-slide-up">
+          <div class="flex items-center gap-2 mb-1.5">
             <Users :size="14" class="text-amber-400" />
-            <span class="text-xs text-text-tertiary uppercase tracking-wider">锦囊团 · 广播模式</span>
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">
-              {{ personaStore.activePersonas.length }} 位角色
+            <span class="text-xs text-text-tertiary">锦囊团 · 广播</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 font-medium">
+              {{ personaStore.activePersonas.length }} 位顾问
             </span>
           </div>
-          <p class="text-sm text-text-primary">{{ prompt }}</p>
+          <p class="text-sm text-text-primary font-medium">{{ prompt }}</p>
         </div>
 
-        <!-- Response grid -->
+        <!-- 回答卡片 -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
-            v-for="persona in personaStore.activePersonas"
+            v-for="(persona, idx) in personaStore.activePersonas"
             :key="persona.id"
             class="rounded-xl border border-border-subtle bg-surface-1 overflow-hidden animate-scale-in"
+            :style="{ animationDelay: idx * 60 + 'ms' }"
           >
-            <!-- Card header -->
-            <div class="flex items-center gap-2 px-3 py-2.5 bg-surface-2 border-b border-border-subtle">
-              <span class="text-sm">{{ CATEGORY_META[persona.category].icon }}</span>
+            <!-- 卡片头部 -->
+            <div class="flex items-center gap-2.5 px-3 py-2.5 border-b border-border-subtle bg-surface-2/50">
+              <PixelAvatar
+                :grid="persona.avatar.grid"
+                :palette="persona.avatar.palette"
+                :size="32"
+              />
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-1.5">
-                  <span class="text-xs font-semibold text-text-primary">{{ persona.name }}</span>
-                  <span class="text-[10px] text-text-tertiary">· {{ persona.title }}</span>
+                  <span class="text-xs font-bold text-text-primary">{{ persona.name }}</span>
+                  <span class="text-[10px] text-text-tertiary">{{ persona.title }}</span>
                 </div>
-                <div class="flex items-center gap-1 mt-0.5">
+                <span
+                  v-if="modelAssignments.get(persona.id)"
+                  class="text-[9px] text-text-tertiary flex items-center gap-1 mt-0.5"
+                >
                   <span
-                    v-if="modelAssignments.get(persona.id)"
-                    class="text-[9px] text-text-tertiary flex items-center gap-1"
-                  >
-                    <span
-                      class="w-1.5 h-1.5 rounded-full"
-                      :style="{ backgroundColor: getModelColor(getProvider(modelAssignments.get(persona.id)!)) }"
-                    />
-                    {{ getModelName(modelAssignments.get(persona.id)!) }}
-                  </span>
-                </div>
+                    class="w-1.5 h-1.5 rounded-full inline-block"
+                    :style="{ backgroundColor: getModelColor(getProvider(modelAssignments.get(persona.id)!)) }"
+                  />
+                  {{ getModelName(modelAssignments.get(persona.id)!) }}
+                </span>
               </div>
               <Loader2
                 v-if="responses.get(persona.id) && !responses.get(persona.id)!.done"
-                :size="12"
+                :size="14"
                 class="text-amber-400 animate-spin"
               />
             </div>
 
-            <!-- Content -->
+            <!-- 内容 -->
             <div class="p-3">
               <div
                 v-if="responses.get(persona.id)?.text"
-                class="md-body text-xs"
+                class="md-body text-xs leading-relaxed"
                 v-html="md.render(responses.get(persona.id)!.text)"
               />
-              <div v-else class="space-y-2">
-                <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
-                <div class="h-3 bg-surface-3 rounded animate-pulse w-3/4" />
-                <div class="h-3 bg-surface-3 rounded animate-pulse w-1/2" />
+              <div v-else class="space-y-2 py-2">
+                <div class="h-2.5 bg-surface-3 rounded-full animate-pulse w-full" />
+                <div class="h-2.5 bg-surface-3 rounded-full animate-pulse w-3/4" />
+                <div class="h-2.5 bg-surface-3 rounded-full animate-pulse w-1/2" />
               </div>
               <span
                 v-if="responses.get(persona.id) && !responses.get(persona.id)!.done && responses.get(persona.id)!.text"
@@ -361,50 +346,49 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
           </div>
         </div>
 
-        <!-- Post-broadcast actions -->
-        <div
-          v-if="hasResults && !streaming"
-          class="flex items-center gap-2 mt-4 animate-fade-in"
-        >
+        <!-- 后续操作 -->
+        <div v-if="hasResults && !streaming" class="flex items-center justify-center gap-3 mt-6 animate-fade-in">
           <button
             @click="resetAll"
-            class="btn-ghost flex items-center gap-1.5 text-xs"
+            class="flex items-center gap-1.5 px-4 py-2 rounded-full border border-border-subtle
+                   text-xs text-text-secondary hover:text-text-primary hover:border-border-strong transition-all"
           >
-            <RotateCcw :size="13" />
-            新问题
+            <RotateCcw :size="12" />
+            换个问题
           </button>
         </div>
       </div>
     </div>
 
-    <!-- Input bar -->
+    <!-- ============ 输入栏 ============ -->
     <div class="shrink-0 border-t border-border-subtle bg-surface-1 px-4 py-3">
       <div class="max-w-4xl mx-auto flex items-center gap-2">
         <input
           v-model="prompt"
           @keydown.enter.prevent="streaming ? stopStreaming() : startBroadcast()"
           :disabled="!hasActivePersonas"
-          :placeholder="hasActivePersonas ? '向锦囊团提问...' : '请先选择角色...'"
-          class="flex-1 bg-surface-2 border border-border-subtle rounded-lg px-3 py-2 text-sm
+          :placeholder="hasActivePersonas ? '向锦囊团提问...' : '请先选择顾问'"
+          class="flex-1 bg-surface-2 border border-border-subtle rounded-full px-4 py-2.5 text-sm
                  text-text-primary placeholder:text-text-tertiary focus:outline-none
-                 focus:border-accent/50 transition-colors"
+                 focus:border-amber-400/40 focus:ring-1 focus:ring-amber-400/20 transition-all"
         />
         <button
           v-if="streaming"
           @click="stopStreaming"
-          class="px-4 py-2 rounded-lg bg-red-500/20 text-red-400 text-sm font-medium
-                 hover:bg-red-500/30 transition-colors"
+          class="w-10 h-10 rounded-full bg-red-500/20 text-red-400
+                 flex items-center justify-center hover:bg-red-500/30 transition-colors"
         >
-          停止
+          <Square :size="14" fill="currentColor" />
         </button>
         <button
           v-else
           @click="startBroadcast"
           :disabled="!hasActivePersonas || !prompt.trim()"
-          class="px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-medium
-                 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          class="w-10 h-10 rounded-full bg-amber-500 text-white
+                 flex items-center justify-center hover:bg-amber-600 transition-colors
+                 disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <Play :size="14" />
+          <Play :size="14" fill="currentColor" />
         </button>
       </div>
     </div>
