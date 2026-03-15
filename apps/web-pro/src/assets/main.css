@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sidebar-width: 260px;
+  --context-panel-width: 320px;
+  --header-height: 48px;
+  --input-area-height: auto;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: light;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  background: #f9fafb;
+  color: #111827;
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+}
+
+#app {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.2);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* Markdown rendering */
+.prose-chat h1, .prose-chat h2, .prose-chat h3 {
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+.prose-chat h1 { font-size: 1.25em; }
+.prose-chat h2 { font-size: 1.125em; }
+.prose-chat h3 { font-size: 1em; }
+.prose-chat p { margin-bottom: 0.5em; line-height: 1.6; }
+.prose-chat ul, .prose-chat ol { padding-left: 1.5em; margin-bottom: 0.5em; }
+.prose-chat li { margin-bottom: 0.25em; }
+.prose-chat code {
+  font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875em;
+  background: #f3f4f6;
+  padding: 0.125em 0.375em;
+  border-radius: 0.25em;
+}
+.prose-chat pre {
+  background: #1f2937;
+  color: #e5e7eb;
+  padding: 1em;
+  border-radius: 0.5em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+.prose-chat pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+.prose-chat blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 1em;
+  color: #6b7280;
+  margin: 0.5em 0;
+}
+
+/* Selection ring */
+.ring-accent {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+/* Transition utilities */
+.v-enter-active, .v-leave-active {
+  transition: all 0.2s ease;
+}
+.v-enter-from { opacity: 0; transform: translateY(4px); }
+.v-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* Mobile safe area */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+}

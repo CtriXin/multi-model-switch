@@ -1,0 +1,20 @@
+{
+  "name": "mms-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "cd apps/web && npm run dev",
+    "dev:api": "cd apps/runtime-api && python -m uvicorn main:app --reload --port 8000",
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "build": "cd apps/web && npm run build",
+    "type-check": "cd apps/web && vue-tsc --noEmit"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

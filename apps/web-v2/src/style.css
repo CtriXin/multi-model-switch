@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { -webkit-font-smoothing: antialiased; }
+  html { font-size: 16px; }
+  body { overflow: hidden; height: 100vh; height: 100dvh; }
+  #app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #ffffff14; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #ffffff22; }
+
+  ::selection { background: #6366f140; color: #e8e8f0; }
+
+  /* Light theme overrides */
+  html.light body { background: #f5f5f7; color: #1d1d1f; }
+  html.light ::selection { color: #1d1d1f; }
+  html.light ::-webkit-scrollbar-thumb { background: #00000018; }
+  html.light ::-webkit-scrollbar-thumb:hover { background: #00000028; }
+}
+
+@layer components {
+  .glass {
+    background: rgba(17, 17, 24, 0.72);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  }
+  .glass-strong {
+    background: rgba(24, 24, 31, 0.88);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  }
+  html.light .glass {
+    background: rgba(255, 255, 255, 0.72);
+  }
+  html.light .glass-strong {
+    background: rgba(245, 245, 247, 0.88);
+  }
+
+  .btn-ghost {
+    @apply px-3 py-1.5 rounded-lg text-sm text-text-secondary
+           hover:bg-white/5 hover:text-text-primary
+           active:scale-[0.97] transition-all duration-150;
+  }
+  .btn-primary {
+    @apply px-4 py-2 rounded-lg text-sm font-medium
+           bg-accent text-white hover:bg-accent-hover
+           active:scale-[0.97] transition-all duration-150;
+  }
+  .btn-icon {
+    @apply p-2 rounded-lg text-text-secondary
+           hover:bg-white/5 hover:text-text-primary
+           active:scale-[0.95] transition-all duration-150;
+  }
+
+  .card {
+    @apply bg-surface-2 border border-border-default rounded-xl;
+  }
+
+  /* markdown rendering */
+  .md-body { @apply text-sm leading-relaxed text-text-primary; }
+  .md-body h1 { @apply text-lg font-bold mt-4 mb-2; }
+  .md-body h2 { @apply text-base font-semibold mt-3 mb-1.5; }
+  .md-body h3 { @apply text-sm font-semibold mt-2 mb-1; }
+  .md-body p { @apply mb-2; }
+  .md-body ul, .md-body ol { @apply mb-2 pl-5; }
+  .md-body li { @apply mb-0.5; }
+  .md-body ul { list-style-type: disc; }
+  .md-body ol { list-style-type: decimal; }
+  .md-body code {
+    @apply px-1 py-0.5 rounded bg-surface-4 text-accent font-mono text-xs;
+  }
+  .md-body pre {
+    @apply p-3 rounded-lg bg-surface-0 border border-border-subtle
+           overflow-x-auto mb-2;
+  }
+  .md-body pre code { @apply p-0 bg-transparent text-text-primary; }
+  .md-body strong { @apply font-semibold text-text-primary; }
+  .md-body blockquote {
+    @apply border-l-2 border-accent/40 pl-3 italic text-text-secondary my-2;
+  }
+  .md-body a { @apply text-accent hover:underline; }
+  .md-body table { @apply w-full border-collapse mb-2; }
+  .md-body th { @apply text-left p-2 border-b border-border-default text-text-secondary text-xs uppercase; }
+  .md-body td { @apply p-2 border-b border-border-subtle; }
+}
+
+/* Route transitions */
+.page-enter-active { animation: pageIn 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+.page-leave-active { animation: pageOut 0.18s ease-in; }
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes pageOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* iOS slide transition */
+.ios-push-enter-active { animation: iosPushIn 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
+.ios-push-leave-active { animation: iosPushOut 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes iosPushIn {
+  from { opacity: 0; transform: translateX(30%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes iosPushOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-10%); }
+}
