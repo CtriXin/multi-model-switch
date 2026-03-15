@@ -2,9 +2,15 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
 import { useAppStore } from './app'
-import { useProviderStore } from './provider'
-import { streamChat, ApiError } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { ApiError, type ContentPart } from '@/services/api'
+import { streamModelChat } from '@/services/runtime'
+
+export interface ImageAttachment {
+  id: string
+  dataUrl: string      // base64 data URL
+  name: string
+  size: number         // original bytes
+}
 
 export interface ChatMessage {
   id: string
@@ -20,6 +26,7 @@ export interface ChatMessage {
 export interface ChatRound {
   id: string
   prompt: string
+  attachments: ImageAttachment[]
   responses: Map<string, ChatMessage>
   activeModelId: string | null
   timestamp: number
@@ -29,10 +36,15 @@ export const useChatStore = defineStore('chat', () => {
   const rounds = ref<ChatRound[]>([])
   const streaming = ref(false)
   const abortController = ref<AbortController | null>(null)
+  const lastSubmittedPrompt = ref('')
 
   const currentRound = computed(() =>
     rounds.value.length ? rounds.value[rounds.value.length - 1] : null
   )
+
+  function shouldSuppressModel(error: ApiError) {
+    return error.code === 'model_unavailable' || error.code === 'rate_limited'
+  }
 
   function parseBrief(text: string): { displayText: string; brief?: Record<string, string> } {
     const match = text.match(/<BRIEF>\n?([\s\S]*?)\n?<\/BRIEF>/)
@@ -46,14 +58,14 @@ export const useChatStore = defineStore('chat', () => {
     return { displayText, brief }
   }
 
-  async function sendMessage(prompt: string, modelIds: string[]) {
+  async function sendMessage(prompt: string, modelIds: string[], attachments: ImageAttachment[] = []) {
     if (streaming.value || !modelIds.length) return
     const appStore = useAppStore()
-    const providerStore = useProviderStore()
 
     const round: ChatRound = {
       id: `round-${Date.now()}`,
       prompt,
+      attachments,
       responses: new Map(),
       activeModelId: null,
       timestamp: Date.now(),
@@ -69,6 +81,7 @@ export const useChatStore = defineStore('chat', () => {
       })
     }
     rounds.value.push(round)
+    lastSubmittedPrompt.value = prompt
 
     const reactiveRound = rounds.value[rounds.value.length - 1]
 
@@ -81,40 +94,27 @@ export const useChatStore = defineStore('chat', () => {
       const msg = reactiveRound.responses.get(mid)
       if (!msg || !model) return
 
-      // Find the provider for this model
-      // For demo models, use demo provider
-      // For OpenRouter models, use openrouter provider
-      // For direct providers, match by provider name
-      let providerConfig = providerStore.providers.find(p => p.id === model.provider)
-      if (!providerConfig) {
-        // Check if model ID starts with 'demo/'
-        if (mid.startsWith('demo/')) {
-          providerConfig = providerStore.providers.find(p => p.type === 'mock')
-        }
-        if (!providerConfig) {
-          providerConfig = providerStore.providers.find(p => p.type === 'openrouter')
-        }
-      }
-      if (!providerConfig) {
-        msg.error = '未找到对应的 API 通道'
-        msg.content = '> 错误: 未找到对应的 API 通道配置'
-        return
-      }
-
-      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-      if (!apiKey) {
-        msg.error = 'API Key 未配置'
-        msg.content = '> 错误: 请先在设置中配置 API Key'
-        return
-      }
-
       const startTime = Date.now()
       try {
-        const stream = streamChat({
-          provider: providerConfig,
-          apiKey,
-          model: mid,
-          messages: [{ role: 'user', content: prompt }],
+        // Build user message content
+        // Vision-capable models get images; others get text-only (graceful degradation)
+        let userContent: string | ContentPart[]
+        if (attachments.length && model.supportsVision) {
+          const parts: ContentPart[] = [{ type: 'text', text: prompt }]
+          for (const img of attachments) {
+            parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+          }
+          userContent = parts
+        } else {
+          userContent = prompt
+          if (attachments.length && !model.supportsVision) {
+            msg.content = '> ⚠️ 该模型不支持图片，已自动降级为纯文本\n\n'
+          }
+        }
+
+        const stream = streamModelChat({
+          modelId: mid,
+          messages: [{ role: 'user', content: userContent }],
           signal,
         })
 
@@ -127,6 +127,9 @@ export const useChatStore = defineStore('chat', () => {
         if (e instanceof ApiError) {
           msg.error = e.message
           msg.content += `\n\n> 错误: ${e.message}`
+          if (shouldSuppressModel(e)) {
+            appStore.suppressModelForToday(mid)
+          }
         } else {
           msg.error = e.message
           msg.content += `\n\n> 错误: ${e.message}`
@@ -146,6 +149,19 @@ export const useChatStore = defineStore('chat', () => {
     useToastStore().info('已停止生成')
   }
 
+  function stopAndRestoreDraft() {
+    const latestRound = rounds.value[rounds.value.length - 1]
+    const prompt = latestRound?.prompt || lastSubmittedPrompt.value
+    abortController.value?.abort()
+    if (latestRound && !Array.from(latestRound.responses.values()).every((msg) => !!msg.elapsed)) {
+      rounds.value.pop()
+    }
+    streaming.value = false
+    abortController.value = null
+    useToastStore().info('已终止并恢复到输入框')
+    return prompt
+  }
+
   function setActiveModel(roundId: string, modelId: string) {
     const r = rounds.value.find(r => r.id === roundId)
     if (r) r.activeModelId = modelId
@@ -157,6 +173,6 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     rounds, streaming, currentRound,
-    sendMessage, stopStreaming, setActiveModel, clearHistory,
+    sendMessage, stopStreaming, stopAndRestoreDraft, setActiveModel, clearHistory,
   }
 })

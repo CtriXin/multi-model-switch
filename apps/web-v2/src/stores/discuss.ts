@@ -2,9 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
 import { useAppStore } from './app'
-import { useProviderStore } from './provider'
-import { streamChat, ApiError } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { streamModelChat } from '@/services/runtime'
+import { ApiError } from '@/services/api'
 
 export type DiscussDepth = 'full' | 'panel' | 'quick'
 
@@ -113,34 +112,27 @@ async function callModel(
   prompt: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const providerStore = useProviderStore()
   const appStore = useAppStore()
 
-  const model = appStore.models.find((m) => m.id === modelId)
-  let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-  if (!providerConfig) {
-    if (modelId.startsWith('demo/')) {
-      providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-    }
-    if (!providerConfig) {
-      providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-    }
+  function shouldSuppressModel(error: ApiError) {
+    return error.code === 'model_unavailable' || error.code === 'rate_limited'
   }
-  if (!providerConfig) throw new Error('未找到 API 通道')
-
-  const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-  if (!apiKey) throw new Error('API Key 未配置')
 
   let result = ''
-  const stream = streamChat({
-    provider: providerConfig,
-    apiKey,
-    model: modelId,
-    messages: [{ role: 'user', content: prompt }],
-    signal,
-  })
-  for await (const chunk of stream) {
-    result += chunk
+  try {
+    const stream = streamModelChat({
+      modelId,
+      messages: [{ role: 'user', content: prompt }],
+      signal,
+    })
+    for await (const chunk of stream) {
+      result += chunk
+    }
+  } catch (error) {
+    if (error instanceof ApiError && shouldSuppressModel(error)) {
+      appStore.suppressModelForToday(modelId)
+    }
+    throw error
   }
   return result
 }
@@ -174,6 +166,7 @@ export const useDiscussStore = defineStore('discuss', () => {
   async function startDiscussion(prompt: string, modelIds: string[], discussDepth: DiscussDepth = 'panel') {
     if (streaming.value || modelIds.length < 2) return
     const toast = useToastStore()
+    const appStore = useAppStore()
 
     topic.value = prompt
     depth.value = discussDepth
@@ -249,35 +242,25 @@ export const useDiscussStore = defineStore('discuss', () => {
         '\n\n各模型分析：\n' + summaryContext +
         '\n\n交叉评审：\n' + reviewContext
 
-      // Pick the first model for synthesis
       const synthesisModel = modelIds[0]
-      const providerStore = useProviderStore()
-      const appStore = useAppStore()
-      const model = appStore.models.find((m) => m.id === synthesisModel)
-      let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-      if (!providerConfig) {
-        if (synthesisModel.startsWith('demo/')) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-        }
-        if (!providerConfig) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-        }
-      }
-      if (!providerConfig) throw new Error('未找到 API 通道')
-
-      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-      if (!apiKey) throw new Error('API Key 未配置')
-
-      const stream = streamChat({
-        provider: providerConfig,
-        apiKey,
-        model: synthesisModel,
+      const stream = streamModelChat({
+        modelId: synthesisModel,
         messages: [{ role: 'user', content: synthesisPrompt }],
         signal,
       })
-      for await (const chunk of stream) {
-        if (signal.aborted) return
-        phase3Text.value += chunk
+      try {
+        for await (const chunk of stream) {
+          if (signal.aborted) return
+          phase3Text.value += chunk
+        }
+      } catch (error) {
+        if (
+          error instanceof ApiError
+          && (error.code === 'model_unavailable' || error.code === 'rate_limited')
+        ) {
+          appStore.suppressModelForToday(synthesisModel)
+        }
+        throw error
       }
 
       toast.success('讨论完成')
@@ -295,6 +278,14 @@ export const useDiscussStore = defineStore('discuss', () => {
     abortController.value?.abort()
     streaming.value = false
     useToastStore().info('已停止讨论')
+  }
+
+  function stopAndRestoreDraft() {
+    const draft = topic.value
+    abortController.value?.abort()
+    reset()
+    useToastStore().info('已终止讨论并恢复到输入框')
+    return draft
   }
 
   /** Pick a Rollup model: prefer non-participating, highest tier */
@@ -345,35 +336,27 @@ ${reviewContext}${synthesisContext}
 请根据以上讨论内容，生成一份统一的行动计划。`
 
     try {
-      const providerStore = useProviderStore()
-      const model = appStore.models.find((m) => m.id === rollupModelId)
-      let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-      if (!providerConfig) {
-        if (rollupModelId.startsWith('demo/')) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-        }
-        if (!providerConfig) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-        }
-      }
-      if (!providerConfig) throw new Error('未找到 Rollup 模型通道')
-
-      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-      if (!apiKey) throw new Error('Rollup 模型的 API Key 未配置')
-
-      const stream = streamChat({
-        provider: providerConfig,
-        apiKey,
-        model: rollupModelId,
+      const stream = streamModelChat({
+        modelId: rollupModelId,
         messages: [
           { role: 'system', content: ROLLUP_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
         ],
         signal,
       })
-      for await (const chunk of stream) {
-        if (signal.aborted) return
-        rollupText.value += chunk
+      try {
+        for await (const chunk of stream) {
+          if (signal.aborted) return
+          rollupText.value += chunk
+        }
+      } catch (error) {
+        if (
+          error instanceof ApiError
+          && (error.code === 'model_unavailable' || error.code === 'rate_limited')
+        ) {
+          appStore.suppressModelForToday(rollupModelId)
+        }
+        throw error
       }
       toast.success('行动计划已生成')
     } catch (e: any) {
@@ -405,7 +388,7 @@ ${reviewContext}${synthesisContext}
     phase, streaming, depth, phase1Results, phase2Results, phase3Text,
     rollupText, rollupModel, rollupPhase,
     topic, hasResults,
-    startDiscussion, startRollup, stopDiscussion, reset,
+    startDiscussion, startRollup, stopDiscussion, stopAndRestoreDraft, reset,
   }
 })
 

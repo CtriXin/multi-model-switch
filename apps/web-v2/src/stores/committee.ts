@@ -1,13 +1,14 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getApiKey } from '@/services/keychain'
-import { streamChat } from '@/services/api'
+import { ApiError, streamChat } from '@/services/api'
 import { useAppStore } from './app'
-import { useProviderStore } from './provider'
 import { usePersonaStore, type PersonaDefinition } from './persona'
 import type { ModelMeta } from './app'
+import { streamModelChat } from '@/services/runtime'
 import {
   buildFallbackSynthesis,
+  getCommitteePack,
+  getCommitteePreset,
   buildRoleModelAssignments,
   buildRolePersonaPrompt,
   buildSystemModeratorPrompt,
@@ -31,10 +32,16 @@ interface StartCommitteePayload {
   mode: CommitteeMode
   roleIds: string[]
   modelPool: ModelMeta[]
+  packId?: string
+  presetId?: string | null
 }
 
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+function shouldSuppressModel(error: ApiError) {
+  return error.code === 'model_unavailable' || error.code === 'rate_limited'
 }
 
 export const useCommitteeStore = defineStore('committee', () => {
@@ -46,6 +53,8 @@ export const useCommitteeStore = defineStore('committee', () => {
   const phaseStatus = ref<PhaseStatus>('waiting')
   const sessionMode = ref<CommitteeMode>('broadcast')
   const activeRoleIds = ref<string[]>([])
+  const activePackId = ref('')
+  const activePresetId = ref<string | null>(null)
   const phase1Summaries = ref<RoleSummary[]>([])
   const phase2Reviews = ref<DebateExchange[]>([])
   const phase3Content = ref('')
@@ -83,6 +92,8 @@ export const useCommitteeStore = defineStore('committee', () => {
     currentPhase.value = 1
     phaseStatus.value = 'waiting'
     activeRoleIds.value = []
+    activePackId.value = ''
+    activePresetId.value = null
     phase1Summaries.value = []
     phase2Reviews.value = []
     phase3Content.value = ''
@@ -113,33 +124,10 @@ export const useCommitteeStore = defineStore('committee', () => {
     return roleAssignments.value.find((item) => item.roleId === roleId)?.modelId || ''
   }
 
-  async function resolveRuntime(modelId: string) {
-    const appStore = useAppStore()
-    const providerStore = useProviderStore()
-    const model = appStore.models.find((item) => item.id === modelId)
-
-    let provider = providerStore.providers.find((item) => item.id === model?.provider)
-    if (!provider && modelId.startsWith('demo/')) {
-      provider = providerStore.providers.find((item) => item.type === 'mock')
-    }
-    if (!provider) {
-      provider = providerStore.providers.find((item) => item.type === 'openrouter')
-    }
-    if (!provider) throw new Error('未找到可用的 API 通道')
-
-    const apiKey = provider.type === 'mock' ? 'demo' : await getApiKey(provider.id)
-    if (!apiKey) throw new Error(`${provider.name} 未配置 API Key`)
-
-    return { provider, apiKey }
-  }
-
   async function collectStream(modelId: string, systemPrompt: string, userPrompt: string, onChunk?: (chunk: string) => void) {
-    const { provider, apiKey } = await resolveRuntime(modelId)
     let raw = ''
-    for await (const chunk of streamChat({
-      provider,
-      apiKey,
-      model: modelId,
+    for await (const chunk of streamModelChat({
+      modelId,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -152,7 +140,14 @@ export const useCommitteeStore = defineStore('committee', () => {
     return raw.trim()
   }
 
-  async function runPhase1(promptText: string, roles: PersonaDefinition[]) {
+  async function runPhase1(
+    promptText: string,
+    roles: PersonaDefinition[],
+    packId?: string,
+    presetId?: string | null,
+  ) {
+    const pack = getCommitteePack(packId || '')
+    const preset = getCommitteePreset(presetId)
     phase1Summaries.value = roles.map((role) =>
       createPendingSummary(role.id, getAssignedModelId(role.id))
     )
@@ -163,7 +158,7 @@ export const useCommitteeStore = defineStore('committee', () => {
       try {
         const raw = await collectStream(
           modelId,
-          buildRolePersonaPrompt(role, { mode: sessionMode.value, prompt: promptText }),
+          buildRolePersonaPrompt(role, { mode: sessionMode.value, prompt: promptText }, pack, preset),
           promptText,
         )
         const parsed = parseRoleOutput(raw)
@@ -180,6 +175,9 @@ export const useCommitteeStore = defineStore('committee', () => {
         })
       } catch (error) {
         if (isAbortError(error)) return
+        if (error instanceof ApiError && shouldSuppressModel(error)) {
+          useAppStore().suppressModelForToday(modelId)
+        }
         phase1Summaries.value.splice(index, 1, {
           roleId: role.id,
           modelId,
@@ -193,7 +191,14 @@ export const useCommitteeStore = defineStore('committee', () => {
     await Promise.allSettled(tasks)
   }
 
-  async function runPhase2(promptText: string, roles: PersonaDefinition[]) {
+  async function runPhase2(
+    promptText: string,
+    roles: PersonaDefinition[],
+    packId?: string,
+    presetId?: string | null,
+  ) {
+    const pack = getCommitteePack(packId || '')
+    const preset = getCommitteePreset(presetId)
     const roleMap = new Map(roles.map((role) => [role.id, role]))
     const pairs = roles
       .map((role) => {
@@ -224,7 +229,7 @@ export const useCommitteeStore = defineStore('committee', () => {
               viewpoint: targetSummary.viewpoint,
               tension: targetSummary.tension || '对方认为这里有关键冲突',
             }] : undefined,
-          }),
+          }, pack, preset),
           promptText,
         )
         const parsed = parseDebateOutput(raw)
@@ -241,6 +246,9 @@ export const useCommitteeStore = defineStore('committee', () => {
         })
       } catch (error) {
         if (isAbortError(error)) return
+        if (error instanceof ApiError && shouldSuppressModel(error)) {
+          useAppStore().suppressModelForToday(modelId)
+        }
         phase2Reviews.value.splice(index, 1, {
           roleId: role.id,
           targetRoleId: target.id,
@@ -255,7 +263,15 @@ export const useCommitteeStore = defineStore('committee', () => {
     await Promise.allSettled(tasks)
   }
 
-  async function runPhase3(promptText: string, roles: PersonaDefinition[], modelPool: ModelMeta[]) {
+  async function runPhase3(
+    promptText: string,
+    roles: PersonaDefinition[],
+    modelPool: ModelMeta[],
+    packId?: string,
+    presetId?: string | null,
+  ) {
+    const pack = getCommitteePack(packId || '')
+    const preset = getCommitteePreset(presetId)
     const goodSummaries = phase1Summaries.value.filter((item) => item.ok)
     const fallback = buildFallbackSynthesis(promptText, goodSummaries, roles)
     const moderatorModel = pickSynthesizerModel(modelPool, roleAssignments.value)
@@ -274,7 +290,7 @@ export const useCommitteeStore = defineStore('committee', () => {
     try {
       const raw = await collectStream(
         moderatorModel.id,
-        buildSystemModeratorPrompt(promptText, goodSummaries, roles),
+        buildSystemModeratorPrompt(promptText, goodSummaries, roles, pack, preset),
         `请基于以上角色观点，生成本轮锦囊团结论。议题：${promptText}`,
         (chunk) => { phase3Content.value += chunk },
       )
@@ -287,6 +303,9 @@ export const useCommitteeStore = defineStore('committee', () => {
       phase3Content.value = raw
     } catch (error) {
       if (isAbortError(error)) return
+      if (error instanceof ApiError && shouldSuppressModel(error)) {
+        useAppStore().suppressModelForToday(moderatorModel.id)
+      }
       committeeSynthesis.value = {
         ...fallback,
         moderator: moderatorModel.name,
@@ -302,6 +321,8 @@ export const useCommitteeStore = defineStore('committee', () => {
     prompt.value = payload.promptText
     sessionMode.value = payload.mode
     activeRoleIds.value = payload.roleIds
+    activePackId.value = payload.packId || ''
+    activePresetId.value = payload.presetId || null
     roleAssignments.value = buildRoleModelAssignments(payload.roleIds, roles, payload.modelPool)
     isActive.value = true
     isStreaming.value = true
@@ -317,18 +338,18 @@ export const useCommitteeStore = defineStore('committee', () => {
     abortController.value = new AbortController()
 
     try {
-      await runPhase1(payload.promptText, roles)
+      await runPhase1(payload.promptText, roles, payload.packId, payload.presetId)
       if (stopped.value) return
 
       if (payload.mode === 'debate') {
         currentPhase.value = 2
-        await runPhase2(payload.promptText, roles)
+        await runPhase2(payload.promptText, roles, payload.packId, payload.presetId)
       }
       if (stopped.value) return
 
       if (payload.mode === 'committee') {
         currentPhase.value = 3
-        await runPhase3(payload.promptText, roles, payload.modelPool)
+        await runPhase3(payload.promptText, roles, payload.modelPool, payload.packId, payload.presetId)
       }
       if (stopped.value) return
 
@@ -350,6 +371,8 @@ export const useCommitteeStore = defineStore('committee', () => {
     phaseStatus,
     sessionMode,
     activeRoleIds,
+    activePackId,
+    activePresetId,
     phase1Summaries,
     phase2Reviews,
     phase3Content,

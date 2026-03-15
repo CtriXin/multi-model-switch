@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { fetchModels } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { getFetchRuntime } from '@/services/runtime'
 
 export interface ModelMeta {
   id: string
@@ -15,6 +15,8 @@ export interface ModelMeta {
   priceOutput: number
   tags: string[]
   contextWindow: number
+  free: boolean
+  supportsVision: boolean
 }
 
 export interface Preset {
@@ -27,6 +29,8 @@ export interface Preset {
 
 export type ModelSelectionMode = 'chat' | 'committee'
 
+const MODEL_SUPPRESSION_KEY = 'mms-disabled-models'
+
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
   openai: '#10b981',
@@ -38,6 +42,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   qwen: '#14b8a6',
   siliconflow: '#6366f1',
   zhipu: '#2563eb',
+  cerebras: '#f97316',
   groq: '#f97316',
   openrouter: '#8b5cf6',
   dashscope: '#7c3aed',
@@ -71,6 +76,29 @@ export const useAppStore = defineStore('app', () => {
   const initialized = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
+
+  function loadSuppressedModelIds() {
+    try {
+      const raw = localStorage.getItem(MODEL_SUPPRESSION_KEY)
+      if (!raw) return new Set<string>()
+      const data = JSON.parse(raw) as Record<string, number>
+      const now = Date.now()
+      const valid = Object.entries(data)
+        .filter(([, expiresAt]) => expiresAt > now)
+        .map(([id]) => id)
+      if (valid.length !== Object.keys(data).length) {
+        const next = Object.fromEntries(valid.map((id) => [id, data[id]]))
+        localStorage.setItem(MODEL_SUPPRESSION_KEY, JSON.stringify(next))
+      }
+      return new Set(valid)
+    } catch {
+      return new Set<string>()
+    }
+  }
+
+  function persistSuppressedModelIds(ids: Record<string, number>) {
+    localStorage.setItem(MODEL_SUPPRESSION_KEY, JSON.stringify(ids))
+  }
 
   const selectedModels = computed(() =>
     selectedModelIds.value
@@ -118,9 +146,9 @@ export const useAppStore = defineStore('app', () => {
     await Promise.allSettled(
       configured.map(async (provider) => {
         try {
-          const key = provider.type === 'mock' ? 'demo' : await getApiKey(provider.id)
-          if (!key) return
-          const fetched = await fetchModels(provider, key)
+          const runtime = await getFetchRuntime(provider.id)
+          if (!runtime) return
+          const fetched = await fetchModels(runtime.provider, runtime.apiKey)
           allModels.push(...fetched)
         } catch (e: any) {
           errors.push(`${provider.name}: ${e.message}`)
@@ -128,7 +156,8 @@ export const useAppStore = defineStore('app', () => {
       }),
     )
 
-    models.value = allModels
+    const suppressed = loadSuppressedModelIds()
+    models.value = allModels.filter((model) => !suppressed.has(model.id))
     loading.value = false
 
     if (errors.length) {
@@ -181,16 +210,18 @@ export const useAppStore = defineStore('app', () => {
     for (const m of models.value) {
       ;(byProvider[m.provider] ??= []).push(m)
     }
-    const providers = Object.keys(byProvider).sort((a, b) => {
-      const aTop = Math.max(...byProvider[a].map((m) => m.tier))
-      const bTop = Math.max(...byProvider[b].map((m) => m.tier))
-      return bTop - aTop
-    })
+    const providers = Object.keys(byProvider)
+    for (let i = providers.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[providers[i], providers[j]] = [providers[j], providers[i]]
+    }
     const picked: string[] = []
     for (const provider of providers) {
       if (picked.length >= count) break
       const pool = [...byProvider[provider]].sort((a, b) => b.tier - a.tier)
-      if (pool[0]) picked.push(pool[0].id)
+      const shortlist = pool.slice(0, Math.min(3, pool.length))
+      const candidate = shortlist[Math.floor(Math.random() * shortlist.length)] ?? pool[0]
+      if (candidate) picked.push(candidate.id)
     }
     if (picked.length >= count) return picked
 
@@ -222,6 +253,58 @@ export const useAppStore = defineStore('app', () => {
     committeeSelectedModelIds.value = pickDiverseModels(3)
   }
 
+  // Track pending suppressions so we don't show multiple toasts for the same model
+  const pendingSuppressions = new Set<string>()
+
+  function suppressModelForToday(modelId: string) {
+    const model = models.value.find((item) => item.id === modelId)
+    if (!model || pendingSuppressions.has(modelId)) return
+
+    pendingSuppressions.add(modelId)
+    const toastStore = useToastStore()
+
+    toastStore.countdown(`${model.name} 即将隐藏`, 5, '取消').then((confirmed) => {
+      pendingSuppressions.delete(modelId)
+      if (!confirmed) return
+
+      // Actually suppress
+      const expiresAt = new Date().setHours(23, 59, 59, 999)
+      let data: Record<string, number> = {}
+      try {
+        data = JSON.parse(localStorage.getItem(MODEL_SUPPRESSION_KEY) || '{}')
+      } catch {
+        data = {}
+      }
+      data[modelId] = expiresAt
+      persistSuppressedModelIds(data)
+
+      models.value = models.value.filter((item) => item.id !== modelId)
+      selectedModelIds.value = selectedModelIds.value.filter((id) => id !== modelId)
+      committeeSelectedModelIds.value = committeeSelectedModelIds.value.filter((id) => id !== modelId)
+      ensureCommitteeSelection()
+    })
+  }
+
+  /** Get list of currently suppressed model IDs (not expired) */
+  function getSuppressedModelIds(): string[] {
+    try {
+      const raw = localStorage.getItem(MODEL_SUPPRESSION_KEY)
+      if (!raw) return []
+      const data = JSON.parse(raw) as Record<string, number>
+      const now = Date.now()
+      return Object.entries(data).filter(([, exp]) => exp > now).map(([id]) => id)
+    } catch {
+      return []
+    }
+  }
+
+  /** Restore all suppressed models by clearing suppression and re-fetching */
+  async function restoreSuppressedModels() {
+    localStorage.removeItem(MODEL_SUPPRESSION_KEY)
+    await refreshModels()
+    useToastStore().info('已恢复所有隐藏模型')
+  }
+
   return {
     models,
     presets,
@@ -238,5 +321,8 @@ export const useAppStore = defineStore('app', () => {
     randomPick,
     copySelection,
     ensureCommitteeSelection,
+    suppressModelForToday,
+    getSuppressedModelIds,
+    restoreSuppressedModels,
   }
 })
