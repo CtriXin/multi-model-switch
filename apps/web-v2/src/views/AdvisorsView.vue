@@ -13,6 +13,15 @@ import {
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
+/** 头像加载失败时使用首字 SVG fallback */
+function onAvatarError(e: Event, name: string) {
+  const img = e.target as HTMLImageElement
+  const letter = name.charAt(0)
+  img.src = `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="32" fill="%23546e7a"/><text x="32" y="40" text-anchor="middle" fill="white" font-size="28" font-family="sans-serif">${letter}</text></svg>`
+  )}`
+}
+
 const personaStore = usePersonaStore()
 const appStore = useAppStore()
 const providerStore = useProviderStore()
@@ -234,6 +243,7 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
                 <img
                   :src="getAvatarUrl(persona, 40)"
                   :alt="persona.name"
+                  @error="onAvatarError($event, persona.name)"
                   class="w-10 h-10 rounded-full bg-surface-3 shrink-0"
                 />
 
@@ -300,6 +310,7 @@ const modelAssignments = computed(() => assignModels(personaStore.activePersonaI
               <img
                 :src="getAvatarUrl(persona, 32)"
                 :alt="persona.name"
+                @error="onAvatarError($event, persona.name)"
                 class="w-8 h-8 rounded-full bg-surface-3 shrink-0"
               />
               <div class="flex-1 min-w-0">
