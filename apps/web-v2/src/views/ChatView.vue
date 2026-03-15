@@ -10,6 +10,7 @@ import ModelChipBar from '@/components/chat/ModelChipBar.vue'
 import ModelResponseCard from '@/components/chat/ModelResponseCard.vue'
 import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
+import type { ImageAttachment } from '@/stores/chat'
 import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -19,6 +20,7 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const toast = useToastStore()
 const platform = inject<import('vue').Ref<string>>('platform')
+const restoredDraft = ref('')
 
 const scrollContainer = ref<HTMLElement>()
 const hasModels = computed(() => appStore.selectedModels.length >= 2)
@@ -26,14 +28,14 @@ const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
 
 // --- View mode ---
 type ViewMode = 'grid' | 'vertical' | 'horizontal'
-// Desktop: ≤2 models → grid (side-by-side), ≥3 → horizontal scroll
+// Desktop: ≤3 models → grid (side-by-side), ≥4 → horizontal scroll
 // Mobile: horizontal (carousel) default, vertical available
-const viewMode = ref<ViewMode>(appStore.selectedModels.length > 2 ? 'horizontal' : 'grid')
+const viewMode = ref<ViewMode>(appStore.selectedModels.length > 3 ? 'horizontal' : 'grid')
 
 // Auto-switch default when model count changes
 watch(() => appStore.selectedModels.length, (count) => {
-  if (count <= 2 && viewMode.value === 'horizontal') viewMode.value = 'grid'
-  else if (count > 2 && viewMode.value === 'grid') viewMode.value = 'horizontal'
+  if (count <= 3 && viewMode.value === 'horizontal') viewMode.value = 'grid'
+  else if (count > 3 && viewMode.value === 'grid') viewMode.value = 'horizontal'
 })
 
 // Mobile view mode: 'horizontal' (carousel) or 'vertical'
@@ -231,7 +233,14 @@ function onTouchEnd(roundId: string, totalCards: number) {
 }
 
 // --- Other ---
-async function handleSubmit(text: string) {
+const previewImage = ref<string | null>(null)
+
+function openImagePreview(src: string) {
+  previewImage.value = src
+}
+
+async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
+  restoredDraft.value = ''
   if (!hasModels.value) {
     toast.info('请至少选择 2 个模型')
     return
@@ -240,12 +249,23 @@ async function handleSubmit(text: string) {
     sessionStore.createSession('chat')
   }
   // Fire and don't await — scroll immediately after DOM update
-  chatStore.sendMessage(text, appStore.selectedModelIds).then(() => {
+  chatStore.sendMessage(text, appStore.selectedModelIds, attachments).then(() => {
     sessionStore.saveCurrentSession()
   })
   // Scroll to the new message after it appears in DOM
   await nextTick()
   scrollToBottom()
+}
+
+function handleStopAndEdit() {
+  restoredDraft.value = chatStore.stopAndRestoreDraft()
+}
+
+async function restorePrompt(prompt: string) {
+  restoredDraft.value = ''
+  await nextTick()
+  restoredDraft.value = prompt
+  toast.info('已恢复到输入框，可修改后重发')
 }
 
 function getModelName(id: string): string {
@@ -263,6 +283,15 @@ function getTier(id: string): number {
 // A round has a selection if activeModelId is set and responses are done
 function hasSelection(round: typeof chatStore.rounds[0]): boolean {
   return !!round.activeModelId && isRoundDone(round)
+}
+
+function shouldUseFixedGridHeight(round: typeof chatStore.rounds[0]): boolean {
+  return Array.from(round.responses.values()).some((msg) => {
+    const content = msg.content || ''
+    const lineCount = content.split('\n').length
+    const briefCount = Object.keys(msg.brief ?? {}).length
+    return !!msg.error || briefCount > 0 || lineCount > 8 || content.length > 420 || (chatStore.streaming && !msg.elapsed)
+  })
 }
 
 const gridClass = computed(() => {
@@ -346,8 +375,21 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
         >
           <!-- User prompt -->
           <div class="flex justify-end mb-4">
-            <div class="max-w-[85%] px-4 py-2.5 rounded-2xl rounded-br-md bg-accent text-white text-sm">
-              {{ round.prompt }}
+            <div class="max-w-[85%]">
+              <!-- Attached images -->
+              <div v-if="round.attachments?.length" class="flex gap-1.5 justify-end mb-1.5">
+                <img
+                  v-for="img in round.attachments"
+                  :key="img.id"
+                  :src="img.dataUrl"
+                  :alt="img.name"
+                  class="h-20 w-20 object-cover rounded-lg border border-white/10 cursor-pointer hover:opacity-80 transition-opacity"
+                  @click="openImagePreview(img.dataUrl)"
+                />
+              </div>
+              <div class="px-4 py-2.5 rounded-2xl rounded-br-md bg-accent text-white text-sm">
+                {{ round.prompt }}
+              </div>
             </div>
           </div>
 
@@ -400,6 +442,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="getViewingModelId(round) === round.activeModelId"
                 @select="chatStore.setActiveModel(round.id, getViewingModelId(round))"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
@@ -410,7 +453,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 <div
                   v-for="[modelId, msg] of round.responses"
                   :key="modelId"
-                  class="h-[clamp(360px,58vh,520px)]"
+                  :class="shouldUseFixedGridHeight(round) ? 'h-[clamp(360px,58vh,520px)]' : ''"
                   @click="chatStore.setActiveModel(round.id, modelId)"
                 >
                 <ModelResponseCard
@@ -425,6 +468,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                   :selected="round.activeModelId === modelId"
                   @select="chatStore.setActiveModel(round.id, modelId)"
                   @discuss="startInlineDiscuss(round.id)"
+                  @retry="restorePrompt(round.prompt)"
                 />
               </div>
             </div>
@@ -445,6 +489,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
@@ -494,6 +539,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                   :selected="round.activeModelId === modelId"
                   @select="chatStore.setActiveModel(round.id, modelId)"
                   @discuss="startInlineDiscuss(round.id)"
+                  @retry="restorePrompt(round.prompt)"
                 />
               </div>
             </div>
@@ -577,6 +623,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :active="true"
                 :selected="round.activeModelId === getDisplayedModelId(round)"
                 class="card"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
           </div>
@@ -615,6 +662,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
@@ -674,6 +722,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                         :active="getActiveIndex(round.id) === cardIdx"
                         :selected="round.activeModelId === modelId"
                         @select="chatStore.setActiveModel(round.id, modelId)"
+                        @retry="restorePrompt(round.prompt)"
                       />
                     </div>
                   </div>
@@ -732,9 +781,22 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
       :disabled="!hasModels"
       :streaming="chatStore.streaming"
       :placeholder="hasModels ? undefined : '请先选择 2 个以上模型...'"
+      :restore-text="restoredDraft"
       @submit="handleSubmit"
       @stop="chatStore.stopStreaming"
+      @stop-and-edit="handleStopAndEdit"
     />
+
+    <!-- Image lightbox -->
+    <Teleport to="body">
+      <div
+        v-if="previewImage"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-pointer"
+        @click="previewImage = null"
+      >
+        <img :src="previewImage" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" />
+      </div>
+    </Teleport>
   </div>
 </template>
 
