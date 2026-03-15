@@ -674,11 +674,11 @@ def select_model_tui(models, title="选择模型"):
 
 _LB_HISTORY_PATH = os.path.expanduser("~/.config/mms/lb_history.json")
 
-# 默认预设
+# 默认预设（3-slot: heavy / medium / light）
 _LB_PRESETS = [
-    {"label": "Opus + Haiku",   "heavy": "claude-opus-4-6",   "light": "claude-haiku-4-5"},
-    {"label": "Sonnet + Haiku", "heavy": "claude-sonnet-4-6", "light": "claude-haiku-4-5"},
-    {"label": "GPT + Mini",     "heavy": "gpt-5.4",           "light": "gpt-4.1-mini"},
+    {"label": "常规降本",   "heavy": "claude-sonnet-4-6", "medium": "kimi-k2.5",       "light": "claude-haiku-4-5"},
+    {"label": "全力 Claude", "heavy": "claude-opus-4-6",   "medium": "claude-sonnet-4-6", "light": "claude-haiku-4-5"},
+    {"label": "GPT 全栈",   "heavy": "gpt-5.4",           "medium": "gpt-4.1",           "light": "gpt-4.1-mini"},
 ]
 
 
@@ -697,13 +697,14 @@ def _load_lb_history():
         return fallback
 
 
-def save_lb_history(heavy, light):
+def save_lb_history(heavy, medium, light):
     """保存一条负载模式选择到历史。保留最近 2 条。"""
-    entry = {"heavy": heavy, "light": light, "label": f"{heavy} + {light}"}
+    entry = {"heavy": heavy, "medium": medium, "light": light,
+             "label": f"{heavy} + {medium} + {light}"}
     history = _load_lb_history()
     recent = history.get("recent", [])
-    # 去重：相同 heavy+light 的不重复添加
-    recent = [r for r in recent if not (r.get("heavy") == heavy and r.get("light") == light)]
+    # 去重
+    recent = [r for r in recent if not (r.get("heavy") == heavy and r.get("medium") == medium and r.get("light") == light)]
     recent.insert(0, entry)
     history["recent"] = recent[:2]
     try:
@@ -715,9 +716,9 @@ def save_lb_history(heavy, light):
 
 
 def select_load_balance_tui(available_models=None):
-    """负载模式 TUI：选择 heavy + light 模型组合。
+    """负载模式 TUI：选择 heavy + medium + light 模型组合。
 
-    返回 {"model": heavy, "lb_light": light} 或 None（取消）。
+    返回 {"model": heavy, "lb_medium": medium, "lb_light": light} 或 None（取消）。
     """
     history = _load_lb_history()
     recent = history.get("recent", [])
@@ -728,16 +729,19 @@ def select_load_balance_tui(available_models=None):
         seen = set()
         # 最近使用（最多 2 条）
         for r in recent[:2]:
-            key = (r["heavy"], r["light"])
+            key = (r["heavy"], r.get("medium", ""), r["light"])
             if key not in seen:
                 seen.add(key)
-                opts.append({"label": f"🕐 {r['heavy']} + {r['light']}", "heavy": r["heavy"], "light": r["light"], "type": "recent"})
+                medium_tag = f" / {r['medium']}" if r.get("medium") else ""
+                opts.append({"label": f"🕐 {r['heavy']}{medium_tag} / {r['light']}",
+                             "heavy": r["heavy"], "medium": r.get("medium", ""), "light": r["light"], "type": "recent"})
         # 预设
         for p in _LB_PRESETS:
-            key = (p["heavy"], p["light"])
+            key = (p["heavy"], p.get("medium", ""), p["light"])
             if key not in seen:
                 seen.add(key)
-                opts.append({"label": f"   {p['label']}", "heavy": p["heavy"], "light": p["light"], "type": "preset"})
+                opts.append({"label": f"   {p['label']}  ({p['heavy']} / {p.get('medium','')} / {p['light']})",
+                             "heavy": p["heavy"], "medium": p.get("medium", ""), "light": p["light"], "type": "preset"})
         # 自定义
         opts.append({"label": "   ✏️  自定义...", "type": "custom"})
         return opts
@@ -757,8 +761,8 @@ def select_load_balance_tui(available_models=None):
             max_y, max_w = stdscr.getmaxyx()
 
             try:
-                stdscr.addstr(0, 2, "⚖️ 负载模式 — 选择模型组合", curses.color_pair(1) | curses.A_BOLD)
-                stdscr.addstr(1, 2, "heavy 处理复杂任务，light 处理简单任务", curses.A_DIM)
+                stdscr.addstr(0, 2, "⚖️ 智能路由 — 选择模型组合", curses.color_pair(1) | curses.A_BOLD)
+                stdscr.addstr(1, 2, "heavy 复杂任务 / medium 常规任务 / light 简单任务", curses.A_DIM)
                 stdscr.addstr(2, 2, "─" * min(40, max_w - 4), curses.A_DIM)
             except curses.error:
                 pass
@@ -794,7 +798,7 @@ def select_load_balance_tui(available_models=None):
                 chosen = options[idx]
                 if chosen["type"] == "custom":
                     return "custom"
-                return {"model": chosen["heavy"], "lb_light": chosen["light"]}
+                return {"model": chosen["heavy"], "lb_medium": chosen.get("medium", ""), "lb_light": chosen["light"]}
             elif key in (ord('q'), ord('Q'), 27):
                 return None
 
@@ -804,21 +808,23 @@ def select_load_balance_tui(available_models=None):
         return None
 
     if result == "custom":
-        # 自定义流程：先选 heavy，再选 light
+        # 自定义流程：选 heavy → medium → light
         models = available_models or []
         if not models:
-            # 无可用模型列表时提供默认选项
             models = [
                 "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
-                "gpt-5.4", "gpt-4.1-mini",
+                "gpt-5.4", "gpt-4.1", "gpt-4.1-mini", "kimi-k2.5",
             ]
         heavy = select_model_tui(models, title="选择 Heavy 模型（复杂任务）")
         if heavy is None:
             return None
+        medium = select_model_tui(models, title="选择 Medium 模型（常规任务）")
+        if medium is None:
+            return None
         light = select_model_tui(models, title="选择 Light 模型（简单任务）")
         if light is None:
             return None
-        return {"model": heavy, "lb_light": light}
+        return {"model": heavy, "lb_medium": medium, "lb_light": light}
 
     return result
 

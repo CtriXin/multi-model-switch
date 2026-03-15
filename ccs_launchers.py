@@ -310,20 +310,28 @@ def launch_claude(model_info, runtime, once=False):
         probe_model = _resolve_model(model_info) if model_info else "claude-sonnet-4-6"
         anthropic_url, detect_method = _resolve_anthropic_base_url(runtime, probe_model=probe_model)
 
-        # 负载模式：提取 lb_light，需要通过 bridge 拦截请求
+        # 智能路由：提取 lb_light / lb_medium，需要通过 bridge 拦截请求
         lb_light = model_info.get("lb_light") if isinstance(model_info, dict) else None
+        lb_medium = model_info.get("lb_medium") if isinstance(model_info, dict) else None
 
         if anthropic_url is not None:
-            if lb_light:
-                # 负载模式：通过本地 bridge 路由，以便拦截并切换模型
+            if lb_light or lb_medium:
+                # 智能路由：通过本地 bridge 路由，以便拦截并切换模型
                 bridge_gw_url = anthropic_url.rstrip("/")
                 if not bridge_gw_url.endswith("/v1"):
                     bridge_gw_url += "/v1"
                 cleanup_ctx = gateway_claude_bridge(bridge_gw_url, runtime["api_key"],
-                                                    heavy_model=probe_model, lb_light_model=lb_light)
+                                                    heavy_model=probe_model,
+                                                    medium_model=lb_medium or None,
+                                                    light_model=lb_light or None)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
-                console.print(f"[dim]⚖️ 负载模式已启用 — heavy: {probe_model}, light: {lb_light}[/dim]")
+                parts = [f"heavy: {probe_model}"]
+                if lb_medium:
+                    parts.append(f"medium: {lb_medium}")
+                if lb_light:
+                    parts.append(f"light: {lb_light}")
+                console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
                 # 探测成功：使用探测到的 URL
                 env = _claude_gateway_env(runtime, base_url=anthropic_url)
@@ -353,7 +361,9 @@ def launch_claude(model_info, runtime, once=False):
                 f"[yellow]⚠ 无 Anthropic 端点，自动通过 OpenAI 端点 bridge[/yellow]"
             )
             cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
-                                                heavy_model=probe_model, lb_light_model=lb_light)
+                                                heavy_model=probe_model,
+                                                medium_model=lb_medium or None,
+                                                light_model=lb_light or None)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
             state_home = None
@@ -369,9 +379,9 @@ def launch_claude(model_info, runtime, once=False):
     env["API_TIMEOUT_MS"] = "3000000"
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
-    # bridge 在转发时替换成真实模型名（heavy_model / lb_light）。
+    # bridge 在转发时替换成真实模型名（heavy_model / medium_model / light_model）。
     _skip_model = auth_mode == "oauth_bridge" or (
-        isinstance(model_info, dict) and model_info.get("lb_light")
+        isinstance(model_info, dict) and (model_info.get("lb_light") or model_info.get("lb_medium"))
     )
 
     if isinstance(model_info, dict):

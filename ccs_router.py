@@ -1,15 +1,23 @@
-"""MMS 负载路由：LLM 快速分类 + 关键词 fast-path + 路由日志。
+"""MMS 智能路由：3-tier (light/medium/heavy) + 置信度 + sticky escalation + 自学习关键词。
 
 策略：
 1. Guardrail：提到关键文件/关键词 → 直接 heavy（零延迟）
-2. 关键词 fast-path：明确 light 关键词命中 → 直接 light（零延迟）
-3. LLM 分类：用 light 模型做 <50 token 的二分类（~300ms），准确率高
-4. 默认 heavy（安全，不降级）
+2. 关键词 fast-path：明确 light/heavy 关键词命中 → 直接对应档（零延迟）
+   - 内置默认关键词 + 用户配置关键词 + 自动学习关键词
+3. LLM 分类：二分类 + 置信度 → 低置信度归 medium（~300ms）
+4. 默认 medium（安全中间档）
+5. Sticky escalation：进入 heavy 后保持 N 轮不降级
+
+关键词来源（优先级：用户配置 > 自动学习 > 内置默认）：
+- 内置：代码中硬编码
+- 用户配置：~/.config/mms/route_keywords.json（手动编辑）
+- 自动学习：LLM 连续 N 次对相似 pattern 给出相同高置信分类 → 自动 promote 为关键词
 """
 
 import json
 import os
 import re
+from collections import defaultdict
 from datetime import datetime
 
 try:
@@ -17,15 +25,27 @@ try:
 except ImportError:
     _httpx = None
 
-# ── Guardrail：提到这些文件名 → 直接 heavy ──
-_GUARDRAIL_FILES = {
+# ── 路径 ──
+_CONFIG_DIR = os.path.expanduser("~/.config/mms")
+_LOG_PATH = os.path.join(_CONFIG_DIR, "lb_route.log")
+_KEYWORDS_PATH = os.path.join(_CONFIG_DIR, "route_keywords.json")
+_LEARNED_PATH = os.path.join(_CONFIG_DIR, "route_learned.json")
+
+# Sticky escalation 默认衰减轮数
+STICKY_DECAY_TURNS = 5
+
+# 自动学习：LLM 连续 N 次高置信分类相同 → promote 为关键词
+_LEARN_THRESHOLD = 3
+
+# ── 内置默认关键词 ──
+
+_BUILTIN_GUARDRAIL_FILES = {
     "ccs_core", "ccs_launchers", "ccs_bridge", "ccs_router", "ccs_tui",
     "ccs_adapter_registry", "ccs_account_state",
     "auth", "schema", "migration", "security", "config.toml",
 }
 
-# ── Heavy 关键词 fast-path ──
-_HEAVY_KEYWORDS = [
+_BUILTIN_HEAVY = [
     (r"\brefactor\b.*(?:entire|across|all|multiple)", "refactor multi-file"),
     (r"\bbreaking\s+change", "breaking change"),
     (r"\bmigrat(?:e|ion)\b", "migration"),
@@ -36,7 +56,6 @@ _HEAVY_KEYWORDS = [
     (r"\bconcurren(?:t|cy)\b", "concurrency"),
     (r"\brace\s+condition", "race condition"),
     (r"\bdeadlock\b", "deadlock"),
-    # 中文
     (r"重构", "重构"),
     (r"架构", "架构"),
     (r"安全", "安全"),
@@ -51,8 +70,7 @@ _HEAVY_KEYWORDS = [
     (r"回滚", "回滚"),
 ]
 
-# ── Light 关键词 fast-path ──
-_LIGHT_KEYWORDS = [
+_BUILTIN_LIGHT = [
     (r"\bfix\s+typo\b", "fix typo"),
     (r"\btypo\b", "typo"),
     (r"\blint\b", "lint"),
@@ -60,7 +78,6 @@ _LIGHT_KEYWORDS = [
     (r"\bdocstring\b", "docstring"),
     (r"\bnit\b", "nit"),
     (r"\bimport\s+sort\b", "import sort"),
-    # 中文
     (r"错别字", "错别字"),
     (r"拼写错误", "拼写错误"),
     (r"排版", "排版"),
@@ -76,28 +93,191 @@ _LIGHT_KEYWORDS = [
     (r"加[个一]?todo", "加todo"),
 ]
 
-_heavy_re = [(re.compile(p, re.IGNORECASE), label) for p, label in _HEAVY_KEYWORDS]
-_light_re = [(re.compile(p, re.IGNORECASE), label) for p, label in _LIGHT_KEYWORDS]
 
-_LOG_PATH = os.path.expanduser("~/.config/mms/lb_route.log")
+# ── 关键词加载（内置 + 用户配置 + 自动学习，合并去重） ──
 
-# ── LLM 分类 prompt ──
-_CLASSIFY_SYSTEM = "You are a task classifier. Reply ONLY with one word: LIGHT or HEAVY."
+def _load_json_safe(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_json_safe(path, data):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    except OSError:
+        pass
+
+
+def _compile_keywords(builtin, user_list, learned_list):
+    """合并内置 + 用户 + 学习到的关键词，返回 [(compiled_re, label)]。"""
+    seen_patterns = set()
+    result = []
+    # 用户配置优先
+    for item in user_list:
+        if isinstance(item, str):
+            pattern, label = item, item
+        elif isinstance(item, list) and len(item) >= 2:
+            pattern, label = item[0], item[1]
+        else:
+            continue
+        if pattern not in seen_patterns:
+            seen_patterns.add(pattern)
+            result.append((re.compile(pattern, re.IGNORECASE), label))
+    # 自动学习
+    for item in learned_list:
+        if isinstance(item, str):
+            pattern, label = item, f"learned:{item}"
+        elif isinstance(item, list) and len(item) >= 2:
+            pattern, label = item[0], f"learned:{item[1]}"
+        else:
+            continue
+        if pattern not in seen_patterns:
+            seen_patterns.add(pattern)
+            result.append((re.compile(pattern, re.IGNORECASE), label))
+    # 内置默认
+    for pattern, label in builtin:
+        if pattern not in seen_patterns:
+            seen_patterns.add(pattern)
+            result.append((re.compile(pattern, re.IGNORECASE), label))
+    return result
+
+
+def _load_all_keywords():
+    """加载并合并所有关键词来源。返回 (guardrail_files, heavy_re, light_re)。"""
+    user_cfg = _load_json_safe(_KEYWORDS_PATH)
+    learned = _load_json_safe(_LEARNED_PATH)
+
+    # guardrail files
+    guardrail = set(_BUILTIN_GUARDRAIL_FILES)
+    guardrail.update(user_cfg.get("guardrail_files", []))
+
+    # heavy
+    heavy_re = _compile_keywords(
+        _BUILTIN_HEAVY,
+        user_cfg.get("heavy", []),
+        learned.get("heavy", []),
+    )
+    # light
+    light_re = _compile_keywords(
+        _BUILTIN_LIGHT,
+        user_cfg.get("light", []),
+        learned.get("light", []),
+    )
+    return guardrail, heavy_re, light_re
+
+
+# 模块加载时初始化，后续 classify_task 每次调用都用（热重载见下方）
+_GUARDRAIL_FILES, _heavy_re, _light_re = _load_all_keywords()
+_keywords_mtime = {
+    "user": os.path.getmtime(_KEYWORDS_PATH) if os.path.exists(_KEYWORDS_PATH) else 0,
+    "learned": os.path.getmtime(_LEARNED_PATH) if os.path.exists(_LEARNED_PATH) else 0,
+}
+
+
+def _maybe_reload_keywords():
+    """检查配置文件是否变化，变化则热重载关键词。"""
+    global _GUARDRAIL_FILES, _heavy_re, _light_re, _keywords_mtime
+    changed = False
+    for key, path in [("user", _KEYWORDS_PATH), ("learned", _LEARNED_PATH)]:
+        try:
+            mt = os.path.getmtime(path) if os.path.exists(path) else 0
+        except OSError:
+            mt = 0
+        if mt != _keywords_mtime[key]:
+            _keywords_mtime[key] = mt
+            changed = True
+    if changed:
+        _GUARDRAIL_FILES, _heavy_re, _light_re = _load_all_keywords()
+
+
+# ── 自动学习 ──
+
+# 内存中的学习计数器：{normalized_pattern: {"tier": str, "count": int}}
+_learn_counter: dict[str, dict] = defaultdict(lambda: {"tier": "", "count": 0})
+
+
+def _normalize_for_learning(text: str) -> str:
+    """把用户文本归一化为学习 key：去标点、小写、截断。
+    取前 8 个词保留足够上下文，避免 "帮我修复 typo" 和 "帮我修复安全漏洞" 归为同 key。
+    """
+    t = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text[:120]).strip().lower()
+    words = t.split()[:8]
+    return " ".join(words) if words else ""
+
+
+def _record_llm_result(text: str, tier: str):
+    """记录 LLM 高置信分类结果，达到阈值后自动 promote。
+    安全策略：只自动学习 light（误判代价低：浪费一次弱模型调用）。
+    heavy 不自动学习（误判代价高：复杂任务可能被困在弱模型上）。
+    """
+    if tier != "light":
+        return
+    key = _normalize_for_learning(text)
+    if not key or len(key) < 4:
+        return
+    entry = _learn_counter[key]
+    if entry["tier"] == tier:
+        entry["count"] += 1
+    else:
+        entry["tier"] = tier
+        entry["count"] = 1
+
+    if entry["count"] >= _LEARN_THRESHOLD:
+        _promote_keyword(key, tier)
+        entry["count"] = 0  # reset，避免重复写入
+
+
+def _promote_keyword(pattern: str, tier: str):
+    """把一个 pattern promote 到 learned keywords 文件。"""
+    learned = _load_json_safe(_LEARNED_PATH)
+    tier_list = learned.get(tier, [])
+    # 避免重复
+    existing_patterns = {item[0] if isinstance(item, list) else item for item in tier_list}
+    escaped = re.escape(pattern)
+    if escaped in existing_patterns or pattern in existing_patterns:
+        return
+    tier_list.append([escaped, pattern])
+    learned[tier] = tier_list
+    _save_json_safe(_LEARNED_PATH, learned)
+    _log_learn(f"promoted '{pattern}' → {tier}")
+    # 触发热重载
+    _maybe_reload_keywords()
+
+
+def _log_learn(msg: str):
+    try:
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
+        ts = datetime.now().strftime("%H:%M:%S")
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}]   LEARN    {msg}\n")
+    except OSError:
+        pass
+
+
+# ── LLM 分类 prompt（二分类 + 置信度） ──
+_CLASSIFY_SYSTEM = "You are a task classifier. Reply with exactly two words: the tier and confidence."
 _CLASSIFY_USER = """Classify this coding task (may be in Chinese or English):
 - LIGHT: trivial changes (typo, rename, formatting, comments, docs, simple config, one-liner fix, 改错别字, 加注释, 改文案, 排版, 重命名)
 - HEAVY: anything else (new feature, refactor, debug, multi-file, architecture, security, performance, 新功能, 重构, 优化, 修复bug)
 
 Task: {task}
 
-Reply LIGHT or HEAVY:"""
+Reply with LIGHT or HEAVY, followed by HIGH or LOW confidence. Example: "LIGHT HIGH" or "HEAVY LOW"."""
 
 
-def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> str | None:
-    """用 light 模型做快速二分类。失败返回 None。"""
+def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[str, str] | None:
+    """用 light 模型做二分类 + 置信度。返回 (tier, confidence) 或 None。"""
     if _httpx is None:
         return None
     try:
-        # 确保 URL 以 /v1/messages 结尾，不重复追加
         url = api_url.rstrip("/")
         if url.endswith("/v1"):
             endpoint = f"{url}/messages"
@@ -121,10 +301,8 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> str | No
             _log_llm_error(f"status={r.status_code} url={endpoint} body={r.text[:200]}")
             return None
         data = r.json()
-        # 兼容 Anthropic 和 OpenAI 两种响应格式，跳过 thinking blocks
         reply = ""
         thinking_text = ""
-        # Anthropic: {"content": [{"type":"thinking",...}, {"type":"text","text":"LIGHT"}]}
         content = data.get("content", [])
         if content and isinstance(content, list):
             for block in content:
@@ -135,20 +313,24 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> str | No
                 elif "text" in block:
                     reply = block["text"]
                     break
-        # OpenAI: {"choices": [{"message": {"content": "LIGHT"}}]}
         if not reply:
             choices = data.get("choices", [])
             if choices and isinstance(choices, list):
                 msg = choices[0].get("message", {})
                 reply = msg.get("content", "") if isinstance(msg, dict) else ""
-        # Fallback: 如果 text 为空但 thinking 里有结论，也提取
         check_text = (reply or thinking_text).strip().upper()
+        tier = None
+        confidence = "high"
         if "LIGHT" in check_text:
-            return "light"
-        if "HEAVY" in check_text:
-            return "heavy"
-        _log_llm_error(f"unexpected reply: {check_text[:100]} | raw={str(data)[:500]}")
-        return None
+            tier = "light"
+        elif "HEAVY" in check_text:
+            tier = "heavy"
+        if tier is None:
+            _log_llm_error(f"unexpected reply: {check_text[:100]} | raw={str(data)[:500]}")
+            return None
+        if "LOW" in check_text:
+            confidence = "low"
+        return (tier, confidence)
     except Exception as exc:
         _log_llm_error(f"exception: {exc}")
         return None
@@ -156,10 +338,9 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> str | No
 
 def _log_llm_error(msg: str):
     try:
-        log_path = os.path.expanduser("~/.config/mms/lb_route.log")
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        os.makedirs(_CONFIG_DIR, exist_ok=True)
         ts = datetime.now().strftime("%H:%M:%S")
-        with open(log_path, "a", encoding="utf-8") as f:
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(f"[{ts}]   LLM_ERR  {msg}\n")
     except OSError:
         pass
@@ -167,12 +348,15 @@ def _log_llm_error(msg: str):
 
 def classify_task(text: str, api_url: str = None, api_key: str = None,
                   light_model: str = None) -> tuple[str, str]:
-    """三层分类：guardrail → 关键词 fast-path → LLM 分类 → 默认 heavy。
+    """四层分类：guardrail → 关键词 fast-path → LLM 分类(+置信度+自学习) → 默认 medium。
 
-    api_url / api_key / light_model: 传入时启用 LLM 分类（用 light 模型判断）。
+    返回 (tier, reason)，tier 为 "light" / "medium" / "heavy"。
     """
     if not text:
         return "heavy", "empty input"
+
+    # 热重载：配置文件变化时自动刷新关键词
+    _maybe_reload_keywords()
 
     text_lower = text.lower()
 
@@ -191,14 +375,18 @@ def classify_task(text: str, api_url: str = None, api_key: str = None,
     if light_hits:
         return "light", f"keyword: {','.join(light_hits)}"
 
-    # 4. LLM 分类（仅首次用户消息，后续轮次文本太长/系统消息多，跳过）
+    # 4. LLM 分类 + 置信度 → 低置信归 medium + 高置信自动学习
     if api_url and api_key and light_model and len(text) < 2000:
         result = _llm_classify(text, api_url, api_key, light_model)
         if result:
-            return result, "llm"
+            tier, confidence = result
+            if confidence == "high":
+                _record_llm_result(text, tier)
+                return tier, f"llm:{tier}+high_confidence"
+            return "medium", f"llm:{tier}+low_confidence"
 
-    # 5. 默认 heavy（安全，不降级）
-    return "heavy", "default"
+    # 5. 默认 medium（安全中间档，不浪费也不冒险）
+    return "medium", "default"
 
 
 def log_route(level: str, reason: str, model_used: str, text_preview: str):
@@ -209,7 +397,8 @@ def log_route(level: str, reason: str, model_used: str, text_preview: str):
         preview = text_preview[:60].replace("\n", " ")
         if len(text_preview) > 60:
             preview += "…"
-        tag = "⬇ LIGHT" if level == "light" else "  heavy"
+        tags = {"light": "⬇ LIGHT", "medium": "  MEDIUM", "heavy": "⬆ HEAVY"}
+        tag = tags.get(level, f"  {level}")
         line = f"[{ts}] {tag}  model={model_used}  reason={reason}  prompt={preview}\n"
         with open(_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(line)
@@ -217,9 +406,12 @@ def log_route(level: str, reason: str, model_used: str, text_preview: str):
         pass
 
 
-def route_model(user_message: str, heavy_model: str, light_model: str) -> str:
-    """light → light_model，其余 → heavy_model。"""
+def route_model(user_message: str, heavy_model: str, light_model: str,
+                medium_model: str = None) -> str:
+    """light → light_model，medium → medium_model，其余 → heavy_model。"""
     level, _ = classify_task(user_message)
     if level == "light":
         return light_model
+    if level == "medium" and medium_model:
+        return medium_model
     return heavy_model
