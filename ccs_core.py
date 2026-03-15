@@ -3211,7 +3211,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         runtime_runtime = None
         family_models = []
 
-        # ── 负载模式：拦截，弹出 heavy+light 选择 TUI ──
+        # ── 智能路由：拦截，弹出 heavy+medium+light 选择 TUI ──
         if scene_name and scenes.get(scene_name, {}).get("load_balance"):
             from ccs_tui import select_load_balance_tui, save_lb_history
             probe_result = _probe_models(current_provider, emit_output=False).get("models")
@@ -3219,7 +3219,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if lb_result is None:
                 continue
             model_info = lb_result
-            save_lb_history(lb_result["model"], lb_result["lb_light"])
+            save_lb_history(lb_result["model"], lb_result.get("lb_medium", ""), lb_result.get("lb_light", ""))
 
         if scene_name is None:
             aggregated = _aggregate_provider_models(

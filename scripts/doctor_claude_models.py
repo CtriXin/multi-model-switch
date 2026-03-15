@@ -67,6 +67,16 @@ class ClaudeRoute:
     api_key: str = ""
 
 
+@dataclass
+class ProviderSummary:
+    provider_id: str
+    model_count: int
+    chat_direct: str
+    claude_protocol: str
+    claude_cli: str
+    recommendation: str
+
+
 def _classify_http(status_code: int, body_text: str) -> tuple[str, bool]:
     body = (body_text or "").lower()
     if 200 <= status_code < 300:
@@ -147,6 +157,22 @@ def _attach_created(result: CheckResult, model_entry: dict[str, Any]) -> CheckRe
     return result
 
 
+def _attach_created_from_response(result: CheckResult, response_text: str) -> CheckResult:
+    if result.created or not response_text:
+        return result
+    try:
+        payload = json.loads(response_text)
+    except Exception:
+        return result
+    if not isinstance(payload, dict):
+        return result
+    created, created_ts = _extract_created_fields(payload)
+    if created:
+        result.created = created
+        result.created_ts = created_ts
+    return result
+
+
 def _fetch_openai_model_catalog(provider: dict[str, Any]) -> list[dict[str, Any]]:
     probe = _probe_models(provider, emit_output=False)
     if probe.get("models") is None:
@@ -211,7 +237,8 @@ def _openai_chat_check(provider: dict[str, Any], model: str) -> CheckResult:
     try:
         resp = httpx.post(f"{url}/chat/completions", headers=headers, json=payload, timeout=HTTP_TIMEOUT)
         status, ok = _classify_http(resp.status_code, resp.text)
-        return CheckResult("chat", f"{provider['id']}::{model}", "openai", status, _trim(resp.text), ok)
+        result = CheckResult("chat", f"{provider['id']}::{model}", "openai", status, _trim(resp.text), ok)
+        return _attach_created_from_response(result, resp.text)
     except Exception as exc:
         status, detail = _classify_exception(exc)
         return CheckResult("chat", f"{provider['id']}::{model}", "openai", status, detail, False)
@@ -233,7 +260,8 @@ def _anthropic_chat_check(provider: dict[str, Any], model: str, base_url: str | 
     try:
         resp = httpx.post(f"{url}/v1/messages", headers=headers, json=payload, timeout=HTTP_TIMEOUT)
         status, ok = _classify_http(resp.status_code, resp.text)
-        return CheckResult("chat", f"{provider['id']}::{model}", "anthropic", status, _trim(resp.text), ok)
+        result = CheckResult("chat", f"{provider['id']}::{model}", "anthropic", status, _trim(resp.text), ok)
+        return _attach_created_from_response(result, resp.text)
     except Exception as exc:
         status, detail = _classify_exception(exc)
         return CheckResult("chat", f"{provider['id']}::{model}", "anthropic", status, detail, False)
@@ -262,10 +290,11 @@ def _resolve_anthropic_route(provider: dict[str, Any], probe_model: str, timeout
     return None, "failed"
 
 
-def _resolve_claude_route(provider: dict[str, Any], sample_model: str, timeout: int) -> ClaudeRoute:
-    anthropic_url, _ = _resolve_anthropic_route(provider, sample_model, timeout)
-    if anthropic_url:
-        return ClaudeRoute(mode="direct", anthropic_url=anthropic_url)
+def _resolve_claude_route(provider: dict[str, Any], sample_models: list[str], timeout: int) -> ClaudeRoute:
+    for model in sample_models:
+        anthropic_url, _ = _resolve_anthropic_route(provider, model, timeout)
+        if anthropic_url:
+            return ClaudeRoute(mode="direct", anthropic_url=anthropic_url)
 
     openai_url = _openai_base_url(provider)
     api_key = provider.get("openai_api_key") or provider.get("api_key", "")
@@ -372,6 +401,94 @@ def _render_table(title: str, results: list[CheckResult]) -> None:
     console.print(table)
 
 
+def _collapse_status(results: list[CheckResult]) -> str:
+    if not results:
+        return "not_tested"
+    statuses = [item.status for item in results]
+    if any(item.ok for item in results):
+        if any(status == "agent_only" for status in statuses):
+            return "partial_ok"
+        return "ok"
+    priority = [
+        "agent_only",
+        "rate_limited",
+        "auth_failed",
+        "no_access",
+        "endpoint_missing",
+        "model_missing",
+        "probe_failed",
+        "timeout",
+        "request_failed",
+        "failed",
+    ]
+    for key in priority:
+        if key in statuses:
+            return key
+    return statuses[0]
+
+
+def _build_provider_summaries(model_results: list[CheckResult], claude_results: list[CheckResult], include_cli: bool) -> list[ProviderSummary]:
+    grouped: dict[str, dict[str, list[CheckResult]]] = {}
+    for item in model_results + claude_results:
+        provider_id = item.target.split("::", 1)[0]
+        grouped.setdefault(provider_id, {}).setdefault(item.category, []).append(item)
+
+    summaries: list[ProviderSummary] = []
+    for provider_id in sorted(grouped):
+        chat_items = grouped[provider_id].get("chat", [])
+        claude_protocol_items = grouped[provider_id].get("claude-protocol", [])
+        claude_cli_items = grouped[provider_id].get("claude-cli", [])
+
+        chat_status = _collapse_status(chat_items)
+        claude_protocol_status = _collapse_status(claude_protocol_items)
+        claude_cli_status = _collapse_status(claude_cli_items) if include_cli else "skipped"
+
+        if claude_protocol_status == "ok" and chat_status == "agent_only":
+            recommendation = "chat_direct=no, claude=yes"
+        elif claude_protocol_status == "ok" and chat_status == "rate_limited":
+            recommendation = "chat_blocked_by_quota, claude=yes"
+        elif claude_protocol_status == "ok" and chat_status != "ok":
+            recommendation = "chat_partial_or_blocked, claude=yes"
+        elif claude_protocol_status != "ok" and chat_status == "ok":
+            recommendation = "chat=yes, claude=no"
+        elif claude_protocol_status == "ok" and chat_status == "ok":
+            recommendation = "chat=yes, claude=yes"
+        else:
+            recommendation = "needs_manual_check"
+
+        summaries.append(
+            ProviderSummary(
+                provider_id=provider_id,
+                model_count=len(chat_items),
+                chat_direct=chat_status,
+                claude_protocol=claude_protocol_status,
+                claude_cli=claude_cli_status,
+                recommendation=recommendation,
+            )
+        )
+    return summaries
+
+
+def _render_summary_table(summaries: list[ProviderSummary]) -> None:
+    table = Table(title="Provider Health Summary", show_lines=False)
+    table.add_column("Provider", style="green")
+    table.add_column("Models", style="cyan")
+    table.add_column("Chat Direct", style="yellow")
+    table.add_column("Claude Proto", style="magenta")
+    table.add_column("Claude CLI", style="blue")
+    table.add_column("Recommendation")
+    for item in summaries:
+        table.add_row(
+            item.provider_id,
+            str(item.model_count),
+            item.chat_direct,
+            item.claude_protocol,
+            item.claude_cli,
+            item.recommendation,
+        )
+    console.print(table)
+
+
 def _run_provider_checks(cfg: dict[str, Any], provider_id: str, max_models: int, skip_claude_cli: bool, route_probe_timeout: int) -> tuple[list[CheckResult], list[CheckResult], list[CheckResult]]:
     provider = resolve_provider_context(cfg, provider_id)
     provider_results: list[CheckResult] = []
@@ -380,19 +497,29 @@ def _run_provider_checks(cfg: dict[str, Any], provider_id: str, max_models: int,
 
     if "openai_chat_completions" in provider.get("protocols", []):
         provider_results.append(_check_openai_models(provider))
-    if "anthropic_messages" in provider.get("protocols", []):
-        probe_model = (provider.get("fallback_models") or ["claude-sonnet-4-6"])[0]
-        anthropic_url, method = _resolve_anthropic_route(provider, probe_model, route_probe_timeout)
-        if anthropic_url:
-            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "ok", f"resolved={anthropic_url} method={method}", True))
-        else:
-            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "probe_failed", f"configured={_anthropic_base_url(provider) or '(none)'}", False))
 
     catalog = _fetch_openai_model_catalog(provider)
     catalog.sort(key=lambda item: (_extract_created_fields(item)[1] is None, -(_extract_created_fields(item)[1] or 0), str(item.get("id", ""))))
     if max_models and max_models > 0:
         catalog = catalog[:max_models]
-    route_info = _resolve_claude_route(provider, catalog[0]["id"] if catalog else "claude-sonnet-4-6", route_probe_timeout)
+    probe_candidates = []
+    for item in catalog:
+        model_id = str(item.get("id", "")).strip()
+        if model_id and model_id not in probe_candidates:
+            probe_candidates.append(model_id)
+    for model_id in provider.get("fallback_models") or []:
+        mid = str(model_id).strip()
+        if mid and mid not in probe_candidates:
+            probe_candidates.append(mid)
+    if not probe_candidates:
+        probe_candidates = ["claude-sonnet-4-6"]
+    route_info = _resolve_claude_route(provider, probe_candidates, route_probe_timeout)
+
+    if "anthropic_messages" in provider.get("protocols", []):
+        if route_info.mode == "direct":
+            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "ok", f"resolved={route_info.anthropic_url} method=probed", True))
+        else:
+            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "probe_failed", f"configured={_anthropic_base_url(provider) or '(none)'}", False))
 
     for entry in catalog:
         model = str(entry.get("id", "")).strip()
@@ -482,8 +609,13 @@ def main() -> int:
 
     all_results = provider_results + account_results + model_results + claude_results
     if args.json:
-        print(json.dumps([item.__dict__ for item in all_results], ensure_ascii=False, indent=2))
+        payload = {
+            "summary": [item.__dict__ for item in _build_provider_summaries(model_results, claude_results, include_cli=not args.skip_claude_cli)],
+            "results": [item.__dict__ for item in all_results],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
+        _render_summary_table(_build_provider_summaries(model_results, claude_results, include_cli=not args.skip_claude_cli))
         _render_table("Provider / OAuth Connectivity", provider_results + account_results)
         _render_table("Model Chat Availability", model_results)
         _render_table("Claude Compatibility", claude_results)
