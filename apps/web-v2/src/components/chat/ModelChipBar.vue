@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useAppStore, getModelColor } from '@/stores/app'
+import { useAppStore, getModelColor, type ModelMeta } from '@/stores/app'
 import { X, Plus, Search, GitMerge, Shuffle } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -11,6 +11,15 @@ const popoverOpen = ref(false)
 const searchQuery = ref('')
 
 const filteredModels = ref<typeof appStore.models>([])
+
+/** Group filtered models by provider for the popover */
+const groupedFiltered = computed(() => {
+  const map: Record<string, ModelMeta[]> = {}
+  for (const m of filteredModels.value) {
+    ;(map[m.provider] ??= []).push(m)
+  }
+  return map
+})
 
 function updateFiltered() {
   const q = searchQuery.value.toLowerCase()
@@ -55,10 +64,11 @@ function tierClass(tier: number): string {
 
 <template>
   <div class="relative border-t border-border-subtle bg-surface-1">
-    <div class="max-w-3xl mx-auto flex items-center h-10">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="flex items-center h-10">
       <!-- Scrollable chips area -->
       <div class="flex-1 min-w-0 overflow-x-auto no-scrollbar">
-        <div class="flex items-center gap-1.5 px-3 py-1.5 w-max">
+        <div class="flex items-center gap-1.5 py-1.5 w-max min-w-full">
           <span
             v-for="m in appStore.selectedModels"
             :key="m.id"
@@ -88,7 +98,7 @@ function tierClass(tier: number): string {
       </div>
 
       <!-- Fixed right buttons -->
-      <div class="flex items-center gap-1 pr-3 shrink-0 border-l border-border-subtle pl-2">
+      <div class="flex items-center gap-1 shrink-0 border-l border-border-subtle pl-3">
         <button
           @click="appStore.randomPick()"
           class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs
@@ -116,17 +126,18 @@ function tierClass(tier: number): string {
           讨论
         </button>
       </div>
+      </div>
     </div>
 
     <!-- Popover dropdown -->
     <Transition name="popover">
       <div
         v-if="popoverOpen"
-        class="absolute left-0 right-0 bottom-full mb-1 z-50 px-3"
+        class="absolute left-0 right-0 bottom-full mb-1 z-50 px-4"
       >
         <div class="fixed inset-0" @click="popoverOpen = false" />
 
-        <div class="relative max-w-3xl mx-auto card shadow-xl max-h-72 flex flex-col">
+        <div class="relative max-w-5xl mx-auto card shadow-xl max-h-72 flex flex-col">
           <!-- Search -->
           <div class="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
             <Search :size="14" class="text-text-tertiary shrink-0" />
@@ -140,28 +151,34 @@ function tierClass(tier: number): string {
             />
           </div>
 
-          <!-- Model list -->
+          <!-- Model list grouped by provider -->
           <div class="overflow-y-auto flex-1 p-1.5">
-            <div
-              v-for="model in filteredModels"
-              :key="model.id"
-              @click="selectModel(model.id)"
-              class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-all text-sm"
-              :class="appStore.selectedModelIds.includes(model.id)
-                ? 'bg-accent/10 text-accent'
-                : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'"
-            >
-              <span
-                class="w-2.5 h-2.5 rounded-full shrink-0"
-                :style="{ backgroundColor: getModelColor(model.provider) }"
-              />
-              <span class="flex-1 truncate">{{ model.name }}</span>
-              <span
-                class="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
-                :class="tierClass(model.tier)"
-              >{{ tierLabel(model.tier) }}</span>
-              <span v-if="appStore.selectedModelIds.includes(model.id)" class="text-accent text-xs">✓</span>
-            </div>
+            <template v-for="(models, provider) in groupedFiltered" :key="provider">
+              <div class="flex items-center gap-2 px-2.5 pt-2.5 pb-1">
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :style="{ backgroundColor: getModelColor(provider) }"
+                />
+                <span class="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">{{ provider }}</span>
+                <span class="text-[10px] text-text-tertiary">({{ models.length }})</span>
+              </div>
+              <div
+                v-for="model in models"
+                :key="model.id"
+                @click="selectModel(model.id)"
+                class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-all text-sm"
+                :class="appStore.selectedModelIds.includes(model.id)
+                  ? 'bg-accent/10 text-accent'
+                  : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'"
+              >
+                <span class="flex-1 truncate">{{ model.name }}</span>
+                <span
+                  class="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                  :class="tierClass(model.tier)"
+                >{{ tierLabel(model.tier) }}</span>
+                <span v-if="appStore.selectedModelIds.includes(model.id)" class="text-accent text-xs">✓</span>
+              </div>
+            </template>
 
             <p v-if="!filteredModels.length" class="text-xs text-text-tertiary text-center py-4">
               未找到匹配的模型

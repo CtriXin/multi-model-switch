@@ -50,23 +50,21 @@ async function copyContent() {
 
 <template>
   <div
-    class="rounded-xl border overflow-hidden transition-all duration-200 group"
+    class="rounded-xl overflow-hidden transition-all duration-200 group border-2 flex h-full min-h-0 flex-col cursor-pointer"
     :class="[
       carousel ? 'bg-surface-2' : 'card',
       selected
         ? 'ring-1 shadow-lg'
         : active
           ? 'ring-1 shadow-lg'
-          : 'hover:border-border-strong hover:shadow-md',
+          : 'hover:shadow-lg hover:-translate-y-0.5',
     ]"
     :style="selected
-      ? { borderColor: color + '60', boxShadow: `0 4px 12px ${color}15`, '--tw-ring-color': color + '30' }
+      ? { borderColor: color, boxShadow: `0 4px 12px ${color}20`, '--tw-ring-color': color + '30' }
       : active
-        ? { borderColor: color + '40', boxShadow: `0 4px 12px ${color}10`, '--tw-ring-color': color + '25' }
-        : {}"
+        ? { borderColor: color + '80', boxShadow: `0 4px 12px ${color}10`, '--tw-ring-color': color + '25' }
+        : { borderColor: color + '40' }"
   >
-    <!-- Provider color top bar (hidden when selected — border already shows color) -->
-    <div v-if="!selected" class="h-[3px]" :style="{ backgroundColor: color }" />
 
     <!-- Header -->
     <div class="flex items-center justify-between px-4 py-2.5 border-b border-border-subtle/50">
@@ -105,8 +103,8 @@ async function copyContent() {
       </div>
     </div>
 
-    <!-- Content area -->
-    <div class="px-4 py-3">
+    <!-- Content area (scrollable) -->
+    <div class="px-4 py-3 flex-1 min-h-0 overflow-y-auto">
       <!-- Error state -->
       <div v-if="error" class="text-center py-4">
         <p class="text-xs text-red-400 mb-3">{{ error }}</p>
@@ -157,8 +155,8 @@ async function copyContent() {
       </div>
     </div>
 
-    <!-- Footer (when done) -->
-    <div v-if="isDone" class="flex items-center gap-1 px-4 py-2 border-t border-border-subtle/50">
+    <!-- Footer (when done) — sticky at bottom -->
+    <div v-if="isDone" class="flex items-center gap-1 px-4 py-2 border-t border-border-subtle/50 shrink-0 bg-surface-1">
       <!-- Select / Selected -->
       <button
         v-if="!selected"
