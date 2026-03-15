@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { getModelColor, useAppStore } from '@/stores/app'
-import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2 } from 'lucide-vue-next'
+import { useProviderStore } from '@/stores/provider'
+import { streamChat } from '@/services/api'
+import { getApiKey } from '@/services/keychain'
+import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -20,12 +23,16 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const providerStore = useProviderStore()
 const showRaw = ref(false)
 const summaryText = ref('')
 const streaming = ref(false)
 const done = ref(false)
+const judgeModel = ref('')
+const showDetails = ref(false)
+const error = ref('')
 
-// Track which raw response cards are expanded (default: collapsed/summary)
+// Track which raw response cards are expanded
 const expandedCards = reactive<Record<string, boolean>>({})
 
 const summaryHtml = computed(() => md.render(summaryText.value || ''))
@@ -42,29 +49,127 @@ function toggleExpand(modelId: string) {
   expandedCards[modelId] = !expandedCards[modelId]
 }
 
-// Mock summary generation
+/** Pick evaluator: prefer a model NOT in the response set, highest tier first */
+function pickEvaluator(): { modelId: string; isSelfEval: boolean } {
+  const respondingIds = new Set(props.responses.keys())
+  // Non-participating models, sorted by tier desc
+  const candidates = appStore.models
+    .filter(m => !respondingIds.has(m.id))
+    .sort((a, b) => b.tier - a.tier)
+
+  if (candidates.length) {
+    return { modelId: candidates[0].id, isSelfEval: false }
+  }
+  // Fallback: use responding model with highest tier
+  const responding = Array.from(respondingIds)
+    .map(id => appStore.models.find(m => m.id === id))
+    .filter(Boolean)
+    .sort((a, b) => b!.tier - a!.tier)
+
+  return {
+    modelId: responding[0]?.id ?? Array.from(respondingIds)[0],
+    isSelfEval: true,
+  }
+}
+
+function buildJudgePrompt(isSelfEval: boolean): string {
+  const responseEntries = Array.from(props.responses.entries())
+    .map(([id, msg], i) => `[回答 ${String.fromCharCode(65 + i)}]\n${msg.content}`)
+    .join('\n\n---\n\n')
+
+  const singleModelClause = isSelfEval
+    ? '\n\n注意：你只有一个信息来源（单模型自评）。在 uncertainty 中默认从「中等」起评，除非有充分证据支持更高确信度。'
+    : ''
+
+  return `你是一个 Risk-Aware Decision Judge。你的职责不是中立总结，而是从多个回答中提取可行动的决策建议。
+
+用户的原始问题：
+${props.prompt}
+
+以下是匿名的多个模型回答（不要猜测来源）：
+
+${responseEntries}
+
+请按以下 Markdown 格式输出你的评估：
+
+## 决策评估
+
+### 各回答评分
+对每个回答给出 1-5 分评分和一句话评语（评分仅供参考，不是唯一标准）：
+- 回答 A: X/5 — 评语
+- 回答 B: X/5 — 评语
+...
+
+### 共识
+各回答达成一致的部分。
+
+### 分歧
+有争议的部分及各方立场。
+
+### 风险与盲点
+回答中被忽略或低估的风险。
+
+### 建议行动
+- **现在可以安全做的**：...
+- **需要进一步验证的**：...
+- **条件失效时**：说明什么情况下以上建议不再适用
+
+### 不确定性
+对本次评估的整体信心：高 / 中 / 低，并说明原因。${singleModelClause}`
+}
+
 async function generateSummary() {
   if (streaming.value || done.value) return
   emit('activate')
   streaming.value = true
   summaryText.value = ''
+  error.value = ''
 
-  const modelNames = Array.from(props.responses.keys()).map(id => getModelName(id))
+  const { modelId, isSelfEval } = pickEvaluator()
+  const model = appStore.models.find(m => m.id === modelId)
+  judgeModel.value = (model?.name ?? modelId) + (isSelfEval ? ' (自评)' : '')
 
-  const text = `### 中立总结
+  // Find provider for this model
+  let providerConfig = providerStore.providers.find(p => p.id === model?.provider)
+  if (!providerConfig) {
+    if (modelId.startsWith('demo/')) {
+      providerConfig = providerStore.providers.find(p => p.type === 'mock')
+    }
+    if (!providerConfig) {
+      providerConfig = providerStore.providers.find(p => p.type === 'openrouter')
+    }
+  }
 
-**共识：** ${modelNames.join('、')} 都认同应该采用渐进式的架构演进策略，避免一步到位的过度设计。各方均强调明确的模块/服务边界是成功的关键。
+  if (!providerConfig) {
+    error.value = '未找到可用的评估模型通道'
+    streaming.value = false
+    return
+  }
 
-**分歧：**
-- **服务粒度** — 部分模型倾向更细的拆分（函数级），部分建议保持适中粒度（服务级）
-- **通信方式** — 事件驱动 vs 同步调用，各有侧重
+  const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
+  if (!apiKey) {
+    error.value = '评估模型的 API Key 未配置'
+    streaming.value = false
+    return
+  }
 
-**推荐：** 如果团队规模较小且业务初期，建议从模块化单体入手；如果已有微服务经验且流量波动大，可直接采用混合架构方案。`
+  try {
+    const prompt = buildJudgePrompt(isSelfEval)
+    const stream = streamChat({
+      provider: providerConfig,
+      apiKey,
+      model: modelId,
+      messages: [{ role: 'user', content: prompt }],
+    })
 
-  for (let i = 0; i < text.length; i++) {
-    summaryText.value += text[i]
-    const delay = '，。！？\n'.includes(text[i]) ? 35 : (4 + Math.random() * 8)
-    await new Promise(r => setTimeout(r, delay))
+    for await (const chunk of stream) {
+      summaryText.value += chunk
+    }
+  } catch (e: any) {
+    error.value = e.message
+    if (!summaryText.value) {
+      summaryText.value = `> 评估失败: ${e.message}`
+    }
   }
 
   streaming.value = false
@@ -83,7 +188,7 @@ async function generateSummary() {
     >
       <Sparkles :size="14" class="text-amber-400 group-hover:scale-110 transition-transform" />
       <span class="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
-        一键总结 — 中立 Agent 帮你看
+        决策评估 — Judge Agent 帮你看
       </span>
     </div>
 
@@ -91,11 +196,20 @@ async function generateSummary() {
     <div v-else class="p-4">
       <div class="flex items-center gap-2 mb-3">
         <Sparkles :size="14" class="text-amber-400" />
-        <span class="text-sm font-medium text-text-primary">中立总结</span>
+        <span class="text-sm font-medium text-text-primary">决策评估</span>
+        <span v-if="judgeModel" class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">
+          由 {{ judgeModel }} 评估
+        </span>
         <span
           v-if="streaming"
           class="inline-block w-1.5 h-4 bg-amber-400 ml-1 animate-cursor_blink"
         />
+      </div>
+
+      <!-- Error -->
+      <div v-if="error && !summaryText" class="flex items-center gap-2 text-xs text-red-400">
+        <AlertTriangle :size="14" />
+        {{ error }}
       </div>
 
       <div class="md-body text-sm" v-html="summaryHtml" />
@@ -166,7 +280,6 @@ async function generateSummary() {
                   :class="expandedCards[modelId] ? '' : 'line-clamp-4'"
                 >{{ msg.content }}</div>
 
-                <!-- Show "展开" hint when clamped -->
                 <button
                   v-if="!expandedCards[modelId]"
                   @click.stop="toggleExpand(modelId)"
@@ -179,7 +292,7 @@ async function generateSummary() {
           </div>
         </Transition>
 
-        <!-- Discuss CTA (only when showDiscuss is true = a model is selected) -->
+        <!-- Discuss CTA -->
         <button
           v-if="showDiscuss"
           @click="emit('discuss')"
