@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquare, GitMerge } from 'lucide-vue-next'
+import { MessageSquare, GitMerge, Users } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -8,6 +8,7 @@ const router = useRouter()
 const tabs = [
   { path: '/chat', label: '对话', icon: MessageSquare },
   { path: '/discuss', label: '讨论', icon: GitMerge },
+  { path: '/advisors', label: '锦囊团', icon: Users },
 ]
 </script>
 

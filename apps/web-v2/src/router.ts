@@ -18,6 +18,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '讨论', icon: 'git-merge' },
   },
   {
+    path: '/advisors',
+    name: 'advisors',
+    component: () => import('@/views/AdvisorsView.vue'),
+    meta: { title: '锦囊团', icon: 'users' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

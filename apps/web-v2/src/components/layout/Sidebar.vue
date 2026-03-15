@@ -3,7 +3,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useTheme } from '@/composables/useTheme'
 import {
-  MessageSquare, GitMerge, Plus, Settings, Package,
+  MessageSquare, GitMerge, Users, Plus, Settings, Package,
   Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-vue-next'
 import { onMounted } from 'vue'
@@ -30,9 +30,15 @@ function newDiscuss() {
   router.push('/discuss')
 }
 
+function newAdvisors() {
+  router.push('/advisors')
+}
+
 function switchTo(session: { id: string; type: string }) {
   sessionStore.switchSession(session.id)
-  router.push(session.type === 'chat' ? '/chat' : '/discuss')
+  if (session.type === 'chat') router.push('/chat')
+  else if (session.type === 'discuss') router.push('/discuss')
+  else router.push('/advisors')
 }
 
 function deleteSession(id: string, e: Event) {
@@ -60,6 +66,11 @@ function deleteSession(id: string, e: Event) {
     <!-- New discuss -->
     <button @click="newDiscuss" class="btn-icon" title="新讨论">
       <GitMerge :size="16" />
+    </button>
+
+    <!-- Advisors -->
+    <button @click="newAdvisors" class="btn-icon" title="锦囊团">
+      <Users :size="16" />
     </button>
 
     <div class="flex-1" />
@@ -127,6 +138,16 @@ function deleteSession(id: string, e: Event) {
         <span class="font-medium">新讨论</span>
         <Plus :size="12" class="ml-auto text-text-tertiary" />
       </button>
+      <button
+        @click="newAdvisors"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/advisors'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <Users :size="16" :stroke-width="1.8" />
+        <span class="font-medium">锦囊团</span>
+      </button>
     </div>
 
     <!-- Divider -->
@@ -149,7 +170,8 @@ function deleteSession(id: string, e: Event) {
             : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
         >
           <MessageSquare v-if="session.type === 'chat'" :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
-          <GitMerge v-else :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
+          <GitMerge v-else-if="session.type === 'discuss'" :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
+          <Users v-else :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
           <div class="flex-1 min-w-0">
             <div class="text-xs font-medium truncate">{{ session.title }}</div>
             <div class="text-[10px] text-text-tertiary flex items-center gap-2 mt-0.5">
