@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 dist/
+node_modules/
+package-lock.json
+test-results/
 .ai/agent-release-notes.md
 .ai/plan/
 .ai/summaries/
