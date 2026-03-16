@@ -41,7 +41,7 @@ function startUsing() {
         >
           <Rocket :size="24" class="text-white" />
         </div>
-        <h1 class="text-xl font-bold text-text-primary mb-2">🚀 快速开始</h1>
+        <h1 class="text-xl font-bold text-text-primary mb-2">快速开始</h1>
         <p class="text-sm text-text-tertiary max-w-md mx-auto">
           先配一个能用的免费 API 就能开始。这里更像新手引导，复杂通道管理放到设置里。
         </p>
