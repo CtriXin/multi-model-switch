@@ -996,7 +996,7 @@ async function clearAllKeys() {
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">版本</span>
-            <span class="text-text-tertiary font-mono text-xs">v0.3.0</span>
+            <span class="text-text-tertiary font-mono text-xs">v0.3.1</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">描述</span>
