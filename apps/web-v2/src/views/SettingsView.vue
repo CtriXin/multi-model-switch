@@ -10,7 +10,7 @@ import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Co
 import { ref, onMounted, computed } from 'vue'
 
 const router = useRouter()
-const { theme, toggle: toggleTheme } = useTheme()
+const { theme, toggle: toggleTheme, v3Config } = useTheme()
 const sidebarExpanded = ref(true)
 const providerStore = useProviderStore()
 const appStore = useAppStore()
@@ -404,6 +404,71 @@ async function clearAllKeys() {
               <Sidebar :size="12" class="text-text-tertiary" />
             </span>
           </button>
+        </div>
+
+        <div class="h-px bg-border-subtle my-2" />
+
+        <div class="space-y-4 pt-2">
+          <div>
+            <p class="text-sm font-semibold text-text-primary flex items-center gap-2 mb-1">
+              <Sparkles :size="14" class="text-accent" />
+              PolyMinder V3 物理引擎 (Cinematic Fluid)
+            </p>
+            <p class="text-xs text-text-tertiary">实时调节界面的物理玻璃质感与生命力。</p>
+          </div>
+
+          <div class="space-y-4 bg-surface-2/50 p-4 rounded-xl border border-border-subtle">
+            <!-- Blur -->
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span class="text-text-secondary">模糊强度 (Blur)</span>
+                <span class="text-text-tertiary font-mono">{{ v3Config.blurAmount }}px</span>
+              </div>
+              <input type="range" v-model="v3Config.blurAmount" min="0" max="80" class="w-full accent-accent" />
+            </div>
+            
+            <!-- Saturation -->
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span class="text-text-secondary">色彩饱和 (Saturate)</span>
+                <span class="text-text-tertiary font-mono">{{ v3Config.saturation }}%</span>
+              </div>
+              <input type="range" v-model="v3Config.saturation" min="0" max="200" class="w-full accent-accent" />
+            </div>
+
+            <!-- Stroke -->
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span class="text-text-secondary">高光边框 (Stroke)</span>
+                <span class="text-text-tertiary font-mono">{{ v3Config.borderOpacity }}%</span>
+              </div>
+              <input type="range" v-model="v3Config.borderOpacity" min="0" max="100" class="w-full accent-accent" />
+            </div>
+
+            <!-- Grain -->
+            <div class="space-y-2">
+              <div class="flex justify-between text-xs">
+                <span class="text-text-secondary">胶片颗粒 (Grain Noise)</span>
+                <span class="text-text-tertiary font-mono">{{ v3Config.noiseOpacity }}%</span>
+              </div>
+              <input type="range" v-model="v3Config.noiseOpacity" min="0" max="20" class="w-full accent-accent" />
+            </div>
+
+            <!-- Aurora Toggle -->
+            <div class="flex items-center justify-between pt-2 border-t border-border-subtle">
+              <span class="text-xs text-text-secondary">底层极光引擎 (Aurora)</span>
+              <button
+                @click="v3Config.showAurora = !v3Config.showAurora"
+                class="relative w-10 h-5 rounded-full transition-colors duration-200"
+                :class="v3Config.showAurora ? 'bg-accent' : 'bg-surface-4'"
+              >
+                <span
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
+                  :class="v3Config.showAurora ? 'translate-x-5' : 'translate-x-0.5'"
+                />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -927,11 +992,11 @@ async function clearAllKeys() {
         <div class="space-y-2 text-sm">
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">应用名称</span>
-            <span class="text-text-primary font-medium">MMS Pro</span>
+            <span class="text-text-primary font-medium">PolyMinder</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">版本</span>
-            <span class="text-text-tertiary font-mono text-xs">v0.2.0</span>
+            <span class="text-text-tertiary font-mono text-xs">v0.3.0</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">描述</span>
