@@ -178,7 +178,7 @@ watch(() => session.isActive.value, (active) => {
         Phase 3 · 综合结论
       </h4>
       <div class="md-body text-sm" v-html="synthesisHtml" />
-      <div v-if="sanitizedSynthesis.value.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+      <div v-if="sanitizedSynthesis.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
         已隐藏模型思考过程，只展示最终结论
       </div>
       <span
@@ -222,7 +222,7 @@ watch(() => session.isActive.value, (active) => {
         </div>
         <template v-if="session.rollupText.value">
           <div class="md-body text-sm" v-html="rollupHtml" />
-          <div v-if="sanitizedRollup.value.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+          <div v-if="sanitizedRollup.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
             已隐藏模型思考过程，只展示行动计划
           </div>
         </template>

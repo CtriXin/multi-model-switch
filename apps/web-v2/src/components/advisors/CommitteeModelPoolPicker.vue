@@ -169,16 +169,16 @@ function tierClass(tier: number) {
       </p>
     </div>
 
-    <Transition v-if="!isMobile" name="popover">
-      <div
-        v-if="popoverOpen"
-        class="absolute left-0 right-0 top-full mt-3 z-40"
-      >
-        <div class="fixed inset-0 z-30" @click="popoverOpen = false" />
+    <Teleport v-if="!isMobile" to="body">
         <div
-          class="relative z-40 max-h-80 overflow-hidden rounded-4xl border border-border-default bg-surface-1 shadow-xl"
-          @click.stop
+          v-if="popoverOpen"
+          class="fixed inset-0 z-[9990] flex items-start justify-center pt-[12vh]"
         >
+          <div class="absolute inset-0 bg-black/40" @click="popoverOpen = false" />
+          <div
+            class="relative z-10 w-full max-w-lg max-h-[70vh] overflow-hidden rounded-2xl border border-border-default bg-surface-1 shadow-2xl"
+            @click.stop
+          >
           <div class="border-b border-border-subtle px-4 py-3">
             <div class="flex items-start justify-between gap-3">
               <div>
@@ -309,22 +309,11 @@ function tierClass(tier: number) {
           </div>
         </div>
       </div>
-    </Transition>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
-.popover-enter-active { animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
-.popover-leave-active { animation: popOut 0.15s ease-in; }
-@keyframes popIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-@keyframes popOut {
-  from { opacity: 1; }
-  to { opacity: 0; transform: translateY(4px); }
-}
-
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

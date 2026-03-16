@@ -136,7 +136,7 @@ function openCommandPalette() {
   <aside v-else class="w-60 shrink-0 flex flex-col border-r border-border-subtle glass">
     <!-- Header: drag area + logo + collapse -->
     <div class="h-12 flex items-center justify-between px-4" style="-webkit-app-region: drag">
-      <span class="text-sm font-bold text-text-primary" style="-webkit-app-region: no-drag">MMS</span>
+      <span class="text-sm font-bold text-text-primary uppercase tracking-tighter" style="-webkit-app-region: no-drag">PolyMinder</span>
       <div class="flex items-center gap-1" style="-webkit-app-region: no-drag">
         <button @click="toggleTheme" class="btn-icon" :title="theme === 'dark' ? '浅色模式' : '深色模式'">
           <Sun v-if="theme === 'dark'" :size="14" />
@@ -231,7 +231,7 @@ function openCommandPalette() {
       >
         <Search :size="16" :stroke-width="1.8" />
         <span>命令面板</span>
-        <kbd class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘K</kbd>
+        <kbd class="ml-auto flex items-center gap-0.5 text-xs px-2 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘<span class="text-[9px]">+</span>K</kbd>
       </button>
       <button
         v-if="showQuickStartEntry"
@@ -253,6 +253,16 @@ function openCommandPalette() {
       >
         <Package :size="16" :stroke-width="1.8" />
         <span>模型管理</span>
+      </button>
+      <button
+        @click="router.push('/advisors')"
+        class="w-full flex sm:hidden items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/advisors'
+          ? 'bg-accent/10 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4'"
+      >
+        <Users :size="16" :stroke-width="1.8" />
+        <span>锦囊团</span>
       </button>
       <button
         @click="router.push('/settings')"
