@@ -6,8 +6,13 @@ import { useAppStore } from '@/stores/app'
 import { useToastStore } from '@/stores/toast'
 import { FREE_PROVIDERS } from '@/data/freeProviders'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
-import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket } from 'lucide-vue-next'
-import { ref, onMounted, computed } from 'vue'
+import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket, ChevronLeft, Menu, Sparkles } from 'lucide-vue-next'
+import { ref, inject, onMounted, computed } from 'vue'
+
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform.value === 'ios')
+
+function openDrawer() { window.dispatchEvent(new CustomEvent('open-drawer')) }
 
 const router = useRouter()
 const { theme, toggle: toggleTheme, v3Config } = useTheme()

@@ -137,6 +137,16 @@ async function callModel(
   return result
 }
 
+function shouldSuppressDiscussModel(error: ApiError) {
+  return error.code === 'model_unavailable'
+    || error.code === 'rate_limited'
+    || error.code === 'chat_unsupported'
+}
+
+function buildFallbackOrder(primaryIds: string[], extraIds: string[] = []) {
+  return Array.from(new Set([...primaryIds, ...extraIds]))
+}
+
 function tryParseJSON<T>(text: string): T | null {
   // Extract JSON from possible markdown code block
   const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/)
@@ -163,10 +173,45 @@ export const useDiscussStore = defineStore('discuss', () => {
 
   const hasResults = computed(() => phase1Results.value.length > 0)
 
+  async function streamWithModelFallback(options: {
+    candidateModelIds: string[]
+    messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+    signal: AbortSignal
+    onChunk: (chunk: string) => void
+  }) {
+    const { candidateModelIds, messages, signal, onChunk } = options
+    const appStore = useAppStore()
+    let lastError: unknown = null
+
+    for (const modelId of candidateModelIds) {
+      try {
+        const stream = streamModelChat({
+          modelId,
+          messages,
+          signal,
+        })
+
+        for await (const chunk of stream) {
+          if (signal.aborted) return { modelId, completed: false }
+          onChunk(chunk)
+        }
+
+        return { modelId, completed: true }
+      } catch (error) {
+        lastError = error
+        if (error instanceof ApiError && shouldSuppressDiscussModel(error)) {
+          appStore.suppressModelForToday(modelId)
+        }
+        if (signal.aborted) throw error
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('请求失败')
+  }
+
   async function startDiscussion(prompt: string, modelIds: string[], discussDepth: DiscussDepth = 'panel') {
     if (streaming.value || modelIds.length < 2) return
     const toast = useToastStore()
-    const appStore = useAppStore()
 
     topic.value = prompt
     depth.value = discussDepth
@@ -242,23 +287,32 @@ export const useDiscussStore = defineStore('discuss', () => {
         '\n\n各模型分析：\n' + summaryContext +
         '\n\n交叉评审：\n' + reviewContext
 
-      const synthesisModel = modelIds[0]
-      const stream = streamModelChat({
-        modelId: synthesisModel,
-        messages: [{ role: 'user', content: synthesisPrompt }],
-        signal,
-      })
+      const synthesisCandidates = buildFallbackOrder(
+        phase1Results.value.filter((item) => !item.error).map((item) => item.model),
+        modelIds,
+      )
       try {
-        for await (const chunk of stream) {
-          if (signal.aborted) return
-          phase3Text.value += chunk
+        phase3Text.value = ''
+        await streamWithModelFallback({
+          candidateModelIds: synthesisCandidates,
+          messages: [{ role: 'user', content: synthesisPrompt }],
+          signal,
+          onChunk: (chunk) => { phase3Text.value += chunk },
+        })
+        if (!phase3Text.value.trim()) {
+          phase3Text.value = buildPhase3FallbackMarkdown(
+            prompt,
+            phase1Results.value,
+            phase2Results.value,
+          )
         }
       } catch (error) {
-        if (
-          error instanceof ApiError
-          && (error.code === 'model_unavailable' || error.code === 'rate_limited')
-        ) {
-          appStore.suppressModelForToday(synthesisModel)
+        if (!phase3Text.value.trim()) {
+          phase3Text.value = buildPhase3FallbackMarkdown(
+            prompt,
+            phase1Results.value,
+            phase2Results.value,
+          )
         }
         throw error
       }
@@ -336,26 +390,25 @@ ${reviewContext}${synthesisContext}
 请根据以上讨论内容，生成一份统一的行动计划。`
 
     try {
-      const stream = streamModelChat({
-        modelId: rollupModelId,
-        messages: [
-          { role: 'system', content: ROLLUP_SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt },
-        ],
-        signal,
-      })
+      const rollupCandidates = buildFallbackOrder(
+        [rollupModelId],
+        modelIds.filter(id => id !== rollupModelId),
+      )
       try {
-        for await (const chunk of stream) {
-          if (signal.aborted) return
-          rollupText.value += chunk
+        const resolved = await streamWithModelFallback({
+          candidateModelIds: rollupCandidates,
+          messages: [
+            { role: 'system', content: ROLLUP_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          signal,
+          onChunk: (chunk) => { rollupText.value += chunk },
+        })
+        if (resolved.completed) {
+          const resolvedMeta = appStore.models.find((m) => m.id === resolved.modelId)
+          rollupModel.value = resolvedMeta?.name ?? resolved.modelId
         }
       } catch (error) {
-        if (
-          error instanceof ApiError
-          && (error.code === 'model_unavailable' || error.code === 'rate_limited')
-        ) {
-          appStore.suppressModelForToday(rollupModelId)
-        }
         throw error
       }
       toast.success('行动计划已生成')

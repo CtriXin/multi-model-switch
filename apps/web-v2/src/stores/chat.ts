@@ -24,6 +24,7 @@ export interface ChatMessage {
   brief?: Record<string, string>
   timestamp: number
   error?: string
+  errorCode?: string
 }
 
 export interface ChatRound {
@@ -62,6 +63,77 @@ export const useChatStore = defineStore('chat', () => {
     return { displayText, brief }
   }
 
+  async function runModelRequest(options: {
+    round: ChatRound
+    modelId: string
+    prompt: string
+    attachments: ImageAttachment[]
+    contextMsgs: ApiChatMessage[]
+    signal: AbortSignal
+  }) {
+    const { round, modelId, prompt, attachments, contextMsgs, signal } = options
+    const appStore = useAppStore()
+    const model = appStore.models.find(m => m.id === modelId)
+    const msg = round.responses.get(modelId)
+    if (!msg || !model) return
+
+    const startTime = Date.now()
+    msg.content = ''
+    msg.error = undefined
+    msg.errorCode = undefined
+    msg.brief = undefined
+    msg.elapsed = undefined
+    msg.streaming = true
+
+    try {
+      let userContent: string | ContentPart[]
+      if (attachments.length && model.supportsVision) {
+        const parts: ContentPart[] = [{ type: 'text', text: prompt }]
+        for (const img of attachments) {
+          parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+        }
+        userContent = parts
+      } else {
+        userContent = prompt
+        if (attachments.length && !model.supportsVision) {
+          msg.content = '> ⚠️ 该模型不支持图片，已自动降级为纯文本\n\n'
+        }
+      }
+
+      const stream = streamModelChat({
+        modelId,
+        messages: [...contextMsgs, { role: 'user', content: userContent }],
+        signal,
+      })
+
+      for await (const chunk of stream) {
+        if (signal.aborted) return
+        msg.content += chunk
+      }
+
+      const parsed = parseBrief(msg.content)
+      msg.content = parsed.displayText
+      msg.brief = parsed.brief
+    } catch (e: any) {
+      if (e.name === 'AbortError' || signal.aborted) return
+      if (e instanceof ApiError) {
+        msg.error = e.message
+        msg.errorCode = e.code
+        msg.content += `\n\n> 错误: ${e.message}`
+        if (shouldSuppressModel(e)) {
+          appStore.suppressModelForToday(modelId)
+        }
+      } else {
+        msg.error = e.message
+        msg.errorCode = 'request_failed'
+        msg.content += `\n\n> 错误: ${e.message}`
+      }
+    } finally {
+      msg.elapsed = (Date.now() - startTime) / 1000
+      msg.streaming = false
+    }
+  }
+
   async function sendMessage(prompt: string, modelIds: string[], attachments: ImageAttachment[] = []) {
     if (streaming.value || !modelIds.length) return
     const appStore = useAppStore()
@@ -96,63 +168,105 @@ export const useChatStore = defineStore('chat', () => {
     abortController.value = new AbortController()
     const signal = abortController.value.signal
 
-    const tasks = modelIds.map(async (mid) => {
-      const model = appStore.models.find(m => m.id === mid)
-      const msg = reactiveRound.responses.get(mid)
-      if (!msg || !model) return
-
-      const startTime = Date.now()
-      try {
-        // Build user message content
-        // Vision-capable models get images; others get text-only (graceful degradation)
-        let userContent: string | ContentPart[]
-        if (attachments.length && model.supportsVision) {
-          const parts: ContentPart[] = [{ type: 'text', text: prompt }]
-          for (const img of attachments) {
-            parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
-          }
-          userContent = parts
-        } else {
-          userContent = prompt
-          if (attachments.length && !model.supportsVision) {
-            msg.content = '> ⚠️ 该模型不支持图片，已自动降级为纯文本\n\n'
-          }
-        }
-
-        const stream = streamModelChat({
-          modelId: mid,
-          messages: [...contextMsgs, { role: 'user', content: userContent }],
-          signal,
-        })
-
-        for await (const chunk of stream) {
-          if (signal.aborted) return
-          msg.content += chunk
-        }
-      } catch (e: any) {
-        if (e.name === 'AbortError' || signal.aborted) return
-        if (e instanceof ApiError) {
-          msg.error = e.message
-          msg.content += `\n\n> 错误: ${e.message}`
-          if (shouldSuppressModel(e)) {
-            appStore.suppressModelForToday(mid)
-          }
-        } else {
-          msg.error = e.message
-          msg.content += `\n\n> 错误: ${e.message}`
-        }
-      }
-      msg.elapsed = (Date.now() - startTime) / 1000
-    })
+    const tasks = modelIds.map(mid => runModelRequest({
+      round: reactiveRound,
+      modelId: mid,
+      prompt,
+      attachments,
+      contextMsgs,
+      signal,
+    }))
 
     await Promise.allSettled(tasks)
     streaming.value = false
     abortController.value = null
   }
 
+  function replaceModelResponse(roundId: string, oldModelId: string, newModelId: string) {
+    const round = rounds.value.find(item => item.id === roundId)
+    if (!round || oldModelId === newModelId) return
+
+    const oldMsg = round.responses.get(oldModelId)
+    const nextEntries = Array.from(round.responses.entries()).map(([id, message]) => {
+      if (id !== oldModelId) return [id, message] as const
+      return [newModelId, {
+        ...(oldMsg ?? {
+          id: `msg-${newModelId}-${Date.now()}`,
+          role: 'model' as const,
+          content: '',
+          timestamp: Date.now(),
+        }),
+        id: `msg-${newModelId}-${Date.now()}`,
+        model: newModelId,
+        content: '',
+        timestamp: Date.now(),
+        error: undefined,
+        errorCode: undefined,
+        brief: undefined,
+        elapsed: undefined,
+        streaming: false,
+      }] as const
+    })
+
+    round.responses = new Map(nextEntries)
+    if (round.activeModelId === oldModelId) round.activeModelId = newModelId
+    if (round.selectedModelId === oldModelId) round.selectedModelId = newModelId
+  }
+
+  async function retryModel(roundId: string, modelId: string, options: {
+    replaceWith?: string
+  } = {}) {
+    if (streaming.value) return
+
+    const roundIndex = rounds.value.findIndex(item => item.id === roundId)
+    if (roundIndex < 0) return
+
+    const round = rounds.value[roundIndex]
+    const targetModelId = options.replaceWith ?? modelId
+
+    if (options.replaceWith) {
+      replaceModelResponse(roundId, modelId, options.replaceWith)
+    } else {
+      const msg = round.responses.get(modelId)
+      if (msg) {
+        msg.content = ''
+        msg.error = undefined
+        msg.errorCode = undefined
+        msg.brief = undefined
+        msg.elapsed = undefined
+      }
+    }
+
+    const targetRound = rounds.value[roundIndex]
+    const contextMsgs = buildContextMessages(rounds.value.slice(0, roundIndex), contextMode.value)
+
+    streaming.value = true
+    abortController.value = new AbortController()
+    const signal = abortController.value.signal
+
+    try {
+      await runModelRequest({
+        round: targetRound,
+        modelId: targetModelId,
+        prompt: targetRound.prompt,
+        attachments: targetRound.attachments,
+        contextMsgs,
+        signal,
+      })
+    } finally {
+      streaming.value = false
+      abortController.value = null
+    }
+  }
+
   function stopStreaming() {
     abortController.value?.abort()
     streaming.value = false
+    for (const round of rounds.value) {
+      for (const msg of round.responses.values()) {
+        if (msg.streaming) msg.streaming = false
+      }
+    }
     useToastStore().info('已停止生成')
   }
 
@@ -180,6 +294,6 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     rounds, streaming, currentRound, contextMode,
-    sendMessage, stopStreaming, stopAndRestoreDraft, setActiveModel, clearHistory,
+    sendMessage, retryModel, stopStreaming, stopAndRestoreDraft, setActiveModel, selectModel, clearHistory,
   }
 })

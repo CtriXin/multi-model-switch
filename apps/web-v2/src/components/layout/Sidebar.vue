@@ -6,7 +6,7 @@ import { useTheme } from '@/composables/useTheme'
 import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
 } from 'lucide-vue-next'
 import { computed, onMounted } from 'vue'
 
