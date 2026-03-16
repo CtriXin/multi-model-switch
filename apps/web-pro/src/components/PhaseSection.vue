@@ -32,13 +32,13 @@
 </template>
 
 <script setup lang="ts">
-import type { DiscussPhase } from '@mms/contracts'
+import type { CommitteePhase } from '@/features/committee'
 
 defineProps<{
-  phase: DiscussPhase
+  phase: CommitteePhase
   title: string
   subtitle?: string
-  current: DiscussPhase
+  current: CommitteePhase
   status: 'waiting' | 'running' | 'done'
   colorClass: string
 }>()

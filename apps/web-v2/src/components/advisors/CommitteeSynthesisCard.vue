@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { CommitteeSynthesis } from '@/features/committee'
 import MarkdownIt from 'markdown-it'
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 
 const props = defineProps<{
   synthesis: CommitteeSynthesis | null
@@ -10,7 +11,30 @@ const props = defineProps<{
 }>()
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
-const rendered = computed(() => md.render(props.content || props.synthesis?.content || ''))
+const expanded = reactive<Record<string, boolean>>({})
+const sanitized = computed(() => sanitizeModelOutput(props.content || props.synthesis?.content || ''))
+const rendered = computed(() => md.render(sanitized.value.content || ''))
+
+function getSanitizedText(text: string) {
+  return sanitizeModelOutput(text || '')
+}
+
+function toggle(id: string) {
+  expanded[id] = !expanded[id]
+}
+
+function renderMarkdown(text: string) {
+  return md.render(getSanitizedText(text).content || '')
+}
+
+function hiddenThink(text: string) {
+  return getSanitizedText(text).hiddenThink
+}
+
+function isLong(text: string) {
+  const content = getSanitizedText(text).content
+  return content.length > 180 || content.includes('\n') || content.includes('|') || content.includes('```')
+}
 </script>
 
 <template>
@@ -31,6 +55,9 @@ const rendered = computed(() => md.render(props.content || props.synthesis?.cont
       </div>
       <div class="px-5 py-4 text-sm">
         <div class="md-body max-w-none" v-html="rendered" />
+        <div v-if="sanitized.hiddenThink" class="pt-3 text-[10px] italic text-text-tertiary">
+          已隐藏系统思考过程，只展示最终结论
+        </div>
         <div v-if="streaming" class="pt-3">
           <span class="inline-flex gap-1">
             <span class="h-1.5 w-1.5 rounded-full bg-amber-400 animate-typing" style="animation-delay:0s" />
@@ -49,8 +76,26 @@ const rendered = computed(() => md.render(props.content || props.synthesis?.cont
         </div>
         <div class="space-y-3 px-5 py-4">
           <div v-for="item in synthesis.consensus" :key="item.id" class="rounded-2xl bg-surface-2 p-4">
-            <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
-            <p class="mt-2 text-xs leading-6 text-text-secondary">{{ item.summary }}</p>
+            <button class="w-full text-left" type="button" @click="toggle(item.id)">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
+                <span v-if="isLong(item.summary)" class="text-[11px] text-text-tertiary">{{ expanded[item.id] ? '收起' : '展开' }}</span>
+              </div>
+            </button>
+            <div class="relative mt-2 text-xs text-text-secondary">
+              <div
+                class="md-body max-w-none overflow-hidden transition-[max-height] duration-200"
+                :class="expanded[item.id] || !isLong(item.summary) ? '' : 'max-h-24'"
+                v-html="renderMarkdown(item.summary)"
+              />
+              <div
+                v-if="!expanded[item.id] && isLong(item.summary)"
+                class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-2 to-transparent"
+              />
+              <div v-if="hiddenThink(item.summary)" class="mt-2 text-[10px] italic text-text-tertiary">
+                已隐藏系统思考过程
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -62,8 +107,26 @@ const rendered = computed(() => md.render(props.content || props.synthesis?.cont
         </div>
         <div class="space-y-3 px-5 py-4">
           <div v-for="item in synthesis.tensions" :key="item.id" class="rounded-2xl bg-surface-2 p-4">
-            <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
-            <p class="mt-2 text-xs leading-6 text-text-secondary">{{ item.summary }}</p>
+            <button class="w-full text-left" type="button" @click="toggle(item.id)">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
+                <span v-if="isLong(item.summary)" class="text-[11px] text-text-tertiary">{{ expanded[item.id] ? '收起' : '展开' }}</span>
+              </div>
+            </button>
+            <div class="relative mt-2 text-xs text-text-secondary">
+              <div
+                class="md-body max-w-none overflow-hidden transition-[max-height] duration-200"
+                :class="expanded[item.id] || !isLong(item.summary) ? '' : 'max-h-24'"
+                v-html="renderMarkdown(item.summary)"
+              />
+              <div
+                v-if="!expanded[item.id] && isLong(item.summary)"
+                class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-2 to-transparent"
+              />
+              <div v-if="hiddenThink(item.summary)" class="mt-2 text-[10px] italic text-text-tertiary">
+                已隐藏系统思考过程
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -77,8 +140,26 @@ const rendered = computed(() => md.render(props.content || props.synthesis?.cont
             </div>
             <div class="space-y-3 px-5 py-4">
               <div v-for="item in synthesis.actions" :key="item.id" class="rounded-2xl bg-surface-2 p-4">
-                <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
-                <p class="mt-2 text-xs leading-6 text-text-secondary">{{ item.summary }}</p>
+                <button class="w-full text-left" type="button" @click="toggle(item.id)">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
+                    <span v-if="isLong(item.summary)" class="text-[11px] text-text-tertiary">{{ expanded[item.id] ? '收起' : '展开' }}</span>
+                  </div>
+                </button>
+                <div class="relative mt-2 text-xs text-text-secondary">
+                  <div
+                    class="md-body max-w-none overflow-hidden transition-[max-height] duration-200"
+                    :class="expanded[item.id] || !isLong(item.summary) ? '' : 'max-h-24'"
+                    v-html="renderMarkdown(item.summary)"
+                  />
+                  <div
+                    v-if="!expanded[item.id] && isLong(item.summary)"
+                    class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-surface-2 to-transparent"
+                  />
+                  <div v-if="hiddenThink(item.summary)" class="mt-2 text-[10px] italic text-text-tertiary">
+                    已隐藏系统思考过程
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -90,8 +171,26 @@ const rendered = computed(() => md.render(props.content || props.synthesis?.cont
             </div>
             <div class="space-y-3 px-5 pb-5">
               <div v-for="item in synthesis.minority" :key="item.id" class="rounded-2xl bg-amber-500/10 p-4">
-                <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
-                <p class="mt-2 text-xs leading-6 text-text-secondary">{{ item.summary }}</p>
+                <button class="w-full text-left" type="button" @click="toggle(item.id)">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="text-sm font-semibold text-text-primary">{{ item.title }}</div>
+                    <span v-if="isLong(item.summary)" class="text-[11px] text-text-tertiary">{{ expanded[item.id] ? '收起' : '展开' }}</span>
+                  </div>
+                </button>
+                <div class="relative mt-2 text-xs text-text-secondary">
+                  <div
+                    class="md-body max-w-none overflow-hidden transition-[max-height] duration-200"
+                    :class="expanded[item.id] || !isLong(item.summary) ? '' : 'max-h-24'"
+                    v-html="renderMarkdown(item.summary)"
+                  />
+                  <div
+                    v-if="!expanded[item.id] && isLong(item.summary)"
+                    class="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-amber-500/10 to-transparent"
+                  />
+                  <div v-if="hiddenThink(item.summary)" class="mt-2 text-[10px] italic text-text-tertiary">
+                    已隐藏系统思考过程
+                  </div>
+                </div>
               </div>
             </div>
           </div>

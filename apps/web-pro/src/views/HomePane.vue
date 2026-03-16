@@ -10,7 +10,7 @@
         </div>
         <h1 class="text-2xl font-bold text-gray-900 mb-2">多模型协作工作台</h1>
         <p class="text-gray-500 text-sm max-w-md mx-auto">
-          同时与多个 AI 模型对话、比较、讨论，获得更全面的决策支持。
+          同时与多个 AI 模型和稳定 Persona 协作，在对话、讨论与委员会模式里获得更有张力的判断。
         </p>
       </div>
 
@@ -76,11 +76,11 @@
           </div>
           <h3 class="font-semibold text-gray-900 mb-1">Discuss 讨论</h3>
           <p class="text-sm text-gray-500 leading-relaxed">
-            三阶段深度讨论，交叉审查得出综合结论
+            升级为 AI 角色委员会，用稳定世界观输出冲突观点与系统结论
           </p>
           <div class="flex items-center gap-2 mt-3">
-            <span class="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full">结构化讨论</span>
-            <span class="text-[11px] px-2 py-0.5 bg-gray-50 text-gray-500 rounded-full">交叉审查</span>
+            <span class="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full">角色委员会</span>
+            <span class="text-[11px] px-2 py-0.5 bg-gray-50 text-gray-500 rounded-full">世界观稳定</span>
           </div>
         </button>
       </div>

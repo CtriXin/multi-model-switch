@@ -3,8 +3,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 import { useTheme } from '@/composables/useTheme'
 import {
-  MessageSquare, GitMerge, Users, Plus, Settings, Package,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen,
+  MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, KeyRound,
 } from 'lucide-vue-next'
 import { onMounted } from 'vue'
 
@@ -79,6 +79,16 @@ function deleteSession(id: string, e: Event) {
     <button @click="toggleTheme" class="btn-icon" :title="theme === 'dark' ? '浅色模式' : '深色模式'">
       <Sun v-if="theme === 'dark'" :size="14" />
       <Moon v-else :size="14" />
+    </button>
+
+    <!-- API Setup -->
+    <button
+      @click="router.push('/setup')"
+      class="btn-icon"
+      :class="route.path === '/setup' ? 'text-text-primary' : ''"
+      title="API 配置"
+    >
+      <KeyRound :size="16" />
     </button>
 
     <!-- Models -->
@@ -194,6 +204,25 @@ function deleteSession(id: string, e: Event) {
 
     <!-- Bottom nav -->
     <div class="p-2 border-t border-border-subtle space-y-0.5">
+      <button
+        @click="() => { const e = new KeyboardEvent('keydown', { key: 'k', metaKey: true }); window.dispatchEvent(e) }"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
+               text-text-secondary hover:bg-white/4 hover:text-text-primary"
+      >
+        <Search :size="16" :stroke-width="1.8" />
+        <span>命令面板</span>
+        <kbd class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘K</kbd>
+      </button>
+      <button
+        @click="router.push('/setup')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/setup'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <KeyRound :size="16" :stroke-width="1.8" />
+        <span>API 配置</span>
+      </button>
       <button
         @click="router.push('/models')"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"

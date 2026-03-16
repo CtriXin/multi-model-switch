@@ -34,24 +34,24 @@ const providerColor = computed(() => {
             <span class="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-400">{{ stance.interest }}</span>
           </div>
         </div>
-        <div class="text-right">
+        <div class="flex flex-col items-end gap-1 text-right">
           <div
             v-if="summary.ok"
-            class="rounded-full bg-green-500/10 px-2 py-1 text-[10px] font-medium text-green-500"
+            class="inline-flex w-fit rounded-full bg-green-500/10 px-2 py-1 text-[10px] font-medium text-green-500"
           >
             {{ summary.elapsed.toFixed(1) }}s
           </div>
           <div
             v-else-if="summary.error"
-            class="rounded-full bg-red-500/10 px-2 py-1 text-[10px] text-red-400"
+            class="inline-flex w-fit rounded-full bg-red-500/10 px-2 py-1 text-[10px] text-red-400"
           >
             失败
           </div>
-          <div v-else class="rounded-full bg-surface-3 px-2 py-1 text-[10px] text-text-tertiary animate-pulse">
+          <div v-else class="inline-flex w-fit rounded-full bg-surface-3 px-2 py-1 text-[10px] text-text-tertiary animate-pulse">
             思考中
           </div>
           <div
-            class="mt-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
+            class="inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]"
             :style="{ borderColor: `${providerColor}30`, backgroundColor: `${providerColor}12` }"
           >
             <span class="h-1.5 w-1.5 rounded-full" :style="{ backgroundColor: providerColor }" />

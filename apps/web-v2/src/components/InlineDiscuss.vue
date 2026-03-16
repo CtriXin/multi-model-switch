@@ -4,6 +4,7 @@ import { useAppStore, getModelColor } from '@/stores/app'
 import { useDiscussSession, type DiscussDepth } from '@/composables/useDiscussSession'
 import { X, Zap, Flame, Rocket, Gavel, Loader2 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -50,7 +51,10 @@ function handleRollup() {
   session.startRollup(props.prompt, props.modelIds)
 }
 
-const rollupHtml = computed(() => md.render(session.rollupText.value || ''))
+const sanitizedSynthesis = computed(() => sanitizeModelOutput(session.phase3Text.value || ''))
+const sanitizedRollup = computed(() => sanitizeModelOutput(session.rollupText.value || ''))
+const synthesisHtml = computed(() => md.render(sanitizedSynthesis.value.content || ''))
+const rollupHtml = computed(() => md.render(sanitizedRollup.value.content || ''))
 
 // Auto-cleanup on unmount
 watch(() => session.isActive.value, (active) => {
@@ -173,7 +177,10 @@ watch(() => session.isActive.value, (active) => {
       <h4 class="text-xs font-medium text-text-tertiary uppercase tracking-wide mb-3">
         Phase 3 · 综合结论
       </h4>
-      <div class="md-body text-sm" v-html="md.render(session.phase3Text.value || '')" />
+      <div class="md-body text-sm" v-html="synthesisHtml" />
+      <div v-if="sanitizedSynthesis.value.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+        已隐藏模型思考过程，只展示最终结论
+      </div>
       <span
         v-if="session.streaming.value && session.phase.value === 3"
         class="inline-block w-1.5 h-4 bg-purple-400 ml-0.5 animate-cursor_blink align-text-bottom"
@@ -213,7 +220,12 @@ watch(() => session.isActive.value, (active) => {
             class="text-amber-400 animate-spin ml-auto"
           />
         </div>
-        <div v-if="session.rollupText.value" class="md-body text-sm" v-html="rollupHtml" />
+        <template v-if="session.rollupText.value">
+          <div class="md-body text-sm" v-html="rollupHtml" />
+          <div v-if="sanitizedRollup.value.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+            已隐藏模型思考过程，只展示行动计划
+          </div>
+        </template>
         <div v-else class="space-y-2">
           <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
           <div class="h-3 bg-surface-3 rounded animate-pulse w-4/5" />
