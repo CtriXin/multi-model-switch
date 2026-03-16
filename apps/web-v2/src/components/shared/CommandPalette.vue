@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { Search, MessageSquare, GitMerge, Zap } from 'lucide-vue-next'
+import { Search, MessageSquare, GitMerge, Zap, Palette, Sparkles } from 'lucide-vue-next'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -21,6 +21,8 @@ interface Command {
 const commands: Command[] = [
   { id: 'chat', label: '前往对话', desc: '多模型并行对话', icon: MessageSquare, action: () => router.push('/chat') },
   { id: 'discuss', label: '前往讨论', desc: '三阶段深度讨论', icon: GitMerge, action: () => router.push('/discuss') },
+  { id: 'design-v3', label: '设计系统 V3', desc: '电影级设计系统', icon: Sparkles, action: () => router.push('/v3/design') },
+  { id: 'design', label: '设计系统', desc: '基础设计组件预览', icon: Palette, action: () => router.push('/design') },
   ...([
     { id: 'preset-coding', name: '编程对决' },
     { id: 'preset-reasoning', name: '深度推理' },
