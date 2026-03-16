@@ -1,0 +1,37 @@
+{
+  "providers": [
+    {
+      "id": "openrouter",
+      "label": "OpenRouter Internal Pool",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiType": "openrouter",
+      "httpReferer": "${MMS_GATEWAY_REFERER}",
+      "xTitle": "MMS Internal Gateway",
+      "timeoutSeconds": 90,
+      "modelAllowlist": ["*"],
+      "apiKeys": [
+        {
+          "id": "or-free-a",
+          "apiKey": "${OPENROUTER_API_KEY_A}",
+          "enabled": true
+        },
+        {
+          "id": "or-free-b",
+          "apiKey": "${OPENROUTER_API_KEY_B}",
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "tokens": [
+    {
+      "id": "internal-test-a",
+      "name": "内部测试 A",
+      "tokenHash": "sha256:replace_me",
+      "providerId": "openrouter",
+      "enabled": true,
+      "allowedModels": ["*"],
+      "dailyRequestLimit": 200
+    }
+  ]
+}

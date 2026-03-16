@@ -397,6 +397,24 @@
   - 多个 upstream key 的轮换 / 负载均衡 / failover
   - 上游错误码透传与用户侧配额语义区分
 
+## 2026-03-16 当前落地状态
+
+`apps/runtime-api` 已开始承接 gateway MVP，当前代码内已落下：
+
+- `GET /gateway/health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- Bearer token 鉴权
+- OpenRouter 上游 key 池轮换 / failover
+- SQLite 请求日志与按 token 的日额度限制
+
+第一版前端不强制新增 `internal-test provider`。继续沿用现有自定义 `openai-compatible provider` 即可：
+
+- `Base URL` 指向 `runtime-api` 的 `/v1`
+- `API Key` 填内部 token
+
+具体配置与 token 生成方式见 `apps/runtime-api/README_GATEWAY.md` 与 `apps/runtime-api/scripts/gateway_token.py`。
+
 以下评审意见建议保留为讨论项，不要在正文直接写死：
 
 - gateway MVP 的准确工期
