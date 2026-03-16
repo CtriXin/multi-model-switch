@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { getModelColor } from '@/stores/app'
-import { Copy, Check, MessageSquare, RefreshCw } from 'lucide-vue-next'
+import { Copy, Check, MessageSquare, RefreshCw, RefreshCcw } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 
@@ -15,6 +15,7 @@ const props = defineProps<{
   elapsed?: number
   tier?: number
   error?: string
+  errorCode?: string
   brief?: Record<string, string>
   streaming?: boolean
   active?: boolean   // visual focus (carousel current, highlighted)
@@ -22,7 +23,7 @@ const props = defineProps<{
   carousel?: boolean
 }>()
 
-const emit = defineEmits<{ select: []; discuss: []; retry: [] }>()
+const emit = defineEmits<{ select: []; discuss: []; retry: []; replace: [] }>()
 
 const copied = ref(false)
 const sanitized = computed(() => sanitizeModelOutput(props.content || ''))
@@ -30,6 +31,32 @@ const html = computed(() => md.render(sanitized.value.content || ''))
 const color = computed(() => getModelColor(props.provider))
 const initial = computed(() => props.modelName.charAt(0).toUpperCase())
 const isDone = computed(() => !!props.elapsed && !props.streaming)
+const derivedErrorCode = computed(() => {
+  if (props.errorCode) return props.errorCode
+  const lower = (props.error || '').toLowerCase()
+  if (!lower) return ''
+  if (/does not support chat completions|unsupported.*chat|not support.*chat/.test(lower)) return 'chat_unsupported'
+  if (/does not support image|image.*not.*support/.test(lower)) return 'image_unsupported'
+  if (/context length|too many tokens|prompt is too long/.test(lower)) return 'context_too_long'
+  if (/rate limit|额度限制|频率/.test(lower)) return 'rate_limited'
+  if (/not found|not available|不可用/.test(lower)) return 'model_unavailable'
+  if (/api key|invalid key|无效/.test(lower)) return 'invalid_key'
+  return ''
+})
+const errorTag = computed(() => {
+  const map: Record<string, string> = {
+    chat_unsupported: '不支持聊天',
+    image_unsupported: '不支持图片',
+    context_too_long: '上下文过长',
+    rate_limited: '频率受限',
+    model_unavailable: '暂不可用',
+    invalid_key: 'Key 失效',
+  }
+  return derivedErrorCode.value ? map[derivedErrorCode.value] : ''
+})
+const canReplaceModel = computed(() =>
+  derivedErrorCode.value === 'chat_unsupported' || derivedErrorCode.value === 'image_unsupported',
+)
 
 const tierLabel = computed(() => {
   if (props.tier === 2) return '旗舰'
@@ -82,6 +109,10 @@ async function copyContent() {
       </div>
       <div class="flex min-w-[104px] shrink-0 items-center justify-end gap-2">
         <span
+          v-if="errorTag"
+          class="inline-flex h-5 items-center rounded px-1.5 text-[9px] font-medium shrink-0 bg-orange-500/15 text-orange-400"
+        >{{ errorTag }}</span>
+        <span
           v-if="tier !== undefined"
           class="inline-flex h-5 items-center rounded px-1.5 text-[9px] font-medium shrink-0"
           :class="tierClass"
@@ -108,12 +139,25 @@ async function copyContent() {
     <!-- Content area (scrollable) -->
     <div class="px-4 py-3 flex-1 min-h-0 overflow-y-auto">
       <!-- Error state -->
-      <div v-if="error" class="text-center py-4">
-        <p class="text-xs text-red-400 mb-3">{{ error }}</p>
+      <div v-if="error" class="relative py-4">
+        <div class="rounded-2xl border border-border-subtle bg-surface-2/60 px-4 py-3 pr-5">
+          <p class="text-xs leading-7 text-text-secondary">{{ error }}</p>
+        </div>
         <button
+          v-if="canReplaceModel"
+          @click.stop="emit('replace')"
+          class="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/12 text-orange-400 backdrop-blur-[1px] transition-colors hover:bg-black/20"
+          title="换个模型重试"
+        >
+          <span class="inline-flex items-center gap-2 rounded-full border border-orange-400/30 bg-surface-1/90 px-4 py-2 text-xs font-medium shadow-lg">
+            <RefreshCcw :size="14" />
+            换个模型重试
+          </span>
+        </button>
+        <button
+          v-else
           @click.stop="emit('retry')"
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                 text-text-secondary bg-surface-3 hover:bg-surface-2 transition-colors"
+          class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-2"
         >
           <RefreshCw :size="12" />
           恢复输入框
@@ -165,7 +209,7 @@ async function copyContent() {
     </div>
 
     <!-- Footer (when done) — sticky at bottom -->
-    <div v-if="isDone" class="flex items-center gap-1 px-4 py-2 border-t border-border-subtle/50 shrink-0 bg-surface-1">
+    <div v-if="isDone && !error" class="flex items-center gap-1 px-4 py-2 border-t border-white/5 shrink-0 bg-black/5 dark:bg-white/5 backdrop-blur-md">
       <!-- Select / Selected -->
       <button
         v-if="!selected"
@@ -193,6 +237,14 @@ async function copyContent() {
       </button>
 
       <!-- Copy button -->
+      <button
+        @click.stop="emit('retry')"
+        class="p-1.5 rounded-md text-text-tertiary transition-colors opacity-60 group-hover:opacity-100 hover:bg-surface-3 hover:text-text-secondary"
+        title="重试该模型"
+      >
+        <RefreshCw :size="13" />
+      </button>
+
       <button
         @click.stop="copyContent"
         class="p-1.5 rounded-md transition-colors opacity-60 group-hover:opacity-100"

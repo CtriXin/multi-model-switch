@@ -252,6 +252,40 @@ export const useAppStore = defineStore('app', () => {
     getSelectionRef(mode).value = pickDiverseModels(count)
   }
 
+  function replaceSelectedModel(oldId: string, newId: string, mode: ModelSelectionMode = 'chat') {
+    const selection = getSelectionRef(mode)
+    const idx = selection.value.indexOf(oldId)
+    if (idx >= 0) {
+      selection.value.splice(idx, 1, newId)
+      return
+    }
+    if (!selection.value.includes(newId) && selection.value.length < 5) {
+      selection.value.push(newId)
+    }
+  }
+
+  function pickReplacementModel(options: {
+    excludeIds?: string[]
+    requireVision?: boolean
+  } = {}): string | null {
+    const exclude = new Set(options.excludeIds ?? [])
+    const eligible = models.value.filter((model) => {
+      if (exclude.has(model.id)) return false
+      if (options.requireVision && !model.supportsVision) return false
+      return true
+    })
+
+    if (!eligible.length) return null
+
+    const preferred = preferFree.value
+      ? eligible.filter(model => model.free)
+      : eligible
+
+    const pool = preferred.length ? preferred : eligible
+    const shuffled = shuffleArray(pool)
+    return shuffled[0]?.id ?? null
+  }
+
   function copySelection(from: ModelSelectionMode, to: ModelSelectionMode) {
     const src = getSelectionRef(from).value
     getSelectionRef(to).value = [...src]
@@ -332,6 +366,8 @@ export const useAppStore = defineStore('app', () => {
     applyPreset,
     clearSelection,
     randomPick,
+    replaceSelectedModel,
+    pickReplacementModel,
     copySelection,
     ensureCommitteeSelection,
     suppressModelForToday,

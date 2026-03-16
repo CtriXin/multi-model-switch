@@ -42,26 +42,43 @@ function getProvider(id: string): string {
   return appStore.models.find(m => m.id === id)?.provider ?? 'unknown'
 }
 
+function getResponseTier(id: string): number {
+  return appStore.models.find(m => m.id === id)?.tier ?? 0
+}
+
 function toggleExpand(modelId: string) {
   expandedCards[modelId] = !expandedCards[modelId]
 }
 
-/** Pick evaluator: prefer a model NOT in the response set, highest tier first */
+/** Pick evaluator: prefer a non-participating model, but only slightly stronger than this round. */
 function pickEvaluator(): { modelId: string; isSelfEval: boolean } {
   const respondingIds = new Set(props.responses.keys())
-  // Non-participating models, sorted by tier desc
+  const respondingTiers = Array.from(respondingIds).map(getResponseTier)
+  const highestRespondingTier = respondingTiers.length ? Math.max(...respondingTiers) : 0
+
   const candidates = appStore.models
     .filter(m => !respondingIds.has(m.id))
-    .sort((a, b) => b.tier - a.tier)
+    .sort((a, b) => a.tier - b.tier || a.priceInput - b.priceInput)
+
+  // First choice: the smallest tier that is strictly above the current round's strongest model.
+  const steppedUp = candidates.find((candidate) => candidate.tier > highestRespondingTier)
+  if (steppedUp) {
+    return { modelId: steppedUp.id, isSelfEval: false }
+  }
 
   if (candidates.length) {
-    return { modelId: candidates[0].id, isSelfEval: false }
+    const sameTier = candidates
+      .filter(candidate => candidate.tier === highestRespondingTier)
+      .sort((a, b) => a.priceInput - b.priceInput)[0]
+
+    return { modelId: (sameTier ?? candidates[0]).id, isSelfEval: false }
   }
+
   // Fallback: use responding model with highest tier
   const responding = Array.from(respondingIds)
     .map(id => appStore.models.find(m => m.id === id))
-    .filter(Boolean)
-    .sort((a, b) => b!.tier - a!.tier)
+    .filter((item): item is NonNullable<typeof item> => !!item)
+    .sort((a, b) => b.tier - a.tier || a.priceInput - b.priceInput)
 
   return {
     modelId: responding[0]?.id ?? Array.from(respondingIds)[0],
@@ -91,12 +108,6 @@ ${responseEntries}
 
 ## 决策评估
 
-### 各回答评分
-对每个回答给出 1-5 分评分和一句话评语（评分仅供参考，不是唯一标准）：
-- 回答 A: X/5 — 评语
-- 回答 B: X/5 — 评语
-...
-
 ### 共识
 各回答达成一致的部分。
 
@@ -110,6 +121,12 @@ ${responseEntries}
 - **现在可以安全做的**：...
 - **需要进一步验证的**：...
 - **条件失效时**：说明什么情况下以上建议不再适用
+
+### 各回答评分
+对每个回答给出 1-5 分评分和一句话评语（评分仅供参考，不是唯一标准）：
+- 回答 A: X/5 — 评语
+- 回答 B: X/5 — 评语
+...
 
 ### 不确定性
 对本次评估的整体信心：高 / 中 / 低，并说明原因。${singleModelClause}`

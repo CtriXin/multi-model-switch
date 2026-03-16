@@ -73,6 +73,13 @@ function buildApiError(status: number, body: string): ApiError {
   }
 
   if (
+    status === 400
+    && /does not support chat completions|chat completions.*not support|not support.*chat|unsupported.*chat/i.test(lower)
+  ) {
+    return new ApiError('该模型不支持聊天对话接口，请换模型重试', status, 'chat_unsupported', detail)
+  }
+
+  if (
     status === 404
     || /no endpoints found|model .*not found|does not exist|not available|temporarily unavailable/.test(lower)
   ) {
@@ -382,11 +389,11 @@ function deriveTags(raw: ApiModel): string[] {
 // ─── Mock Provider ───────────────────────────────────────────────
 
 const MOCK_MODELS: ModelMeta[] = [
-  { id: 'demo/claude-sonnet', name: 'Claude Sonnet (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision'], contextWindow: 200000, free: false, supportsVision: true },
-  { id: 'demo/gpt-4o', name: 'GPT-4o (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2.5, priceOutput: 10, tags: ['reasoning', 'vision', 'coding'], contextWindow: 128000, free: false, supportsVision: true },
-  { id: 'demo/gemini-pro', name: 'Gemini Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 10, tags: ['reasoning', 'coding', 'vision'], contextWindow: 1000000, free: false, supportsVision: true },
-  { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.19, tags: ['reasoning', 'coding'], contextWindow: 64000, free: false, supportsVision: false },
-  { id: 'demo/haiku', name: 'Claude Haiku (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.25, tags: ['fast', 'coding'], contextWindow: 200000, free: false, supportsVision: false },
+  { id: 'demo/claude-sonnet', name: 'Claude Sonnet (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision'], contextWindow: 200000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
+  { id: 'demo/gpt-4o', name: 'GPT-4o (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2.5, priceOutput: 10, tags: ['reasoning', 'vision', 'coding'], contextWindow: 128000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
+  { id: 'demo/gemini-pro', name: 'Gemini Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 10, tags: ['reasoning', 'coding', 'vision'], contextWindow: 1000000, free: true, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
+  { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.19, tags: ['reasoning', 'coding'], contextWindow: 64000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
+  { id: 'demo/haiku', name: 'Claude Haiku (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.25, tags: ['fast', 'coding'], contextWindow: 200000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
 ]
 
 const MOCK_RESPONSES: Record<string, string[]> = {

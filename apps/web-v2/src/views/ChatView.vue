@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, computed, inject, reactive, watch, onMounted, onUnmounted } from 'vue'
+import { onClickOutside } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -11,7 +12,7 @@ import ModelResponseCard from '@/components/chat/ModelResponseCard.vue'
 import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
 import type { ImageAttachment } from '@/stores/chat'
-import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2 } from 'lucide-vue-next'
+import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2, Menu, Sun, Moon, Layers, Zap, Target, History } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -44,6 +45,11 @@ const mobileViewMode = ref<MobileViewMode>('horizontal')
 
 // --- Header state ---
 const showContextMenu = ref(false)
+const headerContextMenuRef = ref<HTMLElement | null>(null)
+
+onClickOutside(headerContextMenuRef, () => {
+  showContextMenu.value = false
+})
 
 // --- Inline discuss state ---
 const inlineDiscussRound = ref<string | null>(null)
@@ -297,6 +303,31 @@ async function restorePrompt(prompt: string) {
   toast.info('已恢复到输入框，可修改后重发')
 }
 
+async function retryRoundModel(round: typeof chatStore.rounds[0], modelId: string) {
+  await chatStore.retryModel(round.id, modelId)
+  sessionStore.saveCurrentSession()
+}
+
+async function replaceRoundModel(round: typeof chatStore.rounds[0], oldModelId: string) {
+  const nextModelId = appStore.pickReplacementModel({
+    excludeIds: Array.from(round.responses.keys()),
+    requireVision: !!round.attachments?.length,
+  })
+
+  if (!nextModelId) {
+    toast.error('没有可替换的新模型了，请先到模型库增加可用模型')
+    return
+  }
+
+  appStore.replaceSelectedModel(oldModelId, nextModelId)
+  if (viewingModelId[round.id] === oldModelId) {
+    viewingModelId[round.id] = nextModelId
+  }
+
+  await chatStore.retryModel(round.id, oldModelId, { replaceWith: nextModelId })
+  sessionStore.saveCurrentSession()
+}
+
 function getModelName(id: string): string {
   return appStore.models.find(m => m.id === id)?.name ?? id
 }
@@ -373,80 +404,77 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
               </p>
             </div>
           </div>
-          
-          <!-- Right: Quick actions -->
-          <div class="flex items-center gap-1.5">
-            <!-- Context mode selector -->
-            <div v-if="chatStore.rounds.length > 0" class="relative">
-              <button
-                @click="showContextMenu = !showContextMenu"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                       bg-surface-2 text-text-secondary hover:bg-surface-3 transition-colors"
-              >
-                <component :is="{ summary: TextQuote, selected: CheckCircle2, full: MessageSquare }[chatStore.contextMode]" :size="14" />
-                <span>{{ { summary: '摘要', selected: '仅选中', full: '全文' }[chatStore.contextMode] }}</span>
-                <ChevronDown :size="12" class="transition-transform" :class="showContextMenu ? 'rotate-180' : ''" />
-              </button>
-              <!-- Context mode dropdown -->
-              <Transition name="popover">
-                <div
-                  v-if="showContextMenu"
-                  class="absolute right-0 top-full mt-1 w-36 rounded-xl border border-border-default
-                         bg-surface-1 shadow-xl py-1 z-50"
-                >
-                  <button
-                    v-for="mode in [{k:'summary',l:'摘要',i:TextQuote},{k:'selected',l:'仅选中',i:CheckCircle2},{k:'full',l:'全文',i:MessageSquare}]"
-                    :key="mode.k"
-                    @click="chatStore.contextMode = mode.k as any; showContextMenu = false"
-                    class="w-full px-3 py-2 text-left flex items-center gap-2 transition-colors"
-                    :class="chatStore.contextMode === mode.k ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-surface-2'"
-                  >
-                    <component :is="mode.i" :size="14" />
-                    <span class="text-xs font-medium">{{ mode.l }}</span>
-                  </button>
-                </div>
-              </Transition>
-              <div v-if="showContextMenu" class="fixed inset-0 z-40" @click="showContextMenu = false" />
-            </div>
-            
-            <!-- New chat button -->
-            <button
-              @click="startNewChat"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                     bg-accent text-white hover:bg-accent-hover transition-colors"
-            >
-              <Plus :size="14" />
-              <span class="hidden sm:inline">新对话</span>
-            </button>
-          </div>
         </div>
-        
-        <!-- Bottom row: Selected models chips -->
-        <div v-if="appStore.selectedModels.length > 0" class="flex items-center gap-2 overflow-x-auto no-scrollbar">
-          <span class="text-xs text-text-tertiary shrink-0">当前模型:</span>
-          <div class="flex items-center gap-1.5">
+
+        <!-- Right: Control Suite -->
+        <div class="flex items-center gap-2">
+          <!-- Model Library -->
+          <button @click="openModels"
+            class="relative p-2 sm:px-3 sm:py-2 rounded-full bg-white/5 text-text-secondary flex items-center gap-2 hover:bg-white/10 transition-all border border-white/5">
+            <Layers :size="18" class="text-accent" />
             <span
-              v-for="m in appStore.selectedModels.slice(0, 4)"
-              :key="m.id"
-              class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs
-                     whitespace-nowrap shrink-0 border"
-              :style="{
-                backgroundColor: getModelColor(m.provider) + '15',
-                borderColor: getModelColor(m.provider) + '30',
-                color: getModelColor(m.provider)
-              }"
-            >
-              <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: getModelColor(m.provider) }" />
-              <span class="truncate max-w-[80px]">{{ m.name }}</span>
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest ml-0.5">模型库</span>
+            <span v-if="appStore.selectedModels.length"
+              class="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-surface-1">
+              {{ appStore.selectedModels.length }}
             </span>
-            <span v-if="appStore.selectedModels.length > 4" class="text-xs text-text-tertiary">
-              +{{ appStore.selectedModels.length - 4 }}
-            </span>
+          </button>
+
+          <!-- Context Mode -->
+          <div ref="headerContextMenuRef" class="relative">
+            <button @click="showContextMenu = !showContextMenu"
+              class="flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-full text-[10px] font-black uppercase tracking-widest
+                     bg-white/5 text-text-secondary hover:bg-white/10 transition-all border border-white/5">
+              <component
+                :is="{ summary: Zap, selected: Target, full: History }[chatStore.contextMode]"
+                :size="18" :stroke-width="3" class="text-accent" />
+              <span
+                class="hidden sm:inline ml-0.5">{{ { summary: '摘要模式', selected: '仅选中模式', full: '全文模式' }[chatStore.contextMode] }}</span>
+              <ChevronDown :size="10" class="opacity-40" />
+            </button>
+
+            <Transition name="popover">
+              <div v-if="showContextMenu"
+                class="absolute right-0 top-full mt-3 w-40 rounded-[28px] border border-white/10 bg-surface-1 shadow-2xl z-50 p-1.5 flex flex-col gap-1">
+                <button
+                  v-for="mode in [{k:'summary',l:'摘要模式',i:Zap},{k:'selected',l:'仅选中模式',i:Target},{k:'full',l:'全文模式',i:History}]"
+                  :key="mode.k"
+                  @click="chatStore.contextMode = mode.k as any; showContextMenu = false"
+                  class="w-full px-4 py-2.5 text-left flex items-center gap-3 rounded-[20px] transition-all"
+                  :class="chatStore.contextMode === mode.k ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-white/5'">
+                  <component :is="mode.i" :size="16" :stroke-width="3" />
+                  <span class="text-[10px] font-black uppercase tracking-widest">{{ mode.l }}</span>
+                </button>
+              </div>
+            </Transition>
           </div>
+
+          <!-- New Chat -->
+          <button @click="startNewChat"
+            class="p-2 sm:px-4 sm:py-2 rounded-full bg-accent text-white shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
+            <Plus :size="18" :stroke-width="4" />
+            <span
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest">新对话</span>
+          </button>
         </div>
-        <div v-else class="flex items-center gap-2">
-          <span class="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg">
-            请先选择 2 个以上模型开始对话
+      </header>
+    </div>
+
+    <!-- Current selection bar (Desktop inline) -->
+    <div v-if="appStore.selectedModels.length > 0"
+      class="max-w-6xl mx-auto w-full px-4 flex items-center justify-between gap-4 mt-2 mb-2">
+
+      <!-- Left: Models List -->
+      <div class="flex items-center gap-2 overflow-x-auto no-scrollbar min-w-0">
+        <span
+          class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">当前模型:</span>
+        <div class="flex items-center gap-1.5">
+          <span v-for="m in appStore.selectedModels" :key="m.id"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tight whitespace-nowrap shrink-0 border border-white/5"
+            :style="{ backgroundColor: getModelColor(m.provider) + '10', color: getModelColor(m.provider) }">
+            <span class="w-1.5 h-1.5 rounded-full"
+              :style="{ backgroundColor: getModelColor(m.provider) }" />
+            {{ m.name }}
           </span>
         </div>
       </div>
@@ -479,33 +507,10 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
       </div>
 
       <!-- Rounds -->
-      <div v-else class="mx-auto py-4 space-y-6" :class="isMobile ? 'max-w-lg px-4' : 'max-w-5xl px-4'">
-        <!-- View mode toggle (desktop only, show when there are rounds) -->
-        <div v-if="!isMobile" class="flex justify-end">
-          <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-2">
-            <button
-              v-for="mode in (['grid', 'horizontal', 'vertical'] as const)"
-              :key="mode"
-              @click="viewMode = mode"
-              class="p-1.5 rounded-md transition-all"
-              :class="viewMode === mode ? 'bg-surface-1 shadow-sm text-text-primary' : 'text-text-tertiary hover:text-text-secondary'"
-              :title="mode === 'grid' ? '并排' : mode === 'horizontal' ? '横向滑动' : '纵向'"
-            >
-              <component
-                :is="mode === 'grid' ? LayoutGrid : mode === 'horizontal' ? GalleryHorizontalEnd : List"
-                :size="14"
-              />
-            </button>
-          </div>
-        </div>
-
-        <div
-          v-for="(round, ri) in chatStore.rounds"
-          :key="round.id"
-          :id="'round-' + round.id"
-          class="animate-slide-up"
-          :style="{ animationDelay: ri * 30 + 'ms' }"
-        >
+      <div v-else class="mx-auto py-4 space-y-10"
+        :class="isMobile ? 'max-w-lg px-4' : 'max-w-6xl px-4'">
+        <div v-for="(round, ri) in chatStore.rounds" :key="round.id" :id="'round-' + round.id"
+          class="animate-slide-up" :style="{ animationDelay: ri * 30 + 'ms' }">
           <!-- User prompt -->
           <div class="flex justify-end mb-4">
             <div class="max-w-[85%]">
@@ -569,61 +574,49 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :tier="getTier(getViewingModelId(round))"
                 :content="round.responses.get(getViewingModelId(round))?.content ?? ''"
                 :elapsed="round.responses.get(getViewingModelId(round))?.elapsed"
+                :error-code="round.responses.get(getViewingModelId(round))?.errorCode"
+                :error="round.responses.get(getViewingModelId(round))?.error"
                 :brief="round.responses.get(getViewingModelId(round))?.brief"
-                :streaming="false"
+                :streaming="!!round.responses.get(getViewingModelId(round))?.streaming"
                 :active="getViewingModelId(round) === round.activeModelId"
                 :selected="getViewingModelId(round) === round.activeModelId"
                 @select="chatStore.setActiveModel(round.id, getViewingModelId(round))"
                 @discuss="startInlineDiscuss(round.id)"
-                @retry="restorePrompt(round.prompt)"
-              />
+                @retry="retryRoundModel(round, getViewingModelId(round))"
+                @replace="replaceRoundModel(round, getViewingModelId(round))" />
             </div>
 
             <!-- Before selection: layout depends on viewMode -->
 
             <!-- Grid mode — whole card clickable to select -->
-              <div v-else-if="viewMode === 'grid'" class="grid gap-3" :class="gridClass">
-                <div
-                  v-for="[modelId, msg] of round.responses"
-                  :key="modelId"
-                  :class="shouldUseFixedGridHeight(round) ? 'h-[clamp(360px,58vh,520px)]' : ''"
-                  @click="chatStore.setActiveModel(round.id, modelId)"
-                >
-                <ModelResponseCard
-                  :model-id="modelId"
-                  :model-name="getModelName(modelId)"
-                  :provider="getProvider(modelId)"
-                  :tier="getTier(modelId)"
-                  :content="msg.content"
-                  :elapsed="msg.elapsed"
-                  :brief="msg.brief"
-                  :streaming="chatStore.streaming && !msg.elapsed"
+            <div v-else-if="viewMode === 'grid'" class="grid gap-3" :class="gridClass">
+              <div v-for="[modelId, msg] of round.responses" :key="modelId"
+                class="max-h-[clamp(360px,58vh,600px)] flex flex-col min-h-0"
+                @click="chatStore.setActiveModel(round.id, modelId)">
+                <ModelResponseCard :model-id="modelId" :model-name="getModelName(modelId)"
+                  :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
+                  :elapsed="msg.elapsed" :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief"
+                  :streaming="!!msg.streaming"
                   :selected="round.activeModelId === modelId"
                   @select="chatStore.setActiveModel(round.id, modelId)"
                   @discuss="startInlineDiscuss(round.id)"
-                  @retry="restorePrompt(round.prompt)"
-                />
+                  @retry="retryRoundModel(round, modelId)"
+                  @replace="replaceRoundModel(round, modelId)" />
               </div>
             </div>
 
             <!-- Vertical mode -->
             <div v-else-if="viewMode === 'vertical'" class="space-y-3 max-w-3xl mx-auto">
-              <ModelResponseCard
-                v-for="[modelId, msg] of round.responses"
-                :key="modelId"
-                :model-id="modelId"
-                :model-name="getModelName(modelId)"
-                :provider="getProvider(modelId)"
-                :tier="getTier(modelId)"
-                :content="msg.content"
-                :elapsed="msg.elapsed"
-                :brief="msg.brief"
-                :streaming="chatStore.streaming && !msg.elapsed"
+              <ModelResponseCard v-for="[modelId, msg] of round.responses" :key="modelId"
+                :model-id="modelId" :model-name="getModelName(modelId)"
+                :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
+                :elapsed="msg.elapsed" :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief"
+                :streaming="!!msg.streaming"
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
-                @retry="restorePrompt(round.prompt)"
-              />
+                @retry="retryRoundModel(round, modelId)"
+                @replace="replaceRoundModel(round, modelId)" />
             </div>
 
             <!-- Horizontal mode — single card full width with tab bar -->
@@ -653,27 +646,18 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
               </div>
 
               <!-- Single visible card -->
-              <div
-                v-for="([modelId, msg], cardIdx) of Array.from(round.responses.entries())"
-                :key="modelId"
-                v-show="getDesktopHActive(round.id) === cardIdx"
-                @click="chatStore.setActiveModel(round.id, modelId)"
-              >
-                <ModelResponseCard
-                  :model-id="modelId"
-                  :model-name="getModelName(modelId)"
-                  :provider="getProvider(modelId)"
-                  :tier="getTier(modelId)"
-                  :content="msg.content"
-                  :elapsed="msg.elapsed"
-                  :brief="msg.brief"
-                  :streaming="chatStore.streaming && !msg.elapsed"
-                  :active="true"
+              <div v-for="([modelId, msg], cardIdx) of Array.from(round.responses.entries())"
+                :key="modelId" v-show="getDesktopHActive(round.id) === cardIdx"
+                @click="chatStore.setActiveModel(round.id, modelId)">
+                <ModelResponseCard :model-id="modelId" :model-name="getModelName(modelId)"
+                  :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
+                  :elapsed="msg.elapsed" :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief"
+                  :streaming="!!msg.streaming" :active="true"
                   :selected="round.activeModelId === modelId"
                   @select="chatStore.setActiveModel(round.id, modelId)"
                   @discuss="startInlineDiscuss(round.id)"
-                  @retry="restorePrompt(round.prompt)"
-                />
+                  @retry="retryRoundModel(round, modelId)"
+                  @replace="replaceRoundModel(round, modelId)" />
               </div>
             </div>
 
@@ -751,13 +735,14 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :tier="getTier(getDisplayedModelId(round))"
                 :content="round.responses.get(getDisplayedModelId(round))?.content ?? ''"
                 :elapsed="round.responses.get(getDisplayedModelId(round))?.elapsed"
+                :error="round.responses.get(getDisplayedModelId(round))?.error"
+                :error-code="round.responses.get(getDisplayedModelId(round))?.errorCode"
                 :brief="round.responses.get(getDisplayedModelId(round))?.brief"
-                :streaming="false"
-                :active="true"
-                :selected="round.activeModelId === getDisplayedModelId(round)"
+                :streaming="!!round.responses.get(getDisplayedModelId(round))?.streaming"
+                :active="true" :selected="round.activeModelId === getDisplayedModelId(round)"
                 class="card"
-                @retry="restorePrompt(round.prompt)"
-              />
+                @retry="retryRoundModel(round, getDisplayedModelId(round))"
+                @replace="replaceRoundModel(round, getDisplayedModelId(round))" />
             </div>
           </div>
 
@@ -781,22 +766,16 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
 
             <!-- Mobile vertical mode -->
             <div v-if="mobileViewMode === 'vertical'" class="space-y-3">
-              <ModelResponseCard
-                v-for="[modelId, msg] of round.responses"
-                :key="modelId"
-                :model-id="modelId"
-                :model-name="getModelName(modelId)"
-                :provider="getProvider(modelId)"
-                :tier="getTier(modelId)"
-                :content="msg.content"
-                :elapsed="msg.elapsed"
-                :brief="msg.brief"
-                :streaming="chatStore.streaming && !msg.elapsed"
+              <ModelResponseCard v-for="[modelId, msg] of round.responses" :key="modelId"
+                :model-id="modelId" :model-name="getModelName(modelId)"
+                :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
+                :elapsed="msg.elapsed" :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief"
+                :streaming="!!msg.streaming"
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
-                @retry="restorePrompt(round.prompt)"
-              />
+                @retry="retryRoundModel(round, modelId)"
+                @replace="replaceRoundModel(round, modelId)" />
             </div>
 
             <!-- Mobile horizontal carousel -->
@@ -821,42 +800,28 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
               </div>
 
               <div class="carousel-wrapper">
-              <div
-                class="overflow-hidden"
-                @touchstart.passive="(e: TouchEvent) => onTouchStart(round.id, e)"
-                @touchmove.passive="(e: TouchEvent) => onTouchMove(round.id, e, round.responses.size)"
-                @touchend="() => onTouchEnd(round.id, round.responses.size)"
-              >
-                <div
-                  class="flex items-stretch"
-                  :class="isDragging[round.id] ? '' : 'carousel-snap'"
-                  :style="{ transform: getTransform(round.id) }"
-                >
-                  <div
-                    v-for="([modelId, msg], cardIdx) in Array.from(round.responses.entries())"
-                    :key="modelId"
-                    class="w-full shrink-0 flex"
-                    :style="{ width: CARD_WIDTH_PCT + '%' }"
-                  >
-                    <div
-                      class="w-full rounded-xl transition-all duration-300"
-                      :class="getActiveIndex(round.id) === cardIdx ? 'carousel-active' : 'carousel-inactive'"
-                    >
-                      <ModelResponseCard
-                        :carousel="true"
-                        :model-id="modelId"
-                        :model-name="getModelName(modelId)"
-                        :provider="getProvider(modelId)"
-                        :tier="getTier(modelId)"
-                        :content="msg.content"
-                        :elapsed="msg.elapsed"
-                        :brief="msg.brief"
-                        :streaming="chatStore.streaming && !msg.elapsed"
-                        :active="getActiveIndex(round.id) === cardIdx"
-                        :selected="round.activeModelId === modelId"
-                        @select="chatStore.setActiveModel(round.id, modelId)"
-                        @retry="restorePrompt(round.prompt)"
-                      />
+                <div class="overflow-hidden"
+                  @touchstart.passive="(e: TouchEvent) => onTouchStart(round.id, e)"
+                  @touchmove.passive="(e: TouchEvent) => onTouchMove(round.id, e, round.responses.size)"
+                  @touchend="() => onTouchEnd(round.id, round.responses.size)">
+                  <div class="flex items-stretch"
+                    :class="isDragging[round.id] ? '' : 'carousel-snap'"
+                    :style="{ transform: getTransform(round.id) }">
+                    <div v-for="([modelId, msg], cardIdx) in Array.from(round.responses.entries())"
+                      :key="modelId" class="w-full shrink-0 flex"
+                      :style="{ width: CARD_WIDTH_PCT + '%' }">
+                      <div class="w-full rounded-xl transition-all duration-300"
+                        :class="getActiveIndex(round.id) === cardIdx ? 'carousel-active' : 'carousel-inactive'">
+                        <ModelResponseCard :carousel="true" :model-id="modelId"
+                          :model-name="getModelName(modelId)" :provider="getProvider(modelId)"
+                          :tier="getTier(modelId)" :content="msg.content" :elapsed="msg.elapsed"
+                          :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief" :streaming="!!msg.streaming"
+                          :active="getActiveIndex(round.id) === cardIdx"
+                          :selected="round.activeModelId === modelId"
+                          @select="chatStore.setActiveModel(round.id, modelId)"
+                          @retry="retryRoundModel(round, modelId)"
+                          @replace="replaceRoundModel(round, modelId)" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -906,8 +871,14 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
       </div>
     </div>
 
-    <!-- Model chip bar -->
-    <ModelChipBar />
+    <!-- Group 3: Trinity Control Pod (Modern Floating Style) -->
+    <div class="z-30 px-4 pb-4 pt-2 shrink-0">
+      <div
+        class="max-w-6xl mx-auto glass-v3 rounded-[36px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 relative flex flex-col overflow-visible border border-white/10">
+        <div class="px-2 pt-2">
+          <ModelChipBar
+            class="!border-none !bg-white/5 !dark:bg-white/5 !rounded-[28px] !shadow-none" />
+        </div>
 
     <!-- Input -->
     <InputBar
