@@ -46,6 +46,7 @@ const recommendedConfiguredCount = computed(() =>
 )
 
 const showQuickStartEntry = computed(() => recommendedConfiguredCount.value <= 2)
+const showDesktopToolbar = computed(() => route.name !== 'chat')
 
 function togglePlatform() {
   platform.value = platform.value === 'macos' ? 'ios' : 'macos'
@@ -129,7 +130,11 @@ function iosDeleteSession(id: string, e: Event) {
     <!-- Main content -->
     <main class="flex-1 flex flex-col min-w-0 bg-surface-0">
       <!-- Toolbar -->
-      <header class="h-12 flex items-center justify-between px-4 border-b border-border-subtle shrink-0" style="-webkit-app-region: drag">
+      <header
+        v-if="showDesktopToolbar"
+        class="h-12 flex items-center justify-between px-4 border-b border-border-subtle shrink-0"
+        style="-webkit-app-region: drag"
+      >
         <div class="flex items-center gap-2 text-sm text-text-secondary" style="-webkit-app-region: no-drag">
           <span class="font-medium text-text-primary">{{ route.meta.title }}</span>
           <span v-if="appStore.selectedModels.length" class="text-text-tertiary">

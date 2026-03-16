@@ -11,7 +11,7 @@ import ModelResponseCard from '@/components/chat/ModelResponseCard.vue'
 import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
 import type { ImageAttachment } from '@/stores/chat'
-import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, History } from 'lucide-vue-next'
+import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -42,9 +42,18 @@ watch(() => appStore.selectedModels.length, (count) => {
 type MobileViewMode = 'horizontal' | 'vertical'
 const mobileViewMode = ref<MobileViewMode>('horizontal')
 
+// --- Header state ---
+const showContextMenu = ref(false)
+
 // --- Inline discuss state ---
 const inlineDiscussRound = ref<string | null>(null)
 const summaryActiveRound = reactive<Record<string, boolean>>({})
+
+function startNewChat() {
+  sessionStore.createSession('chat')
+  chatStore.rounds.length = 0
+  router.push('/chat')
+}
 
 function startInlineDiscuss(roundId: string) {
   inlineDiscussRound.value = roundId
@@ -233,6 +242,15 @@ function onTouchEnd(roundId: string, totalCards: number) {
 }
 
 // --- Other ---
+const contextTip = ref('')
+let contextTipTimer: ReturnType<typeof setTimeout> | null = null
+
+function showContextTip(msg: string) {
+  contextTip.value = msg
+  if (contextTipTimer) clearTimeout(contextTipTimer)
+  contextTipTimer = setTimeout(() => { contextTip.value = '' }, 3500)
+}
+
 const previewImage = ref<string | null>(null)
 
 function openImagePreview(src: string) {
@@ -244,6 +262,17 @@ async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
   if (!hasModels.value) {
     toast.info('请至少选择 2 个模型')
     return
+  }
+  // Warn if previous round has no selection
+  if (chatStore.rounds.length > 0) {
+    const lastRound = chatStore.rounds[chatStore.rounds.length - 1]
+    if (!lastRound.activeModelId && isRoundDone(lastRound)) {
+      if (chatStore.contextMode === 'selected') {
+        showContextTip('上一轮未选择回答，该轮不纳入上下文')
+      } else {
+        showContextTip('上一轮未选择，自动使用首个模型回答')
+      }
+    }
   }
   if (!sessionStore.currentSessionId) {
     sessionStore.createSession('chat')
@@ -275,13 +304,6 @@ function getModelName(id: string): string {
 function getProvider(id: string): string {
   return appStore.models.find(m => m.id === id)?.provider ?? 'unknown'
 }
-
-// --- Context mode chips ---
-const contextModes = [
-  { key: 'summary' as const, label: '摘要' },
-  { key: 'selected' as const, label: '仅选中' },
-  { key: 'full' as const, label: '主线全文' },
-]
 
 function getTier(id: string): number {
   return appStore.models.find(m => m.id === id)?.tier ?? 0
@@ -331,6 +353,105 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
 
 <template>
   <div class="flex flex-col h-full">
+    <!-- Sticky Header - Glass morphism style -->
+    <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
+      <div class="max-w-5xl mx-auto">
+        <!-- Top row: Title and actions -->
+        <div class="flex items-center justify-between mb-3">
+          <!-- Left: Session title -->
+          <div class="flex items-center gap-3">
+            <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-accent/10 text-accent">
+              <MessageSquare :size="20" />
+            </div>
+            <div>
+              <h1 class="text-base font-semibold text-text-primary">
+                {{ sessionStore.currentSession?.title || '新对话' }}
+              </h1>
+              <p class="text-xs text-text-tertiary mt-0.5">
+                {{ chatStore.rounds.length > 0 ? `${chatStore.rounds.length} 轮对话 · ` : '' }}
+                {{ appStore.selectedModels.length }} 个模型
+              </p>
+            </div>
+          </div>
+          
+          <!-- Right: Quick actions -->
+          <div class="flex items-center gap-1.5">
+            <!-- Context mode selector -->
+            <div v-if="chatStore.rounds.length > 0" class="relative">
+              <button
+                @click="showContextMenu = !showContextMenu"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                       bg-surface-2 text-text-secondary hover:bg-surface-3 transition-colors"
+              >
+                <component :is="{ summary: TextQuote, selected: CheckCircle2, full: MessageSquare }[chatStore.contextMode]" :size="14" />
+                <span>{{ { summary: '摘要', selected: '仅选中', full: '全文' }[chatStore.contextMode] }}</span>
+                <ChevronDown :size="12" class="transition-transform" :class="showContextMenu ? 'rotate-180' : ''" />
+              </button>
+              <!-- Context mode dropdown -->
+              <Transition name="popover">
+                <div
+                  v-if="showContextMenu"
+                  class="absolute right-0 top-full mt-1 w-36 rounded-xl border border-border-default
+                         bg-surface-1 shadow-xl py-1 z-50"
+                >
+                  <button
+                    v-for="mode in [{k:'summary',l:'摘要',i:TextQuote},{k:'selected',l:'仅选中',i:CheckCircle2},{k:'full',l:'全文',i:MessageSquare}]"
+                    :key="mode.k"
+                    @click="chatStore.contextMode = mode.k as any; showContextMenu = false"
+                    class="w-full px-3 py-2 text-left flex items-center gap-2 transition-colors"
+                    :class="chatStore.contextMode === mode.k ? 'bg-accent/10 text-accent' : 'text-text-secondary hover:bg-surface-2'"
+                  >
+                    <component :is="mode.i" :size="14" />
+                    <span class="text-xs font-medium">{{ mode.l }}</span>
+                  </button>
+                </div>
+              </Transition>
+              <div v-if="showContextMenu" class="fixed inset-0 z-40" @click="showContextMenu = false" />
+            </div>
+            
+            <!-- New chat button -->
+            <button
+              @click="startNewChat"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                     bg-accent text-white hover:bg-accent-hover transition-colors"
+            >
+              <Plus :size="14" />
+              <span class="hidden sm:inline">新对话</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Bottom row: Selected models chips -->
+        <div v-if="appStore.selectedModels.length > 0" class="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <span class="text-xs text-text-tertiary shrink-0">当前模型:</span>
+          <div class="flex items-center gap-1.5">
+            <span
+              v-for="m in appStore.selectedModels.slice(0, 4)"
+              :key="m.id"
+              class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs
+                     whitespace-nowrap shrink-0 border"
+              :style="{
+                backgroundColor: getModelColor(m.provider) + '15',
+                borderColor: getModelColor(m.provider) + '30',
+                color: getModelColor(m.provider)
+              }"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: getModelColor(m.provider) }" />
+              <span class="truncate max-w-[80px]">{{ m.name }}</span>
+            </span>
+            <span v-if="appStore.selectedModels.length > 4" class="text-xs text-text-tertiary">
+              +{{ appStore.selectedModels.length - 4 }}
+            </span>
+          </div>
+        </div>
+        <div v-else class="flex items-center gap-2">
+          <span class="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg">
+            请先选择 2 个以上模型开始对话
+          </span>
+        </div>
+      </div>
+    </header>
+
     <!-- Chat history -->
     <div ref="scrollContainer" class="flex-1 overflow-y-auto" @scroll.passive="onScroll">
       <!-- Empty state -->
@@ -783,27 +904,6 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
     <!-- Model chip bar -->
     <ModelChipBar />
 
-    <!-- Context mode chips (only when there's history) -->
-    <div
-      v-if="chatStore.rounds.length > 0"
-      class="flex items-center gap-2 px-4 py-1.5"
-    >
-      <History :size="13" class="text-text-tertiary shrink-0" />
-      <div class="flex items-center gap-1">
-        <button
-          v-for="m in contextModes"
-          :key="m.key"
-          @click="chatStore.contextMode = m.key"
-          class="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
-          :class="chatStore.contextMode === m.key
-            ? 'bg-accent/15 text-accent'
-            : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-2'"
-        >
-          {{ m.label }}
-        </button>
-      </div>
-    </div>
-
     <!-- Input -->
     <InputBar
       :disabled="!hasModels"
@@ -837,16 +937,14 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
   padding-right: 8px;
 }
 
-/* Active card: accent border, full opacity, lifted */
+/* Active card: full opacity, lifted */
 .carousel-active {
-  border: 2px solid #6366f1;
   box-shadow: 0 2px 12px rgba(99, 102, 241, 0.15);
   opacity: 1;
 }
 
-/* Inactive/peek card: subtle border, faded, shrunk */
+/* Inactive/peek card: faded, shrunk */
 .carousel-inactive {
-  border: 1.5px solid var(--c-border-subtle);
   opacity: 0.4;
   transform: scale(0.96);
 }
@@ -892,4 +990,8 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
 
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+.tip-fade-enter-active { transition: all 0.2s ease; }
+.tip-fade-leave-active { transition: all 0.3s ease; }
+.tip-fade-enter-from, .tip-fade-leave-to { opacity: 0; transform: translateY(4px); }
 </style>
