@@ -50,6 +50,11 @@ interface ImportPayload {
   providers: ImportProviderInput[]
 }
 
+interface ShareImportPayload extends ImportPayload {
+  exportedAt: string
+  expiresAt?: string | null
+}
+
 const BUILTIN_PROVIDERS: ProviderConfig[] = [
   { id: 'siliconflow', name: '硅基流动', type: 'openai-compatible', baseUrl: 'https://api.siliconflow.cn/v1', enabled: true, builtIn: true },
   { id: 'zhipu', name: '智谱 AI', type: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', enabled: true, builtIn: true },
@@ -541,7 +546,11 @@ export const useProviderStore = defineStore('provider', () => {
     return importedCount
   }
 
-  async function exportShareBundle(accountIds: string[], password: string) {
+  async function exportShareBundle(
+    accountIds: string[],
+    password: string,
+    options: { expiresAt?: string | null } = {},
+  ) {
     const selected = accountIds
       .map((accountId) => accounts.value.find((account) => account.id === accountId))
       .filter((account): account is ProviderAccount => !!account)
@@ -588,9 +597,10 @@ export const useProviderStore = defineStore('provider', () => {
       throw new Error('没有可导出的真实账户')
     }
 
-    const payload: ImportPayload & { exportedAt: string } = {
+    const payload: ShareImportPayload = {
       version: 1,
       exportedAt: new Date().toISOString(),
+      expiresAt: options.expiresAt ?? null,
       providers: Array.from(providerMap.values()),
     }
 
@@ -601,9 +611,14 @@ export const useProviderStore = defineStore('provider', () => {
   async function importShareBundle(bundleJson: string, password: string) {
     const toast = useToastStore()
     try {
-      const payload = await readShareBundle<ImportPayload>(bundleJson, password)
+      const payload = await readShareBundle<ShareImportPayload>(bundleJson, password)
       if (payload.version !== 1 || !Array.isArray(payload.providers)) {
         toast.error('分享包内容无效')
+        return false
+      }
+
+      if (payload.expiresAt && new Date(payload.expiresAt).getTime() <= Date.now()) {
+        toast.error('分享包已过期，请联系分享方重新生成')
         return false
       }
 
