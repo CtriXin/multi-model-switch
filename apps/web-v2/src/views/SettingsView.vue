@@ -1,17 +1,21 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useProviderStore } from '@/stores/provider'
 import { useAppStore } from '@/stores/app'
 import { useToastStore } from '@/stores/toast'
+import { FREE_PROVIDERS } from '@/data/freeProviders'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
-import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check } from 'lucide-vue-next'
+import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket } from 'lucide-vue-next'
 import { ref, onMounted, computed } from 'vue'
 
+const router = useRouter()
 const { theme, toggle: toggleTheme } = useTheme()
 const sidebarExpanded = ref(true)
 const providerStore = useProviderStore()
 const appStore = useAppStore()
 const toast = useToastStore()
+const providerListCollapsed = ref(false)
 
 // Provider editing state
 const editingProviderId = ref<string | null>(null)
@@ -191,6 +195,45 @@ function canAddManualModel(providerId: string) {
   return providerStore.keyStatus[providerId] || !!provider.customModels?.length
 }
 
+const recommendedConfiguredCount = computed(() =>
+  FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
+)
+
+const visibleProviders = computed(() =>
+  providerStore.providers.filter((provider) => (
+    !providerListCollapsed.value
+    || provider.enabled
+    || !!providerStore.keyStatus[provider.id]
+  )),
+)
+
+function canBulkEnable(providerId: string) {
+  const provider = providerStore.getProvider(providerId)
+  if (!provider) return false
+  return provider.type === 'mock'
+    || !provider.builtIn
+    || provider.enabled
+    || !!providerStore.keyStatus[providerId]
+}
+
+async function enableAllProviders() {
+  for (const provider of providerStore.providers) {
+    if (canBulkEnable(provider.id) && !provider.enabled) {
+      providerStore.updateProvider(provider.id, { enabled: true })
+    }
+  }
+  await appStore.refreshModels()
+}
+
+async function disableAllProviders() {
+  for (const provider of providerStore.providers) {
+    if (provider.enabled) {
+      providerStore.updateProvider(provider.id, { enabled: false })
+    }
+  }
+  await appStore.refreshModels()
+}
+
 const shareableAccounts = computed(() =>
   providerStore.accounts.filter((account) => {
     const provider = providerStore.getProvider(account.providerId)
@@ -296,6 +339,24 @@ async function clearAllKeys() {
     <div class="max-w-2xl mx-auto px-6 py-8 space-y-6">
       <h1 class="text-lg font-semibold text-text-primary">设置</h1>
 
+      <div class="card p-5 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 text-base shadow-sm">🚀</span>
+            <p class="text-sm font-semibold text-text-primary">快速开始</p>
+          </div>
+          <p class="mt-2 text-xs text-text-tertiary">
+            新手先从这里配免费 API。你当前已配置 {{ recommendedConfiguredCount }} 个推荐通道。
+          </p>
+        </div>
+        <button
+          @click="router.push('/setup')"
+          class="shrink-0 rounded-lg border border-border-default px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-3"
+        >
+          打开快速开始
+        </button>
+      </div>
+
       <!-- Appearance -->
       <div class="card p-5 space-y-4">
         <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
@@ -349,15 +410,40 @@ async function clearAllKeys() {
 
       <!-- API Providers -->
       <div class="card p-5 space-y-4">
-        <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
-          <Key :size="16" class="text-text-tertiary" />
-          API 通道
-        </h2>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <Key :size="16" class="text-text-tertiary" />
+            API 通道
+          </h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              @click="providerListCollapsed = !providerListCollapsed"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              {{ providerListCollapsed ? '显示全部' : '收起未配置' }}
+            </button>
+            <button
+              @click="enableAllProviders"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              一键全开
+            </button>
+            <button
+              @click="disableAllProviders"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              一键全关
+            </button>
+          </div>
+        </div>
+        <p class="text-[11px] text-text-tertiary">
+          收起后只显示已绑定 API Key 或当前已打开的通道。
+        </p>
 
         <!-- Provider list -->
         <div class="space-y-2">
           <div
-            v-for="provider in providerStore.providers"
+            v-for="provider in visibleProviders"
             :key="provider.id"
             class="rounded-lg border p-3 space-y-3 transition-opacity"
             :class="provider.enabled

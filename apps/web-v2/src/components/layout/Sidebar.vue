@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
+import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
+import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Rocket, Palette,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Palette, Sparkles,
 } from 'lucide-vue-next'
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
 const sessionStore = useSessionStore()
+const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
 
 const props = defineProps<{ collapsed?: boolean }>()
@@ -19,6 +22,12 @@ const emit = defineEmits<{ collapse: []; expand: [] }>()
 onMounted(() => {
   sessionStore.loadSessions()
 })
+
+const recommendedConfiguredCount = computed(() =>
+  FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
+)
+
+const showQuickStartEntry = computed(() => recommendedConfiguredCount.value <= 2)
 
 function newChat() {
   sessionStore.createSession('chat')
@@ -83,12 +92,13 @@ function deleteSession(id: string, e: Event) {
 
     <!-- Quick Start -->
     <button
+      v-if="showQuickStartEntry"
       @click="router.push('/setup')"
       class="btn-icon"
       :class="route.path === '/setup' ? 'text-text-primary' : ''"
-      title="🚀 快速开始"
+      title="快速开始"
     >
-      <Rocket :size="16" />
+      <span class="text-[15px] leading-none">🚀</span>
     </button>
 
     <!-- Models -->
@@ -109,6 +119,16 @@ function deleteSession(id: string, e: Event) {
       title="设置"
     >
       <Settings :size="16" />
+    </button>
+
+    <!-- Design System V2 (Sparkles) -->
+    <button
+      @click="router.push('/v2/design')"
+      class="btn-icon"
+      :class="route.path === '/v2/design' ? 'text-text-primary' : ''"
+      title="V2 设计系统"
+    >
+      <Sparkles :size="16" class="text-[#a78bfa]" />
     </button>
 
     <!-- Design System (dev only) -->
@@ -224,14 +244,15 @@ function deleteSession(id: string, e: Event) {
         <kbd class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘K</kbd>
       </button>
       <button
+        v-if="showQuickStartEntry"
         @click="router.push('/setup')"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
         :class="route.path === '/setup'
           ? 'bg-white/8 text-text-primary'
           : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
       >
-        <Rocket :size="16" :stroke-width="1.8" />
-        <span>🚀 快速开始</span>
+        <span class="text-base leading-none">🚀</span>
+        <span>快速开始</span>
       </button>
       <button
         @click="router.push('/models')"
@@ -252,6 +273,16 @@ function deleteSession(id: string, e: Event) {
       >
         <Settings :size="16" :stroke-width="1.8" />
         <span>设置</span>
+      </button>
+      <button
+        @click="router.push('/v2/design')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/v2/design'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <Sparkles :size="16" :stroke-width="1.8" class="text-[#a78bfa]" />
+        <span>V2 设计系统</span>
       </button>
       <button
         @click="router.push('/design')"
