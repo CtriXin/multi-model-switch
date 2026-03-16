@@ -85,6 +85,7 @@ export const useAppStore = defineStore('app', () => {
   const initialized = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const preferFree = ref(true)
 
   function loadSuppressedModelIds() {
     try {
@@ -215,9 +216,10 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function pickDiverseModels(count = 3): string[] {
-    // Prefer free models, then fill with paid if needed
-    const freeModels = models.value.filter(m => m.free)
-    const pool = freeModels.length ? freeModels : models.value
+    // Respect preferFree: when on, only pick from free; when off, pick from all
+    const pool = preferFree.value
+      ? (models.value.filter(m => m.free).length ? models.value.filter(m => m.free) : models.value)
+      : models.value
 
     const byProvider: Record<string, ModelMeta[]> = {}
     for (const m of pool) {
@@ -233,10 +235,12 @@ export const useAppStore = defineStore('app', () => {
     }
     if (picked.length >= count) return picked
 
-    const remainingPool = freeModels.length
-      ? [...pool, ...models.value.filter((model) => !model.free)]
-      : pool
-    const remaining = shuffleArray(remainingPool).map((model) => model.id)
+    // Fill remaining from broader pool if needed
+    const remaining = shuffleArray(
+      preferFree.value
+        ? [...pool, ...models.value.filter(m => !m.free)]
+        : models.value,
+    ).map(m => m.id)
     for (const id of remaining) {
       if (picked.length >= count) break
       if (!picked.includes(id)) picked.push(id)
@@ -321,7 +325,7 @@ export const useAppStore = defineStore('app', () => {
     selectedModels,
     committeeSelectedModelIds,
     committeeSelectedModels,
-    modelsByCategory, initialized, loading, error,
+    modelsByCategory, initialized, loading, error, preferFree,
     initialize,
     refreshModels,
     toggleModel,

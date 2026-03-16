@@ -20,7 +20,7 @@ const providerColor = computed(() => {
 </script>
 
 <template>
-  <div class="overflow-hidden rounded-[1.25rem] border border-amber-500/20 bg-surface-1 shadow-sm">
+  <div class="overflow-hidden rounded-3xl border border-amber-500/20 bg-surface-1 shadow-sm">
     <div class="bg-gradient-to-r from-rose-500/8 to-amber-500/8 px-4 py-3">
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span class="font-semibold text-rose-300">{{ props.roleName }}</span>

@@ -35,7 +35,9 @@ export function useTheme() {
     const el = document.documentElement
     if (theme.value === 'light') {
       el.classList.add('light')
+      el.classList.remove('dark')
     } else {
+      el.classList.add('dark')
       el.classList.remove('light')
     }
   })

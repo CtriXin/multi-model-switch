@@ -29,7 +29,8 @@ const iconColorMap = {
 
 <template>
   <Teleport to="body">
-    <div class="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
+    <!-- Toast moved to bottom to avoid blocking top navigation -->
+    <div class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none max-w-[90vw]">
       <TransitionGroup name="toast">
         <div
           v-for="t in toast.toasts"
@@ -75,6 +76,6 @@ const iconColorMap = {
 .toast-enter-active { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .toast-leave-active { animation: fadeOut 0.2s ease-out forwards; }
 .toast-move { transition: transform 0.3s ease; }
-@keyframes fadeOut { to { opacity: 0; transform: translateX(20px); } }
-@keyframes slideUp { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes fadeOut { to { opacity: 0; transform: translateY(10px); } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 </style>

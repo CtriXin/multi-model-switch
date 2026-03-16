@@ -76,8 +76,8 @@ function goToSettings() {
 
 <template>
   <div class="flex-1 overflow-y-auto">
-    <div class="max-w-4xl mx-auto px-6 py-8 space-y-8">
-      <div class="flex items-end justify-between">
+    <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
+      <div class="max-w-4xl mx-auto flex items-end justify-between gap-4">
         <div>
           <h1 class="text-lg font-semibold text-text-primary">模型管理</h1>
           <p class="text-xs text-text-tertiary mt-1">
@@ -89,7 +89,6 @@ function goToSettings() {
           </p>
         </div>
 
-        <!-- Filter chips -->
         <div v-if="appStore.models.length" class="flex items-center gap-2">
           <button
             v-if="suppressedCount"
@@ -122,7 +121,9 @@ function goToSettings() {
           </button>
         </div>
       </div>
+    </header>
 
+    <div class="max-w-4xl mx-auto px-6 py-8 space-y-8">
       <!-- Loading state -->
       <div v-if="appStore.loading" class="flex items-center justify-center py-16">
         <Loader2 :size="24" class="text-accent animate-spin" />
