@@ -1,22 +1,38 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta } from '@/stores/app'
-import { X, Plus, Search, GitMerge, Shuffle, DollarSign, Image, Clock } from 'lucide-vue-next'
+import { X, Plus, Search, Dice5, Bot, DollarSign, Image, Clock, TextQuote, ChevronDown, Sparkles, MessageSquare } from 'lucide-vue-next'
+import { useChatStore, type ContextMode } from '@/stores/chat'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
 
-const router = useRouter()
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
+const chatStore = useChatStore()
 const popoverOpen = ref(false)
 const searchQuery = ref('')
-const filterFree = ref(true)
 const filterVision = ref(false)
 const recentSearches = ref<string[]>([])
+const contextMenuOpen = ref(false)
+
+// Context mode options
+const contextModes: { key: ContextMode; label: string; description: string; icon: any }[] = [
+  { key: 'summary', label: '摘要', description: '每轮回答摘要', icon: TextQuote },
+  { key: 'selected', label: '仅选中', description: '仅选中模型', icon: Plus },
+  { key: 'full', label: '全文', description: '完整对话历史', icon: MessageSquare },
+]
+
+function getContextModeLabel(key: ContextMode): string {
+  return contextModes.find(m => m.key === key)?.label ?? '摘要'
+}
+
+function getContextModeIcon(key: ContextMode): any {
+  return contextModes.find(m => m.key === key)?.icon ?? TextQuote
+}
 
 const filteredModels = ref<typeof appStore.models>([])
 
-/** Group filtered models by provider for the popover */
 const groupedFiltered = computed(() => {
   const map: Record<string, ModelMeta[]> = {}
   for (const m of filteredModels.value) {
@@ -28,7 +44,7 @@ const groupedFiltered = computed(() => {
 function updateFiltered() {
   const q = searchQuery.value.toLowerCase()
   filteredModels.value = appStore.models.filter(m => {
-    if (filterFree.value && !m.free) return false
+    if (appStore.preferFree && !m.free) return false
     if (filterVision.value && !m.supportsVision) return false
     if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false
     return true
@@ -39,7 +55,6 @@ function togglePopover() {
   popoverOpen.value = !popoverOpen.value
   if (popoverOpen.value) {
     searchQuery.value = ''
-    filterFree.value = true
     filterVision.value = false
     recentSearches.value = getSearchHistory()
     updateFiltered()
@@ -71,7 +86,7 @@ function applyRecentSearch(keyword: string) {
 }
 
 function toggleFilterFree() {
-  filterFree.value = !filterFree.value
+  appStore.preferFree = !appStore.preferFree
   updateFiltered()
 }
 
@@ -92,80 +107,121 @@ function tierClass(tier: number): string {
       : 'bg-green-500/15 text-green-400'
 }
 
-// Watch for popover close to commit search
 watch(popoverOpen, (val) => {
   if (!val) commitSearch()
 })
 </script>
 
 <template>
-  <div class="relative border-t border-border-subtle bg-surface-1">
-    <div class="max-w-5xl mx-auto px-4">
-      <div class="flex items-center h-10">
-      <!-- Scrollable chips area -->
-      <div class="flex-1 min-w-0 overflow-x-auto no-scrollbar">
-        <div class="flex items-center gap-1.5 py-1.5 w-max min-w-full">
-          <span
-            v-for="m in appStore.selectedModels"
-            :key="m.id"
-            class="inline-flex items-center gap-1.5 pl-1 pr-1.5 py-1 rounded-full text-xs
-                   whitespace-nowrap shrink-0 group border transition-colors"
-            :style="{
-              backgroundColor: getModelColor(m.provider) + '12',
-              borderColor: getModelColor(m.provider) + '25',
-            }"
-          >
-            <span
-              class="w-2 h-2 rounded-full shrink-0"
-              :style="{ backgroundColor: getModelColor(m.provider) }"
-            />
-            <span class="truncate max-w-[80px] text-text-primary">{{ m.name }}</span>
-            <span v-if="m.free" class="text-[8px] text-green-400 font-medium">$0</span>
-            <span v-if="m.supportsVision" class="text-[8px] text-purple-400">📷</span>
+  <div class="border-t border-border-subtle bg-surface-1">
+      <div class="max-w-5xl mx-auto px-3 sm:px-4">
+        <div class="flex items-center h-11 sm:h-10">
+          <!-- Scrollable chips area -->
+          <div class="flex-1 min-w-0 overflow-x-auto no-scrollbar">
+            <div class="flex items-center gap-2 sm:gap-1.5 py-2 sm:py-1.5 w-max min-w-full">
+              <span
+                v-for="m in appStore.selectedModels"
+                :key="m.id"
+                class="inline-flex items-center gap-1.5 pl-1.5 sm:pl-1 pr-2 sm:pr-1.5 py-1.5 sm:py-1 rounded-full text-xs
+                       whitespace-nowrap shrink-0 group border transition-colors"
+                :style="{
+                  backgroundColor: getModelColor(m.provider) + '12',
+                  borderColor: getModelColor(m.provider) + '25',
+                }"
+              >
+                <span
+                  class="w-2.5 h-2.5 sm:w-2 sm:h-2 rounded-full shrink-0"
+                  :style="{ backgroundColor: getModelColor(m.provider) }"
+                />
+                <span class="truncate max-w-[100px] sm:max-w-[80px] text-text-primary">{{ m.name }}</span>
+                <span v-if="m.free" class="text-[9px] sm:text-[8px] text-green-400 font-medium">$0</span>
+                <span v-if="m.supportsVision" class="text-[9px] sm:text-[8px] text-purple-400">📷</span>
+                <button
+                  @click.stop="removeModel(m.id)"
+                  class="p-1 sm:p-0.5 rounded-full hover:bg-white/10 opacity-40 group-hover:opacity-100 transition-opacity"
+                >
+                  <X class="w-3.5 h-3.5 sm:w-3 sm:h-3" />
+                </button>
+              </span>
+              <span v-if="!appStore.selectedModels.length" class="text-xs text-text-tertiary whitespace-nowrap">
+                未选择模型
+              </span>
+            </div>
+          </div>
+
+          <!-- Fixed right buttons -->
+          <div class="flex items-center gap-2 sm:gap-1.5 shrink-0 border-l border-border-subtle pl-2.5 sm:pl-3">
+            <!-- Context Mode (only in chat page) -->
+            <div v-if="route.path === '/chat' && chatStore.rounds.length > 0" class="relative">
+              <button
+                @click="contextMenuOpen = !contextMenuOpen"
+                class="inline-flex items-center gap-1 px-2 sm:px-2 py-1.5 sm:py-1 rounded-full text-xs
+                       text-text-secondary hover:bg-surface-3 active:scale-95 transition-all whitespace-nowrap"
+                title="选择上下文模式"
+              >
+                <component :is="getContextModeIcon(chatStore.contextMode)" class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span class="hidden sm:inline">{{ getContextModeLabel(chatStore.contextMode) }}</span>
+                <ChevronDown class="w-3.5 h-3.5 sm:w-3 sm:h-3 transition-transform" :class="contextMenuOpen ? 'rotate-180' : ''" />
+              </button>
+              <!-- Context mode dropdown -->
+              <Transition name="popover">
+                <div
+                  v-if="contextMenuOpen"
+                  class="absolute right-0 bottom-full mb-1 w-40 rounded-xl border border-border-default
+                         bg-surface-1 shadow-xl py-1.5 z-50"
+                >
+                  <div class="px-3 py-1.5 text-[10px] font-medium text-text-tertiary uppercase tracking-wider">
+                    上下文模式
+                  </div>
+                  <button
+                    v-for="mode in contextModes"
+                    :key="mode.key"
+                    @click="chatStore.contextMode = mode.key; contextMenuOpen = false"
+                    class="w-full px-3 py-2 text-left flex items-center gap-2 transition-colors"
+                    :class="chatStore.contextMode === mode.key
+                      ? 'bg-accent/10 text-accent'
+                      : 'text-text-secondary hover:bg-surface-2'"
+                  >
+                    <component :is="mode.icon" :size="14" />
+                    <div class="flex-1 min-w-0">
+                      <div class="text-xs font-medium">{{ mode.label }}</div>
+                      <div class="text-[10px] text-text-tertiary">{{ mode.description }}</div>
+                    </div>
+                  </button>
+                </div>
+              </Transition>
+              <!-- Click outside to close -->
+              <div
+                v-if="contextMenuOpen"
+                class="fixed inset-0 z-40"
+                @click="contextMenuOpen = false"
+              />
+            </div>
+
             <button
-              @click.stop="removeModel(m.id)"
-              class="p-0.5 rounded-full hover:bg-white/10 opacity-40 group-hover:opacity-100 transition-opacity"
+              @click="appStore.randomPick()"
+              class="inline-flex items-center gap-1 px-2 py-1.5 sm:py-1 rounded-full text-xs
+                     text-amber-400 hover:bg-amber-500/10 active:scale-95 transition-all whitespace-nowrap"
+              title="随机换一组模型"
             >
-              <X :size="10" />
+              <Dice5 class="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span class="hidden sm:inline">换一组</span>
             </button>
-          </span>
-          <span v-if="!appStore.selectedModels.length" class="text-xs text-text-tertiary whitespace-nowrap">
-            未选择模型
-          </span>
+            <button
+              @click="togglePopover"
+              class="inline-flex items-center gap-1 px-2 py-1.5 sm:py-1 rounded-full text-xs
+                     hover:bg-accent/10 active:scale-95 transition-all whitespace-nowrap"
+              :class="appStore.selectedModels.length > 0 ? 'text-accent' : 'text-text-tertiary'"
+            >
+              <Bot 
+                class="w-4 h-4 sm:w-3.5 sm:h-3.5 transition-colors"
+                :class="appStore.selectedModels.length > 0 ? 'text-accent' : 'text-text-tertiary'"
+              />
+              <span class="hidden sm:inline">模型</span>
+            </button>
+          </div>
         </div>
       </div>
-
-      <!-- Fixed right buttons -->
-      <div class="flex items-center gap-1 shrink-0 border-l border-border-subtle pl-3">
-        <button
-          @click="appStore.randomPick()"
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs
-                 text-amber-400 hover:bg-amber-500/10 active:scale-95 transition-all whitespace-nowrap"
-          title="随机换一组模型"
-        >
-          <Shuffle :size="12" />
-          换一组
-        </button>
-        <button
-          @click="togglePopover"
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs
-                 text-accent hover:bg-accent/10 active:scale-95 transition-all whitespace-nowrap"
-        >
-          <Plus :size="12" />
-          模型
-        </button>
-        <button
-          v-if="route.path === '/chat'"
-          @click="router.push('/discuss')"
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs
-                 text-purple-400 hover:bg-purple-500/10 active:scale-95 transition-all whitespace-nowrap"
-        >
-          <GitMerge :size="12" />
-          讨论
-        </button>
-      </div>
-      </div>
-    </div>
 
     <!-- Popover dropdown -->
     <Transition name="popover">
@@ -194,7 +250,7 @@ watch(popoverOpen, (val) => {
               <button
                 @click="toggleFilterFree"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
-                :class="filterFree
+                :class="appStore.preferFree
                   ? 'bg-green-500/15 text-green-400 border-green-500/30'
                   : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
               >
@@ -287,4 +343,6 @@ watch(popoverOpen, (val) => {
   from { opacity: 1; }
   to { opacity: 0; transform: translateY(4px); }
 }
+
+
 </style>

@@ -1,15 +1,21 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { useTheme } from '@/composables/useTheme'
 import { useProviderStore } from '@/stores/provider'
 import { useAppStore } from '@/stores/app'
+import { useToastStore } from '@/stores/toast'
+import { FREE_PROVIDERS } from '@/data/freeProviders'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
-import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu } from 'lucide-vue-next'
-import { ref, onMounted } from 'vue'
+import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket } from 'lucide-vue-next'
+import { ref, onMounted, computed } from 'vue'
 
+const router = useRouter()
 const { theme, toggle: toggleTheme } = useTheme()
 const sidebarExpanded = ref(true)
 const providerStore = useProviderStore()
 const appStore = useAppStore()
+const toast = useToastStore()
+const providerListCollapsed = ref(false)
 
 // Provider editing state
 const editingProviderId = ref<string | null>(null)
@@ -20,6 +26,26 @@ const saving = ref(false)
 const showImport = ref(false)
 const importText = ref('')
 const importFileInput = ref<HTMLInputElement | null>(null)
+
+// Secure share bundle state
+const showShareExport = ref(false)
+const showShareImport = ref(false)
+const shareSelectedAccountIds = ref<string[]>([])
+const sharePassword = ref('')
+const shareExpiryDays = ref<'7' | '30' | '90' | 'never'>('30')
+const shareBundleOutput = ref('')
+const shareGenerating = ref(false)
+const shareCopied = ref(false)
+const shareImportText = ref('')
+const shareImportPassword = ref('')
+const shareImportFileInput = ref<HTMLInputElement | null>(null)
+const shareImporting = ref(false)
+const shareExpiryOptions = [
+  { value: '7', label: '7 天' },
+  { value: '30', label: '30 天' },
+  { value: '90', label: '90 天' },
+  { value: 'never', label: '不过期' },
+] as const
 
 // Add custom provider state
 const showAddProvider = ref(false)
@@ -36,6 +62,7 @@ const newModelId = ref('')
 
 onMounted(async () => {
   await providerStore.refreshKeyStatus()
+  resetShareSelection()
 })
 
 function startEdit(providerId: string) {
@@ -168,16 +195,172 @@ function canAddManualModel(providerId: string) {
   return providerStore.keyStatus[providerId] || !!provider.customModels?.length
 }
 
+const recommendedConfiguredCount = computed(() =>
+  FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
+)
+
+const visibleProviders = computed(() =>
+  providerStore.providers.filter((provider) => (
+    !providerListCollapsed.value
+    || provider.enabled
+    || !!providerStore.keyStatus[provider.id]
+  )),
+)
+
+function canBulkEnable(providerId: string) {
+  const provider = providerStore.getProvider(providerId)
+  if (!provider) return false
+  return provider.type === 'mock'
+    || !provider.builtIn
+    || provider.enabled
+    || !!providerStore.keyStatus[providerId]
+}
+
+async function enableAllProviders() {
+  for (const provider of providerStore.providers) {
+    if (canBulkEnable(provider.id) && !provider.enabled) {
+      providerStore.updateProvider(provider.id, { enabled: true })
+    }
+  }
+  await appStore.refreshModels()
+}
+
+async function disableAllProviders() {
+  for (const provider of providerStore.providers) {
+    if (provider.enabled) {
+      providerStore.updateProvider(provider.id, { enabled: false })
+    }
+  }
+  await appStore.refreshModels()
+}
+
+const shareableAccounts = computed(() =>
+  providerStore.accounts.filter((account) => {
+    const provider = providerStore.getProvider(account.providerId)
+    return !!provider
+      && provider.type !== 'mock'
+      && !!providerStore.accountKeyStatus[account.id]
+  }),
+)
+
+function getShareAccountProviderName(providerId: string) {
+  return providerStore.getProvider(providerId)?.name ?? providerId
+}
+
+function resetShareSelection() {
+  shareSelectedAccountIds.value = shareableAccounts.value.map((account) => account.id)
+}
+
+function toggleShareAccount(accountId: string) {
+  const index = shareSelectedAccountIds.value.indexOf(accountId)
+  if (index >= 0) {
+    shareSelectedAccountIds.value.splice(index, 1)
+  } else {
+    shareSelectedAccountIds.value.push(accountId)
+  }
+}
+
+async function generateShareBundle() {
+  if (!shareSelectedAccountIds.value.length) return
+  shareGenerating.value = true
+  try {
+    const expiresAt = shareExpiryDays.value === 'never'
+      ? null
+      : new Date(Date.now() + Number(shareExpiryDays.value) * 24 * 60 * 60 * 1000).toISOString()
+    shareBundleOutput.value = await providerStore.exportShareBundle(
+      shareSelectedAccountIds.value,
+      sharePassword.value,
+      { expiresAt },
+    )
+  } catch (error: any) {
+    toast.error(error.message || '生成分享包失败')
+  } finally {
+    shareGenerating.value = false
+  }
+}
+
+async function copyShareBundle() {
+  if (!shareBundleOutput.value) return
+  await navigator.clipboard.writeText(shareBundleOutput.value)
+  shareCopied.value = true
+  setTimeout(() => { shareCopied.value = false }, 1500)
+}
+
+function downloadShareBundle() {
+  if (!shareBundleOutput.value) return
+  const blob = new Blob([shareBundleOutput.value], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `mms-share-bundle-${new Date().toISOString().slice(0, 10)}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function handleShareImportFileUpload(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    shareImportText.value = e.target?.result as string
+  }
+  reader.readAsText(file)
+}
+
+async function handleShareImport() {
+  const text = shareImportText.value.trim()
+  if (!text) return
+  shareImporting.value = true
+  try {
+    const ok = await providerStore.importShareBundle(text, shareImportPassword.value)
+    if (ok) {
+      shareImportText.value = ''
+      shareImportPassword.value = ''
+      showShareImport.value = false
+      await providerStore.refreshKeyStatus()
+      await appStore.refreshModels()
+      resetShareSelection()
+    }
+  } finally {
+    shareImporting.value = false
+  }
+}
+
 async function clearAllKeys() {
   await providerStore.clearAllCredentials()
   await appStore.refreshModels()
+  shareBundleOutput.value = ''
+  resetShareSelection()
 }
 </script>
 
 <template>
   <div class="flex-1 overflow-y-auto">
+    <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
+      <div class="max-w-2xl mx-auto">
+        <h1 class="text-lg font-semibold text-text-primary">设置</h1>
+        <p class="mt-1 text-xs text-text-tertiary">管理外观、API 通道、分享包和高级接入。</p>
+      </div>
+    </header>
+
     <div class="max-w-2xl mx-auto px-6 py-8 space-y-6">
-      <h1 class="text-lg font-semibold text-text-primary">设置</h1>
+      <div class="card p-5 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 text-base shadow-sm">🚀</span>
+            <p class="text-sm font-semibold text-text-primary">快速开始</p>
+          </div>
+          <p class="mt-2 text-xs text-text-tertiary">
+            新手先从这里配免费 API。你当前已配置 {{ recommendedConfiguredCount }} 个推荐通道。
+          </p>
+        </div>
+        <button
+          @click="router.push('/setup')"
+          class="shrink-0 rounded-lg border border-border-default px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-3"
+        >
+          打开快速开始
+        </button>
+      </div>
 
       <!-- Appearance -->
       <div class="card p-5 space-y-4">
@@ -232,15 +415,40 @@ async function clearAllKeys() {
 
       <!-- API Providers -->
       <div class="card p-5 space-y-4">
-        <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
-          <Key :size="16" class="text-text-tertiary" />
-          API 通道
-        </h2>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <Key :size="16" class="text-text-tertiary" />
+            API 通道
+          </h2>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              @click="providerListCollapsed = !providerListCollapsed"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              {{ providerListCollapsed ? '显示全部' : '收起未配置' }}
+            </button>
+            <button
+              @click="enableAllProviders"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              一键全开
+            </button>
+            <button
+              @click="disableAllProviders"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+            >
+              一键全关
+            </button>
+          </div>
+        </div>
+        <p class="text-[11px] text-text-tertiary">
+          收起后只显示已绑定 API Key 或当前已打开的通道。
+        </p>
 
         <!-- Provider list -->
         <div class="space-y-2">
           <div
-            v-for="provider in providerStore.providers"
+            v-for="provider in visibleProviders"
             :key="provider.id"
             class="rounded-lg border p-3 space-y-3 transition-opacity"
             :class="provider.enabled
@@ -414,6 +622,22 @@ async function clearAllKeys() {
             添加自定义通道
           </button>
           <button
+            @click="showShareExport = !showShareExport"
+            class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default
+                   hover:bg-surface-3 transition-colors flex items-center gap-1"
+          >
+            <Shield :size="12" />
+            导出私密分享包
+          </button>
+          <button
+            @click="showShareImport = !showShareImport"
+            class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default
+                   hover:bg-surface-3 transition-colors flex items-center gap-1"
+          >
+            <Upload :size="12" />
+            导入私密分享包
+          </button>
+          <button
             v-if="Object.keys(providerStore.accountKeyStatus).length > 0"
             @click="clearAllKeys"
             class="text-xs text-red-400 px-3 py-1.5 rounded-lg border border-red-500/20
@@ -457,6 +681,200 @@ async function clearAllKeys() {
             </label>
             <button
               @click="showImport = false; importText = ''"
+              class="text-xs text-text-tertiary px-3 py-1.5 rounded-lg hover:bg-surface-3 transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+
+        <div v-if="showShareExport" class="space-y-3 p-3 rounded-lg bg-surface-2 border border-border-default">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium text-text-primary">私密分享包导出</p>
+              <p class="mt-1 text-xs text-text-tertiary">
+                导出内容包含真实 API Key。文件本身会用分享密码加密，密码请走单独渠道发送。
+              </p>
+            </div>
+            <button
+              @click="resetShareSelection"
+              class="text-[11px] text-text-tertiary px-2 py-1 rounded hover:bg-surface-3 transition-colors"
+            >
+              全选
+            </button>
+          </div>
+
+          <div
+            v-if="shareableAccounts.length"
+            class="max-h-48 overflow-y-auto rounded-lg border border-border-subtle bg-surface-1 p-2 space-y-1.5"
+          >
+            <label
+              v-for="account in shareableAccounts"
+              :key="account.id"
+              class="flex items-start gap-3 rounded-lg px-2 py-2 cursor-pointer hover:bg-surface-2 transition-colors"
+            >
+              <input
+                :checked="shareSelectedAccountIds.includes(account.id)"
+                type="checkbox"
+                class="mt-0.5"
+                @change="toggleShareAccount(account.id)"
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm text-text-primary">{{ account.name }}</span>
+                  <span class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">
+                    {{ getShareAccountProviderName(account.providerId) }}
+                  </span>
+                  <span
+                    v-if="account.isDefault"
+                    class="text-[10px] text-accent bg-accent/10 px-1.5 py-0.5 rounded"
+                  >
+                    默认
+                  </span>
+                </div>
+                <div class="mt-1 text-[11px] text-text-tertiary">
+                  只导出当前账户；接收方导入后会落到自己的本地 keychain
+                </div>
+              </div>
+            </label>
+          </div>
+          <p v-else class="text-xs text-text-tertiary">
+            暂无可分享账户。只有已保存真实 Key 的账户才会出现在这里。
+          </p>
+
+          <div>
+            <label class="text-xs text-text-tertiary block mb-1">分享密码</label>
+            <input
+              v-model="sharePassword"
+              type="password"
+              placeholder="至少 8 位，建议单独通过 IM 发送"
+              class="w-full text-sm bg-surface-1 border border-border-default rounded-lg px-3 py-2
+                     text-text-primary placeholder:text-text-tertiary/40
+                     focus:outline-none focus:border-accent transition-colors"
+            />
+          </div>
+
+          <div>
+            <label class="text-xs text-text-tertiary block mb-1">有效期</label>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="option in shareExpiryOptions"
+                :key="option.value"
+                @click="shareExpiryDays = option.value"
+                class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+                :class="shareExpiryDays === option.value
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border-default text-text-secondary hover:bg-surface-3'"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <p class="mt-1 text-[11px] text-text-tertiary">
+              过期后导入会被拒绝。它只能降低旧包长期滞留风险，不能替代权限回收。
+            </p>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button
+              @click="generateShareBundle"
+              :disabled="sharePassword.trim().length < 8 || !shareSelectedAccountIds.length || shareGenerating"
+              class="text-xs bg-accent text-white px-3 py-1.5 rounded-lg
+                     hover:bg-accent/90 disabled:opacity-50 transition-colors"
+            >
+              {{ shareGenerating ? '生成中...' : '生成加密分享包' }}
+            </button>
+            <button
+              @click="showShareExport = false"
+              class="text-xs text-text-tertiary px-3 py-1.5 rounded-lg hover:bg-surface-3 transition-colors"
+            >
+              收起
+            </button>
+          </div>
+
+          <div v-if="shareBundleOutput" class="space-y-2">
+            <textarea
+              :value="shareBundleOutput"
+              readonly
+              rows="8"
+              class="w-full text-xs bg-surface-1 border border-border-default rounded-lg px-3 py-2
+                     text-text-primary font-mono focus:outline-none resize-none"
+            />
+            <div class="flex flex-wrap gap-2">
+              <button
+                @click="copyShareBundle"
+                class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default
+                       hover:bg-surface-3 transition-colors inline-flex items-center gap-1"
+              >
+                <component :is="shareCopied ? Check : Copy" :size="12" />
+                {{ shareCopied ? '已复制' : '复制' }}
+              </button>
+              <button
+                @click="downloadShareBundle"
+                class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default
+                       hover:bg-surface-3 transition-colors inline-flex items-center gap-1"
+              >
+                <Download :size="12" />
+                下载 JSON
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showShareImport" class="space-y-3 p-3 rounded-lg bg-surface-2 border border-border-default">
+          <div>
+            <p class="text-sm font-medium text-text-primary">私密分享包导入</p>
+            <p class="mt-1 text-xs text-text-tertiary">
+              只导入可信来源的分享包。若分享包包含自定义 Base URL，请先确认来源可靠。
+            </p>
+          </div>
+
+          <textarea
+            v-model="shareImportText"
+            rows="6"
+            placeholder='{"type":"provider-share-bundle", ... }'
+            class="w-full text-xs bg-surface-1 border border-border-default rounded-lg px-3 py-2
+                   text-text-primary placeholder:text-text-tertiary/30 font-mono
+                   focus:outline-none focus:border-accent transition-colors resize-none"
+          />
+
+          <div>
+            <label class="text-xs text-text-tertiary block mb-1">分享密码</label>
+            <input
+              v-model="shareImportPassword"
+              type="password"
+              placeholder="输入分享方单独发给你的密码"
+              class="w-full text-sm bg-surface-1 border border-border-default rounded-lg px-3 py-2
+                     text-text-primary placeholder:text-text-tertiary/40
+                     focus:outline-none focus:border-accent transition-colors"
+            />
+          </div>
+          <p class="text-[11px] text-text-tertiary">
+            如果分享包已过期，导入会被直接拒绝，需要分享方重新生成。
+          </p>
+
+          <div class="flex flex-wrap gap-2">
+            <button
+              @click="handleShareImport"
+              :disabled="!shareImportText.trim() || shareImportPassword.trim().length < 8 || shareImporting"
+              class="text-xs bg-accent text-white px-3 py-1.5 rounded-lg
+                     hover:bg-accent/90 disabled:opacity-50 transition-colors"
+            >
+              {{ shareImporting ? '导入中...' : '导入分享包' }}
+            </button>
+            <label class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default
+                          hover:bg-surface-3 transition-colors cursor-pointer inline-flex items-center gap-1">
+              <Upload :size="12" />
+              选择文件
+              <input
+                ref="shareImportFileInput"
+                type="file"
+                accept=".json"
+                class="hidden"
+                @change="handleShareImportFileUpload"
+              />
+            </label>
+            <button
+              @click="showShareImport = false; shareImportText = ''; shareImportPassword = ''"
               class="text-xs text-text-tertiary px-3 py-1.5 rounded-lg hover:bg-surface-3 transition-colors"
             >
               取消

@@ -1,24 +1,33 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
+import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
+import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, KeyRound,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Palette, Sparkles, Smartphone,
 } from 'lucide-vue-next'
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
 const sessionStore = useSessionStore()
+const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
 
 const props = defineProps<{ collapsed?: boolean }>()
-const emit = defineEmits<{ collapse: []; expand: [] }>()
+const emit = defineEmits<{ collapse: []; expand: []; togglePlatform: [] }>()
 
 onMounted(() => {
   sessionStore.loadSessions()
 })
+
+const recommendedConfiguredCount = computed(() =>
+  FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
+)
+
+const showQuickStartEntry = computed(() => recommendedConfiguredCount.value <= 2)
 
 function newChat() {
   sessionStore.createSession('chat')
@@ -44,6 +53,11 @@ function switchTo(session: { id: string; type: string }) {
 function deleteSession(id: string, e: Event) {
   e.stopPropagation()
   sessionStore.deleteSession(id)
+}
+
+function openCommandPalette() {
+  const event = new globalThis.KeyboardEvent('keydown', { key: 'k', metaKey: true })
+  globalThis.window.dispatchEvent(event)
 }
 </script>
 
@@ -81,14 +95,20 @@ function deleteSession(id: string, e: Event) {
       <Moon v-else :size="14" />
     </button>
 
-    <!-- API Setup -->
+    <!-- Switch to mobile -->
+    <button @click="emit('togglePlatform')" class="btn-icon" title="切换手机模式">
+      <Smartphone :size="14" />
+    </button>
+
+    <!-- Quick Start -->
     <button
+      v-if="showQuickStartEntry"
       @click="router.push('/setup')"
       class="btn-icon"
       :class="route.path === '/setup' ? 'text-text-primary' : ''"
-      title="API 配置"
+      title="快速开始"
     >
-      <KeyRound :size="16" />
+      <span class="text-[15px] leading-none">🚀</span>
     </button>
 
     <!-- Models -->
@@ -109,6 +129,26 @@ function deleteSession(id: string, e: Event) {
       title="设置"
     >
       <Settings :size="16" />
+    </button>
+
+    <!-- Design System V3 (Sparkles) -->
+    <button
+      @click="router.push('/v3/design')"
+      class="btn-icon"
+      :class="route.path === '/v3/design' ? 'text-text-primary' : ''"
+      title="V3 电影级设计系统"
+    >
+      <Sparkles :size="16" class="text-indigo-400" />
+    </button>
+
+    <!-- Design System (dev only) -->
+    <button
+      @click="router.push('/design')"
+      class="btn-icon"
+      :class="route.path === '/design' ? 'text-text-primary' : ''"
+      title="设计系统"
+    >
+      <Palette :size="16" />
     </button>
   </aside>
 
@@ -205,7 +245,7 @@ function deleteSession(id: string, e: Event) {
     <!-- Bottom nav -->
     <div class="p-2 border-t border-border-subtle space-y-0.5">
       <button
-        @click="() => { const e = new KeyboardEvent('keydown', { key: 'k', metaKey: true }); window.dispatchEvent(e) }"
+        @click="openCommandPalette"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
                text-text-secondary hover:bg-white/4 hover:text-text-primary"
       >
@@ -214,14 +254,15 @@ function deleteSession(id: string, e: Event) {
         <kbd class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘K</kbd>
       </button>
       <button
+        v-if="showQuickStartEntry"
         @click="router.push('/setup')"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
         :class="route.path === '/setup'
           ? 'bg-white/8 text-text-primary'
           : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
       >
-        <KeyRound :size="16" :stroke-width="1.8" />
-        <span>API 配置</span>
+        <span class="text-base leading-none">🚀</span>
+        <span>快速开始</span>
       </button>
       <button
         @click="router.push('/models')"
@@ -242,6 +283,34 @@ function deleteSession(id: string, e: Event) {
       >
         <Settings :size="16" :stroke-width="1.8" />
         <span>设置</span>
+      </button>
+      <button
+        @click="emit('togglePlatform')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
+               text-text-secondary hover:bg-white/4 hover:text-text-primary"
+      >
+        <Smartphone :size="16" :stroke-width="1.8" />
+        <span>手机模式</span>
+      </button>
+      <button
+        @click="router.push('/v3/design')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/v3/design'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <Sparkles :size="16" :stroke-width="1.8" class="text-indigo-400" />
+        <span>V3 电影级设计系统</span>
+      </button>
+      <button
+        @click="router.push('/design')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/design'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <Palette :size="16" :stroke-width="1.8" />
+        <span>设计系统</span>
       </button>
     </div>
   </aside>

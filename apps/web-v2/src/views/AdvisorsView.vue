@@ -280,8 +280,22 @@ onBeforeRouteLeave(() => {
 <template>
   <div class="flex h-full flex-col bg-surface-0">
     <div class="flex-1 overflow-y-auto">
+      <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
+        <div class="mx-auto flex max-w-5xl items-center justify-between gap-4">
+          <div class="min-w-0">
+            <h1 class="text-lg font-semibold text-text-primary">锦囊团</h1>
+            <p class="mt-1 text-xs text-text-tertiary">
+              一次性委员会模式，先定角色、模式和模型池，再发起本轮战情会。
+            </p>
+          </div>
+          <div class="shrink-0 rounded-full bg-accent/10 px-3 py-1 text-[11px] font-medium text-accent">
+            {{ personaStore.activePersonaIds.length }} 个角色待命
+          </div>
+        </div>
+      </header>
+
       <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
-        <section class="overflow-hidden rounded-[1.75rem] border border-border-default bg-surface-1 shadow-sm">
+        <section class="overflow-hidden rounded-5xl border border-border-default bg-surface-1 shadow-sm">
           <div class="grid gap-6 px-4 py-5 md:px-6 md:py-6 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
             <div>
               <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
@@ -300,7 +314,7 @@ onBeforeRouteLeave(() => {
                   v-for="mode in COMMITTEE_MODE_OPTIONS"
                   :key="mode.id"
                   @click="currentMode = mode.id"
-                  class="rounded-[1.4rem] border px-4 py-4 text-left transition-all duration-200"
+                  class="rounded-4xl border px-4 py-4 text-left transition-all duration-200"
                   :class="currentMode === mode.id
                     ? 'border-accent/35 bg-accent/10 shadow-sm'
                     : 'border-border-default bg-surface-1 hover:border-accent/20 hover:bg-surface-2/70 hover:shadow-sm'"
@@ -318,7 +332,7 @@ onBeforeRouteLeave(() => {
           </div>
         </section>
 
-        <section class="mt-6 rounded-[1.75rem] border border-border-default bg-surface-1 p-5 shadow-sm md:p-6">
+        <section class="mt-6 rounded-5xl border border-border-default bg-surface-1 p-5 shadow-sm md:p-6">
           <div class="space-y-6">
             <div class="flex flex-col">
               <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Committee Packs</div>
@@ -334,7 +348,7 @@ onBeforeRouteLeave(() => {
                   v-for="pack in COMMITTEE_PACKS"
                   :key="pack.id"
                   @click="selectCommitteePack(pack.id)"
-                  class="flex h-full flex-col rounded-[1.2rem] border px-4 py-3 text-left transition-all duration-200"
+                  class="flex h-full flex-col rounded-3xl border px-4 py-3 text-left transition-all duration-200"
                   :class="activePack.id === pack.id
                     ? 'border-accent/35 bg-accent/8 shadow-sm'
                     : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
@@ -382,7 +396,7 @@ onBeforeRouteLeave(() => {
                   v-for="preset in filteredCommitteePresets"
                   :key="preset.id"
                   @click="applyCommitteePreset(preset.id)"
-                  class="flex h-full flex-col rounded-[1.2rem] border px-4 py-3 text-left transition-all duration-200"
+                  class="flex h-full flex-col rounded-3xl border px-4 py-3 text-left transition-all duration-200"
                   :class="activePresetId === preset.id
                     ? 'border-accent/35 bg-accent/8 shadow-sm'
                     : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
@@ -415,7 +429,7 @@ onBeforeRouteLeave(() => {
           </div>
         </section>
 
-        <section id="committee-roles-section" class="mt-6 rounded-[2rem] border border-border-default bg-surface-1/95 p-5 shadow-sm md:p-6">
+        <section id="committee-roles-section" class="mt-6 rounded-5xl border border-border-default bg-surface-1/95 p-5 shadow-sm md:p-6">
           <div class="flex flex-col gap-4">
             <div>
               <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Persona Matrix</div>
@@ -451,7 +465,7 @@ onBeforeRouteLeave(() => {
             <div
               v-for="group in roleGroups"
               :key="group.category"
-              class="rounded-[1.6rem] border bg-surface-1 p-4 shadow-sm"
+              class="rounded-4xl border bg-surface-1 p-4 shadow-sm"
               :class="isCategoryActive(group.category)
                 ? [group.borderClass, group.softClass]
                 : 'border-border-default'"
@@ -483,7 +497,7 @@ onBeforeRouteLeave(() => {
                   v-for="role in group.roles"
                   :key="role.id"
                   @click="toggleRole(role.id)"
-                  class="flex h-full flex-col overflow-hidden rounded-[1.4rem] border border-border-default bg-surface-1 p-3 text-left transition-all duration-200"
+                  class="flex h-full flex-col overflow-hidden rounded-4xl border border-border-default bg-surface-1 p-3 text-left transition-all duration-200"
                   :class="isRoleActive(role.id)
                     ? [group.borderClass, 'shadow-md']
                     : 'opacity-60 hover:bg-surface-2 hover:opacity-100'"
@@ -592,7 +606,7 @@ onBeforeRouteLeave(() => {
             <div class="z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-surface-1 shadow-sm border border-border-default">
               <MessageSquare class="h-4 w-4 text-accent" />
             </div>
-            <div class="flex-1 rounded-[1.5rem] border border-border-default bg-surface-1 px-4 py-4 shadow-sm">
+            <div class="flex-1 rounded-4xl border border-border-default bg-surface-1 px-4 py-4 shadow-sm">
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] transition-colors"
@@ -618,7 +632,7 @@ onBeforeRouteLeave(() => {
               </div>
               <p class="mt-3 text-base font-medium leading-7 text-text-primary">{{ committeeStore.prompt }}</p>
 
-              <div class="mt-4 rounded-[1.2rem] border border-border-subtle bg-surface-2/70 px-4 py-3">
+              <div class="mt-4 rounded-3xl border border-border-subtle bg-surface-2/70 px-4 py-3">
                 <template v-if="resultInspector === 'mode'">
                   <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">当前模式</div>
                   <div class="mt-2 text-sm font-semibold text-text-primary">{{ startedModeOption?.name }}</div>

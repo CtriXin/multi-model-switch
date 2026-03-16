@@ -185,6 +185,30 @@ async function generateSummary() {
 
       <div class="md-body text-sm" v-html="summaryHtml" />
 
+      <!-- Quick-select buttons after evaluation -->
+      <div v-if="done && !error" class="flex flex-wrap gap-2 mt-3">
+        <button
+          v-for="[modelId] of responses"
+          :key="modelId"
+          @click="emit('select', modelId)"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                 border transition-all active:scale-95"
+          :class="selectedModelId === modelId
+            ? 'border-transparent text-white'
+            : 'border-border-subtle bg-surface-2 text-text-secondary hover:bg-surface-3'"
+          :style="selectedModelId === modelId
+            ? { backgroundColor: getModelColor(getProvider(modelId)) }
+            : {}"
+        >
+          <span
+            class="w-2 h-2 rounded-full shrink-0"
+            :style="{ backgroundColor: getModelColor(getProvider(modelId)) }"
+          />
+          {{ getModelName(modelId) }}
+          <Check v-if="selectedModelId === modelId" :size="10" />
+        </button>
+      </div>
+
       <!-- Collapsible raw responses -->
       <div v-if="done" class="mt-4 pt-3 border-t border-border-subtle">
         <button

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, watch } from 'vue'
+import { ref, provide, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
+import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
+import { FREE_PROVIDERS } from '@/data/freeProviders'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import IOSTabBar from '@/components/layout/IOSTabBar.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
@@ -11,13 +13,14 @@ import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
 import {
   Monitor, Smartphone, Sun, Moon, Layers, Plus, GitMerge,
-  Menu, MessageSquare, Trash2, KeyRound, Package, Settings,
+  Menu, MessageSquare, Trash2, Package, Settings,
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
+const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
 
 // Auto-detect mobile: < 768px → mobile layout
@@ -37,6 +40,12 @@ onUnmounted(() => window.removeEventListener('resize', onResize))
 
 appStore.initialize()
 sessionStore.loadSessions()
+
+const recommendedConfiguredCount = computed(() =>
+  FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
+)
+
+const showQuickStartEntry = computed(() => recommendedConfiguredCount.value <= 2)
 
 function togglePlatform() {
   platform.value = platform.value === 'macos' ? 'ios' : 'macos'
@@ -115,26 +124,11 @@ function iosDeleteSession(id: string, e: Event) {
       :collapsed="sidebarCollapsed"
       @collapse="sidebarCollapsed = true"
       @expand="sidebarCollapsed = false"
+      @toggle-platform="togglePlatform"
     />
 
     <!-- Main content -->
     <main class="flex-1 flex flex-col min-w-0 bg-surface-0">
-      <!-- Toolbar -->
-      <header class="h-12 flex items-center justify-between px-4 border-b border-border-subtle shrink-0" style="-webkit-app-region: drag">
-        <div class="flex items-center gap-2 text-sm text-text-secondary" style="-webkit-app-region: no-drag">
-          <span class="font-medium text-text-primary">{{ route.meta.title }}</span>
-          <span v-if="appStore.selectedModels.length" class="text-text-tertiary">
-            · {{ appStore.selectedModels.length }} 个模型
-          </span>
-        </div>
-        <div class="flex items-center gap-1" style="-webkit-app-region: no-drag">
-          <button @click="togglePlatform" class="btn-ghost flex items-center gap-1.5">
-            <Smartphone :size="14" />
-            <span class="text-xs">移动端</span>
-          </button>
-        </div>
-      </header>
-
       <!-- Page content -->
       <div class="flex-1 flex flex-col overflow-hidden">
         <router-view v-slot="{ Component }">
@@ -272,11 +266,12 @@ function iosDeleteSession(id: string, e: Event) {
           <!-- Drawer bottom nav -->
           <div class="px-3 py-3 border-t border-border-subtle space-y-1">
             <button
+              v-if="showQuickStartEntry"
               @click="router.push('/setup'); iosDrawerOpen = false"
               class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
             >
-              <KeyRound :size="16" />
-              API 配置
+              <span class="text-base leading-none">🚀</span>
+              快速开始
             </button>
             <button
               @click="router.push('/models'); iosDrawerOpen = false"

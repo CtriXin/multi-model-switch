@@ -14,7 +14,8 @@ export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
   let hiddenThink = false
   let content = raw
 
-  if (THINK_BLOCK_RE.test(content) || THINK_OPEN_RE.test(content) || THINK_CLOSE_ONLY_RE.test(content)) {
+  // Use fresh regexes for .test() to avoid global-flag lastIndex issues
+  if (/<think>[\s\S]*?<\/think>/i.test(content) || /<think>[\s\S]*$/i.test(content) || /<\/think>/i.test(content)) {
     hiddenThink = true
   }
 

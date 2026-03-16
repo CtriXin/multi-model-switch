@@ -39,7 +39,7 @@ function isLong(text: string) {
 
 <template>
   <div class="space-y-4">
-    <div class="overflow-hidden rounded-[1.4rem] border border-border-default bg-surface-1 shadow-sm">
+    <div class="overflow-hidden rounded-4xl border border-border-default bg-surface-1 shadow-sm">
       <div class="border-b border-border-subtle bg-surface-2/60 px-5 py-4">
         <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">锦囊团结论</div>
         <div class="mt-2 text-base font-semibold text-text-primary">{{ synthesis?.oneLiner || '系统正在组织最终结论…' }}</div>
@@ -69,7 +69,7 @@ function isLong(text: string) {
     </div>
 
     <div v-if="synthesis" class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <section class="rounded-[1.4rem] border border-border-default bg-surface-1 shadow-sm">
+      <section class="rounded-4xl border border-border-default bg-surface-1 shadow-sm">
         <div class="border-b border-border-subtle px-5 py-4">
           <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-400">Consensus</div>
           <h4 class="mt-1 text-base font-semibold text-text-primary">共识</h4>
@@ -100,7 +100,7 @@ function isLong(text: string) {
         </div>
       </section>
 
-      <section class="rounded-[1.4rem] border border-border-default bg-surface-1 shadow-sm">
+      <section class="rounded-4xl border border-border-default bg-surface-1 shadow-sm">
         <div class="border-b border-border-subtle px-5 py-4">
           <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-rose-400">Tensions</div>
           <h4 class="mt-1 text-base font-semibold text-text-primary">主要分歧</h4>
@@ -131,7 +131,7 @@ function isLong(text: string) {
         </div>
       </section>
 
-      <section class="rounded-[1.4rem] border border-border-default bg-surface-1 shadow-sm xl:col-span-2">
+      <section class="rounded-4xl border border-border-default bg-surface-1 shadow-sm xl:col-span-2">
         <div class="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
           <div>
             <div class="border-b border-border-subtle px-5 py-4">
