@@ -32,22 +32,20 @@ function startUsing() {
 
 <template>
   <div class="flex-1 overflow-y-auto overscroll-contain" style="-webkit-overflow-scrolling: touch">
-    <div class="max-w-2xl mx-auto px-6 py-10">
-      <!-- Header -->
-      <div class="text-center mb-10 animate-fade-in">
+    <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
+      <div class="max-w-2xl mx-auto flex items-center gap-3">
         <div
-          class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500
-                 flex items-center justify-center mx-auto mb-4 shadow-lg"
+          class="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 shadow-lg"
         >
-          <Rocket :size="24" class="text-white" />
+          <Rocket :size="20" class="text-white" />
         </div>
-        <h1 class="text-xl font-bold text-text-primary mb-2">快速开始</h1>
-        <p class="text-sm text-text-tertiary max-w-md mx-auto">
-          先配一个能用的免费 API 就能开始。这里更像新手引导，复杂通道管理放到设置里。
-        </p>
-
-        <!-- Progress dots -->
-        <div class="flex items-center justify-center gap-2 mt-5">
+        <div class="min-w-0">
+          <h1 class="text-lg font-semibold text-text-primary">快速开始</h1>
+          <p class="mt-1 text-xs text-text-tertiary">
+            先配一个能用的免费 API 就能开始，复杂通道管理放到设置里。
+          </p>
+        </div>
+        <div class="ml-auto flex items-center gap-2">
           <div class="flex gap-1">
             <div
               v-for="p in FREE_PROVIDERS"
@@ -60,6 +58,21 @@ function startUsing() {
             {{ configuredCount }} / {{ FREE_PROVIDERS.length }} 已配置
           </span>
         </div>
+      </div>
+    </header>
+
+    <div class="max-w-2xl mx-auto px-6 py-10">
+      <div class="text-center mb-10 animate-fade-in">
+        <div
+          class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500
+                 flex items-center justify-center mx-auto mb-4 shadow-lg"
+        >
+          <Rocket :size="24" class="text-white" />
+        </div>
+        <h2 class="text-xl font-bold text-text-primary mb-2">三分钟开始使用</h2>
+        <p class="text-sm text-text-tertiary max-w-md mx-auto">
+          选一个顺手的免费通道先跑起来，后面需要多账户、分享包或高级配置再去设置里管。
+        </p>
       </div>
 
       <!-- CN Providers -->
