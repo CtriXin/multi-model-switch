@@ -89,7 +89,9 @@ const viewingModelId = reactive<Record<string, string | null>>({})
 
 function getViewingModelId(round: typeof chatStore.rounds[0]): string {
   // Show the viewing override if set, otherwise show selected
-  return viewingModelId[round.id] ?? round.activeModelId ?? ''
+  const viewingId = viewingModelId[round.id]
+  if (viewingId && round.responses.has(viewingId)) return viewingId
+  return round.activeModelId ?? Array.from(round.responses.keys())[0] ?? ''
 }
 
 function switchViewingModel(roundId: string, modelId: string) {
@@ -309,23 +311,14 @@ async function retryRoundModel(round: typeof chatStore.rounds[0], modelId: strin
 }
 
 async function replaceRoundModel(round: typeof chatStore.rounds[0], oldModelId: string) {
-  const nextModelId = appStore.pickReplacementModel({
-    excludeIds: Array.from(round.responses.keys()),
-    requireVision: !!round.attachments?.length,
-  })
-
-  if (!nextModelId) {
-    toast.error('没有可替换的新模型了，请先到模型库增加可用模型')
-    return
-  }
-
-  appStore.replaceSelectedModel(oldModelId, nextModelId)
-  if (viewingModelId[round.id] === oldModelId) {
-    viewingModelId[round.id] = nextModelId
-  }
-
-  await chatStore.retryModel(round.id, oldModelId, { replaceWith: nextModelId })
-  sessionStore.saveCurrentSession()
+  window.dispatchEvent(new CustomEvent('open-model-picker', {
+    detail: {
+      mode: 'replace',
+      roundId: round.id,
+      oldModelId,
+      requireVision: !!round.attachments?.length,
+    },
+  }))
 }
 
 function getModelName(id: string): string {

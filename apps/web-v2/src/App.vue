@@ -27,6 +27,7 @@ const { theme, toggle: toggleTheme } = useTheme()
 const MOBILE_BREAKPOINT = 768
 const platform = ref<'macos' | 'ios'>(window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos')
 const iosModelSheetOpen = ref(false)
+const modelSheetRequest = ref<Record<string, unknown> | null>(null)
 const sidebarCollapsed = ref(false)
 const iosDrawerOpen = ref(false)
 
@@ -35,8 +36,49 @@ provide('platform', platform)
 function onResize() {
   platform.value = window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos'
 }
-onMounted(() => window.addEventListener('resize', onResize))
-onUnmounted(() => window.removeEventListener('resize', onResize))
+
+const mouseX = ref(0)
+const mouseY = ref(0)
+
+function handleMouseMove(e: MouseEvent) {
+  if (platform.value !== 'macos') return
+  mouseX.value = (e.clientX / window.innerWidth - 0.5) * 40
+  mouseY.value = (e.clientY / window.innerHeight - 0.5) * 40
+}
+
+function handleOpenModels() {
+  modelSheetRequest.value = null
+  iosModelSheetOpen.value = true
+}
+
+function handleOpenModelPicker(event: Event) {
+  if (platform.value !== 'ios') return
+  modelSheetRequest.value = ((event as CustomEvent<Record<string, unknown> | null>).detail) ?? null
+  iosModelSheetOpen.value = true
+}
+
+function closeModelSheet() {
+  iosModelSheetOpen.value = false
+  modelSheetRequest.value = null
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onResize)
+  window.addEventListener('mousemove', handleMouseMove)
+  window.addEventListener('open-models', handleOpenModels)
+  window.addEventListener('open-model-picker', handleOpenModelPicker)
+  window.addEventListener('toggle-platform', togglePlatform)
+  window.addEventListener('open-drawer', () => { iosDrawerOpen.value = true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('open-models', handleOpenModels)
+  window.removeEventListener('open-model-picker', handleOpenModelPicker)
+  window.removeEventListener('toggle-platform', togglePlatform)
+  window.removeEventListener('open-drawer', () => { iosDrawerOpen.value = true })
+})
 
 appStore.initialize()
 sessionStore.loadSessions()
@@ -330,13 +372,7 @@ function iosDeleteSession(id: string, e: Event) {
     </Teleport>
   </div>
 
-  <IOSModelSheet
-    v-if="platform === 'macos'"
-    :open="iosModelSheetOpen"
-    @close="iosModelSheetOpen = false"
-  />
-
-  <!-- Global overlays -->
+  <IOSModelSheet :open="iosModelSheetOpen" :request="modelSheetRequest" @close="closeModelSheet" />
   <ToastContainer />
   <CommandPalette />
 </template>

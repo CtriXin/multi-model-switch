@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta } from '@/stores/app'
 import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare } from 'lucide-vue-next'
 import { useChatStore, type ContextMode } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
+import { useToastStore } from '@/stores/toast'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const chatStore = useChatStore()
+const sessionStore = useSessionStore()
+const toast = useToastStore()
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform?.value === 'ios')
 const popoverOpen = ref(false)
 const searchQuery = ref('')
 const filterVision = ref(false)
@@ -19,6 +25,12 @@ const contextMenuOpen = ref(false)
 const modelPopoverButtonRef = ref<HTMLElement | null>(null)
 const modelPopoverPanelRef = ref<HTMLElement | null>(null)
 const contextMenuRef = ref<HTMLElement | null>(null)
+const replacementRequest = ref<{
+  mode: 'replace'
+  roundId: string
+  oldModelId: string
+  requireVision?: boolean
+} | null>(null)
 
 // Context mode options
 const contextModes: { key: ContextMode; label: string; description: string; icon: any }[] = [
@@ -58,6 +70,7 @@ function updateFiltered() {
 function togglePopover() {
   popoverOpen.value = !popoverOpen.value
   if (popoverOpen.value) {
+    replacementRequest.value = null
     searchQuery.value = ''
     filterVision.value = false
     recentSearches.value = getSearchHistory()
@@ -65,7 +78,21 @@ function togglePopover() {
   }
 }
 
-function selectModel(id: string) {
+async function selectModel(id: string) {
+  if (replacementRequest.value) {
+    const request = replacementRequest.value
+    if (id === request.oldModelId) return
+    if (isReplacementDisabled(id)) return
+
+    appStore.replaceSelectedModel(request.oldModelId, id)
+    await chatStore.retryModel(request.roundId, request.oldModelId, { replaceWith: id })
+    sessionStore.saveCurrentSession()
+    replacementRequest.value = null
+    popoverOpen.value = false
+    toast.info('已替换当前卡片模型')
+    return
+  }
+
   appStore.toggleModel(id)
 }
 
@@ -99,6 +126,25 @@ function toggleFilterVision() {
   updateFiltered()
 }
 
+function isReplacementDisabled(id: string) {
+  if (!replacementRequest.value) return false
+  if (id === replacementRequest.value.oldModelId) return false
+  return appStore.selectedModelIds.includes(id)
+}
+
+function openReplacementPicker(event: Event) {
+  if (isMobile.value) return
+  const detail = (event as CustomEvent<typeof replacementRequest.value>).detail
+  if (!detail || detail.mode !== 'replace') return
+
+  replacementRequest.value = detail
+  popoverOpen.value = true
+  searchQuery.value = ''
+  filterVision.value = !!detail.requireVision
+  recentSearches.value = getSearchHistory()
+  updateFiltered()
+}
+
 function tierLabel(tier: number): string {
   return tier === 2 ? 'PRO' : tier === 1 ? 'STD' : 'FREE'
 }
@@ -121,8 +167,17 @@ onClickOutside(contextMenuRef, () => {
 
 onClickOutside(modelPopoverPanelRef, () => {
   popoverOpen.value = false
+  replacementRequest.value = null
 }, {
   ignore: [modelPopoverButtonRef],
+})
+
+onMounted(() => {
+  window.addEventListener('open-model-picker', openReplacementPicker)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('open-model-picker', openReplacementPicker)
 })
 </script>
 
@@ -171,11 +226,13 @@ onClickOutside(modelPopoverPanelRef, () => {
           <!-- Models: 模型选择 -->
           <button ref="modelPopoverButtonRef" @click="togglePopover"
             class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
-            :class="appStore.selectedModels.length > 0 
+            :class="replacementRequest
+                ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/15'
+                : appStore.selectedModels.length > 0 
                 ? 'bg-accent/5 text-accent border-accent/20 hover:bg-accent/10' 
                 : 'text-text-tertiary border-white/5 hover:bg-white/5'">
             <Bot :size="16" :stroke-width="3" />
-            <span class="hidden sm:inline">模型基因</span>
+            <span class="hidden sm:inline">{{ replacementRequest ? '替换模型' : '模型基因' }}</span>
           </button>
 
           <!-- Context Mode -->
@@ -224,6 +281,11 @@ onClickOutside(modelPopoverPanelRef, () => {
           class="relative max-w-5xl mx-auto shadow-[0_30px_80px_rgba(0,0,0,0.4)] rounded-[24px] max-h-80 flex flex-col overflow-hidden bg-white dark:bg-[#1a1a24] border border-white/10 dark:border-white/5">
           <!-- Search + Filter -->
           <div class="px-3 py-2 border-b border-border-subtle space-y-2">
+            <div v-if="replacementRequest" class="rounded-xl border border-orange-500/20 bg-orange-500/8 px-3 py-2 text-[11px] text-orange-300">
+              正在替换
+              <span class="font-semibold">{{ appStore.getModel(replacementRequest.oldModelId)?.name ?? replacementRequest.oldModelId }}</span>
+              ，仅本次卡片会换成你新选的模型。
+            </div>
             <div class="flex items-center gap-2">
               <Search :size="14" class="text-text-tertiary shrink-0" />
               <input type="text" :value="searchQuery" @input="handleSearch" placeholder="搜索模型..."
@@ -273,7 +335,13 @@ onClickOutside(modelPopoverPanelRef, () => {
               </div>
               <div v-for="model in models" :key="model.id" @click="selectModel(model.id)"
                 class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-all text-sm"
-                :class="appStore.selectedModelIds.includes(model.id)
+                :class="replacementRequest
+                  ? (isReplacementDisabled(model.id)
+                    ? 'opacity-35 cursor-not-allowed text-text-tertiary'
+                    : model.id === replacementRequest.oldModelId
+                      ? 'bg-orange-500/10 text-orange-300'
+                      : 'text-text-secondary hover:bg-white/5 hover:text-text-primary')
+                  : appStore.selectedModelIds.includes(model.id)
                   ? 'bg-accent/10 text-accent'
                   : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'">
                 <span class="flex-1 truncate">{{ model.name }}</span>
@@ -283,7 +351,11 @@ onClickOutside(modelPopoverPanelRef, () => {
                   class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400">VISION</span>
                 <span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
                   :class="tierClass(model.tier)">{{ tierLabel(model.tier) }}</span>
-                <span v-if="appStore.selectedModelIds.includes(model.id)"
+                <span v-if="replacementRequest && model.id === replacementRequest.oldModelId"
+                  class="text-orange-400 text-xs">当前</span>
+                <span v-else-if="replacementRequest && isReplacementDisabled(model.id)"
+                  class="text-text-tertiary text-xs">已选</span>
+                <span v-else-if="appStore.selectedModelIds.includes(model.id)"
                   class="text-accent text-xs">✓</span>
               </div>
             </template>

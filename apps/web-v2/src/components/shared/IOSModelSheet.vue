@@ -1,18 +1,33 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useAppStore, getModelColor, type ModelMeta, type ModelSelectionMode } from '@/stores/app'
-import { Search, Check, DollarSign, Image, Clock } from 'lucide-vue-next'
+import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
+import { useToastStore } from '@/stores/toast'
+import { Search, Check, DollarSign, Image, Clock, X, Dice5 } from 'lucide-vue-next'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
 
 const props = withDefaults(defineProps<{
   open: boolean
   mode?: ModelSelectionMode
+  request?: {
+    mode?: 'replace'
+    roundId?: string
+    oldModelId?: string
+    requireVision?: boolean
+  } | null
 }>(), {
   mode: 'chat',
+  request: null,
 })
 const emit = defineEmits<{ close: [] }>()
 
 const appStore = useAppStore()
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
+const toast = useToastStore()
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform.value === 'ios')
 const search = ref('')
 const filterFree = ref(true)
 const filterVision = ref(false)
@@ -49,6 +64,12 @@ const filtered = computed(() => {
 })
 
 const selectedCount = computed(() => selectedIds.value.length)
+const replacementMode = computed(() =>
+  props.mode === 'chat'
+  && props.request?.mode === 'replace'
+  && !!props.request.oldModelId
+  && !!props.request.roundId,
+)
 
 const presetIcons: Record<string, string> = {
   'preset-coding': '🏆',
@@ -91,11 +112,27 @@ function toggleFilterFree() {
   filterFree.value = !filterFree.value
 }
 
-function toggleFilterVision() {
-  filterVision.value = !filterVision.value
+function isReplacementDisabled(id: string) {
+  if (!replacementMode.value || !props.request?.oldModelId) return false
+  if (id === props.request.oldModelId) return false
+  return selectedIds.value.includes(id)
 }
 
-// --- Touch drag for two-detent ---
+async function handleModelPress(id: string) {
+  if (replacementMode.value && props.request?.oldModelId && props.request.roundId) {
+    if (id === props.request.oldModelId || isReplacementDisabled(id)) return
+    appStore.replaceSelectedModel(props.request.oldModelId, id)
+    await chatStore.retryModel(props.request.roundId, props.request.oldModelId, { replaceWith: id })
+    sessionStore.saveCurrentSession()
+    toast.info('已替换当前卡片模型')
+    done()
+    return
+  }
+
+  appStore.toggleModel(id, props.mode)
+}
+
+// --- Touch drag for mobile ---
 function onTouchStart(e: TouchEvent) {
   dragging.value = true
   dragStartY.value = e.touches[0].clientY
@@ -163,7 +200,7 @@ watch(() => props.open, (val) => {
     detent.value = 'half'
     search.value = ''
     filterFree.value = true
-    filterVision.value = false
+    filterVision.value = !!props.request?.requireVision
     sheetTranslateY.value = 0
     recentSearches.value = getSearchHistory()
     handleAnimating.value = false
@@ -219,34 +256,24 @@ function modelTags(model: ModelMeta): string[] {
           <!-- Header -->
           <div class="flex items-center justify-between px-5 pb-3 shrink-0">
             <div>
-              <h2 class="text-lg font-bold text-text-primary">选择模型</h2>
-              <p class="text-xs text-text-tertiary mt-0.5">{{ selectedCount }} / {{ MAX_SELECTION }} 已选</p>
+              <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型' : '选择模型基因' }}</h2>
+              <p class="text-[10px] font-black text-text-tertiary mt-1 uppercase tracking-[0.2em]">
+                {{ replacementMode
+                  ? `正在替换 ${appStore.getModel(props.request?.oldModelId || '')?.name ?? ''}`
+                  : `${selectedCount} / ${MAX_SELECTION} 已激活` }}
+              </p>
             </div>
-            <div class="flex items-center gap-3">
-              <button
-                v-if="selectedCount > 0"
-                @click="clearAll"
-                class="text-sm text-text-secondary hover:text-text-primary transition-colors"
-              >清空</button>
-              <button
-                @click="done"
-                class="text-sm font-semibold text-accent hover:text-accent-hover transition-colors"
-              >完成</button>
+            <div class="flex items-center gap-4">
+              <button v-if="!replacementMode && selectedCount > 0" @click="clearAll" class="text-[10px] font-black text-text-tertiary hover:text-red-400 uppercase tracking-widest transition-colors">重置</button>
+              <button @click="done" class="px-8 py-3 rounded-2xl bg-accent text-white text-xs font-black uppercase tracking-widest shadow-xl shadow-accent/20 hover:scale-105 active:scale-95 transition-all">{{ replacementMode ? '取消替换' : '确认进化' }}</button>
             </div>
           </div>
 
           <!-- Presets -->
-          <div class="flex gap-2 px-5 pb-2 overflow-x-auto shrink-0 no-scrollbar">
-            <button
-              v-for="p in appStore.presets"
-              :key="p.id"
-              @click="appStore.applyPreset(p, props.mode)"
-              class="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs
-                     border border-border-default text-text-primary
-                     hover:border-accent/30 active:scale-95 transition-all"
-            >
-              <span>{{ presetIcons[p.id] || '⚡' }}</span>
-              <span>{{ p.name }}</span>
+          <div v-if="!replacementMode" class="flex gap-2 px-8 pb-4 overflow-x-auto shrink-0 no-scrollbar">
+            <button v-for="p in appStore.presets" :key="p.id" @click="appStore.applyPreset(p, props.mode)"
+                    class="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/5 bg-black/5 dark:bg-white/5 text-text-primary hover:border-accent/30 active:scale-95 transition-all">
+              <span>{{ presetIcons[p.id] || '⚡' }}</span> <span>{{ p.name }}</span>
             </button>
           </div>
 
@@ -272,7 +299,11 @@ function modelTags(model: ModelMeta): string[] {
               <Image :size="11" />
               图片
             </button>
-            <span class="text-[10px] text-text-tertiary ml-auto">{{ filtered.length }} 个</span>
+            <button v-if="!replacementMode" @click="randomPick" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="'text-amber-400 border-white/5 hover:bg-amber-500/10'">
+              <Dice5 :size="12" /> 随机
+            </button>
+            <span class="text-[9px] font-black text-text-tertiary ml-auto uppercase tracking-widest opacity-40">{{ filtered.length }} 个可用</span>
           </div>
 
           <!-- Search -->
@@ -300,26 +331,24 @@ function modelTags(model: ModelMeta): string[] {
           </div>
 
           <!-- Model Grid -->
-          <div class="flex-1 overflow-y-auto px-5 pb-6">
-            <div class="grid grid-cols-2 gap-2.5">
-              <button
-                v-for="model in filtered"
-                :key="model.id"
-                @click="appStore.toggleModel(model.id, props.mode)"
-                class="relative flex flex-col items-start p-3 rounded-xl border text-left
-                       active:scale-[0.97] transition-all duration-150"
-                :class="isSelected(model.id)
-                  ? 'border-accent/40 bg-accent/5'
-                  : 'border-border-default bg-surface-2 hover:border-border-strong'"
-              >
-                <!-- Checkmark -->
-                <div
-                  class="absolute top-2.5 right-2.5 w-5 h-5 rounded-full flex items-center justify-center transition-all"
-                  :class="isSelected(model.id)
-                    ? 'bg-accent text-white'
-                    : 'border border-border-strong'"
-                >
-                  <Check v-if="isSelected(model.id)" :size="12" :stroke-width="3" />
+          <div class="flex-1 overflow-y-auto px-8 pb-10">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button v-for="model in filtered" :key="model.id" @click="handleModelPress(model.id)"
+                      class="relative flex flex-col items-start p-4 rounded-2xl border text-left active:scale-[0.98] transition-all duration-300 group"
+                      :class="replacementMode
+                        ? (isReplacementDisabled(model.id)
+                          ? 'border-white/5 bg-black/5 dark:bg-white/5 opacity-35'
+                          : model.id === props.request?.oldModelId
+                            ? 'border-orange-500/50 bg-orange-500/5 shadow-inner'
+                            : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')
+                        : (isSelected(model.id) ? 'border-accent/50 bg-accent/5 shadow-inner' : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')">
+                <div class="absolute top-4 right-4 w-6 h-6 rounded-full flex items-center justify-center transition-all border"
+                     :class="replacementMode
+                      ? (model.id === props.request?.oldModelId
+                        ? 'bg-orange-500 border-orange-500 text-white scale-110'
+                        : 'border-white/10')
+                      : (isSelected(model.id) ? 'bg-accent border-accent text-white scale-110' : 'border-white/10')">
+                  <Check v-if="replacementMode ? model.id === props.request?.oldModelId : isSelected(model.id)" :size="14" :stroke-width="4" />
                 </div>
 
                 <!-- Avatar -->
@@ -354,6 +383,8 @@ function modelTags(model: ModelMeta): string[] {
                     class="px-1.5 py-0.5 rounded text-[10px] text-text-tertiary bg-surface-3"
                   >{{ tag }}</span>
                 </div>
+                <span v-if="replacementMode && model.id === props.request?.oldModelId" class="mt-3 text-[10px] font-black uppercase tracking-widest text-orange-400">当前模型</span>
+                <span v-else-if="replacementMode && isReplacementDisabled(model.id)" class="mt-3 text-[10px] font-black uppercase tracking-widest text-text-tertiary">已在模型池</span>
               </button>
             </div>
 
