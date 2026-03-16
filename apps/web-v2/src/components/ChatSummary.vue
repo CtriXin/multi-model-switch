@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
 import { getModelColor, useAppStore } from '@/stores/app'
-import { useProviderStore } from '@/stores/provider'
-import { streamChat } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { streamModelChat } from '@/services/runtime'
 import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 
@@ -23,7 +21,6 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
-const providerStore = useProviderStore()
 const showRaw = ref(false)
 const summaryText = ref('')
 const streaming = ref(false)
@@ -126,39 +123,13 @@ async function generateSummary() {
   error.value = ''
 
   const { modelId, isSelfEval } = pickEvaluator()
-  const model = appStore.models.find(m => m.id === modelId)
+  const model = appStore.models.find((item) => item.id === modelId)
   judgeModel.value = (model?.name ?? modelId) + (isSelfEval ? ' (自评)' : '')
-
-  // Find provider for this model
-  let providerConfig = providerStore.providers.find(p => p.id === model?.provider)
-  if (!providerConfig) {
-    if (modelId.startsWith('demo/')) {
-      providerConfig = providerStore.providers.find(p => p.type === 'mock')
-    }
-    if (!providerConfig) {
-      providerConfig = providerStore.providers.find(p => p.type === 'openrouter')
-    }
-  }
-
-  if (!providerConfig) {
-    error.value = '未找到可用的评估模型通道'
-    streaming.value = false
-    return
-  }
-
-  const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-  if (!apiKey) {
-    error.value = '评估模型的 API Key 未配置'
-    streaming.value = false
-    return
-  }
 
   try {
     const prompt = buildJudgePrompt(isSelfEval)
-    const stream = streamChat({
-      provider: providerConfig,
-      apiKey,
-      model: modelId,
+    const stream = streamModelChat({
+      modelId,
       messages: [{ role: 'user', content: prompt }],
     })
 

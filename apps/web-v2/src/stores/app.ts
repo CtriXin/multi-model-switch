@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { fetchModels } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { getFetchRuntime } from '@/services/runtime'
 
 export interface ModelMeta {
   id: string
@@ -15,6 +15,8 @@ export interface ModelMeta {
   priceOutput: number
   tags: string[]
   contextWindow: number
+  free: boolean
+  supportsVision: boolean
 }
 
 export interface Preset {
@@ -25,19 +27,46 @@ export interface Preset {
   icon?: string
 }
 
+export type ModelSelectionMode = 'chat' | 'committee'
+
+const MODEL_SUPPRESSION_KEY = 'mms-disabled-models'
+
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
   openai: '#10b981',
   google: '#3b82f6',
-  deepseek: '#8b5cf6',
-  moonshot: '#ec4899',
+  deepseek: '#ef4444',
+  moonshot: '#0ea5e9',
   meta: '#ef4444',
-  mistral: '#f97316',
+  mistral: '#ff6f00',
   qwen: '#14b8a6',
+  siliconflow: '#6366f1',
+  zhipu: '#2563eb',
+  cerebras: '#f97316',
+  groq: '#f97316',
+  openrouter: '#8b5cf6',
+  dashscope: '#7c3aed',
+  lingyiwanwu: '#10b981',
+  baichuan: '#d946ef',
+  stepfun: '#f43f5e',
+  minimax: '#ec4899',
+  nvidia: '#84cc16',
+  together: '#14b8a6',
+  fireworks: '#f59e0b',
+  demo: '#6b7280',
 }
 
 export function getModelColor(provider: string): string {
   return PROVIDER_COLORS[provider] ?? '#6366f1'
+}
+
+function shuffleArray<T>(items: T[]): T[] {
+  const next = [...items]
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[next[i], next[j]] = [next[j], next[i]]
+  }
+  return next
 }
 
 const MOCK_PRESETS: Preset[] = [
@@ -52,12 +81,42 @@ export const useAppStore = defineStore('app', () => {
   const models = ref<ModelMeta[]>([])
   const presets = ref<Preset[]>(MOCK_PRESETS)
   const selectedModelIds = ref<string[]>([])
+  const committeeSelectedModelIds = ref<string[]>([])
   const initialized = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
+  function loadSuppressedModelIds() {
+    try {
+      const raw = localStorage.getItem(MODEL_SUPPRESSION_KEY)
+      if (!raw) return new Set<string>()
+      const data = JSON.parse(raw) as Record<string, number>
+      const now = Date.now()
+      const valid = Object.entries(data)
+        .filter(([, expiresAt]) => expiresAt > now)
+        .map(([id]) => id)
+      if (valid.length !== Object.keys(data).length) {
+        const next = Object.fromEntries(valid.map((id) => [id, data[id]]))
+        localStorage.setItem(MODEL_SUPPRESSION_KEY, JSON.stringify(next))
+      }
+      return new Set(valid)
+    } catch {
+      return new Set<string>()
+    }
+  }
+
+  function persistSuppressedModelIds(ids: Record<string, number>) {
+    localStorage.setItem(MODEL_SUPPRESSION_KEY, JSON.stringify(ids))
+  }
+
   const selectedModels = computed(() =>
     selectedModelIds.value
+      .map(id => models.value.find(m => m.id === id))
+      .filter(Boolean) as ModelMeta[]
+  )
+
+  const committeeSelectedModels = computed(() =>
+    committeeSelectedModelIds.value
       .map(id => models.value.find(m => m.id === id))
       .filter(Boolean) as ModelMeta[]
   )
@@ -96,9 +155,9 @@ export const useAppStore = defineStore('app', () => {
     await Promise.allSettled(
       configured.map(async (provider) => {
         try {
-          const key = provider.type === 'mock' ? 'demo' : await getApiKey(provider.id)
-          if (!key) return
-          const fetched = await fetchModels(provider, key)
+          const runtime = await getFetchRuntime(provider.id)
+          if (!runtime) return
+          const fetched = await fetchModels(runtime.provider, runtime.apiKey)
           allModels.push(...fetched)
         } catch (e: any) {
           errors.push(`${provider.name}: ${e.message}`)
@@ -106,7 +165,8 @@ export const useAppStore = defineStore('app', () => {
       }),
     )
 
-    models.value = allModels
+    const suppressed = loadSuppressedModelIds()
+    models.value = allModels.filter((model) => !suppressed.has(model.id))
     loading.value = false
 
     if (errors.length) {
@@ -118,55 +178,160 @@ export const useAppStore = defineStore('app', () => {
     selectedModelIds.value = selectedModelIds.value.filter(
       (id) => models.value.some((m) => m.id === id),
     )
+    committeeSelectedModelIds.value = committeeSelectedModelIds.value.filter(
+      (id) => models.value.some((m) => m.id === id),
+    )
+    ensureCommitteeSelection()
   }
 
-  function toggleModel(id: string) {
-    const idx = selectedModelIds.value.indexOf(id)
+  function getSelectionRef(mode: ModelSelectionMode = 'chat') {
+    return mode === 'committee' ? committeeSelectedModelIds : selectedModelIds
+  }
+
+  function toggleModel(id: string, mode: ModelSelectionMode = 'chat') {
+    const selection = getSelectionRef(mode)
+    const idx = selection.value.indexOf(id)
     if (idx >= 0) {
-      selectedModelIds.value.splice(idx, 1)
-    } else if (selectedModelIds.value.length < 5) {
-      selectedModelIds.value.push(id)
+      selection.value.splice(idx, 1)
+    } else if (selection.value.length < 5) {
+      selection.value.push(id)
     }
   }
 
-  function applyPreset(preset: Preset) {
+  function applyPreset(preset: Preset, mode: ModelSelectionMode = 'chat') {
     // Only apply model IDs that exist in current model list
     const available = preset.models.filter((id) =>
       models.value.some((m) => m.id === id),
     )
     if (available.length) {
-      selectedModelIds.value = [...available]
+      getSelectionRef(mode).value = [...available]
     } else {
       useToastStore().info('预设中的模型不可用，请先配置对应通道')
     }
   }
 
-  function clearSelection() {
-    selectedModelIds.value = []
+  function clearSelection(mode: ModelSelectionMode = 'chat') {
+    getSelectionRef(mode).value = []
   }
 
-  function randomPick(count = 3) {
+  function pickDiverseModels(count = 3): string[] {
+    // Prefer free models, then fill with paid if needed
+    const freeModels = models.value.filter(m => m.free)
+    const pool = freeModels.length ? freeModels : models.value
+
     const byProvider: Record<string, ModelMeta[]> = {}
-    for (const m of models.value) {
+    for (const m of pool) {
       ;(byProvider[m.provider] ??= []).push(m)
     }
-    const providers = Object.keys(byProvider)
-    for (let i = providers.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[providers[i], providers[j]] = [providers[j], providers[i]]
-    }
+    const providers = shuffleArray(Object.keys(byProvider))
     const picked: string[] = []
-    for (const p of providers) {
+    for (const provider of providers) {
       if (picked.length >= count) break
-      const pool = byProvider[p]
-      picked.push(pool[Math.floor(Math.random() * pool.length)].id)
+      const candidates = shuffleArray(byProvider[provider])
+      const candidate = candidates[0]
+      if (candidate) picked.push(candidate.id)
     }
-    selectedModelIds.value = picked
+    if (picked.length >= count) return picked
+
+    const remainingPool = freeModels.length
+      ? [...pool, ...models.value.filter((model) => !model.free)]
+      : pool
+    const remaining = shuffleArray(remainingPool).map((model) => model.id)
+    for (const id of remaining) {
+      if (picked.length >= count) break
+      if (!picked.includes(id)) picked.push(id)
+    }
+    return picked
+  }
+
+  function randomPick(count = 3, mode: ModelSelectionMode = 'chat') {
+    getSelectionRef(mode).value = pickDiverseModels(count)
+  }
+
+  function copySelection(from: ModelSelectionMode, to: ModelSelectionMode) {
+    const src = getSelectionRef(from).value
+    getSelectionRef(to).value = [...src]
+  }
+
+  function ensureCommitteeSelection() {
+    if (committeeSelectedModelIds.value.length || !models.value.length) return
+    if (selectedModelIds.value.length) {
+      committeeSelectedModelIds.value = [...selectedModelIds.value]
+      return
+    }
+    committeeSelectedModelIds.value = pickDiverseModels(3)
+  }
+
+  // Track pending suppressions so we don't show multiple toasts for the same model
+  const pendingSuppressions = new Set<string>()
+
+  function suppressModelForToday(modelId: string) {
+    const model = models.value.find((item) => item.id === modelId)
+    if (!model || pendingSuppressions.has(modelId)) return
+
+    pendingSuppressions.add(modelId)
+    const toastStore = useToastStore()
+
+    toastStore.countdown(`${model.name} 即将隐藏`, 5, '取消').then((confirmed) => {
+      pendingSuppressions.delete(modelId)
+      if (!confirmed) return
+
+      // Actually suppress
+      const expiresAt = new Date().setHours(23, 59, 59, 999)
+      let data: Record<string, number> = {}
+      try {
+        data = JSON.parse(localStorage.getItem(MODEL_SUPPRESSION_KEY) || '{}')
+      } catch {
+        data = {}
+      }
+      data[modelId] = expiresAt
+      persistSuppressedModelIds(data)
+
+      models.value = models.value.filter((item) => item.id !== modelId)
+      selectedModelIds.value = selectedModelIds.value.filter((id) => id !== modelId)
+      committeeSelectedModelIds.value = committeeSelectedModelIds.value.filter((id) => id !== modelId)
+      ensureCommitteeSelection()
+    })
+  }
+
+  /** Get list of currently suppressed model IDs (not expired) */
+  function getSuppressedModelIds(): string[] {
+    try {
+      const raw = localStorage.getItem(MODEL_SUPPRESSION_KEY)
+      if (!raw) return []
+      const data = JSON.parse(raw) as Record<string, number>
+      const now = Date.now()
+      return Object.entries(data).filter(([, exp]) => exp > now).map(([id]) => id)
+    } catch {
+      return []
+    }
+  }
+
+  /** Restore all suppressed models by clearing suppression and re-fetching */
+  async function restoreSuppressedModels() {
+    localStorage.removeItem(MODEL_SUPPRESSION_KEY)
+    await refreshModels()
+    useToastStore().info('已恢复所有隐藏模型')
   }
 
   return {
-    models, presets, selectedModelIds, selectedModels,
+    models,
+    presets,
+    selectedModelIds,
+    selectedModels,
+    committeeSelectedModelIds,
+    committeeSelectedModels,
     modelsByCategory, initialized, loading, error,
-    initialize, refreshModels, toggleModel, applyPreset, clearSelection, randomPick,
+    initialize,
+    refreshModels,
+    toggleModel,
+    applyPreset,
+    clearSelection,
+    randomPick,
+    copySelection,
+    ensureCommitteeSelection,
+    suppressModelForToday,
+    getSuppressedModelIds,
+    restoreSuppressedModels,
   }
 })

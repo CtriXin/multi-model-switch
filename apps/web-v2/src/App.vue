@@ -11,7 +11,7 @@ import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
 import {
   Monitor, Smartphone, Sun, Moon, Layers, Plus, GitMerge,
-  Menu, MessageSquare, Trash2,
+  Menu, MessageSquare, Trash2, KeyRound, Package, Settings,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -136,7 +136,7 @@ function iosDeleteSession(id: string, e: Event) {
       </header>
 
       <!-- Page content -->
-      <div class="flex-1 overflow-hidden">
+      <div class="flex-1 flex flex-col overflow-hidden">
         <router-view v-slot="{ Component }">
           <transition name="page" mode="out-in">
             <component :is="Component" :key="route.path" />
@@ -179,7 +179,7 @@ function iosDeleteSession(id: string, e: Event) {
     </header>
 
     <!-- Mobile Content -->
-    <div class="flex-1 overflow-hidden">
+    <div class="flex-1 flex flex-col overflow-hidden">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" :key="route.path" />
@@ -272,6 +272,20 @@ function iosDeleteSession(id: string, e: Event) {
           <!-- Drawer bottom nav -->
           <div class="px-3 py-3 border-t border-border-subtle space-y-1">
             <button
+              @click="router.push('/setup'); iosDrawerOpen = false"
+              class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
+            >
+              <KeyRound :size="16" />
+              API 配置
+            </button>
+            <button
+              @click="router.push('/models'); iosDrawerOpen = false"
+              class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
+            >
+              <Package :size="16" />
+              模型管理
+            </button>
+            <button
               @click="togglePlatform"
               class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
             >
@@ -282,7 +296,8 @@ function iosDeleteSession(id: string, e: Event) {
               @click="router.push('/settings'); iosDrawerOpen = false"
               class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
             >
-              ⚙ 设置
+              <Settings :size="16" />
+              设置
             </button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useToastStore } from '@/stores/toast'
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-vue-next'
-import { TransitionGroup } from 'vue'
+import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-vue-next'
+import { TransitionGroup, computed } from 'vue'
 
 const toast = useToastStore()
 
@@ -9,18 +9,21 @@ const iconMap = {
   info: Info,
   success: CheckCircle,
   error: AlertCircle,
+  warning: AlertTriangle,
 }
 
 const colorMap = {
   info: 'border-blue-500/30 bg-blue-500/10',
   success: 'border-green-500/30 bg-green-500/10',
   error: 'border-red-500/30 bg-red-500/10',
+  warning: 'border-amber-500/30 bg-amber-500/10',
 }
 
 const iconColorMap = {
   info: 'text-blue-400',
   success: 'text-green-400',
   error: 'text-red-400',
+  warning: 'text-amber-400',
 }
 </script>
 
@@ -32,12 +35,34 @@ const iconColorMap = {
           v-for="t in toast.toasts"
           :key="t.id"
           class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl border
-                 glass-strong shadow-lg max-w-xs animate-slide-up"
+                 glass-strong shadow-lg max-w-sm animate-slide-up relative overflow-hidden"
           :class="colorMap[t.type]"
         >
-          <component :is="iconMap[t.type]" :size="16" :class="iconColorMap[t.type]" />
+          <!-- Countdown progress bar -->
+          <div
+            v-if="t.countdown != null"
+            class="absolute bottom-0 left-0 h-[2px] bg-amber-400/60 transition-all duration-1000 ease-linear"
+            :style="{ width: `${(t.countdown / 5) * 100}%` }"
+          />
+
+          <component :is="iconMap[t.type]" :size="16" :class="iconColorMap[t.type]" class="shrink-0" />
           <span class="text-sm text-text-primary flex-1">{{ t.message }}</span>
-          <button @click="toast.remove(t.id)" class="text-text-tertiary hover:text-text-primary">
+
+          <!-- Action button (e.g. "取消") -->
+          <button
+            v-if="t.action"
+            @click="t.action.onClick()"
+            class="shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors
+                   bg-white/10 hover:bg-white/20 text-text-primary"
+          >
+            {{ t.action.label }}
+          </button>
+
+          <button
+            v-else
+            @click="toast.remove(t.id)"
+            class="text-text-tertiary hover:text-text-primary shrink-0"
+          >
             <X :size="14" />
           </button>
         </div>

@@ -1,8 +1,6 @@
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { useProviderStore } from '@/stores/provider'
-import { streamChat } from '@/services/api'
-import { getApiKey } from '@/services/keychain'
+import { streamModelChat } from '@/services/runtime'
 import type { Phase1Result, Phase2Result, DiscussDepth, RollupResult } from '@/stores/discuss'
 
 export type { DiscussDepth }
@@ -98,29 +96,9 @@ async function callModelForSession(
   prompt: string,
   signal: AbortSignal,
 ): Promise<string> {
-  const providerStore = useProviderStore()
-  const appStore = useAppStore()
-
-  const model = appStore.models.find((m) => m.id === modelId)
-  let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-  if (!providerConfig) {
-    if (modelId.startsWith('demo/')) {
-      providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-    }
-    if (!providerConfig) {
-      providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-    }
-  }
-  if (!providerConfig) throw new Error('未找到 API 通道')
-
-  const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-  if (!apiKey) throw new Error('API Key 未配置')
-
   let result = ''
-  const stream = streamChat({
-    provider: providerConfig,
-    apiKey,
-    model: modelId,
+  const stream = streamModelChat({
+    modelId,
     messages: [{ role: 'user', content: prompt }],
     signal,
   })
@@ -221,26 +199,8 @@ export function useDiscussSession() {
         '\n\n交叉评审：\n' + reviewContext
 
       const synthesisModel = modelIds[0]
-      const providerStore = useProviderStore()
-      const model = appStore.models.find((m) => m.id === synthesisModel)
-      let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-      if (!providerConfig) {
-        if (synthesisModel.startsWith('demo/')) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-        }
-        if (!providerConfig) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-        }
-      }
-      if (!providerConfig) throw new Error('未找到 API 通道')
-
-      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-      if (!apiKey) throw new Error('API Key 未配置')
-
-      const stream = streamChat({
-        provider: providerConfig,
-        apiKey,
-        model: synthesisModel,
+      const stream = streamModelChat({
+        modelId: synthesisModel,
         messages: [{ role: 'user', content: synthesisPrompt }],
         signal,
       })
@@ -288,26 +248,8 @@ export function useDiscussSession() {
     const userPrompt = `原始问题：${prompt}\n\n各模型独立分析：\n${analysisContext}\n\n交叉审查：\n${reviewContext}${synthesisContext}\n\n请根据以上讨论内容，生成一份统一的行动计划。`
 
     try {
-      const providerStore = useProviderStore()
-      const model = appStore.models.find((m) => m.id === rollupModelId)
-      let providerConfig = providerStore.providers.find((p) => p.id === model?.provider)
-      if (!providerConfig) {
-        if (rollupModelId.startsWith('demo/')) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'mock')
-        }
-        if (!providerConfig) {
-          providerConfig = providerStore.providers.find((p) => p.type === 'openrouter')
-        }
-      }
-      if (!providerConfig) throw new Error('未找到 Rollup 模型通道')
-
-      const apiKey = providerConfig.type === 'mock' ? 'demo' : await getApiKey(providerConfig.id)
-      if (!apiKey) throw new Error('Rollup 模型的 API Key 未配置')
-
-      const stream = streamChat({
-        provider: providerConfig,
-        apiKey,
-        model: rollupModelId,
+      const stream = streamModelChat({
+        modelId: rollupModelId,
         messages: [
           { role: 'system', content: ROLLUP_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },

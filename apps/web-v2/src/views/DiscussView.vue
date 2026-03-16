@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useDiscussStore, type DiscussDepth } from '@/stores/discuss'
@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toast'
 import InputBar from '@/components/chat/InputBar.vue'
 import ModelChipBar from '@/components/chat/ModelChipBar.vue'
 import MarkdownIt from 'markdown-it'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 import {
   MessageSquare, CheckCircle, AlertTriangle, Lightbulb,
   ArrowRight, RotateCcw, GitMerge, Zap, Flame, Rocket,
@@ -23,6 +24,7 @@ const discussStore = useDiscussStore()
 const sessionStore = useSessionStore()
 const toast = useToastStore()
 const platform = inject<import('vue').Ref<string>>('platform')
+const restoredDraft = ref('')
 
 const hasModels = computed(() => appStore.selectedModels.length >= 2)
 
@@ -45,6 +47,7 @@ onMounted(() => {
 })
 
 function handleSubmit(text: string) {
+  restoredDraft.value = ''
   if (!hasModels.value) {
     toast.info('请至少选择 2 个模型')
     return
@@ -77,14 +80,25 @@ function handleReset() {
   if (discussStore.streaming) return
   discussStore.reset()
   pendingTopic.value = null
+  restoredDraft.value = ''
+}
+
+async function handleStopAndEdit() {
+  const draft = discussStore.stopAndRestoreDraft()
+  pendingTopic.value = null
+  restoredDraft.value = ''
+  await nextTick()
+  restoredDraft.value = draft
 }
 
 function continueToChat() {
+  const sanitizedRollup = sanitizeModelOutput(discussStore.rollupText || '')
+  const sanitizedSynthesis = sanitizeModelOutput(discussStore.phase3Text || '')
   // Carry discuss context to chat — prefer rollup if available, fallback to synthesis
   const context = discussStore.rollupText
-    ? `[行动计划] ${discussStore.topic}\n\n${discussStore.rollupText}`
+    ? `[行动计划] ${discussStore.topic}\n\n${sanitizedRollup.content}`
     : discussStore.phase3Text
-      ? `[讨论结论] ${discussStore.topic}\n\n${discussStore.phase3Text}`
+      ? `[讨论结论] ${discussStore.topic}\n\n${sanitizedSynthesis.content}`
       : discussStore.topic
   router.push({ path: '/chat', query: { context } })
 }
@@ -105,8 +119,10 @@ const depthLabel = computed(() => {
   return '快速审查'
 })
 
-const synthesis = computed(() => md.render(discussStore.phase3Text || ''))
-const rollupHtml = computed(() => md.render(discussStore.rollupText || ''))
+const sanitizedSynthesis = computed(() => sanitizeModelOutput(discussStore.phase3Text || ''))
+const sanitizedRollup = computed(() => sanitizeModelOutput(discussStore.rollupText || ''))
+const synthesis = computed(() => md.render(sanitizedSynthesis.value.content || ''))
+const rollupHtml = computed(() => md.render(sanitizedRollup.value.content || ''))
 
 function handleRollup() {
   discussStore.startRollup(appStore.selectedModelIds)
@@ -206,7 +222,7 @@ function handleRollup() {
       </div>
 
       <!-- Discussion content -->
-      <div v-else class="max-w-4xl mx-auto px-4 py-4">
+      <div v-else class="max-w-5xl mx-auto px-4 py-4">
         <!-- Topic + depth badge -->
         <div class="mb-6 animate-slide-up">
           <div class="flex items-center gap-2">
@@ -327,7 +343,12 @@ function handleRollup() {
             </h3>
 
             <div class="card p-4">
-              <div v-if="discussStore.phase3Text" class="md-body" v-html="synthesis" />
+              <template v-if="discussStore.phase3Text">
+                <div class="md-body" v-html="synthesis" />
+                <div v-if="sanitizedSynthesis.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+                  已隐藏模型思考过程，只展示最终结论
+                </div>
+              </template>
               <div v-else class="space-y-2">
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-4/5" />
@@ -381,7 +402,12 @@ function handleRollup() {
               />
             </div>
             <div class="p-4">
-              <div v-if="discussStore.rollupText" class="md-body text-sm" v-html="rollupHtml" />
+              <template v-if="discussStore.rollupText">
+                <div class="md-body text-sm" v-html="rollupHtml" />
+                <div v-if="sanitizedRollup.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
+                  已隐藏模型思考过程，只展示行动计划
+                </div>
+              </template>
               <div v-else class="space-y-2">
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-4/5" />
@@ -423,8 +449,10 @@ function handleRollup() {
       :disabled="!hasModels || discussStore.hasResults"
       :streaming="discussStore.streaming"
       :placeholder="discussStore.hasResults ? '点击「新讨论」重置后可输入新主题...' : hasModels ? '输入讨论主题...' : '请先选择 2 个以上模型...'"
+      :restore-text="restoredDraft"
       @submit="handleSubmit"
       @stop="discussStore.stopDiscussion"
+      @stop-and-edit="handleStopAndEdit"
     />
   </div>
 </template>

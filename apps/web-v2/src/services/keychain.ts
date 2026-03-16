@@ -136,9 +136,13 @@ export async function hasApiKey(providerId: string): Promise<boolean> {
   return blob !== undefined
 }
 
-export async function listProviderIds(): Promise<string[]> {
+export async function listCredentialIds(): Promise<string[]> {
   const db = await openDB()
   return idbAllKeys(db, CREDENTIALS_STORE)
+}
+
+export async function listProviderIds(): Promise<string[]> {
+  return listCredentialIds()
 }
 
 export async function clearAll(): Promise<void> {
