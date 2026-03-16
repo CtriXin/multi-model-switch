@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Key, ArrowRight } from 'lucide-vue-next'
+import { Rocket, ArrowRight } from 'lucide-vue-next'
 import { useProviderStore } from '@/stores/provider'
 import { FREE_PROVIDERS, CN_PROVIDERS, INTL_PROVIDERS } from '@/data/freeProviders'
 import SetupProviderCard from '@/components/SetupProviderCard.vue'
@@ -39,11 +39,11 @@ function startUsing() {
           class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500
                  flex items-center justify-center mx-auto mb-4 shadow-lg"
         >
-          <Key :size="24" class="text-white" />
+          <Rocket :size="24" class="text-white" />
         </div>
-        <h1 class="text-xl font-bold text-text-primary mb-2">3 分钟获取免费 API</h1>
+        <h1 class="text-xl font-bold text-text-primary mb-2">🚀 快速开始</h1>
         <p class="text-sm text-text-tertiary max-w-md mx-auto">
-          以下服务商均提供免费额度，选一个注册即可开始。配置越多，可用模型越多。
+          先配一个能用的免费 API 就能开始。这里更像新手引导，复杂通道管理放到设置里。
         </p>
 
         <!-- Progress dots -->

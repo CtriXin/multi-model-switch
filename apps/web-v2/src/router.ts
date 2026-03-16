@@ -13,7 +13,7 @@ const routes: RouteRecordRaw[] = [
     path: '/setup',
     name: 'setup',
     component: () => import('@/views/SetupGuide.vue'),
-    meta: { title: 'API 配置', icon: 'key' },
+    meta: { title: '🚀 快速开始', icon: 'rocket' },
   },
   {
     path: '/chat',
@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
     name: 'models',
     component: () => import('@/views/ModelsView.vue'),
     meta: { title: '模型管理', icon: 'cpu' },
+  },
+  {
+    path: '/design',
+    name: 'design',
+    component: () => import('@/views/DesignSystem.vue'),
+    meta: { title: '设计系统', icon: 'palette' },
   },
 ]
 

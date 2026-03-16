@@ -4,7 +4,7 @@ import { useSessionStore } from '@/stores/session'
 import { useTheme } from '@/composables/useTheme'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, KeyRound,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Rocket, Palette,
 } from 'lucide-vue-next'
 import { onMounted } from 'vue'
 
@@ -81,14 +81,14 @@ function deleteSession(id: string, e: Event) {
       <Moon v-else :size="14" />
     </button>
 
-    <!-- API Setup -->
+    <!-- Quick Start -->
     <button
       @click="router.push('/setup')"
       class="btn-icon"
       :class="route.path === '/setup' ? 'text-text-primary' : ''"
-      title="API 配置"
+      title="🚀 快速开始"
     >
-      <KeyRound :size="16" />
+      <Rocket :size="16" />
     </button>
 
     <!-- Models -->
@@ -109,6 +109,16 @@ function deleteSession(id: string, e: Event) {
       title="设置"
     >
       <Settings :size="16" />
+    </button>
+
+    <!-- Design System (dev only) -->
+    <button
+      @click="router.push('/design')"
+      class="btn-icon"
+      :class="route.path === '/design' ? 'text-text-primary' : ''"
+      title="设计系统"
+    >
+      <Palette :size="16" />
     </button>
   </aside>
 
@@ -220,8 +230,8 @@ function deleteSession(id: string, e: Event) {
           ? 'bg-white/8 text-text-primary'
           : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
       >
-        <KeyRound :size="16" :stroke-width="1.8" />
-        <span>API 配置</span>
+        <Rocket :size="16" :stroke-width="1.8" />
+        <span>🚀 快速开始</span>
       </button>
       <button
         @click="router.push('/models')"
@@ -242,6 +252,16 @@ function deleteSession(id: string, e: Event) {
       >
         <Settings :size="16" :stroke-width="1.8" />
         <span>设置</span>
+      </button>
+      <button
+        @click="router.push('/design')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
+        :class="route.path === '/design'
+          ? 'bg-white/8 text-text-primary'
+          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
+      >
+        <Palette :size="16" :stroke-width="1.8" />
+        <span>设计系统</span>
       </button>
     </div>
   </aside>

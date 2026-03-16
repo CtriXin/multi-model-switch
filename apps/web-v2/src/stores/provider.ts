@@ -56,23 +56,23 @@ interface ShareImportPayload extends ImportPayload {
 }
 
 const BUILTIN_PROVIDERS: ProviderConfig[] = [
-  { id: 'siliconflow', name: '硅基流动', type: 'openai-compatible', baseUrl: 'https://api.siliconflow.cn/v1', enabled: true, builtIn: true },
-  { id: 'zhipu', name: '智谱 AI', type: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', enabled: true, builtIn: true },
-  { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com', enabled: true, builtIn: true },
-  { id: 'dashscope', name: '通义千问', type: 'openai-compatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', enabled: true, builtIn: true },
-  { id: 'moonshot', name: '月之暗面 Kimi', type: 'openai-compatible', baseUrl: 'https://api.moonshot.cn/v1', enabled: true, builtIn: true },
-  { id: 'lingyiwanwu', name: '零一万物', type: 'openai-compatible', baseUrl: 'https://api.lingyiwanwu.com/v1', enabled: true, builtIn: true },
-  { id: 'baichuan', name: '百川智能', type: 'openai-compatible', baseUrl: 'https://api.baichuan-ai.com/v1', enabled: true, builtIn: true },
-  { id: 'stepfun', name: '阶跃星辰', type: 'openai-compatible', baseUrl: 'https://api.stepfun.com/v1', enabled: true, builtIn: true },
-  { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseUrl: 'https://api.minimax.chat/v1', enabled: true, builtIn: true },
-  { id: 'cerebras', name: 'Cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', enabled: true, builtIn: true },
-  { id: 'google', name: 'Google AI Studio', type: 'openai-compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', enabled: true, builtIn: true },
-  { id: 'groq', name: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', enabled: true, builtIn: true },
-  { id: 'nvidia', name: 'NVIDIA NIM', type: 'openai-compatible', baseUrl: 'https://integrate.api.nvidia.com/v1', enabled: true, builtIn: true },
-  { id: 'mistral', name: 'Mistral AI', type: 'openai-compatible', baseUrl: 'https://api.mistral.ai/v1', enabled: true, builtIn: true },
-  { id: 'together', name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', enabled: true, builtIn: true },
-  { id: 'fireworks', name: 'Fireworks AI', type: 'openai-compatible', baseUrl: 'https://api.fireworks.ai/inference/v1', enabled: true, builtIn: true },
-  { id: 'openrouter', name: 'OpenRouter', type: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', enabled: true, builtIn: true },
+  { id: 'siliconflow', name: '硅基流动', type: 'openai-compatible', baseUrl: 'https://api.siliconflow.cn/v1', enabled: false, builtIn: true },
+  { id: 'zhipu', name: '智谱 AI', type: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', enabled: false, builtIn: true },
+  { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com', enabled: false, builtIn: true },
+  { id: 'dashscope', name: '通义千问', type: 'openai-compatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', enabled: false, builtIn: true },
+  { id: 'moonshot', name: '月之暗面 Kimi', type: 'openai-compatible', baseUrl: 'https://api.moonshot.cn/v1', enabled: false, builtIn: true },
+  { id: 'lingyiwanwu', name: '零一万物', type: 'openai-compatible', baseUrl: 'https://api.lingyiwanwu.com/v1', enabled: false, builtIn: true },
+  { id: 'baichuan', name: '百川智能', type: 'openai-compatible', baseUrl: 'https://api.baichuan-ai.com/v1', enabled: false, builtIn: true },
+  { id: 'stepfun', name: '阶跃星辰', type: 'openai-compatible', baseUrl: 'https://api.stepfun.com/v1', enabled: false, builtIn: true },
+  { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseUrl: 'https://api.minimax.chat/v1', enabled: false, builtIn: true },
+  { id: 'cerebras', name: 'Cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', enabled: false, builtIn: true },
+  { id: 'google', name: 'Google AI Studio', type: 'openai-compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', enabled: false, builtIn: true },
+  { id: 'groq', name: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', enabled: false, builtIn: true },
+  { id: 'nvidia', name: 'NVIDIA NIM', type: 'openai-compatible', baseUrl: 'https://integrate.api.nvidia.com/v1', enabled: false, builtIn: true },
+  { id: 'mistral', name: 'Mistral AI', type: 'openai-compatible', baseUrl: 'https://api.mistral.ai/v1', enabled: false, builtIn: true },
+  { id: 'together', name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', enabled: false, builtIn: true },
+  { id: 'fireworks', name: 'Fireworks AI', type: 'openai-compatible', baseUrl: 'https://api.fireworks.ai/inference/v1', enabled: false, builtIn: true },
+  { id: 'openrouter', name: 'OpenRouter', type: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', enabled: false, builtIn: true },
   { id: 'demo', name: 'Demo (模拟数据)', type: 'mock', baseUrl: '', enabled: true, builtIn: true },
 ]
 
@@ -205,6 +205,21 @@ export const useProviderStore = defineStore('provider', () => {
     keyStatus.value = next
   }
 
+  function syncBuiltinProviderEnabledState() {
+    let changed = false
+
+    for (const provider of providers.value) {
+      if (!provider.builtIn || provider.type === 'mock') continue
+
+      if (!keyStatus.value[provider.id] && provider.enabled) {
+        provider.enabled = false
+        changed = true
+      }
+    }
+
+    if (changed) saveProviders()
+  }
+
   function normalizeProviderDefaults(providerId: string) {
     const providerAccounts = sortAccounts(accounts.value.filter((account) => account.providerId === providerId))
     if (!providerAccounts.length) return
@@ -303,6 +318,7 @@ export const useProviderStore = defineStore('provider', () => {
     for (const id of ids) next[id] = true
     accountKeyStatus.value = next
     recomputeProviderKeyStatus()
+    syncBuiltinProviderEnabledState()
   }
 
   function addProvider(config: Omit<ProviderConfig, 'builtIn'>) {
@@ -397,12 +413,19 @@ export const useProviderStore = defineStore('provider', () => {
     const account = accounts.value.find((item) => item.id === accountId)
     if (!account) return
     await saveApiKey(accountId, key)
+    const provider = getProvider(account.providerId)
     account.enabled = true
     account.lastErrorAt = null
     account.lastErrorType = null
     account.suppressedUntil = null
     accountKeyStatus.value[accountId] = true
     recomputeProviderKeyStatus()
+    if (provider?.builtIn && provider.type !== 'mock' && !provider.enabled) {
+      provider.enabled = true
+      saveProviders()
+    } else {
+      syncBuiltinProviderEnabledState()
+    }
     saveAccountsOnly()
   }
 
@@ -415,6 +438,7 @@ export const useProviderStore = defineStore('provider', () => {
     account.lastErrorType = null
     account.suppressedUntil = null
     recomputeProviderKeyStatus()
+    syncBuiltinProviderEnabledState()
     saveAccountsOnly()
   }
 
@@ -460,6 +484,7 @@ export const useProviderStore = defineStore('provider', () => {
     await clearAllKeys()
     accountKeyStatus.value = {}
     recomputeProviderKeyStatus()
+    syncBuiltinProviderEnabledState()
   }
 
   async function importConfig(json: string) {
