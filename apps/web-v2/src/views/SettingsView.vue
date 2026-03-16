@@ -336,14 +336,8 @@ async function clearAllKeys() {
 
 <template>
   <div class="flex-1 overflow-y-auto">
-    <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
-      <div class="max-w-2xl mx-auto">
-        <h1 class="text-lg font-semibold text-text-primary">设置</h1>
-        <p class="mt-1 text-xs text-text-tertiary">管理外观、API 通道、分享包和高级接入。</p>
-      </div>
-    </header>
-
     <div class="max-w-2xl mx-auto px-6 py-8 space-y-6">
+      <h1 class="text-lg font-semibold text-text-primary">设置</h1>
       <div class="card p-5 flex items-center justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
