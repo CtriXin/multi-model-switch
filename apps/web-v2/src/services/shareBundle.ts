@@ -1,6 +1,6 @@
 const SHARE_BUNDLE_TYPE = 'provider-share-bundle'
 const SHARE_BUNDLE_VERSION = 1
-const PBKDF2_ITERATIONS = 250_000
+const PBKDF2_ITERATIONS = 600_000
 
 export interface ShareBundle {
   version: 1
@@ -33,7 +33,7 @@ function fromBase64(value: string): Uint8Array {
   return bytes
 }
 
-async function deriveShareKey(password: string, salt: Uint8Array) {
+async function deriveShareKey(password: string, salt: Uint8Array, iterations: number) {
   const material = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(password),
@@ -46,7 +46,7 @@ async function deriveShareKey(password: string, salt: Uint8Array) {
     {
       name: 'PBKDF2',
       salt,
-      iterations: PBKDF2_ITERATIONS,
+      iterations,
       hash: 'SHA-256',
     },
     material,
@@ -63,7 +63,7 @@ export async function createShareBundle<T>(payload: T, password: string): Promis
 
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
-  const key = await deriveShareKey(password, salt)
+  const key = await deriveShareKey(password, salt, PBKDF2_ITERATIONS)
   const plaintext = new TextEncoder().encode(JSON.stringify(payload))
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
@@ -108,7 +108,8 @@ export async function readShareBundle<T>(input: string, password: string): Promi
   const salt = fromBase64(bundle.salt)
   const iv = fromBase64(bundle.iv)
   const ciphertext = fromBase64(bundle.payload)
-  const key = await deriveShareKey(password, salt)
+  // Use the iterations stored in the bundle for backward compatibility
+  const key = await deriveShareKey(password, salt, bundle.iterations)
 
   let plaintext: ArrayBuffer
   try {
