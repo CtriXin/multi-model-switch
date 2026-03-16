@@ -280,7 +280,7 @@ function getProvider(id: string): string {
 const contextModes = [
   { key: 'summary' as const, label: '摘要' },
   { key: 'selected' as const, label: '仅选中' },
-  { key: 'full' as const, label: '全量' },
+  { key: 'full' as const, label: '主线全文' },
 ]
 
 function getTier(id: string): number {
