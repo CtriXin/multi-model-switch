@@ -463,13 +463,18 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
           <Sparkles :size="28" class="text-accent" />
         </div>
         <h2 class="text-lg font-semibold text-text-primary mb-2 animate-slide-up">
-          多模型对话
+          问一次，最多五份答卷
         </h2>
         <p class="text-sm text-text-secondary max-w-sm animate-slide-up" style="animation-delay: 50ms">
-          同时向多个模型发送消息，并排比较它们的回答
+          同一个问题交给多个模型，并排比较后选出最佳回答。选中后还能继续追问，上下文自动接力。
         </p>
-        <p v-if="!hasModels" class="text-xs text-text-tertiary mt-4 animate-slide-up" style="animation-delay: 100ms">
-          从上方模型栏选择 2 个以上模型开始
+        <div class="flex flex-wrap justify-center gap-2 mt-5 max-w-sm animate-slide-up" style="animation-delay: 100ms">
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">Judge 帮你打分</span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">选中即上下文</span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">不满意可深入讨论</span>
+        </div>
+        <p v-if="!hasModels" class="text-xs text-text-tertiary mt-5 animate-slide-up" style="animation-delay: 150ms">
+          先从下方选 2 个以上模型，然后输入你的问题
         </p>
       </div>
 

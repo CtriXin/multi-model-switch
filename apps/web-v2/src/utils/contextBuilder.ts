@@ -59,6 +59,7 @@ export function buildContextMessages(
     for (let i = prev.length - 1; i >= 0 && collected.length < MAX_CONTEXT_ROUNDS; i--) {
       const r = prev[i]
       const pick = r.activeModelId ?? Array.from(r.responses.keys())[0]
+      if (!pick) continue
       const answer = r.responses.get(pick)
       const sanitized = answer?.content ? sanitizeForContext(answer.content) : ''
       const roundChars = r.prompt.length + sanitized.length
@@ -99,9 +100,10 @@ export function buildContextMessages(
   // summary: truncate + pack into a single user message
   const lines: string[] = []
   for (const r of prev) {
+    const pick = r.activeModelId ?? Array.from(r.responses.keys())[0]
+    if (!pick) continue
     const q = r.prompt.length > 200 ? r.prompt.slice(0, 200) + '…' : r.prompt
     const imgNote = r.attachments?.length ? ` [含 ${r.attachments.length} 张图片]` : ''
-    const pick = r.activeModelId ?? Array.from(r.responses.keys())[0]
     const raw = r.responses.get(pick)?.content ?? ''
     const sanitized = sanitizeForContext(raw)
     const a = sanitized.length > 300 ? sanitized.slice(0, 300) + '…' : sanitized
