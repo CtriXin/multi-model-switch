@@ -10,7 +10,8 @@ import ModelChipBar from '@/components/chat/ModelChipBar.vue'
 import ModelResponseCard from '@/components/chat/ModelResponseCard.vue'
 import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
-import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare } from 'lucide-vue-next'
+import type { ImageAttachment } from '@/stores/chat'
+import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, History } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,6 +20,7 @@ const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const toast = useToastStore()
 const platform = inject<import('vue').Ref<string>>('platform')
+const restoredDraft = ref('')
 
 const scrollContainer = ref<HTMLElement>()
 const hasModels = computed(() => appStore.selectedModels.length >= 2)
@@ -26,14 +28,14 @@ const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
 
 // --- View mode ---
 type ViewMode = 'grid' | 'vertical' | 'horizontal'
-// Desktop: ≤2 models → grid (side-by-side), ≥3 → horizontal scroll
+// Desktop: ≤3 models → grid (side-by-side), ≥4 → horizontal scroll
 // Mobile: horizontal (carousel) default, vertical available
-const viewMode = ref<ViewMode>(appStore.selectedModels.length > 2 ? 'horizontal' : 'grid')
+const viewMode = ref<ViewMode>(appStore.selectedModels.length > 3 ? 'horizontal' : 'grid')
 
 // Auto-switch default when model count changes
 watch(() => appStore.selectedModels.length, (count) => {
-  if (count <= 2 && viewMode.value === 'horizontal') viewMode.value = 'grid'
-  else if (count > 2 && viewMode.value === 'grid') viewMode.value = 'horizontal'
+  if (count <= 3 && viewMode.value === 'horizontal') viewMode.value = 'grid'
+  else if (count > 3 && viewMode.value === 'grid') viewMode.value = 'horizontal'
 })
 
 // Mobile view mode: 'horizontal' (carousel) or 'vertical'
@@ -138,26 +140,9 @@ onMounted(() => {
 
 // --- Desktop horizontal mode active card ---
 const desktopHActive = reactive<Record<string, number>>({})
-const hScrollContainer = ref<HTMLElement>()
 
 function getDesktopHActive(roundId: string): number {
   return desktopHActive[roundId] ?? 0
-}
-
-function setDesktopHActive(roundId: string, idx: number, e: Event) {
-  if (desktopHActive[roundId] === idx) return // already active, let inner clicks through
-  // Don't block clicks on interactive elements inside the card
-  const target = e.target as HTMLElement
-  if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) return
-  e.stopPropagation()
-  desktopHActive[roundId] = idx
-  // Scroll the clicked card into view
-  const card = (e.currentTarget as HTMLElement)
-  const wrapper = card?.parentElement
-  if (wrapper && card) {
-    const scrollLeft = card.offsetLeft - 12
-    wrapper.scrollTo({ left: scrollLeft, behavior: 'smooth' })
-  }
 }
 
 function isRoundDone(round: typeof chatStore.rounds[0]): boolean {
@@ -165,7 +150,7 @@ function isRoundDone(round: typeof chatStore.rounds[0]): boolean {
 }
 
 // --- Swipe carousel state ---
-const CARD_WIDTH_PCT = 92 // card occupies 92%, peek ~8%
+const CARD_WIDTH_PCT = 100 // card occupies full width
 const activeCardIndex = reactive<Record<string, number>>({})
 const dragOffset = reactive<Record<string, number>>({}) // px offset during drag
 const isDragging = reactive<Record<string, boolean>>({})
@@ -181,12 +166,10 @@ function setActiveIndex(roundId: string, idx: number) {
   activeCardIndex[roundId] = idx
 }
 
-function getTransform(roundId: string, containerWidth: number): string {
+function getTransform(roundId: string): string {
   const idx = getActiveIndex(roundId)
-  const cardW = containerWidth * CARD_WIDTH_PCT / 100
-  const baseOffset = -idx * cardW
   const drag = dragOffset[roundId] ?? 0
-  return `translateX(${baseOffset + drag}px)`
+  return `translateX(calc(${-idx * CARD_WIDTH_PCT}% + ${drag}px))`
 }
 
 function onTouchStart(roundId: string, e: TouchEvent) {
@@ -250,7 +233,14 @@ function onTouchEnd(roundId: string, totalCards: number) {
 }
 
 // --- Other ---
-async function handleSubmit(text: string) {
+const previewImage = ref<string | null>(null)
+
+function openImagePreview(src: string) {
+  previewImage.value = src
+}
+
+async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
+  restoredDraft.value = ''
   if (!hasModels.value) {
     toast.info('请至少选择 2 个模型')
     return
@@ -259,7 +249,7 @@ async function handleSubmit(text: string) {
     sessionStore.createSession('chat')
   }
   // Fire and don't await — scroll immediately after DOM update
-  chatStore.sendMessage(text, appStore.selectedModelIds).then(() => {
+  chatStore.sendMessage(text, appStore.selectedModelIds, attachments).then(() => {
     sessionStore.saveCurrentSession()
   })
   // Scroll to the new message after it appears in DOM
@@ -267,13 +257,15 @@ async function handleSubmit(text: string) {
   scrollToBottom()
 }
 
-function jumpToDiscuss() {
-  if (!chatStore.currentRound) {
-    router.push('/discuss')
-    return
-  }
-  const ctx = chatStore.currentRound.prompt
-  router.push({ path: '/discuss', query: { context: ctx } })
+function handleStopAndEdit() {
+  restoredDraft.value = chatStore.stopAndRestoreDraft()
+}
+
+async function restorePrompt(prompt: string) {
+  restoredDraft.value = ''
+  await nextTick()
+  restoredDraft.value = prompt
+  toast.info('已恢复到输入框，可修改后重发')
 }
 
 function getModelName(id: string): string {
@@ -284,6 +276,13 @@ function getProvider(id: string): string {
   return appStore.models.find(m => m.id === id)?.provider ?? 'unknown'
 }
 
+// --- Context mode chips ---
+const contextModes = [
+  { key: 'summary' as const, label: '摘要' },
+  { key: 'selected' as const, label: '仅选中' },
+  { key: 'full' as const, label: '全量' },
+]
+
 function getTier(id: string): number {
   return appStore.models.find(m => m.id === id)?.tier ?? 0
 }
@@ -291,6 +290,15 @@ function getTier(id: string): number {
 // A round has a selection if activeModelId is set and responses are done
 function hasSelection(round: typeof chatStore.rounds[0]): boolean {
   return !!round.activeModelId && isRoundDone(round)
+}
+
+function shouldUseFixedGridHeight(round: typeof chatStore.rounds[0]): boolean {
+  return Array.from(round.responses.values()).some((msg) => {
+    const content = msg.content || ''
+    const lineCount = content.split('\n').length
+    const briefCount = Object.keys(msg.brief ?? {}).length
+    return !!msg.error || briefCount > 0 || lineCount > 8 || content.length > 420 || (chatStore.streaming && !msg.elapsed)
+  })
 }
 
 const gridClass = computed(() => {
@@ -345,7 +353,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
       </div>
 
       <!-- Rounds -->
-      <div v-else class="mx-auto py-4 space-y-6" :class="isMobile ? 'max-w-lg px-4' : 'max-w-6xl px-4'">
+      <div v-else class="mx-auto py-4 space-y-6" :class="isMobile ? 'max-w-lg px-4' : 'max-w-5xl px-4'">
         <!-- View mode toggle (desktop only, show when there are rounds) -->
         <div v-if="!isMobile" class="flex justify-end">
           <div class="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-2">
@@ -374,8 +382,21 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
         >
           <!-- User prompt -->
           <div class="flex justify-end mb-4">
-            <div class="max-w-[85%] px-4 py-2.5 rounded-2xl rounded-br-md bg-accent text-white text-sm">
-              {{ round.prompt }}
+            <div class="max-w-[85%]">
+              <!-- Attached images -->
+              <div v-if="round.attachments?.length" class="flex gap-1.5 justify-end mb-1.5">
+                <img
+                  v-for="img in round.attachments"
+                  :key="img.id"
+                  :src="img.dataUrl"
+                  :alt="img.name"
+                  class="h-20 w-20 object-cover rounded-lg border border-white/10 cursor-pointer hover:opacity-80 transition-opacity"
+                  @click="openImagePreview(img.dataUrl)"
+                />
+              </div>
+              <div class="px-4 py-2.5 rounded-2xl rounded-br-md bg-accent text-white text-sm">
+                {{ round.prompt }}
+              </div>
             </div>
           </div>
 
@@ -428,28 +449,35 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="getViewingModelId(round) === round.activeModelId"
                 @select="chatStore.setActiveModel(round.id, getViewingModelId(round))"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
             <!-- Before selection: layout depends on viewMode -->
 
-            <!-- Grid mode -->
-            <div v-else-if="viewMode === 'grid'" class="grid gap-3" :class="gridClass">
-              <ModelResponseCard
-                v-for="[modelId, msg] of round.responses"
-                :key="modelId"
-                :model-id="modelId"
-                :model-name="getModelName(modelId)"
-                :provider="getProvider(modelId)"
-                :tier="getTier(modelId)"
-                :content="msg.content"
-                :elapsed="msg.elapsed"
-                :brief="msg.brief"
-                :streaming="chatStore.streaming && !msg.elapsed"
-                :selected="round.activeModelId === modelId"
-                @select="chatStore.setActiveModel(round.id, modelId)"
-                @discuss="startInlineDiscuss(round.id)"
-              />
+            <!-- Grid mode — whole card clickable to select -->
+              <div v-else-if="viewMode === 'grid'" class="grid gap-3" :class="gridClass">
+                <div
+                  v-for="[modelId, msg] of round.responses"
+                  :key="modelId"
+                  :class="shouldUseFixedGridHeight(round) ? 'h-[clamp(360px,58vh,520px)]' : ''"
+                  @click="chatStore.setActiveModel(round.id, modelId)"
+                >
+                <ModelResponseCard
+                  :model-id="modelId"
+                  :model-name="getModelName(modelId)"
+                  :provider="getProvider(modelId)"
+                  :tier="getTier(modelId)"
+                  :content="msg.content"
+                  :elapsed="msg.elapsed"
+                  :brief="msg.brief"
+                  :streaming="chatStore.streaming && !msg.elapsed"
+                  :selected="round.activeModelId === modelId"
+                  @select="chatStore.setActiveModel(round.id, modelId)"
+                  @discuss="startInlineDiscuss(round.id)"
+                  @retry="restorePrompt(round.prompt)"
+                />
+              </div>
             </div>
 
             <!-- Vertical mode -->
@@ -468,37 +496,58 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
-            <!-- Horizontal scroll mode -->
-            <div v-else class="horizontal-scroll-wrapper">
-              <div
-                ref="hScrollContainer"
-                class="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory no-scrollbar scroll-smooth"
-              >
-                <div
-                  v-for="([modelId, msg], cardIdx) of Array.from(round.responses.entries())"
+            <!-- Horizontal mode — single card full width with tab bar -->
+            <div v-else>
+              <!-- Tab bar to switch between cards -->
+              <div class="flex items-stretch gap-1 mb-3 rounded-lg bg-surface-2 p-1">
+                <button
+                  v-for="([modelId], cardIdx) of Array.from(round.responses.entries())"
                   :key="modelId"
-                  class="shrink-0 snap-start cursor-pointer"
-                  :style="{ width: round.responses.size <= 2 ? '65%' : '55%' }"
-                  @click="setDesktopHActive(round.id, cardIdx, $event)"
+                  @click="desktopHActive[round.id] = cardIdx"
+                  class="flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium transition-all flex-1 min-w-0"
+                  :class="getDesktopHActive(round.id) === cardIdx
+                    ? 'bg-surface-1 shadow-sm'
+                    : 'hover:bg-surface-3 opacity-60 hover:opacity-90'"
                 >
-                  <ModelResponseCard
-                    :model-id="modelId"
-                    :model-name="getModelName(modelId)"
-                    :provider="getProvider(modelId)"
-                    :tier="getTier(modelId)"
-                    :content="msg.content"
-                    :elapsed="msg.elapsed"
-                    :brief="msg.brief"
-                    :streaming="chatStore.streaming && !msg.elapsed"
-                    :active="getDesktopHActive(round.id) === cardIdx"
-                    :selected="round.activeModelId === modelId"
-                    @select="chatStore.setActiveModel(round.id, modelId)"
-                    @discuss="startInlineDiscuss(round.id)"
-                  />
-                </div>
+                  <div
+                    class="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold text-white shrink-0"
+                    :style="{ backgroundColor: getModelColor(getProvider(modelId)) }"
+                  >
+                    {{ getModelName(modelId).charAt(0) }}
+                  </div>
+                  <span class="truncate">{{ getModelName(modelId) }}</span>
+                  <span v-if="round.responses.get(modelId)?.elapsed" class="ml-auto text-[9px] text-text-tertiary shrink-0">
+                    {{ round.responses.get(modelId)!.elapsed!.toFixed(1) }}s
+                  </span>
+                </button>
+              </div>
+
+              <!-- Single visible card -->
+              <div
+                v-for="([modelId, msg], cardIdx) of Array.from(round.responses.entries())"
+                :key="modelId"
+                v-show="getDesktopHActive(round.id) === cardIdx"
+                @click="chatStore.setActiveModel(round.id, modelId)"
+              >
+                <ModelResponseCard
+                  :model-id="modelId"
+                  :model-name="getModelName(modelId)"
+                  :provider="getProvider(modelId)"
+                  :tier="getTier(modelId)"
+                  :content="msg.content"
+                  :elapsed="msg.elapsed"
+                  :brief="msg.brief"
+                  :streaming="chatStore.streaming && !msg.elapsed"
+                  :active="true"
+                  :selected="round.activeModelId === modelId"
+                  @select="chatStore.setActiveModel(round.id, modelId)"
+                  @discuss="startInlineDiscuss(round.id)"
+                  @retry="restorePrompt(round.prompt)"
+                />
               </div>
             </div>
 
@@ -581,6 +630,7 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :active="true"
                 :selected="round.activeModelId === getDisplayedModelId(round)"
                 class="card"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
           </div>
@@ -619,11 +669,32 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 :selected="round.activeModelId === modelId"
                 @select="chatStore.setActiveModel(round.id, modelId)"
                 @discuss="startInlineDiscuss(round.id)"
+                @retry="restorePrompt(round.prompt)"
               />
             </div>
 
             <!-- Mobile horizontal carousel -->
-            <div v-else class="carousel-wrapper -mx-4">
+            <div v-else>
+              <!-- Tab bar for mobile -->
+              <div v-if="round.responses.size > 1" class="flex items-stretch gap-1 mb-2 rounded-lg bg-surface-2 p-1">
+                <button
+                  v-for="([modelId], cardIdx) of Array.from(round.responses.entries())"
+                  :key="modelId"
+                  @click="setActiveIndex(round.id, cardIdx)"
+                  class="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-all flex-1 min-w-0"
+                  :class="getActiveIndex(round.id) === cardIdx
+                    ? 'bg-surface-1 shadow-sm'
+                    : 'opacity-50'"
+                >
+                  <span
+                    class="w-4 h-4 rounded flex items-center justify-center text-[8px] font-bold text-white shrink-0"
+                    :style="{ backgroundColor: getModelColor(getProvider(modelId)) }"
+                  >{{ getModelName(modelId).charAt(0) }}</span>
+                  <span class="truncate">{{ getModelName(modelId) }}</span>
+                </button>
+              </div>
+
+              <div class="carousel-wrapper">
               <div
                 class="overflow-hidden"
                 @touchstart.passive="(e: TouchEvent) => onTouchStart(round.id, e)"
@@ -631,18 +702,18 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                 @touchend="() => onTouchEnd(round.id, round.responses.size)"
               >
                 <div
-                  class="flex items-start pl-4"
+                  class="flex items-stretch"
                   :class="isDragging[round.id] ? '' : 'carousel-snap'"
-                  :style="{ transform: getTransform(round.id, (scrollContainer?.clientWidth ?? 375) - 32) }"
+                  :style="{ transform: getTransform(round.id) }"
                 >
                   <div
                     v-for="([modelId, msg], cardIdx) in Array.from(round.responses.entries())"
                     :key="modelId"
-                    class="shrink-0 carousel-card"
+                    class="w-full shrink-0 flex"
                     :style="{ width: CARD_WIDTH_PCT + '%' }"
                   >
                     <div
-                      class="mx-1 rounded-xl transition-all duration-300"
+                      class="w-full rounded-xl transition-all duration-300"
                       :class="getActiveIndex(round.id) === cardIdx ? 'carousel-active' : 'carousel-inactive'"
                     >
                       <ModelResponseCard
@@ -658,23 +729,12 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
                         :active="getActiveIndex(round.id) === cardIdx"
                         :selected="round.activeModelId === modelId"
                         @select="chatStore.setActiveModel(round.id, modelId)"
+                        @retry="restorePrompt(round.prompt)"
                       />
                     </div>
                   </div>
                 </div>
               </div>
-
-              <!-- Dot indicators -->
-              <div v-if="round.responses.size > 1" class="flex items-center justify-center gap-2 mt-3">
-                <button
-                  v-for="(entry, idx) in Array.from(round.responses.entries())"
-                  :key="entry[0]"
-                  @click="setActiveIndex(round.id, idx)"
-                  class="rounded-full transition-all duration-300"
-                  :class="getActiveIndex(round.id) === idx
-                    ? 'w-5 h-2 bg-accent'
-                    : 'w-2 h-2 bg-text-tertiary opacity-40'"
-                />
               </div>
             </div>
           </template>
@@ -723,16 +783,48 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
     <!-- Model chip bar -->
     <ModelChipBar />
 
+    <!-- Context mode chips (only when there's history) -->
+    <div
+      v-if="chatStore.rounds.length > 0"
+      class="flex items-center gap-2 px-4 py-1.5"
+    >
+      <History :size="13" class="text-text-tertiary shrink-0" />
+      <div class="flex items-center gap-1">
+        <button
+          v-for="m in contextModes"
+          :key="m.key"
+          @click="chatStore.contextMode = m.key"
+          class="px-2.5 py-1 rounded-full text-xs font-medium transition-all"
+          :class="chatStore.contextMode === m.key
+            ? 'bg-accent/15 text-accent'
+            : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-2'"
+        >
+          {{ m.label }}
+        </button>
+      </div>
+    </div>
+
     <!-- Input -->
     <InputBar
       :disabled="!hasModels"
       :streaming="chatStore.streaming"
-      :show-discuss="!!hasRounds"
       :placeholder="hasModels ? undefined : '请先选择 2 个以上模型...'"
+      :restore-text="restoredDraft"
       @submit="handleSubmit"
       @stop="chatStore.stopStreaming"
-      @discuss="jumpToDiscuss"
+      @stop-and-edit="handleStopAndEdit"
     />
+
+    <!-- Image lightbox -->
+    <Teleport to="body">
+      <div
+        v-if="previewImage"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-pointer"
+        @click="previewImage = null"
+      >
+        <img :src="previewImage" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl" />
+      </div>
+    </Teleport>
   </div>
 </template>
 

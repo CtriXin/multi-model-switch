@@ -2,9 +2,8 @@
 import { useTheme } from '@/composables/useTheme'
 import { useProviderStore } from '@/stores/provider'
 import { useAppStore } from '@/stores/app'
-import { getApiKey } from '@/services/keychain'
-import { maskKey } from '@/services/keychain'
-import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, Check, X, ExternalLink } from 'lucide-vue-next'
+import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
+import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu } from 'lucide-vue-next'
 import { ref, onMounted } from 'vue'
 
 const { theme, toggle: toggleTheme } = useTheme()
@@ -14,10 +13,8 @@ const appStore = useAppStore()
 
 // Provider editing state
 const editingProviderId = ref<string | null>(null)
-const keyInput = ref('')
 const baseUrlInput = ref('')
 const saving = ref(false)
-const maskedKeys = ref<Record<string, string>>({})
 
 // Import state
 const showImport = ref(false)
@@ -33,54 +30,74 @@ const newProvider = ref({
   baseUrl: '',
 })
 
+// Manual model addition
+const addingModelProvider = ref<string | null>(null)
+const newModelId = ref('')
+
 onMounted(async () => {
   await providerStore.refreshKeyStatus()
-  // Load masked keys for display
-  for (const p of providerStore.providers) {
-    if (providerStore.keyStatus[p.id]) {
-      const key = await getApiKey(p.id)
-      if (key) maskedKeys.value[p.id] = maskKey(key)
-    }
-  }
 })
 
 function startEdit(providerId: string) {
   editingProviderId.value = providerId
   const p = providerStore.getProvider(providerId)
   baseUrlInput.value = p?.baseUrl ?? ''
-  keyInput.value = ''
 }
 
 function cancelEdit() {
   editingProviderId.value = null
-  keyInput.value = ''
   baseUrlInput.value = ''
 }
 
-async function saveProviderKey() {
-  if (!editingProviderId.value || !keyInput.value.trim()) return
+async function saveProviderBaseUrl() {
+  if (!editingProviderId.value) return
   saving.value = true
   try {
-    await providerStore.setApiKey(editingProviderId.value, keyInput.value.trim())
-    // Update baseUrl if changed
     const p = providerStore.getProvider(editingProviderId.value)
     if (p && baseUrlInput.value && baseUrlInput.value !== p.baseUrl) {
       providerStore.updateProvider(editingProviderId.value, { baseUrl: baseUrlInput.value })
     }
-    maskedKeys.value[editingProviderId.value] = maskKey(keyInput.value.trim())
-    editingProviderId.value = null
-    keyInput.value = ''
-    // Refresh models after adding a key
+    cancelEdit()
     await appStore.refreshModels()
   } finally {
     saving.value = false
   }
 }
 
-async function removeKey(providerId: string) {
-  await providerStore.removeApiKey(providerId)
-  delete maskedKeys.value[providerId]
+async function toggleProviderEnabled(providerId: string) {
+  const p = providerStore.getProvider(providerId)
+  if (!p) return
+  providerStore.updateProvider(providerId, { enabled: !p.enabled })
   await appStore.refreshModels()
+}
+
+function startAddModel(providerId: string) {
+  addingModelProvider.value = providerId
+  newModelId.value = ''
+}
+
+function addCustomModel() {
+  if (!addingModelProvider.value || !newModelId.value.trim()) return
+  const p = providerStore.getProvider(addingModelProvider.value)
+  if (!p) return
+  const existing = p.customModels ?? []
+  if (!existing.includes(newModelId.value.trim())) {
+    providerStore.updateProvider(addingModelProvider.value, {
+      customModels: [...existing, newModelId.value.trim()],
+    })
+  }
+  newModelId.value = ''
+  addingModelProvider.value = null
+  appStore.refreshModels()
+}
+
+function removeCustomModel(providerId: string, modelId: string) {
+  const p = providerStore.getProvider(providerId)
+  if (!p?.customModels) return
+  providerStore.updateProvider(providerId, {
+    customModels: p.customModels.filter(m => m !== modelId),
+  })
+  appStore.refreshModels()
 }
 
 async function handleImport() {
@@ -91,13 +108,6 @@ async function handleImport() {
     importText.value = ''
     showImport.value = false
     await appStore.refreshModels()
-    // Reload masked keys
-    for (const p of providerStore.providers) {
-      if (providerStore.keyStatus[p.id]) {
-        const key = await getApiKey(p.id)
-        if (key) maskedKeys.value[p.id] = maskKey(key)
-      }
-    }
   }
 }
 
@@ -124,9 +134,42 @@ function addCustomProvider() {
   newProvider.value = { id: '', name: '', type: 'openai-compatible', baseUrl: '' }
 }
 
+function addAccount(providerId: string) {
+  providerStore.addAccount(providerId)
+}
+
+async function removeProvider(providerId: string) {
+  await providerStore.removeProvider(providerId)
+  await appStore.refreshModels()
+}
+
+function getProviderAccounts(providerId: string) {
+  return providerStore.getAccountsByProvider(providerId)
+}
+
+function getProviderSummary(providerId: string) {
+  const provider = providerStore.getProvider(providerId)
+  if (!provider || provider.type === 'mock') return '仅用于本地演示，不需要配置账户'
+
+  const accounts = getProviderAccounts(providerId)
+  const availableCount = providerStore.getRuntimeAccounts(providerId).length
+  const defaultAccount = providerStore.getDefaultAccount(providerId)
+
+  if (!accounts.length) {
+    return '还没有账户，新增后可分别绑定不同 API Key'
+  }
+
+  return `${accounts.length} 个账户 · ${availableCount} 个可用 · 默认 ${defaultAccount?.name ?? '未设置'}`
+}
+
+function canAddManualModel(providerId: string) {
+  const provider = providerStore.getProvider(providerId)
+  if (!provider || provider.type === 'mock') return false
+  return providerStore.keyStatus[providerId] || !!provider.customModels?.length
+}
+
 async function clearAllKeys() {
   await providerStore.clearAllCredentials()
-  maskedKeys.value = {}
   await appStore.refreshModels()
 }
 </script>
@@ -199,41 +242,47 @@ async function clearAllKeys() {
           <div
             v-for="provider in providerStore.providers"
             :key="provider.id"
-            class="rounded-lg border border-border-default p-3 space-y-3"
+            class="rounded-lg border p-3 space-y-3 transition-opacity"
+            :class="provider.enabled
+              ? 'border-border-default'
+              : 'border-border-default/50 opacity-60'"
           >
             <!-- Provider header row -->
             <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span
-                  class="w-2.5 h-2.5 rounded-full"
-                  :class="providerStore.keyStatus[provider.id] ? 'bg-green-400' : 'bg-surface-4'"
-                />
-                <span class="text-sm font-medium text-text-primary">{{ provider.name }}</span>
-                <span v-if="provider.builtIn" class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">内置</span>
+              <div class="min-w-0 flex items-center gap-2">
+                <button
+                  @click="toggleProviderEnabled(provider.id)"
+                  class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0"
+                  :class="provider.enabled ? 'bg-accent' : 'bg-surface-4'"
+                  :title="provider.enabled ? '点击禁用' : '点击启用'"
+                >
+                  <span
+                    class="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform duration-200"
+                    :class="provider.enabled ? 'translate-x-[14px]' : 'translate-x-0'"
+                  />
+                </button>
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="truncate text-sm font-medium text-text-primary">{{ provider.name }}</span>
+                    <span v-if="provider.builtIn" class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">内置</span>
+                    <span v-if="provider.type === 'mock'" class="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">Demo</span>
+                  </div>
+                  <p class="mt-1 text-xs text-text-tertiary">
+                    {{ getProviderSummary(provider.id) }}
+                  </p>
+                </div>
               </div>
               <div class="flex items-center gap-2">
-                <span v-if="maskedKeys[provider.id]" class="text-xs text-text-tertiary font-mono">
-                  {{ maskedKeys[provider.id] }}
-                </span>
-                <span v-else class="text-xs text-text-tertiary">未配置</span>
                 <button
-                  v-if="editingProviderId !== provider.id"
+                  v-if="provider.type !== 'mock' && !provider.builtIn && editingProviderId !== provider.id"
                   @click="startEdit(provider.id)"
                   class="text-xs text-accent hover:text-accent/80 px-2 py-1 rounded hover:bg-surface-3 transition-colors"
                 >
-                  {{ providerStore.keyStatus[provider.id] ? '修改' : '配置' }}
-                </button>
-                <button
-                  v-if="providerStore.keyStatus[provider.id] && editingProviderId !== provider.id"
-                  @click="removeKey(provider.id)"
-                  class="text-xs text-red-400 hover:text-red-300 p-1 rounded hover:bg-surface-3 transition-colors"
-                  title="删除 Key"
-                >
-                  <Trash2 :size="12" />
+                  编辑通道
                 </button>
                 <button
                   v-if="!provider.builtIn && editingProviderId !== provider.id"
-                  @click="providerStore.removeProvider(provider.id)"
+                  @click="removeProvider(provider.id)"
                   class="text-xs text-red-400 hover:text-red-300 p-1 rounded hover:bg-surface-3 transition-colors"
                   title="删除通道"
                 >
@@ -242,20 +291,78 @@ async function clearAllKeys() {
               </div>
             </div>
 
-            <!-- Edit form (expanded) -->
-            <div v-if="editingProviderId === provider.id" class="space-y-3 pt-2 border-t border-border-default">
-              <div>
-                <label class="text-xs text-text-tertiary block mb-1">API Key</label>
-                <input
-                  v-model="keyInput"
-                  type="password"
-                  :placeholder="providerStore.keyStatus[provider.id] ? '输入新 Key 覆盖...' : '粘贴 API Key...'"
-                  class="w-full text-sm bg-surface-2 border border-border-default rounded-lg px-3 py-2
-                         text-text-primary placeholder:text-text-tertiary/50
-                         focus:outline-none focus:border-accent transition-colors font-mono"
+            <div
+              v-if="provider.type !== 'mock'"
+              class="rounded-xl border border-border-subtle bg-surface-2/40 p-3"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-xs font-medium text-text-secondary">账户池</p>
+                  <p class="mt-1 text-[11px] text-text-tertiary">同一 provider 可挂多个 key，失败时会在可用账户间自动 fallback。</p>
+                </div>
+                <button
+                  @click="addAccount(provider.id)"
+                  class="inline-flex items-center gap-1 rounded-lg border border-border-default px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-3"
+                >
+                  <Plus :size="12" />
+                  新增账户
+                </button>
+              </div>
+
+              <div class="mt-3 space-y-2">
+                <ProviderAccountItem
+                  v-for="account in getProviderAccounts(provider.id)"
+                  :key="account.id"
+                  :provider="provider"
+                  :account="account"
+                  :can-delete="getProviderAccounts(provider.id).length > 1"
                 />
               </div>
-              <div v-if="!provider.builtIn">
+            </div>
+
+            <!-- Custom models display -->
+            <div v-if="provider.customModels?.length" class="flex flex-wrap gap-1.5">
+              <span class="text-[10px] text-text-tertiary self-center">手动模型：</span>
+              <span
+                v-for="m in provider.customModels"
+                :key="m"
+                class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-surface-3 text-text-tertiary rounded group"
+              >
+                {{ m }}
+                <button
+                  @click="removeCustomModel(provider.id, m)"
+                  class="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-all"
+                >
+                  <X :size="8" />
+                </button>
+              </span>
+            </div>
+
+            <!-- Add manual model -->
+            <div v-if="addingModelProvider === provider.id" class="flex gap-2 items-center">
+              <input
+                v-model="newModelId"
+                placeholder="模型 ID，如 deepseek-chat"
+                class="flex-1 text-xs bg-surface-1 border border-border-default rounded px-2 py-1.5
+                       text-text-primary font-mono focus:outline-none focus:border-accent"
+                @keydown.enter="addCustomModel"
+              />
+              <button @click="addCustomModel" :disabled="!newModelId.trim()"
+                class="text-xs bg-accent text-white px-2 py-1.5 rounded disabled:opacity-50">添加</button>
+              <button @click="addingModelProvider = null"
+                class="text-xs text-text-tertiary px-2 py-1.5 rounded hover:bg-surface-3">取消</button>
+            </div>
+            <button
+              v-else-if="canAddManualModel(provider.id)"
+              @click="startAddModel(provider.id)"
+              class="text-[10px] text-text-tertiary hover:text-accent flex items-center gap-1 transition-colors"
+            >
+              <Cpu :size="10" />
+              手动添加模型
+            </button>
+
+            <div v-if="editingProviderId === provider.id" class="space-y-3 pt-2 border-t border-border-default">
+              <div>
                 <label class="text-xs text-text-tertiary block mb-1">Base URL</label>
                 <input
                   v-model="baseUrlInput"
@@ -268,13 +375,12 @@ async function clearAllKeys() {
               </div>
               <div class="flex gap-2">
                 <button
-                  @click="saveProviderKey"
-                  :disabled="!keyInput.trim() || saving"
+                  @click="saveProviderBaseUrl"
+                  :disabled="!baseUrlInput.trim() || saving"
                   class="text-xs bg-accent text-white px-3 py-1.5 rounded-lg
                          hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed
                          transition-colors flex items-center gap-1"
                 >
-                  <Check :size="12" />
                   保存
                 </button>
                 <button
@@ -282,7 +388,6 @@ async function clearAllKeys() {
                   class="text-xs text-text-tertiary px-3 py-1.5 rounded-lg
                          hover:bg-surface-3 transition-colors flex items-center gap-1"
                 >
-                  <X :size="12" />
                   取消
                 </button>
               </div>
@@ -309,7 +414,7 @@ async function clearAllKeys() {
             添加自定义通道
           </button>
           <button
-            v-if="Object.keys(maskedKeys).length > 0"
+            v-if="Object.keys(providerStore.accountKeyStatus).length > 0"
             @click="clearAllKeys"
             class="text-xs text-red-400 px-3 py-1.5 rounded-lg border border-red-500/20
                    hover:bg-red-500/10 transition-colors flex items-center gap-1"
