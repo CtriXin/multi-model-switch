@@ -113,7 +113,7 @@ watch(popoverOpen, (val) => {
 </script>
 
 <template>
-  <div class="border-t border-border-subtle bg-surface-1">
+  <div class="relative border-t border-border-subtle bg-surface-1">
       <div class="max-w-5xl mx-auto px-3 sm:px-4">
         <div class="flex items-center h-11 sm:h-10">
           <!-- Scrollable chips area -->

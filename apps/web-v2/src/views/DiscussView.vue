@@ -132,25 +132,6 @@ function handleRollup() {
 <template>
   <div class="flex flex-col h-full">
     <div class="flex-1 overflow-y-auto">
-      <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
-        <div class="max-w-5xl mx-auto flex items-center justify-between gap-4">
-          <div class="min-w-0">
-            <h1 class="text-lg font-semibold text-text-primary">多模型讨论</h1>
-            <p class="mt-1 text-xs text-text-tertiary">
-              {{ appStore.selectedModels.length }} 个模型参与，独立分析 → 交叉审查 → 综合结论
-            </p>
-          </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <span
-              v-if="discussStore.depth"
-              class="rounded-full bg-purple-500/10 px-2.5 py-1 text-[11px] font-medium text-purple-400"
-            >
-              {{ depthLabel }}
-            </span>
-          </div>
-        </div>
-      </header>
-
       <!-- Empty state -->
       <div
         v-if="!discussStore.hasResults && !discussStore.streaming && !pendingTopic"
