@@ -11,7 +11,7 @@ import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
 import {
   Monitor, Smartphone, Sun, Moon, Layers, Plus, GitMerge,
-  Menu, MessageSquare, Trash2, KeyRound, Package, Settings,
+  Menu, MessageSquare, Trash2, Rocket, Package, Settings,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -275,8 +275,8 @@ function iosDeleteSession(id: string, e: Event) {
               @click="router.push('/setup'); iosDrawerOpen = false"
               class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-text-secondary active:bg-white/8"
             >
-              <KeyRound :size="16" />
-              API 配置
+              <Rocket :size="16" />
+              🚀 快速开始
             </button>
             <button
               @click="router.push('/models'); iosDrawerOpen = false"
