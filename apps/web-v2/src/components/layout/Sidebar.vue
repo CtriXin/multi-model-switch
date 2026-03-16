@@ -54,6 +54,11 @@ function deleteSession(id: string, e: Event) {
   e.stopPropagation()
   sessionStore.deleteSession(id)
 }
+
+function openCommandPalette() {
+  const event = new globalThis.KeyboardEvent('keydown', { key: 'k', metaKey: true })
+  globalThis.window.dispatchEvent(event)
+}
 </script>
 
 <template>
@@ -235,7 +240,7 @@ function deleteSession(id: string, e: Event) {
     <!-- Bottom nav -->
     <div class="p-2 border-t border-border-subtle space-y-0.5">
       <button
-        @click="() => { const e = new KeyboardEvent('keydown', { key: 'k', metaKey: true }); window.dispatchEvent(e) }"
+        @click="openCommandPalette"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
                text-text-secondary hover:bg-white/4 hover:text-text-primary"
       >
