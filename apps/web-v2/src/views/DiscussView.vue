@@ -137,7 +137,7 @@ function handleRollup() {
           <div class="min-w-0">
             <h1 class="text-lg font-semibold text-text-primary">多模型讨论</h1>
             <p class="mt-1 text-xs text-text-tertiary">
-              {{ appStore.selectedModels.length }} 个模型参与，适合交叉审查和综合结论。
+              {{ appStore.selectedModels.length }} 个模型参与，独立分析 → 交叉审查 → 综合结论
             </p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
@@ -160,13 +160,18 @@ function handleRollup() {
           <GitMerge :size="28" class="text-purple-400" />
         </div>
         <h2 class="text-lg font-semibold text-text-primary mb-2 animate-slide-up">
-          多模型讨论
+          让模型们吵一架，结论更靠谱
         </h2>
         <p class="text-sm text-text-secondary max-w-sm animate-slide-up" style="animation-delay: 50ms">
-          各模型独立分析、交叉审查、最终综合出统一结论
+          抛出一个决策难题，多个模型各自分析、互相审查、找出分歧，最后综合出一份可落地的行动方案。
         </p>
-        <p v-if="!hasModels" class="text-xs text-text-tertiary mt-4 animate-slide-up" style="animation-delay: 100ms">
-          {{ platform === 'ios' ? '点击右上角选择 2 个以上模型' : '从上方模型栏选择 2 个以上模型开始' }}
+        <div class="flex flex-wrap justify-center gap-2 mt-5 max-w-sm animate-slide-up" style="animation-delay: 100ms">
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">三种审查深度可选</span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">交叉找漏洞</span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">Rollup 出结论</span>
+        </div>
+        <p v-if="!hasModels" class="text-xs text-text-tertiary mt-5 animate-slide-up" style="animation-delay: 150ms">
+          {{ platform === 'ios' ? '点击右上角选择 2 个以上模型' : '先从下方选 2 个以上模型，然后输入你的议题' }}
         </p>
       </div>
 

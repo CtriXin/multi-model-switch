@@ -74,7 +74,7 @@ function tierClass(tier: number) {
 </script>
 
 <template>
-  <div class="relative isolate rounded-[1.5rem] border border-border-default bg-surface-2/60 p-5">
+  <div class="relative isolate rounded-4xl border border-border-default bg-surface-2/60 p-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Model Pool</div>
@@ -135,7 +135,7 @@ function tierClass(tier: number) {
       </span>
     </div>
 
-    <div class="mt-5 rounded-[1.25rem] border border-border-default bg-surface-1 p-4">
+    <div class="mt-5 rounded-3xl border border-border-default bg-surface-1 p-4">
       <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-text-tertiary">当前运行</div>
       <div class="mt-3 grid gap-3 sm:grid-cols-2">
         <div class="rounded-2xl border border-border-subtle bg-surface-2 p-3">
@@ -176,7 +176,7 @@ function tierClass(tier: number) {
       >
         <div class="fixed inset-0 z-30" @click="popoverOpen = false" />
         <div
-          class="relative z-40 max-h-80 overflow-hidden rounded-[1.4rem] border border-border-default bg-surface-1 shadow-xl"
+          class="relative z-40 max-h-80 overflow-hidden rounded-4xl border border-border-default bg-surface-1 shadow-xl"
           @click.stop
         >
           <div class="border-b border-border-subtle px-4 py-3">

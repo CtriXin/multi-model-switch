@@ -19,7 +19,7 @@ const providerColor = computed(() => {
 </script>
 
 <template>
-  <div class="rounded-[1.25rem] border border-border-default bg-surface-1 overflow-hidden shadow-sm">
+  <div class="rounded-3xl border border-border-default bg-surface-1 overflow-hidden shadow-sm">
     <div class="border-b border-border-subtle bg-surface-2/70 px-4 py-3">
       <div class="flex items-start justify-between gap-3">
         <div>

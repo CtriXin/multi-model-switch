@@ -190,10 +190,10 @@ watch(() => props.restoreText, (value) => {
       </div>
 
       <div
-        class="flex min-h-[52px] items-end gap-2 rounded-xl border px-2.5 py-2 transition-colors duration-150"
+        class="flex min-h-[52px] items-end gap-2 rounded-xl border px-2.5 py-2 transition-colors duration-150 relative overflow-hidden"
         :class="[
           streaming
-            ? 'border-accent/30 bg-accent/5'
+            ? 'border-accent/50 bg-accent/5'
             : dragOver
               ? 'border-accent bg-accent/10'
               : 'border-border-default bg-surface-2 focus-within:border-accent/40',
@@ -202,6 +202,17 @@ watch(() => props.restoreText, (value) => {
         @dragleave="onDragLeave"
         @drop="onDrop"
       >
+        <!-- Streaming aurora border effect -->
+        <div
+          v-if="streaming"
+          class="absolute inset-0 rounded-xl pointer-events-none"
+          style="background: linear-gradient(90deg, #6366f1, #818cf8, #a78bfa, #6366f1); background-size: 300% 100%; animation: aurora-flow 2s linear infinite; opacity: 0.15;"
+        />
+        <div
+          v-if="streaming"
+          class="absolute inset-0 rounded-xl pointer-events-none border-2 border-accent/30"
+          style="animation: pulse-border 1.5s ease-in-out infinite;"
+        />
         <!-- Image button -->
         <button
           v-if="!streaming"
@@ -230,12 +241,12 @@ watch(() => props.restoreText, (value) => {
           v-model="text"
           @keydown="handleKeydown"
           @paste="onPaste"
-          :placeholder="placeholder ?? '输入消息... (Shift+Enter 换行)'"
+          :placeholder="streaming ? '生成中...' : (placeholder ?? '输入消息... (Shift+Enter 换行)')"
           :disabled="disabled || streaming"
           rows="1"
           class="flex-1 bg-transparent text-base text-text-primary placeholder-text-tertiary
                  resize-none py-2 pl-1.5 pr-1 outline-none max-h-40 min-h-[36px]
-                 disabled:opacity-40 disabled:cursor-not-allowed"
+                 disabled:opacity-40 disabled:cursor-not-allowed relative z-10"
         />
         <div class="flex shrink-0 items-center gap-1.5 self-end">
           <button
@@ -276,11 +287,19 @@ watch(() => props.restoreText, (value) => {
           <kbd class="px-1 py-0.5 rounded bg-surface-3 text-[9px]">⌘K</kbd> 命令面板
         </span>
         <span v-else />
-        <span v-if="streaming" class="text-[10px] text-accent flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse_dot" />
-          生成中...
-        </span>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes aurora-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(99, 102, 241, 0.3); }
+  50% { border-color: rgba(99, 102, 241, 0.6); }
+}
+</style>

@@ -6,7 +6,7 @@ import { useTheme } from '@/composables/useTheme'
 import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Palette, Sparkles,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Palette, Sparkles, Smartphone,
 } from 'lucide-vue-next'
 import { computed, onMounted } from 'vue'
 
@@ -17,7 +17,7 @@ const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
 
 const props = defineProps<{ collapsed?: boolean }>()
-const emit = defineEmits<{ collapse: []; expand: [] }>()
+const emit = defineEmits<{ collapse: []; expand: []; togglePlatform: [] }>()
 
 onMounted(() => {
   sessionStore.loadSessions()
@@ -95,6 +95,11 @@ function openCommandPalette() {
       <Moon v-else :size="14" />
     </button>
 
+    <!-- Switch to mobile -->
+    <button @click="emit('togglePlatform')" class="btn-icon" title="切换手机模式">
+      <Smartphone :size="14" />
+    </button>
+
     <!-- Quick Start -->
     <button
       v-if="showQuickStartEntry"
@@ -126,14 +131,14 @@ function openCommandPalette() {
       <Settings :size="16" />
     </button>
 
-    <!-- Design System V2 (Sparkles) -->
+    <!-- Design System V3 (Sparkles) -->
     <button
-      @click="router.push('/v2/design')"
+      @click="router.push('/v3/design')"
       class="btn-icon"
-      :class="route.path === '/v2/design' ? 'text-text-primary' : ''"
-      title="V2 设计系统"
+      :class="route.path === '/v3/design' ? 'text-text-primary' : ''"
+      title="V3 电影级设计系统"
     >
-      <Sparkles :size="16" class="text-[#a78bfa]" />
+      <Sparkles :size="16" class="text-indigo-400" />
     </button>
 
     <!-- Design System (dev only) -->
@@ -280,14 +285,22 @@ function openCommandPalette() {
         <span>设置</span>
       </button>
       <button
-        @click="router.push('/v2/design')"
+        @click="emit('togglePlatform')"
+        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
+               text-text-secondary hover:bg-white/4 hover:text-text-primary"
+      >
+        <Smartphone :size="16" :stroke-width="1.8" />
+        <span>手机模式</span>
+      </button>
+      <button
+        @click="router.push('/v3/design')"
         class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/v2/design'
+        :class="route.path === '/v3/design'
           ? 'bg-white/8 text-text-primary'
           : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
       >
-        <Sparkles :size="16" :stroke-width="1.8" class="text-[#a78bfa]" />
-        <span>V2 设计系统</span>
+        <Sparkles :size="16" :stroke-width="1.8" class="text-indigo-400" />
+        <span>V3 电影级设计系统</span>
       </button>
       <button
         @click="router.push('/design')"

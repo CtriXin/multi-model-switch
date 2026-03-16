@@ -52,10 +52,10 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '设计系统', icon: 'palette' },
   },
   {
-    path: '/v2/design',
-    name: 'design-v2',
+    path: '/v3/design',
+    name: 'design-v3',
     component: () => import('@/views/DesignSystemV2.vue'),
-    meta: { title: 'V2 设计系统', icon: 'sparkles' },
+    meta: { title: 'V3 电影级设计系统', icon: 'sparkles' },
   },
 ]
 
