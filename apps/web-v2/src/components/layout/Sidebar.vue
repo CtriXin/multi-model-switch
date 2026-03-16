@@ -6,7 +6,7 @@ import { useTheme } from '@/composables/useTheme'
 import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Palette, Sparkles, Smartphone,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone,
 } from 'lucide-vue-next'
 import { computed, onMounted } from 'vue'
 
@@ -129,26 +129,6 @@ function openCommandPalette() {
       title="设置"
     >
       <Settings :size="16" />
-    </button>
-
-    <!-- Design System V3 (Sparkles) -->
-    <button
-      @click="router.push('/v3/design')"
-      class="btn-icon"
-      :class="route.path === '/v3/design' ? 'text-text-primary' : ''"
-      title="V3 电影级设计系统"
-    >
-      <Sparkles :size="16" class="text-indigo-400" />
-    </button>
-
-    <!-- Design System (dev only) -->
-    <button
-      @click="router.push('/design')"
-      class="btn-icon"
-      :class="route.path === '/design' ? 'text-text-primary' : ''"
-      title="设计系统"
-    >
-      <Palette :size="16" />
     </button>
   </aside>
 
@@ -291,26 +271,6 @@ function openCommandPalette() {
       >
         <Smartphone :size="16" :stroke-width="1.8" />
         <span>手机模式</span>
-      </button>
-      <button
-        @click="router.push('/v3/design')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/v3/design'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <Sparkles :size="16" :stroke-width="1.8" class="text-indigo-400" />
-        <span>V3 电影级设计系统</span>
-      </button>
-      <button
-        @click="router.push('/design')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/design'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <Palette :size="16" :stroke-width="1.8" />
-        <span>设计系统</span>
       </button>
     </div>
   </aside>

@@ -280,20 +280,6 @@ onBeforeRouteLeave(() => {
 <template>
   <div class="flex h-full flex-col bg-surface-0">
     <div class="flex-1 overflow-y-auto">
-      <header class="sticky top-0 z-10 border-b border-border-default bg-surface-1/95 backdrop-blur-sm px-6 py-4">
-        <div class="mx-auto flex max-w-5xl items-center justify-between gap-4">
-          <div class="min-w-0">
-            <h1 class="text-lg font-semibold text-text-primary">锦囊团</h1>
-            <p class="mt-1 text-xs text-text-tertiary">
-              一次性委员会模式，先定角色、模式和模型池，再发起本轮战情会。
-            </p>
-          </div>
-          <div class="shrink-0 rounded-full bg-accent/10 px-3 py-1 text-[11px] font-medium text-accent">
-            {{ personaStore.activePersonaIds.length }} 个角色待命
-          </div>
-        </div>
-      </header>
-
       <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
         <section class="overflow-hidden rounded-5xl border border-border-default bg-surface-1 shadow-sm">
           <div class="grid gap-6 px-4 py-5 md:px-6 md:py-6 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
