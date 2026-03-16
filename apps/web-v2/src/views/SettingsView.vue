@@ -28,6 +28,7 @@ const showShareExport = ref(false)
 const showShareImport = ref(false)
 const shareSelectedAccountIds = ref<string[]>([])
 const sharePassword = ref('')
+const shareExpiryDays = ref<'7' | '30' | '90' | 'never'>('30')
 const shareBundleOutput = ref('')
 const shareGenerating = ref(false)
 const shareCopied = ref(false)
@@ -35,6 +36,12 @@ const shareImportText = ref('')
 const shareImportPassword = ref('')
 const shareImportFileInput = ref<HTMLInputElement | null>(null)
 const shareImporting = ref(false)
+const shareExpiryOptions = [
+  { value: '7', label: '7 天' },
+  { value: '30', label: '30 天' },
+  { value: '90', label: '90 天' },
+  { value: 'never', label: '不过期' },
+] as const
 
 // Add custom provider state
 const showAddProvider = ref(false)
@@ -214,9 +221,13 @@ async function generateShareBundle() {
   if (!shareSelectedAccountIds.value.length) return
   shareGenerating.value = true
   try {
+    const expiresAt = shareExpiryDays.value === 'never'
+      ? null
+      : new Date(Date.now() + Number(shareExpiryDays.value) * 24 * 60 * 60 * 1000).toISOString()
     shareBundleOutput.value = await providerStore.exportShareBundle(
       shareSelectedAccountIds.value,
       sharePassword.value,
+      { expiresAt },
     )
   } catch (error: any) {
     toast.error(error.message || '生成分享包失败')
@@ -652,6 +663,26 @@ async function clearAllKeys() {
             />
           </div>
 
+          <div>
+            <label class="text-xs text-text-tertiary block mb-1">有效期</label>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="option in shareExpiryOptions"
+                :key="option.value"
+                @click="shareExpiryDays = option.value"
+                class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+                :class="shareExpiryDays === option.value
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-border-default text-text-secondary hover:bg-surface-3'"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <p class="mt-1 text-[11px] text-text-tertiary">
+              过期后导入会被拒绝。它只能降低旧包长期滞留风险，不能替代权限回收。
+            </p>
+          </div>
+
           <div class="flex flex-wrap gap-2">
             <button
               @click="generateShareBundle"
@@ -726,6 +757,9 @@ async function clearAllKeys() {
                      focus:outline-none focus:border-accent transition-colors"
             />
           </div>
+          <p class="text-[11px] text-text-tertiary">
+            如果分享包已过期，导入会被直接拒绝，需要分享方重新生成。
+          </p>
 
           <div class="flex flex-wrap gap-2">
             <button
