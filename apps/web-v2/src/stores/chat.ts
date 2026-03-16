@@ -4,6 +4,7 @@ import { useToastStore } from './toast'
 import { useAppStore } from './app'
 import { ApiError, type ContentPart, type ChatMessage as ApiChatMessage } from '@/services/api'
 import { streamModelChat } from '@/services/runtime'
+import { buildContextMessages } from '@/utils/contextBuilder'
 
 export type ContextMode = 'summary' | 'selected' | 'full'
 
@@ -61,55 +62,6 @@ export const useChatStore = defineStore('chat', () => {
     return { displayText, brief }
   }
 
-  /**
-   * Build context messages from given rounds based on contextMode.
-   * Returns empty array when there's no history to include.
-   */
-  function buildContextMessages(prev: ChatRound[]): ApiChatMessage[] {
-    if (!prev.length) return []
-
-    const mode = contextMode.value
-
-    if (mode === 'full') {
-      const msgs: ApiChatMessage[] = []
-      for (const r of prev) {
-        msgs.push({ role: 'user', content: r.prompt })
-        const pick = r.activeModelId ?? Array.from(r.responses.keys())[0]
-        const answer = r.responses.get(pick)
-        if (answer?.content) {
-          msgs.push({ role: 'assistant', content: answer.content })
-        }
-      }
-      return msgs
-    }
-
-    if (mode === 'selected') {
-      const msgs: ApiChatMessage[] = []
-      for (const r of prev) {
-        if (!r.activeModelId) continue
-        const answer = r.responses.get(r.activeModelId)
-        if (!answer?.content) continue
-        msgs.push({ role: 'user', content: r.prompt })
-        msgs.push({ role: 'assistant', content: answer.content })
-      }
-      return msgs
-    }
-
-    // summary: truncate + pack into a single system message
-    const lines: string[] = []
-    for (const r of prev) {
-      const q = r.prompt.length > 200 ? r.prompt.slice(0, 200) + '…' : r.prompt
-      const pick = r.activeModelId ?? Array.from(r.responses.keys())[0]
-      const raw = r.responses.get(pick)?.content ?? ''
-      const a = raw.length > 300 ? raw.slice(0, 300) + '…' : raw
-      lines.push(`Q: ${q}\nA: ${a}`)
-    }
-    return [{
-      role: 'system',
-      content: `以下是之前的对话摘要，供你参考：\n\n${lines.join('\n\n')}`,
-    }]
-  }
-
   async function sendMessage(prompt: string, modelIds: string[], attachments: ImageAttachment[] = []) {
     if (streaming.value || !modelIds.length) return
     const appStore = useAppStore()
@@ -138,7 +90,7 @@ export const useChatStore = defineStore('chat', () => {
     const reactiveRound = rounds.value[rounds.value.length - 1]
 
     // Build context from previous rounds (exclude the one just pushed)
-    const contextMsgs = buildContextMessages(rounds.value.slice(0, -1))
+    const contextMsgs = buildContextMessages(rounds.value.slice(0, -1), contextMode.value)
 
     streaming.value = true
     abortController.value = new AbortController()
