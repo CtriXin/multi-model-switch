@@ -67,6 +67,12 @@ function openCommandPalette() {
     v-if="collapsed"
     class="w-12 shrink-0 flex flex-col items-center border-r border-border-subtle glass py-2 gap-1"
   >
+    <div
+      data-tauri-drag-region
+      class="h-7 w-full shrink-0"
+      style="-webkit-app-region: drag"
+    />
+
     <!-- Expand -->
     <button @click="emit('expand')" class="btn-icon mb-2" title="展开侧边栏">
       <PanelLeftOpen :size="16" />
@@ -135,12 +141,31 @@ function openCommandPalette() {
   <!-- Expanded: full sidebar -->
   <aside v-else class="w-60 shrink-0 flex flex-col border-r border-border-subtle glass">
     <!-- Header: drag area + logo + collapse -->
-    <div class="h-12 flex items-center justify-between px-4" style="-webkit-app-region: drag">
-      <span class="text-sm font-bold text-text-primary uppercase tracking-tighter" style="-webkit-app-region: no-drag">PolyMinder</span>
-      <div class="flex items-center gap-1" style="-webkit-app-region: no-drag">
-        <button @click="toggleTheme" class="btn-icon" :title="theme === 'dark' ? '浅色模式' : '深色模式'">
-          <Sun v-if="theme === 'dark'" :size="14" />
-          <Moon v-else :size="14" />
+    <div
+      data-tauri-drag-region
+      class="h-12 flex items-center justify-between pl-[74px] pr-3"
+      style="-webkit-app-region: drag"
+    >
+      <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
+        <!-- SparkRing Logo Icon -->
+        <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-md">
+          <div class="absolute inset-0.5 rounded-full border-[1.5px] border-white/20"></div>
+          <Sparkles class="w-3.5 h-3.5 text-white" />
+        </div>
+        <span class="text-[13px] font-black tracking-tight flex items-baseline">
+          <span class="text-accent italic">Spark</span>
+          <span class="text-text-primary">Ring</span>
+        </span>
+      </div>
+      <div class="flex items-center gap-1.5" style="-webkit-app-region: no-drag">
+        <button
+          @click="toggleTheme"
+          class="p-1.5 rounded-full transition-colors"
+          :class="theme === 'dark' ? 'text-amber-400 hover:bg-amber-400/10' : 'text-indigo-600 hover:bg-indigo-600/10'"
+          :title="theme === 'dark' ? '浅色模式' : '深色模式'"
+        >
+          <Sun v-if="theme === 'dark'" :size="16" />
+          <Moon v-else :size="16" />
         </button>
         <button @click="emit('collapse')" class="btn-icon" title="收起侧边栏">
           <PanelLeftClose :size="14" />
