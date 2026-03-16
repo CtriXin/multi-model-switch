@@ -7,6 +7,7 @@ import {
   listCredentialIds,
   saveApiKey,
 } from '@/services/keychain'
+import { createShareBundle, readShareBundle } from '@/services/shareBundle'
 import { useToastStore } from './toast'
 
 export interface ProviderConfig {
@@ -31,6 +32,22 @@ export interface ProviderAccount {
   lastErrorAt: number | null
   lastErrorType: string | null
   suppressedUntil: number | null
+}
+
+interface ImportAccountInput extends Partial<ProviderAccount> {
+  apiKey?: string
+}
+
+interface ImportProviderInput extends Partial<ProviderConfig> {
+  id: string
+  baseUrl: string
+  accounts?: ImportAccountInput[]
+  apiKey?: string
+}
+
+interface ImportPayload {
+  version: number
+  providers: ImportProviderInput[]
 }
 
 const BUILTIN_PROVIDERS: ProviderConfig[] = [
@@ -443,66 +460,166 @@ export const useProviderStore = defineStore('provider', () => {
   async function importConfig(json: string) {
     const toast = useToastStore()
     try {
-      const data = JSON.parse(json)
+      const data = JSON.parse(json) as ImportPayload
       if (data.version !== 1 || !Array.isArray(data.providers)) {
         toast.error('配置格式无效')
         return false
       }
 
-      let importedCount = 0
-      for (const item of data.providers) {
-        if (!item.id || !item.baseUrl) continue
-
-        const existing = providers.value.find((provider) => provider.id === item.id)
-        if (existing) {
-          Object.assign(existing, {
-            name: item.name ?? existing.name,
-            type: item.type ?? existing.type,
-            baseUrl: item.baseUrl ?? existing.baseUrl,
-            enabled: item.enabled ?? true,
-            models: item.models ?? existing.models,
-          })
-        } else {
-          providers.value.push({
-            id: item.id,
-            name: item.name ?? item.id,
-            type: item.type ?? 'openai-compatible',
-            baseUrl: item.baseUrl,
-            enabled: item.enabled ?? true,
-            builtIn: false,
-            models: item.models,
-          })
-        }
-
-        if (Array.isArray(item.accounts)) {
-          for (const rawAccount of item.accounts as Partial<ProviderAccount>[]) {
-            const normalized = normalizeAccount({
-              ...rawAccount,
-              providerId: item.id,
-              id: rawAccount.id || generateAccountId(item.id),
-            })
-            if (!normalized) continue
-            const existingAccount = accounts.value.find((account) => account.id === normalized.id)
-            if (existingAccount) Object.assign(existingAccount, normalized)
-            else accounts.value.push(normalized)
-          }
-          normalizeProviderDefaults(item.id)
-        }
-
-        if (item.apiKey) {
-          await setApiKey(item.id, item.apiKey)
-        }
-
-        importedCount++
-      }
-
-      saveProviders()
-      saveAccountsOnly()
-      recomputeProviderKeyStatus()
+      const importedCount = await importConfigData(data, { source: 'plain' })
       toast.success(`成功导入 ${importedCount} 个通道配置`)
       return true
     } catch (error: any) {
       toast.error('导入失败: ' + error.message)
+      return false
+    }
+  }
+
+  async function importConfigData(
+    data: ImportPayload,
+    options: { source: 'plain' | 'share' },
+  ) {
+    let importedCount = 0
+
+    for (const item of data.providers) {
+      if (!item.id || !item.baseUrl) continue
+
+      const existing = providers.value.find((provider) => provider.id === item.id)
+      if (existing) {
+        Object.assign(existing, {
+          name: item.name ?? existing.name,
+          type: item.type ?? existing.type,
+          baseUrl: item.baseUrl ?? existing.baseUrl,
+          enabled: item.enabled ?? true,
+          models: item.models ?? existing.models,
+          customModels: item.customModels ?? existing.customModels,
+        })
+      } else {
+        providers.value.push({
+          id: item.id,
+          name: item.name ?? item.id,
+          type: item.type ?? 'openai-compatible',
+          baseUrl: item.baseUrl,
+          enabled: item.enabled ?? true,
+          builtIn: false,
+          models: item.models,
+          customModels: item.customModels,
+        })
+      }
+
+      if (Array.isArray(item.accounts)) {
+        for (const rawAccount of item.accounts) {
+          const normalized = normalizeAccount({
+            ...rawAccount,
+            providerId: item.id,
+            id: rawAccount.id || generateAccountId(item.id),
+          })
+          if (!normalized) continue
+
+          const existingAccount = accounts.value.find((account) => account.id === normalized.id)
+          const targetAccount = existingAccount ?? normalized
+          if (existingAccount) Object.assign(existingAccount, normalized)
+          else accounts.value.push(normalized)
+
+          if (rawAccount.apiKey) {
+            await setAccountApiKey(targetAccount.id, rawAccount.apiKey)
+          }
+        }
+        normalizeProviderDefaults(item.id)
+      }
+
+      if (options.source === 'plain' && item.apiKey) {
+        await setApiKey(item.id, item.apiKey)
+      }
+
+      importedCount += 1
+    }
+
+    saveProviders()
+    saveAccountsOnly()
+    recomputeProviderKeyStatus()
+    return importedCount
+  }
+
+  async function exportShareBundle(accountIds: string[], password: string) {
+    const selected = accountIds
+      .map((accountId) => accounts.value.find((account) => account.id === accountId))
+      .filter((account): account is ProviderAccount => !!account)
+
+    if (!selected.length) {
+      throw new Error('至少选择一个已配置账户')
+    }
+
+    const providerMap = new Map<string, ImportProviderInput>()
+
+    for (const account of selected) {
+      const provider = getProvider(account.providerId)
+      if (!provider || provider.type === 'mock') continue
+
+      const apiKey = await getApiKey(account.id)
+      if (!apiKey) {
+        throw new Error(`${provider.name} / ${account.name} 没有可分享的 API Key`)
+      }
+
+      if (!providerMap.has(provider.id)) {
+        providerMap.set(provider.id, {
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          baseUrl: provider.baseUrl,
+          enabled: provider.enabled,
+          models: provider.models,
+          customModels: provider.customModels,
+          accounts: [],
+        })
+      }
+
+      providerMap.get(provider.id)!.accounts!.push({
+        id: account.id,
+        providerId: account.providerId,
+        name: account.name,
+        enabled: account.enabled,
+        isDefault: account.isDefault,
+        apiKey,
+      })
+    }
+
+    if (!providerMap.size) {
+      throw new Error('没有可导出的真实账户')
+    }
+
+    const payload: ImportPayload & { exportedAt: string } = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      providers: Array.from(providerMap.values()),
+    }
+
+    const bundle = await createShareBundle(payload, password)
+    return JSON.stringify(bundle, null, 2)
+  }
+
+  async function importShareBundle(bundleJson: string, password: string) {
+    const toast = useToastStore()
+    try {
+      const payload = await readShareBundle<ImportPayload>(bundleJson, password)
+      if (payload.version !== 1 || !Array.isArray(payload.providers)) {
+        toast.error('分享包内容无效')
+        return false
+      }
+
+      const hasCustomProvider = payload.providers.some((item) => {
+        const builtIn = BUILTIN_PROVIDERS.some((provider) => provider.id === item.id)
+        return !builtIn
+      })
+      if (hasCustomProvider) {
+        toast.info('分享包包含自定义通道，请确认 Base URL 来源可信')
+      }
+
+      const importedCount = await importConfigData(payload, { source: 'share' })
+      toast.success(`成功导入 ${importedCount} 个分享通道`)
+      return true
+    } catch (error: any) {
+      toast.error(error.message || '分享包导入失败')
       return false
     }
   }
@@ -555,6 +672,8 @@ export const useProviderStore = defineStore('provider', () => {
     markAccountFailure,
     clearAllCredentials,
     importConfig,
+    importShareBundle,
     exportConfig,
+    exportShareBundle,
   }
 })

@@ -10,7 +10,6 @@ const route = useRoute()
 const appStore = useAppStore()
 const popoverOpen = ref(false)
 const searchQuery = ref('')
-const filterFree = ref(true)
 const filterVision = ref(false)
 const recentSearches = ref<string[]>([])
 
@@ -28,7 +27,7 @@ const groupedFiltered = computed(() => {
 function updateFiltered() {
   const q = searchQuery.value.toLowerCase()
   filteredModels.value = appStore.models.filter(m => {
-    if (filterFree.value && !m.free) return false
+    if (appStore.preferFree && !m.free) return false
     if (filterVision.value && !m.supportsVision) return false
     if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false
     return true
@@ -39,7 +38,6 @@ function togglePopover() {
   popoverOpen.value = !popoverOpen.value
   if (popoverOpen.value) {
     searchQuery.value = ''
-    filterFree.value = true
     filterVision.value = false
     recentSearches.value = getSearchHistory()
     updateFiltered()
@@ -71,7 +69,7 @@ function applyRecentSearch(keyword: string) {
 }
 
 function toggleFilterFree() {
-  filterFree.value = !filterFree.value
+  appStore.preferFree = !appStore.preferFree
   updateFiltered()
 }
 
@@ -194,7 +192,7 @@ watch(popoverOpen, (val) => {
               <button
                 @click="toggleFilterFree"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
-                :class="filterFree
+                :class="appStore.preferFree
                   ? 'bg-green-500/15 text-green-400 border-green-500/30'
                   : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
               >
