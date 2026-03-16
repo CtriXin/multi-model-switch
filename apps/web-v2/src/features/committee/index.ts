@@ -18,6 +18,27 @@ export interface CommitteeModeOption {
   description: string
 }
 
+export interface CommitteePack {
+  id: string
+  name: string
+  subtitle: string
+  focus: string
+  outcomes: string[]
+  domain: string
+  evaluationAxes: string[]
+  qualityCriteria: string[]
+}
+
+export interface CommitteePreset {
+  id: string
+  packId: string
+  name: string
+  subtitle: string
+  description: string
+  mode: CommitteeMode
+  roleIds: string[]
+}
+
 export interface RoleSummary {
   roleId: string
   modelId: string
@@ -103,6 +124,105 @@ export const COMMITTEE_MODE_OPTIONS: CommitteeModeOption[] = [
     description: '先摆开说，再由系统主持人收成共识、分歧、动作和少数派意见。',
   },
 ]
+
+export const COMMITTEE_PACKS: CommitteePack[] = [
+  {
+    id: 'product',
+    name: '产品委员会',
+    subtitle: '这需求靠不靠谱？用户骂不骂？先做哪个后做哪个？',
+    focus: '需求真假、用户接受度、上线顺序',
+    outcomes: ['需求解析', '方案评审', '优先级'],
+    domain: '产品决策',
+    evaluationAxes: ['需求是否真成立', '用户会不会买账', '方案边界是否清楚', '先做哪个后做哪个'],
+    qualityCriteria: ['结论能追溯到具体角色', '分歧要区分红线和偏好', '建议动作能直接排进待办'],
+  },
+  {
+    id: 'operations',
+    name: '运营委员会',
+    subtitle: '这活动能不能爆？风险在哪？复盘时哪里翻车？',
+    focus: '增长、转化、风险、复盘',
+    outcomes: ['活动复盘', '转化走查', '增长判断'],
+    domain: '运营策略',
+    evaluationAxes: ['增长是否真实成立', '转化链路是否顺', '风险有没有被低估', '哪些动作值得复用'],
+    qualityCriteria: ['结论尽量回到行为和结果', '止损和加码建议分开写', '复盘后能落成下一轮动作'],
+  },
+  {
+    id: 'design',
+    name: '设计委员会',
+    subtitle: '这图用户看得懂吗？信息乱不乱？能不能卖货？',
+    focus: '视觉、信息层级、理解成本、转化',
+    outcomes: ['视觉评审', '页面走查', '表达识别'],
+    domain: '设计评审',
+    evaluationAxes: ['信息层级清不清', '表达准不准', '理解成本高不高', '有没有支撑转化意图'],
+    qualityCriteria: ['问题要尽量落到具体位置', '建议能直接给设计稿改动', '区分审美偏好和可用性问题'],
+  },
+]
+
+export const COMMITTEE_PRESETS: CommitteePreset[] = [
+  {
+    id: 'product-root-cause',
+    packId: 'product',
+    name: '刨根问底',
+    subtitle: '需求解析组合',
+    description: '先把需求真假、用户感知和落地难度一起掰开看。',
+    mode: 'committee',
+    roleIds: ['laochuanzhang', 'lengyankan', 'shouyiren', 'shengyijing'],
+  },
+  {
+    id: 'product-bone-picking',
+    packId: 'product',
+    name: '挑骨头',
+    subtitle: '方案评审组合',
+    description: '适合评审方案边界、风险红线、推进顺序和长期账。',
+    mode: 'committee',
+    roleIds: ['wuyazui', 'zhiguanyuan', 'tuijinzhe', 'touzijia'],
+  },
+  {
+    id: 'ops-retro',
+    packId: 'operations',
+    name: '复盘拆台',
+    subtitle: '活动复盘组合',
+    description: '看活动到底是运气好，还是机制真成立，顺手把坑挖出来。',
+    mode: 'committee',
+    roleIds: ['shengyijing', 'lengyankan', 'wuyazui', 'tuijinzhe'],
+  },
+  {
+    id: 'ops-funnel',
+    packId: 'operations',
+    name: '漏斗找茬',
+    subtitle: '转化走查组合',
+    description: '逐步找出用户在哪一步犹豫、误解、掉队。',
+    mode: 'debate',
+    roleIds: ['tiexinren', 'lengyankan', 'shengyijing', 'zhiguanyuan'],
+  },
+  {
+    id: 'design-first-glance',
+    packId: 'design',
+    name: '一眼看穿',
+    subtitle: '视觉评审组合',
+    description: '重点看信息层级清不清、表达准不准、能不能带动转化。',
+    mode: 'committee',
+    roleIds: ['tiexinren', 'lengyankan', 'shengyijing', 'laochuanzhang'],
+  },
+  {
+    id: 'design-readability',
+    packId: 'design',
+    name: '读图验收',
+    subtitle: '页面走查组合',
+    description: '适合首屏、海报、落地页，先看懂不懂，再看顺不顺手。',
+    mode: 'broadcast',
+    roleIds: ['tiexinren', 'lengyankan', 'chuishaoren', 'tuijinzhe'],
+  },
+]
+
+export function getCommitteePack(packId: string) {
+  return COMMITTEE_PACKS.find((pack) => pack.id === packId)
+}
+
+export function getCommitteePreset(presetId: string | null | undefined) {
+  if (!presetId) return undefined
+  return COMMITTEE_PRESETS.find((preset) => preset.id === presetId)
+}
 
 function buildModelCapability(model: ModelMeta) {
   let score = model.tier * 10
@@ -241,9 +361,43 @@ function buildModeInstruction(context: PersonaPromptContext) {
   ].join('\n')
 }
 
-export function buildRolePersonaPrompt(role: PersonaDefinition, context: PersonaPromptContext) {
+export function buildPackContextPrompt(pack?: CommitteePack, preset?: CommitteePreset) {
+  if (!pack) return ''
+  const lines = [
+    `你正在参与一个“${pack.name}”。`,
+    `领域：${pack.domain}。`,
+    `这轮更关注：${pack.focus}。`,
+    '',
+    '本次评估要围绕这些问题展开：',
+    ...pack.evaluationAxes.map((axis) => `- ${axis}`),
+    '',
+    '好的输出应该满足：',
+    ...pack.qualityCriteria.map((criterion) => `- ${criterion}`),
+  ]
+
+  if (preset) {
+    lines.push(
+      '',
+      `当前采用的推荐组合：${preset.name}（${preset.subtitle}）。`,
+      `组合说明：${preset.description}`,
+      '请把你的通用角色能力聚焦到这个具体问题场景上。',
+    )
+  }
+
+  return lines.join('\n')
+}
+
+export function buildRolePersonaPrompt(
+  role: PersonaDefinition,
+  context: PersonaPromptContext,
+  pack?: CommitteePack,
+  preset?: CommitteePreset,
+) {
   const stance = getStanceLabels(role.stance)
+  const packLayer = buildPackContextPrompt(pack, preset)
   const base = [
+    packLayer,
+    packLayer ? '\n---\n' : '',
     `你现在扮演固定角色：${role.name} · ${role.title}`,
     '',
     `你的职责：${role.focus}`,
@@ -294,7 +448,13 @@ export function buildRolePersonaPrompt(role: PersonaDefinition, context: Persona
   ].join('\n')
 }
 
-export function buildSystemModeratorPrompt(prompt: string, summaries: RoleSummary[], roles: PersonaDefinition[]) {
+export function buildSystemModeratorPrompt(
+  prompt: string,
+  summaries: RoleSummary[],
+  roles: PersonaDefinition[],
+  pack?: CommitteePack,
+  preset?: CommitteePreset,
+) {
   const roleMap = new Map(roles.map((role) => [role.id, role]))
   const summaryLines = summaries
     .map((summary) => {
@@ -309,8 +469,11 @@ export function buildSystemModeratorPrompt(prompt: string, summaries: RoleSummar
       ].join('\n')
     })
     .filter((line): line is string => !!line)
+  const packLayer = buildPackContextPrompt(pack, preset)
 
   return [
+    packLayer,
+    packLayer ? '\n---\n' : '',
     '你现在扮演系统主持人，不代表任何单个角色。',
     '你的任务是把不同角色的判断整理成结构化锦囊团结论。',
     '',
@@ -320,6 +483,7 @@ export function buildSystemModeratorPrompt(prompt: string, summaries: RoleSummar
     '- 每一条结论都尽量回到来源角色，不能写成无来源的空话。',
     '- critical 角色权重更高，但 support 角色的少数派提醒不能丢。',
     '- 不要编造角色没有说过的观点。',
+    '- 共识、分歧、建议动作都要尽量贴合当前委员会包的评估维度，不要写泛泛正确的话。',
     '',
     '输出格式（严格按下面结构，用 Markdown）：',
     '## 一句话结论',

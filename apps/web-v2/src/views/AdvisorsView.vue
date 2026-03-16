@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { CheckCircle, ChevronRight, Cpu, Loader2, MessageSquare, Sparkles, Square, Users } from 'lucide-vue-next'
+import { CheckCircle, Cpu, Loader2, MessageSquare, Sparkles, Square, Users } from 'lucide-vue-next'
 import CommitteeDebateCard from '@/components/advisors/CommitteeDebateCard.vue'
 import CommitteeModelPoolPicker from '@/components/advisors/CommitteeModelPoolPicker.vue'
 import CommitteePhaseSection from '@/components/advisors/CommitteePhaseSection.vue'
 import CommitteeSummaryCard from '@/components/advisors/CommitteeSummaryCard.vue'
 import CommitteeSynthesisCard from '@/components/advisors/CommitteeSynthesisCard.vue'
-import { COMMITTEE_MODE_OPTIONS, buildRoleModelAssignments, type CommitteeMode, type CommitteePhase } from '@/features/committee'
+import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
+import {
+  COMMITTEE_MODE_OPTIONS,
+  COMMITTEE_PACKS,
+  COMMITTEE_PRESETS,
+  buildRoleModelAssignments,
+  type CommitteeMode,
+  type CommitteePhase,
+} from '@/features/committee'
 import { getModelColor, useAppStore } from '@/stores/app'
 import { useCommitteeStore } from '@/stores/committee'
 import { CATEGORY_META, getAvatarUrl, getStanceLabels, usePersonaStore, type PersonaCategory } from '@/stores/persona'
@@ -17,9 +25,11 @@ const committeeStore = useCommitteeStore()
 const personaStore = usePersonaStore()
 
 const inputText = ref('')
+const textareaRef = ref<HTMLTextAreaElement>()
 const showAssignments = ref(false)
-const setupStage = ref<'landing' | 'configure'>('landing')
+const showCommitteeModelSheet = ref(false)
 const resultInspector = ref<'mode' | 'roles' | 'models'>('mode')
+const selectedPackId = ref(COMMITTEE_PACKS[0]?.id || 'product')
 
 const roleMap = computed(() =>
   Object.fromEntries(personaStore.personas.map((role) => [role.id, role]))
@@ -41,6 +51,22 @@ const currentMode = computed<CommitteeMode>({
 
 const currentModeOption = computed(() =>
   COMMITTEE_MODE_OPTIONS.find((mode) => mode.id === currentMode.value)
+)
+
+const activePack = computed(() =>
+  COMMITTEE_PACKS.find((pack) => pack.id === selectedPackId.value) || COMMITTEE_PACKS[0]
+)
+
+const filteredCommitteePresets = computed(() =>
+  COMMITTEE_PRESETS.filter((preset) => preset.packId === activePack.value.id)
+)
+
+const activePresetId = computed(() =>
+  COMMITTEE_PRESETS.find((preset) =>
+    preset.mode === currentMode.value
+    && preset.roleIds.length === personaStore.activePersonaIds.length
+    && preset.roleIds.every((roleId) => personaStore.activePersonaIds.includes(roleId))
+  )?.id || null
 )
 
 const startedModeOption = computed(() =>
@@ -144,6 +170,24 @@ function clearRoles() {
   personaStore.clearActive()
 }
 
+function selectCommitteePack(packId: string) {
+  selectedPackId.value = packId
+}
+
+function applyCommitteePreset(presetId: string) {
+  const preset = COMMITTEE_PRESETS.find((item) => item.id === presetId)
+  if (!preset) return
+  selectedPackId.value = preset.packId
+  currentMode.value = preset.mode
+  personaStore.activePersonaIds = [...preset.roleIds]
+}
+
+function getPresetRoleNames(roleIds: string[]) {
+  return roleIds
+    .map((roleId) => roleMap.value[roleId]?.name)
+    .filter((name): name is string => !!name)
+}
+
 function isCategoryFullySelected(category: PersonaCategory) {
   return (roleGroups.value.find((group) => group.category === category)?.roles || [])
     .every((role) => personaStore.activePersonaIds.includes(role.id))
@@ -173,6 +217,8 @@ async function handleSubmit() {
     mode: currentMode.value,
     roleIds: personaStore.activePersonaIds,
     modelPool: appStore.committeeSelectedModels,
+    packId: selectedPackId.value,
+    presetId: activePresetId.value,
   })
   resultInspector.value = 'mode'
 }
@@ -180,37 +226,28 @@ async function handleSubmit() {
 function startNew() {
   inputText.value = ''
   committeeStore.clearSession()
-  setupStage.value = 'configure'
+  nextTick(resizeComposer)
 }
 
 function endSession() {
   inputText.value = ''
   committeeStore.clearSession()
-  setupStage.value = 'landing'
   resultInspector.value = 'mode'
+  nextTick(resizeComposer)
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+  if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     handleSubmit()
   }
 }
 
-function scrollToSection(section: 'mode' | 'roles' | 'models') {
-  const targetMap: Record<typeof section, string> = {
-    mode: 'committee-mode-section',
-    roles: 'committee-roles-section',
-    models: 'committee-models-section',
-  }
-  const target = document.getElementById(targetMap[section])
-  target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-async function openSetup(section: 'mode' | 'roles' | 'models' = 'mode') {
-  setupStage.value = 'configure'
-  await nextTick()
-  scrollToSection(section)
+function resizeComposer() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, 160)}px`
 }
 
 function toggleInspector(section: 'mode' | 'roles' | 'models') {
@@ -222,6 +259,11 @@ onMounted(() => {
     personaStore.activatePreset('all')
   }
   appStore.ensureCommitteeSelection()
+  nextTick(resizeComposer)
+})
+
+watch(inputText, () => {
+  nextTick(resizeComposer)
 })
 
 onBeforeRouteLeave(() => {
@@ -230,121 +272,25 @@ onBeforeRouteLeave(() => {
   }
   inputText.value = ''
   committeeStore.clearSession()
-  setupStage.value = 'landing'
   resultInspector.value = 'mode'
+  showCommitteeModelSheet.value = false
 })
 </script>
 
 <template>
   <div class="flex h-full flex-col bg-surface-0">
     <div class="flex-1 overflow-y-auto">
-      <div
-        v-if="!committeeStore.isActive && !committeeStore.isStreaming && setupStage === 'landing'"
-        class="flex h-full items-center justify-center px-4 py-8 md:px-6"
-      >
-        <section class="w-full max-w-5xl rounded-[2rem] border border-border-default bg-surface-1 px-6 py-8 shadow-sm md:px-8 md:py-10">
-          <div class="mx-auto max-w-3xl text-center">
-              <div class="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
-              AI 锦囊团
-              </div>
-            <h1 class="mt-5 text-3xl font-semibold leading-tight text-text-primary md:text-[2.6rem]">
-              先定这轮怎么开会，
-              <br>
-              再让 12 个角色上桌。
-            </h1>
-            <p class="mx-auto mt-4 max-w-2xl text-sm leading-7 text-text-secondary md:text-base">
-              锦囊团不是连续聊天，也不是会话历史。它更像一次临时组局：
-              先定模式、挑角色、绑模型，再开一轮会，结论看完就散场。
-            </p>
-          </div>
-
-          <div class="mx-auto mt-8 grid max-w-4xl gap-4 md:grid-cols-3">
-            <button
-              class="rounded-[1.5rem] border border-border-default bg-surface-2/70 p-5 text-left transition-colors hover:border-border-subtle hover:bg-surface-1"
-              @click="openSetup('mode')"
-            >
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">Step 1</div>
-              <div class="mt-2 text-lg font-semibold text-text-primary">先定模式</div>
-              <p class="mt-2 text-xs leading-6 text-text-secondary">广播、辩论、收敛，先决定这轮是扫一遍，还是正面交锋，还是直接收束。</p>
-              <div class="mt-4 inline-flex items-center gap-1 text-xs font-medium text-accent">
-                去选模式
-                <ChevronRight class="h-3.5 w-3.5" />
-              </div>
-            </button>
-
-            <button
-              class="rounded-[1.5rem] border border-border-default bg-surface-2/70 p-5 text-left transition-colors hover:border-border-subtle hover:bg-surface-1"
-              @click="openSetup('roles')"
-            >
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">Step 2</div>
-              <div class="mt-2 text-lg font-semibold text-text-primary">再挑角色</div>
-              <p class="mt-2 text-xs leading-6 text-text-secondary">不是默认全塞给用户。你可以整组激活，也可以只拉几类站位明确的人上桌。</p>
-              <div class="mt-4 inline-flex items-center gap-1 text-xs font-medium text-accent">
-                去选角色
-                <ChevronRight class="h-3.5 w-3.5" />
-              </div>
-            </button>
-
-            <button
-              class="rounded-[1.5rem] border border-border-default bg-surface-2/70 p-5 text-left transition-colors hover:border-border-subtle hover:bg-surface-1"
-              @click="openSetup('models')"
-            >
-              <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">Step 3</div>
-              <div class="mt-2 text-lg font-semibold text-text-primary">最后绑模型</div>
-              <p class="mt-2 text-xs leading-6 text-text-secondary">锦囊团单独维护一套模型池，不直接复用 chat 的运行态，但可以一键导入当前聊天已选模型。</p>
-              <div class="mt-4 inline-flex items-center gap-1 text-xs font-medium text-accent">
-                去绑模型
-                <ChevronRight class="h-3.5 w-3.5" />
-              </div>
-            </button>
-          </div>
-
-          <div class="mx-auto mt-8 flex max-w-3xl flex-wrap items-center justify-center gap-2 text-xs text-text-tertiary">
-            <button
-              class="rounded-full bg-surface-2 px-3 py-1.5 transition-colors hover:bg-surface-3"
-              @click="openSetup('mode')"
-            >
-              {{ currentModeOption?.name || '收敛模式' }}
-            </button>
-            <button
-              class="rounded-full bg-surface-2 px-3 py-1.5 transition-colors hover:bg-surface-3"
-              @click="openSetup('roles')"
-            >
-              {{ personaStore.activePersonaIds.length }} 个角色已预激活
-            </button>
-            <button
-              class="rounded-full bg-surface-2 px-3 py-1.5 transition-colors hover:bg-surface-3"
-              @click="openSetup('models')"
-            >
-              {{ appStore.committeeSelectedModels.length }} 个模型池
-            </button>
-          </div>
-
-          <div class="mt-8 flex justify-center">
-            <button
-              class="inline-flex items-center gap-2 rounded-[1.2rem] bg-accent px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
-              @click="openSetup('mode')"
-            >
-              开始组局
-              <ChevronRight class="h-4 w-4" />
-            </button>
-          </div>
-        </section>
-      </div>
-
-      <div v-else-if="!committeeStore.isActive && !committeeStore.isStreaming" class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
+      <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
         <section class="overflow-hidden rounded-[1.75rem] border border-border-default bg-surface-1 shadow-sm">
-          <div class="grid gap-6 px-6 py-6 lg:grid-cols-[1.08fr_0.92fr] md:px-8">
+          <div class="grid gap-6 px-4 py-5 md:px-6 md:py-6 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
             <div>
               <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
                 AI 锦囊团
               </div>
-              <h1 class="max-w-3xl text-3xl font-semibold leading-tight text-text-primary md:text-[2.2rem]">
-                先把这轮会议配好，
-                <br>
-                再让角色正式上桌。
+              <h1 class="max-w-3xl text-2xl font-semibold leading-tight text-text-primary md:text-[2.2rem]">
+                先把这轮会议配好，再让角色正式上桌。
               </h1>
-              <p class="mt-4 max-w-2xl text-sm leading-7 text-text-secondary md:text-base">
+              <p class="mt-3 max-w-2xl text-sm leading-7 text-text-secondary md:mt-4 md:text-base">
                 这一页只做一次性锦囊团，不做会话历史。你可以把它理解成临时战情会：
                 模式决定怎么开，角色决定谁发言，模型池决定谁来扮演这些人。
               </p>
@@ -367,7 +313,104 @@ onBeforeRouteLeave(() => {
             </div>
 
             <div id="committee-models-section">
-              <CommitteeModelPoolPicker />
+              <CommitteeModelPoolPicker @open-sheet="showCommitteeModelSheet = true" />
+            </div>
+          </div>
+        </section>
+
+        <section class="mt-6 rounded-[1.75rem] border border-border-default bg-surface-1 p-5 shadow-sm md:p-6">
+          <div class="space-y-6">
+            <div class="flex flex-col">
+              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Committee Packs</div>
+              <div class="mt-2">
+                <h2 class="text-2xl font-semibold text-text-primary">任务委员会包</h2>
+                <p class="mt-2 max-w-3xl text-sm leading-7 text-text-secondary">
+                  先按问题类型选一层场景。它不替你决定答案，只是先把这轮会议该看的角度收拢到对的方向上。
+                </p>
+              </div>
+
+              <div class="mt-4 grid gap-2 md:grid-cols-3">
+                <button
+                  v-for="pack in COMMITTEE_PACKS"
+                  :key="pack.id"
+                  @click="selectCommitteePack(pack.id)"
+                  class="flex h-full flex-col rounded-[1.2rem] border px-4 py-3 text-left transition-all duration-200"
+                  :class="activePack.id === pack.id
+                    ? 'border-accent/35 bg-accent/8 shadow-sm'
+                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-text-primary">{{ pack.name }}</div>
+                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">{{ pack.subtitle }}</div>
+                    </div>
+                    <span
+                      class="inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium leading-none"
+                      :class="activePack.id === pack.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'"
+                    >
+                      {{ pack.outcomes.length }} 类
+                    </span>
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-1.5">
+                    <span
+                      v-for="outcome in pack.outcomes"
+                      :key="outcome"
+                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary"
+                    >
+                      {{ outcome }}
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div class="h-px bg-border-subtle" />
+
+            <div class="flex flex-col">
+              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Presets</div>
+              <div class="mt-2">
+                <h2 class="text-2xl font-semibold text-text-primary">对症抓药</h2>
+                <p class="mt-2 max-w-3xl text-sm leading-7 text-text-secondary">
+                  根据你想解决的问题，自动抓一组角色给你用。当前是
+                  <span class="font-semibold text-text-primary">{{ activePack.name }}</span>
+                  ：{{ activePack.focus }}。
+                </p>
+              </div>
+
+              <div class="mt-4 grid gap-2 sm:grid-cols-2">
+                <button
+                  v-for="preset in filteredCommitteePresets"
+                  :key="preset.id"
+                  @click="applyCommitteePreset(preset.id)"
+                  class="flex h-full flex-col rounded-[1.2rem] border px-4 py-3 text-left transition-all duration-200"
+                  :class="activePresetId === preset.id
+                    ? 'border-accent/35 bg-accent/8 shadow-sm'
+                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-text-primary">{{ preset.name }}</div>
+                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">{{ preset.subtitle }}</div>
+                    </div>
+                    <span
+                      class="inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium leading-none"
+                      :class="activePresetId === preset.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'"
+                    >
+                      {{ COMMITTEE_MODE_OPTIONS.find((mode) => mode.id === preset.mode)?.name }}
+                    </span>
+                  </div>
+                  <p class="mt-2 text-xs leading-6 text-text-secondary">{{ preset.description }}</p>
+                  <div class="mt-auto flex flex-wrap gap-1.5 pt-3">
+                    <span
+                      v-for="roleName in getPresetRoleNames(preset.roleIds)"
+                      :key="roleName"
+                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary"
+                    >
+                      {{ roleName }}
+                    </span>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -678,28 +721,35 @@ onBeforeRouteLeave(() => {
     <div class="border-t border-border-subtle bg-surface-1/95 backdrop-blur-sm">
       <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="px-4 py-3">
         <div class="mx-auto max-w-5xl">
-          <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-            <span class="rounded-full bg-surface-2 px-2.5 py-1">{{ currentModeOption?.name }}</span>
-            <span class="rounded-full bg-surface-2 px-2.5 py-1">{{ personaStore.activePersonaIds.length }} 个角色已激活</span>
-            <span class="rounded-full bg-surface-2 px-2.5 py-1">{{ appStore.committeeSelectedModels.length }} 个模型池</span>
-          </div>
-          <div class="flex items-end gap-2">
-            <div class="flex-1 rounded-[1.3rem] border border-border-default bg-surface-2 transition-all focus-within:border-accent/40 focus-within:bg-surface-1">
-              <textarea
-                v-model="inputText"
-                rows="2"
-                placeholder="输入要交给这群高参的问题，比如：这个产品到底该先做预设角色，还是先做角色自定义？"
-                class="max-h-[120px] w-full resize-none bg-transparent px-4 py-3 text-sm leading-7 text-text-primary focus:outline-none"
-                @keydown="handleKeydown"
-              />
+          <div class="mb-2 overflow-x-auto no-scrollbar">
+            <div class="flex w-max min-w-full items-center gap-2 text-xs text-text-tertiary">
+              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ currentModeOption?.name }}</span>
+              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ personaStore.activePersonaIds.length }} 个角色已激活</span>
+              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ appStore.committeeSelectedModels.length }} 个模型池</span>
             </div>
+          </div>
+          <div
+            class="flex min-h-[48px] items-end gap-2 rounded-xl border px-2.5 py-1.5 transition-colors duration-150 md:min-h-[52px] md:py-2"
+            :class="[
+              'border-border-default bg-surface-2 focus-within:border-accent/40 focus-within:bg-surface-1',
+            ]"
+          >
+            <textarea
+              ref="textareaRef"
+              v-model="inputText"
+              rows="1"
+              class="min-h-[36px] max-h-40 flex-1 resize-none bg-transparent py-2 pl-1.5 pr-1 text-base text-text-primary placeholder-text-tertiary outline-none"
+              @keydown="handleKeydown"
+            />
             <button
               @click="handleSubmit"
               :disabled="!canSubmit"
-              class="inline-flex items-center gap-2 rounded-[1.2rem] bg-accent px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+              class="inline-flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-lg transition-all active:scale-95"
+              :class="canSubmit
+                ? 'bg-accent text-white hover:bg-accent-hover'
+                : 'text-text-tertiary disabled:cursor-not-allowed'"
             >
               <Sparkles class="h-4 w-4" />
-              启动锦囊团
             </button>
           </div>
         </div>
@@ -746,5 +796,22 @@ onBeforeRouteLeave(() => {
         </div>
       </div>
     </div>
+
+    <IOSModelSheet
+      :open="showCommitteeModelSheet"
+      mode="committee"
+      @close="showCommitteeModelSheet = false"
+    />
   </div>
 </template>
+
+<style scoped>
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+</style>

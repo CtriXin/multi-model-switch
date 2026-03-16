@@ -60,6 +60,15 @@ export function getModelColor(provider: string): string {
   return PROVIDER_COLORS[provider] ?? '#6366f1'
 }
 
+function shuffleArray<T>(items: T[]): T[] {
+  const next = [...items]
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[next[i], next[j]] = [next[j], next[i]]
+  }
+  return next
+}
+
 const MOCK_PRESETS: Preset[] = [
   { id: 'preset-coding', name: '编程对决', models: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.5-pro-preview'], builtin: true, icon: '🏆' },
   { id: 'preset-reasoning', name: '深度推理', models: ['anthropic/claude-opus-4', 'openai/o3', 'deepseek/deepseek-r1'], builtin: true, icon: '🧠' },
@@ -206,28 +215,28 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function pickDiverseModels(count = 3): string[] {
+    // Prefer free models, then fill with paid if needed
+    const freeModels = models.value.filter(m => m.free)
+    const pool = freeModels.length ? freeModels : models.value
+
     const byProvider: Record<string, ModelMeta[]> = {}
-    for (const m of models.value) {
+    for (const m of pool) {
       ;(byProvider[m.provider] ??= []).push(m)
     }
-    const providers = Object.keys(byProvider)
-    for (let i = providers.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[providers[i], providers[j]] = [providers[j], providers[i]]
-    }
+    const providers = shuffleArray(Object.keys(byProvider))
     const picked: string[] = []
     for (const provider of providers) {
       if (picked.length >= count) break
-      const pool = [...byProvider[provider]].sort((a, b) => b.tier - a.tier)
-      const shortlist = pool.slice(0, Math.min(3, pool.length))
-      const candidate = shortlist[Math.floor(Math.random() * shortlist.length)] ?? pool[0]
+      const candidates = shuffleArray(byProvider[provider])
+      const candidate = candidates[0]
       if (candidate) picked.push(candidate.id)
     }
     if (picked.length >= count) return picked
 
-    const remaining = [...models.value]
-      .sort((a, b) => b.tier - a.tier || a.name.localeCompare(b.name))
-      .map((model) => model.id)
+    const remainingPool = freeModels.length
+      ? [...pool, ...models.value.filter((model) => !model.free)]
+      : pool
+    const remaining = shuffleArray(remainingPool).map((model) => model.id)
     for (const id of remaining) {
       if (picked.length >= count) break
       if (!picked.includes(id)) picked.push(id)

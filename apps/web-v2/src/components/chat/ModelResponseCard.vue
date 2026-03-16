@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { getModelColor } from '@/stores/app'
 import { Copy, Check, MessageSquare, RefreshCw } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -24,7 +25,8 @@ const props = defineProps<{
 const emit = defineEmits<{ select: []; discuss: []; retry: [] }>()
 
 const copied = ref(false)
-const html = computed(() => md.render(props.content || ''))
+const sanitized = computed(() => sanitizeModelOutput(props.content || ''))
+const html = computed(() => md.render(sanitized.value.content || ''))
 const color = computed(() => getModelColor(props.provider))
 const initial = computed(() => props.modelName.charAt(0).toUpperCase())
 const isDone = computed(() => !!props.elapsed && !props.streaming)
@@ -32,7 +34,7 @@ const isDone = computed(() => !!props.elapsed && !props.streaming)
 const tierLabel = computed(() => {
   if (props.tier === 2) return '旗舰'
   if (props.tier === 1) return '主力'
-  return '经济'
+  return 'FREE'
 })
 
 const tierClass = computed(() => {
@@ -67,8 +69,8 @@ async function copyContent() {
   >
 
     <!-- Header -->
-    <div class="flex items-center justify-between px-4 py-2.5 border-b border-border-subtle/50">
-      <div class="flex items-center gap-2.5 min-w-0">
+    <div class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-2.5 border-b border-border-subtle/50">
+      <div class="flex min-w-0 items-center gap-2.5">
         <!-- Avatar with initial -->
         <div
           class="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shrink-0"
@@ -77,18 +79,18 @@ async function copyContent() {
           {{ initial }}
         </div>
         <span class="text-sm font-medium text-text-primary truncate">{{ modelName }}</span>
-        <!-- Tier badge -->
+      </div>
+      <div class="flex min-w-[104px] shrink-0 items-center justify-end gap-2">
         <span
           v-if="tier !== undefined"
-          class="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
+          class="inline-flex h-5 items-center rounded px-1.5 text-[9px] font-medium shrink-0"
           :class="tierClass"
         >{{ tierLabel }}</span>
-      </div>
-      <div class="flex items-center gap-2">
         <!-- Elapsed time -->
-        <span v-if="elapsed" class="text-[10px] text-text-tertiary">
+        <span v-if="elapsed" class="w-8 shrink-0 text-right text-[10px] text-text-tertiary">
           {{ elapsed.toFixed(1) }}s
         </span>
+        <span v-else class="w-8 shrink-0" />
         <!-- Status dot -->
         <div
           class="w-1.5 h-1.5 rounded-full shrink-0"
@@ -114,7 +116,7 @@ async function copyContent() {
                  text-text-secondary bg-surface-3 hover:bg-surface-2 transition-colors"
         >
           <RefreshCw :size="12" />
-          换一个模型
+          恢复输入框
         </button>
       </div>
 
@@ -126,7 +128,7 @@ async function copyContent() {
       </div>
 
       <!-- Rendered markdown content -->
-      <div v-else-if="content" class="md-body" v-html="html" />
+      <div v-else-if="sanitized.content" class="md-body max-w-none" v-html="html" />
 
       <!-- Streaming typing indicator -->
       <div v-if="streaming && content" class="mt-3 flex items-center gap-1.5">
@@ -142,6 +144,13 @@ async function copyContent() {
           class="w-1.5 h-1.5 rounded-full animate-typing"
           :style="{ backgroundColor: color, animationDelay: '0.3s' }"
         />
+      </div>
+
+      <div
+        v-if="sanitized.hiddenThink"
+        class="mt-3 text-[10px] italic text-text-tertiary"
+      >
+        已隐藏模型思考过程，只展示最终内容
       </div>
 
       <!-- Brief -->
@@ -161,8 +170,7 @@ async function copyContent() {
       <button
         v-if="!selected"
         @click.stop="emit('select')"
-        class="text-[11px] px-2.5 py-1 font-medium rounded-md transition-colors"
-        :class="`hover:bg-[${color}15]`"
+        class="rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-surface-3"
         :style="{ color }"
       >
         选择此回答

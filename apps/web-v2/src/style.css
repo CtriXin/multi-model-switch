@@ -61,7 +61,7 @@
   }
 
   /* markdown rendering */
-  .md-body { @apply text-sm leading-relaxed text-text-primary; }
+  .md-body { @apply text-sm leading-relaxed text-text-primary; overflow-wrap: anywhere; word-break: break-word; }
   .md-body h1 { @apply text-lg font-bold mt-4 mb-2; }
   .md-body h2 { @apply text-base font-semibold mt-3 mb-1.5; }
   .md-body h3 { @apply text-sm font-semibold mt-2 mb-1; }
@@ -83,9 +83,19 @@
     @apply border-l-2 border-accent/40 pl-3 italic text-text-secondary my-2;
   }
   .md-body a { @apply text-accent hover:underline; }
-  .md-body table { @apply w-full border-collapse mb-2; }
+  .md-body hr { @apply my-3 border-border-subtle; }
+  .md-body img {
+    @apply my-3 max-w-full rounded-xl border border-border-subtle;
+  }
+  .md-body table {
+    @apply w-full border-collapse mb-2 text-xs;
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
   .md-body th { @apply text-left p-2 border-b border-border-default text-text-secondary text-xs uppercase; }
   .md-body td { @apply p-2 border-b border-border-subtle; }
+  .md-body > :last-child { @apply mb-0; }
 }
 
 /* Route transitions */
