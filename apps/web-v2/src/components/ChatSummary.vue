@@ -2,6 +2,7 @@
 import { ref, computed, reactive } from 'vue'
 import { getModelColor, useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
+import { pickNeutralModel } from '@/utils/modelSelection'
 import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 
@@ -18,6 +19,7 @@ const emit = defineEmits<{
   discuss: []
   activate: []
   select: [modelId: string]
+  judgeComplete: [judge: { content: string; modelId: string; isSelfEval: boolean; timestamp: number }]
 }>()
 
 const appStore = useAppStore()
@@ -50,40 +52,10 @@ function toggleExpand(modelId: string) {
   expandedCards[modelId] = !expandedCards[modelId]
 }
 
-/** Pick evaluator: prefer a non-participating model, but only slightly stronger than this round. */
+/** Pick evaluator: prefer a non-participating model via shared utility. */
 function pickEvaluator(): { modelId: string; isSelfEval: boolean } {
-  const respondingIds = new Set(props.responses.keys())
-  const respondingTiers = Array.from(respondingIds).map(getResponseTier)
-  const highestRespondingTier = respondingTiers.length ? Math.max(...respondingTiers) : 0
-
-  const candidates = appStore.models
-    .filter(m => !respondingIds.has(m.id))
-    .sort((a, b) => a.tier - b.tier || a.priceInput - b.priceInput)
-
-  // First choice: the smallest tier that is strictly above the current round's strongest model.
-  const steppedUp = candidates.find((candidate) => candidate.tier > highestRespondingTier)
-  if (steppedUp) {
-    return { modelId: steppedUp.id, isSelfEval: false }
-  }
-
-  if (candidates.length) {
-    const sameTier = candidates
-      .filter(candidate => candidate.tier === highestRespondingTier)
-      .sort((a, b) => a.priceInput - b.priceInput)[0]
-
-    return { modelId: (sameTier ?? candidates[0]).id, isSelfEval: false }
-  }
-
-  // Fallback: use responding model with highest tier
-  const responding = Array.from(respondingIds)
-    .map(id => appStore.models.find(m => m.id === id))
-    .filter((item): item is NonNullable<typeof item> => !!item)
-    .sort((a, b) => b.tier - a.tier || a.priceInput - b.priceInput)
-
-  return {
-    modelId: responding[0]?.id ?? Array.from(respondingIds)[0],
-    isSelfEval: true,
-  }
+  const respondingIds = Array.from(props.responses.keys())
+  return pickNeutralModel(respondingIds, appStore.models)
 }
 
 function buildJudgePrompt(isSelfEval: boolean): string {
@@ -162,6 +134,16 @@ async function generateSummary() {
 
   streaming.value = false
   done.value = true
+
+  // Emit judge result for persistence
+  if (summaryText.value && !error.value) {
+    emit('judgeComplete', {
+      content: summaryText.value,
+      modelId,
+      isSelfEval,
+      timestamp: Date.now(),
+    })
+  }
 }
 </script>
 
@@ -312,7 +294,7 @@ async function generateSummary() {
                  text-purple-400 hover:bg-purple-500/10 transition-colors"
         >
           <MessageSquare :size="12" />
-          深入讨论 →
+          深入辩论 →
         </button>
       </div>
     </div>

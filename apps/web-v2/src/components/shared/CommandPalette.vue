@@ -20,7 +20,7 @@ interface Command {
 
 const commands: Command[] = [
   { id: 'chat', label: '前往对话', desc: '多模型并行对话', icon: MessageSquare, action: () => router.push('/chat') },
-  { id: 'discuss', label: '前往讨论', desc: '三阶段深度讨论', icon: GitMerge, action: () => router.push('/discuss') },
+  { id: 'discuss', label: '前往辩论', desc: '三阶段深度辩论', icon: GitMerge, action: () => router.push('/discuss') },
   { id: 'design-v3', label: '设计系统 V3', desc: '电影级设计系统', icon: Sparkles, action: () => router.push('/v3/design') },
   { id: 'design', label: '设计系统', desc: '基础设计组件预览', icon: Palette, action: () => router.push('/design') },
   ...([

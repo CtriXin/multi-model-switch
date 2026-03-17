@@ -68,7 +68,7 @@ watch(() => session.isActive.value, (active) => {
     <div class="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
-        <span class="text-sm font-medium text-text-primary">深入讨论</span>
+        <span class="text-sm font-medium text-text-primary">深入辩论</span>
         <span v-if="session.phase.value > 0" class="text-xs text-text-tertiary">
           Phase {{ session.phase.value }}/3
         </span>
@@ -83,7 +83,7 @@ watch(() => session.isActive.value, (active) => {
 
     <!-- Depth selector (before starting) -->
     <div v-if="session.phase.value === 0" class="p-4">
-      <p class="text-xs text-text-secondary mb-3">选择讨论深度：</p>
+      <p class="text-xs text-text-secondary mb-3">选择辩论深度：</p>
       <div class="grid grid-cols-3 gap-2 mb-4">
         <button
           v-for="opt in depthOptions"
@@ -114,7 +114,7 @@ watch(() => session.isActive.value, (active) => {
         class="w-full py-2 rounded-lg bg-purple-500 hover:bg-purple-600
                text-white text-sm font-medium transition-colors active:scale-[0.98]"
       >
-        开始讨论
+        开始辩论
       </button>
     </div>
 

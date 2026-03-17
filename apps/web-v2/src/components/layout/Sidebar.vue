@@ -7,8 +7,9 @@ import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
   Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
+  Clock, Home
 } from 'lucide-vue-next'
-import { computed, onMounted } from 'vue'
+import { computed, inject, onMounted, ref } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,8 @@ const { theme, toggle: toggleTheme } = useTheme()
 
 const props = defineProps<{ collapsed?: boolean }>()
 const emit = defineEmits<{ collapse: []; expand: []; togglePlatform: [] }>()
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform.value === 'ios')
 
 onMounted(() => {
   sessionStore.loadSessions()
@@ -62,251 +65,241 @@ function openCommandPalette() {
 </script>
 
 <template>
-  <!-- Collapsed: icon rail -->
+  <!-- Collapsed: floating icon rail -->
   <aside
     v-if="collapsed"
-    class="w-12 shrink-0 flex flex-col items-center border-r border-border-subtle glass py-2 gap-1"
+    class="relative z-50 w-16 shrink-0 flex flex-col items-center py-4 gap-2 h-full"
   >
-    <div
-      data-tauri-drag-region
-      class="h-7 w-full shrink-0"
-      style="-webkit-app-region: drag"
-    />
+    <div class="glass-v3 w-12 flex flex-col items-center py-4 gap-3 rounded-[24px] shadow-2xl border border-white/10 flex-1">
+      <!-- Logo in mini mode: No top margin div -->
+      <div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-lg animate-pulse-subtle shrink-0">
+        <Sparkles class="w-4 h-4 text-white" />
+      </div>
 
-    <!-- Expand -->
-    <button @click="emit('expand')" class="btn-icon mb-2" title="展开侧边栏">
-      <PanelLeftOpen :size="16" />
-    </button>
+      <!-- Actions: Unified size 22, stroke 3 -->
+      <button @click="emit('expand')" class="p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="展开侧边栏">
+        <PanelLeftOpen :size="22" :stroke-width="3" />
+      </button>
 
-    <!-- New chat -->
-    <button @click="newChat" class="btn-icon" title="新对话">
-      <MessageSquare :size="16" />
-    </button>
+      <div class="flex flex-col gap-2 w-full px-1.5 mt-2">
+        <button @click="router.push('/')" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/' ? 'bg-accent/20 text-accent' : ''" title="首页">
+          <Home :size="22" :stroke-width="3" />
+        </button>
+        <button @click="newChat" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新对话">
+          <MessageSquare :size="22" :stroke-width="3" />
+        </button>
+        <button @click="newDiscuss" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新辩论">
+          <GitMerge :size="22" :stroke-width="3" />
+        </button>
+        <button @click="newAdvisors" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="锦囊团">
+          <Users :size="22" :stroke-width="3" />
+        </button>
+      </div>
 
-    <!-- New discuss -->
-    <button @click="newDiscuss" class="btn-icon" title="新讨论">
-      <GitMerge :size="16" />
-    </button>
+      <div class="flex-1" />
 
-    <!-- Advisors -->
-    <button @click="newAdvisors" class="btn-icon" title="锦囊团">
-      <Users :size="16" />
-    </button>
-
-    <div class="flex-1" />
-
-    <!-- Theme -->
-    <button @click="toggleTheme" class="btn-icon" :title="theme === 'dark' ? '浅色模式' : '深色模式'">
-      <Sun v-if="theme === 'dark'" :size="14" />
-      <Moon v-else :size="14" />
-    </button>
-
-    <!-- Switch to mobile -->
-    <button @click="emit('togglePlatform')" class="btn-icon" title="切换手机模式">
-      <Smartphone :size="14" />
-    </button>
-
-    <!-- Quick Start -->
-    <button
-      v-if="showQuickStartEntry"
-      @click="router.push('/setup')"
-      class="btn-icon"
-      :class="route.path === '/setup' ? 'text-text-primary' : ''"
-      title="快速开始"
-    >
-      <span class="text-[15px] leading-none">🚀</span>
-    </button>
-
-    <!-- Models -->
-    <button
-      @click="router.push('/models')"
-      class="btn-icon"
-      :class="route.path === '/models' ? 'text-text-primary' : ''"
-      title="模型管理"
-    >
-      <Package :size="16" />
-    </button>
-
-    <!-- Settings -->
-    <button
-      @click="router.push('/settings')"
-      class="btn-icon"
-      :class="route.path === '/settings' ? 'text-text-primary' : ''"
-      title="设置"
-    >
-      <Settings :size="16" />
-    </button>
+      <!-- Bottom mini utils: Unified size 20, stroke 3 -->
+      <div class="flex flex-col gap-2 w-full px-1.5 pb-2">
+        <button @click="toggleTheme" class="flex items-center justify-center p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all">
+          <Sun v-if="theme === 'dark'" :size="20" :stroke-width="3" class="text-amber-400" />
+          <Moon v-else :size="20" :stroke-width="3" class="text-indigo-600" />
+        </button>
+        <button @click="router.push('/settings')" class="flex items-center justify-center p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/settings' ? 'bg-accent/20 text-accent' : ''">
+          <Settings :size="20" :stroke-width="3" />
+        </button>
+      </div>
+    </div>
   </aside>
 
-  <!-- Expanded: full sidebar -->
-  <aside v-else class="w-60 shrink-0 flex flex-col border-r border-border-subtle glass">
-    <!-- Header: drag area + logo + collapse -->
-    <div
-      data-tauri-drag-region
-      class="h-12 flex items-center justify-between pl-[74px] pr-3"
-      style="-webkit-app-region: drag"
-    >
-      <div class="flex items-center gap-2" style="-webkit-app-region: no-drag">
-        <!-- SparkRing Logo Icon -->
-        <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-md">
-          <div class="absolute inset-0.5 rounded-full border-[1.5px] border-white/20"></div>
-          <Sparkles class="w-3.5 h-3.5 text-white" />
-        </div>
-        <span class="text-[13px] font-black tracking-tight flex items-baseline">
-          <span class="text-accent italic">Spark</span>
-          <span class="text-text-primary">Ring</span>
-        </span>
-      </div>
-      <div class="flex items-center gap-1.5" style="-webkit-app-region: no-drag">
-        <button
-          @click="toggleTheme"
-          class="p-1.5 rounded-full transition-colors"
-          :class="theme === 'dark' ? 'text-amber-400 hover:bg-amber-400/10' : 'text-indigo-600 hover:bg-indigo-600/10'"
-          :title="theme === 'dark' ? '浅色模式' : '深色模式'"
-        >
-          <Sun v-if="theme === 'dark'" :size="16" />
-          <Moon v-else :size="16" />
-        </button>
-        <button @click="emit('collapse')" class="btn-icon" title="收起侧边栏">
-          <PanelLeftClose :size="14" />
-        </button>
-      </div>
-    </div>
-
-    <!-- New session buttons -->
-    <div class="px-2 space-y-0.5">
-      <button
-        @click="newChat"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
-               text-text-secondary hover:bg-white/4 hover:text-text-primary"
-      >
-        <MessageSquare :size="16" :stroke-width="1.8" />
-        <span class="font-medium">新对话</span>
-        <Plus :size="12" class="ml-auto text-text-tertiary" />
-      </button>
-      <button
-        @click="newDiscuss"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
-               text-text-secondary hover:bg-white/4 hover:text-text-primary"
-      >
-        <GitMerge :size="16" :stroke-width="1.8" />
-        <span class="font-medium">新讨论</span>
-        <Plus :size="12" class="ml-auto text-text-tertiary" />
-      </button>
-      <button
-        @click="newAdvisors"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/advisors'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <Users :size="16" :stroke-width="1.8" />
-        <span class="font-medium">锦囊团</span>
-      </button>
-    </div>
-
-    <!-- Divider -->
-    <div class="mx-4 my-3 h-px bg-border-subtle" />
-
-    <!-- Session history -->
-    <div class="px-2 flex-1 overflow-y-auto">
-      <div class="flex items-center justify-between mb-2 px-2">
-        <span class="text-[10px] font-medium text-text-tertiary uppercase tracking-wider">最近会话</span>
-      </div>
-
-      <div v-if="sessionStore.sortedSessions.length" class="space-y-0.5">
-        <button
-          v-for="session in sessionStore.sortedSessions"
-          :key="session.id"
-          @click="switchTo(session)"
-          class="w-full flex items-start gap-2 px-2 py-2 rounded-lg text-left transition-all duration-150 group"
-          :class="sessionStore.currentSessionId === session.id
-            ? 'bg-white/8 text-text-primary'
-            : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-        >
-          <MessageSquare v-if="session.type === 'chat'" :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
-          <GitMerge v-else-if="session.type === 'discuss'" :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
-          <Users v-else :size="14" class="mt-0.5 shrink-0" :stroke-width="1.5" />
-          <div class="flex-1 min-w-0">
-            <div class="text-xs font-medium truncate">{{ session.title }}</div>
-            <div class="text-[10px] text-text-tertiary flex items-center gap-2 mt-0.5">
-              <span>{{ sessionStore.formatTime(session.updatedAt) }}</span>
-              <span>{{ session.messageCount }} 条</span>
-            </div>
+  <!-- Expanded: full floating sidebar -->
+  <aside v-else class="relative z-50 w-64 shrink-0 flex flex-col p-3 h-full">
+    <div class="glass-v3 flex-1 flex flex-col rounded-[32px] shadow-2xl border border-white/10 overflow-hidden relative">
+      <!-- Header: Logo & Controls - Standard Left/Right Layout -->
+      <div class="h-16 flex items-center justify-between px-5">
+        <div class="flex items-center gap-2.5">
+          <!-- SparkRing Logo Icon with Animation -->
+          <div class="relative flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-lg logo-spin">
+            <div class="absolute inset-0.5 rounded-full border-2 border-white/30"></div>
+            <Sparkles class="w-4 h-4 text-white" />
           </div>
-          <button
-            @click="deleteSession(session.id, $event)"
-            class="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 transition-all shrink-0 mt-0.5"
-          >
-            <Trash2 :size="12" class="text-text-tertiary hover:text-red-400" />
-          </button>
+          <span class="text-[15px] font-black tracking-tighter flex items-baseline select-none">
+            <span class="text-accent italic">Spark</span>
+            <span class="text-text-primary">Ring</span>
+          </span>
+        </div>
+        <!-- Collapse Button aligned to Right -->
+        <button @click="emit('collapse')" class="p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all">
+          <PanelLeftClose :size="18" :stroke-width="3" />
         </button>
       </div>
-      <p v-else class="text-xs text-text-tertiary py-4 text-center">
-        暂无历史会话
-      </p>
-    </div>
 
-    <!-- Bottom nav -->
-    <div class="p-2 border-t border-border-subtle space-y-0.5">
-      <button
-        @click="openCommandPalette"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
-               text-text-secondary hover:bg-white/4 hover:text-text-primary"
-      >
-        <Search :size="16" :stroke-width="1.8" />
-        <span>命令面板</span>
-        <kbd class="ml-auto flex items-center gap-0.5 text-xs px-2 py-0.5 rounded bg-surface-3 text-text-tertiary">⌘<span class="text-[9px]">+</span>K</kbd>
-      </button>
-      <button
-        v-if="showQuickStartEntry"
-        @click="router.push('/setup')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/setup'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <span class="text-base leading-none">🚀</span>
-        <span>快速开始</span>
-      </button>
-      <button
-        @click="router.push('/models')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/models'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <Package :size="16" :stroke-width="1.8" />
-        <span>模型管理</span>
-      </button>
-      <button
-        @click="router.push('/advisors')"
-        class="w-full flex sm:hidden items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/advisors'
-          ? 'bg-accent/10 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4'"
-      >
-        <Users :size="16" :stroke-width="1.8" />
-        <span>锦囊团</span>
-      </button>
-      <button
-        @click="router.push('/settings')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150"
-        :class="route.path === '/settings'
-          ? 'bg-white/8 text-text-primary'
-          : 'text-text-secondary hover:bg-white/4 hover:text-text-primary'"
-      >
-        <Settings :size="16" :stroke-width="1.8" />
-        <span>设置</span>
-      </button>
-      <button
-        @click="emit('togglePlatform')"
-        class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-150
-               text-text-secondary hover:bg-white/4 hover:text-text-primary"
-      >
-        <Smartphone :size="16" :stroke-width="1.8" />
-        <span>手机模式</span>
-      </button>
+      <!-- Primary Creation Area -->
+      <div class="px-3 space-y-1.5 mt-2">
+        <button
+          @click="router.push('/')"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
+                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
+          :class="route.path === '/' ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20' : ''"
+        >
+          <Home :size="16" :stroke-width="3" :class="route.path === '/' ? 'text-surface-1' : 'group-hover:text-emerald-400 transition-colors'" />
+          <span>首页体验</span>
+        </button>
+        <button
+          @click="newChat"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
+                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
+        >
+          <MessageSquare :size="16" :stroke-width="3" class="group-hover:text-accent transition-colors" />
+          <span>新对话</span>
+          <Plus :size="12" :stroke-width="4" class="ml-auto opacity-30" />
+        </button>
+        <button
+          @click="newDiscuss"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
+                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
+        >
+          <GitMerge :size="16" :stroke-width="3" class="group-hover:text-purple-400 transition-colors" />
+          <span>{{ isMobile ? '辩论' : '深度辩论' }}</span>
+          <Plus :size="12" :stroke-width="4" class="ml-auto opacity-30" />
+        </button>
+        <button
+          @click="newAdvisors"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/advisors'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+        >
+          <Sparkles :size="16" :stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
+          <span>AI 锦囊团</span>
+        </button>
+      </div>
+
+      <!-- Divider with Label -->
+      <div class="flex items-center gap-3 px-6 my-6 opacity-30">
+        <div class="h-px flex-1 bg-text-tertiary"></div>
+        <span class="text-[9px] font-black uppercase tracking-[0.3em] text-text-tertiary">History</span>
+        <div class="h-px flex-1 bg-text-tertiary"></div>
+      </div>
+
+      <!-- Session history (The refined timeline) -->
+      <div class="px-3 flex-1 overflow-y-auto no-scrollbar pb-4">
+        <div v-if="sessionStore.sortedSessions.length" class="space-y-1.5">
+          <button
+            v-for="session in sessionStore.sortedSessions"
+            :key="session.id"
+            @click="switchTo(session)"
+            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all duration-300 group relative"
+            :class="sessionStore.currentSessionId === session.id
+              ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+              : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'"
+          >
+            <div 
+              class="w-1.5 h-1.5 rounded-full shrink-0" 
+              :style="{ backgroundColor: session.type === 'chat' ? '#6366f1' : '#a855f7' }"
+              :class="sessionStore.currentSessionId === session.id ? 'opacity-0' : 'opacity-60'"
+            ></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[11px] font-bold truncate tracking-tight">{{ session.title }}</div>
+              <div class="text-[9px] mt-0.5 opacity-50 font-black uppercase tracking-widest flex items-center gap-2" :class="sessionStore.currentSessionId === session.id ? 'text-surface-1' : ''">
+                <span>{{ session.messageCount }} 轮 · {{ sessionStore.formatTime(session.updatedAt) }}</span>
+              </div>
+            </div>
+            <button
+              @click.stop="deleteSession(session.id, $event)"
+              class="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 -mr-1"
+              :class="sessionStore.currentSessionId === session.id
+                ? 'hover:bg-red-500/20 text-current hover:text-red-500'
+                : 'hover:bg-red-500/10 text-text-tertiary hover:text-red-500'"
+              title="删除会话"
+            >
+              <Trash2 :size="14" :stroke-width="3" />
+            </button>
+          </button>
+        </div>
+        <div v-else class="flex flex-col items-center justify-center py-12 opacity-20 grayscale">
+          <Clock :size="32" :stroke-width="1" />
+          <span class="text-[10px] font-black uppercase tracking-widest mt-4">No Records</span>
+        </div>
+      </div>
+
+      <!-- Bottom Utilities Area -->
+      <div class="px-3 py-3 bg-black/5 dark:bg-white/2 border-t border-white/5 space-y-1">
+        <button
+          @click="openCommandPalette"
+          class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13px] font-black transition-all duration-150 uppercase tracking-widest
+                 text-text-secondary hover:bg-white/10 hover:text-text-primary group"
+        >
+          <Search :size="20" :stroke-width="3" />
+          <span>命令面板</span>
+          <kbd class="ml-auto text-[12px] font-black px-1.5 py-0.5 rounded bg-white/5 border border-white/5">⌘K</kbd>
+        </button>
+        
+        <div class="grid grid-cols-2 gap-1.5">
+          <button
+            @click="router.push('/models')"
+            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300
+                   bg-white/5 text-text-secondary hover:bg-accent/10 hover:text-accent border border-transparent hover:border-accent/20"
+            :class="route.path === '/models' ? 'bg-accent text-white shadow-lg' : ''"
+          >
+            <Package :size="18" :stroke-width="3" />
+            <span class="text-[9px] font-black uppercase tracking-widest">模型管理</span>
+          </button>
+          <button
+            @click="router.push('/settings')"
+            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300
+                   bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary border border-transparent"
+            :class="route.path === '/settings' ? 'bg-text-primary text-surface-1 shadow-lg' : ''"
+          >
+            <Settings :size="18" :stroke-width="3" />
+            <span class="text-[9px] font-black uppercase tracking-widest">偏好设置</span>
+          </button>
+        </div>
+
+        <!-- System Theme & Platform Footer -->
+        <div class="flex items-center justify-between px-2 pt-2 pb-1">
+          <button @click="toggleTheme" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all">
+            <Sun v-if="theme === 'dark'" :size="16" :stroke-width="3" class="text-amber-400" />
+            <Moon v-else :size="16" :stroke-width="3" class="text-indigo-600" />
+          </button>
+          <div class="h-1 w-1 rounded-full bg-text-tertiary opacity-20"></div>
+          <button @click="emit('togglePlatform')" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all opacity-40 hover:opacity-100">
+            <Smartphone :size="16" :stroke-width="3" />
+          </button>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.glass-v3 {
+  backdrop-filter: blur(32px) saturate(150%);
+  -webkit-backdrop-filter: blur(32px) saturate(150%);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+html.light .glass-v3 {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes logo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.logo-spin:hover {
+  animation: logo-spin 10s linear infinite;
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(0.96); }
+}
+</style>

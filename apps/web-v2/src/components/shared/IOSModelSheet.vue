@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { useAppStore, getModelColor, type ModelMeta, type ModelSelectionMode } from '@/stores/app'
+import { ref, computed, watch, inject } from 'vue'
+import { useAppStore, getModelColor, type ModelMeta, type ModelSelectionMode, type ModelPoolTag } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToastStore } from '@/stores/toast'
@@ -29,21 +29,21 @@ const toast = useToastStore()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
 const search = ref('')
-const filterFree = ref(true)
+const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
 const filterVision = ref(false)
 const recentSearches = ref<string[]>([])
 const sheetRef = ref<HTMLElement>()
 const detent = ref<'half' | 'full'>('half')
+const transitioning = ref(false)
 
 // Drag state
 const dragging = ref(false)
 const dragStartY = ref(0)
 const dragCurrentY = ref(0)
 const sheetTranslateY = ref(0)
-const handleAnimating = ref(false)
 
-const HALF_HEIGHT = 55 // vh
-const FULL_HEIGHT = 92 // vh
+const HALF_HEIGHT = 55 
+const FULL_HEIGHT = 92 
 const MAX_SELECTION = 5
 
 const selectedIds = computed(() => (
@@ -52,9 +52,10 @@ const selectedIds = computed(() => (
 
 const filtered = computed(() => {
   const q = search.value.toLowerCase()
-  return appStore.models.filter(m => {
-    if (filterFree.value && !m.free) return false
-    if (filterVision.value && !m.supportsVision) return false
+  return appStore.filterModels({
+    tags: tierFilters.value,
+    requireVision: filterVision.value,
+  }).filter(m => {
     if (q && !m.name.toLowerCase().includes(q)
         && !m.category.toLowerCase().includes(q)
         && !m.provider.toLowerCase().includes(q)
@@ -108,8 +109,19 @@ function applyRecentSearch(keyword: string) {
   search.value = keyword
 }
 
-function toggleFilterFree() {
-  filterFree.value = !filterFree.value
+function toggleTierFilter(tag: ModelPoolTag) {
+  const next = new Set(tierFilters.value)
+  if (next.has(tag)) next.delete(tag)
+  else next.add(tag)
+  tierFilters.value = Array.from(next)
+}
+function toggleFilterVision() { filterVision.value = !filterVision.value }
+function hasTierFilter(tag: ModelPoolTag) { return tierFilters.value.includes(tag) }
+function randomPick() {
+  appStore.randomPick(3, props.mode, {
+    tags: tierFilters.value,
+    requireVision: filterVision.value,
+  })
 }
 
 function isReplacementDisabled(id: string) {
@@ -154,22 +166,17 @@ function onTouchEnd() {
   if (!dragging.value) return
   dragging.value = false
   const delta = dragCurrentY.value - dragStartY.value
-
   if (detent.value === 'half') {
-    if (delta < -60) {
-      detent.value = 'full'
-    } else if (delta > 80) {
-      emit('close')
-    }
+    if (delta < -60) detent.value = 'full'
+    else if (delta > 80) emit('close')
   } else {
-    if (delta > 100) {
-      detent.value = 'half'
-    }
+    if (delta > 100) detent.value = 'half'
   }
   sheetTranslateY.value = 0
 }
 
 function onMouseDown(e: MouseEvent) {
+  if (!isMobile.value) return
   dragging.value = true
   dragStartY.value = e.clientY
   dragCurrentY.value = e.clientY
@@ -181,11 +188,8 @@ function onMouseMove(e: MouseEvent) {
   if (!dragging.value) return
   dragCurrentY.value = e.clientY
   const delta = dragCurrentY.value - dragStartY.value
-  if (detent.value === 'half' && delta < 0) {
-    sheetTranslateY.value = delta * 0.4
-  } else if (delta > 0) {
-    sheetTranslateY.value = delta
-  }
+  if (detent.value === 'half' && delta < 0) sheetTranslateY.value = delta * 0.4
+  else if (delta > 0) sheetTranslateY.value = delta
 }
 
 function onMouseUp() {
@@ -199,23 +203,21 @@ watch(() => props.open, (val) => {
   if (val) {
     detent.value = 'half'
     search.value = ''
-    filterFree.value = true
     filterVision.value = !!props.request?.requireVision
     sheetTranslateY.value = 0
     recentSearches.value = getSearchHistory()
-    handleAnimating.value = false
-    setTimeout(() => { handleAnimating.value = true }, 450)
   }
 })
 
 const sheetHeight = computed(() => detent.value === 'full' ? FULL_HEIGHT : HALF_HEIGHT)
 
 const sheetStyle = computed(() => {
+  if (!isMobile.value) return {}
   const baseTranslate = sheetTranslateY.value
   return {
     height: `${sheetHeight.value}vh`,
     transform: baseTranslate ? `translateY(${baseTranslate}px)` : undefined,
-    transition: dragging.value ? 'none' : 'height 0.4s cubic-bezier(0.32, 0.72, 0, 1), transform 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
+    transition: dragging.value ? 'none' : 'height 0.5s cubic-bezier(0.32, 0.72, 0, 1), transform 0.5s cubic-bezier(0.32, 0.72, 0, 1)',
   }
 })
 
@@ -226,35 +228,48 @@ function modelTags(model: ModelMeta): string[] {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="fixed inset-0 z-[9997]">
-      <Transition name="sheet-backdrop">
-        <div v-if="open" class="absolute inset-0 bg-black/40" @click="emit('close')" />
+    <div v-show="open || transitioning" class="fixed inset-0 z-[9997] flex items-center justify-center overflow-hidden">
+      <!-- Backdrop -->
+      <Transition 
+        name="sheet-backdrop"
+        @before-enter="transitioning = true"
+        @after-leave="transitioning = false"
+      >
+        <div v-if="open" class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="emit('close')" />
       </Transition>
 
-      <Transition name="sheet-content">
+      <!-- Sheet / Modal -->
+      <Transition :name="isMobile ? 'sheet-content' : 'modal-slide'">
         <div
           v-if="open"
           ref="sheetRef"
-          class="absolute bottom-0 left-0 right-0 flex flex-col
-                 bg-surface-1 rounded-t-[14px] overflow-hidden"
-          :style="sheetStyle"
+          :class="[
+            isMobile 
+              ? 'absolute bottom-0 left-0 right-0 rounded-t-[32px] shadow-[0_-20px_50px_rgba(0,0,0,0.3)]' 
+              : 'relative w-full max-w-2xl max-h-[80vh] rounded-[32px] shadow-[0_40px_100px_rgba(0,0,0,0.4)] border border-white/10',
+            'flex flex-col bg-white dark:bg-[#0b0b18] overflow-hidden'
+          ]"
+          :style="isMobile ? sheetStyle : {}"
         >
-          <!-- Drag Handle -->
+          <!-- Drag Handle / Header Control -->
           <div
-            class="flex flex-col items-center py-2.5 shrink-0 cursor-grab active:cursor-grabbing"
+            class="flex flex-col items-center py-3 shrink-0"
+            :class="isMobile ? 'cursor-grab active:cursor-grabbing' : ''"
             @touchstart.passive="onTouchStart"
             @touchmove.passive="onTouchMove"
             @touchend="onTouchEnd"
             @mousedown="onMouseDown"
           >
-            <div
-              class="w-9 h-[5px] rounded-full bg-text-tertiary/30"
-              :class="{ 'handle-breathe': handleAnimating }"
-            />
+            <div v-if="isMobile" class="w-12 h-1.5 rounded-full bg-text-tertiary/20" />
+            <div v-else class="w-full flex justify-end px-8 pt-4">
+               <button @click="emit('close')" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all">
+                 <X :size="24" class="text-text-tertiary" />
+               </button>
+            </div>
           </div>
 
           <!-- Header -->
-          <div class="flex items-center justify-between px-5 pb-3 shrink-0">
+          <div class="flex items-center justify-between px-8 pb-6 shrink-0">
             <div>
               <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型' : '选择模型基因' }}</h2>
               <p class="text-[10px] font-black text-text-tertiary mt-1 uppercase tracking-[0.2em]">
@@ -277,27 +292,23 @@ function modelTags(model: ModelMeta): string[] {
             </button>
           </div>
 
-          <!-- Filter chips -->
-          <div class="flex items-center gap-1.5 px-5 pb-2 shrink-0">
-            <button
-              @click="toggleFilterFree"
-              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border"
-              :class="filterFree
-                ? 'bg-green-500/15 text-green-400 border-green-500/30'
-                : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
-            >
-              <DollarSign :size="11" />
-              免费
+          <!-- Filter chips & Random -->
+          <div class="flex items-center gap-2 px-8 pb-4 shrink-0">
+            <button @click="toggleTierFilter('free')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="hasTierFilter('free') ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              <DollarSign :size="12" /> 免费
             </button>
-            <button
-              @click="toggleFilterVision"
-              class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border"
-              :class="filterVision
-                ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-                : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
-            >
-              <Image :size="11" />
-              图片
+            <button @click="toggleTierFilter('std')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="hasTierFilter('std') ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              主力
+            </button>
+            <button @click="toggleTierFilter('pro')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="hasTierFilter('pro') ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              旗舰
+            </button>
+            <button @click="toggleFilterVision" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="filterVision ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              <Image :size="12" /> 视觉
             </button>
             <button v-if="!replacementMode" @click="randomPick" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
                     :class="'text-amber-400 border-white/5 hover:bg-amber-500/10'">
@@ -307,27 +318,11 @@ function modelTags(model: ModelMeta): string[] {
           </div>
 
           <!-- Search -->
-          <div class="px-5 pb-2 shrink-0">
-            <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-2 border border-border-default">
-              <Search :size="15" class="text-text-tertiary shrink-0" />
-              <input
-                v-model="search"
-                placeholder="搜索模型..."
-                class="flex-1 bg-transparent text-sm text-text-primary placeholder-text-tertiary outline-none"
-              />
+          <div class="px-8 pb-4 shrink-0">
+            <div class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-black/5 dark:bg-white/5 border border-white/5 focus-within:border-accent/30 transition-all">
+              <Search :size="18" class="text-text-tertiary" />
+              <input v-model="search" placeholder="搜索模型基因 ID..." class="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary/40 outline-none font-medium" />
             </div>
-          </div>
-
-          <!-- Recent searches -->
-          <div v-if="!search && recentSearches.length" class="flex items-center gap-1.5 px-5 pb-2 overflow-x-auto no-scrollbar shrink-0">
-            <Clock :size="11" class="text-text-tertiary shrink-0" />
-            <button
-              v-for="kw in recentSearches"
-              :key="kw"
-              @click="applyRecentSearch(kw)"
-              class="shrink-0 px-2 py-0.5 rounded-full text-[10px] text-text-tertiary
-                     bg-surface-3 hover:bg-surface-2 transition-colors"
-            >{{ kw }}</button>
           </div>
 
           <!-- Model Grid -->
@@ -350,47 +345,21 @@ function modelTags(model: ModelMeta): string[] {
                       : (isSelected(model.id) ? 'bg-accent border-accent text-white scale-110' : 'border-white/10')">
                   <Check v-if="replacementMode ? model.id === props.request?.oldModelId : isSelected(model.id)" :size="14" :stroke-width="4" />
                 </div>
-
-                <!-- Avatar -->
-                <div
-                  class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white mb-2"
-                  :style="{ backgroundColor: getModelColor(model.provider) }"
-                >
+                <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white mb-3 shadow-lg" :style="{ backgroundColor: getModelColor(model.provider) }">
                   {{ modelInitial(model) }}
                 </div>
-
-                <!-- Name -->
-                <span class="text-sm font-medium text-text-primary leading-tight pr-6">{{ model.name }}</span>
-                <span class="text-[11px] text-text-tertiary mt-0.5">{{ model.provider }}</span>
-
-                <!-- Tags -->
-                <div class="flex flex-wrap gap-1 mt-2">
-                  <span
-                    class="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                    :class="tierColor(model.tier)"
-                  >{{ tierLabel(model.tier) }}</span>
-                  <span
-                    v-if="model.free"
-                    class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-500/10 text-green-400"
-                  >free</span>
-                  <span
-                    v-if="model.supportsVision"
-                    class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-400"
-                  >vision</span>
-                  <span
-                    v-for="tag in modelTags(model)"
-                    :key="tag"
-                    class="px-1.5 py-0.5 rounded text-[10px] text-text-tertiary bg-surface-3"
-                  >{{ tag }}</span>
+                <span class="text-sm font-black text-text-primary leading-tight pr-8 uppercase tracking-tight">{{ model.name }}</span>
+                <span class="text-[10px] font-bold text-text-tertiary mt-1 uppercase tracking-widest opacity-60">{{ model.provider }}</span>
+                <div class="flex flex-wrap gap-1 mt-3">
+                  <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider" :class="tierColor(model.tier)">{{ tierLabel(model.tier) }}</span>
+                  <span v-if="model.free" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-green-500/10 text-green-400">free</span>
+                  <span v-if="model.supportsVision" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400">vision</span>
                 </div>
                 <span v-if="replacementMode && model.id === props.request?.oldModelId" class="mt-3 text-[10px] font-black uppercase tracking-widest text-orange-400">当前模型</span>
                 <span v-else-if="replacementMode && isReplacementDisabled(model.id)" class="mt-3 text-[10px] font-black uppercase tracking-widest text-text-tertiary">已在模型池</span>
               </button>
             </div>
-
-            <p v-if="!filtered.length" class="text-xs text-text-tertiary text-center py-6">
-              没有符合条件的模型
-            </p>
+            <p v-if="!filtered.length" class="text-xs font-bold text-text-tertiary text-center py-12 uppercase tracking-[0.2em]">没有匹配的模型基因</p>
           </div>
         </div>
       </Transition>
@@ -399,33 +368,21 @@ function modelTags(model: ModelMeta): string[] {
 </template>
 
 <style scoped>
-.sheet-backdrop-enter-active,
-.sheet-backdrop-leave-active { transition: opacity 0.3s ease; }
-.sheet-backdrop-enter-from,
-.sheet-backdrop-leave-to { opacity: 0; }
-
-.sheet-content-enter-active { animation: sheetIn 0.4s cubic-bezier(0.32, 0.72, 0, 1); }
-.sheet-content-leave-active { animation: sheetOut 0.3s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
-
-@keyframes sheetIn {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
+.sheet-backdrop-enter-active, .sheet-backdrop-leave-active { 
+  transition: opacity 0.5s cubic-bezier(0.32, 0.72, 0, 1), backdrop-filter 0.5s cubic-bezier(0.32, 0.72, 0, 1); 
 }
-@keyframes sheetOut {
-  from { transform: translateY(0); opacity: 1; }
-  to   { transform: translateY(100%); opacity: 0; }
-}
+.sheet-backdrop-enter-from, .sheet-backdrop-leave-to { opacity: 0; backdrop-filter: blur(0); }
 
-.handle-breathe {
-  animation: handleFloat 1.2s ease-in-out 3;
-}
+.sheet-content-enter-active { animation: sheetIn 0.6s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet-content-leave-active { animation: sheetOut 0.5s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
 
-@keyframes handleFloat {
-  0%   { transform: translateY(0) scaleX(1);    opacity: 0.3; }
-  40%  { transform: translateY(-3px) scaleX(0.85); opacity: 0.6; }
-  70%  { transform: translateY(-3px) scaleX(0.85); opacity: 0.6; }
-  100% { transform: translateY(0) scaleX(1);    opacity: 0.3; }
-}
+.modal-slide-enter-active { animation: modalIn 0.7s cubic-bezier(0.23, 1, 0.32, 1); }
+.modal-slide-leave-active { animation: modalOut 0.4s cubic-bezier(0.32, 0.72, 0, 1) forwards; }
+
+@keyframes sheetIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheetOut { from { transform: translateY(0); opacity: 1; } to { transform: translateY(100%); opacity: 0; } }
+@keyframes modalIn { from { opacity: 0; transform: scale(0.9) translateY(100px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes modalOut { from { opacity: 1; transform: scale(1) translateY(0); } to { opacity: 0; transform: scale(0.95) translateY(40px); } }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

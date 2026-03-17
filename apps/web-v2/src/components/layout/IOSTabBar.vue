@@ -7,7 +7,7 @@ const router = useRouter()
 
 const tabs = [
   { path: '/chat', label: '对话', icon: MessageSquare },
-  { path: '/discuss', label: '讨论', icon: GitMerge },
+  { path: '/discuss', label: '辩论', icon: GitMerge },
   { path: '/advisors', label: '锦囊团', icon: Users },
 ]
 </script>

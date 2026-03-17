@@ -19,14 +19,19 @@ export function shouldRetryWithAnotherAccount(error: unknown) {
 }
 
 function resolveProviderForModel(modelId: string) {
-  const appStore = useAppStore()
   const providerStore = useProviderStore()
+
+  // Demo models must always run on the local mock provider so showcases
+  // are not blocked by real provider account configuration.
+  if (modelId.startsWith('demo/')) {
+    const mockProvider = providerStore.providers.find((item) => item.type === 'mock')
+    if (mockProvider) return mockProvider
+  }
+
+  const appStore = useAppStore()
   const model = appStore.models.find((item) => item.id === modelId)
 
   let provider = providerStore.getProvider(model?.provider || '')
-  if (!provider && modelId.startsWith('demo/')) {
-    provider = providerStore.providers.find((item) => item.type === 'mock')
-  }
   if (!provider) {
     provider = providerStore.providers.find((item) => item.type === 'openrouter')
   }

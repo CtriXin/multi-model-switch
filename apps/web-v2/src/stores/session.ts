@@ -10,7 +10,14 @@ export interface SerializedChatRound {
   attachments?: ImageAttachment[]
   responses: [string, ChatMessage][]
   activeModelId: string | null
+  selectedModelId: string | null
   timestamp: number
+  judge?: {
+    content: string
+    modelId: string
+    isSelfEval: boolean
+    timestamp: number
+  }
 }
 
 export interface Session {
@@ -28,6 +35,9 @@ export interface Session {
     phase1Results: Phase1Result[]
     phase2Results: Phase2Result[]
     phase3Text: string
+    rollupText: string
+    rollupModel: string
+    rollupPhase: 'idle' | 'streaming' | 'done'
     topic: string
   }
 }
@@ -46,7 +56,9 @@ function serializeRounds(rounds: ChatRound[]): SerializedChatRound[] {
     attachments: r.attachments?.length ? r.attachments : undefined,
     responses: Array.from(r.responses.entries()),
     activeModelId: r.activeModelId,
+    selectedModelId: r.selectedModelId,
     timestamp: r.timestamp,
+    judge: r.judge,
   }))
 }
 
@@ -57,7 +69,9 @@ function deserializeRounds(data: SerializedChatRound[]): ChatRound[] {
     attachments: r.attachments ?? [],
     responses: new Map(r.responses),
     activeModelId: r.activeModelId,
+    selectedModelId: r.selectedModelId ?? null,
     timestamp: r.timestamp,
+    judge: r.judge,
   }))
 }
 
@@ -116,11 +130,14 @@ export const useSessionStore = defineStore('session', () => {
         phase1Results: [...discussStore.phase1Results],
         phase2Results: [...discussStore.phase2Results],
         phase3Text: discussStore.phase3Text,
+        rollupText: discussStore.rollupText,
+        rollupModel: discussStore.rollupModel,
+        rollupPhase: discussStore.rollupPhase,
         topic: discussStore.topic,
       }
       session.messageCount = discussStore.phase1Results.length + discussStore.phase2Results.length
       if (discussStore.topic) {
-        session.title = discussStore.topic.slice(0, 20) || '新讨论'
+        session.title = discussStore.topic.slice(0, 20) || '新辩论'
       }
     }
 
@@ -145,7 +162,7 @@ export const useSessionStore = defineStore('session', () => {
     const session: Session = {
       id: generateId(),
       type,
-      title: type === 'chat' ? '新对话' : '新讨论',
+      title: type === 'chat' ? '新对话' : '新辩论',
       modelIds: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -194,6 +211,9 @@ export const useSessionStore = defineStore('session', () => {
       discussStore.phase1Results = [...session.discussData.phase1Results]
       discussStore.phase2Results = [...session.discussData.phase2Results]
       discussStore.phase3Text = session.discussData.phase3Text
+      discussStore.rollupText = session.discussData.rollupText ?? ''
+      discussStore.rollupModel = session.discussData.rollupModel ?? ''
+      discussStore.rollupPhase = session.discussData.rollupPhase ?? 'idle'
       discussStore.topic = session.discussData.topic
     }
 

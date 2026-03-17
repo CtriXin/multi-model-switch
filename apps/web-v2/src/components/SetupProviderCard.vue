@@ -5,6 +5,7 @@ import { useProviderStore } from '@/stores/provider'
 import { useAppStore } from '@/stores/app'
 import { getApiKey, maskKey } from '@/services/keychain'
 import type { FreeProviderInfo } from '@/data/freeProviders'
+import { openExternalUrl } from '@/utils/openExternalUrl'
 
 const props = defineProps<{
   provider: FreeProviderInfo
@@ -65,6 +66,10 @@ function onKeyInput(e: Event) {
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') saveKey()
+}
+
+function openLink(url?: string) {
+  openExternalUrl(url)
 }
 </script>
 
@@ -129,35 +134,32 @@ function handleKeydown(e: KeyboardEvent) {
 
         <!-- Action Links -->
         <div class="flex gap-2 mb-4">
-          <a
-            :href="provider.registerUrl"
-            target="_blank"
-            rel="noopener"
+          <button
+            type="button"
+            @click="openLink(provider.registerUrl)"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-opacity hover:opacity-90 shadow-sm"
             :style="{ background: provider.color }"
           >
             <ExternalLink :size="12" />
             去注册
-          </a>
-          <a
-            :href="provider.keyUrl"
-            target="_blank"
-            rel="noopener"
+          </button>
+          <button
+            type="button"
+            @click="openLink(provider.keyUrl)"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary bg-surface-3 rounded-lg hover:bg-surface-4 transition-colors"
           >
             <KeyRound :size="12" />
             获取 API Key
-          </a>
-          <a
+          </button>
+          <button
             v-if="provider.modelsUrl"
-            :href="provider.modelsUrl"
-            target="_blank"
-            rel="noopener"
+            type="button"
+            @click="openLink(provider.modelsUrl)"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary bg-surface-3 rounded-lg hover:bg-surface-4 transition-colors"
           >
             <BookOpen :size="12" />
             查看模型
-          </a>
+          </button>
         </div>
 
         <!-- Key Input -->

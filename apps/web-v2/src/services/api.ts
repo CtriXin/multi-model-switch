@@ -5,6 +5,7 @@
 
 import type { ProviderConfig } from '@/stores/provider'
 import type { ModelMeta } from '@/stores/app'
+import { resolveModelCapabilities } from '@/config/modelCapabilities'
 
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -193,6 +194,13 @@ interface ApiModel {
   }
 }
 
+const ALWAYS_FREE_PROVIDER_IDS = new Set([
+  'groq',
+  'google',
+  'cerebras',
+  'demo',
+])
+
 /**
  * Strip the provider prefix from a compound model ID.
  * "deepseek/deepseek-chat" → "deepseek-chat"
@@ -274,6 +282,10 @@ export async function fetchModels(
           contextWindow: 4096,
           free: false,
           supportsVision: false,
+          supportsNativeWebSearch: false,
+          supportsTools: false,
+          capabilitySource: 'default',
+          capabilityVerifiedAt: null,
         })
       }
     }
@@ -297,12 +309,20 @@ function mapToModelMeta(raw: ApiModel, provider: ProviderConfig): ModelMeta {
   const providerName = provider.type === 'openrouter' ? 'openrouter' : provider.id
 
   // Free detection
+  const hasExplicitPricing = raw.pricing?.prompt != null || raw.pricing?.completion != null
+  const zeroPriced = parseFloat(raw.pricing?.prompt ?? '1') === 0 && parseFloat(raw.pricing?.completion ?? '1') === 0
   const free = provider.type === 'openrouter'
-    ? (parseFloat(raw.pricing?.prompt ?? '1') === 0 && parseFloat(raw.pricing?.completion ?? '1') === 0)
-    : false
+    ? zeroPriced
+    : (hasExplicitPricing && zeroPriced) || ALWAYS_FREE_PROVIDER_IDS.has(provider.id)
 
   // Vision detection
   const supportsVision = deriveSupportsVision(raw, provider)
+  const capabilities = resolveModelCapabilities({
+    compoundId: id,
+    rawModelId: raw.id,
+    providerId: provider.id,
+    supportsVision,
+  })
 
   return {
     id,
@@ -315,7 +335,11 @@ function mapToModelMeta(raw: ApiModel, provider: ProviderConfig): ModelMeta {
     tags: deriveTags(raw),
     contextWindow: raw.context_length ?? 4096,
     free,
-    supportsVision,
+    supportsVision: capabilities.supportsVision,
+    supportsNativeWebSearch: capabilities.supportsNativeWebSearch,
+    supportsTools: capabilities.supportsTools,
+    capabilitySource: capabilities.capabilitySource,
+    capabilityVerifiedAt: capabilities.capabilityVerifiedAt,
   }
 }
 
@@ -389,33 +413,319 @@ function deriveTags(raw: ApiModel): string[] {
 // ─── Mock Provider ───────────────────────────────────────────────
 
 const MOCK_MODELS: ModelMeta[] = [
-  { id: 'demo/claude-sonnet', name: 'Claude Sonnet (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision'], contextWindow: 200000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
-  { id: 'demo/gpt-4o', name: 'GPT-4o (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2.5, priceOutput: 10, tags: ['reasoning', 'vision', 'coding'], contextWindow: 128000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
-  { id: 'demo/gemini-pro', name: 'Gemini Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 10, tags: ['reasoning', 'coding', 'vision'], contextWindow: 1000000, free: true, supportsVision: true, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
-  { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.19, tags: ['reasoning', 'coding'], contextWindow: 64000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
-  { id: 'demo/haiku', name: 'Claude Haiku (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.25, tags: ['fast', 'coding'], contextWindow: 200000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'default', capabilityVerifiedAt: null },
+  { id: 'demo/claude-sonnet-4', name: 'Claude Sonnet 4 (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 200000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/gpt-4.1', name: 'GPT-4.1 (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2, priceOutput: 8, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 128000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/gemini-2.5-pro', name: 'Gemini 2.5 Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 5, tags: ['reasoning', 'vision', 'recommended'], contextWindow: 1000000, free: true, supportsVision: true, supportsNativeWebSearch: true, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.2, tags: ['reasoning', 'coding'], contextWindow: 64000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/qwen-max', name: 'Qwen Max (Demo)', provider: 'qwen', category: 'frontier', tier: 1, priceInput: 0.9, priceOutput: 3.8, tags: ['reasoning', 'coding'], contextWindow: 131072, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/mistral-large', name: 'Mistral Large (Demo)', provider: 'mistral', category: 'reasoning', tier: 1, priceInput: 0.8, priceOutput: 2.8, tags: ['reasoning', 'coding', 'fast'], contextWindow: 32000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/glm-4.5', name: 'GLM-4.5 (Demo)', provider: 'zhipu', category: 'frontier', tier: 1, priceInput: 0.75, priceOutput: 2.6, tags: ['reasoning', 'fast'], contextWindow: 128000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/claude-haiku-3.5', name: 'Claude Haiku 3.5 (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.2, tags: ['fast', 'coding'], contextWindow: 200000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/offline-strategy-agent', name: 'Strategy Agent (Offline Demo)', provider: 'openai', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/throttled-risk-agent', name: 'Risk Agent (Rate Limited Demo)', provider: 'anthropic', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
 ]
 
-const MOCK_RESPONSES: Record<string, string[]> = {
-  anthropic: [
-    '这是一个很好的问题。让我从几个角度来分析：\n\n**首先**，我们需要考虑整体架构的合理性。一个好的设计应该兼顾可扩展性和易用性。\n\n**其次**，从实现层面来看，推荐使用模块化的方式来组织代码，这样便于后续的维护和迭代。\n\n**最后**，建议在实现前做好充分的技术选型评估，避免后期的重构成本。',
-    '根据我的分析，这个场景适合使用事件驱动架构。核心思路是：\n\n1. 将业务流程拆分为独立的事件\n2. 通过消息队列解耦各个服务\n3. 使用幂等性设计保证数据一致性\n\n这样做的好处是系统的伸缩性更强，也更容易做故障隔离。',
-  ],
-  openai: [
-    '好的，我来帮你解答这个问题。\n\n这个问题的关键在于理解核心概念之间的关系。我建议采用以下策略：\n\n- 使用 **分层架构** 来降低复杂度\n- 引入 **依赖注入** 提高测试覆盖率\n- 利用 **缓存策略** 优化性能\n\n具体实现上，可以参考业界的最佳实践来落地。',
-    '这个需求可以通过以下方式实现：\n\n```typescript\nclass EventBus {\n  private handlers = new Map()\n  \n  on(event: string, handler: Function) {\n    this.handlers.set(event, handler)\n  }\n  \n  emit(event: string, data: any) {\n    this.handlers.get(event)?.(data)\n  }\n}\n```\n\n这个方案简洁高效，适合中小规模的应用场景。',
-  ],
-  google: [
-    '我来综合分析一下这个问题。\n\n从技术可行性来看，有以下几种方案：\n\n| 方案 | 优势 | 劣势 | 推荐度 |\n|------|------|------|--------|\n| 方案A | 实现简单 | 扩展性差 | ★★★ |\n| 方案B | 性能好 | 复杂度高 | ★★★★ |\n| 方案C | 均衡 | 需要学习成本 | ★★★★★ |\n\n综合考虑，我推荐方案C。',
-  ],
-  deepseek: [
-    '让我深入思考一下这个问题...\n\n经过分析，核心解决方案是：\n\n1. 使用有限状态机建模业务流程\n2. 通过状态转移表明确各状态间的跳转规则\n3. 结合响应式系统实现自动更新\n\n这个方案的时间复杂度是 O(n)，空间复杂度是 O(1)，效率很高。',
-  ],
+const MOCK_UNAVAILABLE_MODEL_IDS = new Set(['demo/offline-strategy-agent'])
+const MOCK_RATE_LIMIT_MODEL_IDS = new Set(['demo/throttled-risk-agent'])
+const MOCK_CHAT_TRIGGER = /新对话|chat|普通问答|快速方案/i
+const MOCK_COMMITTEE_TRIGGER = /锦囊团|committee|战情会|角色评审/i
+const MOCK_JUDGE_TRIGGER = /Risk-Aware Decision Judge|## 决策评估/
+
+function getMockMessageText(message: ChatMessage | undefined): string {
+  if (!message) return ''
+  if (typeof message.content === 'string') return message.content
+  return message.content
+    .filter((part): part is Extract<ContentPart, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n')
 }
 
-function getMockResponse(provider: string): string {
-  const pool = MOCK_RESPONSES[provider] || MOCK_RESPONSES.openai
-  return pool[Math.floor(Math.random() * pool.length)]
+function stableIndex(seed: string, size: number): number {
+  if (size <= 1) return 0
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  }
+  return hash % size
+}
+
+function compactText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function extractTopic(text: string): string {
+  const cleaned = compactText(text)
+  const patterns = [
+    /用户的问题是[:：]\s*(.+)$/i,
+    /原始问题[:：]\s*(.+)$/i,
+    /议题[:：]\s*(.+)$/i,
+  ]
+  for (const pattern of patterns) {
+    const match = cleaned.match(pattern)
+    if (match?.[1]) return match[1].slice(0, 48)
+  }
+  return cleaned.slice(0, 48) || '当前议题'
+}
+
+function resolveMockProvider(modelId: string): string {
+  if (modelId.includes('claude') || modelId.includes('haiku')) return 'anthropic'
+  if (modelId.includes('gemini')) return 'google'
+  if (modelId.includes('deepseek')) return 'deepseek'
+  if (modelId.includes('qwen')) return 'qwen'
+  if (modelId.includes('mistral')) return 'mistral'
+  if (modelId.includes('glm')) return 'zhipu'
+  return 'openai'
+}
+
+function buildGeneralMockResponse(provider: string, prompt: string): string {
+  const topic = extractTopic(prompt)
+  const providerAngles: Record<string, string[]> = {
+    anthropic: ['先收边界。', '先验关键假设。'],
+    openai: ['先拿短反馈。', '先定 owner+时限。'],
+    google: ['先对齐指标。', '先小流量验证。'],
+    deepseek: ['先做假设树。', '先定失败信号。'],
+    qwen: ['先可交付。', '先拆成两步。'],
+    mistral: ['先并行准备。', '先跑低成本实验。'],
+    zhipu: ['先曝露依赖。', '先写约束条件。'],
+  }
+  const anglePool = providerAngles[provider] ?? providerAngles.openai
+  const angle = anglePool[stableIndex(topic + provider, anglePool.length)]
+
+  return [
+    '<BRIEF>',
+    `结论: 先做小闭环（${topic}）`,
+    '风险: 口径偏差',
+    '下一步: 3天验证',
+    '</BRIEF>',
+    '## 结论',
+    `围绕“${topic}”，先做小闭环。`,
+    '',
+    '## 关键点',
+    `- 视角：${angle}`,
+    '- 指标：转化率 / 错误率 / 时延',
+    '',
+    '## 动作',
+    '1. 先上线最小版本。',
+    '2. 只看一个主指标。',
+    '3. 失败就回滚。',
+    '',
+    '## 风险',
+    '- 口径不一致会误判。',
+    '- 依赖未准备会拖慢。',
+  ].join('\n')
+}
+
+function buildMockPhase1Response(prompt: string): string {
+  const topic = extractTopic(prompt)
+  return JSON.stringify({
+    approach: `先围绕“${topic}”做最小验证。`,
+    reasoning: '先小后大，降低返工。',
+    risks: ['口径偏差', '依赖阻塞', '回滚不完整'],
+    keyDecisions: ['先上小流量', '先定回滚线'],
+    nextStep: '24小时内确认 owner 和指标。',
+  }, null, 2)
+}
+
+function buildMockPhase2Response(prompt: string): string {
+  const topic = extractTopic(prompt)
+  const strongestPoint = `优点：围绕“${topic}”能快速对齐目标。`
+  const weakestAssumption = '弱点：默认关键假设成立，证据不足。'
+  const missingRisk = '遗漏：失败回滚的成本与时长。'
+  const betterApproach = '改进：先小流量验证，再扩量。'
+  const verdict = '部分接受：方向对，但证据和风控仍不足。'
+
+  return JSON.stringify({
+    strongestPoint,
+    weakestAssumption,
+    missingRisk,
+    betterApproach,
+    verdict,
+    agreement: strongestPoint,
+    challenge: weakestAssumption,
+    betterOption: betterApproach,
+  }, null, 2)
+}
+
+function buildMockPhase3Response(prompt: string): string {
+  const topic = extractTopic(prompt)
+  return [
+    '## 综合结论',
+    `围绕“${topic}”，先验证再扩面。`,
+    '',
+    '### 核心共识',
+    '- 先小流量验证。',
+    '- 指标统一后再推进。',
+    '- 必须可回滚。',
+    '',
+    '### 分歧与取舍',
+    '- 分歧在速度与稳健。',
+    '- 当前优先稳健。',
+    '',
+    '### 建议行动计划',
+    '1. 先定 owner 与指标。',
+    '2. 先做最小版本。',
+    '3. 复盘后再扩量。',
+  ].join('\n')
+}
+
+function buildMockRollupResponse(prompt: string): string {
+  const topic = extractTopic(prompt)
+  return [
+    '## 行动计划',
+    `围绕“${topic}”，按“小闭环 -> 复盘 -> 扩量”推进。`,
+    '',
+    '## 核心理由',
+    '低成本、快反馈、可回滚。',
+    '',
+    '## 取舍',
+    '牺牲首版完整度，换取更低风险。',
+    '',
+    '## 风险与约束',
+    '- 指标口径不统一。',
+    '- 依赖资源未到位。',
+    '',
+    '## 失效条件',
+    '- 没有 owner。',
+    '- 没有回滚方案。',
+    '',
+    '## 下一步',
+    '1. 明确 owner 与截止时间。',
+    '2. 先上小流量。',
+    '3. 复盘后再扩量。',
+  ].join('\n')
+}
+
+function buildCommitteeSummaryResponse(systemText: string, userText: string): string {
+  const topic = extractTopic(userText || systemText)
+  const roleName = systemText.match(/固定角色：([^\n·]+)/)?.[1]?.trim() || '该角色'
+  const roleFocus = systemText.match(/你的职责：([^\n]+)/)?.[1]?.trim() || '关键职责'
+  const redLine = systemText.match(/你的不可妥协点：([^\n]+)/)?.[1]?.trim() || '不能牺牲基本可交付性'
+
+  return [
+    `【判断】“${topic}”先守住 ${roleFocus}。`,
+    `【观点】${roleName}建议先小范围验证，再放大。`,
+    `【张力】若直接扩面，风险会先爆。`,
+    `【建议】先定回滚线，并写入“${redLine}”。`,
+  ].join('\n')
+}
+
+function buildCommitteeDebateResponse(systemText: string, userText: string): string {
+  const topic = extractTopic(userText || systemText)
+  const roleName = systemText.match(/固定角色：([^\n·]+)/)?.[1]?.trim() || '本角色'
+  const targetRole = systemText.match(/回应的对象：([^\n。]+)/)?.[1]?.trim() || '对方角色'
+  const redLine = systemText.match(/你的不可妥协点：([^\n]+)/)?.[1]?.trim() || '先守住关键约束'
+
+  return [
+    `【反驳】${targetRole}太快扩面，会放大“${topic}”的不确定性。`,
+    `【立场】${roleName}坚持：${redLine}。`,
+    `【吸收】可吸收对方的节奏建议，但先做小验证。`,
+  ].join('\n')
+}
+
+function buildCommitteeModeratorResponse(systemText: string, userText: string): string {
+  const topic = extractTopic(userText || systemText)
+  const roleNames = Array.from(systemText.matchAll(/- ([^·\n]+)\s*·/g)).map((match) => match[1].trim())
+  const roleA = roleNames[0] || '角色A'
+  const roleB = roleNames[1] || '角色B'
+  const roleC = roleNames[2] || '角色C'
+
+  return [
+    '## 一句话结论',
+    `围绕“${topic}”，锦囊团建议先小验证再扩量。`,
+    '',
+    '## 共识',
+    `- 先小验证，避免误判 → 来源：${roleA}, ${roleB}`,
+    `- 指标统一再决策 → 来源：${roleA}, ${roleC}`,
+    '',
+    '## 主要分歧',
+    '- 【红线冲突】速度优先 vs 风险优先。',
+    '',
+    '## 建议动作',
+    `- 本周先上小流量并设 owner → 来源：${roleA}, ${roleB}`,
+    `- 同步准备回滚与监控 → 来源：${roleB}, ${roleC}`,
+    '',
+    '## 少数派意见',
+    `- ${roleC}：无口径统一时，不建议扩量。`,
+  ].join('\n')
+}
+
+function buildJudgeResponse(lastUserText: string): string {
+  const topic = extractTopic(lastUserText)
+  const letters = Array.from(lastUserText.matchAll(/\[回答 ([A-Z])\]/g)).map((match) => match[1])
+  const uniqueLetters = Array.from(new Set(letters))
+  const scored = uniqueLetters.length ? uniqueLetters : ['A', 'B']
+  const scoreLines = scored.map((letter, index) => {
+    const score = 4 - (index % 2)
+    const comment = score >= 4 ? '结构清晰，行动性强。' : '有价值，但风控不足。'
+    return `- 回答 ${letter}: ${score}/5 — ${comment}`
+  })
+
+  return [
+    '## 决策评估',
+    '',
+    '### 共识',
+    '先小范围验证，再决定是否扩量。',
+    '',
+    '### 分歧',
+    '主要分歧在推进节奏和风险容忍度。',
+    '',
+    '### 风险与盲点',
+    '- 指标口径可能不一致。',
+    '- 回滚条件不够明确。',
+    '',
+    '### 建议行动',
+    '- **现在可以安全做的**：先上小流量验证关键假设。',
+    '- **需要进一步验证的**：扩量阈值与回滚阈值。',
+    '- **条件失效时**：若主指标连续两天恶化，立即回滚。',
+    '',
+    '### 各回答评分',
+    ...scoreLines,
+    '',
+    '### 不确定性',
+    `整体信心：中。原因：围绕“${topic}”的关键假设仍需真实数据验证。`,
+  ].join('\n')
+}
+
+function getStructuredMockResponse(messages: ChatMessage[], provider: string): string | null {
+  const lastUserText = getMockMessageText([...messages].reverse().find((message) => message.role === 'user'))
+  const systemText = getMockMessageText([...messages].reverse().find((message) => message.role === 'system'))
+
+  if (systemText.includes('你现在扮演系统主持人')) {
+    return buildCommitteeModeratorResponse(systemText, lastUserText)
+  }
+  if (systemText.includes('输出格式（严格按下面三个字段输出') && systemText.includes('【反驳】')) {
+    return buildCommitteeDebateResponse(systemText, lastUserText)
+  }
+  if (systemText.includes('输出格式（严格按下面四个字段输出') && systemText.includes('【判断】')) {
+    return buildCommitteeSummaryResponse(systemText, lastUserText)
+  }
+  if (lastUserText.includes('请严格按以下 JSON 格式输出') && lastUserText.includes('"approach"')) {
+    return buildMockPhase1Response(lastUserText)
+  }
+  if (
+    lastUserText.includes('请严格按以下 JSON 格式输出')
+    && (lastUserText.includes('"strongestPoint"') || lastUserText.includes('"agreement"'))
+  ) {
+    return buildMockPhase2Response(lastUserText)
+  }
+  if (lastUserText.includes('你是一个总结专家') && lastUserText.includes('## 综合结论')) {
+    return buildMockPhase3Response(lastUserText)
+  }
+  if (systemText.includes('independent synthesis agent')) {
+    return buildMockRollupResponse(lastUserText)
+  }
+  if (MOCK_JUDGE_TRIGGER.test(lastUserText)) {
+    return buildJudgeResponse(lastUserText)
+  }
+  if (MOCK_COMMITTEE_TRIGGER.test(lastUserText)) {
+    return buildCommitteeModeratorResponse(systemText, lastUserText)
+  }
+  if (MOCK_CHAT_TRIGGER.test(lastUserText)) {
+    return buildGeneralMockResponse(provider, lastUserText)
+  }
+
+  if (!lastUserText) return null
+  return buildGeneralMockResponse(provider, lastUserText)
 }
 
 async function* mockStreamChat(
@@ -423,14 +733,25 @@ async function* mockStreamChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
 ): AsyncGenerator<string> {
-  const provider = model.includes('claude') || model.includes('haiku')
-    ? 'anthropic'
-    : model.includes('gpt') ? 'openai'
-    : model.includes('gemini') ? 'google'
-    : model.includes('deepseek') ? 'deepseek'
-    : 'openai'
+  if (MOCK_UNAVAILABLE_MODEL_IDS.has(model)) {
+    throw new ApiError(
+      '该 Demo Agent 当前不可访问（模拟 404），请点击重试并更换模型',
+      404,
+      'model_unavailable',
+      'mock_demo_unavailable',
+    )
+  }
+  if (MOCK_RATE_LIMIT_MODEL_IDS.has(model)) {
+    throw new ApiError(
+      '该 Demo Agent 触发频率限制（模拟 429），请重试或切换模型',
+      429,
+      'rate_limited',
+      'mock_demo_rate_limited',
+    )
+  }
 
-  const fullText = getMockResponse(provider)
+  const provider = resolveMockProvider(model)
+  const fullText = getStructuredMockResponse(messages, provider) || buildGeneralMockResponse(provider, '')
 
   for (let i = 0; i < fullText.length; ) {
     if (signal?.aborted) return
@@ -439,6 +760,6 @@ async function* mockStreamChat(
     i += chunkSize
     const lastChar = fullText[i - 1]
     const delay = '，。！？\n'.includes(lastChar) ? 40 : (5 + Math.random() * 10)
-    await new Promise((r) => setTimeout(r, delay))
+    await new Promise((resolve) => setTimeout(resolve, delay))
   }
 }
