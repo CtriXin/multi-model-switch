@@ -21,6 +21,7 @@ export interface ChatMessage {
   content: string
   model?: string
   elapsed?: number
+  streaming?: boolean
   brief?: Record<string, string>
   timestamp: number
   error?: string
@@ -33,7 +34,14 @@ export interface ChatRound {
   attachments: ImageAttachment[]
   responses: Map<string, ChatMessage>
   activeModelId: string | null
+  selectedModelId: string | null
   timestamp: number
+  judge?: {
+    content: string
+    modelId: string
+    isSelfEval: boolean
+    timestamp: number
+  }
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -116,13 +124,12 @@ export const useChatStore = defineStore('chat', () => {
       msg.brief = parsed.brief
     } catch (e: any) {
       if (e.name === 'AbortError' || signal.aborted) return
+      appStore.recordFailure(modelId)
       if (e instanceof ApiError) {
         msg.error = e.message
         msg.errorCode = e.code
         msg.content += `\n\n> 错误: ${e.message}`
-        if (shouldSuppressModel(e)) {
-          appStore.suppressModelForToday(modelId)
-        }
+        // suppressModelForToday is already handled by recordFailure when count >= 3
       } else {
         msg.error = e.message
         msg.errorCode = 'request_failed'
@@ -144,6 +151,7 @@ export const useChatStore = defineStore('chat', () => {
       attachments,
       responses: new Map(),
       activeModelId: null,
+      selectedModelId: null,
       timestamp: Date.now(),
     }
 
@@ -286,6 +294,11 @@ export const useChatStore = defineStore('chat', () => {
   function setActiveModel(roundId: string, modelId: string) {
     const r = rounds.value.find(r => r.id === roundId)
     if (r) r.activeModelId = modelId
+  }
+
+  function selectModel(roundId: string, modelId: string) {
+    const r = rounds.value.find(r => r.id === roundId)
+    if (r) r.selectedModelId = r.selectedModelId === modelId ? null : modelId
   }
 
   function clearHistory() {

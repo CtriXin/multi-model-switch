@@ -65,7 +65,7 @@ export const useCommitteeStore = defineStore('committee', () => {
   const abortController = ref<AbortController | null>(null)
 
   const activeRoleCount = computed(() => activeRoleIds.value.length)
-  const hasDebatePhase = computed(() => sessionMode.value === 'debate')
+  const hasDebatePhase = computed(() => sessionMode.value === 'debate' || sessionMode.value === 'committee')
   const hasCommitteePhase = computed(() => sessionMode.value === 'committee')
   const isCompleted = computed(() => phaseStatus.value === 'completed' && !isStreaming.value)
 
@@ -175,8 +175,8 @@ export const useCommitteeStore = defineStore('committee', () => {
         })
       } catch (error) {
         if (isAbortError(error)) return
-        if (error instanceof ApiError && shouldSuppressModel(error)) {
-          useAppStore().suppressModelForToday(modelId)
+        if (error instanceof ApiError) {
+          useAppStore().recordFailure(modelId)
         }
         phase1Summaries.value.splice(index, 1, {
           roleId: role.id,
@@ -203,7 +203,7 @@ export const useCommitteeStore = defineStore('committee', () => {
     const pairs = roles
       .map((role) => {
         const target = roleMap.get(role.debatePartnerId)
-        if (!target || !activeRoleIds.value.includes(target.id) || role.id > target.id) return null
+        if (!target || !activeRoleIds.value.includes(target.id)) return null
         return { role, target }
       })
       .filter((pair): pair is { role: PersonaDefinition; target: PersonaDefinition } => !!pair)
@@ -246,8 +246,8 @@ export const useCommitteeStore = defineStore('committee', () => {
         })
       } catch (error) {
         if (isAbortError(error)) return
-        if (error instanceof ApiError && shouldSuppressModel(error)) {
-          useAppStore().suppressModelForToday(modelId)
+        if (error instanceof ApiError) {
+          useAppStore().recordFailure(modelId)
         }
         phase2Reviews.value.splice(index, 1, {
           roleId: role.id,
@@ -287,11 +287,25 @@ export const useCommitteeStore = defineStore('committee', () => {
     synthesizer.value = moderatorModel.name
     phase3Content.value = ''
 
+    // Build debate context for committee mode (Phase 2 results)
+    const debateContext = phase2Reviews.value
+      .filter((d) => d.ok)
+      .map((d) => {
+        const debaterRole = roles.find((r) => r.id === d.roleId)
+        const targetRole = roles.find((r) => r.id === d.targetRoleId)
+        return `- ${debaterRole?.name ?? d.roleId} → ${targetRole?.name ?? d.targetRoleId}：${d.rebuttal || '无反驳'}`
+      })
+      .join('\n')
+
+    const debateSection = debateContext
+      ? `\n\n辩论交锋摘要：\n${debateContext}`
+      : ''
+
     try {
       const raw = await collectStream(
         moderatorModel.id,
         buildSystemModeratorPrompt(promptText, goodSummaries, roles, pack, preset),
-        `请基于以上角色观点，生成本轮锦囊团结论。议题：${promptText}`,
+        `请基于以上角色观点，生成本轮锦囊团结论。议题：${promptText}${debateSection}`,
         (chunk) => { phase3Content.value += chunk },
       )
       const parsed = parseModeratorOutput(raw, roles, {
@@ -303,8 +317,8 @@ export const useCommitteeStore = defineStore('committee', () => {
       phase3Content.value = raw
     } catch (error) {
       if (isAbortError(error)) return
-      if (error instanceof ApiError && shouldSuppressModel(error)) {
-        useAppStore().suppressModelForToday(moderatorModel.id)
+      if (error instanceof ApiError) {
+        useAppStore().recordFailure(moderatorModel.id)
       }
       committeeSynthesis.value = {
         ...fallback,
@@ -341,7 +355,7 @@ export const useCommitteeStore = defineStore('committee', () => {
       await runPhase1(payload.promptText, roles, payload.packId, payload.presetId)
       if (stopped.value) return
 
-      if (payload.mode === 'debate') {
+      if (payload.mode === 'debate' || payload.mode === 'committee') {
         currentPhase.value = 2
         await runPhase2(payload.promptText, roles, payload.packId, payload.presetId)
       }

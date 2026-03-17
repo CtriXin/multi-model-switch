@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
+import { pickNeutralModel } from '@/utils/modelSelection'
 import type { Phase1Result, Phase2Result, DiscussDepth, RollupResult } from '@/stores/discuss'
 
 export type { DiscussDepth }
@@ -11,7 +12,7 @@ export interface DiscussSessionOptions {
   depth?: DiscussDepth
 }
 
-const PHASE1_PROMPT = `你是一个技术专家。用户提出了一个技术问题，请给出你的独立分析。
+const PHASE1_PROMPT = `你是一个分析专家。用户提出了一个问题，请给出你的独立分析。
 
 请严格按以下 JSON 格式输出（不要输出其他内容）：
 {
@@ -24,18 +25,20 @@ const PHASE1_PROMPT = `你是一个技术专家。用户提出了一个技术问
 
 用户的问题是：`
 
-const PHASE2_PROMPT = `你是一个技术审查专家。请审查另一个模型对以下问题的分析，并给出你的交叉评审意见。
+const PHASE2_PROMPT = `你是一个审查专家。你的首要任务是压力测试对方的分析。请审查另一个模型对以下问题的分析，并给出你的交叉评审意见。
 
 请严格按以下 JSON 格式输出（不要输出其他内容）：
 {
-  "agreement": "你同意的部分（一句话）",
-  "challenge": "你质疑的部分（一句话）",
-  "betterOption": "你的改进建议（一句话）"
+  "strongestPoint": "对方分析中最有力的部分（一句话）",
+  "weakestAssumption": "对方最薄弱的假设或逻辑漏洞（一句话）",
+  "missingRisk": "对方遗漏的关键风险（一句话）",
+  "betterApproach": "你的改进建议（一句话）",
+  "verdict": "整体判断：接受/部分接受/拒绝，一句话理由"
 }
 
 原始问题：`
 
-const PHASE3_PROMPT = `你是一个技术总结专家。根据多个模型对以下问题的分析和交叉评审，请综合输出最终结论。
+const PHASE3_PROMPT = `你是一个总结专家。根据多个模型对以下问题的分析和交叉评审，请综合输出最终结论。
 
 使用 Markdown 格式，包含：
 ## 综合结论
@@ -167,20 +170,27 @@ export function useDiscussSession() {
       const phase2Tasks = pairs.map(async ([reviewer, target]) => {
         const targetResult = phase1Results.value.find((r) => r.model === target)
         const contextStr = target === '*'
-          ? phase1Results.value.map((r) => `[${r.model}]: ${r.data.approach}`).join('\n')
-          : targetResult ? `[${target}]: ${targetResult.data.approach}` : ''
+          ? phase1Results.value.map((r) => `[${r.model}]: ${r.data.approach} — ${r.data.reasoning}`).join('\n')
+          : targetResult ? `[${target}]: ${targetResult.data.approach} — ${targetResult.data.reasoning}` : ''
 
         const fullPrompt = PHASE2_PROMPT + prompt + '\n\n被审查的分析：\n' + contextStr
         const response = await callModelForSession(reviewer, fullPrompt, signal)
-        const data = tryParseJSON<Phase2Result['data']>(response)
+        const raw = tryParseJSON<any>(response)
 
-        phase2Results.value.push({
-          reviewer,
-          target,
-          data: data && data.agreement
-            ? data
-            : { agreement: response.slice(0, 80), challenge: '', betterOption: '' },
-        })
+        // Map new 5-field format to backward-compat Phase2Result.data
+        const data: Phase2Result['data'] = raw && (raw.strongestPoint || raw.agreement)
+          ? {
+              agreement: raw.strongestPoint ?? raw.agreement ?? '',
+              challenge: raw.weakestAssumption ?? raw.challenge ?? '',
+              betterOption: raw.betterApproach ?? raw.betterOption ?? '',
+              strongestPoint: raw.strongestPoint,
+              weakestAssumption: raw.weakestAssumption,
+              missingRisk: raw.missingRisk,
+              verdict: raw.verdict,
+            }
+          : { agreement: response.slice(0, 80), challenge: '', betterOption: '' }
+
+        phase2Results.value.push({ reviewer, target, data })
       })
       await Promise.allSettled(phase2Tasks)
       if (signal.aborted) return
@@ -188,7 +198,7 @@ export function useDiscussSession() {
       // Phase 3: Synthesis — stream
       phase.value = 3
       const summaryContext = phase1Results.value
-        .map((r) => `[${r.model}] 方案: ${r.data.approach}`)
+        .map((r) => `[${r.model}] 方案: ${r.data.approach}; 理由: ${r.data.reasoning}`)
         .join('\n')
       const reviewContext = phase2Results.value
         .map((r) => `[${r.reviewer} → ${r.target}] 同意: ${r.data.agreement}; 质疑: ${r.data.challenge}`)
@@ -198,7 +208,7 @@ export function useDiscussSession() {
         '\n\n各模型分析：\n' + summaryContext +
         '\n\n交叉评审：\n' + reviewContext
 
-      const synthesisModel = modelIds[0]
+      const { modelId: synthesisModel } = pickNeutralModel(modelIds, appStore.models)
       const stream = streamModelChat({
         modelId: synthesisModel,
         messages: [{ role: 'user', content: synthesisPrompt }],
@@ -229,11 +239,8 @@ export function useDiscussSession() {
     const signal = abortController.value.signal
 
     // Pick rollup model: prefer non-participating, highest tier
-    const participating = new Set(modelIds)
-    const candidates = appStore.models
-      .filter((m) => !participating.has(m.id))
-      .sort((a, b) => b.tier - a.tier)
-    const rollupModelId = overrideModelId || (candidates.length ? candidates[0].id : modelIds[0])
+    const { modelId: neutralModelId } = pickNeutralModel(modelIds, appStore.models)
+    const rollupModelId = overrideModelId || neutralModelId
     const modelMeta = appStore.models.find((m) => m.id === rollupModelId)
     rollupModel.value = modelMeta?.name ?? rollupModelId
 
@@ -245,7 +252,7 @@ export function useDiscussSession() {
       .join('\n')
     const synthesisContext = phase3Text.value ? `\n\n综合结论：\n${phase3Text.value}` : ''
 
-    const userPrompt = `原始问题：${prompt}\n\n各模型独立分析：\n${analysisContext}\n\n交叉审查：\n${reviewContext}${synthesisContext}\n\n请根据以上讨论内容，生成一份统一的行动计划。`
+    const userPrompt = `原始问题：${prompt}\n\n各模型独立分析：\n${analysisContext}\n\n交叉审查：\n${reviewContext}${synthesisContext}\n\n请根据以上辩论内容，生成一份统一的行动计划。`
 
     try {
       const stream = streamModelChat({

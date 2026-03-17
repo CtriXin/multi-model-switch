@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
-import { CheckCircle, Cpu, Loader2, MessageSquare, Sparkles, Square, Users } from 'lucide-vue-next'
+import {
+  CheckCircle, ChevronDown, Cpu, Layers, Loader2, Menu, MessageSquare, Moon, Plus, RotateCcw,
+  Sparkles, Square, Sun, Users
+} from 'lucide-vue-next'
 import CommitteeDebateCard from '@/components/advisors/CommitteeDebateCard.vue'
 import CommitteeModelPoolPicker from '@/components/advisors/CommitteeModelPoolPicker.vue'
 import CommitteePhaseSection from '@/components/advisors/CommitteePhaseSection.vue'
 import CommitteeSummaryCard from '@/components/advisors/CommitteeSummaryCard.vue'
 import CommitteeSynthesisCard from '@/components/advisors/CommitteeSynthesisCard.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
+import { startWindowDrag } from '@/utils/windowDrag'
 import {
   COMMITTEE_MODE_OPTIONS,
   COMMITTEE_PACKS,
@@ -18,17 +22,37 @@ import {
 } from '@/features/committee'
 import { getModelColor, useAppStore } from '@/stores/app'
 import { useCommitteeStore } from '@/stores/committee'
+import { useTheme } from '@/composables/useTheme'
 import { CATEGORY_META, getAvatarUrl, getStanceLabels, usePersonaStore, type PersonaCategory } from '@/stores/persona'
 
 const appStore = useAppStore()
 const committeeStore = useCommitteeStore()
 const personaStore = usePersonaStore()
+const { theme, toggle: toggleTheme } = useTheme()
+const platform = inject<import('vue').Ref<string>>('platform')
+
+function openDrawer() { window.dispatchEvent(new CustomEvent('open-drawer')) }
+function openModels() { window.dispatchEvent(new CustomEvent('open-models')) }
 
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement>()
 const showAssignments = ref(false)
 const showCommitteeModelSheet = ref(false)
 const resultInspector = ref<'mode' | 'roles' | 'models'>('mode')
+const activeInspectors = ref(new Set<string>(['mode']))
+
+function toggleInspector(section: string) {
+  if (activeInspectors.value.has(section)) {
+    if (activeInspectors.value.size > 1) activeInspectors.value.delete(section)
+  } else {
+    activeInspectors.value.add(section)
+  }
+}
+
+function isInspectorActive(section: string) {
+  return activeInspectors.value.has(section)
+}
+
 const selectedPackId = ref(COMMITTEE_PACKS[0]?.id || 'product')
 
 const roleMap = computed(() =>
@@ -232,7 +256,7 @@ function startNew() {
 function endSession() {
   inputText.value = ''
   committeeStore.clearSession()
-  resultInspector.value = 'mode'
+  activeInspectors.value = new Set(['mode'])
   nextTick(resizeComposer)
 }
 
@@ -248,10 +272,6 @@ function resizeComposer() {
   if (!el) return
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 160)}px`
-}
-
-function toggleInspector(section: 'mode' | 'roles' | 'models') {
-  resultInspector.value = resultInspector.value === section ? 'mode' : section
 }
 
 onMounted(() => {
@@ -278,16 +298,66 @@ onBeforeRouteLeave(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-surface-0">
+  <div class="flex flex-col h-full overflow-hidden bg-transparent">
+    <!-- Group 1: Floating Capsule Header (V3 SPEC Style) -->
+    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
+      <header
+        data-tauri-drag-region
+        class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10"
+        @mousedown.left="startWindowDrag">
+
+        <!-- Left: Sidebar Breadcrumb & Info -->
+        <div class="flex items-center gap-1 sm:gap-2 min-w-0">
+          <!-- Mobile Sidebar Toggle (Mobile ONLY) -->
+          <button @click="openDrawer"
+            class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors sm:hidden">
+            <Menu :size="18" />
+          </button>
+
+          <div class="flex items-center gap-2.5 min-w-0">
+            <!-- Identity Icon (Sparkles for Advisors) -->
+            <div
+              class="flex items-center justify-center w-8 h-8 rounded-full bg-accent text-white shadow-lg shadow-accent/20 shrink-0">
+              <Sparkles :size="16" />
+            </div>
+            <div class="min-w-0">
+              <h1 class="text-sm font-black text-text-primary truncate tracking-tight">
+                AI 锦囊团
+              </h1>
+              <p
+                class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
+                {{ personaStore.activePersonaIds.length }} 角色 ·
+                {{ appStore.committeeSelectedModels.length }} 模型
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Control Suite -->
+        <div class="flex items-center gap-2">
+          <!-- New Session -->
+          <button @click="endSession"
+            class="p-2 sm:px-4 sm:py-2 rounded-full bg-accent text-white shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
+            <Plus :size="18" :stroke-width="4" />
+            <span
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest">新议题</span>
+          </button>
+        </div>
+      </header>
+    </div>
+
     <div class="flex-1 overflow-y-auto">
-      <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
+      <div v-if="!committeeStore.isActive && !committeeStore.isStreaming"
+        class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
         <section class="rounded-5xl border border-border-default bg-surface-1 shadow-sm">
           <div class="grid gap-6 px-4 py-5 md:px-6 md:py-6 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
             <div>
-              <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
+              <div
+                class="mb-4 inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
                 AI 锦囊团
               </div>
-              <h1 class="max-w-3xl text-2xl font-semibold leading-tight text-text-primary md:text-[2.2rem]">
+              <h1
+                class="max-w-3xl text-2xl font-semibold leading-tight text-text-primary md:text-[2.2rem]">
                 先把这轮会议配好，再让角色正式上桌。
               </h1>
               <p class="mt-3 max-w-2xl text-sm leading-7 text-text-secondary md:mt-4 md:text-base">
@@ -296,16 +366,14 @@ onBeforeRouteLeave(() => {
               </p>
 
               <div id="committee-mode-section" class="mt-6 grid gap-3 sm:grid-cols-3">
-                <button
-                  v-for="mode in COMMITTEE_MODE_OPTIONS"
-                  :key="mode.id"
+                <button v-for="mode in COMMITTEE_MODE_OPTIONS" :key="mode.id"
                   @click="currentMode = mode.id"
                   class="rounded-4xl border px-4 py-4 text-left transition-all duration-200"
                   :class="currentMode === mode.id
                     ? 'border-accent/35 bg-accent/10 shadow-sm'
-                    : 'border-border-default bg-surface-1 hover:border-accent/20 hover:bg-surface-2/70 hover:shadow-sm'"
-                >
-                  <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">{{ mode.tagline }}</div>
+                    : 'border-border-default bg-surface-1 hover:border-accent/20 hover:bg-surface-2/70 hover:shadow-sm'">
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent">
+                    {{ mode.tagline }}</div>
                   <div class="mt-2 text-lg font-semibold text-text-primary">{{ mode.name }}</div>
                   <p class="mt-2 text-xs leading-6 text-text-secondary">{{ mode.description }}</p>
                 </button>
@@ -318,10 +386,12 @@ onBeforeRouteLeave(() => {
           </div>
         </section>
 
-        <section class="mt-6 rounded-5xl border border-border-default bg-surface-1 p-5 shadow-sm md:p-6">
+        <section
+          class="mt-6 rounded-5xl border border-border-default bg-surface-1 p-5 shadow-sm md:p-6">
           <div class="space-y-6">
             <div class="flex flex-col">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Committee Packs</div>
+              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">
+                Committee Packs</div>
               <div class="mt-2">
                 <h2 class="text-2xl font-semibold text-text-primary">任务委员会包</h2>
                 <p class="mt-2 max-w-3xl text-sm leading-7 text-text-secondary">
@@ -330,33 +400,27 @@ onBeforeRouteLeave(() => {
               </div>
 
               <div class="mt-4 grid gap-2 md:grid-cols-3">
-                <button
-                  v-for="pack in COMMITTEE_PACKS"
-                  :key="pack.id"
+                <button v-for="pack in COMMITTEE_PACKS" :key="pack.id"
                   @click="selectCommitteePack(pack.id)"
                   class="flex h-full flex-col rounded-3xl border px-4 py-3 text-left transition-all duration-200"
                   :class="activePack.id === pack.id
                     ? 'border-accent/35 bg-accent/8 shadow-sm'
-                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
-                >
+                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'">
                   <div class="flex items-start justify-between gap-3">
                     <div>
                       <div class="text-sm font-semibold text-text-primary">{{ pack.name }}</div>
-                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">{{ pack.subtitle }}</div>
+                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">
+                        {{ pack.subtitle }}</div>
                     </div>
                     <span
                       class="inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium leading-none"
-                      :class="activePack.id === pack.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'"
-                    >
+                      :class="activePack.id === pack.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'">
                       {{ pack.outcomes.length }} 类
                     </span>
                   </div>
                   <div class="mt-3 flex flex-wrap gap-1.5">
-                    <span
-                      v-for="outcome in pack.outcomes"
-                      :key="outcome"
-                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary"
-                    >
+                    <span v-for="outcome in pack.outcomes" :key="outcome"
+                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary">
                       {{ outcome }}
                     </span>
                   </div>
@@ -367,7 +431,8 @@ onBeforeRouteLeave(() => {
             <div class="h-px bg-border-subtle" />
 
             <div class="flex flex-col">
-              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Presets</div>
+              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">
+                Presets</div>
               <div class="mt-2">
                 <h2 class="text-2xl font-semibold text-text-primary">对症抓药</h2>
                 <p class="mt-2 max-w-3xl text-sm leading-7 text-text-secondary">
@@ -378,34 +443,28 @@ onBeforeRouteLeave(() => {
               </div>
 
               <div class="mt-4 grid gap-2 sm:grid-cols-2">
-                <button
-                  v-for="preset in filteredCommitteePresets"
-                  :key="preset.id"
+                <button v-for="preset in filteredCommitteePresets" :key="preset.id"
                   @click="applyCommitteePreset(preset.id)"
                   class="flex h-full flex-col rounded-3xl border px-4 py-3 text-left transition-all duration-200"
                   :class="activePresetId === preset.id
                     ? 'border-accent/35 bg-accent/8 shadow-sm'
-                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'"
-                >
+                    : 'border-border-default bg-surface-2/40 hover:border-border-subtle hover:bg-surface-2/80'">
                   <div class="flex items-start justify-between gap-3">
                     <div>
                       <div class="text-sm font-semibold text-text-primary">{{ preset.name }}</div>
-                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">{{ preset.subtitle }}</div>
+                      <div class="mt-1 text-[11px] leading-5 text-text-secondary">
+                        {{ preset.subtitle }}</div>
                     </div>
                     <span
                       class="inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium leading-none"
-                      :class="activePresetId === preset.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'"
-                    >
+                      :class="activePresetId === preset.id ? 'bg-accent/12 text-accent' : 'bg-surface-1 text-text-tertiary'">
                       {{ COMMITTEE_MODE_OPTIONS.find((mode) => mode.id === preset.mode)?.name }}
                     </span>
                   </div>
                   <p class="mt-2 text-xs leading-6 text-text-secondary">{{ preset.description }}</p>
                   <div class="mt-auto flex flex-wrap gap-1.5 pt-3">
-                    <span
-                      v-for="roleName in getPresetRoleNames(preset.roleIds)"
-                      :key="roleName"
-                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary"
-                    >
+                    <span v-for="roleName in getPresetRoleNames(preset.roleIds)" :key="roleName"
+                      class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary">
                       {{ roleName }}
                     </span>
                   </div>
@@ -415,10 +474,12 @@ onBeforeRouteLeave(() => {
           </div>
         </section>
 
-        <section id="committee-roles-section" class="mt-6 rounded-5xl border border-border-default bg-surface-1/95 p-5 shadow-sm md:p-6">
+        <section id="committee-roles-section"
+          class="mt-6 rounded-5xl border border-border-default bg-surface-1/95 p-5 shadow-sm md:p-6">
           <div class="flex flex-col gap-4">
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">Persona Matrix</div>
+              <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-tertiary">
+                Persona Matrix</div>
               <h2 class="mt-2 text-2xl font-semibold text-text-primary">12 个预设角色，按角度互相掐架</h2>
               <p class="mt-2 max-w-3xl text-sm leading-7 text-text-secondary">
                 普通用户不需要先学什么立场轴，直接勾角色就行。你真正要验证的是：
@@ -426,86 +487,65 @@ onBeforeRouteLeave(() => {
               </p>
             </div>
             <div class="flex flex-wrap gap-2 md:justify-end">
-              <button
-                @click="showAssignments = !showAssignments"
-                class="whitespace-nowrap rounded-full border border-border-default bg-surface-1 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary"
-              >
+              <button @click="showAssignments = !showAssignments"
+                class="whitespace-nowrap rounded-full border border-border-default bg-surface-1 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary">
                 {{ showAssignments ? '隐藏分配' : '查看分配' }}
               </button>
-              <button
-                @click="selectAllRoles"
-                class="whitespace-nowrap rounded-full border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary"
-              >
+              <button @click="selectAllRoles"
+                class="whitespace-nowrap rounded-full border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary">
                 全选 12 角
               </button>
-              <button
-                @click="clearRoles"
-                class="whitespace-nowrap rounded-full border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary"
-              >
+              <button @click="clearRoles"
+                class="whitespace-nowrap rounded-full border border-border-default px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-subtle hover:text-text-primary">
                 清空
               </button>
             </div>
           </div>
 
           <div class="mt-6 grid gap-4 xl:grid-cols-2">
-            <div
-              v-for="group in roleGroups"
-              :key="group.category"
-              class="rounded-4xl border bg-surface-1 p-4 shadow-sm"
-              :class="isCategoryActive(group.category)
+            <div v-for="group in roleGroups" :key="group.category"
+              class="rounded-4xl border bg-surface-1 p-4 shadow-sm" :class="isCategoryActive(group.category)
                 ? [group.borderClass, group.softClass]
-                : 'border-border-default'"
-            >
+                : 'border-border-default'">
               <div class="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <div
-                    class="text-[11px] font-semibold uppercase tracking-[0.22em]"
-                    :class="isCategoryActive(group.category) ? group.textClass : 'text-text-tertiary'"
-                  >
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.22em]"
+                    :class="isCategoryActive(group.category) ? group.textClass : 'text-text-tertiary'">
                     {{ group.tag }}
                   </div>
                   <div class="mt-1 text-lg font-semibold text-text-primary">{{ group.label }}</div>
                   <div class="mt-1 text-xs text-text-secondary">{{ group.desc }}</div>
                 </div>
-                <button
-                  @click="toggleCategory(group.category)"
+                <button @click="toggleCategory(group.category)"
                   class="rounded-full border bg-surface-1 px-3 py-1.5 text-[11px] font-medium transition-colors hover:bg-surface-2"
                   :class="isCategoryActive(group.category)
                     ? [group.borderClass, group.textClass]
-                    : 'border-border-default text-text-secondary'"
-                >
+                    : 'border-border-default text-text-secondary'">
                   {{ isCategoryFullySelected(group.category) ? '取消整组' : '整组激活' }}
                 </button>
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
-                <button
-                  v-for="role in group.roles"
-                  :key="role.id"
-                  @click="toggleRole(role.id)"
+                <button v-for="role in group.roles" :key="role.id" @click="toggleRole(role.id)"
                   class="flex h-full flex-col overflow-hidden rounded-4xl border border-border-default bg-surface-1 p-3 text-left transition-all duration-200"
                   :class="isRoleActive(role.id)
                     ? [group.borderClass, 'shadow-md']
-                    : 'opacity-60 hover:bg-surface-2 hover:opacity-100'"
-                >
+                    : 'opacity-60 hover:bg-surface-2 hover:opacity-100'">
                   <div class="flex items-center justify-between gap-3">
                     <div class="flex min-w-0 items-center gap-3">
-                      <img
-                        :src="getAvatarUrl(role, 34)"
-                        :alt="role.name"
+                      <img :src="getAvatarUrl(role, 34)" :alt="role.name"
                         class="h-8.5 w-8.5 rounded-full bg-surface-3 shrink-0"
-                        :class="isRoleActive(role.id) ? '' : 'grayscale'"
-                      />
+                        :class="isRoleActive(role.id) ? '' : 'grayscale'" />
                       <div class="min-w-0">
-                        <div class="truncate text-sm font-semibold text-text-primary">{{ role.name }}</div>
+                        <div class="truncate text-sm font-semibold text-text-primary">
+                          {{ role.name }}</div>
                       </div>
                     </div>
                     <div
                       class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none"
                       :class="isRoleActive(role.id)
                         ? group.badgeClass
-                        : 'bg-surface-3 text-text-tertiary'"
-                    >
+                        : 'bg-surface-3 text-text-tertiary'">
                       {{ isRoleActive(role.id) ? '已激活' : '待命中' }}
                     </div>
                   </div>
@@ -515,30 +555,22 @@ onBeforeRouteLeave(() => {
                   </div>
 
                   <div class="mt-2 flex flex-wrap gap-1.5 text-[10px]">
-                    <span
-                      class="rounded-full px-2 py-0.5"
-                      :class="isRoleActive(role.id) ? 'bg-sky-500/10 text-sky-400' : 'bg-surface-3 text-text-tertiary'"
-                    >
+                    <span class="rounded-full px-2 py-0.5"
+                      :class="isRoleActive(role.id) ? 'bg-sky-500/10 text-sky-400' : 'bg-surface-3 text-text-tertiary'">
                       {{ getStanceLabels(role.stance).cognition }}
                     </span>
-                    <span
-                      class="rounded-full px-2 py-0.5"
-                      :class="isRoleActive(role.id) ? 'bg-amber-500/10 text-amber-400' : 'bg-surface-3 text-text-tertiary'"
-                    >
+                    <span class="rounded-full px-2 py-0.5"
+                      :class="isRoleActive(role.id) ? 'bg-amber-500/10 text-amber-400' : 'bg-surface-3 text-text-tertiary'">
                       {{ getStanceLabels(role.stance).horizon }}
                     </span>
-                    <span
-                      class="rounded-full px-2 py-0.5"
-                      :class="isRoleActive(role.id) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-surface-3 text-text-tertiary'"
-                    >
+                    <span class="rounded-full px-2 py-0.5"
+                      :class="isRoleActive(role.id) ? 'bg-emerald-500/10 text-emerald-400' : 'bg-surface-3 text-text-tertiary'">
                       {{ getStanceLabels(role.stance).interest }}
                     </span>
                   </div>
 
-                  <p
-                    class="mt-3 text-xs leading-5 text-text-secondary"
-                    :class="showAssignments ? 'min-h-[64px]' : ''"
-                  >
+                  <p class="mt-3 text-xs leading-5 text-text-secondary"
+                    :class="showAssignments ? 'min-h-[64px]' : ''">
                     {{ role.coreBelief }}
                   </p>
 
@@ -546,10 +578,8 @@ onBeforeRouteLeave(() => {
                     不可妥协：{{ role.nonNegotiable }}
                   </p>
 
-                  <div
-                    v-if="showAssignments"
-                    class="mt-3 rounded-xl border border-border-default bg-surface-2/70 px-3 py-2.5"
-                  >
+                  <div v-if="showAssignments"
+                    class="mt-3 rounded-xl border border-border-default bg-surface-2/70 px-3 py-2.5">
                     <template v-if="assignmentMap[role.id]">
                       <div class="flex items-center justify-between gap-2">
                         <span class="text-[11px] font-medium text-accent">当前模型</span>
@@ -558,11 +588,9 @@ onBeforeRouteLeave(() => {
                         </span>
                       </div>
                       <div class="mt-2 flex flex-wrap gap-1.5">
-                        <span
-                          v-for="reason in assignmentMap[role.id].reasons.slice(0, 2)"
+                        <span v-for="reason in assignmentMap[role.id].reasons.slice(0, 2)"
                           :key="reason"
-                          class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary"
-                        >
+                          class="rounded-full border border-border-subtle bg-surface-1 px-2 py-0.5 text-[10px] text-text-tertiary">
                           {{ reason }}
                         </span>
                       </div>
@@ -589,128 +617,107 @@ onBeforeRouteLeave(() => {
           <div class="absolute left-5 top-0 bottom-0 hidden w-px bg-border-subtle md:block" />
 
           <div class="relative mb-8 flex items-start gap-4">
-            <div class="z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-surface-1 shadow-sm border border-border-default">
+            <div
+              class="z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-surface-1 shadow-sm border border-border-default">
               <MessageSquare class="h-4 w-4 text-accent" />
             </div>
-            <div class="flex-1 rounded-4xl border border-border-default bg-surface-1 px-4 py-4 shadow-sm">
+            <div
+              class="flex-1 rounded-4xl border border-border-default bg-surface-1 px-4 py-4 shadow-sm">
               <div class="flex flex-wrap items-center gap-2">
                 <button
-                  class="rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] transition-colors"
-                  :class="resultInspector === 'mode' ? 'bg-accent text-white' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3'"
-                  @click="toggleInspector('mode')"
-                >
+                  class="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                  :class="isInspectorActive('mode') ? 'bg-accent text-white shadow-lg scale-105' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3 opacity-60'"
+                  @click="toggleInspector('mode')">
                   {{ startedModeOption?.name }}
                 </button>
                 <button
-                  class="rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors"
-                  :class="resultInspector === 'roles' ? 'bg-accent text-white' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3'"
-                  @click="toggleInspector('roles')"
-                >
+                  class="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                  :class="isInspectorActive('roles') ? 'bg-accent text-white shadow-lg scale-105' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3 opacity-60'"
+                  @click="toggleInspector('roles')">
                   {{ committeeStore.activeRoleCount }} 个角色
                 </button>
                 <button
-                  class="rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors"
-                  :class="resultInspector === 'models' ? 'bg-accent text-white' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3'"
-                  @click="toggleInspector('models')"
-                >
+                  class="rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                  :class="isInspectorActive('models') ? 'bg-accent text-white shadow-lg scale-105' : 'bg-surface-2 text-text-tertiary hover:bg-surface-3 opacity-60'"
+                  @click="toggleInspector('models')">
                   {{ appStore.committeeSelectedModels.length }} 个模型池
                 </button>
               </div>
-              <p class="mt-3 text-base font-medium leading-7 text-text-primary">{{ committeeStore.prompt }}</p>
+              <p
+                class="mt-4 text-base font-semibold leading-relaxed text-text-primary italic border-l-4 border-accent/20 pl-4">
+                {{ committeeStore.prompt }}</p>
 
-              <div class="mt-4 rounded-3xl border border-border-subtle bg-surface-2/70 px-4 py-3">
-                <template v-if="resultInspector === 'mode'">
-                  <div class="text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">当前模式</div>
-                  <div class="mt-2 text-sm font-semibold text-text-primary">{{ startedModeOption?.name }}</div>
-                  <p class="mt-2 text-xs leading-6 text-text-secondary">{{ inspectorModeText }}</p>
-                </template>
-
-                <template v-else-if="resultInspector === 'roles'">
-                  <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">
-                    <Users class="h-3.5 w-3.5" />
-                    当前角色
+              <div class="mt-6 space-y-4">
+                <div v-if="isInspectorActive('mode')"
+                  class="rounded-3xl border border-accent/10 bg-accent/5 px-4 py-3 animate-slide-up">
+                  <div class="text-[10px] font-black uppercase tracking-widest text-accent/60">当前模式
                   </div>
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <span
-                      v-for="role in activeRoles"
-                      :key="role.id"
-                      class="rounded-full border border-border-subtle bg-surface-1 px-3 py-1 text-xs text-text-secondary"
-                    >
+                  <div class="mt-1 text-sm font-black text-text-primary uppercase tracking-tight">
+                    {{ startedModeOption?.name }}</div>
+                  <p class="mt-1 text-xs leading-relaxed text-text-secondary font-medium">
+                    {{ inspectorModeText }}</p>
+                </div>
+
+                <div v-if="isInspectorActive('roles')"
+                  class="rounded-3xl border border-border-subtle bg-surface-2/40 px-4 py-3 animate-slide-up">
+                  <div
+                    class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-text-tertiary">
+                    <Users class="h-3 w-3" />
+                    当前角色组
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-1.5">
+                    <span v-for="role in activeRoles" :key="role.id"
+                      class="rounded-full border border-white/5 bg-white/5 px-3 py-1 text-[11px] font-bold text-text-secondary">
                       {{ role.name }}
                     </span>
                   </div>
-                </template>
+                </div>
 
-                <template v-else>
-                  <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-text-tertiary">
-                    <Cpu class="h-3.5 w-3.5" />
-                    本次模型池
+                <div v-if="isInspectorActive('models')"
+                  class="rounded-3xl border border-border-subtle bg-surface-2/40 px-4 py-3 animate-slide-up">
+                  <div
+                    class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-text-tertiary">
+                    <Cpu class="h-3 w-3" />
+                    模型池分配
                   </div>
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <span
-                      v-for="model in appStore.committeeSelectedModels"
-                      :key="model.id"
-                      class="rounded-full border px-3 py-1 text-xs"
-                      :style="getModelChipStyle(model.id)"
-                    >
+                  <div class="mt-3 flex flex-wrap gap-1.5">
+                    <span v-for="model in appStore.committeeSelectedModels" :key="model.id"
+                      class="rounded-full border px-3 py-1 text-[11px] font-bold"
+                      :style="getModelChipStyle(model.id)">
                       {{ model.name }}
                     </span>
                   </div>
-                </template>
+                </div>
               </div>
             </div>
           </div>
 
-          <CommitteePhaseSection
-            :phase="1"
-            title="角色独立发言"
-            :subtitle="`${committeeStore.activeRoleCount} 个高参并行发言`"
-            :status="phase1Status"
-            color-class="bg-accent"
-          >
+          <CommitteePhaseSection :phase="1" title="角色独立发言"
+            :subtitle="`${committeeStore.activeRoleCount} 个高参并行发言`" :status="phase1Status"
+            color-class="bg-accent">
             <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <CommitteeSummaryCard
-                v-for="summary in committeeStore.phase1Summaries"
-                :key="summary.roleId"
-                :summary="summary"
-                :role="roleMap[summary.roleId]"
-                :model-name="getModelName(summary.modelId)"
-              />
+              <CommitteeSummaryCard v-for="summary in committeeStore.phase1Summaries"
+                :key="summary.roleId" :summary="summary" :role="roleMap[summary.roleId]"
+                :model-name="getModelName(summary.modelId)" />
             </div>
           </CommitteePhaseSection>
 
-          <CommitteePhaseSection
-            v-if="committeeStore.hasDebatePhase"
-            :phase="2"
-            title="第二轮正面回应"
-            subtitle="立场不改，但要正面接招"
-            :status="phase2Status"
-            color-class="bg-rose-500"
-          >
+          <CommitteePhaseSection v-if="committeeStore.hasDebatePhase" :phase="2" title="第二轮正面回应"
+            subtitle="立场不改，但要正面接招" :status="phase2Status" color-class="bg-rose-500">
             <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <CommitteeDebateCard
-                v-for="review in committeeStore.phase2Reviews"
-                :key="`${review.roleId}-${review.targetRoleId}`"
-                :review="review"
+              <CommitteeDebateCard v-for="review in committeeStore.phase2Reviews"
+                :key="`${review.roleId}-${review.targetRoleId}`" :review="review"
                 :role-name="roleMap[review.roleId]?.name || review.roleId"
-                :target-name="roleMap[review.targetRoleId]?.name || review.targetRoleId"
-              />
+                :target-name="roleMap[review.targetRoleId]?.name || review.targetRoleId" />
             </div>
           </CommitteePhaseSection>
 
-          <CommitteePhaseSection
-            v-if="committeeStore.hasCommitteePhase"
-            :phase="3"
-            title="系统主持人总结"
-            :subtitle="committeeStore.synthesizer || ''"
-            :status="phase3Status"
-            color-class="bg-amber-500"
-          >
-            <CommitteeSynthesisCard
-              :synthesis="committeeStore.committeeSynthesis"
+          <CommitteePhaseSection v-if="committeeStore.hasCommitteePhase" :phase="3" title="系统主持人总结"
+            :subtitle="committeeStore.synthesizer || ''" :status="phase3Status"
+            color-class="bg-amber-500">
+            <CommitteeSynthesisCard :synthesis="committeeStore.committeeSynthesis"
               :content="committeeStore.phase3Content"
-              :streaming="committeeStore.isStreaming && committeeStore.currentPhase === 3"
-            />
+              :streaming="committeeStore.isStreaming && committeeStore.currentPhase === 3" />
           </CommitteePhaseSection>
         </div>
 
@@ -718,90 +725,86 @@ onBeforeRouteLeave(() => {
       </div>
     </div>
 
-    <div class="border-t border-border-subtle bg-surface-1/95 backdrop-blur-sm">
-      <div v-if="!committeeStore.isActive && !committeeStore.isStreaming" class="px-4 py-3">
-        <div class="mx-auto max-w-5xl">
-          <div class="mb-2 overflow-x-auto no-scrollbar">
-            <div class="flex w-max min-w-full items-center gap-2 text-xs text-text-tertiary">
-              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ currentModeOption?.name }}</span>
-              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ personaStore.activePersonaIds.length }} 个角色已激活</span>
-              <span class="rounded-full bg-surface-2 px-2.5 py-1 whitespace-nowrap">{{ appStore.committeeSelectedModels.length }} 个模型池</span>
-            </div>
-          </div>
+    <!-- Group 3: Trinity Control Pod (Consistency with Chat/Discuss) -->
+    <div class="z-30 px-4 pb-4 pt-4 shrink-0">
+      <div
+        class="max-w-6xl mx-auto glass-v3 rounded-[36px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 relative flex flex-col overflow-visible border border-white/10">
+
+        <!-- Status Bar (Top of Pod) -->
+        <div v-if="!committeeStore.isActive && !committeeStore.isStreaming"
+          class="px-6 pt-3 pb-1 overflow-x-auto no-scrollbar">
           <div
-            class="flex min-h-[48px] items-end gap-2 rounded-xl border px-2.5 py-1.5 transition-colors duration-150 md:min-h-[52px] md:py-2"
-            :class="[
-              'border-border-default bg-surface-2 focus-within:border-accent/40 focus-within:bg-surface-1',
-            ]"
-          >
-            <textarea
-              ref="textareaRef"
-              v-model="inputText"
-              rows="1"
-              class="min-h-[36px] max-h-40 flex-1 resize-none bg-transparent py-2 pl-1.5 pr-1 text-base text-text-primary placeholder-text-tertiary outline-none"
-              @keydown="handleKeydown"
-            />
-            <button
-              @click="handleSubmit"
-              :disabled="!canSubmit"
-              class="inline-flex h-9 w-9 shrink-0 items-center justify-center self-end rounded-lg transition-all active:scale-95"
+            class="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-text-tertiary">
+            <span
+              class="px-2 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20">{{ currentModeOption?.name }}</span>
+            <span
+              class="px-2 py-0.5 rounded-full bg-white/5 border border-white/5">{{ personaStore.activePersonaIds.length }}
+              个角色已激活</span>
+            <span
+              class="px-2 py-0.5 rounded-full bg-white/5 border border-white/5">{{ appStore.committeeSelectedModels.length }}
+              个模型池</span>
+          </div>
+        </div>
+
+        <!-- Input / Streaming / Done State -->
+        <div class="px-4 pb-2 pt-1">
+          <!-- Normal Input State -->
+          <div v-if="!committeeStore.isActive && !committeeStore.isStreaming"
+            class="flex items-end gap-2 px-2">
+            <textarea ref="textareaRef" v-model="inputText" placeholder="输入锦囊团议题..." rows="1"
+              class="flex-1 bg-transparent text-base text-text-primary placeholder:text-text-tertiary/40 resize-none py-3 px-1 outline-none max-h-40 min-h-[44px] font-medium leading-relaxed"
+              @keydown="handleKeydown" />
+            <button @click="handleSubmit" :disabled="!canSubmit"
+              class="h-10 w-10 shrink-0 flex items-center justify-center rounded-full transition-all duration-500 mb-1"
               :class="canSubmit
-                ? 'bg-accent text-white hover:bg-accent-hover'
-                : 'text-text-tertiary disabled:cursor-not-allowed'"
-            >
+                ? 'bg-accent text-white shadow-xl scale-105 hover:bg-accent-hover'
+                : 'bg-white/5 text-text-tertiary'">
               <Sparkles class="h-4 w-4" />
             </button>
           </div>
-        </div>
-      </div>
 
-      <div v-else-if="committeeStore.isStreaming" class="px-4 py-3">
-        <div class="mx-auto flex max-w-5xl items-center justify-between gap-3 text-sm text-text-secondary">
-          <div class="flex items-center gap-3">
-            <Loader2 class="h-4 w-4 animate-spin text-accent" />
-            <span>{{ phaseNames[committeeStore.currentPhase] }}中...</span>
-            <span class="text-xs text-text-tertiary">{{ committeeStore.phaseProgress.current }}/{{ committeeStore.phaseProgress.total }}</span>
+          <!-- Streaming State -->
+          <div v-else-if="committeeStore.isStreaming"
+            class="flex items-center justify-between gap-3 px-4 py-3 text-sm text-text-secondary">
+            <div class="flex items-center gap-3">
+              <Loader2 class="h-4 w-4 animate-spin text-accent" />
+              <span
+                class="font-black uppercase tracking-widest text-xs">{{ phaseNames[committeeStore.currentPhase] }}中...</span>
+              <span
+                class="text-[10px] font-mono text-text-tertiary">{{ committeeStore.phaseProgress.current }}/{{ committeeStore.phaseProgress.total }}</span>
+            </div>
+            <button @click="committeeStore.stop()"
+              class="h-9 px-4 flex items-center gap-2 rounded-full bg-red-500/10 border border-red-500/20 text-xs font-black uppercase tracking-widest text-red-400 hover:bg-red-500/20 transition-all">
+              <Square class="h-3 w-3" fill="currentColor" />
+              停止
+            </button>
           </div>
-          <button
-            @click="committeeStore.stop()"
-            class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/10"
-          >
-            <Square class="h-3.5 w-3.5" fill="currentColor" />
-            停止
-          </button>
-        </div>
-      </div>
 
-      <div v-else class="px-4 py-3">
-        <div class="mx-auto flex max-w-5xl items-center justify-between gap-3">
-          <div class="flex items-center gap-2 text-sm text-text-secondary">
-            <CheckCircle v-if="committeeStore.isCompleted" class="h-4 w-4 text-green-500" />
-            <Square v-else class="h-4 w-4 text-amber-400" fill="currentColor" />
-            {{ committeeStore.isCompleted ? '锦囊团运行完成' : '本轮已停止，保留当前结果' }}
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              @click="endSession"
-              class="rounded-full px-3 py-1.5 text-sm text-text-secondary transition-colors hover:bg-surface-2"
-            >
-              结束
-            </button>
-            <button
-              @click="startNew"
-              class="rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
-            >
-              新问题
-            </button>
+          <!-- Done State -->
+          <div v-else class="flex items-center justify-between gap-3 px-4 py-2">
+            <div
+              class="flex items-center gap-2 text-xs font-bold text-text-secondary uppercase tracking-tight">
+              <CheckCircle v-if="committeeStore.isCompleted" class="h-4 w-4 text-green-500" />
+              <Square v-else class="h-4 w-4 text-amber-400" fill="currentColor" />
+              {{ committeeStore.isCompleted ? '锦囊团运行完成' : '本轮已停止' }}
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="endSession"
+                class="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest text-text-tertiary hover:bg-white/5 transition-all">
+                结束
+              </button>
+              <button @click="startNew"
+                class="px-5 py-2 rounded-xl bg-accent text-white text-xs font-black uppercase tracking-widest shadow-lg shadow-accent/20 hover:scale-105 active:scale-95 transition-all">
+                新问题
+              </button>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <IOSModelSheet
-      :open="showCommitteeModelSheet"
-      mode="committee"
-      @close="showCommitteeModelSheet = false"
-    />
+    <IOSModelSheet :open="showCommitteeModelSheet" mode="committee"
+      @close="showCommitteeModelSheet = false" />
   </div>
 </template>
 

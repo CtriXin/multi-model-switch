@@ -2,7 +2,7 @@
 import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
-import { useAppStore, getModelColor, type ModelMeta } from '@/stores/app'
+import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
 import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare } from 'lucide-vue-next'
 import { useChatStore, type ContextMode } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
@@ -20,6 +20,7 @@ const isMobile = computed(() => platform?.value === 'ios')
 const popoverOpen = ref(false)
 const searchQuery = ref('')
 const filterVision = ref(false)
+const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
 const recentSearches = ref<string[]>([])
 const contextMenuOpen = ref(false)
 const modelPopoverButtonRef = ref<HTMLElement | null>(null)
@@ -59,9 +60,10 @@ const groupedFiltered = computed(() => {
 
 function updateFiltered() {
   const q = searchQuery.value.toLowerCase()
-  filteredModels.value = appStore.models.filter(m => {
-    if (appStore.preferFree && !m.free) return false
-    if (filterVision.value && !m.supportsVision) return false
+  filteredModels.value = appStore.filterModels({
+    tags: tierFilters.value,
+    requireVision: filterVision.value,
+  }).filter(m => {
     if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false
     return true
   })
@@ -72,7 +74,6 @@ function togglePopover() {
   if (popoverOpen.value) {
     replacementRequest.value = null
     searchQuery.value = ''
-    filterVision.value = false
     recentSearches.value = getSearchHistory()
     updateFiltered()
   }
@@ -116,14 +117,28 @@ function applyRecentSearch(keyword: string) {
   updateFiltered()
 }
 
-function toggleFilterFree() {
-  appStore.preferFree = !appStore.preferFree
+function toggleTierFilter(tag: ModelPoolTag) {
+  const next = new Set(tierFilters.value)
+  if (next.has(tag)) next.delete(tag)
+  else next.add(tag)
+  tierFilters.value = Array.from(next)
   updateFiltered()
 }
 
 function toggleFilterVision() {
   filterVision.value = !filterVision.value
   updateFiltered()
+}
+
+function hasTierFilter(tag: ModelPoolTag) {
+  return tierFilters.value.includes(tag)
+}
+
+function randomPickFromFilters() {
+  appStore.randomPick(3, 'chat', {
+    tags: tierFilters.value,
+    requireVision: filterVision.value,
+  })
 }
 
 function isReplacementDisabled(id: string) {
@@ -217,7 +232,7 @@ onUnmounted(() => {
         <div class="flex items-center gap-1 shrink-0 border-l border-white/5 pl-2 ml-1">
 
           <!-- Dice: 随机模型 -->
-          <button @click="appStore.randomPick()"
+          <button @click="randomPickFromFilters"
             class="p-2 rounded-full text-amber-400 hover:bg-amber-500/10 transition-all active:scale-90"
             title="随机换一组模型">
             <Dices :size="18" :stroke-width="3" />
@@ -294,13 +309,27 @@ onUnmounted(() => {
             </div>
             <!-- Filter chips -->
             <div class="flex items-center gap-1.5">
-              <button @click="toggleFilterFree"
+              <button @click="toggleTierFilter('free')"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
-                :class="appStore.preferFree
+                :class="hasTierFilter('free')
                   ? 'bg-green-500/15 text-green-400 border-green-500/30'
                   : 'text-text-tertiary border-border-subtle hover:bg-surface-3'">
                 <DollarSign :size="10" />
                 免费
+              </button>
+              <button @click="toggleTierFilter('std')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('std')
+                  ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'">
+                主力
+              </button>
+              <button @click="toggleTierFilter('pro')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('pro')
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'">
+                旗舰
               </button>
               <button @click="toggleFilterVision"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"

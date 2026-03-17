@@ -123,50 +123,52 @@ async function removeAccount() {
     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-sm font-medium text-text-primary">{{ account.name }}</span>
+          <span class="text-sm font-semibold text-text-primary tracking-tight">{{ account.name }}</span>
           <span
             v-if="account.isDefault"
-            class="inline-flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[10px] font-medium text-accent"
+            class="inline-flex items-center gap-1 rounded-full bg-accent/8 px-2 py-0.5 text-[10px] font-bold text-accent uppercase tracking-wider"
           >
-            <Star :size="10" />
-            默认账户
+            <Star :size="9" :stroke-width="3" />
+            DEFAULT
           </span>
           <span
             v-if="hasKey && account.enabled && !isSuppressed"
-            class="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[10px] font-medium text-emerald-400"
+            class="inline-flex items-center gap-1 rounded-full bg-emerald-500/8 px-2 py-0.5 text-[10px] font-bold text-emerald-400 uppercase tracking-wider"
           >
-            <ShieldCheck :size="10" />
-            可用
+            <ShieldCheck :size="9" :stroke-width="3" />
+            ACTIVE
           </span>
           <span
             v-else-if="isSuppressed"
-            class="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[10px] font-medium text-amber-400"
+            class="inline-flex items-center gap-1 rounded-full bg-amber-500/8 px-2 py-0.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider"
           >
-            <ShieldOff :size="10" />
-            今日停用
+            <ShieldOff :size="9" :stroke-width="3" />
+            RATE LIMITED
           </span>
           <span
             v-else-if="!account.enabled"
-            class="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-[10px] font-medium text-text-tertiary"
+            class="inline-flex items-center gap-1 rounded-full bg-text-tertiary/10 px-2 py-0.5 text-[10px] font-bold text-text-tertiary uppercase tracking-wider"
           >
-            <Power :size="10" />
-            已停用
+            <Power :size="9" :stroke-width="3" />
+            DISABLED
           </span>
           <span
             v-else
-            class="inline-flex items-center gap-1 rounded-full bg-surface-3 px-2 py-0.5 text-[10px] font-medium text-text-tertiary"
+            class="inline-flex items-center gap-1 rounded-full bg-text-tertiary/10 px-2 py-0.5 text-[10px] font-bold text-text-tertiary uppercase tracking-wider"
           >
-            <KeyRound :size="10" />
-            未配置
+            <KeyRound :size="9" :stroke-width="3" />
+            NO KEY
           </span>
         </div>
 
-        <div class="mt-1 text-xs font-mono text-text-tertiary">
-          {{ maskedKeyValue || '未保存 API Key' }}
-        </div>
-        <div class="mt-1 text-[11px] leading-5 text-text-tertiary">
-          {{ statusText }}
-        </div>
+        <template v-if="account.enabled">
+          <div class="mt-1 text-[11px] font-mono text-text-tertiary/60 select-all">
+            {{ maskedKeyValue || '未保存 API Key' }}
+          </div>
+          <div class="mt-1 text-[10px] leading-5 text-text-tertiary/40 font-medium uppercase tracking-tight">
+            {{ statusText }}
+          </div>
+        </template>
       </div>
 
       <div class="flex flex-wrap gap-1.5 sm:max-w-[18rem] sm:justify-end">

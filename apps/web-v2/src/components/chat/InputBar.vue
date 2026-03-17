@@ -2,11 +2,8 @@
 import { ref, watch, nextTick, inject, computed } from 'vue'
 import { Send, Square, ImagePlus, X } from 'lucide-vue-next'
 import { useToastStore } from '@/stores/toast'
+import { useAppStore } from '@/stores/app'
 import type { ImageAttachment } from '@/stores/chat'
-
-const MAX_IMAGES = 4
-const MAX_SIZE_BYTES = 4 * 1024 * 1024 // 4MB after compression
-const MAX_DIMENSION = 1024
 
 const props = defineProps<{
   disabled?: boolean
@@ -21,6 +18,7 @@ const emit = defineEmits<{
   stopAndEdit: []
 }>()
 
+const appStore = useAppStore()
 const platform = inject<import('vue').Ref<string>>('platform', ref('web'))
 const isMobile = computed(() => platform.value === 'ios')
 const text = ref('')
@@ -28,6 +26,8 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const fileInputRef = ref<HTMLInputElement>()
 const attachments = ref<ImageAttachment[]>([])
 const dragOver = ref(false)
+
+const hasModels = computed(() => appStore.selectedModels.length > 0)
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -52,8 +52,6 @@ function resize() {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
-// ── Image handling ──
-
 function openFilePicker() {
   fileInputRef.value?.click()
 }
@@ -61,7 +59,7 @@ function openFilePicker() {
 function onFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files) processFiles(Array.from(input.files))
-  input.value = '' // reset so same file can be re-selected
+  input.value = '' 
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -80,43 +78,14 @@ function onPaste(e: ClipboardEvent) {
   }
 }
 
-function onDragOver(e: DragEvent) {
-  e.preventDefault()
-  dragOver.value = true
-}
-
-function onDragLeave() {
-  dragOver.value = false
-}
-
-function onDrop(e: DragEvent) {
-  e.preventDefault()
-  dragOver.value = false
-  const files = e.dataTransfer?.files
-  if (!files) return
-  const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
-  if (imageFiles.length) processFiles(imageFiles)
-}
-
 async function processFiles(files: File[]) {
   const toast = useToastStore()
-  const remaining = MAX_IMAGES - attachments.value.length
-  if (remaining <= 0) {
-    toast.info(`最多附加 ${MAX_IMAGES} 张图片`)
-    return
-  }
+  const remaining = 4 - attachments.value.length
+  if (remaining <= 0) return
   const toProcess = files.slice(0, remaining)
-  if (files.length > remaining) {
-    toast.info(`最多附加 ${MAX_IMAGES} 张图片，已忽略多余的`)
-  }
-
   for (const file of toProcess) {
     try {
       const dataUrl = await compressImage(file)
-      if (dataUrl.length > MAX_SIZE_BYTES * 1.37) { // base64 overhead ~37%
-        toast.error(`${file.name} 压缩后仍超过 4MB，请使用更小的图片`)
-        continue
-      }
       attachments.value.push({
         id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         dataUrl,
@@ -134,9 +103,8 @@ function compressImage(file: File): Promise<string> {
     const img = new Image()
     img.onload = () => {
       let { width, height } = img
-      // Scale down to max dimension
-      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-        const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height)
+      if (width > 1024 || height > 1024) {
+        const ratio = Math.min(1024 / width, 1024 / height)
         width = Math.round(width * ratio)
         height = Math.round(height * ratio)
       }
@@ -165,141 +133,56 @@ watch(() => props.restoreText, (value) => {
 </script>
 
 <template>
-  <div class="border-t border-border-subtle bg-surface-1">
-    <div class="max-w-5xl mx-auto px-4 py-3">
-      <!-- Image preview row -->
-      <div v-if="attachments.length" class="flex gap-2 mb-2 overflow-x-auto pb-1">
-        <div
-          v-for="img in attachments"
-          :key="img.id"
-          class="relative shrink-0 group"
-        >
-          <img
-            :src="img.dataUrl"
-            :alt="img.name"
-            class="h-16 w-16 object-cover rounded-lg border border-border-subtle"
-          />
-          <button
-            @click="removeAttachment(img.id)"
-            class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white
-                   flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <X :size="10" />
-          </button>
-        </div>
-      </div>
-
-      <div
-        class="flex min-h-[52px] items-end gap-2 rounded-xl border px-2.5 py-2 transition-colors duration-150 relative overflow-hidden"
-        :class="[
-          streaming
-            ? 'border-accent/50 bg-accent/5'
-            : dragOver
-              ? 'border-accent bg-accent/10'
-              : 'border-border-default bg-surface-2 focus-within:border-accent/40',
-        ]"
-        @dragover="onDragOver"
-        @dragleave="onDragLeave"
-        @drop="onDrop"
-      >
-        <!-- Streaming aurora border effect -->
-        <div
-          v-if="streaming"
-          class="absolute inset-0 rounded-xl pointer-events-none"
-          style="background: linear-gradient(90deg, #6366f1, #818cf8, #a78bfa, #6366f1); background-size: 300% 100%; animation: aurora-flow 2s linear infinite; opacity: 0.15;"
-        />
-        <div
-          v-if="streaming"
-          class="absolute inset-0 rounded-xl pointer-events-none border-2 border-accent/30"
-          style="animation: pulse-border 1.5s ease-in-out infinite;"
-        />
-        <!-- Image button -->
+  <div class="relative w-full px-2">
+    <div v-if="attachments.length" class="flex gap-2 mb-3 overflow-x-auto pb-1 px-4">
+      <div v-for="img in attachments" :key="img.id" class="relative shrink-0 group/img">
+        <img :src="img.dataUrl" class="h-14 w-14 object-cover rounded-xl border border-white/10 shadow-lg transition-transform group-hover/img:scale-[0.98]" />
         <button
-          v-if="!streaming"
-          @click="openFilePicker"
-          type="button"
-          :disabled="disabled"
-          class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg
-                 text-text-tertiary hover:text-text-secondary hover:bg-surface-3
-                 transition-colors self-end disabled:opacity-40"
-          title="插入图片"
+          @click="removeAttachment(img.id)"
+          class="absolute top-0 right-0 -translate-y-1/3 translate-x-1/3 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-all hover:scale-110 active:scale-90 z-10 shadow-md"
         >
-          <ImagePlus :size="16" />
+          <X :size="10" :stroke-width="3" />
         </button>
-
-        <input
-          ref="fileInputRef"
-          type="file"
-          accept="image/*"
-          multiple
-          class="hidden"
-          @change="onFileSelect"
-        />
-
-        <textarea
-          ref="textareaRef"
-          v-model="text"
-          @keydown="handleKeydown"
-          @paste="onPaste"
-          :placeholder="streaming ? '生成中...' : (placeholder ?? '输入消息... (Shift+Enter 换行)')"
-          :disabled="disabled || streaming"
-          rows="1"
-          class="flex-1 bg-transparent text-base text-text-primary placeholder-text-tertiary
-                 resize-none py-2 pl-1.5 pr-1 outline-none max-h-40 min-h-[36px]
-                 disabled:opacity-40 disabled:cursor-not-allowed relative z-10"
-        />
-        <div class="flex shrink-0 items-center gap-1.5 self-end">
-          <button
-            v-if="streaming"
-            @click="emit('stop')"
-            type="button"
-            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30
-                   active:scale-95 transition-all"
-            title="停止生成"
-          >
-            <Square :size="16" fill="currentColor" />
-          </button>
-          <button
-            v-if="streaming"
-            @click="emit('stopAndEdit')"
-            type="button"
-            class="inline-flex h-9 items-center rounded-lg border border-border-subtle px-3 text-[11px] font-medium text-text-secondary transition-colors hover:bg-surface-3"
-            title="终止当前回答并把原问题放回输入框"
-          >
-            终止并编辑
-          </button>
-          <button
-            v-else
-            @click="submit"
-            type="button"
-            :disabled="!text.trim() || disabled"
-            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-all active:scale-95"
-            :class="text.trim() && !disabled
-              ? 'bg-accent text-white hover:bg-accent-hover'
-              : 'text-text-tertiary'"
-          >
-            <Send :size="16" />
-          </button>
-        </div>
       </div>
-      <div class="flex items-center justify-between mt-1.5 px-1">
-        <span v-if="!isMobile" class="text-[10px] text-text-tertiary">
-          <kbd class="px-1 py-0.5 rounded bg-surface-3 text-[9px]">⌘K</kbd> 命令面板
-        </span>
-        <span v-else />
+    </div>
+
+    <div
+      class="flex min-h-[48px] items-end gap-2 transition-all duration-300 relative group"
+      @dragover.prevent="dragOver = true"
+      @dragleave.prevent="dragOver = false"
+      @drop.prevent="dragOver = false"
+    >
+      <!-- Colorful Icon when models are selected -->
+      <button v-if="!streaming" @click="openFilePicker" type="button" :disabled="disabled" 
+              class="h-10 w-10 shrink-0 flex items-center justify-center rounded-full transition-all self-end mb-1 ml-2"
+              :class="hasModels 
+                ? 'bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 text-white shadow-lg scale-105' 
+                : 'text-text-tertiary hover:bg-black/5 dark:hover:bg-white/5'">
+        <ImagePlus :size="20" />
+      </button>
+
+      <input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="onFileSelect" />
+
+      <textarea
+        ref="textareaRef"
+        v-model="text"
+        @keydown="handleKeydown"
+        @paste="onPaste"
+        :placeholder="streaming ? 'AI 正在思考中...' : (placeholder ?? '发送消息...')"
+        :disabled="disabled || streaming"
+        rows="1"
+        class="flex-1 bg-transparent text-base text-text-primary placeholder:text-text-tertiary/40 resize-none py-3 px-1 outline-none max-h-40 min-h-[44px] disabled:opacity-40 font-medium leading-relaxed"
+      />
+      
+      <div class="flex shrink-0 items-center gap-2 self-end mb-1 mr-2">
+        <button v-if="streaming" @click="emit('stop')" class="h-10 w-10 flex items-center justify-center rounded-full bg-red-500/20 text-red-400"><Square :size="16" fill="currentColor" /></button>
+        <button v-if="streaming" @click="emit('stopAndEdit')" class="h-10 px-4 rounded-xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-text-secondary">终止并编辑</button>
+        <button v-else @click="submit" :disabled="!text.trim() || disabled" 
+                class="h-10 w-10 flex items-center justify-center rounded-full transition-all duration-500" 
+                :class="text.trim() && !disabled ? 'bg-accent text-white shadow-xl scale-105' : 'bg-white/5 text-text-tertiary'">
+          <Send :size="18" />
+        </button>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-@keyframes aurora-flow {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 300% 50%; }
-}
-
-@keyframes pulse-border {
-  0%, 100% { border-color: rgba(99, 102, 241, 0.3); }
-  50% { border-color: rgba(99, 102, 241, 0.6); }
-}
-</style>

@@ -1,7 +1,7 @@
 {
   "name": "@mms/web-v2",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.3",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5188",
@@ -24,6 +24,7 @@
     "@capacitor/status-bar": "^8.0.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2.5.3",
     "@vueuse/core": "^10.9.0",
     "lucide-vue-next": "^0.344.0",
     "markdown-it": "^14.0.0",

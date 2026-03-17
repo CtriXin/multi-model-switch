@@ -4,11 +4,13 @@ import { useToastStore } from './toast'
 import { useAppStore } from './app'
 import { streamModelChat } from '@/services/runtime'
 import { ApiError } from '@/services/api'
+import { pickNeutralModel } from '@/utils/modelSelection'
 
 export type DiscussDepth = 'full' | 'panel' | 'quick'
 
 export interface Phase1Result {
   model: string
+  error?: string
   data: {
     approach: string
     reasoning: string
@@ -21,10 +23,16 @@ export interface Phase1Result {
 export interface Phase2Result {
   reviewer: string
   target: string
+  error?: string
   data: {
     agreement: string
     challenge: string
     betterOption: string
+    // Enhanced Phase 2 fields (optional for backward compat)
+    strongestPoint?: string
+    weakestAssumption?: string
+    missingRisk?: string
+    verdict?: string
   }
 }
 
@@ -37,7 +45,7 @@ export interface RollupResult {
   nextSteps: string[]
 }
 
-const PHASE1_PROMPT = `你是一个技术专家。用户提出了一个技术问题，请给出你的独立分析。
+const PHASE1_PROMPT = `你是一个分析专家。用户提出了一个问题，请给出你的独立分析。
 
 请严格按以下 JSON 格式输出（不要输出其他内容）：
 {
@@ -50,18 +58,20 @@ const PHASE1_PROMPT = `你是一个技术专家。用户提出了一个技术问
 
 用户的问题是：`
 
-const PHASE2_PROMPT = `你是一个技术审查专家。请审查另一个模型对以下问题的分析，并给出你的交叉评审意见。
+const PHASE2_PROMPT = `你是一个审查专家。你的首要任务是压力测试对方的分析。请审查另一个模型对以下问题的分析，并给出你的交叉评审意见。
 
 请严格按以下 JSON 格式输出（不要输出其他内容）：
 {
-  "agreement": "你同意的部分（一句话）",
-  "challenge": "你质疑的部分（一句话）",
-  "betterOption": "你的改进建议（一句话）"
+  "strongestPoint": "对方分析中最有力的部分（一句话）",
+  "weakestAssumption": "对方最薄弱的假设或逻辑漏洞（一句话）",
+  "missingRisk": "对方遗漏的关键风险（一句话）",
+  "betterApproach": "你的改进建议（一句话）",
+  "verdict": "整体判断：接受/部分接受/拒绝，一句话理由"
 }
 
 原始问题：`
 
-const PHASE3_PROMPT = `你是一个技术总结专家。根据多个模型对以下问题的分析和交叉评审，请综合输出最终结论。
+const PHASE3_PROMPT = `你是一个总结专家。根据多个模型对以下问题的分析和交叉评审，请综合输出最终结论。
 
 使用 Markdown 格式，包含：
 ## 综合结论
@@ -129,9 +139,7 @@ async function callModel(
       result += chunk
     }
   } catch (error) {
-    if (error instanceof ApiError && shouldSuppressModel(error)) {
-      appStore.suppressModelForToday(modelId)
-    }
+    appStore.recordFailure(modelId)
     throw error
   }
   return result
@@ -156,6 +164,88 @@ function tryParseJSON<T>(text: string): T | null {
   } catch {
     return null
   }
+}
+
+function normalizePlainText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[>*#`_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function splitPlainSentences(text: string): string[] {
+  return normalizePlainText(text)
+    .split(/(?<=[。！？.!?])\s+|\n+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+function buildPhase1Fallback(text: string): Phase1Result['data'] {
+  const sentences = splitPlainSentences(text)
+  const approach = sentences[0] ?? normalizePlainText(text).slice(0, 80) ?? '建议先做小范围验证'
+  const reasoning = sentences.slice(0, 3).join(' ') || approach
+  const risks = sentences
+    .filter(item => /风险|问题|注意|代价|限制|瓶颈|崩|失败/.test(item))
+    .slice(0, 3)
+  const keyDecisions = sentences.slice(0, 2)
+  const nextStep = sentences.find(item => /建议|下一步|先|应该|可以/.test(item)) ?? '先做一个最小可验证方案。'
+  return {
+    approach,
+    reasoning,
+    risks,
+    keyDecisions,
+    nextStep,
+  }
+}
+
+function buildPhase2Fallback(text: string): Phase2Result['data'] {
+  const sentences = splitPlainSentences(text)
+  return {
+    agreement: sentences[0] ?? '整体方向基本可行，但还需要补充细节。',
+    challenge: sentences[1] ?? '当前论证还缺少对风险和边界条件的说明。',
+    betterOption: sentences[2] ?? '建议先缩小范围验证，再决定是否全面推进。',
+  }
+}
+
+function buildPhase3FallbackMarkdown(
+  prompt: string,
+  phase1: Phase1Result[],
+  phase2: Phase2Result[],
+): string {
+  const topApproaches = phase1
+    .slice(0, 3)
+    .map((item) => `- ${item.data.approach}`)
+    .join('\n')
+
+  const disagreements = phase2
+    .filter((item) => item.data.challenge)
+    .slice(0, 3)
+    .map((item) => `- ${item.data.challenge}`)
+    .join('\n')
+
+  const nextSteps = Array.from(new Set(
+    phase1
+      .map((item) => item.data.nextStep)
+      .concat(phase2.map((item) => item.data.betterOption))
+      .filter(Boolean),
+  )).slice(0, 4)
+
+  return [
+    '## 综合结论',
+    `围绕“${prompt}”，当前更稳妥的做法是先收敛到一个可验证的小方案，再逐步扩大范围。`,
+    '',
+    '### 核心共识',
+    topApproaches || '- 各模型都认为需要先明确方案边界和实施顺序。',
+    '',
+    '### 分歧与取舍',
+    disagreements || '- 主要分歧集中在推进节奏、复杂度控制和风险暴露方式。',
+    '',
+    '### 建议行动计划',
+    ...(nextSteps.length
+      ? nextSteps.map((step, index) => `${index + 1}. ${step}`)
+      : ['1. 先做最小范围验证。', '2. 记录风险与回滚方案。', '3. 验证通过后再扩大投入。']),
+  ].join('\n')
 }
 
 export const useDiscussStore = defineStore('discuss', () => {
@@ -199,8 +289,8 @@ export const useDiscussStore = defineStore('discuss', () => {
         return { modelId, completed: true }
       } catch (error) {
         lastError = error
-        if (error instanceof ApiError && shouldSuppressDiscussModel(error)) {
-          appStore.suppressModelForToday(modelId)
+        if (error instanceof ApiError) {
+          appStore.recordFailure(modelId)
         }
         if (signal.aborted) throw error
       }
@@ -226,20 +316,28 @@ export const useDiscussStore = defineStore('discuss', () => {
     try {
       // Phase 1: Independent analysis — parallel
       const phase1Tasks = modelIds.map(async (mid) => {
-        const response = await callModel(mid, PHASE1_PROMPT + prompt, signal)
-        const data = tryParseJSON<Phase1Result['data']>(response)
-        if (data && data.approach) {
-          phase1Results.value.push({ model: mid, data })
-        } else {
-          // Fallback: use raw text as approach
+        try {
+          const response = await callModel(mid, PHASE1_PROMPT + prompt, signal)
+          const data = tryParseJSON<Phase1Result['data']>(response)
+          if (data && data.approach) {
+            phase1Results.value.push({ model: mid, data })
+          } else {
+            phase1Results.value.push({
+              model: mid,
+              data: buildPhase1Fallback(response),
+            })
+          }
+        } catch (error: any) {
+          if (signal.aborted) return
           phase1Results.value.push({
             model: mid,
+            error: error?.message ?? '请求失败',
             data: {
-              approach: response.slice(0, 100),
-              reasoning: response,
+              approach: '该模型本轮未成功返回结果',
+              reasoning: error?.message ?? '请求失败，请稍后重试或更换模型。',
               risks: [],
               keyDecisions: [],
-              nextStep: '',
+              nextStep: '建议切换模型或稍后重试。',
             },
           })
         }
@@ -252,24 +350,45 @@ export const useDiscussStore = defineStore('discuss', () => {
       const pairs = buildReviewPairs(modelIds, discussDepth)
 
       const phase2Tasks = pairs.map(async ([reviewer, target]) => {
-        const targetResult = phase1Results.value.find((r) => r.model === target)
-        const contextStr = target === '*'
-          ? phase1Results.value.map((r) => `[${r.model}]: ${r.data.approach} — ${r.data.reasoning}`).join('\n')
-          : targetResult
-            ? `[${target}]: ${targetResult.data.approach} — ${targetResult.data.reasoning}`
-            : ''
+        try {
+          const targetResult = phase1Results.value.find((r) => r.model === target)
+          const contextStr = target === '*'
+            ? phase1Results.value.map((r) => `[${r.model}]: ${r.data.approach} — ${r.data.reasoning}`).join('\n')
+            : targetResult
+              ? `[${target}]: ${targetResult.data.approach} — ${targetResult.data.reasoning}`
+              : ''
 
-        const fullPrompt = PHASE2_PROMPT + prompt + '\n\n被审查的分析：\n' + contextStr
-        const response = await callModel(reviewer, fullPrompt, signal)
-        const data = tryParseJSON<Phase2Result['data']>(response)
+          const fullPrompt = PHASE2_PROMPT + prompt + '\n\n被审查的分析：\n' + contextStr
+          const response = await callModel(reviewer, fullPrompt, signal)
+          const raw = tryParseJSON<any>(response)
 
-        phase2Results.value.push({
-          reviewer,
-          target,
-          data: data && data.agreement
-            ? data
-            : { agreement: response.slice(0, 80), challenge: '', betterOption: '' },
-        })
+          // Map new 5-field format to backward-compat Phase2Result.data
+          const data: Phase2Result['data'] = raw && (raw.strongestPoint || raw.agreement)
+            ? {
+                agreement: raw.strongestPoint ?? raw.agreement ?? '',
+                challenge: raw.weakestAssumption ?? raw.challenge ?? '',
+                betterOption: raw.betterApproach ?? raw.betterOption ?? '',
+                strongestPoint: raw.strongestPoint,
+                weakestAssumption: raw.weakestAssumption,
+                missingRisk: raw.missingRisk,
+                verdict: raw.verdict,
+              }
+            : buildPhase2Fallback(response)
+
+          phase2Results.value.push({ reviewer, target, data })
+        } catch (error: any) {
+          if (signal.aborted) return
+          phase2Results.value.push({
+            reviewer,
+            target,
+            error: error?.message ?? '审查失败',
+            data: {
+              agreement: '该轮审查未成功完成。',
+              challenge: error?.message ?? '请求失败，请稍后重试。',
+              betterOption: '建议更换模型或降低同时参与的模型数量。',
+            },
+          })
+        }
       })
       await Promise.allSettled(phase2Tasks)
       if (signal.aborted) return
@@ -317,10 +436,16 @@ export const useDiscussStore = defineStore('discuss', () => {
         throw error
       }
 
-      toast.success('讨论完成')
+      toast.success('辩论完成')
+
+      const failedPhase1Count = phase1Results.value.filter(item => item.error).length
+      const failedPhase2Count = phase2Results.value.filter(item => item.error).length
+      if (failedPhase1Count || failedPhase2Count) {
+        toast.info(`本轮有 ${failedPhase1Count} 个独立分析、${failedPhase2Count} 个交叉审查未成功，已保留失败占位`)
+      }
     } catch (e: any) {
       if (e.name !== 'AbortError' && !signal.aborted) {
-        toast.error('讨论失败: ' + e.message)
+        toast.error('辩论失败: ' + e.message)
       }
     } finally {
       streaming.value = false
@@ -331,27 +456,22 @@ export const useDiscussStore = defineStore('discuss', () => {
   function stopDiscussion() {
     abortController.value?.abort()
     streaming.value = false
-    useToastStore().info('已停止讨论')
+    useToastStore().info('已停止辩论')
   }
 
   function stopAndRestoreDraft() {
     const draft = topic.value
     abortController.value?.abort()
     reset()
-    useToastStore().info('已终止讨论并恢复到输入框')
+    useToastStore().info('已终止辩论并恢复到输入框')
     return draft
   }
 
   /** Pick a Rollup model: prefer non-participating, highest tier */
   function pickRollupModel(participatingIds: string[]): string {
     const appStore = useAppStore()
-    const participating = new Set(participatingIds)
-    const candidates = appStore.models
-      .filter((m) => !participating.has(m.id))
-      .sort((a, b) => b.tier - a.tier)
-    if (candidates.length) return candidates[0].id
-    // Fallback: highest-tier participating model
-    return participatingIds[0]
+    const { modelId } = pickNeutralModel(participatingIds, appStore.models)
+    return modelId
   }
 
   async function startRollup(modelIds: string[], overrideModelId?: string) {
@@ -387,7 +507,7 @@ ${analysisContext}
 交叉审查：
 ${reviewContext}${synthesisContext}
 
-请根据以上讨论内容，生成一份统一的行动计划。`
+请根据以上辩论内容，生成一份统一的行动计划。`
 
     try {
       const rollupCandidates = buildFallbackOrder(

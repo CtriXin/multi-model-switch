@@ -54,7 +54,7 @@ export function buildContextMessages(
 
   if (mode === 'full') {
     // Collect rounds from newest to oldest, then reverse to get chronological order
-    const collected: { user: string | ContentPart[]; assistant: string }[] = []
+    const collected: { user: string | ContentPart[]; assistant: string; judge?: string }[] = []
     let charCount = 0
     for (let i = prev.length - 1; i >= 0 && collected.length < MAX_CONTEXT_ROUNDS; i--) {
       const r = prev[i]
@@ -62,21 +62,27 @@ export function buildContextMessages(
       if (!pick) continue
       const answer = r.responses.get(pick)
       const sanitized = answer?.content ? sanitizeForContext(answer.content) : ''
-      const roundChars = r.prompt.length + sanitized.length
+      const judgeText = r.judge?.content ? sanitizeForContext(r.judge.content) : ''
+      const roundChars = r.prompt.length + sanitized.length + judgeText.length
       if (charCount + roundChars > MAX_CONTEXT_CHARS && collected.length > 0) break
       charCount += roundChars
-      collected.push({ user: buildUserContent(r), assistant: sanitized })
+      collected.push({ user: buildUserContent(r), assistant: sanitized, judge: judgeText || undefined })
     }
     const msgs: ApiChatMessage[] = []
     for (const round of collected.reverse()) {
       msgs.push({ role: 'user', content: round.user })
-      if (round.assistant) msgs.push({ role: 'assistant', content: round.assistant })
+      if (round.assistant) {
+        const content = round.judge
+          ? `${round.assistant}\n\n[决策评估]\n${round.judge}`
+          : round.assistant
+        msgs.push({ role: 'assistant', content })
+      }
     }
     return msgs
   }
 
   if (mode === 'selected') {
-    const collected: { user: string | ContentPart[]; assistant: string }[] = []
+    const collected: { user: string | ContentPart[]; assistant: string; judge?: string }[] = []
     let charCount = 0
     for (let i = prev.length - 1; i >= 0 && collected.length < MAX_CONTEXT_ROUNDS; i--) {
       const r = prev[i]
@@ -84,15 +90,19 @@ export function buildContextMessages(
       const answer = r.responses.get(r.activeModelId)
       if (!answer?.content) continue
       const sanitized = sanitizeForContext(answer.content)
-      const roundChars = r.prompt.length + sanitized.length
+      const judgeText = r.judge?.content ? sanitizeForContext(r.judge.content) : ''
+      const roundChars = r.prompt.length + sanitized.length + judgeText.length
       if (charCount + roundChars > MAX_CONTEXT_CHARS && collected.length > 0) break
       charCount += roundChars
-      collected.push({ user: buildUserContent(r), assistant: sanitized })
+      collected.push({ user: buildUserContent(r), assistant: sanitized, judge: judgeText || undefined })
     }
     const msgs: ApiChatMessage[] = []
     for (const round of collected.reverse()) {
       msgs.push({ role: 'user', content: round.user })
-      msgs.push({ role: 'assistant', content: round.assistant })
+      const content = round.judge
+        ? `${round.assistant}\n\n[决策评估]\n${round.judge}`
+        : round.assistant
+      msgs.push({ role: 'assistant', content })
     }
     return msgs
   }

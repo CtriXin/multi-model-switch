@@ -1,25 +1,23 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAppStore, getModelColor, type ModelMeta } from '@/stores/app'
-import { useProviderStore } from '@/stores/provider'
+import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
 import { Cpu, Zap, Brain, Eye, Code, Loader2, AlertCircle, EyeOff, DollarSign, Image, RotateCcw } from 'lucide-vue-next'
 
 const appStore = useAppStore()
-const providerStore = useProviderStore()
 const router = useRouter()
 
 // Filter state
-const filterFree = ref(true)
 const filterVision = ref(false)
+const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
 
 const suppressedCount = computed(() => appStore.getSuppressedModelIds().length)
 
 const filteredModels = computed(() => {
-  let models = appStore.models
-  if (filterFree.value) models = models.filter(m => m.free)
-  if (filterVision.value) models = models.filter(m => m.supportsVision)
-  return models
+  return appStore.filterModels({
+    tags: tierFilters.value,
+    requireVision: filterVision.value,
+  })
 })
 
 const modelsByProvider = computed(() => {
@@ -43,7 +41,7 @@ const providerLabels: Record<string, string> = {
 }
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? 'Premium' : tier === 1 ? 'Standard' : 'Free'
+  return tier === 2 ? '旗舰' : tier === 1 ? '主力' : 'FREE'
 }
 
 function tierClass(tier: number): string {
@@ -71,6 +69,22 @@ const tagIcons: Record<string, typeof Cpu> = {
 
 function goToSettings() {
   router.push('/settings')
+}
+
+function toggleTierFilter(tag: ModelPoolTag) {
+  const next = new Set(tierFilters.value)
+  if (next.has(tag)) next.delete(tag)
+  else next.add(tag)
+  tierFilters.value = Array.from(next)
+}
+
+function hasTierFilter(tag: ModelPoolTag) {
+  return tierFilters.value.includes(tag)
+}
+
+function clearFilters() {
+  tierFilters.value = []
+  filterVision.value = false
 }
 </script>
 
@@ -100,14 +114,32 @@ function goToSettings() {
             恢复隐藏 ({{ suppressedCount }})
           </button>
           <button
-            @click="filterFree = !filterFree"
+            @click="toggleTierFilter('free')"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="filterFree
+            :class="hasTierFilter('free')
               ? 'bg-green-500/15 text-green-400 border-green-500/30'
               : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
           >
             <DollarSign :size="12" />
-            仅免费
+            FREE
+          </button>
+          <button
+            @click="toggleTierFilter('std')"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
+            :class="hasTierFilter('std')
+              ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
+          >
+            主力
+          </button>
+          <button
+            @click="toggleTierFilter('pro')"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
+            :class="hasTierFilter('pro')
+              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
+          >
+            旗舰
           </button>
           <button
             @click="filterVision = !filterVision"
@@ -146,7 +178,7 @@ function goToSettings() {
 
       <!-- Filter result empty -->
       <div
-        v-else-if="!filteredModels.length && (filterFree || filterVision)"
+        v-else-if="!filteredModels.length && (tierFilters.length || filterVision)"
         class="card p-8 text-center space-y-2"
       >
         <EyeOff :size="24" class="text-text-tertiary mx-auto" />
@@ -154,7 +186,7 @@ function goToSettings() {
           没有符合过滤条件的模型
         </p>
         <button
-          @click="filterFree = false; filterVision = false"
+          @click="clearFilters"
           class="text-xs text-accent hover:text-accent/80"
         >
           清除过滤

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { getModelColor } from '@/stores/app'
-import { Copy, Check, MessageSquare, RefreshCw, RefreshCcw } from 'lucide-vue-next'
+import { Copy, Check, MessageSquare, RefreshCw, RefreshCcw, Sparkles } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 
@@ -23,13 +23,13 @@ const props = defineProps<{
   carousel?: boolean
 }>()
 
-const emit = defineEmits<{ select: []; discuss: []; retry: []; replace: [] }>()
+const emit = defineEmits<{ select: []; discuss: []; retry: []; replace: []; randomReplace: [] }>()
 
 const copied = ref(false)
 const sanitized = computed(() => sanitizeModelOutput(props.content || ''))
 const html = computed(() => md.render(sanitized.value.content || ''))
 const color = computed(() => getModelColor(props.provider))
-const initial = computed(() => props.modelName.charAt(0).toUpperCase())
+const initial = computed(() => (props.modelName || props.modelId || '?').charAt(0).toUpperCase())
 const isDone = computed(() => !!props.elapsed && !props.streaming)
 const derivedErrorCode = computed(() => {
   if (props.errorCode) return props.errorCode
@@ -55,7 +55,7 @@ const errorTag = computed(() => {
   return derivedErrorCode.value ? map[derivedErrorCode.value] : ''
 })
 const canReplaceModel = computed(() =>
-  derivedErrorCode.value === 'chat_unsupported' || derivedErrorCode.value === 'image_unsupported',
+  !!props.error && !props.streaming,
 )
 
 const tierLabel = computed(() => {
@@ -79,17 +79,16 @@ async function copyContent() {
 
 <template>
   <div
-    class="rounded-xl overflow-hidden transition-all duration-200 group border-2 flex h-full min-h-0 flex-col cursor-pointer"
+    class="glass-v3 rounded-[24px] overflow-hidden transition-all duration-300 group flex h-full min-h-0 flex-col cursor-pointer"
     :class="[
-      carousel ? 'bg-surface-2' : 'card',
       selected
-        ? 'ring-1 shadow-lg'
+        ? 'ring-2 shadow-2xl scale-[1.01] z-10'
         : active
           ? 'ring-1 shadow-lg'
-          : 'hover:shadow-lg hover:-translate-y-0.5',
+          : 'hover:shadow-xl hover:-translate-y-1',
     ]"
     :style="selected
-      ? { borderColor: color, boxShadow: `0 4px 12px ${color}20`, '--tw-ring-color': color + '30' }
+      ? { borderColor: color, boxShadow: `0 8px 32px ${color}30`, '--tw-ring-color': color + '50' }
       : active
         ? { borderColor: color + '80', boxShadow: `0 4px 12px ${color}10`, '--tw-ring-color': color + '25' }
         : { borderColor: color + '40' }"
@@ -140,28 +139,26 @@ async function copyContent() {
     <div class="px-4 py-3 flex-1 min-h-0 overflow-y-auto">
       <!-- Error state -->
       <div v-if="error" class="relative py-4">
-        <div class="rounded-2xl border border-border-subtle bg-surface-2/60 px-4 py-3 pr-5">
+        <div class="rounded-2xl border border-red-500/20 bg-surface-2/60 px-4 py-3 pr-5">
           <p class="text-xs leading-7 text-text-secondary">{{ error }}</p>
         </div>
-        <button
-          v-if="canReplaceModel"
-          @click.stop="emit('replace')"
-          class="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/12 text-orange-400 backdrop-blur-[1px] transition-colors hover:bg-black/20"
-          title="换个模型重试"
-        >
-          <span class="inline-flex items-center gap-2 rounded-full border border-orange-400/30 bg-surface-1/90 px-4 py-2 text-xs font-medium shadow-lg">
+        <!-- Replace + Random buttons as floating capsules -->
+        <div v-if="canReplaceModel" class="flex items-center gap-2 mt-3">
+          <button
+            @click.stop="emit('replace')"
+            class="inline-flex items-center gap-1.5 rounded-full border border-orange-400/30 bg-surface-1/90 px-4 py-2 text-xs font-medium text-orange-400 shadow-lg transition-colors hover:bg-orange-500/10"
+          >
             <RefreshCcw :size="14" />
-            换个模型重试
-          </span>
-        </button>
-        <button
-          v-else
-          @click.stop="emit('retry')"
-          class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-2"
-        >
-          <RefreshCw :size="12" />
-          恢复输入框
-        </button>
+            更换模型
+          </button>
+          <button
+            @click.stop="emit('randomReplace')"
+            class="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-surface-1/90 px-4 py-2 text-xs font-medium text-accent shadow-lg transition-colors hover:bg-accent/10"
+          >
+            <Sparkles :size="14" />
+            随机替换
+          </button>
+        </div>
       </div>
 
       <!-- Loading skeleton -->
@@ -233,7 +230,7 @@ async function copyContent() {
                opacity-0 group-hover:opacity-100 flex items-center gap-1"
       >
         <MessageSquare :size="11" />
-        讨论
+        辩论
       </button>
 
       <!-- Copy button -->

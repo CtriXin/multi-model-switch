@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'com.mms.polyminder',
-  appName: 'MMS',
+  appId: 'com.mms.sparkring',
+  appName: 'SparkRing',
   webDir: 'dist',
   server: {
     // Dev only: load from Vite dev server

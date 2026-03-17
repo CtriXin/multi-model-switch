@@ -6,7 +6,7 @@ import { useAppStore } from '@/stores/app'
 import { useToastStore } from '@/stores/toast'
 import { FREE_PROVIDERS } from '@/data/freeProviders'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
-import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket, ChevronLeft, Menu, Sparkles } from 'lucide-vue-next'
+import { Sun, Moon, Sidebar, Info, Key, Plus, Upload, Trash2, X, Cpu, Shield, Copy, Download, Check, Rocket, ChevronLeft, Menu, Sparkles, DollarSign } from 'lucide-vue-next'
 import { ref, inject, onMounted, computed } from 'vue'
 
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
@@ -341,12 +341,22 @@ async function clearAllKeys() {
 
 <template>
   <div class="flex-1 overflow-y-auto">
+    <!-- Mobile top bar -->
+    <div v-if="isMobile" class="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 bg-white/80 dark:bg-[#0b0b18]/80 backdrop-blur-md border-b border-border-subtle safe-top">
+      <button @click="router.back()" class="p-1.5 -ml-1 rounded-lg active:bg-surface-3 transition-colors">
+        <ChevronLeft :size="22" class="text-text-primary" />
+      </button>
+      <span class="text-base font-semibold text-text-primary">设置</span>
+      <button @click="openDrawer" class="ml-auto p-1.5 rounded-lg active:bg-surface-3 transition-colors">
+        <Menu :size="20" class="text-text-tertiary" />
+      </button>
+    </div>
     <div class="max-w-2xl mx-auto px-6 py-8 space-y-6">
-      <h1 class="text-lg font-semibold text-text-primary">设置</h1>
-      <div class="card p-5 flex items-center justify-between gap-4">
+      <h1 v-if="!isMobile" class="text-lg font-semibold text-text-primary">设置</h1>
+      <div class="glass-v3 rounded-2xl p-5 flex items-center justify-between gap-4 border border-white/10">
         <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 text-base shadow-sm">🚀</span>
+          <div class="flex items-center gap-2.5">
+            <span class="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 text-base shadow-lg">🚀</span>
             <p class="text-sm font-semibold text-text-primary">快速开始</p>
           </div>
           <p class="mt-2 text-xs text-text-tertiary">
@@ -355,21 +365,22 @@ async function clearAllKeys() {
         </div>
         <button
           @click="router.push('/setup')"
-          class="shrink-0 rounded-lg border border-border-default px-3 py-2 text-xs text-text-secondary transition-colors hover:bg-surface-3"
+          class="shrink-0 rounded-full px-4 py-2 text-xs font-bold uppercase tracking-widest
+                 bg-accent text-white shadow-lg shadow-accent/30 hover:scale-105 active:scale-95 transition-all"
         >
-          打开快速开始
+          打开
         </button>
       </div>
 
       <!-- Appearance -->
-      <div class="card p-5 space-y-4">
+      <div class="glass-v3 rounded-2xl p-5 space-y-4 border border-white/10">
         <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
           <Sun :size="16" class="text-text-tertiary" />
           外观
         </h2>
 
         <!-- Theme -->
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between py-2">
           <div>
             <p class="text-sm text-text-primary">主题</p>
             <p class="text-xs text-text-tertiary">切换深色 / 浅色模式</p>
@@ -391,7 +402,7 @@ async function clearAllKeys() {
         </div>
 
         <!-- Sidebar default -->
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between py-2">
           <div>
             <p class="text-sm text-text-primary">侧边栏默认展开</p>
             <p class="text-xs text-text-tertiary">macOS 模式下是否默认展开侧边栏</p>
@@ -411,18 +422,39 @@ async function clearAllKeys() {
           </button>
         </div>
 
-        <div class="h-px bg-border-subtle my-2" />
+        <!-- Default free优先 -->
+        <div class="flex items-center justify-between py-2">
+          <div>
+            <p class="text-sm text-text-primary">默认免费优先</p>
+            <p class="text-xs text-text-tertiary">优先展示免费模型</p>
+          </div>
+          <button
+            @click="appStore.preferFree = !appStore.preferFree"
+            class="relative w-14 h-7 rounded-full transition-colors duration-200"
+            :class="appStore.preferFree ? 'bg-accent' : 'bg-surface-4'"
+          >
+            <span
+              class="absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform duration-200
+                     flex items-center justify-center"
+              :class="appStore.preferFree ? 'translate-x-7' : 'translate-x-0.5'"
+            >
+              <DollarSign :size="12" class="text-text-tertiary" />
+            </span>
+          </button>
+        </div>
 
-        <div class="space-y-4 pt-2">
+        <div class="h-px bg-border-subtle" />
+
+        <div class="space-y-4 pt-4">
           <div>
             <p class="text-sm font-semibold text-text-primary flex items-center gap-2 mb-1">
               <Sparkles :size="14" class="text-accent" />
-              PolyMinder V3 物理引擎 (Cinematic Fluid)
+              SparkRing V3 物理引擎 (Cinematic Fluid)
             </p>
             <p class="text-xs text-text-tertiary">实时调节界面的物理玻璃质感与生命力。</p>
           </div>
 
-          <div class="space-y-4 bg-surface-2/50 p-4 rounded-xl border border-border-subtle">
+          <div class="space-y-4 bg-white/5 dark:bg-white/5 p-4 rounded-xl border border-white/10">
             <!-- Blur -->
             <div class="space-y-2">
               <div class="flex justify-between text-xs">
@@ -431,7 +463,7 @@ async function clearAllKeys() {
               </div>
               <input type="range" v-model="v3Config.blurAmount" min="0" max="80" class="w-full accent-accent" />
             </div>
-            
+
             <!-- Saturation -->
             <div class="space-y-2">
               <div class="flex justify-between text-xs">
@@ -458,27 +490,27 @@ async function clearAllKeys() {
               </div>
               <input type="range" v-model="v3Config.noiseOpacity" min="0" max="20" class="w-full accent-accent" />
             </div>
+          </div>
 
-            <!-- Aurora Toggle -->
-            <div class="flex items-center justify-between pt-2 border-t border-border-subtle">
-              <span class="text-xs text-text-secondary">底层极光引擎 (Aurora)</span>
-              <button
-                @click="v3Config.showAurora = !v3Config.showAurora"
-                class="relative w-10 h-5 rounded-full transition-colors duration-200"
-                :class="v3Config.showAurora ? 'bg-accent' : 'bg-surface-4'"
-              >
-                <span
-                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
-                  :class="v3Config.showAurora ? 'translate-x-5' : 'translate-x-0.5'"
-                />
-              </button>
-            </div>
+          <!-- Aurora Toggle - Separate from slider container -->
+          <div class="flex items-center justify-between pt-2">
+            <span class="text-xs text-text-secondary">底层极光引擎 (Aurora)</span>
+            <button
+              @click="v3Config.showAurora = !v3Config.showAurora"
+              class="relative w-10 h-5 rounded-full transition-colors duration-200"
+              :class="v3Config.showAurora ? 'bg-accent' : 'bg-surface-4'"
+            >
+              <span
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
+                :class="v3Config.showAurora ? 'translate-x-5' : 'translate-x-0.5'"
+              />
+            </button>
           </div>
         </div>
       </div>
 
       <!-- API Providers -->
-      <div class="card p-5 space-y-4">
+      <div class="glass-v3 rounded-2xl p-5 space-y-4 border border-white/10">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
             <Key :size="16" class="text-text-tertiary" />
@@ -487,19 +519,19 @@ async function clearAllKeys() {
           <div class="flex flex-wrap items-center gap-2">
             <button
               @click="providerListCollapsed = !providerListCollapsed"
-              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
             >
               {{ providerListCollapsed ? '显示全部' : '收起未配置' }}
             </button>
             <button
               @click="enableAllProviders"
-              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
             >
               一键全开
             </button>
             <button
               @click="disableAllProviders"
-              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-border-default transition-colors hover:bg-surface-3"
+              class="text-xs text-text-secondary px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
             >
               一键全关
             </button>
@@ -516,12 +548,12 @@ async function clearAllKeys() {
             :key="provider.id"
             class="rounded-lg border p-3 space-y-3 transition-opacity"
             :class="provider.enabled
-              ? 'border-border-default'
-              : 'border-border-default/50 opacity-60'"
+              ? 'border-white/10 bg-white/5'
+              : 'border-white/5 bg-white/2'"
           >
             <!-- Provider header row -->
-            <div class="flex items-center justify-between">
-              <div class="min-w-0 flex items-center gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="min-w-0 flex items-center gap-2 flex-1">
                 <button
                   @click="toggleProviderEnabled(provider.id)"
                   class="relative w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0"
@@ -544,11 +576,11 @@ async function clearAllKeys() {
                   </p>
                 </div>
               </div>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 shrink-0">
                 <button
                   v-if="provider.type !== 'mock' && !provider.builtIn && editingProviderId !== provider.id"
                   @click="startEdit(provider.id)"
-                  class="text-xs text-accent hover:text-accent/80 px-2 py-1 rounded hover:bg-surface-3 transition-colors"
+                  class="text-xs text-accent hover:text-accent/80 px-2 py-1 rounded hover:bg-surface-3 transition-colors whitespace-nowrap"
                 >
                   编辑通道
                 </button>
@@ -565,23 +597,27 @@ async function clearAllKeys() {
 
             <div
               v-if="provider.type !== 'mock'"
-              class="rounded-xl border border-border-subtle bg-surface-2/40 p-3"
+              class="rounded-xl border border-border-subtle bg-surface-2/40 p-3 pt-4"
             >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="text-xs font-medium text-text-secondary">账户池</p>
-                  <p class="mt-1 text-[11px] text-text-tertiary">同一 provider 可挂多个 key，失败时会在可用账户间自动 fallback。</p>
+              <div class="flex items-center justify-between gap-3 px-1 mb-4">
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2">
+                    <p class="text-xs font-black text-text-primary uppercase tracking-widest">账户池</p>
+                    <div class="h-1 w-1 rounded-full bg-text-tertiary/30"></div>
+                    <span class="text-[10px] font-bold text-text-tertiary uppercase tracking-tight">Account Pool</span>
+                  </div>
+                  <p class="text-[10px] text-text-tertiary/60 leading-relaxed font-medium">支持多 Key 轮询与自动故障转移</p>
                 </div>
                 <button
                   @click="addAccount(provider.id)"
-                  class="inline-flex items-center gap-1 rounded-lg border border-border-default px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-surface-3"
+                  class="inline-flex items-center gap-1.5 rounded-xl bg-text-primary text-white dark:bg-white dark:text-black px-4 py-2 text-[11px] font-black uppercase tracking-widest shadow-lg shadow-black/10 transition-all hover:scale-105 active:scale-95 active:shadow-none"
                 >
-                  <Plus :size="12" />
+                  <Plus :size="12" :stroke-width="3" />
                   新增账户
                 </button>
               </div>
 
-              <div class="mt-3 space-y-2">
+              <div class="space-y-2">
                 <ProviderAccountItem
                   v-for="account in getProviderAccounts(provider.id)"
                   :key="account.id"
@@ -989,7 +1025,7 @@ async function clearAllKeys() {
       </div>
 
       <!-- About -->
-      <div class="card p-5 space-y-3">
+      <div class="glass-v3 rounded-2xl p-5 space-y-3 border border-white/10">
         <h2 class="text-sm font-semibold text-text-primary flex items-center gap-2">
           <Info :size="16" class="text-text-tertiary" />
           关于
@@ -997,11 +1033,11 @@ async function clearAllKeys() {
         <div class="space-y-2 text-sm">
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">应用名称</span>
-            <span class="text-text-primary font-medium">PolyMinder</span>
+            <span class="text-text-primary font-medium">SparkRing</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">版本</span>
-            <span class="text-text-tertiary font-mono text-xs">v0.3.1</span>
+            <span class="text-text-tertiary font-mono text-xs">v0.3.3</span>
           </div>
           <div class="flex items-center justify-between">
             <span class="text-text-secondary">描述</span>
@@ -1012,3 +1048,17 @@ async function clearAllKeys() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.safe-top { padding-top: env(safe-area-inset-top); }
+
+.glass-v3 {
+  backdrop-filter: blur(32px) saturate(150%);
+  -webkit-backdrop-filter: blur(32px) saturate(150%);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+html.light .glass-v3 {
+  background: rgba(255, 255, 255, 0.6);
+}
+</style>

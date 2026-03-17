@@ -2,6 +2,7 @@ import plugin from 'tailwindcss/plugin'
 
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}'],
   theme: {
     extend: {
@@ -35,6 +36,18 @@ export default {
           deepseek: '#8b5cf6',
           moonshot: '#ec4899',
         },
+      },
+      borderRadius: {
+        // 统一圆角规范 (MMS Design System)
+        'sm': '4px',        // 小标签、徽章
+        'md': '6px',        // 按钮、输入框
+        'lg': '8px',        // 小卡片、下拉菜单
+        'xl': '12px',       // 标准卡片
+        '2xl': '16px',      // 标准大卡片
+        '3xl': '20px',      // 大卡片/面板 (原 1.25rem)
+        '4xl': '24px',      // 特殊大元素
+        '5xl': '28px',      // 超大卡片 (原 1.75rem)
+        'pill': '9999px',   // 胶囊形
       },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Helvetica Neue', 'sans-serif'],
@@ -73,7 +86,7 @@ export default {
           '--c-border-strong': 'rgba(255,255,255,0.13)',
           '--c-text-primary': '#e8e8f0',
           '--c-text-secondary': '#8888a0',
-          '--c-text-tertiary': '#555566',
+          '--c-text-tertiary': '#6e6e80',
         },
         /* Light theme */
         'html.light': {
@@ -87,7 +100,7 @@ export default {
           '--c-border-strong': 'rgba(0,0,0,0.15)',
           '--c-text-primary': '#1d1d1f',
           '--c-text-secondary': '#636366',
-          '--c-text-tertiary': '#aeaeb2',
+          '--c-text-tertiary': '#8e8e93',
         },
       })
     }),
