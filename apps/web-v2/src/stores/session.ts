@@ -83,9 +83,23 @@ export const useSessionStore = defineStore('session', () => {
     sessions.value.find(s => s.id === currentSessionId.value) ?? null
   )
 
-  const sortedSessions = computed(() =>
-    [...sessions.value].sort((a, b) => b.updatedAt - a.updatedAt)
-  )
+  const sortedSessions = computed(() => {
+    return [...sessions.value].sort((a, b) => {
+      const aEmpty = a.messageCount === 0
+      const bEmpty = b.messageCount === 0
+
+      // 1. If both are empty (drafts), sort by createdAt DESC (stable)
+      if (aEmpty && bEmpty) {
+        return b.createdAt - a.createdAt
+      }
+      // 2. If one is empty, it stays at the top
+      if (aEmpty) return -1
+      if (bEmpty) return 1
+
+      // 3. Both have history, sort by updatedAt DESC
+      return b.updatedAt - a.updatedAt
+    })
+  })
 
   function loadSessions() {
     try {
@@ -109,7 +123,9 @@ export const useSessionStore = defineStore('session', () => {
 
     const appStore = useAppStore()
     session.modelIds = [...appStore.selectedModelIds]
-    if (options.touchUpdatedAt !== false) {
+    
+    // Only update updatedAt if we have messages or explicitly asked
+    if (options.touchUpdatedAt !== false && session.messageCount > 0) {
       session.updatedAt = Date.now()
     }
 
@@ -117,11 +133,12 @@ export const useSessionStore = defineStore('session', () => {
       const chatStore = useChatStore()
       session.chatData = serializeRounds(chatStore.rounds)
       session.contextMode = chatStore.contextMode
+      const oldCount = session.messageCount
       session.messageCount = chatStore.rounds.length
-      if (chatStore.rounds.length && !session.title.startsWith('新')) {
-        // keep existing title
-      } else if (chatStore.rounds.length) {
+      
+      if (session.messageCount > 0 && (oldCount === 0 || session.title.startsWith('新'))) {
         session.title = chatStore.rounds[0].prompt.slice(0, 20) || '新对话'
+        session.updatedAt = Date.now() // Essential: first message bumps it to history
       }
     } else {
       const discussStore = useDiscussStore()
@@ -135,9 +152,12 @@ export const useSessionStore = defineStore('session', () => {
         rollupPhase: discussStore.rollupPhase,
         topic: discussStore.topic,
       }
+      const oldCount = session.messageCount
       session.messageCount = discussStore.phase1Results.length + discussStore.phase2Results.length
-      if (discussStore.topic) {
+      
+      if (session.messageCount > 0 && (oldCount === 0 || !session.title || session.title.startsWith('新'))) {
         session.title = discussStore.topic.slice(0, 20) || '新辩论'
+        session.updatedAt = Date.now()
       }
     }
 
@@ -145,18 +165,22 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   function createSession(type: 'chat' | 'discuss'): Session {
-    // If current session is already empty and same type, reuse it
-    const cur = currentSession.value
-    if (cur && cur.type === type && cur.messageCount === 0) {
-      return cur
+    // 1. Try to find ANY existing empty session of this type to reuse
+    const existingEmpty = sessions.value.find(s => s.type === type && s.messageCount === 0)
+    if (existingEmpty) {
+      if (currentSessionId.value !== existingEmpty.id) {
+        switchSession(existingEmpty.id)
+      }
+      return existingEmpty
     }
 
-    // Save current session first
+    // Save current session state
     saveCurrentSession({ touchUpdatedAt: false })
 
-    // Clean up stale empty sessions (no messages ever sent)
+    // 2. Less aggressive cleanup: only remove empty sessions of the SAME type (redundant now due to reuse)
+    // or keep it simple: just allow one empty session per type.
     sessions.value = sessions.value.filter(s =>
-      s.id === currentSessionId.value || s.messageCount > 0
+      s.messageCount > 0 || s.id === currentSessionId.value || s.type !== type
     )
 
     const session: Session = {

@@ -230,6 +230,13 @@ const sheetStyle = computed(() => {
 function modelTags(model: ModelMeta): string[] {
   return model.tags.filter(t => ['reasoning', 'fast', 'coding', 'vision'].includes(t))
 }
+
+function scrollToProviderSection(provider: string) {
+  const el = document.getElementById('section-' + provider)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
 </script>
 
 <template>
@@ -252,7 +259,7 @@ function modelTags(model: ModelMeta): string[] {
           :class="[
             isMobile 
               ? 'absolute bottom-0 left-0 right-0 rounded-t-[32px] shadow-[0_-20px_50px_rgba(0,0,0,0.3)]' 
-              : 'relative w-full max-w-2xl max-h-[80vh] rounded-[32px] shadow-[0_40px_100px_rgba(0,0,0,0.4)] border border-white/10',
+              : 'relative w-full max-w-4xl max-h-[80vh] rounded-[32px] shadow-[0_40px_100px_rgba(0,0,0,0.4)] border border-white/10',
             'flex flex-col bg-white dark:bg-[#0b0b18] overflow-hidden'
           ]"
           :style="isMobile ? sheetStyle : {}"
@@ -277,7 +284,7 @@ function modelTags(model: ModelMeta): string[] {
           <!-- Header -->
           <div class="flex items-center justify-between px-8 pb-6 shrink-0">
             <div>
-              <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型' : '选择模型基因' }}</h2>
+              <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型基因' : '选择模型基因' }}</h2>
               <p class="text-[10px] font-black text-text-tertiary mt-1 uppercase tracking-[0.2em]">
                 {{ replacementMode
                   ? `正在替换 ${appStore.getModel(props.request?.oldModelId || '')?.name ?? ''}`
@@ -299,7 +306,7 @@ function modelTags(model: ModelMeta): string[] {
           </div>
 
           <!-- Filter chips & Random -->
-          <div class="flex items-center gap-2 px-8 pb-4 shrink-0">
+          <div class="flex items-center gap-2 px-8 pb-4 shrink-0 overflow-x-auto no-scrollbar">
             <button @click="toggleFilterFree" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
                     :class="filterFree ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
               <DollarSign :size="12" /> 免费
@@ -325,7 +332,7 @@ function modelTags(model: ModelMeta): string[] {
                     :class="'text-amber-400 border-white/5 hover:bg-amber-500/10'">
               <Dice5 :size="12" /> 随机
             </button>
-            <span class="text-[9px] font-black text-text-tertiary ml-auto uppercase tracking-widest opacity-40">{{ filtered.length }} 个可用</span>
+            <span class="text-[9px] font-black text-text-tertiary ml-auto uppercase tracking-widest opacity-40">{{ filtered.length }} 可选</span>
           </div>
 
           <!-- Search -->
@@ -336,41 +343,63 @@ function modelTags(model: ModelMeta): string[] {
             </div>
           </div>
 
-          <!-- Model Grid -->
-          <div class="flex-1 overflow-y-auto px-8 pb-10">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button v-for="model in filtered" :key="model.id" @click="handleModelPress(model.id)"
-                      class="relative flex flex-col items-start p-4 rounded-2xl border text-left active:scale-[0.98] transition-all duration-300 group"
-                      :class="replacementMode
-                        ? (isReplacementDisabled(model.id)
-                          ? 'border-white/5 bg-black/5 dark:bg-white/5 opacity-35'
-                          : model.id === props.request?.oldModelId
-                            ? 'border-orange-500/50 bg-orange-500/5 shadow-inner'
-                            : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')
-                        : (isSelected(model.id) ? 'border-accent/50 bg-accent/5 shadow-inner' : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')">
-                <div class="absolute top-4 right-4 w-6 h-6 rounded-full flex items-center justify-center transition-all border"
-                     :class="replacementMode
-                      ? (model.id === props.request?.oldModelId
-                        ? 'bg-orange-500 border-orange-500 text-white scale-110'
-                        : 'border-white/10')
-                      : (isSelected(model.id) ? 'bg-accent border-accent text-white scale-110' : 'border-white/10')">
-                  <Check v-if="replacementMode ? model.id === props.request?.oldModelId : isSelected(model.id)" :size="14" :stroke-width="4" />
-                </div>
-                <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white mb-3 shadow-lg" :style="{ backgroundColor: getModelColor(model.provider) }">
-                  {{ modelInitial(model) }}
-                </div>
-                <span class="text-sm font-black text-text-primary leading-tight pr-8 uppercase tracking-tight">{{ model.name }}</span>
-                <span class="text-[10px] font-bold text-text-tertiary mt-1 uppercase tracking-widest opacity-60">{{ model.provider }}</span>
-                <div class="flex flex-wrap gap-1 mt-3">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider" :class="tierColor(model.tier)">{{ tierLabel(model.tier) }}</span>
-                  <span v-if="model.free" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-green-500/10 text-green-400">$0</span>
-                  <span v-if="model.supportsVision" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400">vision</span>
-                </div>
-                <span v-if="replacementMode && model.id === props.request?.oldModelId" class="mt-3 text-[10px] font-black uppercase tracking-widest text-orange-400">当前模型</span>
-                <span v-else-if="replacementMode && isReplacementDisabled(model.id)" class="mt-3 text-[10px] font-black uppercase tracking-widest text-text-tertiary">已在模型池</span>
+          <!-- Main Body: Rail + Grid -->
+          <div class="flex-1 flex overflow-hidden">
+            <!-- Provider Quick Rail -->
+            <aside v-if="filtered.length > 8" class="w-16 flex flex-col items-center py-4 gap-3 bg-black/5 dark:bg-white/2 border-r border-white/5 overflow-y-auto no-scrollbar shrink-0">
+              <button
+                v-for="provider in Array.from(new Set(filtered.map(m => m.provider)))"
+                :key="provider"
+                @click="scrollToProviderSection(provider)"
+                class="w-10 h-10 rounded-xl flex items-center justify-center bg-white/5 text-text-tertiary hover:bg-accent/20 hover:text-accent transition-all active:scale-90 shrink-0 border border-transparent hover:border-accent/30"
+                :title="provider"
+              >
+                <span class="text-[10px] font-black uppercase leading-none">{{ provider.slice(0, 2) }}</span>
               </button>
+            </aside>
+
+            <!-- Model Grid -->
+            <div class="flex-1 overflow-y-auto px-8 pb-10 custom-scrollbar scroll-smooth">
+              <template v-for="provider in Array.from(new Set(filtered.map(m => m.provider)))" :key="provider">
+                <div :id="'section-' + provider" class="flex items-center gap-2 py-6 sticky top-0 bg-white/90 dark:bg-[#0b0b18]/90 backdrop-blur-md z-10">
+                  <div class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: getModelColor(provider) }"></div>
+                  <span class="text-[10px] font-black uppercase tracking-[0.2em] text-text-tertiary">{{ provider }}</span>
+                  <div class="h-px flex-1 bg-white/5 ml-2"></div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button v-for="model in filtered.filter(m => m.provider === provider)" :key="model.id" @click="handleModelPress(model.id)"
+                          class="relative flex flex-col items-start p-4 rounded-2xl border text-left active:scale-[0.98] transition-all duration-300 group"
+                          :class="replacementMode
+                            ? (isReplacementDisabled(model.id)
+                              ? 'border-white/5 bg-black/5 dark:bg-white/5 opacity-35'
+                              : model.id === props.request?.oldModelId
+                                ? 'border-orange-500/50 bg-orange-500/5 shadow-inner'
+                                : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')
+                            : (isSelected(model.id) ? 'border-accent/50 bg-accent/5 shadow-inner' : 'border-white/5 bg-black/5 dark:bg-white/5 hover:border-white/20')">
+                    <div class="absolute top-4 right-4 w-6 h-6 rounded-full flex items-center justify-center transition-all border"
+                         :class="replacementMode
+                          ? (model.id === props.request?.oldModelId
+                            ? 'bg-orange-500 border-orange-500 text-white scale-110'
+                            : 'border-white/10')
+                          : (isSelected(model.id) ? 'bg-accent border-accent text-white scale-110' : 'border-white/10')">
+                      <Check v-if="replacementMode ? model.id === props.request?.oldModelId : isSelected(model.id)" :size="14" :stroke-width="4" />
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white mb-3 shadow-lg" :style="{ backgroundColor: getModelColor(model.provider) }">
+                      {{ modelInitial(model) }}
+                    </div>
+                    <span class="text-sm font-black text-text-primary leading-tight pr-8 uppercase tracking-tight">{{ model.name }}</span>
+                    <span class="text-[10px] font-bold text-text-tertiary mt-1 uppercase tracking-widest opacity-60">{{ model.provider }}</span>
+                    <div class="flex flex-wrap gap-1 mt-3">
+                      <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider" :class="tierColor(model.tier)">{{ tierLabel(model.tier) }}</span>
+                      <span v-if="model.free" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-green-500/10 text-green-400">$0</span>
+                      <span v-if="model.supportsVision" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400">VIS</span>
+                    </div>
+                  </button>
+                </div>
+              </template>
+              <p v-if="!filtered.length" class="text-xs font-bold text-text-tertiary text-center py-12 uppercase tracking-[0.2em]">没有匹配的模型基因</p>
             </div>
-            <p v-if="!filtered.length" class="text-xs font-bold text-text-tertiary text-center py-12 uppercase tracking-[0.2em]">没有匹配的模型基因</p>
           </div>
         </div>
       </Transition>
@@ -397,4 +426,6 @@ function modelTags(model: ModelMeta): string[] {
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
 </style>

@@ -348,7 +348,7 @@ onBeforeRouteLeave(() => {
 
     <div class="flex-1 overflow-y-auto">
       <div v-if="!committeeStore.isActive && !committeeStore.isStreaming"
-        class="mx-auto max-w-5xl px-4 py-6 md:px-6 md:py-8">
+        class="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8">
         <section class="rounded-5xl border border-border-default bg-surface-1 shadow-sm">
           <div class="grid gap-6 px-4 py-5 md:px-6 md:py-6 lg:grid-cols-[1.08fr_0.92fr] lg:px-8">
             <div>
