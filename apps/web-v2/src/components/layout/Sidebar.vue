@@ -82,27 +82,32 @@ function openCommandPalette() {
   >
     <div class="glass-v3 w-12 flex flex-col items-center py-4 gap-3 rounded-[24px] shadow-2xl border border-white/10 flex-1">
       <!-- Logo in mini mode: No top margin div -->
-      <div class="relative flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-lg animate-pulse-subtle shrink-0">
-        <Sparkles class="w-4 h-4 text-white" />
+      <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2">
+        <!-- Triple-Track Kinetic Mini Reactor -->
+        <div class="absolute inset-0 rounded-full border border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse] group-hover/logo:border-accent/50 transition-colors"></div>
+        <div class="absolute inset-1 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
+        <div class="relative flex items-center justify-center w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-xl shadow-accent/20 transition-all duration-500 group-hover/logo:scale-110 active:scale-90">
+          <Sparkles class="w-3.5 h-3.5 text-white relative z-10 drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
+        </div>
       </div>
 
       <!-- Actions: Unified size 22, stroke 3 -->
       <button @click="emit('expand')" class="p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="展开侧边栏">
-        <PanelLeftOpen :size="22" :stroke-width="3" />
+        <PanelLeftOpen :size="22" stroke-width="3" />
       </button>
 
       <div class="flex flex-col gap-2 w-full px-1.5 mt-2">
         <button @click="router.push('/')" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/' ? 'bg-accent/20 text-accent' : ''" title="首页">
-          <Home :size="22" :stroke-width="3" />
+          <Home :size="22" stroke-width="3" />
         </button>
         <button @click="newChat" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新对话">
-          <MessageSquare :size="22" :stroke-width="3" />
+          <MessageSquare :size="22" stroke-width="3" />
         </button>
         <button @click="newDiscuss" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新辩论">
-          <GitMerge :size="22" :stroke-width="3" />
+          <GitMerge :size="22" stroke-width="3" />
         </button>
         <button @click="newAdvisors" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="锦囊团">
-          <Users :size="22" :stroke-width="3" />
+          <Users :size="22" stroke-width="3" />
         </button>
       </div>
 
@@ -111,64 +116,75 @@ function openCommandPalette() {
       <!-- Bottom mini utils: Unified size 20, stroke 3 -->
       <div class="flex flex-col gap-2 w-full px-1.5 pb-2">
         <button @click="toggleTheme" class="flex items-center justify-center p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all">
-          <Sun v-if="theme === 'dark'" :size="20" :stroke-width="3" class="text-amber-400" />
-          <Moon v-else :size="20" :stroke-width="3" class="text-indigo-600" />
+          <Sun v-if="theme === 'dark'" :size="20" stroke-width="3" class="text-amber-400" />
+          <Moon v-else :size="20" stroke-width="3" class="text-indigo-600" />
         </button>
         <button @click="router.push('/settings')" class="flex items-center justify-center p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/settings' ? 'bg-accent/20 text-accent' : ''">
-          <Settings :size="20" :stroke-width="3" />
+          <Settings :size="20" stroke-width="3" />
         </button>
       </div>
     </div>
   </aside>
 
   <!-- Expanded: full floating sidebar -->
-  <aside v-else class="relative z-50 w-64 shrink-0 flex flex-col p-3 h-full">
+  <aside v-else class="relative z-50 w-[280px] shrink-0 flex flex-col p-3 h-full">
     <div class="glass-v3 flex-1 flex flex-col rounded-[32px] shadow-2xl border border-white/10 overflow-hidden relative">
-      <!-- Header: Logo & Controls - Standard Left/Right Layout -->
-      <div class="h-16 flex items-center justify-between px-5">
-        <div class="flex items-center gap-2.5">
-          <!-- SparkRing Logo Icon with Animation -->
-          <div class="relative flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-tr from-accent to-purple-500 shadow-lg logo-spin">
-            <div class="absolute inset-0.5 rounded-full border-2 border-white/30"></div>
-            <Sparkles class="w-4 h-4 text-white" />
+      <!-- Header: Pure Brand Identity (No Controls) -->
+      <div class="h-20 flex items-center pl-5 pr-2">
+        <div class="flex items-center gap-2 group/logo cursor-pointer select-none max-w-full">
+          <!-- SparkRing v4.0.1: Precision Reactor -->
+          <div class="relative flex items-center justify-center w-9 h-9 shrink-0">
+            <!-- Triple Track Animation -->
+            <div class="absolute inset-0 rounded-full border-[1.5px] border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse]"></div>
+            <div class="absolute inset-1.5 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
+            <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.5)] group-hover/logo:scale-110 transition-all duration-500">
+              <Sparkles class="w-3.5 h-3.5 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
+            </div>
           </div>
-          <span class="text-[15px] font-black tracking-tighter flex items-baseline select-none">
-            <span class="text-accent italic">Spark</span>
-            <span class="text-text-primary">Ring</span>
-          </span>
+          
+          <!-- Designer Typography: Syne (Surgically Fit) -->
+          <div class="flex flex-col select-none relative pt-1 min-w-0">
+            <div class="text-[18px] font-[800] tracking-[-0.08em] flex items-center leading-none transform-gpu scale-x-[0.98] origin-left" style="font-family: 'Syne', sans-serif;">
+              <span class="text-accent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">SPARK</span>
+              <span class="text-text-primary ml-1 whitespace-nowrap">RING</span>
+            </div>
+            <!-- Kinetic Accent Line: Entry Animation + Hover Effect -->
+            <div class="h-[1.5px] bg-gradient-to-r from-accent via-accent/40 to-transparent mt-1 opacity-40 animate-v3-line-entry group-hover/logo:opacity-100 group-hover/logo:h-[2px] transition-all duration-500"></div>
+          </div>
         </div>
-        <!-- Collapse Button aligned to Right -->
-        <button @click="emit('collapse')" class="p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all">
-          <PanelLeftClose :size="18" :stroke-width="3" />
-        </button>
       </div>
 
       <!-- Primary Creation Area -->
       <div class="px-3 space-y-1.5 mt-2">
         <button
           @click="router.push('/')"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
-                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
-          :class="route.path === '/' ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20' : ''"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/' 
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20' 
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <Home :size="16" :stroke-width="3" :class="route.path === '/' ? 'text-surface-1' : 'group-hover:text-emerald-400 transition-colors'" />
+          <Home :size="16" stroke-width="3" :class="route.path === '/' ? 'text-surface-1' : 'group-hover:text-emerald-400 transition-colors'" />
           <span>首页体验</span>
         </button>
         <button
           @click="newChat"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
-                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/chat'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <MessageSquare :size="16" :stroke-width="3" class="group-hover:text-accent transition-colors" />
+          <MessageSquare :size="16" stroke-width="3" :class="route.path === '/chat' ? 'text-surface-1' : 'group-hover:text-accent transition-colors'" />
           <span>新对话</span>
           <Plus :size="12" :stroke-width="4" class="ml-auto opacity-30" />
         </button>
         <button
           @click="newDiscuss"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300
-                 bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary group active:scale-95"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/discuss'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <GitMerge :size="16" :stroke-width="3" class="group-hover:text-purple-400 transition-colors" />
+          <GitMerge :size="16" stroke-width="3" :class="route.path === '/discuss' ? 'text-surface-1' : 'group-hover:text-purple-400 transition-colors'" />
           <span>{{ isMobile ? '辩论' : '深度辩论' }}</span>
           <Plus :size="12" :stroke-width="4" class="ml-auto opacity-30" />
         </button>
@@ -179,7 +195,7 @@ function openCommandPalette() {
             ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
             : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <Sparkles :size="16" :stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
+          <Sparkles :size="16" stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
           <span>AI 锦囊团</span>
         </button>
       </div>
@@ -222,7 +238,7 @@ function openCommandPalette() {
                 : 'hover:bg-red-500/10 text-text-tertiary hover:text-red-500'"
               title="删除会话"
             >
-              <Trash2 :size="14" :stroke-width="3" />
+              <Trash2 :size="14" stroke-width="3" />
             </button>
           </button>
         </div>
@@ -239,7 +255,7 @@ function openCommandPalette() {
           class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13px] font-black transition-all duration-150 uppercase tracking-widest
                  text-text-secondary hover:bg-white/10 hover:text-text-primary group"
         >
-          <Search :size="20" :stroke-width="3" />
+          <Search :size="20" stroke-width="3" />
           <span>命令面板</span>
           <kbd class="ml-auto text-[12px] font-black px-1.5 py-0.5 rounded bg-white/5 border border-white/5">⌘K</kbd>
         </button>
@@ -247,33 +263,40 @@ function openCommandPalette() {
         <div class="grid grid-cols-2 gap-1.5">
           <button
             @click="router.push('/models')"
-            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300
-                   bg-white/5 text-text-secondary hover:bg-accent/10 hover:text-accent border border-transparent hover:border-accent/20"
-            :class="route.path === '/models' ? 'bg-accent text-white shadow-lg' : ''"
+            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
+            :class="route.path === '/models' 
+              ? 'bg-text-primary text-surface-1 shadow-lg' 
+              : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
           >
-            <Package :size="18" :stroke-width="3" />
+            <Package :size="18" stroke-width="3" />
             <span class="text-[9px] font-black uppercase tracking-widest">模型管理</span>
           </button>
           <button
             @click="router.push('/settings')"
-            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300
-                   bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary border border-transparent"
-            :class="route.path === '/settings' ? 'bg-text-primary text-surface-1 shadow-lg' : ''"
+            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
+            :class="route.path === '/settings' 
+              ? 'bg-text-primary text-surface-1 shadow-lg' 
+              : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
           >
-            <Settings :size="18" :stroke-width="3" />
+            <Settings :size="18" stroke-width="3" />
             <span class="text-[9px] font-black uppercase tracking-widest">偏好设置</span>
           </button>
         </div>
 
         <!-- System Theme & Platform Footer -->
         <div class="flex items-center justify-between px-2 pt-2 pb-1">
-          <button @click="toggleTheme" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all">
-            <Sun v-if="theme === 'dark'" :size="16" :stroke-width="3" class="text-amber-400" />
-            <Moon v-else :size="16" :stroke-width="3" class="text-indigo-600" />
-          </button>
+          <div class="flex items-center gap-1">
+            <button @click="toggleTheme" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all">
+              <Sun v-if="theme === 'dark'" :size="16" stroke-width="3" class="text-amber-400" />
+              <Moon v-else :size="16" stroke-width="3" class="text-indigo-600" />
+            </button>
+            <button @click="emit('collapse')" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all" title="收起侧边栏">
+              <PanelLeftClose :size="16" stroke-width="3" />
+            </button>
+          </div>
           <div class="h-1 w-1 rounded-full bg-text-tertiary opacity-20"></div>
           <button @click="emit('togglePlatform')" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all opacity-40 hover:opacity-100">
-            <Smartphone :size="16" :stroke-width="3" />
+            <Smartphone :size="16" stroke-width="3" />
           </button>
         </div>
       </div>
@@ -282,18 +305,27 @@ function openCommandPalette() {
 </template>
 
 <style scoped>
-.glass-v3 {
-  backdrop-filter: blur(32px) saturate(150%);
-  -webkit-backdrop-filter: blur(32px) saturate(150%);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-html.light .glass-v3 {
-  background: rgba(255, 255, 255, 0.6);
-}
-
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* V3 Industrial Stroke Enforcement */
+:deep(svg) {
+  stroke-width: 3px !important;
+}
+
+:deep(.lucide-plus), :deep(.lucide-plus-circle) {
+  stroke-width: 4px !important;
+}
+
+
+@keyframes v3-line-entry {
+  from { width: 0; opacity: 0; }
+  to { width: 100%; opacity: 0.4; }
+}
+
+.animate-v3-line-entry {
+  animation: v3-line-entry 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
 
 @keyframes logo-spin {
   from { transform: rotate(0deg); }

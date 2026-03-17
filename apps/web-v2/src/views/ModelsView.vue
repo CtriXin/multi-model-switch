@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
-import { Cpu, Zap, Brain, Eye, Code, Loader2, AlertCircle, EyeOff, DollarSign, Image, RotateCcw, ToggleLeft, ToggleRight } from 'lucide-vue-next'
+import { 
+  Cpu, Zap, Brain, Eye, Code, Loader2, AlertCircle, EyeOff, DollarSign, Image, 
+  RotateCcw, ToggleLeft, ToggleRight, Check, Database, Gauge, Activity, Globe
+} from 'lucide-vue-next'
 
 const appStore = useAppStore()
 const router = useRouter()
+
+// Platform detection for mobile layout
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform.value === 'ios')
 
 // Filter state
 const filterVision = ref(false)
@@ -30,28 +37,26 @@ const modelsByProvider = computed(() => {
   return map
 })
 
-const providerLabels: Record<string, string> = {
-  anthropic: 'CLAUDE',
-  openai: 'OPENAI',
-  google: 'GOOGLE',
-  deepseek: 'DEEPSEEK',
-  moonshot: 'MOONSHOT',
-  meta: 'META',
-  mistral: 'MISTRAL',
-  qwen: 'QWEN',
-  cerebras: 'CEREBRAS',
-}
+const providers = computed(() => Object.keys(modelsByProvider.value))
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? '旗舰' : tier === 1 ? '主力' : '基础'
+  return tier === 2 ? 'Premium' : tier === 1 ? 'Standard' : 'Basic'
 }
 
-function tierClass(tier: number): string {
-  return tier === 2
-    ? 'bg-amber-500/15 text-amber-400 border-amber-500/20'
-    : tier === 1
-      ? 'bg-blue-500/15 text-blue-400 border-blue-500/20'
-      : 'bg-green-500/15 text-green-400 border-green-500/20'
+function tierClass(tier: number, isActive: boolean): string {
+  if (tier === 2) {
+    return isActive 
+      ? 'bg-amber-500 text-black border-amber-500 shadow-lg shadow-amber-500/20' 
+      : 'bg-amber-500/10 text-amber-500 border-amber-500/20'
+  }
+  if (tier === 1) {
+    return isActive
+      ? 'bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-500/20'
+      : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+  }
+  return isActive
+    ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
+    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
 }
 
 function formatContext(n: number): string {
@@ -62,7 +67,7 @@ function formatPrice(n: number): string {
   return `$${n}`
 }
 
-const tagIcons: Record<string, typeof Cpu> = {
+const tagIcons: Record<string, any> = {
   reasoning: Brain,
   coding: Code,
   vision: Eye,
@@ -89,209 +94,230 @@ function clearFilters() {
   filterFree.value = false
   filterVision.value = false
 }
+
+function scrollToProvider(provider: string) {
+  const el = document.getElementById(`provider-section-${provider}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
+function toggleModel(id: string) {
+  appStore.toggleModel(id)
+}
+
+onMounted(() => {
+  if (!appStore.models.length) appStore.refreshModels()
+})
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto">
-    <div class="max-w-4xl mx-auto px-6 py-8 space-y-8">
-      <div class="flex items-end justify-between">
-        <div>
-          <h1 class="text-lg font-semibold text-text-primary">模型管理</h1>
-          <p class="text-xs text-text-tertiary mt-1">
-            <template v-if="appStore.loading">加载中...</template>
-            <template v-else-if="appStore.models.length">
-              {{ filteredModels.length }} / {{ appStore.models.length }} 个模型
-            </template>
-            <template v-else>未加载模型</template>
-          </p>
-        </div>
-
-        <div v-if="appStore.models.length" class="flex items-center gap-2">
-          <button
-            v-if="suppressedCount"
-            @click="appStore.restoreSuppressedModels()"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border
-                   bg-amber-500/10 text-amber-400 border-amber-500/25 hover:bg-amber-500/20"
-          >
-            <RotateCcw :size="12" />
-            恢复隐藏 ({{ suppressedCount }})
-          </button>
-          <button
-            @click="filterFree = !filterFree"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="filterFree
-              ? 'bg-green-500/15 text-green-400 border-green-500/30'
-              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
-          >
-            <DollarSign :size="12" />
-            免费($0)
-            <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
-          </button>
-          <button
-            @click="toggleTierFilter('basic')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="hasTierFilter('basic')
-              ? 'bg-green-500/15 text-green-400 border-green-500/30'
-              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
-          >
-            基础
-          </button>
-          <button
-            @click="toggleTierFilter('std')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="hasTierFilter('std')
-              ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
-          >
-            主力
-          </button>
-          <button
-            @click="toggleTierFilter('pro')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="hasTierFilter('pro')
-              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
-          >
-            旗舰
-          </button>
-          <button
-            @click="filterVision = !filterVision"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="filterVision
-              ? 'bg-purple-500/15 text-purple-400 border-purple-500/30'
-              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
-          >
-            <Image :size="12" />
-            支持图片
-          </button>
-        </div>
-      </div>
-      <!-- Loading state -->
-      <div v-if="appStore.loading" class="flex items-center justify-center py-16">
-        <Loader2 :size="24" class="text-accent animate-spin" />
-        <span class="ml-2 text-sm text-text-tertiary">正在加载模型列表...</span>
-      </div>
-
-      <!-- Empty state: no configured providers -->
-      <div
-        v-else-if="!appStore.models.length"
-        class="card p-8 text-center space-y-3"
-      >
-        <AlertCircle :size="32" class="text-text-tertiary mx-auto" />
-        <p class="text-sm text-text-secondary">{{ appStore.error || '未配置 API 通道' }}</p>
-        <p class="text-xs text-text-tertiary">请先在设置中配置 Provider 和 API Key</p>
-        <button
-          @click="goToSettings"
-          class="text-xs text-accent hover:text-accent/80 px-4 py-2 rounded-lg border border-accent/30
-                 hover:bg-accent/10 transition-colors mt-2"
-        >
-          前往设置
+  <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+    <!-- Mobile top bar -->
+    <div v-if="isMobile" class="sticky top-0 z-[30] flex items-center justify-between px-4 py-3 bg-white/80 dark:bg-[#0b0b18]/80 backdrop-blur-md border-b border-white/5 safe-top shrink-0">
+      <div class="flex items-center gap-3">
+        <button @click="router.back()" class="p-1.5 -ml-1 rounded-lg active:bg-surface-3 transition-colors">
+          <ChevronLeft :size="22" class="text-text-primary" />
         </button>
+        <span class="text-base font-black uppercase tracking-tight text-text-primary">模型基因库</span>
       </div>
+      <div class="p-2 bg-text-primary dark:bg-white rounded-lg shadow-lg">
+        <Cpu :size="16" class="text-surface-1 dark:text-black" stroke-width="3" />
+      </div>
+    </div>
 
-      <!-- Filter result empty -->
-      <div
-        v-else-if="!filteredModels.length && (tierFilters.length || filterVision || filterFree)"
-        class="card p-8 text-center space-y-2"
+    <!-- Quick Jump Rail (The V3 Navigation Fix) -->
+    <aside v-if="providers.length > 3" class="hidden lg:flex flex-col items-center py-8 gap-4 w-20 bg-black/5 dark:bg-white/2 border-r border-white/5 overflow-y-auto no-scrollbar shrink-0">
+      <div class="p-2 bg-accent rounded-xl mb-4 shadow-lg shadow-accent/20">
+        <Database :size="20" class="text-white" stroke-width="3" />
+      </div>
+      <button
+        v-for="provider in providers"
+        :key="provider"
+        @click="scrollToProvider(provider)"
+        class="w-12 h-12 rounded-2xl flex flex-col items-center justify-center transition-all duration-300 group relative active:scale-90 bg-white/5 hover:bg-white/10"
       >
-        <EyeOff :size="24" class="text-text-tertiary mx-auto" />
-        <p class="text-sm text-text-secondary">
-          没有符合过滤条件的模型
-        </p>
-        <p class="text-xs text-text-tertiary">
-          提示：“免费($0)” 与 “基础” 档位不是同一个概念
-        </p>
-        <button
-          @click="clearFilters"
-          class="text-xs text-accent hover:text-accent/80"
-        >
-          清除过滤
-        </button>
-      </div>
+        <span class="text-[10px] font-black uppercase leading-none text-text-tertiary group-hover:text-text-primary">{{ provider.slice(0, 2) }}</span>
+        <div class="absolute left-16 px-3 py-1.5 rounded-lg bg-text-primary text-surface-1 text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 pointer-events-none transition-all -translate-x-2 group-hover:translate-x-0 whitespace-nowrap shadow-xl z-50">
+          {{ provider }}
+        </div>
+      </button>
+    </aside>
 
-      <!-- Provider groups -->
-      <template v-else>
-        <div
-          v-for="(models, provider) in modelsByProvider"
-          :key="provider"
-          class="space-y-3"
-        >
-          <div class="flex items-center gap-2">
-            <span
-              class="w-3 h-3 rounded-full"
-              :style="{ backgroundColor: getModelColor(provider) }"
-            />
-            <h2 class="text-xs font-bold uppercase tracking-wider text-text-tertiary">
-              {{ providerLabels[provider] ?? provider.toUpperCase() }}
-            </h2>
-            <span class="text-[10px] text-text-tertiary">({{ models.length }})</span>
+    <!-- Main Content -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-10">
+        <!-- Header Trinity Bar (Desktop Only or Unified) -->
+        <div v-if="!isMobile" class="glass-v3 rounded-[32px] p-6 border border-white/10 shadow-2xl flex flex-wrap items-center justify-between gap-6">
+          <div class="flex items-center gap-4">
+            <div class="p-3 bg-text-primary dark:bg-white rounded-2xl shadow-xl">
+              <Cpu :size="24" class="text-surface-1 dark:text-black" stroke-width="3" />
+            </div>
+            <div>
+              <h1 class="text-2xl font-black text-text-primary tracking-tighter uppercase">模型基因库</h1>
+              <p class="text-[10px] text-text-tertiary font-black uppercase tracking-[0.2em] opacity-50">
+                <template v-if="appStore.loading">Syncing Registry...</template>
+                <template v-else>{{ filteredModels.length }} / {{ appStore.models.length }} Models Active</template>
+              </p>
+            </div>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div
-              v-for="model in models"
-              :key="model.id"
-              class="card p-4 space-y-3 hover:border-border-hover transition-colors"
-            >
-              <!-- Header -->
-              <div class="flex items-start justify-between">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <h3 class="text-sm font-semibold text-text-primary">{{ model.name }}</h3>
-                    <span
-                      v-if="model.free"
-                      class="text-[9px] px-1.5 py-0.5 bg-green-500/15 text-green-400 rounded-full font-medium"
-                    >$0</span>
-                    <span
-                      v-if="model.supportsVision"
-                      class="text-[9px] px-1.5 py-0.5 bg-purple-500/15 text-purple-400 rounded-full font-medium"
-                    >VISION</span>
+          <!-- Controls Panel (Desktop) -->
+          <div v-if="appStore.models.length" class="flex flex-wrap items-center gap-2 bg-black/[0.03] dark:bg-black/20 p-2 rounded-[20px] border border-black/5 dark:border-white/5">
+            <button @click="filterFree = !filterFree" class="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:border-accent/30 hover:text-text-primary'">
+              <DollarSign :size="12" stroke-width="4" /> 免费 
+              <component :is="filterFree ? ToggleRight : ToggleLeft" :size="14" stroke-width="3" />
+            </button>
+            <div class="w-px h-4 bg-black/5 dark:bg-white/10 mx-1"></div>
+            <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)"
+                    class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent shadow-accent/20' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:border-accent/30 hover:text-text-primary'">
+              {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}
+            </button>
+            <div class="w-px h-4 bg-black/5 dark:bg-white/10 mx-1"></div>
+            <button @click="filterVision = !filterVision" class="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="filterVision ? 'bg-purple-500 text-white border-purple-500 shadow-purple-500/20' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:border-accent/30 hover:text-text-primary'">
+              <Image :size="12" stroke-width="3" /> 视觉
+            </button>
+          </div>
+        </div>
+
+        <!-- Mobile Controls Panel -->
+        <div v-else-if="appStore.models.length" class="flex flex-col gap-3 px-1">
+          <div class="flex items-center justify-between">
+            <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-50">{{ filteredModels.length }} / {{ appStore.models.length }} Models</p>
+            <button @click="clearFilters" class="text-[9px] font-black text-accent uppercase tracking-widest underline decoration-2 underline-offset-4">Reset All</button>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button @click="filterFree = !filterFree" class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
+              <DollarSign :size="12" stroke-width="4" /> 免费 
+              <component :is="filterFree ? ToggleRight : ToggleLeft" :size="14" stroke-width="3" />
+            </button>
+            <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)"
+                    class="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
+              {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}
+            </button>
+            <button @click="filterVision = !filterVision" class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border shadow-sm"
+                    :class="filterVision ? 'bg-purple-500 text-white border-purple-500' : 'bg-white dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
+              <Image :size="12" stroke-width="3" /> 视觉
+            </button>
+          </div>
+        </div>
+
+        <!-- Loading / Empty States -->
+        <div v-if="appStore.loading" class="py-20 flex flex-col items-center justify-center space-y-4">
+          <Loader2 :size="40" class="text-accent animate-spin" stroke-width="3" />
+          <p class="text-sm font-black text-text-tertiary uppercase tracking-[0.3em] animate-pulse">Synchronizing Genes...</p>
+        </div>
+
+        <div v-else-if="!appStore.models.length" class="glass-v3 rounded-[40px] p-16 text-center space-y-6 border border-white/10">
+          <div class="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4 border border-white/5 shadow-inner">
+            <AlertCircle :size="40" class="text-text-tertiary opacity-30" />
+          </div>
+          <div>
+            <p class="text-xl font-black text-text-primary uppercase">{{ appStore.error || '未检测到 API 链路' }}</p>
+            <p class="text-xs text-text-tertiary mt-2 uppercase tracking-widest">请先在设置中心配置有效的 Provider 与密钥</p>
+          </div>
+          <button @click="goToSettings" class="px-10 py-4 rounded-2xl bg-accent text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all">前往系统配置</button>
+        </div>
+
+        <!-- Grouped Model Grid -->
+        <div v-else class="space-y-16 pb-20">
+          <div v-for="provider in providers" :id="'provider-section-' + provider" :key="provider" class="scroll-mt-10">
+            <!-- Provider Section Header (Improved V3 Coverage) -->
+            <div class="flex items-center gap-4 mb-8 sticky top-0 py-6 bg-surface-0/95 backdrop-blur-xl z-20 -mx-6 px-6 border-b border-white/5">
+              <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-black text-white shadow-xl shrink-0" :style="{ backgroundColor: getModelColor(provider) }">
+                {{ provider.charAt(0).toUpperCase() }}
+              </div>
+              <div class="min-w-0">
+                <h2 class="text-xl font-black text-text-primary uppercase tracking-tight truncate">{{ provider }}</h2>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-60">{{ modelsByProvider[provider].length }} 模型基因就绪</span>
+                </div>
+              </div>
+              <div class="h-px flex-1 bg-white/5 ml-4"></div>
+            </div>
+
+            <!-- Model Cards Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div
+                v-for="model in modelsByProvider[provider]"
+                :key="model.id"
+                @click="toggleModel(model.id)"
+                class="group relative flex flex-col p-6 rounded-[32px] border transition-all duration-500 cursor-pointer active:scale-[0.98]"
+                :class="appStore.selectedModelIds.includes(model.id) 
+                  ? 'bg-accent/10 border-accent/40 shadow-[0_20px_50px_rgba(99,102,241,0.15)] ring-1 ring-accent/20' 
+                  : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/8 shadow-xl'"
+              >
+                <!-- Select Checkmark -->
+                <div class="absolute top-6 right-6 w-6 h-6 rounded-full flex items-center justify-center border transition-all"
+                     :class="appStore.selectedModelIds.includes(model.id) ? 'bg-accent border-accent text-white scale-110 shadow-lg shadow-accent/20' : 'border-white/10 opacity-30'">
+                  <Check v-if="appStore.selectedModelIds.includes(model.id)" :size="14" stroke-width="4" />
+                </div>
+
+                <!-- Card Header -->
+                <div class="mb-6">
+                  <div class="flex items-center gap-2 mb-2">
+                    <h3 class="text-base font-black text-text-primary uppercase tracking-tight truncate pr-8">{{ model.name }}</h3>
                   </div>
-                  <p class="text-[10px] text-text-tertiary font-mono mt-0.5">{{ model.id }}</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors"
+                          :class="tierClass(model.tier, appStore.selectedModelIds.includes(model.id))">{{ tierLabel(model.tier) }}</span>
+                    <span v-if="model.free" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Free</span>
+                    <span v-if="model.supportsVision" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-500 border border-purple-500/20">Vision</span>
+                  </div>
                 </div>
-                <span
-                  class="text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ml-2"
-                  :class="tierClass(model.tier)"
-                >{{ tierLabel(model.tier) }}</span>
-              </div>
 
-              <!-- Stats -->
-              <div class="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <p class="text-[10px] text-text-tertiary">Context</p>
-                  <p class="text-xs font-medium text-text-primary">{{ formatContext(model.contextWindow) }}</p>
+                <!-- Industrial Dashboard Stats -->
+                <div class="grid grid-cols-3 gap-2 p-4 rounded-2xl bg-black/[0.03] dark:bg-black/20 border border-black/5 dark:border-white/5 mb-6 transition-colors group-hover:bg-black/[0.06] dark:group-hover:bg-black/30">
+                  <div class="text-center space-y-1">
+                    <p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">Context</p>
+                    <div class="flex items-center justify-center gap-1">
+                      <Gauge :size="10" class="text-accent opacity-40" />
+                      <span class="text-[11px] font-mono font-bold text-text-primary">{{ formatContext(model.contextWindow) }}</span>
+                    </div>
+                  </div>
+                  <div class="text-center space-y-1 border-x border-black/5 dark:border-white/5">
+                    <p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">In (1M)</p>
+                    <span class="text-[11px] font-mono font-bold text-text-primary">{{ formatPrice(model.priceInput) }}</span>
+                  </div>
+                  <div class="text-center space-y-1">
+                    <p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">Out (1M)</p>
+                    <span class="text-[11px] font-mono font-bold text-text-primary">{{ formatPrice(model.priceOutput) }}</span>
+                  </div>
                 </div>
-                <div>
-                  <p class="text-[10px] text-text-tertiary">Input</p>
-                  <p class="text-xs font-medium text-text-primary">{{ formatPrice(model.priceInput) }}/M</p>
-                </div>
-                <div>
-                  <p class="text-[10px] text-text-tertiary">Output</p>
-                  <p class="text-xs font-medium text-text-primary">{{ formatPrice(model.priceOutput) }}/M</p>
-                </div>
-              </div>
 
-              <!-- Tags -->
-              <div class="flex flex-wrap gap-1">
-                <span
-                  v-for="tag in model.tags"
-                  :key="tag"
-                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]
-                         bg-surface-3 text-text-tertiary"
-                >
-                  <component :is="tagIcons[tag] ?? Cpu" :size="10" />
-                  {{ tag }}
-                </span>
+                <!-- Technical ID Footer -->
+                <div class="flex items-center justify-between mt-auto pt-2">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <Globe :size="12" class="text-text-tertiary opacity-40" />
+                    <span class="text-[9px] font-mono font-medium text-text-tertiary truncate uppercase tracking-tighter opacity-50">{{ model.id }}</span>
+                  </div>
+                  <div class="flex gap-1 shrink-0">
+                    <component v-for="tag in model.tags.slice(0, 2)" :key="tag" :is="tagIcons[tag] ?? Cpu" :size="12" class="text-text-tertiary opacity-40" />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </template>
 
-      <!-- Error -->
-      <div v-if="appStore.error && appStore.models.length" class="card p-3 border-amber-500/30">
-        <p class="text-xs text-amber-400">{{ appStore.error }}</p>
+        <!-- Global Sync Info -->
+        <div v-if="appStore.error && appStore.models.length" class="p-4 rounded-2xl bg-red-500/5 border border-red-500/20 flex items-center gap-3">
+          <Activity :size="16" class="text-red-400" />
+          <p class="text-[10px] font-black text-red-400 uppercase tracking-widest">Synchronization Error: {{ appStore.error }}</p>
+        </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>

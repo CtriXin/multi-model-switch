@@ -80,11 +80,24 @@ function updateGlassControl(key: string, value: number) {
     <!-- Header: Cinematic V3 -->
     <header class="h-16 flex items-center justify-between px-8 sticky top-4 z-50 mx-4 md:mx-8 rounded-2xl border transition-all duration-500 shadow-2xl"
             :style="glassStyle">
-      <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/40">
-          <Sparkles :size="16" class="text-white" />
+      <div class="flex items-center gap-2 group/logo cursor-pointer">
+        <!-- Kinetic Reactor Core v3.7 -->
+        <div class="relative flex items-center justify-center w-10 h-10 shrink-0">
+          <div class="absolute inset-0 rounded-full border-[1.5px] border-dashed border-accent/30 animate-[spin_8s_linear_infinite_reverse] group-hover/logo:border-accent/60 transition-colors"></div>
+          <div class="absolute inset-1.5 rounded-full border border-white/5 animate-[spin_15s_linear_infinite]"></div>
+          <div class="relative flex items-center justify-center w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-[0_0_20px_rgba(99,102,241,0.5)] group-hover/logo:scale-110 transition-transform duration-500">
+            <Sparkles :size="16" :stroke-width="3.5" class="text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+          </div>
         </div>
-        <span class="font-black tracking-tighter text-xl uppercase italic">SparkRing <span class="text-indigo-600 dark:text-indigo-400">V3 SPEC</span></span>
+        
+        <div class="flex flex-col select-none uppercase" style="font-family: 'Syne', sans-serif;">
+          <div class="text-[20px] font-[800] tracking-[-0.07em] flex items-center leading-none">
+            <span class="text-accent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">SPARK</span>
+            <span class="text-text-primary ml-1.5">RING</span>
+            <span class="text-indigo-600 dark:text-indigo-400 ml-4 text-[10px] opacity-40">v3.7 SPEC</span>
+          </div>
+          <div class="h-[1.5px] w-full bg-gradient-to-r from-accent/60 via-accent/20 to-transparent mt-1.5 group-hover:bg-accent transition-colors"></div>
+        </div>
       </div>
 
       <nav class="hidden lg:flex gap-1 p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-white/5">

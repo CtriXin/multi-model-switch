@@ -22,7 +22,7 @@ const tabs = [
         class="flex flex-col items-center gap-0.5 px-6 py-1 transition-colors"
         :class="route.path === tab.path ? 'text-accent' : 'text-text-tertiary'"
       >
-        <component :is="tab.icon" :size="20" :stroke-width="route.path === tab.path ? 2 : 1.5" />
+        <component :is="tab.icon" :size="20" stroke-width="3" />
         <span class="text-[10px]">{{ tab.label }}</span>
       </button>
     </div>
