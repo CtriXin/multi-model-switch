@@ -143,6 +143,16 @@ function iosSwitchSession(session: { id: string; type: string }) {
   router.push(session.type === 'chat' ? '/chat' : '/discuss')
   iosDrawerOpen.value = false
 }
+
+function isDrawerSessionActive(session: { id: string; type: string }) {
+  if (route.path === '/chat') {
+    return session.type === 'chat' && sessionStore.currentSessionId === session.id
+  }
+  if (route.path === '/discuss') {
+    return session.type === 'discuss' && sessionStore.currentSessionId === session.id
+  }
+  return false
+}
 </script>
 
 <template>
@@ -244,10 +254,10 @@ function iosSwitchSession(session: { id: string; type: string }) {
             <div class="flex-1 overflow-y-auto px-3 py-2 border-t border-white/5 mt-2">
               <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest px-4 mb-2 mt-4 opacity-40">Recent History</p>
               <div v-if="sessionStore.sortedSessions.length" class="space-y-1">
-                <button v-for="session in sessionStore.sortedSessions" :key="session.id" @click="iosSwitchSession(session)" class="w-full flex items-start gap-3 px-4 py-3.5 rounded-2xl text-left transition-all active:scale-[0.98]" :class="sessionStore.currentSessionId === session.id ? 'bg-text-primary text-surface-1 shadow-lg' : 'text-text-secondary active:bg-white/5'">
+                <button v-for="session in sessionStore.sortedSessions" :key="session.id" @click="iosSwitchSession(session)" class="w-full flex items-start gap-3 px-4 py-3.5 rounded-2xl text-left transition-all active:scale-[0.98]" :class="isDrawerSessionActive(session) ? 'bg-text-primary text-surface-1 shadow-lg' : 'text-text-secondary active:bg-white/5'">
                   <div class="flex-1 min-w-0">
                     <div class="text-xs font-bold truncate">{{ session.title }}</div>
-                    <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-50" :class="sessionStore.currentSessionId === session.id ? 'text-surface-1' : ''">
+                    <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-50" :class="isDrawerSessionActive(session) ? 'text-surface-1' : ''">
                       {{ sessionStore.formatTime(session.updatedAt) }} · {{ session.messageCount }} 轮
                     </div>
                   </div>

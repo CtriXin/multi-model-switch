@@ -4,7 +4,7 @@ import { useAppStore, getModelColor, type ModelMeta, type ModelSelectionMode, ty
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToastStore } from '@/stores/toast'
-import { Search, Check, DollarSign, Image, Clock, X, Dice5 } from 'lucide-vue-next'
+import { Search, Check, DollarSign, Image, Clock, X, Dice5, ToggleLeft, ToggleRight } from 'lucide-vue-next'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
 
 const props = withDefaults(defineProps<{
@@ -29,7 +29,8 @@ const toast = useToastStore()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
 const search = ref('')
-const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
+const filterFree = ref(appStore.preferFree)
+const tierFilters = ref<ModelPoolTag[]>([])
 const filterVision = ref(false)
 const recentSearches = ref<string[]>([])
 const sheetRef = ref<HTMLElement>()
@@ -54,6 +55,7 @@ const filtered = computed(() => {
   const q = search.value.toLowerCase()
   return appStore.filterModels({
     tags: tierFilters.value,
+    requireFree: filterFree.value,
     requireVision: filterVision.value,
   }).filter(m => {
     if (q && !m.name.toLowerCase().includes(q)
@@ -81,7 +83,7 @@ const presetIcons: Record<string, string> = {
 }
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? 'premium' : tier === 1 ? 'standard' : 'free'
+  return tier === 2 ? 'premium' : tier === 1 ? 'standard' : 'basic'
 }
 
 function tierColor(tier: number): string {
@@ -115,12 +117,15 @@ function toggleTierFilter(tag: ModelPoolTag) {
   else next.add(tag)
   tierFilters.value = Array.from(next)
 }
+function toggleFilterFree() { filterFree.value = !filterFree.value }
 function toggleFilterVision() { filterVision.value = !filterVision.value }
 function hasTierFilter(tag: ModelPoolTag) { return tierFilters.value.includes(tag) }
 function randomPick() {
   appStore.randomPick(3, props.mode, {
     tags: tierFilters.value,
+    requireFree: filterFree.value,
     requireVision: filterVision.value,
+    useAllWhenNoTags: true,
   })
 }
 
@@ -203,6 +208,7 @@ watch(() => props.open, (val) => {
   if (val) {
     detent.value = 'half'
     search.value = ''
+    filterFree.value = appStore.preferFree
     filterVision.value = !!props.request?.requireVision
     sheetTranslateY.value = 0
     recentSearches.value = getSearchHistory()
@@ -294,9 +300,14 @@ function modelTags(model: ModelMeta): string[] {
 
           <!-- Filter chips & Random -->
           <div class="flex items-center gap-2 px-8 pb-4 shrink-0">
-            <button @click="toggleTierFilter('free')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
-                    :class="hasTierFilter('free') ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+            <button @click="toggleFilterFree" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="filterFree ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
               <DollarSign :size="12" /> 免费
+              <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
+            </button>
+            <button @click="toggleTierFilter('basic')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+                    :class="hasTierFilter('basic') ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              基础
             </button>
             <button @click="toggleTierFilter('std')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
                     :class="hasTierFilter('std') ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
@@ -352,7 +363,7 @@ function modelTags(model: ModelMeta): string[] {
                 <span class="text-[10px] font-bold text-text-tertiary mt-1 uppercase tracking-widest opacity-60">{{ model.provider }}</span>
                 <div class="flex flex-wrap gap-1 mt-3">
                   <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider" :class="tierColor(model.tier)">{{ tierLabel(model.tier) }}</span>
-                  <span v-if="model.free" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-green-500/10 text-green-400">free</span>
+                  <span v-if="model.free" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-green-500/10 text-green-400">$0</span>
                   <span v-if="model.supportsVision" class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400">vision</span>
                 </div>
                 <span v-if="replacementMode && model.id === props.request?.oldModelId" class="mt-3 text-[10px] font-black uppercase tracking-widest text-orange-400">当前模型</span>

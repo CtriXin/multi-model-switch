@@ -61,7 +61,7 @@ const canReplaceModel = computed(() =>
 const tierLabel = computed(() => {
   if (props.tier === 2) return '旗舰'
   if (props.tier === 1) return '主力'
-  return 'FREE'
+  return '基础'
 })
 
 const tierClass = computed(() => {

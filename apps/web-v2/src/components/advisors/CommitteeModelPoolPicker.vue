@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
-import { Plus, Search, Shuffle, Copy, X, DollarSign, Image, Clock } from 'lucide-vue-next'
-import { getModelColor, useAppStore } from '@/stores/app'
+import { Plus, Search, Shuffle, Copy, X, DollarSign, Image, Clock, ToggleLeft, ToggleRight } from 'lucide-vue-next'
+import { getModelColor, useAppStore, type ModelPoolTag } from '@/stores/app'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
 
 const emit = defineEmits<{
@@ -12,8 +12,9 @@ const appStore = useAppStore()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const popoverOpen = ref(false)
 const searchQuery = ref('')
-const filterFree = ref(true)
+const filterFree = ref(appStore.preferFree)
 const filterVision = ref(false)
+const tierFilters = ref<ModelPoolTag[]>([])
 const recentSearches = ref<string[]>([])
 const MAX_SELECTION = 5
 
@@ -22,10 +23,12 @@ const isMobile = computed(() => platform.value === 'ios')
 
 const filteredModels = computed(() => {
   const q = searchQuery.value.toLowerCase()
-  return [...appStore.models]
+  return appStore.filterModels({
+    tags: tierFilters.value,
+    requireFree: filterFree.value,
+    requireVision: filterVision.value,
+  })
     .filter((model) => {
-      if (filterFree.value && !model.free) return false
-      if (filterVision.value && !model.supportsVision) return false
       if (q && !model.name.toLowerCase().includes(q)
           && !model.provider.toLowerCase().includes(q)
           && !model.id.toLowerCase().includes(q)) return false
@@ -48,8 +51,9 @@ function togglePopover() {
   popoverOpen.value = !popoverOpen.value
   if (popoverOpen.value) {
     searchQuery.value = ''
-    filterFree.value = true
+    filterFree.value = appStore.preferFree
     filterVision.value = false
+    tierFilters.value = []
     recentSearches.value = getSearchHistory()
   } else {
     if (searchQuery.value.trim()) addSearchHistory(searchQuery.value.trim())
@@ -60,10 +64,30 @@ function applyRecentSearch(keyword: string) {
   searchQuery.value = keyword
 }
 
+function toggleTierFilter(tag: ModelPoolTag) {
+  const next = new Set(tierFilters.value)
+  if (next.has(tag)) next.delete(tag)
+  else next.add(tag)
+  tierFilters.value = Array.from(next)
+}
+
+function hasTierFilter(tag: ModelPoolTag) {
+  return tierFilters.value.includes(tag)
+}
+
+function randomPickFromFilters() {
+  appStore.randomPick(3, 'committee', {
+    tags: tierFilters.value,
+    requireFree: filterFree.value,
+    requireVision: filterVision.value,
+    useAllWhenNoTags: true,
+  })
+}
+
 function tierLabel(tier: number) {
   if (tier === 2) return '旗舰'
   if (tier === 1) return '主力'
-  return '经济'
+  return '基础'
 }
 
 function tierClass(tier: number) {
@@ -149,7 +173,7 @@ function tierClass(tier: number) {
       </div>
       <div class="mt-4 flex items-center gap-2">
         <button
-          @click="appStore.randomPick(3, 'committee')"
+          @click="randomPickFromFilters"
           type="button"
           class="inline-flex items-center gap-1 rounded-full border border-border-subtle px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-border-default hover:text-text-primary"
         >
@@ -217,6 +241,34 @@ function tierClass(tier: number) {
               >
                 <DollarSign :size="10" />
                 免费
+                <component :is="filterFree ? ToggleRight : ToggleLeft" :size="11" />
+              </button>
+              <button
+                @click="toggleTierFilter('basic')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('basic')
+                  ? 'bg-green-500/15 text-green-400 border-green-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
+              >
+                基础
+              </button>
+              <button
+                @click="toggleTierFilter('std')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('std')
+                  ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
+              >
+                主力
+              </button>
+              <button
+                @click="toggleTierFilter('pro')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('pro')
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'"
+              >
+                旗舰
               </button>
               <button
                 @click="filterVision = !filterVision"
@@ -292,7 +344,7 @@ function tierClass(tier: number) {
               <span
                 v-if="model.free"
                 class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400"
-              >FREE</span>
+              >$0</span>
               <span
                 v-if="model.supportsVision"
                 class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400"
