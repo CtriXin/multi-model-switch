@@ -3,7 +3,7 @@ import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
-import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare } from 'lucide-vue-next'
+import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare, ToggleLeft, ToggleRight } from 'lucide-vue-next'
 import { useChatStore, type ContextMode } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToastStore } from '@/stores/toast'
@@ -20,7 +20,8 @@ const isMobile = computed(() => platform?.value === 'ios')
 const popoverOpen = ref(false)
 const searchQuery = ref('')
 const filterVision = ref(false)
-const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
+const filterFree = ref(appStore.preferFree)
+const tierFilters = ref<ModelPoolTag[]>([])
 const recentSearches = ref<string[]>([])
 const contextMenuOpen = ref(false)
 const modelPopoverButtonRef = ref<HTMLElement | null>(null)
@@ -62,6 +63,7 @@ function updateFiltered() {
   const q = searchQuery.value.toLowerCase()
   filteredModels.value = appStore.filterModels({
     tags: tierFilters.value,
+    requireFree: filterFree.value,
     requireVision: filterVision.value,
   }).filter(m => {
     if (q && !m.name.toLowerCase().includes(q) && !m.provider.toLowerCase().includes(q) && !m.id.toLowerCase().includes(q)) return false
@@ -130,6 +132,11 @@ function toggleFilterVision() {
   updateFiltered()
 }
 
+function toggleFilterFree() {
+  filterFree.value = !filterFree.value
+  updateFiltered()
+}
+
 function hasTierFilter(tag: ModelPoolTag) {
   return tierFilters.value.includes(tag)
 }
@@ -137,7 +144,9 @@ function hasTierFilter(tag: ModelPoolTag) {
 function randomPickFromFilters() {
   appStore.randomPick(3, 'chat', {
     tags: tierFilters.value,
+    requireFree: filterFree.value,
     requireVision: filterVision.value,
+    useAllWhenNoTags: true,
   })
 }
 
@@ -161,7 +170,7 @@ function openReplacementPicker(event: Event) {
 }
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? 'PRO' : tier === 1 ? 'STD' : 'FREE'
+  return tier === 2 ? 'PRO' : tier === 1 ? 'STD' : 'BASIC'
 }
 
 function tierClass(tier: number): string {
@@ -309,13 +318,21 @@ onUnmounted(() => {
             </div>
             <!-- Filter chips -->
             <div class="flex items-center gap-1.5">
-              <button @click="toggleTierFilter('free')"
+              <button @click="toggleFilterFree"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
-                :class="hasTierFilter('free')
+                :class="filterFree
                   ? 'bg-green-500/15 text-green-400 border-green-500/30'
                   : 'text-text-tertiary border-border-subtle hover:bg-surface-3'">
                 <DollarSign :size="10" />
                 免费
+                <component :is="filterFree ? ToggleRight : ToggleLeft" :size="11" />
+              </button>
+              <button @click="toggleTierFilter('basic')"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
+                :class="hasTierFilter('basic')
+                  ? 'bg-green-500/15 text-green-400 border-green-500/30'
+                  : 'text-text-tertiary border-border-subtle hover:bg-surface-3'">
+                基础
               </button>
               <button @click="toggleTierFilter('std')"
                 class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-all border"
@@ -375,7 +392,7 @@ onUnmounted(() => {
                   : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'">
                 <span class="flex-1 truncate">{{ model.name }}</span>
                 <span v-if="model.free"
-                  class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">FREE</span>
+                  class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">$0</span>
                 <span v-if="model.supportsVision"
                   class="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400">VISION</span>
                 <span class="text-[9px] font-medium px-1.5 py-0.5 rounded-full"

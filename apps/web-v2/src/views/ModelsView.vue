@@ -2,20 +2,22 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
-import { Cpu, Zap, Brain, Eye, Code, Loader2, AlertCircle, EyeOff, DollarSign, Image, RotateCcw } from 'lucide-vue-next'
+import { Cpu, Zap, Brain, Eye, Code, Loader2, AlertCircle, EyeOff, DollarSign, Image, RotateCcw, ToggleLeft, ToggleRight } from 'lucide-vue-next'
 
 const appStore = useAppStore()
 const router = useRouter()
 
 // Filter state
 const filterVision = ref(false)
-const tierFilters = ref<ModelPoolTag[]>(appStore.preferFree ? ['free'] : [])
+const filterFree = ref(appStore.preferFree)
+const tierFilters = ref<ModelPoolTag[]>([])
 
 const suppressedCount = computed(() => appStore.getSuppressedModelIds().length)
 
 const filteredModels = computed(() => {
   return appStore.filterModels({
     tags: tierFilters.value,
+    requireFree: filterFree.value,
     requireVision: filterVision.value,
   })
 })
@@ -41,7 +43,7 @@ const providerLabels: Record<string, string> = {
 }
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? '旗舰' : tier === 1 ? '主力' : 'FREE'
+  return tier === 2 ? '旗舰' : tier === 1 ? '主力' : '基础'
 }
 
 function tierClass(tier: number): string {
@@ -84,6 +86,7 @@ function hasTierFilter(tag: ModelPoolTag) {
 
 function clearFilters() {
   tierFilters.value = []
+  filterFree.value = false
   filterVision.value = false
 }
 </script>
@@ -114,14 +117,24 @@ function clearFilters() {
             恢复隐藏 ({{ suppressedCount }})
           </button>
           <button
-            @click="toggleTierFilter('free')"
+            @click="filterFree = !filterFree"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
-            :class="hasTierFilter('free')
+            :class="filterFree
               ? 'bg-green-500/15 text-green-400 border-green-500/30'
               : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
           >
             <DollarSign :size="12" />
-            FREE
+            免费($0)
+            <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
+          </button>
+          <button
+            @click="toggleTierFilter('basic')"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
+            :class="hasTierFilter('basic')
+              ? 'bg-green-500/15 text-green-400 border-green-500/30'
+              : 'bg-surface-2 text-text-tertiary border-border-subtle hover:bg-surface-3'"
+          >
+            基础
           </button>
           <button
             @click="toggleTierFilter('std')"
@@ -178,12 +191,15 @@ function clearFilters() {
 
       <!-- Filter result empty -->
       <div
-        v-else-if="!filteredModels.length && (tierFilters.length || filterVision)"
+        v-else-if="!filteredModels.length && (tierFilters.length || filterVision || filterFree)"
         class="card p-8 text-center space-y-2"
       >
         <EyeOff :size="24" class="text-text-tertiary mx-auto" />
         <p class="text-sm text-text-secondary">
           没有符合过滤条件的模型
+        </p>
+        <p class="text-xs text-text-tertiary">
+          提示：“免费($0)” 与 “基础” 档位不是同一个概念
         </p>
         <button
           @click="clearFilters"
@@ -225,7 +241,7 @@ function clearFilters() {
                     <span
                       v-if="model.free"
                       class="text-[9px] px-1.5 py-0.5 bg-green-500/15 text-green-400 rounded-full font-medium"
-                    >FREE</span>
+                    >$0</span>
                     <span
                       v-if="model.supportsVision"
                       class="text-[9px] px-1.5 py-0.5 bg-purple-500/15 text-purple-400 rounded-full font-medium"

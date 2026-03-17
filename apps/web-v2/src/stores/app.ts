@@ -34,11 +34,13 @@ export interface Preset {
 }
 
 export type ModelSelectionMode = 'chat' | 'committee'
-export type ModelPoolTag = 'free' | 'std' | 'pro'
+export type ModelPoolTag = 'basic' | 'std' | 'pro'
 
 export interface ModelFilterOptions {
   tags?: ModelPoolTag[]
+  requireFree?: boolean
   requireVision?: boolean
+  useAllWhenNoTags?: boolean
 }
 
 const MODEL_SUPPRESSION_KEY = 'mms-disabled-models'
@@ -264,7 +266,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function matchesModelTag(model: ModelMeta, tag: ModelPoolTag): boolean {
-    if (tag === 'free') return model.free
+    if (tag === 'basic') return model.tier === 0
     if (tag === 'std') return model.tier === 1
     return model.tier === 2
   }
@@ -272,6 +274,7 @@ export const useAppStore = defineStore('app', () => {
   function filterModels(options: ModelFilterOptions = {}, source = models.value): ModelMeta[] {
     const tags = options.tags ?? []
     return source.filter((model) => {
+      if (options.requireFree && !model.free) return false
       if (options.requireVision && !model.supportsVision) return false
       if (!tags.length) return true
       return tags.some((tag) => matchesModelTag(model, tag))
@@ -287,24 +290,28 @@ export const useAppStore = defineStore('app', () => {
       ? []
       : models.value.filter((model) => model.tier < highestTier)
 
-    if (!preferFree.value) return nonTopPool
+    if (!preferFree.value) return nonTopPool.length ? nonTopPool : models.value
 
     const freePool = models.value.filter((model) => model.free)
     if (freePool.length >= count) return freePool
 
-    if (!nonTopPool.length) return freePool
+    if (!nonTopPool.length) return freePool.length ? freePool : models.value
 
     const nonFreePool = nonTopPool.filter((model) => !model.free)
-    if (!nonFreePool.length) return freePool
+    if (!nonFreePool.length) return freePool.length ? freePool : models.value
 
     const fallbackTier = Math.min(...nonFreePool.map((model) => model.tier))
     const fallbackPool = nonFreePool.filter((model) => model.tier === fallbackTier)
-    return [...freePool, ...fallbackPool]
+    const mergedPool = [...freePool, ...fallbackPool]
+    return mergedPool.length ? mergedPool : models.value
   }
 
   function buildRandomPickPool(count = 3, options: ModelFilterOptions = {}): ModelMeta[] {
     const hasTagFilter = !!options.tags?.length
-    const basePool = hasTagFilter ? models.value : buildDefaultRandomPickPool(count)
+    const useAllPool = options.useAllWhenNoTags && !hasTagFilter
+    const basePool = useAllPool
+      ? models.value
+      : (hasTagFilter ? models.value : buildDefaultRandomPickPool(count))
     return filterModels(options, basePool)
   }
 

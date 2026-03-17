@@ -36,6 +36,15 @@ export class ApiError extends Error {
   }
 }
 
+export function isCodingPlanUrl(baseUrl: string) {
+  try {
+    const url = new URL(baseUrl)
+    return url.hostname === 'coding.dashscope.aliyuncs.com'
+  } catch {
+    return baseUrl.includes('coding.dashscope.aliyuncs.com')
+  }
+}
+
 function extractApiErrorDetail(body: string): string {
   if (!body) return ''
   try {
@@ -53,7 +62,7 @@ function extractApiErrorDetail(body: string): string {
   return body
 }
 
-function buildApiError(status: number, body: string): ApiError {
+export function buildApiError(status: number, body: string): ApiError {
   const detail = extractApiErrorDetail(body).trim()
   const lower = detail.toLowerCase()
 
@@ -102,6 +111,35 @@ function buildApiError(status: number, body: string): ApiError {
   )
 }
 
+export function resolveApiModelId(provider: ProviderConfig, model: string) {
+  return provider.type === 'openrouter' ? model : stripProviderPrefix(model, provider.id)
+}
+
+export function normalizeGatewayError(error: unknown): Error {
+  if (error instanceof ApiError) return error
+
+  const message = error instanceof Error ? error.message : String(error)
+  const match = message.match(/^(Anthropic|OpenAI) bridge failed \((\d+)\):\s*(.+)$/)
+  if (match) {
+    const status = Number(match[2])
+    const detail = match[3]
+    if (
+      status === 405
+      && /coding plan .*coding agents|only available for coding agents/i.test(detail)
+    ) {
+      return new ApiError(
+        '当前通道使用的是阿里云 Coding Plan。它只允许在 Claude Code / OpenClaw 这类编程工具中使用，不支持当前页面聊天直连。请改用普通 DashScope API，或仅在 CLI Workbench 的 Claude 路线中使用。',
+        status,
+        'provider_cli_only',
+        detail,
+      )
+    }
+    return buildApiError(status, detail)
+  }
+
+  return error instanceof Error ? error : new Error(message)
+}
+
 /**
  * Stream chat completions from an OpenAI-compatible endpoint.
  * Yields text chunks as they arrive.
@@ -117,7 +155,7 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
 
   // Strip provider prefix for non-OpenRouter providers
   // e.g. "deepseek/deepseek-chat" → "deepseek-chat"
-  const apiModel = provider.type === 'openrouter' ? model : stripProviderPrefix(model, provider.id)
+  const apiModel = resolveApiModelId(provider, model)
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -201,6 +239,85 @@ const ALWAYS_FREE_PROVIDER_IDS = new Set([
   'demo',
 ])
 
+const TIER_PREMIUM_KEYWORDS = [
+  'opus',
+  'sonnet',
+  'gpt-4',
+  'gpt-5',
+  'o1',
+  'o3',
+  'o4',
+  'r1',
+  'pro',
+  'max',
+  'ultra',
+  'large',
+  'reasoner',
+]
+
+const TIER_LIGHTWEIGHT_KEYWORDS = [
+  'mini',
+  'flash',
+  'haiku',
+  'small',
+  'lite',
+  'nano',
+  'fast',
+  'turbo',
+]
+
+function textContainsAnyKeyword(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(keyword))
+}
+
+function scoreModelForFallbackTier(model: ModelMeta): number {
+  const text = `${model.id} ${model.name}`.toLowerCase()
+  let score = 0
+
+  const combinedPrice = model.priceInput + model.priceOutput
+  if (combinedPrice >= 12) score += 3
+  else if (combinedPrice >= 6) score += 2
+  else if (combinedPrice >= 2) score += 1
+
+  if (model.contextWindow >= 1_000_000) score += 2
+  else if (model.contextWindow >= 200_000) score += 1.5
+  else if (model.contextWindow >= 128_000) score += 1
+  else if (model.contextWindow >= 64_000) score += 0.5
+
+  if (model.supportsVision) score += 0.7
+  if (model.supportsTools) score += 0.6
+  if (model.supportsNativeWebSearch) score += 0.4
+  if (model.tags.includes('reasoning')) score += 0.5
+  if (model.tags.includes('coding')) score += 0.3
+
+  if (textContainsAnyKeyword(text, TIER_PREMIUM_KEYWORDS)) score += 1.8
+  if (textContainsAnyKeyword(text, TIER_LIGHTWEIGHT_KEYWORDS)) score -= 1.2
+  return score
+}
+
+function shouldApplyFallbackTierRanking(models: ModelMeta[]): boolean {
+  if (models.length < 3) return false
+  return new Set(models.map((model) => model.tier)).size === 1
+}
+
+function rebucketModelsByUnifiedScore(models: ModelMeta[]): ModelMeta[] {
+  if (!shouldApplyFallbackTierRanking(models)) return models
+
+  const ranked = [...models].sort((left, right) => {
+    const scoreDiff = scoreModelForFallbackTier(right) - scoreModelForFallbackTier(left)
+    if (scoreDiff !== 0) return scoreDiff
+    if (right.contextWindow !== left.contextWindow) return right.contextWindow - left.contextWindow
+    return left.name.localeCompare(right.name)
+  })
+  const proCount = Math.max(1, Math.min(ranked.length - 1, Math.round(ranked.length * 0.35)))
+  const proIds = new Set(ranked.slice(0, proCount).map((model) => model.id))
+
+  return models.map((model) => ({
+    ...model,
+    tier: proIds.has(model.id) ? 2 : 1,
+  }))
+}
+
 /**
  * Strip the provider prefix from a compound model ID.
  * "deepseek/deepseek-chat" → "deepseek-chat"
@@ -223,6 +340,14 @@ export async function fetchModels(
   // Mock provider — return static model list
   if (provider.type === 'mock') {
     return MOCK_MODELS
+  }
+
+  if (isCodingPlanUrl(provider.baseUrl)) {
+    throw new ApiError(
+      '当前通道使用的是阿里云 Coding Plan。它不适合当前页面里的模型发现与聊天直连，请仅用于支持的编程工具链路。',
+      400,
+      'provider_cli_only',
+    )
   }
 
   let apiModels: ModelMeta[] = []
@@ -295,7 +420,7 @@ export async function fetchModels(
     throw new ApiError(`获取模型列表失败`, 0)
   }
 
-  return apiModels
+  return rebucketModelsByUnifiedScore(apiModels)
 }
 
 function mapToModelMeta(raw: ApiModel, provider: ProviderConfig): ModelMeta {

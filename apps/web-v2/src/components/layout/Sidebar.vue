@@ -53,6 +53,16 @@ function switchTo(session: { id: string; type: string }) {
   else router.push('/advisors')
 }
 
+function isSessionActive(session: { id: string; type: string }) {
+  if (route.path === '/chat') {
+    return session.type === 'chat' && sessionStore.currentSessionId === session.id
+  }
+  if (route.path === '/discuss') {
+    return session.type === 'discuss' && sessionStore.currentSessionId === session.id
+  }
+  return false
+}
+
 function deleteSession(id: string, e: Event) {
   e.stopPropagation()
   sessionStore.deleteSession(id)
@@ -189,25 +199,25 @@ function openCommandPalette() {
             :key="session.id"
             @click="switchTo(session)"
             class="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all duration-300 group relative"
-            :class="sessionStore.currentSessionId === session.id
+            :class="isSessionActive(session)
               ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
               : 'text-text-secondary hover:bg-white/5 hover:text-text-primary'"
           >
             <div 
               class="w-1.5 h-1.5 rounded-full shrink-0" 
               :style="{ backgroundColor: session.type === 'chat' ? '#6366f1' : '#a855f7' }"
-              :class="sessionStore.currentSessionId === session.id ? 'opacity-0' : 'opacity-60'"
+              :class="isSessionActive(session) ? 'opacity-0' : 'opacity-60'"
             ></div>
             <div class="flex-1 min-w-0">
               <div class="text-[11px] font-bold truncate tracking-tight">{{ session.title }}</div>
-              <div class="text-[9px] mt-0.5 opacity-50 font-black uppercase tracking-widest flex items-center gap-2" :class="sessionStore.currentSessionId === session.id ? 'text-surface-1' : ''">
+              <div class="text-[9px] mt-0.5 opacity-50 font-black uppercase tracking-widest flex items-center gap-2" :class="isSessionActive(session) ? 'text-surface-1' : ''">
                 <span>{{ session.messageCount }} 轮 · {{ sessionStore.formatTime(session.updatedAt) }}</span>
               </div>
             </div>
             <button
               @click.stop="deleteSession(session.id, $event)"
               class="opacity-0 group-hover:opacity-100 w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 -mr-1"
-              :class="sessionStore.currentSessionId === session.id
+              :class="isSessionActive(session)
                 ? 'hover:bg-red-500/20 text-current hover:text-red-500'
                 : 'hover:bg-red-500/10 text-text-tertiary hover:text-red-500'"
               title="删除会话"
