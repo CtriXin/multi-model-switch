@@ -1,8 +1,8 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "MMS",
-  "version": "0.3.1",
-  "identifier": "com.mms.polyminder",
+  "productName": "SparkRing",
+  "version": "0.3.3",
+  "identifier": "com.mms.sparkring",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5188",
@@ -12,15 +12,16 @@
   "app": {
     "windows": [
       {
-        "title": "MMS — Multi-Model Switch",
+        "title": "SparkRing",
         "width": 1100,
         "height": 720,
         "minWidth": 800,
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false,
+        "acceptFirstMouse": true,
         "decorations": true
       }
     ],
