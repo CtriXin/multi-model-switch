@@ -32,15 +32,52 @@ _ROUTE_STATUS_PATH = os.path.join(os.path.expanduser("~/.config/mms"), "route_st
 
 
 def _write_route_status(tier, model, reason):
-    """写路由状态供 statusline 读取，非阻塞，失败静默。"""
+    """写路由状态供 statusline 读取，非阻塞，失败静默。
+
+    同时写入隔离目录和真实 HOME（如果在隔离环境中），
+    确保用户在 Claude Code 内外都能看到状态。
+    """
     try:
         import time
         data = json.dumps({"tier": tier, "model": model, "reason": reason, "ts": time.time()})
-        tmp = _ROUTE_STATUS_PATH + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(data)
-        os.replace(tmp, _ROUTE_STATUS_PATH)
-    except OSError:
+
+        # 写入当前 HOME（可能是隔离目录）
+        try:
+            tmp = _ROUTE_STATUS_PATH + ".tmp"
+            os.makedirs(os.path.dirname(_ROUTE_STATUS_PATH), exist_ok=True)
+            with open(tmp, "w") as f:
+                f.write(data)
+            os.replace(tmp, _ROUTE_STATUS_PATH)
+        except OSError:
+            pass
+
+        # 如果在隔离环境中，同时写入真实 HOME。
+        # 典型隔离目录：~/\.config/mms/claude-gateway/s/<pid>
+        real_home = os.environ.get("HOME", "")
+        real_status_path = None
+        gateway_marker = f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}"
+        if gateway_marker in real_home:
+            user_home = real_home.split(gateway_marker, 1)[0]
+            if user_home:
+                real_status_path = os.path.join(user_home, ".config", "mms", "route_status.json")
+        elif f"{os.sep}claude-gateway{os.sep}" in real_home:
+            # 兼容旧目录结构
+            user_home = real_home.split(f"{os.sep}claude-gateway{os.sep}", 1)[0]
+            if user_home.endswith(f"{os.sep}.config{os.sep}mms"):
+                user_home = os.path.dirname(os.path.dirname(user_home))
+            if user_home:
+                real_status_path = os.path.join(user_home, ".config", "mms", "route_status.json")
+
+        if real_status_path and os.path.abspath(real_status_path) != os.path.abspath(_ROUTE_STATUS_PATH):
+            try:
+                tmp = real_status_path + ".tmp"
+                os.makedirs(os.path.dirname(real_status_path), exist_ok=True)
+                with open(tmp, "w") as f:
+                    f.write(data)
+                os.replace(tmp, real_status_path)
+            except OSError:
+                pass
+    except Exception:
         pass
 
 
@@ -883,6 +920,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # ── 智能路由：3-tier (light/medium/heavy) + sticky escalation ──
         light_model = getattr(self.server, "light_model", None)
         medium_model = getattr(self.server, "medium_model", None)
+        # 过滤空字符串
+        light_model = light_model if light_model and light_model.strip() else None
+        medium_model = medium_model if medium_model and medium_model.strip() else None
         path_no_qs = path.split("?")[0]
         has_routing = light_model or medium_model
         if has_routing and "/messages" in path_no_qs and path_no_qs != "/v1/messages/count_tokens":
@@ -933,6 +973,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     log_route(level, reason, payload.get("model", "?"), last_text)
                     # 写状态文件供 statusline 读取
                     _write_route_status(level, payload.get("model", ""), reason)
+                    # 保存 level 供后续使用
+                    self.server._last_level = level
+                else:
+                    # 智能路由开启但无法提取文本，默认用 heavy
+                    _write_route_status("heavy", payload.get("model", ""), "no_text")
+                    self.server._last_level = "heavy"
+            else:
+                # 智能路由开启但没有用户消息，默认用 heavy
+                _write_route_status("heavy", payload.get("model", ""), "no_user_msg")
+                self.server._last_level = "heavy"
 
         # 无论是否路由，都写 status 供 statusline 显示真实 model
         if not has_routing and "/messages" in path.split("?")[0]:
@@ -967,6 +1017,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             fwd_headers["anthropic-beta"] = beta
 
         stream = bool(payload.get("stream"))
+        # 智能路由模式下强制非流式（避免 OpenAI/Anthropic SSE 格式不匹配导致无法结束）
+        if has_routing:
+            stream = False
+
         try:
             if stream:
                 with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
@@ -1502,6 +1556,7 @@ def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_mod
     server.light_model = light_model
     server._sticky_floor = None
     server._sticky_remaining = 0
+    server._last_level = "heavy"  # 默认 tier
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime
 
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge
+from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, _write_route_status
 from ccs_core import detect_working_base_url
 
 try:
@@ -300,7 +300,7 @@ def launch_claude(model_info, runtime, once=False):
         else:
             cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
         bridge_cfg = cleanup_ctx.__enter__()
-        env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
+        env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"], heavy_model=bridge_model)
         state_home = None
     else:
         gateway_health_check(runtime)
@@ -308,11 +308,22 @@ def launch_claude(model_info, runtime, once=False):
         # ---- 三级兼容策略 ----
         # 1. 自动探测正确的 ANTHROPIC_BASE_URL（缓存 1h，避免重复请求）
         probe_model = _resolve_model(model_info) if model_info else "claude-sonnet-4-6"
+
+        # 对不支持 Claude 模型的 provider，自动映射到支持的模型
+        provider_id = runtime.get("id", "")
+        if provider_id == "bailian-codingplan" and probe_model.startswith(("claude-", "sonnet-", "opus-", "haiku-")):
+            # 百炼 CodingPlan 不支持 Claude 模型，使用其支持的 fallback 模型
+            probe_model = "qwen3.5-plus"
+            console.print(f"[dim]百炼 CodingPlan 不支持 Claude 模型，自动切换为: {probe_model}[/dim]")
+
         anthropic_url, detect_method = _resolve_anthropic_base_url(runtime, probe_model=probe_model)
 
         # 智能路由：提取 lb_light / lb_medium，需要通过 bridge 拦截请求
         lb_light = model_info.get("lb_light") if isinstance(model_info, dict) else None
         lb_medium = model_info.get("lb_medium") if isinstance(model_info, dict) else None
+        # 过滤空字符串（用户可能只选了 heavy+light，medium 为空字符串）
+        lb_light = lb_light if lb_light and lb_light.strip() else None
+        lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
 
         if anthropic_url is not None:
             if lb_light or lb_medium:
@@ -325,7 +336,14 @@ def launch_claude(model_info, runtime, once=False):
                                                     medium_model=lb_medium or None,
                                                     light_model=lb_light or None)
                 bridge_cfg = cleanup_ctx.__enter__()
-                env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
+                env = _claude_gateway_env(
+                    runtime,
+                    base_url=bridge_cfg["base_url"],
+                    auth_token=bridge_cfg["api_key"],
+                    heavy_model=probe_model,
+                    medium_model=lb_medium or None,
+                    light_model=lb_light or None,
+                )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
                     parts.append(f"medium: {lb_medium}")
@@ -350,7 +368,14 @@ def launch_claude(model_info, runtime, once=False):
             else:
                 cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
             bridge_cfg = cleanup_ctx.__enter__()
-            env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
+            env = _claude_gateway_env(
+                runtime,
+                base_url=bridge_cfg["base_url"],
+                auth_token=bridge_cfg["api_key"],
+                heavy_model=probe_model,
+                medium_model=lb_medium or None,
+                light_model=lb_light or None,
+            )
             state_home = None
 
         elif _openai_base_url(runtime) and not _anthropic_base_url(runtime):
@@ -365,11 +390,39 @@ def launch_claude(model_info, runtime, once=False):
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None)
             bridge_cfg = cleanup_ctx.__enter__()
-            env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"])
+            env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"], heavy_model=probe_model)
             state_home = None
 
+        elif lb_light or lb_medium:
+            # 3b. 探测失败但配置了负载均衡 → 用 OpenAI 端点 + bridge 启用智能路由
+            console.print(
+                f"[yellow]⚠ Anthropic 探测失败，但配置了负载均衡，用 OpenAI bridge 启用智能路由[/yellow]"
+            )
+            openai_url = _openai_base_url(runtime)
+            api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
+            if openai_url:
+                cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
+                                                    heavy_model=probe_model,
+                                                    medium_model=lb_medium,
+                                                    light_model=lb_light)
+                bridge_cfg = cleanup_ctx.__enter__()
+                env = _claude_gateway_env(
+                    runtime,
+                    base_url=bridge_cfg["base_url"],
+                    auth_token=bridge_cfg["api_key"],
+                    heavy_model=probe_model,
+                    medium_model=lb_medium or None,
+                    light_model=lb_light or None,
+                )
+                state_home = None
+            else:
+                console.print("[red]✗ 无 OpenAI 端点，无法启用智能路由[/red]")
+                env = _claude_gateway_env(runtime, base_url=None)
+                state_home = None
+                cleanup_ctx = None
+
         else:
-            # 3. 探测失败且无 bridge → 保底继续（剥离 /v1 后缀），让 Claude Code 自己报错
+            # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
             console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
             env = _claude_gateway_env(runtime, base_url=None)
             state_home = None
@@ -445,6 +498,9 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     if not configured or not api_key:
         return None, "no_config"
 
+    # 预处理 URL
+    url = configured.rstrip("/")
+
     # ---- 内存缓存（TTL 1h）----
     cached = _ANTHROPIC_URL_CACHE.get(provider_id)
     if cached:
@@ -452,8 +508,13 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         if age < 3600:
             return cached["url"], "cached"
 
+    # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
+    if provider_id == "bailian-codingplan":
+        console.print(f"[dim]百炼 CodingPlan：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
+        _ANTHROPIC_URL_CACHE[provider_id] = {"url": url, "ts": datetime.now()}
+        return url, "bypass_for_bailian"
+
     # ---- 使用公共工具探测（复用 ccs_core.detect_working_base_url）----
-    url = configured.rstrip("/")
     # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
     body = json.dumps({
         "model": probe_model,
@@ -525,7 +586,7 @@ def _cleanup_stale_sessions(sessions_dir):
             pass  # 进程存在但无权限发信号，跳过
 
 
-def _claude_gateway_env(runtime, base_url=None, auth_token=None):
+def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=None, medium_model=None, light_model=None):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
     - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
     - 启动时清理已死进程的残留目录
@@ -535,6 +596,9 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None):
     base_url: 由 _resolve_anthropic_base_url() 探测后传入；
               为 None 时从 runtime 推断并去掉 /v1 后缀（保底兼容）。
     auth_token: 覆盖 ANTHROPIC_AUTH_TOKEN（bridge 模式传 bridge token）。
+    heavy_model: bridge 模式下指定 heavy model，用于设置模型 slot。
+    medium_model: bridge 模式下可选 medium model（仅用于展示）。
+    light_model: bridge 模式下可选 light model（仅用于展示）。
     """
     import json as _json
     gateway_base = os.path.expanduser("~/.config/mms/claude-gateway")
@@ -612,8 +676,18 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None):
 
     # ── settings.json：继承用户配置 + 覆盖 gateway 必要字段 ──
     effective_token = auth_token or runtime["api_key"]
-    # bridge 模式下 base_url 是本地代理，不应拉模型列表；直连模式才探测
-    best_model = None if auth_token else _pick_gateway_model(runtime, base_url)
+    provider_id = runtime.get("id", "")
+    # bridge 模式下：使用标准 Claude 模型名作为 slot，bridge 负责映射到实际模型
+    # 直连模式：从 gateway 拉模型列表，或对 bailian-codingplan 使用其 fallback 模型
+    if auth_token:
+        # 使用标准 Claude 模型名，让 Claude Code 通过校验；bridge 会替换为 heavy_model
+        best_model = "claude-sonnet-4-6"
+    elif provider_id == "bailian-codingplan":
+        # 百炼 CodingPlan：使用其支持的模型名（如 qwen3.5-plus）
+        fallback = runtime.get("fallback_models", [])
+        best_model = fallback[0] if fallback else "qwen3.5-plus"
+    else:
+        best_model = _pick_gateway_model(runtime, base_url)
     settings_env: dict = {
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
@@ -652,6 +726,54 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None):
                     "ANTHROPIC_REASONING_MODEL"):
             env[key] = best_model
     env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+
+    # ── 写入 route_status.json 供 statusline 读取 ──
+    # bridge 模式下用 heavy_model，直连模式下用 best_model
+    status_model = heavy_model if auth_token else (best_model or "unknown")
+    status_tier = "heavy" if auth_token else "-"
+    status_reason = "bridge_ready" if auth_token else "direct"
+    try:
+        _write_route_status(status_tier, status_model, status_reason)
+    except Exception:
+        pass
+
+    # ── 为 Claude Code 添加 SessionStart hook，启动时显示路由状态 ──
+    if auth_token and heavy_model:
+        try:
+            # 生成 hook 脚本，显示当前路由配置
+            hook_script = os.path.join(gateway_home, "mms_status_hook.sh")
+            tier_symbol = {"heavy": "▲", "medium": "●", "light": "▼"}
+            tier_color = {"heavy": "red", "medium": "yellow", "light": "green"}
+            with open(hook_script, "w") as f:
+                f.write(f'#!/bin/bash\n')
+                f.write(f'# MMS 路由状态显示\n')
+                f.write(f'echo ""\n')
+                f.write(f'echo "[MMS] 智能路由已启用"\n')
+                f.write(f'echo "  Heavy: {heavy_model}"\n')
+                if medium_model:
+                    f.write(f'echo "  Medium: {medium_model}"\n')
+                if light_model:
+                    f.write(f'echo "  Light: {light_model}"\n')
+                f.write(f'echo ""\n')
+            os.chmod(hook_script, 0o755)
+
+            # 添加 hook 到 settings.json
+            if "hooks" not in settings_data:
+                settings_data["hooks"] = {}
+            if "SessionStart" not in settings_data["hooks"]:
+                settings_data["hooks"]["SessionStart"] = []
+            # 添加我们的 hook（不覆盖已有的）
+            settings_data["hooks"]["SessionStart"].append({
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"bash {hook_script}"}]
+            })
+            # 重新写入 settings.json
+            with open(gw_settings, "w", encoding="utf-8") as f:
+                _json.dump(settings_data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+        except Exception:
+            pass
+
     return env
 
 
