@@ -18,14 +18,25 @@ apps/runtime-api/gateway-state.db
 # web-v2 local release/build artifacts
 apps/web-v2/.ai/
 apps/web-v2/.playwright-cli/
+apps/web-v2/.env
+apps/web-v2/.env.*
+!apps/web-v2/.env.example
+!apps/web-v2/.env.*.example
 apps/web-v2/devicectl-*.json
 apps/web-v2/devicectl-*.log
 apps/web-v2/ios/build/
 apps/web-v2/ios/App/App.xcodeproj/xcuserdata/
 apps/web-v2/ios/App/App.xcworkspace/xcuserdata/
+apps/web-v2/**/*.xcarchive/
+apps/web-v2/**/*.dSYM/
 apps/web-v2/src-tauri/target/
+apps/web-v2/src-tauri/target/appstore/
+apps/web-v2/src-tauri/target/direct/
+apps/web-v2/src-tauri/src-tauri/
 apps/web-v2/*.pkg
+apps/web-v2/*.dmg
 apps/web-v2/src-tauri/*.provisionprofile
+apps/web-v2/src-tauri/*.p12
 
 # AI tool caches & worktrees
 .ai/cache/
