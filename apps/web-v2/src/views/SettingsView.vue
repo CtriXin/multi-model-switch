@@ -314,26 +314,31 @@ onMounted(() => {
             </div>
 
             <!-- Prefer Free Models Switch -->
-            <div
-              class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
+            <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">免费优先
-                </p>
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">免费优先</p>
                 <p class="text-[9px] text-text-tertiary font-medium">全局过滤收费模型</p>
               </div>
-              <button @click="appStore.preferFree = !appStore.preferFree"
-                class="relative w-12 h-6 rounded-full transition-colors duration-300"
-                :class="appStore.preferFree ? 'bg-emerald-500' : 'bg-black/10 dark:bg-white/10'">
-                <span
-                  class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center"
-                  :class="appStore.preferFree ? 'translate-x-6' : 'translate-x-0.5'">
-                  <DollarSign :size="10"
-                    :class="appStore.preferFree ? 'text-emerald-500' : 'text-text-tertiary'"
-                    stroke-width="4" />
+              <button @click="appStore.preferFree = !appStore.preferFree" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.preferFree ? 'bg-emerald-500' : 'bg-black/10 dark:bg-white/10'">
+                <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.preferFree ? 'translate-x-6' : 'translate-x-0.5'">
+                  <DollarSign :size="10" :class="appStore.preferFree ? 'text-emerald-500' : 'text-text-tertiary'" stroke-width="4" />
                 </span>
               </button>
             </div>
-          </div>
+
+            <!-- Show Home Entry Switch -->
+            <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
+              <div>
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">显示首页入口</p>
+                <p class="text-[9px] text-text-tertiary font-medium">在侧边栏显示首页链接</p>
+              </div>
+              <button @click="appStore.showHomeEntry = !appStore.showHomeEntry" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.showHomeEntry ? 'bg-accent' : 'bg-black/10 dark:bg-white/10'">
+                <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.showHomeEntry ? 'translate-x-6' : 'translate-x-0.5'">
+                  <Home :size="10" :class="appStore.showHomeEntry ? 'text-accent' : 'text-text-tertiary'" stroke-width="4" />
+                </span>
+              </button>
+            </div>
+            </div>
 
           <!-- Engine Controls -->
           <div class="space-y-4 pt-2 border-t border-white/5">
@@ -634,7 +639,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* .safe-top { padding-top: env(safe-area-inset-top); } */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
