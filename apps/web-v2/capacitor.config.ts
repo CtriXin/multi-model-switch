@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'com.mms.sparkring',
+  appId: 'com.xin.lab',
   appName: 'SparkRing',
   webDir: 'dist',
   server: {
