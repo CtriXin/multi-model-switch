@@ -89,6 +89,27 @@
 - 至少做语法检查和一条与问题相关的链路验证
 - 完成该迭代后先询问用户是否要提交当前改动，再进入下一轮
 
+## 开源准备：必须 gitignore 的内容
+
+本仓库计划开源，以下目录/文件**绝不能**进入 git 历史：
+
+| 路径 | 原因 |
+|------|------|
+| `.ai/cache/` | AI 工具运行缓存，含临时上下文 |
+| `.sparkring/` | Sparkring 本地配置/缓存 |
+| `.worktrees/` | Git worktree 临时工作区 |
+| `.claude/` | Claude Code 项目配置（含 memory） |
+| `apps/runtime-api/gateway-config.json` | 网关配置，可能含 API 端点 |
+| `apps/runtime-api/gateway-state.db` | 运行时状态数据库 |
+| `apps/web-v2/src-tauri/*.provisionprofile` | Apple 签名证书 |
+| `apps/web-v2/ios/build/` | Xcode 构建产物 |
+| `apps/web-v2/src-tauri/target/` | Rust 构建产物 |
+
+开源前还需额外检查：
+- 所有 `.env` / API Key 引用不能硬编码
+- `docs/` 内文档不含内部链接或私有服务地址
+- commit 历史中无泄漏的 key（需要时用 `git filter-repo` 清理）
+
 ## 一句话
 
 在这个仓库里，`Claude` 先当审计员，再当实现者。
