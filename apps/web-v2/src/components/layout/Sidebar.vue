@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
+import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
 import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
@@ -14,6 +15,7 @@ import logoMarkUrl from '@/assets/brand/logo-mark.svg'
 
 const route = useRoute()
 const router = useRouter()
+const appStore = useAppStore()
 const sessionStore = useSessionStore()
 const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
@@ -93,7 +95,7 @@ function openCommandPalette() {
       </button>
 
       <div class="flex flex-col gap-2 w-full px-1.5 mt-2">
-        <button @click="router.push('/')" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/' ? 'bg-accent/20 text-accent' : ''" title="首页">
+        <button v-if="appStore.showHomeEntry" @click="router.push('/')" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/' ? 'bg-accent/20 text-accent' : ''" title="首页">
           <Home :size="22" stroke-width="3" />
         </button>
         <button @click="newChat" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新对话">
@@ -148,6 +150,7 @@ function openCommandPalette() {
       <!-- Primary Creation Area -->
       <div class="px-3 space-y-1.5 mt-2">
         <button
+          v-if="appStore.showHomeEntry"
           @click="router.push('/')"
           class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
           :class="route.path === '/' 
