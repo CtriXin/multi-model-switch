@@ -421,7 +421,7 @@ function handleRollup() {
                   class="mt-3 text-[10px] italic text-text-tertiary">
                   已隐藏模型思考过程，只展示最终结论
                 </div>
-                <button v-if="!discussStore.streaming"
+                <button v-if="discussStore.hasResults && !discussStore.streaming"
                   @click="shareText('综合结论', discussStore.phase3Text)"
                   class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
                   <Share2 :size="12" />
@@ -477,7 +477,7 @@ function handleRollup() {
                   class="mt-3 text-[10px] italic text-text-tertiary">
                   已隐藏模型思考过程，只展示行动计划
                 </div>
-                <button v-if="discussStore.rollupPhase === 'done'"
+                <button v-if="discussStore.rollupPhase === 'done' || (discussStore.rollupText && !discussStore.streaming)"
                   @click="shareText('行动计划', discussStore.rollupText)"
                   class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
                   <Share2 :size="12" />
