@@ -3,6 +3,8 @@ import type { CommitteeSynthesis } from '@/features/committee'
 import MarkdownIt from 'markdown-it'
 import { computed, reactive } from 'vue'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
+import { Share2 } from 'lucide-vue-next'
+import { shareText } from '@/composables/useShare'
 
 const props = defineProps<{
   synthesis: CommitteeSynthesis | null
@@ -51,6 +53,14 @@ function isLong(text: string) {
           >
             {{ item.label }}
           </span>
+          <button
+            v-if="!streaming && synthesis"
+            @click="shareText('锦囊团结论', content || synthesis?.content || '')"
+            class="rounded-full bg-surface-1 px-2.5 py-1 text-[11px] font-medium text-text-secondary border border-border-subtle hover:bg-surface-3 transition-colors flex items-center gap-1"
+          >
+            <Share2 :size="11" />
+            分享
+          </button>
         </div>
       </div>
       <div class="px-5 py-4 text-sm">

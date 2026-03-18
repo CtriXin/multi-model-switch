@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { getModelColor } from '@/stores/app'
-import { Copy, Check, MessageSquare, RefreshCw, RefreshCcw, Sparkles } from 'lucide-vue-next'
+import { Copy, Check, MessageSquare, RefreshCw, RefreshCcw, Sparkles, Share2 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
+import { shareText } from '@/composables/useShare'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -74,6 +75,10 @@ async function copyContent() {
   await navigator.clipboard.writeText(props.content)
   copied.value = true
   setTimeout(() => { copied.value = false }, 2000)
+}
+
+async function handleShare() {
+  await shareText(props.modelName, props.content)
 }
 </script>
 
@@ -249,6 +254,14 @@ async function copyContent() {
         :title="copied ? '已复制' : '复制'"
       >
         <component :is="copied ? Check : Copy" :size="13" />
+      </button>
+
+      <button
+        @click.stop="handleShare"
+        class="p-1.5 rounded-md text-text-tertiary transition-colors opacity-60 group-hover:opacity-100 hover:bg-surface-3 hover:text-text-secondary"
+        title="分享"
+      >
+        <Share2 :size="13" />
       </button>
     </div>
   </div>
