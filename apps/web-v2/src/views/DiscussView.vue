@@ -421,6 +421,12 @@ function handleRollup() {
                   class="mt-3 text-[10px] italic text-text-tertiary">
                   已隐藏模型思考过程，只展示最终结论
                 </div>
+                <button v-if="!discussStore.streaming"
+                  @click="shareText('综合结论', discussStore.phase3Text)"
+                  class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
+                  <Share2 :size="12" />
+                  分享结论
+                </button>
               </template>
               <div v-else class="space-y-2">
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
@@ -471,6 +477,12 @@ function handleRollup() {
                   class="mt-3 text-[10px] italic text-text-tertiary">
                   已隐藏模型思考过程，只展示行动计划
                 </div>
+                <button v-if="discussStore.rollupPhase === 'done'"
+                  @click="shareText('行动计划', discussStore.rollupText)"
+                  class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
+                  <Share2 :size="12" />
+                  分享计划
+                </button>
               </template>
               <div v-else class="space-y-2">
                 <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
@@ -493,10 +505,6 @@ function handleRollup() {
           <button @click="handleReset" class="btn-ghost flex items-center gap-1.5 text-xs">
             <RotateCcw :size="13" />
             新辩论
-          </button>
-          <button @click="shareText(discussStore.topic, discussStore.rollupText || discussStore.phase3Text || '')" class="btn-ghost flex items-center gap-1.5 text-xs">
-            <Share2 :size="13" />
-            分享
           </button>
         </div>
       </div>
