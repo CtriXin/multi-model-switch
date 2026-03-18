@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { fetchModels } from '@/services/api'
@@ -100,7 +100,16 @@ export const useAppStore = defineStore('app', () => {
   const initialized = ref(false)
   const loading = ref(false)
   const error = ref<string | null>(null)
-  const preferFree = ref(true)
+  const preferFree = ref(localStorage.getItem('mms-prefer-free') !== 'false')
+  const showHomeEntry = ref(localStorage.getItem('mms-show-home') !== 'false')
+
+  watch(preferFree, (val) => {
+    localStorage.setItem('mms-prefer-free', String(val))
+  })
+
+  watch(showHomeEntry, (val) => {
+    localStorage.setItem('mms-show-home', String(val))
+  })
 
   function loadSuppressedModelIds() {
     try {
@@ -478,7 +487,7 @@ export const useAppStore = defineStore('app', () => {
     selectedModels,
     committeeSelectedModelIds,
     committeeSelectedModels,
-    modelsByCategory, initialized, loading, error, preferFree,
+    modelsByCategory, initialized, loading, error, preferFree, showHomeEntry,
     initialize,
     refreshModels,
     toggleModel,
