@@ -12,6 +12,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "release:mac:appstore": "bash scripts/release-mac-appstore.sh",
+    "release:mac:direct": "bash scripts/release-mac-direct.sh",
     "brand:icons": "bash scripts/generate-brand-assets.sh",
     "cap:sync": "cap sync ios",
     "cap:open": "cap open ios",
