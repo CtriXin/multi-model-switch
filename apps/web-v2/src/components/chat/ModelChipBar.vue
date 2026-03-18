@@ -294,11 +294,17 @@ onUnmounted(() => {
               <Search :size="16" class="text-text-tertiary shrink-0" />
               <input type="text" :value="searchQuery" @input="handleSearch" placeholder="快速搜索模型基因..." class="flex-1 bg-transparent text-sm text-text-primary outline-none" autofocus />
             </div>
-            <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-              <button @click="toggleFilterFree" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border" :class="filterFree ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">免费 <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" /></button>
-              <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)" class="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border" :class="hasTierFilter(tag) ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">{{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}</button>
-              <button @click="toggleFilterVision" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border" :class="filterVision ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">图片</button>
-              <span class="text-[9px] font-black text-text-tertiary ml-auto uppercase opacity-40">{{ filteredModels.length }} 可选</span>
+            <div class="flex items-center gap-3 overflow-x-auto no-scrollbar scroll-smooth px-1">
+              <button @click="toggleFilterFree" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
+                免费 <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
+              </button>
+              <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)" class="shrink-0 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent shadow-accent/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
+                {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}
+              </button>
+              <button @click="toggleFilterVision" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="filterVision ? 'bg-purple-500 text-white border-purple-500 shadow-purple-500/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
+                图片
+              </button>
+              <div class="shrink-0 w-4"></div>
             </div>
           </div>
 
