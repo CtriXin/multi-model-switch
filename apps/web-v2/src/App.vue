@@ -110,7 +110,7 @@ watch(() => route.path, () => {
     <!-- Desktop Sidebar (Only for macOS platform) -->
     <Sidebar v-if="platform === 'macos'" />
 
-    <main class="flex-1 flex flex-col min-w-0 relative z-10">
+    <main :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top' : '']">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
@@ -286,7 +286,7 @@ watch(() => route.path, () => {
   }
 }
 
-/* .safe-top { padding-top: env(safe-area-inset-top); } */
+.safe-top { padding-top: env(safe-area-inset-top); }
 .page-enter-active {
   animation: pageIn 0.2s ease-out;
 }
