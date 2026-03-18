@@ -1,0 +1,52 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- SparkRing V4.1 Master Logo - Sharingan Reactor Edition -->
+  
+  <!-- Background Void -->
+  <rect width="1024" height="1024" rx="200" fill="#020205"/>
+  
+  <!-- Outer Data Ring (The Perimeter) -->
+  <circle cx="512" cy="512" r="420" stroke="#6366F1" stroke-width="8" stroke-dasharray="40 80" opacity="0.3"/>
+  
+  <!-- Kinetic Middle Ring (The Sharingan Path) -->
+  <circle cx="512" cy="512" r="300" stroke="#6366F1" stroke-width="4" opacity="0.2"/>
+  
+  <!-- The 3 Tomoe-Nodes (Agent / Spark / Model) -->
+  <g id="tomoe-nodes">
+    <!-- Node 1 (Top) -->
+    <g transform="translate(512, 212)">
+      <circle r="45" fill="#6366F1" filter="url(#glow_blue)"/>
+      <circle r="25" fill="#FFFFFF"/>
+    </g>
+    <!-- Node 2 (Bottom-Right) -->
+    <g transform="translate(771.8, 662)">
+      <circle r="45" fill="#6366F1" filter="url(#glow_blue)"/>
+      <circle r="25" fill="#FFFFFF"/>
+    </g>
+    <!-- Node 3 (Bottom-Left) -->
+    <g transform="translate(252.2, 662)">
+      <circle r="45" fill="#6366F1" filter="url(#glow_blue)"/>
+      <circle r="25" fill="#FFFFFF"/>
+    </g>
+  </g>
+  
+  <!-- Central Spark Core -->
+  <g filter="url(#glow_white)">
+    <path d="M512 332L555 472L692 512L555 552L512 692L469 552L332 512L469 472L512 332Z" fill="white"/>
+    <circle cx="512" cy="512" r="60" fill="url(#core_gradient)"/>
+  </g>
+
+  <defs>
+    <filter id="glow_blue" x="-100" y="-100" width="300" height="300" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="30" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="glow_white" x="200" y="200" width="624" height="624" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <linearGradient id="core_gradient" x1="512" y1="332" x2="512" y2="692" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
+</svg>

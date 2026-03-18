@@ -1,0 +1,60 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- SparkRing V4 Master Branding - The Sharingan Reactor -->
+  <defs>
+    <!-- Plasma Glow Filter -->
+    <filter id="plasma-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="25" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <!-- Core Emissive Gradient -->
+    <linearGradient id="core-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#6366F1" />
+    </linearGradient>
+    <!-- Shadow Mask -->
+    <radialGradient id="ring-shading" cx="50%" cy="50%" r="50%">
+      <stop offset="80%" stop-color="#020205" stop-opacity="0" />
+      <stop offset="100%" stop-color="#6366F1" stop-opacity="0.2" />
+    </radialGradient>
+  </defs>
+
+  <!-- 1. Background Void (App Store Spec) -->
+  <rect width="1024" height="1024" rx="220" fill="#020205"/>
+
+  <!-- 2. The Outer Ring (Perimeter) -->
+  <circle cx="512" cy="512" r="440" stroke="#6366F1" stroke-width="4" opacity="0.15"/>
+  <circle cx="512" cy="512" r="440" stroke="#6366F1" stroke-width="2" stroke-dasharray="20 60" opacity="0.4"/>
+
+  <!-- 3. The 3 Tomoe Nodes (Human | Model | Agent) -->
+  <g id="sharingan-nodes">
+    <!-- Node 1: Human (Top) -->
+    <g transform="translate(512, 240)">
+      <circle r="60" fill="#6366F1" opacity="0.2" filter="url(#plasma-glow)"/>
+      <circle r="35" fill="#6366F1" stroke="#FFFFFF" stroke-width="4"/>
+      <circle r="12" fill="#FFFFFF"/>
+    </g>
+    <!-- Node 2: Model (Bottom Right) -->
+    <g transform="translate(747, 648)">
+      <circle r="60" fill="#6366F1" opacity="0.2" filter="url(#plasma-glow)"/>
+      <circle r="35" fill="#6366F1" stroke="#FFFFFF" stroke-width="4"/>
+      <circle r="12" fill="#FFFFFF"/>
+    </g>
+    <!-- Node 3: Agent (Bottom Left) -->
+    <g transform="translate(277, 648)">
+      <circle r="60" fill="#6366F1" opacity="0.2" filter="url(#plasma-glow)"/>
+      <circle r="35" fill="#6366F1" stroke="#FFFFFF" stroke-width="4"/>
+      <circle r="12" fill="#FFFFFF"/>
+    </g>
+  </g>
+
+  <!-- 4. The Connective Gravity Ring -->
+  <path d="M512 240C641.787 240 747 345.213 747 475C747 604.787 641.787 710 512 710C382.213 710 277 604.787 277 475C277 345.213 382.213 240 512 240Z" stroke="white" stroke-width="1" stroke-opacity="0.1" fill="url(#ring-shading)"/>
+
+  <!-- 5. Central Spark Core -->
+  <g transform="translate(512, 512)">
+    <!-- High-Intensity Star -->
+    <path d="M0 -160L18 -45L158 -45L45 -18L85 120L0 45L-85 120L-45 -18L-158 -45L-18 -45L0 -160Z" fill="white" filter="url(#plasma-glow)"/>
+    <circle r="50" fill="url(#core-grad)" stroke="#FFFFFF" stroke-width="2"/>
+    <path d="M-20 0H20M0 -20V20" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>
