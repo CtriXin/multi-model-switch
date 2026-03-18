@@ -306,33 +306,32 @@ function scrollToProviderSection(provider: string) {
           </div>
 
           <!-- Filter chips & Random -->
-          <div class="flex items-center gap-2 px-8 pb-4 shrink-0 overflow-x-auto no-scrollbar">
-            <button @click="toggleFilterFree" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
-                    :class="filterFree ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
-              <DollarSign :size="12" /> 免费
+          <div class="flex items-center gap-3 px-8 pb-4 shrink-0 overflow-x-auto no-scrollbar scroll-smooth">
+            <button @click="toggleFilterFree" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
+                    :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+              <DollarSign :size="12" /> 免费基因
               <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
             </button>
-            <button @click="toggleTierFilter('basic')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
-                    :class="hasTierFilter('basic') ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
+            <button @click="toggleTierFilter('basic')" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
+                    :class="hasTierFilter('basic') ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
               基础
             </button>
-            <button @click="toggleTierFilter('std')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+            <button @click="toggleTierFilter('std')" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
                     :class="hasTierFilter('std') ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
               主力
             </button>
-            <button @click="toggleTierFilter('pro')" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+            <button @click="toggleTierFilter('pro')" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
                     :class="hasTierFilter('pro') ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
               旗舰
             </button>
-            <button @click="toggleFilterVision" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+            <button @click="toggleFilterVision" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
                     :class="filterVision ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
-              <Image :size="12" /> 视觉
+              <Image :size="12" /> 视觉支持
             </button>
-            <button v-if="!replacementMode" @click="randomPick" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
-                    :class="'text-amber-400 border-white/5 hover:bg-amber-500/10'">
-              <Dice5 :size="12" /> 随机
+            <button v-if="!replacementMode" @click="randomPick" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap text-amber-400 border-white/5 hover:bg-amber-500/10">
+              <Dice5 :size="12" /> 随机抽取
             </button>
-            <span class="text-[9px] font-black text-text-tertiary ml-auto uppercase tracking-widest opacity-40">{{ filtered.length }} 可选</span>
+            <div class="shrink-0 w-8"></div> <!-- Spacer for scroll end -->
           </div>
 
           <!-- Search -->

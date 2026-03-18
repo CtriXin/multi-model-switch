@@ -111,15 +111,15 @@ watch(() => route.path, () => {
       </router-view>
     </main>
 
-    <!-- MOBILE DRAWER (Precision Bleached V3) -->
+    <!-- MOBILE DRAWER (Improved V3 Light Mode) -->
     <Teleport to="body">
       <transition name="drawer-overlay">
         <div v-if="iosDrawerOpen" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[10000]" @click="iosDrawerOpen = false" />
       </transition>
       <transition name="drawer-panel">
-        <div v-if="iosDrawerOpen" class="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col p-3 safe-top">
+        <div v-if="iosDrawerOpen" class="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col p-3 pb-6 safe-top">
           <div class="glass-v3 flex-1 flex flex-col rounded-[32px] shadow-2xl border border-white/10 overflow-hidden bg-white dark:bg-[#0b0b18]">
-            <!-- Header: Pure Logo -->
+            <!-- Header: Pure Brand Identity -->
             <div class="h-20 flex items-center justify-center border-b border-white/5 relative shrink-0">
               <div class="flex items-center gap-2.5">
                 <div class="relative flex items-center justify-center w-10 h-10 shrink-0">
@@ -138,14 +138,14 @@ watch(() => route.path, () => {
               </div>
             </div>
 
-            <!-- Feature Navigation (Clean bleached state) -->
-            <div class="px-3 py-6 space-y-2 overflow-y-auto no-scrollbar">
+            <!-- Feature Navigation (Bleached State) -->
+            <div class="px-3 py-6 space-y-2 overflow-y-auto no-scrollbar flex-1">
               <div class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">Quick Action</div>
               <button @click="iosNewChat" class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl bg-accent text-white shadow-xl shadow-accent/20 active:scale-95 transition-all">
                 <Plus :size="20" stroke-width="4" /> <span class="font-black uppercase tracking-widest text-[11px]">开启新对话</span>
               </button>
 
-              <div class="h-px bg-white/5 my-4 mx-4" />
+              <div class="h-px bg-black/[0.03] dark:bg-white/5 my-4 mx-4" />
 
               <div class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">Main Menu</div>
               <button v-for="link in [
@@ -161,38 +161,38 @@ watch(() => route.path, () => {
               >
                 <component :is="link.icon" :size="20" stroke-width="3" /> <span class="font-black uppercase tracking-widest text-[11px]">{{ link.label }}</span>
               </button>
-            </div>
 
-            <!-- Session History -->
-            <div class="flex-1 overflow-y-auto px-3 py-2 border-t border-white/5 mt-2">
-              <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest px-4 mb-2 mt-4 opacity-40">Recent History</p>
-              <div v-if="sessionStore.sortedSessions.length" class="space-y-1">
-                <button v-for="session in sessionStore.sortedSessions" :key="session.id" @click="iosSwitchSession(session)" 
-                  class="w-full flex items-start gap-3 px-4 py-3.5 rounded-2xl text-left transition-all active:scale-[0.98]" 
-                  :class="isDrawerSessionActive(session) 
-                    ? 'bg-text-primary text-surface-1 shadow-lg' 
-                    : 'text-text-primary hover:bg-black/[0.03] dark:hover:bg-white/5'"
-                >
-                  <div class="flex-1 min-w-0">
-                    <div class="text-xs font-bold truncate">{{ session.title }}</div>
-                    <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-40" :class="isDrawerSessionActive(session) ? 'text-surface-1' : ''">
-                      {{ sessionStore.formatTime(session.updatedAt) }} · {{ session.messageCount }} 轮
+              <!-- Session History Section -->
+              <div class="mt-8 border-t border-black/[0.03] dark:border-white/5 pt-6">
+                <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest px-4 mb-2 opacity-40">Recent History</p>
+                <div v-if="sessionStore.sortedSessions.length" class="space-y-1 px-1">
+                  <button v-for="session in sessionStore.sortedSessions" :key="session.id" @click="iosSwitchSession(session)" 
+                    class="w-full flex items-start gap-3 px-4 py-3.5 rounded-2xl text-left transition-all active:scale-[0.98]" 
+                    :class="isDrawerSessionActive(session) 
+                      ? 'bg-text-primary text-surface-1 shadow-lg' 
+                      : 'text-text-primary hover:bg-black/[0.03] dark:hover:bg-white/5'"
+                  >
+                    <div class="flex-1 min-w-0">
+                      <div class="text-xs font-bold truncate">{{ session.title }}</div>
+                      <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-40" :class="isDrawerSessionActive(session) ? 'text-surface-1' : ''">
+                        {{ sessionStore.formatTime(session.updatedAt) }} · {{ session.messageCount }} 轮
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                </div>
               </div>
             </div>
 
-            <!-- Footer Utilities & Theme Toggle -->
-            <div class="px-3 py-4 bg-black/[0.02] dark:bg-white/2 border-t border-white/5 flex gap-2">
+            <!-- Footer Utilities & Theme Toggle (Unified Bottom) -->
+            <div class="px-3 py-4 bg-black/[0.02] dark:bg-white/2 border-t border-black/[0.03] dark:border-white/5 flex gap-2 shrink-0">
               <button v-for="util in [
-                { path: '/models', icon: Package, label: '模型' },
-                { path: '/settings', icon: Settings, label: '设置' }
+                { path: '/models', icon: Package, label: '模型基因' },
+                { path: '/settings', icon: Settings, label: '配置中心' }
               ]" :key="util.path" @click="router.push(util.path); iosDrawerOpen = false" 
                 class="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all border border-transparent font-black uppercase tracking-widest text-[10px]"
                 :class="route.path === util.path 
                   ? 'bg-text-primary text-surface-1 shadow-lg' 
-                  : 'bg-black/[0.03] dark:bg-white/5 text-text-primary hover:bg-black/[0.06] dark:hover:bg-white/10'"
+                  : 'bg-transparent text-text-primary hover:bg-black/[0.04] dark:hover:bg-white/5'"
               >
                 <component :is="util.icon" :size="16" stroke-width="3" />
                 <span>{{ util.label }}</span>

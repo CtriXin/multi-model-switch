@@ -10,6 +10,7 @@ import {
   Clock, Home
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
+import logoMarkUrl from '@/assets/brand/logo-mark.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -82,13 +83,8 @@ function openCommandPalette() {
   >
     <div class="glass-v3 w-12 flex flex-col items-center py-4 gap-3 rounded-[24px] shadow-2xl border border-white/10 flex-1">
       <!-- Logo in mini mode: No top margin div -->
-      <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2">
-        <!-- Triple-Track Kinetic Mini Reactor -->
-        <div class="absolute inset-0 rounded-full border border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse] group-hover/logo:border-accent/50 transition-colors"></div>
-        <div class="absolute inset-1 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
-        <div class="relative flex items-center justify-center w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-xl shadow-accent/20 transition-all duration-500 group-hover/logo:scale-110 active:scale-90">
-          <Sparkles class="w-3.5 h-3.5 text-white relative z-10 drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
-        </div>
+      <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2 logo-mark-shell">
+        <img :src="logoMarkUrl" alt="SparkRing logo" class="w-full h-full object-contain transition-transform duration-500 group-hover/logo:scale-110 active:scale-95" />
       </div>
 
       <!-- Actions: Unified size 22, stroke 3 -->
@@ -133,13 +129,8 @@ function openCommandPalette() {
       <div class="h-20 flex items-center pl-5 pr-2">
         <div class="flex items-center gap-2 group/logo cursor-pointer select-none max-w-full">
           <!-- SparkRing v4.0.1: Precision Reactor -->
-          <div class="relative flex items-center justify-center w-9 h-9 shrink-0">
-            <!-- Triple Track Animation -->
-            <div class="absolute inset-0 rounded-full border-[1.5px] border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse]"></div>
-            <div class="absolute inset-1.5 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
-            <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.5)] group-hover/logo:scale-110 transition-all duration-500">
-              <Sparkles class="w-3.5 h-3.5 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
-            </div>
+          <div class="relative flex items-center justify-center w-9 h-9 shrink-0 logo-spin logo-mark-shell">
+            <img :src="logoMarkUrl" alt="SparkRing logo" class="w-full h-full object-contain group-hover/logo:scale-105 transition-transform duration-500" />
           </div>
           
           <!-- Designer Typography: Syne (Surgically Fit) -->
@@ -334,6 +325,10 @@ function openCommandPalette() {
 
 .logo-spin:hover {
   animation: logo-spin 10s linear infinite;
+}
+
+.logo-mark-shell {
+  filter: drop-shadow(0 8px 14px rgba(88, 96, 255, 0.26));
 }
 
 .animate-pulse-subtle {
