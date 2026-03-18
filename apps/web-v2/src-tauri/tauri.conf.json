@@ -1,8 +1,8 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SparkRing",
-  "version": "0.3.4",
-  "identifier": "com.mms.sparkring",
+  "version": "0.3.5",
+  "identifier": "com.xin.lab",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5188",

@@ -24,3 +24,5 @@ apps/web-v2/ios/build/
 apps/web-v2/ios/App/App.xcodeproj/xcuserdata/
 apps/web-v2/ios/App/App.xcworkspace/xcuserdata/
 apps/web-v2/src-tauri/target/
+apps/web-v2/*.pkg
+apps/web-v2/src-tauri/*.provisionprofile
