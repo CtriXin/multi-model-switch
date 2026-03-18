@@ -3,8 +3,9 @@ import { ref, computed, reactive } from 'vue'
 import { getModelColor, useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
 import { pickNeutralModel } from '@/utils/modelSelection'
-import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle } from 'lucide-vue-next'
+import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle, Share2 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
+import { shareText } from '@/composables/useShare'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -185,7 +186,15 @@ async function generateSummary() {
       <div class="md-body text-sm" v-html="summaryHtml" />
 
       <!-- Quick-select buttons after evaluation -->
-      <div v-if="done && !error" class="flex flex-wrap gap-2 mt-3">
+      <div v-if="done && !error" class="flex flex-wrap items-center gap-2 mt-3">
+        <button
+          @click="shareText('决策评估', summaryText)"
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                 border border-border-subtle bg-surface-2 text-text-secondary hover:bg-surface-3 transition-all active:scale-95"
+        >
+          <Share2 :size="12" />
+          分享
+        </button>
         <button
           v-for="[modelId] of responses"
           :key="modelId"

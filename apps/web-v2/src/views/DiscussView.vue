@@ -11,10 +11,11 @@ import ModelChipBar from '@/components/chat/ModelChipBar.vue'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 import { startWindowDrag } from '@/utils/windowDrag'
+import { shareText } from '@/composables/useShare'
 import {
   MessageSquare, CheckCircle, AlertTriangle, Lightbulb,
   ArrowRight, RotateCcw, GitMerge, Zap, Flame, Rocket,
-  Gavel, Loader2, Menu, Sun, Moon, Layers, Plus,
+  Gavel, Loader2, Menu, Sun, Moon, Layers, Plus, Share2,
 } from 'lucide-vue-next'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
@@ -492,6 +493,10 @@ function handleRollup() {
           <button @click="handleReset" class="btn-ghost flex items-center gap-1.5 text-xs">
             <RotateCcw :size="13" />
             新辩论
+          </button>
+          <button @click="shareText(discussStore.topic, discussStore.rollupText || discussStore.phase3Text || '')" class="btn-ghost flex items-center gap-1.5 text-xs">
+            <Share2 :size="13" />
+            分享
           </button>
         </div>
       </div>
