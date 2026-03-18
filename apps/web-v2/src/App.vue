@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, provide, onMounted, onUnmounted, watch, computed } from 'vue'
+import { Capacitor } from '@capacitor/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
@@ -22,7 +23,8 @@ const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme, v3Config } = useTheme()
 
 const MOBILE_BREAKPOINT = 768
-const platform = ref<'macos' | 'ios'>(window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos')
+const isNative = Capacitor.isNativePlatform()
+const platform = ref<'macos' | 'ios'>(isNative || window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos')
 const iosDrawerOpen = ref(false)
 const iosModelSheetOpen = ref(false)
 const modelSheetRequest = ref<any>(null)
@@ -30,7 +32,7 @@ const modelSheetRequest = ref<any>(null)
 provide('platform', platform)
 
 function onResize() {
-  platform.value = window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos'
+  platform.value = isNative || window.innerWidth < MOBILE_BREAKPOINT ? 'ios' : 'macos'
 }
 
 function handleOpenModels() {
@@ -111,7 +113,7 @@ watch(() => route.path, () => {
     <Sidebar v-if="platform === 'macos'" />
 
     <main
-      :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top' : '']">
+      :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top safe-bottom' : '']">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
@@ -174,22 +176,22 @@ watch(() => route.path, () => {
 
               <div class="h-px bg-black/[0.03] dark:bg-white/5 my-4 mx-4" />
 
-              <div
-                class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">
-                Navigator</div>
-              <button v-for="link in [
+              <div class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">Navigator</div>
+              <template v-for="link in [
                 { path: '/', icon: Home, label: '首页体验' },
                 { path: '/chat', icon: MessageSquare, label: '对话模式' },
                 { path: '/discuss', icon: GitMerge, label: '深度辩论' },
                 { path: '/advisors', icon: Users, label: 'AI 锦囊团' }
-              ]" :key="link.path" @click="router.push(link.path); iosDrawerOpen = false"
-                class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-300 active:scale-95"
-                :class="route.path === link.path 
-                  ? 'bg-text-primary text-surface-1 shadow-xl' 
-                  : 'bg-transparent text-text-primary hover:bg-black/[0.03] dark:hover:bg-white/5'">
-                <component :is="link.icon" :size="20" stroke-width="3" /> <span
-                  class="font-black uppercase tracking-widest text-[11px]">{{ link.label }}</span>
-              </button>
+              ]" :key="link.path">
+                <button v-if="link.path !== '/' || appStore.showHomeEntry" @click="router.push(link.path); iosDrawerOpen = false" 
+                  class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-300 active:scale-95" 
+                  :class="route.path === link.path 
+                    ? 'bg-text-primary text-surface-1 shadow-xl' 
+                    : 'bg-transparent text-text-primary hover:bg-black/[0.03] dark:hover:bg-white/5'"
+                >
+                  <component :is="link.icon" :size="20" stroke-width="3" /> <span class="font-black uppercase tracking-widest text-[11px]">{{ link.label }}</span>
+                </button>
+              </template>
 
               <!-- Session History Section -->
               <div class="mt-8 border-t border-black/[0.03] dark:border-white/5 pt-6">
@@ -291,6 +293,9 @@ watch(() => route.path, () => {
 
 .safe-top {
   padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
 }
 .page-enter-active {
   animation: pageIn 0.2s ease-out;
