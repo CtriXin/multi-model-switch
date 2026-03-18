@@ -1,0 +1,16 @@
+{
+	"appId": "com.xin.lab",
+	"appName": "SparkRing",
+	"webDir": "dist",
+	"server": {},
+	"ios": {
+		"contentInset": "always",
+		"preferredContentMode": "mobile",
+		"scheme": "capacitor"
+	},
+	"packageClassList": [
+		"KeyboardPlugin",
+		"SharePlugin",
+		"StatusBarPlugin"
+	]
+}
