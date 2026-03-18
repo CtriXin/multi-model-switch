@@ -2,9 +2,10 @@
 import { ref, watch, computed } from 'vue'
 import { useAppStore, getModelColor } from '@/stores/app'
 import { useDiscussSession, type DiscussDepth } from '@/composables/useDiscussSession'
-import { X, Zap, Flame, Rocket, Gavel, Loader2 } from 'lucide-vue-next'
+import { X, Zap, Flame, Rocket, Gavel, Loader2, Share2 } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
+import { shareText } from '@/composables/useShare'
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
@@ -181,6 +182,13 @@ watch(() => session.isActive.value, (active) => {
       <div v-if="sanitizedSynthesis.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
         已隐藏模型思考过程，只展示最终结论
       </div>
+      <button
+        v-if="!session.streaming.value && session.phase3Text.value"
+        @click="shareText('综合结论', session.phase3Text.value)"
+        class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
+        <Share2 :size="12" />
+        分享结论
+      </button>
       <span
         v-if="session.streaming.value && session.phase.value === 3"
         class="inline-block w-1.5 h-4 bg-purple-400 ml-0.5 animate-cursor_blink align-text-bottom"
@@ -225,6 +233,13 @@ watch(() => session.isActive.value, (active) => {
           <div v-if="sanitizedRollup.hiddenThink" class="mt-3 text-[10px] italic text-text-tertiary">
             已隐藏模型思考过程，只展示行动计划
           </div>
+          <button
+            v-if="session.rollupPhase.value === 'done'"
+            @click="shareText('行动计划', session.rollupText.value)"
+            class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
+            <Share2 :size="12" />
+            分享计划
+          </button>
         </template>
         <div v-else class="space-y-2">
           <div class="h-3 bg-surface-3 rounded animate-pulse w-full" />
