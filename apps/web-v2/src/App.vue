@@ -110,7 +110,8 @@ watch(() => route.path, () => {
     <!-- Desktop Sidebar (Only for macOS platform) -->
     <Sidebar v-if="platform === 'macos'" />
 
-    <main :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top' : '']">
+    <main
+      :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top' : '']">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
@@ -126,7 +127,9 @@ watch(() => route.path, () => {
       </transition>
       <transition name="drawer-panel">
         <div v-if="iosDrawerOpen"
-          class="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col p-3 safe-top">
+          class="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col p-3 ">
+          <!-- safe-top -->
+
           <!-- The Bleached Container -->
           <div
             class="mobile-drawer-container flex-1 flex flex-col rounded-[32px] shadow-[0_30px_80px_rgba(0,0,0,0.3)] border border-white/10 overflow-hidden"
@@ -286,7 +289,9 @@ watch(() => route.path, () => {
   }
 }
 
-.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
 .page-enter-active {
   animation: pageIn 0.2s ease-out;
 }
