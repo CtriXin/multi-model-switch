@@ -69,7 +69,28 @@ npm run cap:open
 2. `cfBundleVersion` 必须递增（否则 Transporter 409）
 3. 当前配置是 `arm64-only + minimumSystemVersion 12.0`
 
-### 3.2 构建 App（Tauri）
+### 3.2 一键脚本（推荐）
+
+```bash
+cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
+npm run release:mac:appstore
+```
+
+可选：指定版本号（影响输出文件名）
+
+```bash
+bash scripts/release-mac-appstore.sh 0.3.6
+```
+
+默认输出：`SparkRing-mac-appstore-<version>-<timestamp>.pkg`  
+可通过环境变量覆盖证书名：
+
+```bash
+APPSTORE_INSTALLER_IDENTITY="3rd Party Mac Developer Installer: xxx (TEAMID)" \
+bash scripts/release-mac-appstore.sh
+```
+
+### 3.3 手动命令（兜底）
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
@@ -79,7 +100,7 @@ npm run tauri build -- --bundles app --config src-tauri/tauri.appstore.conf.json
 产物：
 - `src-tauri/target/release/bundle/macos/SparkRing.app`
 
-### 3.3 打 App Store 上传用 pkg
+### 3.4 打 App Store 上传用 pkg
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
@@ -90,14 +111,14 @@ xcrun productbuild \
   "SparkRing-mac-appstore-<version>.pkg"
 ```
 
-### 3.4 上传路径（Transporter）
+### 3.5 上传路径（Transporter）
 
 1. 打开 `Transporter`
 2. 拖入 `SparkRing-mac-appstore-<version>.pkg`
 3. 点 `Deliver`
 4. App Store Connect -> `SparkRing` -> `TestFlight` 查看 `Processing`
 
-### 3.5 mac App Store 常见报错
+### 3.6 mac App Store 常见报错
 
 1. `supports arm64 but not Intel... deployment target must be 12.0 or higher`
    - 处理：保持 `minimumSystemVersion >= 12.0`
@@ -126,7 +147,30 @@ xcrun notarytool store-credentials "AC_NOTARY" \
   --password "<app-specific-password>"
 ```
 
-### 4.2 构建并签名（直传版）
+### 4.2 一键脚本（推荐）
+
+```bash
+cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
+npm run release:mac:direct
+```
+
+可选：指定版本号
+
+```bash
+bash scripts/release-mac-direct.sh 0.3.6
+```
+
+默认输出：`SparkRing-direct-<version>-<timestamp>.pkg`  
+可通过环境变量覆盖：
+
+```bash
+DEV_ID_APP_IDENTITY="Developer ID Application: xxx (TEAMID)" \
+DEV_ID_INSTALLER_IDENTITY="Developer ID Installer: xxx (TEAMID)" \
+NOTARY_PROFILE="AC_NOTARY" \
+bash scripts/release-mac-direct.sh
+```
+
+### 4.3 手动命令（兜底）
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
@@ -142,7 +186,7 @@ codesign --force --deep --options runtime --timestamp \
   "$APP_PATH"
 ```
 
-### 4.3 打直传 pkg + 公证 + 装订
+### 4.4 打直传 pkg + 公证 + 装订
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
@@ -161,14 +205,14 @@ xcrun notarytool submit "$PKG" --keychain-profile "AC_NOTARY" --wait
 xcrun stapler staple "$PKG"
 ```
 
-### 4.4 本地验签（发给别人前必须跑）
+### 4.5 本地验签（发给别人前必须跑）
 
 ```bash
 pkgutil --check-signature "SparkRing-direct-<version>.pkg"
 spctl -a -vv --type install "SparkRing-direct-<version>.pkg"
 ```
 
-### 4.5 面对面传输建议
+### 4.6 面对面传输建议
 
 1. 优先传 `notarized + stapled` 的 `pkg`，不要直接传裸 `.app`
 2. 传输方式：AirDrop/U 盘/网盘都可以
@@ -195,4 +239,3 @@ shasum -a 256 "SparkRing-direct-<version>.pkg"
 3. mac 面对面直传不报损坏：
    - 必须 `Developer ID + Notarization + Staple`
    - 发 `pkg`，发前跑 `spctl/pkgutil` 验签
-
