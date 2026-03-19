@@ -96,10 +96,15 @@ function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-function toggleProviderEnabled(id: string) {
+async function syncModelsAfterProviderChange() {
+  await appStore.refreshModels()
+}
+
+async function toggleProviderEnabled(id: string) {
   const p = providerStore.getProvider(id)
   if (p) {
     providerStore.updateProvider(id, { enabled: !p.enabled })
+    await syncModelsAfterProviderChange()
   }
 }
 
@@ -121,6 +126,7 @@ async function saveProviderBaseUrl() {
   saving.value = true
   try {
     providerStore.updateProvider(editingProviderId.value, { baseUrl: baseUrlInput.value })
+    await syncModelsAfterProviderChange()
     editingProviderId.value = null
   } finally {
     saving.value = false
@@ -130,6 +136,7 @@ async function saveProviderBaseUrl() {
 async function removeProvider(id: string) {
   if (confirm('确定要删除此自定义通道吗？相关的账号信息也将被移除。')) {
     await providerStore.removeProvider(id)
+    await syncModelsAfterProviderChange()
   }
 }
 
@@ -142,6 +149,7 @@ async function addCustomProvider() {
     baseUrl: newProvider.value.baseUrl,
     enabled: true
   })
+  await syncModelsAfterProviderChange()
   showAddProvider.value = false
   newProvider.value = { id: '', name: '', baseUrl: '' }
 }
@@ -171,6 +179,7 @@ async function addCustomModel() {
   await providerStore.updateProvider(addingModelProvider.value, {
     customModels: [...(p?.customModels || []), newModelId.value.trim()]
   })
+  await syncModelsAfterProviderChange()
   addingModelProvider.value = null
   newModelId.value = ''
 }
@@ -181,6 +190,7 @@ async function removeCustomModel(providerId: string, modelId: string) {
     providerStore.updateProvider(providerId, {
       customModels: p.customModels.filter(m => m !== modelId)
     })
+    await syncModelsAfterProviderChange()
   }
 }
 
@@ -189,12 +199,24 @@ function canAddManualModel(providerId: string) {
   return p && !p.builtIn
 }
 
-function enableAllProviders() {
-  providers.value.forEach(p => { if (!p.enabled) providerStore.updateProvider(p.id, { enabled: true }) })
+async function enableAllProviders() {
+  let changed = false
+  providers.value.forEach((p) => {
+    if (p.enabled) return
+    providerStore.updateProvider(p.id, { enabled: true })
+    changed = true
+  })
+  if (changed) await syncModelsAfterProviderChange()
 }
 
-function disableAllProviders() {
-  providers.value.forEach(p => { if (p.enabled) providerStore.updateProvider(p.id, { enabled: false }) })
+async function disableAllProviders() {
+  let changed = false
+  providers.value.forEach((p) => {
+    if (!p.enabled) return
+    providerStore.updateProvider(p.id, { enabled: false })
+    changed = true
+  })
+  if (changed) await syncModelsAfterProviderChange()
 }
 
 async function handleImport() {
@@ -372,7 +394,7 @@ onMounted(() => {
             <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
                 <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">开启好友模式</p>
-                <p class="text-[9px] text-text-tertiary font-medium">解锁邀请奖励与社交功能</p>
+                <p class="text-[9px] text-text-tertiary font-medium">解锁邀请奖励与更多福利功能</p>
               </div>
               <button @click="appStore.showFriendsMode = !appStore.showFriendsMode" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.showFriendsMode ? 'bg-purple-500' : 'bg-black/10 dark:bg-white/10'">
                 <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.showFriendsMode ? 'translate-x-6' : 'translate-x-0.5'">

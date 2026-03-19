@@ -12,9 +12,11 @@
 
 import { Capacitor } from '@capacitor/core'
 
-const PROVISION_BASE = 'http://82.156.121.141:4000'
+const PROVISION_BASE = 'http://82.156.121.141:4001'
+const LEGACY_PROVISION_BASE = 'http://82.156.121.141:4000'
 const PROVISION_URL = `${PROVISION_BASE}/api/provision`
 const API_BASE_URL = `${PROVISION_BASE}/v1`
+const LEGACY_API_BASE_URL = `${LEGACY_PROVISION_BASE}/v1`
 
 const INSTALL_ID_KEY = 'mms-install-id'
 const PROVISION_STATE_KEY = 'mms-provision-state'
@@ -68,6 +70,15 @@ export function getInstallId(): string {
   return getOrCreateInstallId()
 }
 
+export function normalizeSparkringBaseUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/$/, '')
+  if (!normalized) return API_BASE_URL
+  if (normalized === LEGACY_PROVISION_BASE || normalized === LEGACY_API_BASE_URL) {
+    return API_BASE_URL
+  }
+  return normalized
+}
+
 function detectPlatform(): string {
   if (Capacitor.isNativePlatform()) {
     return Capacitor.getPlatform() === 'ios' ? 'ios' : 'macos'
@@ -107,7 +118,7 @@ export async function provision(tier?: ProvisionTier): Promise<ProvisionResult |
     const apiKey: string | undefined = data.api_key
     if (!apiKey) return null
 
-    const baseUrl: string = data.base_url || API_BASE_URL
+    const baseUrl = normalizeSparkringBaseUrl(data.base_url || API_BASE_URL)
     const resolvedTier: ProvisionTier = tier === 'max' ? 'max' : 'default'
 
     saveProvisionState({
