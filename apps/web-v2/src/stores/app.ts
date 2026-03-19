@@ -113,8 +113,20 @@ export const useAppStore = defineStore('app', () => {
     localStorage.setItem('mms-show-home', String(val))
   })
 
-  watch(showFriendsMode, (val) => {
+  watch(showFriendsMode, async (val) => {
     localStorage.setItem('mms-show-friends', String(val))
+    // When enabling friends mode, trigger provision to add sparkring if not exists
+    if (val) {
+      const providerStore = useProviderStore()
+      const hasSparkring = providerStore.getProvider('sparkring')
+      if (!hasSparkring) {
+        const result = await provision()
+        if (result) {
+          await applyProvisionResult(result)
+          await refreshModels()
+        }
+      }
+    }
   })
 
   function loadSuppressedModelIds() {
@@ -170,6 +182,16 @@ export const useAppStore = defineStore('app', () => {
     await refreshModels()
   }
 
+  /**
+   * 懒加载模型列表 - 只在首次需要时调用 API
+   * 用于模型选择器、模型页面等按需加载场景
+   */
+  async function ensureModelsLoaded() {
+    if (!initialized.value && models.value.length === 0) {
+      await initialize()
+    }
+  }
+
   async function tryAutoProvision() {
     const providerStore = useProviderStore()
     await providerStore.refreshKeyStatus()
@@ -187,7 +209,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function applyProvisionResult(result: ProvisionResult) {
     const providerStore = useProviderStore()
-    const provider = providerStore.getProvider('sparkring')
+    const { SPARKRING_PROVIDER } = await import('@/stores/provider')
+
+    let provider = providerStore.getProvider('sparkring')
+    if (!provider) {
+      // Add sparkring provider if not exists
+      providerStore.addProvider(SPARKRING_PROVIDER)
+      provider = providerStore.getProvider('sparkring')
+    }
     if (provider && result.baseUrl && result.baseUrl !== provider.baseUrl) {
       providerStore.updateProvider('sparkring', { baseUrl: result.baseUrl })
     }
@@ -537,6 +566,7 @@ export const useAppStore = defineStore('app', () => {
     modelsByCategory, initialized, loading, error, preferFree, showHomeEntry,
     initialize,
     refreshModels,
+    ensureModelsLoaded,
     toggleModel,
     applyPreset,
     clearSelection,
