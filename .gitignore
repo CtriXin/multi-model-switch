@@ -38,6 +38,11 @@ apps/web-v2/*.dmg
 apps/web-v2/src-tauri/*.provisionprofile
 apps/web-v2/src-tauri/*.p12
 
+# local AI context / scratch files
+DESIGN_V3_SPEC.md
+apps/web-v2/GEMINI.md
+apps/web-v2/*-worktree/
+
 # AI tool caches & worktrees
 .ai/cache/
 .sparkring/
