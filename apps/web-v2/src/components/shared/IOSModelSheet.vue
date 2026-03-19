@@ -204,7 +204,7 @@ function onMouseUp() {
 }
 
 // Reset on open
-watch(() => props.open, (val) => {
+watch(() => props.open, async (val) => {
   if (val) {
     detent.value = 'half'
     search.value = ''
@@ -212,6 +212,8 @@ watch(() => props.open, (val) => {
     filterVision.value = !!props.request?.requireVision
     sheetTranslateY.value = 0
     recentSearches.value = getSearchHistory()
+    // 确保模型列表已加载
+    await appStore.ensureModelsLoaded()
   }
 })
 
