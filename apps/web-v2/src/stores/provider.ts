@@ -1,12 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import {
-  clearAll as clearAllKeys,
-  deleteApiKey,
-  getApiKey,
-  listCredentialIds,
-  saveApiKey,
-} from '@/services/keychain'
+import { clearAll as clearAllKeys, deleteApiKey, getApiKey, listCredentialIds, saveApiKey } from '@/services/keychain'
+import { normalizeSparkringBaseUrl } from '@/services/provision'
 import { createShareBundle, readShareBundle } from '@/services/shareBundle'
 import { useToastStore } from './toast'
 
@@ -56,45 +51,189 @@ interface ShareImportPayload extends ImportPayload {
 }
 
 const BUILTIN_PROVIDERS: ProviderConfig[] = [
-  { id: 'siliconflow', name: '硅基流动', type: 'openai-compatible', baseUrl: 'https://api.siliconflow.cn/v1', enabled: false, builtIn: true },
-  { id: 'zhipu', name: '智谱 AI', type: 'openai-compatible', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', enabled: false, builtIn: true },
-  { id: 'deepseek', name: 'DeepSeek', type: 'openai-compatible', baseUrl: 'https://api.deepseek.com', enabled: false, builtIn: true },
-  { id: 'dashscope', name: '通义千问', type: 'openai-compatible', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', enabled: false, builtIn: true },
-  { id: 'moonshot', name: '月之暗面 Kimi', type: 'openai-compatible', baseUrl: 'https://api.moonshot.cn/v1', enabled: false, builtIn: true },
-  { id: 'lingyiwanwu', name: '零一万物', type: 'openai-compatible', baseUrl: 'https://api.lingyiwanwu.com/v1', enabled: false, builtIn: true },
-  { id: 'baichuan', name: '百川智能', type: 'openai-compatible', baseUrl: 'https://api.baichuan-ai.com/v1', enabled: false, builtIn: true },
-  { id: 'stepfun', name: '阶跃星辰', type: 'openai-compatible', baseUrl: 'https://api.stepfun.com/v1', enabled: false, builtIn: true },
-  { id: 'minimax', name: 'MiniMax', type: 'openai-compatible', baseUrl: 'https://api.minimax.chat/v1', enabled: false, builtIn: true },
-  { id: 'cerebras', name: 'Cerebras', type: 'openai-compatible', baseUrl: 'https://api.cerebras.ai/v1', enabled: false, builtIn: true },
-  { id: 'google', name: 'Google AI Studio', type: 'openai-compatible', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', enabled: false, builtIn: true },
-  { id: 'groq', name: 'Groq', type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', enabled: false, builtIn: true },
-  { id: 'nvidia', name: 'NVIDIA NIM', type: 'openai-compatible', baseUrl: 'https://integrate.api.nvidia.com/v1', enabled: false, builtIn: true },
-  { id: 'mistral', name: 'Mistral AI', type: 'openai-compatible', baseUrl: 'https://api.mistral.ai/v1', enabled: false, builtIn: true },
-  { id: 'together', name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', enabled: false, builtIn: true },
-  { id: 'fireworks', name: 'Fireworks AI', type: 'openai-compatible', baseUrl: 'https://api.fireworks.ai/inference/v1', enabled: false, builtIn: true },
-  { id: 'openrouter', name: 'OpenRouter', type: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', enabled: false, builtIn: true },
-  { id: 'sparkring', name: 'SparkRing 体验通道', type: 'openai-compatible', baseUrl: 'http://82.156.121.141:4000/v1', enabled: false, builtIn: true },
+  {
+    id: 'siliconflow',
+    name: '硅基流动',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'zhipu',
+    name: '智谱 AI',
+    type: 'openai-compatible',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.deepseek.com',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'dashscope',
+    name: '通义千问',
+    type: 'openai-compatible',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'moonshot',
+    name: '月之暗面 Kimi',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'lingyiwanwu',
+    name: '零一万物',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.lingyiwanwu.com/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'baichuan',
+    name: '百川智能',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.baichuan-ai.com/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'stepfun',
+    name: '阶跃星辰',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.stepfun.com/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'minimax',
+    name: 'MiniMax',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.minimax.chat/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'google',
+    name: 'Google AI Studio',
+    type: 'openai-compatible',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    type: 'openai-compatible',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'mistral',
+    name: 'Mistral AI',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.mistral.ai/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'together',
+    name: 'Together AI',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.together.xyz/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'fireworks',
+    name: 'Fireworks AI',
+    type: 'openai-compatible',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    enabled: false,
+    builtIn: true,
+  },
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    type: 'openrouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    enabled: false,
+    builtIn: true,
+  },
   { id: 'demo', name: 'Demo (模拟数据)', type: 'mock', baseUrl: '', enabled: true, builtIn: true },
 ]
+
+// SparkRing provider config (hidden by default, shown after provision)
+export const SPARKRING_PROVIDER: ProviderConfig = {
+  id: 'sparkring',
+  name: 'SparkRing 体验通道',
+  type: 'openai-compatible',
+  baseUrl: 'http://82.156.121.141:4001/v1',
+  enabled: false,
+  builtIn: true,
+}
 
 const STORAGE_KEY = 'mms-providers'
 const ACCOUNTS_STORAGE_KEY = 'mms-provider-accounts'
 const DEFAULT_ACCOUNT_NAME = '默认账户'
+
+function migrateLegacyProviderBaseUrl(provider: ProviderConfig): ProviderConfig {
+  if (provider.id !== 'sparkring') return provider
+
+  const nextBaseUrl = normalizeSparkringBaseUrl(provider.baseUrl)
+  if (nextBaseUrl === provider.baseUrl) return provider
+  return { ...provider, baseUrl: nextBaseUrl }
+}
 
 function loadProviders(): ProviderConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return BUILTIN_PROVIDERS.map((provider) => ({ ...provider }))
     const saved: ProviderConfig[] = JSON.parse(raw)
+    let changed = false
+
     const result = BUILTIN_PROVIDERS.map((builtin) => {
       const override = saved.find((item) => item.id === builtin.id)
-      return override ? { ...builtin, ...override, builtIn: true } : { ...builtin }
+      const merged = override ? { ...builtin, ...override, builtIn: true } : { ...builtin }
+      const migrated = migrateLegacyProviderBaseUrl(merged)
+      changed ||= migrated.baseUrl !== merged.baseUrl
+      return migrated
     })
     for (const savedProvider of saved) {
       if (!result.find((item) => item.id === savedProvider.id)) {
-        result.push({ ...savedProvider, builtIn: false })
+        const migrated = migrateLegacyProviderBaseUrl({ ...savedProvider, builtIn: false })
+        changed ||= migrated.baseUrl !== savedProvider.baseUrl
+        result.push(migrated)
       }
     }
+    if (changed) persistProviders(result)
     return result
   } catch {
     return BUILTIN_PROVIDERS.map((provider) => ({ ...provider }))
@@ -126,9 +265,7 @@ function loadAccounts(): ProviderAccount[] {
     const raw = localStorage.getItem(ACCOUNTS_STORAGE_KEY)
     if (!raw) return []
     const saved = JSON.parse(raw) as Partial<ProviderAccount>[]
-    return saved
-      .map((item) => normalizeAccount(item))
-      .filter((item): item is ProviderAccount => !!item)
+    return saved.map((item) => normalizeAccount(item)).filter((item): item is ProviderAccount => !!item)
   } catch {
     return []
   }
@@ -152,14 +289,10 @@ export const useProviderStore = defineStore('provider', () => {
   const keyStatus = ref<Record<string, boolean>>({})
   const accountKeyStatus = ref<Record<string, boolean>>({})
 
-  const enabledProviders = computed(() =>
-    providers.value.filter((provider) => provider.enabled),
-  )
+  const enabledProviders = computed(() => providers.value.filter((provider) => provider.enabled))
 
   const configuredProviders = computed(() =>
-    enabledProviders.value.filter((provider) => (
-      provider.type === 'mock' || getRuntimeAccounts(provider.id).length > 0
-    )),
+    enabledProviders.value.filter((provider) => provider.type === 'mock' || getRuntimeAccounts(provider.id).length > 0),
   )
 
   function saveProviders() {
@@ -200,8 +333,9 @@ export const useProviderStore = defineStore('provider', () => {
   function recomputeProviderKeyStatus() {
     const next: Record<string, boolean> = {}
     for (const provider of providers.value) {
-      next[provider.id] = provider.type === 'mock'
-        || accounts.value.some((account) => account.providerId === provider.id && accountKeyStatus.value[account.id])
+      next[provider.id] =
+        provider.type === 'mock' ||
+        accounts.value.some((account) => account.providerId === provider.id && accountKeyStatus.value[account.id])
     }
     keyStatus.value = next
   }
@@ -226,9 +360,7 @@ export const useProviderStore = defineStore('provider', () => {
     if (!providerAccounts.length) return
 
     const currentDefault = providerAccounts.find((account) => account.isDefault)
-    const fallback = currentDefault
-      || providerAccounts.find((account) => account.enabled)
-      || providerAccounts[0]
+    const fallback = currentDefault || providerAccounts.find((account) => account.enabled) || providerAccounts[0]
 
     for (const account of providerAccounts) {
       account.isDefault = account.id === fallback.id
@@ -277,11 +409,12 @@ export const useProviderStore = defineStore('provider', () => {
 
   function getRuntimeAccounts(providerId: string, options: { includeSuppressed?: boolean } = {}) {
     clearExpiredSuppressions()
-    return getAccountsByProvider(providerId).filter((account) => (
-      account.enabled
-      && accountKeyStatus.value[account.id]
-      && (options.includeSuppressed || !isAccountSuppressed(account))
-    ))
+    return getAccountsByProvider(providerId).filter(
+      (account) =>
+        account.enabled &&
+        accountKeyStatus.value[account.id] &&
+        (options.includeSuppressed || !isAccountSuppressed(account)),
+    )
   }
 
   function getFallbackAccounts(providerId: string) {
@@ -295,9 +428,9 @@ export const useProviderStore = defineStore('provider', () => {
     for (const provider of providers.value) {
       if (provider.type === 'mock' || !credentialIds.has(provider.id)) continue
 
-      const hasAccountCredential = accounts.value.some((account) => (
-        account.providerId === provider.id && credentialIds.has(account.id)
-      ))
+      const hasAccountCredential = accounts.value.some(
+        (account) => account.providerId === provider.id && credentialIds.has(account.id),
+      )
       if (hasAccountCredential) continue
 
       const legacyKey = await getApiKey(provider.id)
@@ -506,21 +639,21 @@ export const useProviderStore = defineStore('provider', () => {
     }
   }
 
-  async function importConfigData(
-    data: ImportPayload,
-    options: { source: 'plain' | 'share' },
-  ) {
+  async function importConfigData(data: ImportPayload, options: { source: 'plain' | 'share' }) {
     let importedCount = 0
 
     for (const item of data.providers) {
       if (!item.id || !item.baseUrl) continue
+      const normalizedBaseUrl = item.id === 'sparkring'
+        ? normalizeSparkringBaseUrl(item.baseUrl)
+        : item.baseUrl
 
       const existing = providers.value.find((provider) => provider.id === item.id)
       if (existing) {
         Object.assign(existing, {
           name: item.name ?? existing.name,
           type: item.type ?? existing.type,
-          baseUrl: item.baseUrl ?? existing.baseUrl,
+          baseUrl: normalizedBaseUrl ?? existing.baseUrl,
           enabled: item.enabled ?? true,
           models: item.models ?? existing.models,
           customModels: item.customModels ?? existing.customModels,
@@ -530,7 +663,7 @@ export const useProviderStore = defineStore('provider', () => {
           id: item.id,
           name: item.name ?? item.id,
           type: item.type ?? 'openai-compatible',
-          baseUrl: item.baseUrl,
+          baseUrl: normalizedBaseUrl,
           enabled: item.enabled ?? true,
           builtIn: false,
           models: item.models,
@@ -666,23 +799,27 @@ export const useProviderStore = defineStore('provider', () => {
   }
 
   function exportConfig() {
-    return JSON.stringify({
-      version: 1,
-      providers: providers.value.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        type: provider.type,
-        baseUrl: provider.baseUrl,
-        enabled: provider.enabled,
-        models: provider.models,
-        accounts: getAccountsByProvider(provider.id).map((account) => ({
-          id: account.id,
-          name: account.name,
-          enabled: account.enabled,
-          isDefault: account.isDefault,
+    return JSON.stringify(
+      {
+        version: 1,
+        providers: providers.value.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          baseUrl: provider.baseUrl,
+          enabled: provider.enabled,
+          models: provider.models,
+          accounts: getAccountsByProvider(provider.id).map((account) => ({
+            id: account.id,
+            name: account.name,
+            enabled: account.enabled,
+            isDefault: account.isDefault,
+          })),
         })),
-      })),
-    }, null, 2)
+      },
+      null,
+      2,
+    )
   }
 
   return {
