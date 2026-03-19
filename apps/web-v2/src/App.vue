@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, provide, onMounted, onUnmounted, watch, computed, reactive } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -28,6 +28,22 @@ const platform = ref<'macos' | 'ios'>(isNative || window.innerWidth < MOBILE_BRE
 const iosDrawerOpen = ref(false)
 const iosModelSheetOpen = ref(false)
 const modelSheetRequest = ref<any>(null)
+const EDGE_SWIPE_WIDTH = 24
+const SWIPE_TRIGGER_DISTANCE = 72
+
+const rootSwipe = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  triggered: false,
+})
+
+const drawerSwipe = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  triggered: false,
+})
 
 provide('platform', platform)
 
@@ -51,6 +67,91 @@ function closeModelSheet() {
   iosModelSheetOpen.value = false
 }
 
+function resetRootSwipe() {
+  rootSwipe.active = false
+  rootSwipe.startX = 0
+  rootSwipe.startY = 0
+  rootSwipe.triggered = false
+}
+
+function resetDrawerSwipe() {
+  drawerSwipe.active = false
+  drawerSwipe.startX = 0
+  drawerSwipe.startY = 0
+  drawerSwipe.triggered = false
+}
+
+function onRootTouchStart(e: TouchEvent) {
+  if (platform.value !== 'ios' || iosDrawerOpen.value || iosModelSheetOpen.value) return
+  const touch = e.touches[0]
+  if (!touch || touch.clientX > EDGE_SWIPE_WIDTH) {
+    resetRootSwipe()
+    return
+  }
+
+  rootSwipe.active = true
+  rootSwipe.startX = touch.clientX
+  rootSwipe.startY = touch.clientY
+  rootSwipe.triggered = false
+}
+
+function onRootTouchMove(e: TouchEvent) {
+  if (!rootSwipe.active || rootSwipe.triggered) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - rootSwipe.startX
+  const dy = touch.clientY - rootSwipe.startY
+
+  if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) {
+    resetRootSwipe()
+    return
+  }
+
+  if (dx > SWIPE_TRIGGER_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+    iosDrawerOpen.value = true
+    rootSwipe.triggered = true
+  }
+}
+
+function onRootTouchEnd() {
+  resetRootSwipe()
+}
+
+function onDrawerTouchStart(e: TouchEvent) {
+  if (platform.value !== 'ios' || !iosDrawerOpen.value) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  drawerSwipe.active = true
+  drawerSwipe.startX = touch.clientX
+  drawerSwipe.startY = touch.clientY
+  drawerSwipe.triggered = false
+}
+
+function onDrawerTouchMove(e: TouchEvent) {
+  if (!drawerSwipe.active || drawerSwipe.triggered) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - drawerSwipe.startX
+  const dy = touch.clientY - drawerSwipe.startY
+
+  if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) {
+    resetDrawerSwipe()
+    return
+  }
+
+  if (dx < -SWIPE_TRIGGER_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+    iosDrawerOpen.value = false
+    drawerSwipe.triggered = true
+  }
+}
+
+function onDrawerTouchEnd() {
+  resetDrawerSwipe()
+}
+
 function iosNewChat() {
   sessionStore.createSession('chat')
   router.push('/chat')
@@ -68,11 +169,15 @@ function isDrawerSessionActive(session: any) {
   return sessionStore.currentSessionId === session.id && (route.path === '/chat' || route.path === '/discuss')
 }
 
+function handleOpenDrawer() {
+  iosDrawerOpen.value = true
+}
+
 onMounted(() => {
   window.addEventListener('resize', onResize)
   window.addEventListener('open-models', handleOpenModels)
   window.addEventListener('open-model-picker', handleOpenModelPicker)
-  window.addEventListener('open-drawer', () => { iosDrawerOpen.value = true })
+  window.addEventListener('open-drawer', handleOpenDrawer)
 
   appStore.initialize()
   sessionStore.loadSessions()
@@ -82,7 +187,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('open-models', handleOpenModels)
   window.removeEventListener('open-model-picker', handleOpenModelPicker)
-  window.removeEventListener('open-drawer', () => { iosDrawerOpen.value = true })
+  window.removeEventListener('open-drawer', handleOpenDrawer)
 })
 
 watch(() => route.path, () => {
@@ -92,7 +197,11 @@ watch(() => route.path, () => {
 
 <template>
   <div
-    :class="['h-full w-full overflow-hidden flex transition-colors duration-500', theme === 'dark' ? 'dark bg-[#0b0b18]' : 'bg-[#f5f5f7]']">
+    :class="['h-full w-full overflow-hidden flex transition-colors duration-500', theme === 'dark' ? 'dark bg-[#0b0b18]' : 'bg-[#f5f5f7]']"
+    @touchstart.passive="onRootTouchStart"
+    @touchmove.passive="onRootTouchMove"
+    @touchend.passive="onRootTouchEnd"
+    @touchcancel.passive="onRootTouchEnd">
     <!-- V3 AURORA ENGINE -->
     <div v-if="v3Config.showAurora"
       class="fixed -inset-[100px] pointer-events-none z-0 overflow-hidden opacity-50 dark:opacity-100">
@@ -113,7 +222,7 @@ watch(() => route.path, () => {
     <Sidebar v-if="platform === 'macos'" />
 
     <main
-      :class="['flex-1 flex flex-col min-w-0 relative z-10', platform === 'ios' ? 'safe-top safe-bottom' : '']">
+      :class="['flex-1 flex flex-col min-w-0 relative z-10 overflow-x-hidden', platform === 'ios' ? 'safe-top safe-bottom' : '']">
       <router-view v-slot="{ Component }">
         <transition name="page" mode="out-in">
           <component :is="Component" />
@@ -129,8 +238,11 @@ watch(() => route.path, () => {
       </transition>
       <transition name="drawer-panel">
         <div v-if="iosDrawerOpen"
-          class="fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col p-3 ">
-          <!-- safe-top -->
+          class="mobile-drawer-shell fixed inset-y-0 left-0 w-[300px] max-w-[85vw] z-[10001] flex flex-col px-3"
+          @touchstart.passive="onDrawerTouchStart"
+          @touchmove.passive="onDrawerTouchMove"
+          @touchend.passive="onDrawerTouchEnd"
+          @touchcancel.passive="onDrawerTouchEnd">
 
           <!-- The Bleached Container -->
           <div
@@ -167,21 +279,21 @@ watch(() => route.path, () => {
             <div class="px-3 py-6 space-y-2 overflow-y-auto no-scrollbar flex-1">
               <div
                 class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">
-                Create</div>
+                新建</div>
               <button @click="iosNewChat"
                 class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl bg-accent text-white shadow-xl shadow-accent/20 active:scale-95 transition-all">
                 <Plus :size="20" stroke-width="4" /> <span
-                  class="font-black uppercase tracking-widest text-[11px]">开启新对话</span>
+                  class="font-black uppercase tracking-widest text-[11px]">新聊天</span>
               </button>
 
               <div class="h-px bg-black/[0.03] dark:bg-white/5 my-4 mx-4" />
 
-              <div class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">Navigator</div>
+              <div class="px-4 mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary opacity-40">导航</div>
               <template v-for="link in [
-                { path: '/', icon: Home, label: '首页体验' },
-                { path: '/chat', icon: MessageSquare, label: '对话模式' },
-                { path: '/discuss', icon: GitMerge, label: '深度辩论' },
-                { path: '/advisors', icon: Users, label: 'AI 锦囊团' }
+                { path: '/', icon: Home, label: '首页' },
+                { path: '/chat', icon: MessageSquare, label: '聊天' },
+                { path: '/discuss', icon: GitMerge, label: '辩论' },
+                { path: '/advisors', icon: Users, label: '参谋团' }
               ]" :key="link.path">
                 <button v-if="link.path !== '/' || appStore.showHomeEntry" @click="router.push(link.path); iosDrawerOpen = false" 
                   class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-300 active:scale-95" 
@@ -197,7 +309,7 @@ watch(() => route.path, () => {
               <div class="mt-8 border-t border-black/[0.03] dark:border-white/5 pt-6">
                 <p
                   class="text-[10px] font-black text-text-tertiary uppercase tracking-widest px-4 mb-2 opacity-40">
-                  Recent History</p>
+                  最近的</p>
                 <div v-if="sessionStore.sortedSessions.length" class="space-y-1 px-1 pb-4">
                   <button v-for="session in sessionStore.sortedSessions" :key="session.id"
                     @click="iosSwitchSession(session)"
@@ -210,7 +322,7 @@ watch(() => route.path, () => {
                       <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-40"
                         :class="isDrawerSessionActive(session) ? 'text-surface-1' : ''">
                         {{ sessionStore.formatTime(session.updatedAt) }} ·
-                        {{ session.messageCount }} 轮
+                        聊了 {{ session.messageCount }} 轮
                       </div>
                     </div>
                   </button>
@@ -222,7 +334,7 @@ watch(() => route.path, () => {
             <div
               class="px-3 border-t border-black/[0.03] dark:border-white/5 flex gap-2 shrink-0 py-8">
               <button v-for="util in [
-                { path: '/models', icon: Package, label: '基因库' },
+                { path: '/models', icon: Package, label: '模型库' },
                 { path: '/settings', icon: Settings, label: '设置' }
               ]" :key="util.path" @click="router.push(util.path); iosDrawerOpen = false"
                 class="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all border border-transparent font-black uppercase tracking-widest text-[10px]"
@@ -292,10 +404,14 @@ watch(() => route.path, () => {
 }
 
 .safe-top {
-  padding-top: env(safe-area-inset-top);
+  padding-top: max(10px, calc(env(safe-area-inset-top) - 12px));
 }
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
+}
+.mobile-drawer-shell {
+  padding-top: max(18px, calc(env(safe-area-inset-top) - 4px));
+  padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
 }
 .page-enter-active {
   animation: pageIn 0.2s ease-out;

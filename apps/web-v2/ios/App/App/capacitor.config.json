@@ -4,7 +4,7 @@
 	"webDir": "dist",
 	"server": {},
 	"ios": {
-		"contentInset": "always",
+		"contentInset": "never",
 		"preferredContentMode": "mobile",
 		"scheme": "capacitor"
 	},

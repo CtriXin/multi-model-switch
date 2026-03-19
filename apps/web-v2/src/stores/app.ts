@@ -4,6 +4,7 @@ import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { fetchModels } from '@/services/api'
 import { getFetchRuntime } from '@/services/runtime'
+import { provision, isProvisioned, getCurrentTier, type ProvisionResult } from '@/services/provision'
 
 export interface ModelMeta {
   id: string
@@ -102,6 +103,7 @@ export const useAppStore = defineStore('app', () => {
   const error = ref<string | null>(null)
   const preferFree = ref(localStorage.getItem('mms-prefer-free') !== 'false')
   const showHomeEntry = ref(localStorage.getItem('mms-show-home') !== 'false')
+  const showFriendsMode = ref(localStorage.getItem('mms-show-friends') === 'true')
 
   watch(preferFree, (val) => {
     localStorage.setItem('mms-prefer-free', String(val))
@@ -109,6 +111,10 @@ export const useAppStore = defineStore('app', () => {
 
   watch(showHomeEntry, (val) => {
     localStorage.setItem('mms-show-home', String(val))
+  })
+
+  watch(showFriendsMode, (val) => {
+    localStorage.setItem('mms-show-friends', String(val))
   })
 
   function loadSuppressedModelIds() {
@@ -157,7 +163,48 @@ export const useAppStore = defineStore('app', () => {
   async function initialize() {
     if (initialized.value) return
     initialized.value = true
+
+    // Auto-provision: first-time users get a free key from NewAPI
+    await tryAutoProvision()
+
     await refreshModels()
+  }
+
+  async function tryAutoProvision() {
+    const providerStore = useProviderStore()
+    await providerStore.refreshKeyStatus()
+
+    // Skip if user already has any real (non-mock) provider configured
+    const hasRealProvider = providerStore.configuredProviders.some(
+      (p) => p.type !== 'mock',
+    )
+    if (hasRealProvider) return
+
+    const result = await provision()
+    if (!result) return
+    await applyProvisionResult(result)
+  }
+
+  async function applyProvisionResult(result: ProvisionResult) {
+    const providerStore = useProviderStore()
+    const provider = providerStore.getProvider('sparkring')
+    if (provider && result.baseUrl && result.baseUrl !== provider.baseUrl) {
+      providerStore.updateProvider('sparkring', { baseUrl: result.baseUrl })
+    }
+    await providerStore.setApiKey('sparkring', result.apiKey)
+  }
+
+  async function activateMaxChannel() {
+    const toast = useToastStore()
+    const result = await provision('max')
+    if (!result) {
+      toast.error('连接失败，请检查网络后重试')
+      return false
+    }
+    await applyProvisionResult(result)
+    await refreshModels()
+    toast.success('大份已上桌，慢用 🍜')
+    return true
   }
 
   async function refreshModels() {
@@ -196,7 +243,7 @@ export const useAppStore = defineStore('app', () => {
 
     if (errors.length) {
       error.value = errors.join('; ')
-      useToastStore().error('部分通道加载失败')
+      useToastStore().error('有些模型连不上，检查下网络或配置')
     }
 
     // Clean up selected models that no longer exist
@@ -231,7 +278,7 @@ export const useAppStore = defineStore('app', () => {
     if (available.length) {
       getSelectionRef(mode).value = [...available]
     } else {
-      useToastStore().info('预设中的模型不可用，请先配置对应通道')
+      useToastStore().info('预设里的模型还没配置好，先接入一下')
     }
   }
 
@@ -327,7 +374,7 @@ export const useAppStore = defineStore('app', () => {
   function randomPick(count = 3, mode: ModelSelectionMode = 'chat', options: ModelFilterOptions = {}) {
     const pool = buildRandomPickPool(count, options)
     if (!pool.length) {
-      useToastStore().info('当前筛选下没有可随机模型')
+      useToastStore().info('这个筛选条件下没有可选的模型')
       return
     }
 
@@ -335,7 +382,7 @@ export const useAppStore = defineStore('app', () => {
     const picked = pickDiverseModelIds(pool, targetCount)
     getSelectionRef(mode).value = picked
     if (pool.length < count) {
-      useToastStore().info(`当前筛选下只有 ${pool.length} 个模型，已全部选中`)
+      useToastStore().info(`只有 ${pool.length} 个模型，都给你选上了`)
     }
   }
 
@@ -440,7 +487,7 @@ export const useAppStore = defineStore('app', () => {
 
     if (data[modelId].count >= 3) {
       const model = models.value.find((m) => m.id === modelId)
-      useToastStore().info(`${model?.name ?? modelId} 今日失败 ${data[modelId].count} 次，自动隐藏`)
+      useToastStore().info(`${model?.name ?? modelId} 今天挂了 ${data[modelId].count} 次，先让它歇会儿`)
       suppressModelForToday(modelId)
     }
   }
@@ -473,7 +520,7 @@ export const useAppStore = defineStore('app', () => {
   async function restoreSuppressedModels() {
     localStorage.removeItem(MODEL_SUPPRESSION_KEY)
     await refreshModels()
-    useToastStore().info('已恢复所有隐藏模型')
+    useToastStore().info('隐藏的模型都回来了')
   }
 
   function getModel(id: string): ModelMeta | undefined {
@@ -505,5 +552,7 @@ export const useAppStore = defineStore('app', () => {
     getSuppressedModelIds,
     restoreSuppressedModels,
     getModel,
+    activateMaxChannel,
+    showFriendsMode,
   }
 })

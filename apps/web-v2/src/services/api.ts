@@ -74,6 +74,14 @@ export function buildApiError(status: number, body: string): ApiError {
     return new ApiError('该模型触发频率或额度限制，今天先别再测它了', status, 'rate_limited', detail)
   }
 
+  // Quota errors from NewAPI provisioned keys
+  if (detail.includes('daily_quota_exceeded')) {
+    return new ApiError('今日额度已用完，明天 UTC 0 点重置', status, 'quota_exceeded', detail)
+  }
+  if (detail.includes('pre_consume_token_quota_failed') || detail.includes('quota_not_enough')) {
+    return new ApiError('账户额度已耗尽', status, 'quota_depleted', detail)
+  }
+
   // Image-input 404 — model exists but doesn't support images; NOT model_unavailable
   if (
     (status === 404 || status === 400)
@@ -232,6 +240,18 @@ interface ApiModel {
   }
 }
 
+/** NewAPI /api/models/info response format */
+interface NewApiModelInfo {
+  id: string
+  name?: string
+  description?: string
+  context_window?: number
+  input_price_per_1m?: number
+  output_price_per_1m?: number
+  capabilities?: string[]
+  enabled?: boolean
+}
+
 const ALWAYS_FREE_PROVIDER_IDS = new Set([
   'groq',
   'google',
@@ -353,6 +373,31 @@ export async function fetchModels(
   let apiModels: ModelMeta[] = []
   let fetchFailed = false
 
+  // Sparkring provider uses /api/models/info (no auth required)
+  if (provider.id === 'sparkring') {
+    try {
+      const baseUrl = provider.baseUrl.replace(/\/v1$/, '')
+      const res = await fetch(`${baseUrl}/api/models/info`)
+      if (res.ok) {
+        const json = await res.json()
+        const rawModels: NewApiModelInfo[] = json.data ?? json
+        apiModels = rawModels
+          .filter((m) => m.enabled !== false)
+          .map((m) => mapNewApiModelToMeta(m, provider))
+          .sort((a, b) => b.tier - a.tier || a.name.localeCompare(b.name))
+      } else {
+        fetchFailed = true
+      }
+    } catch {
+      fetchFailed = true
+    }
+
+    if (!apiModels.length && fetchFailed) {
+      throw new ApiError(`获取模型列表失败`, 0)
+    }
+    return apiModels
+  }
+
   try {
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${apiKey}`,
@@ -421,6 +466,32 @@ export async function fetchModels(
   }
 
   return rebucketModelsByUnifiedScore(apiModels)
+}
+
+/** Map NewAPI /api/models/info format to ModelMeta */
+function mapNewApiModelToMeta(raw: NewApiModelInfo, provider: ProviderConfig): ModelMeta {
+  const inputPrice = raw.input_price_per_1m ?? 0
+  const outputPrice = raw.output_price_per_1m ?? 0
+  const caps = new Set(raw.capabilities ?? [])
+  const id = `${provider.id}/${raw.id}`
+
+  return {
+    id,
+    name: raw.name ?? raw.id,
+    provider: provider.id,
+    category: deriveCategory({ id: raw.id }),
+    tier: deriveTier(inputPrice),
+    priceInput: inputPrice,
+    priceOutput: outputPrice,
+    tags: deriveTags({ id: raw.id, name: raw.name ?? '' }),
+    contextWindow: raw.context_window ?? 4096,
+    free: inputPrice === 0 && outputPrice === 0,
+    supportsVision: caps.has('vision') || /-vl\b|vision|4v|vl-|\/vl-/.test(raw.id.toLowerCase()),
+    supportsNativeWebSearch: caps.has('web_search'),
+    supportsTools: caps.has('tools') || caps.has('function_calling'),
+    capabilitySource: 'registry',
+    capabilityVerifiedAt: new Date().toISOString(),
+  }
 }
 
 function mapToModelMeta(raw: ApiModel, provider: ProviderConfig): ModelMeta {

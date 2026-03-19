@@ -73,6 +73,7 @@ const BUILTIN_PROVIDERS: ProviderConfig[] = [
   { id: 'together', name: 'Together AI', type: 'openai-compatible', baseUrl: 'https://api.together.xyz/v1', enabled: false, builtIn: true },
   { id: 'fireworks', name: 'Fireworks AI', type: 'openai-compatible', baseUrl: 'https://api.fireworks.ai/inference/v1', enabled: false, builtIn: true },
   { id: 'openrouter', name: 'OpenRouter', type: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', enabled: false, builtIn: true },
+  { id: 'sparkring', name: 'SparkRing 体验通道', type: 'openai-compatible', baseUrl: 'http://82.156.121.141:4000/v1', enabled: false, builtIn: true },
   { id: 'demo', name: 'Demo (模拟数据)', type: 'mock', baseUrl: '', enabled: true, builtIn: true },
 ]
 
@@ -492,15 +493,15 @@ export const useProviderStore = defineStore('provider', () => {
     try {
       const data = JSON.parse(json) as ImportPayload
       if (data.version !== 1 || !Array.isArray(data.providers)) {
-        toast.error('配置格式无效')
+        toast.error('配置文件格式不对')
         return false
       }
 
       const importedCount = await importConfigData(data, { source: 'plain' })
-      toast.success(`成功导入 ${importedCount} 个通道配置`)
+      toast.success(`导入了 ${importedCount} 个配置`)
       return true
     } catch (error: any) {
-      toast.error('导入失败: ' + error.message)
+      toast.error('导入出错了: ' + error.message)
       return false
     }
   }
@@ -638,12 +639,12 @@ export const useProviderStore = defineStore('provider', () => {
     try {
       const payload = await readShareBundle<ShareImportPayload>(bundleJson, password)
       if (payload.version !== 1 || !Array.isArray(payload.providers)) {
-        toast.error('分享包内容无效')
+        toast.error('分享链接内容不对')
         return false
       }
 
       if (payload.expiresAt && new Date(payload.expiresAt).getTime() <= Date.now()) {
-        toast.error('分享包已过期，请联系分享方重新生成')
+        toast.error('分享链接已过期，让分享的人重新生成一个')
         return false
       }
 
@@ -652,14 +653,14 @@ export const useProviderStore = defineStore('provider', () => {
         return !builtIn
       })
       if (hasCustomProvider) {
-        toast.info('分享包包含自定义通道，请确认 Base URL 来源可信')
+        toast.info('分享链接里有自定义通道，确认来源可信再导入')
       }
 
       const importedCount = await importConfigData(payload, { source: 'share' })
-      toast.success(`成功导入 ${importedCount} 个分享通道`)
+      toast.success(`导入了 ${importedCount} 个分享配置`)
       return true
     } catch (error: any) {
-      toast.error(error.message || '分享包导入失败')
+      toast.error(error.message || '导入分享链接失败')
       return false
     }
   }

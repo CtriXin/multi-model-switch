@@ -105,7 +105,7 @@ onMounted(() => { if (!appStore.models.length) appStore.refreshModels() })
 <template>
   <div class="flex flex-col h-full overflow-hidden bg-transparent">
     <!-- Group 1: Floating Capsule Header (V3 Standard Alignment) -->
-    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
       <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10">
         <div class="flex items-center gap-2.5 min-w-0">
           <button @click="router.back()" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors">
@@ -144,7 +144,7 @@ onMounted(() => { if (!appStore.models.length) appStore.refreshModels() })
       </aside>
 
       <!-- Main Content -->
-      <div class="flex-1 overflow-y-auto custom-scrollbar scroll-smooth">
+      <div class="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar scroll-smooth">
         <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-10">
           <!-- Filter Controls (Refined V3 Panel) -->
           <div v-if="appStore.models.length" class="flex flex-wrap items-center justify-between gap-6 px-2">

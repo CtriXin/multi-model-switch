@@ -10,7 +10,9 @@ const config: CapacitorConfig = {
     // cleartext: true,
   },
   ios: {
-    contentInset: 'always',
+    // Keep `never`: `always` makes WKWebView add extra safe-area inset on iPhone,
+    // which causes the bottom black strip / double bottom spacing regression.
+    contentInset: 'never',
     preferredContentMode: 'mobile',
     scheme: 'capacitor',
   },

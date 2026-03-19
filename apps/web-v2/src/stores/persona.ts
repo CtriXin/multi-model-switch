@@ -51,8 +51,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
 }> = {
   strategy: {
     icon: '🧭',
-    label: '定方向的',
-    desc: '看五年后值不值，是不是死胡同',
+    label: '看长远的',
+    desc: '这事五年后还值不值',
     tag: '看远方',
     borderClass: 'border-sky-300/70',
     softClass: 'bg-sky-500/8',
@@ -61,8 +61,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
   },
   risk: {
     icon: '🧯',
-    label: '挑毛病的',
-    desc: '先找坑，再想最坏能坏成什么样',
+    label: '找风险的',
+    desc: '哪里可能出问题，最坏会怎样',
     tag: '找茬',
     borderClass: 'border-rose-300/70',
     softClass: 'bg-rose-500/8',
@@ -71,8 +71,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
   },
   feasibility: {
     icon: '🛠️',
-    label: '算资源的',
-    desc: '技术能不能搞定，手头资源够不够',
+    label: '看落地的',
+    desc: '能不能做出来，资源够不够',
     tag: '能不能干',
     borderClass: 'border-emerald-300/70',
     softClass: 'bg-emerald-500/8',
@@ -81,8 +81,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
   },
   business: {
     icon: '🧮',
-    label: '盘生意的',
-    desc: '谁买单，怎么赚钱，值不值得投',
+    label: '算账的',
+    desc: '谁买单，怎么赚钱',
     tag: '算账',
     borderClass: 'border-fuchsia-300/70',
     softClass: 'bg-fuchsia-500/8',
@@ -91,8 +91,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
   },
   user: {
     icon: '📣',
-    label: '接地气的',
-    desc: '用户顺不顺手，会不会当场骂街',
+    label: '看用户的',
+    desc: '用户用着顺不顺手',
     tag: '听用户',
     borderClass: 'border-amber-300/80',
     softClass: 'bg-amber-500/8',
@@ -101,8 +101,8 @@ export const CATEGORY_META: Record<PersonaCategory, {
   },
   execution: {
     icon: '📌',
-    label: '盯进度的',
-    desc: '谁来干，先干啥，会不会烂尾',
+    label: '抓执行的',
+    desc: '谁来干，先干啥',
     tag: '抓落实',
     borderClass: 'border-violet-300/70',
     softClass: 'bg-violet-500/8',

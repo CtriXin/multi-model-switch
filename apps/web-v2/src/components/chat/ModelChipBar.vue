@@ -91,7 +91,7 @@ async function selectModel(id: string) {
     sessionStore.saveCurrentSession()
     replacementRequest.value = null
     popoverOpen.value = false
-    toast.info('已替换当前卡片模型')
+    toast.info('换好了')
     return
   }
 
@@ -111,11 +111,6 @@ function commitSearch() {
   if (searchQuery.value.trim()) {
     addSearchHistory(searchQuery.value.trim())
   }
-}
-
-function applyRecentSearch(keyword: string) {
-  searchQuery.value = keyword
-  updateFiltered()
 }
 
 function toggleTierFilter(tag: ModelPoolTag) {
@@ -210,10 +205,10 @@ onUnmounted(() => {
 <template>
   <div class="relative transition-all duration-500">
     <div class="max-w-5xl mx-auto px-3 sm:px-4">
-      <div class="flex items-center h-11 sm:h-10">
+      <div class="flex items-center h-10">
         <!-- Scrollable chips area -->
         <div class="flex-1 min-w-0 overflow-x-auto no-scrollbar">
-          <div class="flex items-center gap-2 sm:gap-1.5 py-2 sm:py-1.5 w-max min-w-full">
+          <div class="flex items-center gap-2 sm:gap-1.5 py-1.5 sm:py-1 w-max min-w-full">
             <span v-for="m in appStore.selectedModels" :key="m.id" class="inline-flex items-center gap-1.5 pl-1.5 sm:pl-1 pr-2 sm:pr-1.5 py-1.5 sm:py-1 rounded-full text-xs
                        whitespace-nowrap shrink-0 group border transition-colors" :style="{
                   backgroundColor: getModelColor(m.provider) + '12',
@@ -230,36 +225,43 @@ onUnmounted(() => {
             </span>
             <span v-if="!appStore.selectedModels.length"
               class="text-xs text-text-tertiary whitespace-nowrap">
-              未选择模型
+              先选个模型吧
             </span>
           </div>
         </div>
 
         <div class="flex items-center gap-1 shrink-0 border-l border-white/5 pl-2 ml-1">
+          <!-- Random: always amber, compact when idle on mobile -->
           <button @click="randomPickFromFilters"
-            class="p-2 rounded-full text-amber-400 hover:bg-amber-500/10 transition-all active:scale-90"
-            title="随机换一组模型">
-            <Dices :size="18" :stroke-width="3" />
+            class="rounded-full transition-all active:scale-90 p-0.5 lg:p-2 text-amber-400 hover:bg-amber-500/10"
+            title="换一批">
+            <Dices class="w-5 h-5 lg:w-[18px] lg:h-[18px]" stroke-width="3" />
           </button>
 
+          <!-- Model picker: mobile compact when idle, styled when active -->
           <button ref="modelPopoverButtonRef" @click="togglePopover"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border"
+            class="flex items-center gap-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
             :class="replacementRequest
-                ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/15'
-                : appStore.selectedModels.length > 0 
-                ? 'bg-accent/5 text-accent border-accent/20 hover:bg-accent/10' 
-                : 'text-text-tertiary border-white/5 hover:bg-white/5'">
-            <Bot :size="16" :stroke-width="3" />
-            <span class="hidden sm:inline">{{ replacementRequest ? '替换模型' : '模型基因' }}</span>
+              ? 'px-3 py-1.5 text-orange-400 bg-orange-500/10 border border-orange-500/20'
+              : popoverOpen
+              ? 'px-3 py-1.5 bg-accent/10 text-accent border border-accent/30'
+              : 'px-0.5 py-0.5 lg:px-3 lg:py-1.5 text-text-secondary hover:text-accent lg:text-accent lg:bg-accent/5 lg:border lg:border-accent/20 lg:hover:bg-accent/10'"
+          >
+            <Bot class="w-5 h-5 lg:w-4 lg:h-4" stroke-width="3" />
+            <span class="hidden lg:inline">{{ replacementRequest ? '换一个' : '选模型' }}</span>
           </button>
 
+          <!-- Context mode: mobile compact when idle, styled when active -->
           <div v-if="route.path === '/chat' && chatStore.rounds.length > 0" ref="contextMenuRef" class="relative">
             <button @click="contextMenuOpen = !contextMenuOpen"
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest
-                       text-text-secondary hover:bg-accent/10 hover:text-accent transition-all border border-transparent" title="上下文策略">
-              <component :is="getContextModeIcon(chatStore.contextMode)" :size="16"
-                :stroke-width="3" class="text-accent" />
-              <span class="hidden sm:inline">{{ getContextModeLabel(chatStore.contextMode) }}</span>
+              class="flex items-center gap-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
+              :class="contextMenuOpen
+                ? 'px-3 py-1.5 bg-accent/10 text-accent border border-accent/30'
+                : 'px-0.5 py-0.5 lg:px-3 lg:py-1.5 text-text-secondary hover:text-accent lg:hover:bg-accent/10 lg:hover:text-accent'"
+              title="上下文策略"
+            >
+              <component :is="getContextModeIcon(chatStore.contextMode)" class="w-5 h-5 lg:w-4 lg:h-4 text-accent" stroke-width="3" />
+              <span class="hidden lg:inline">{{ getContextModeLabel(chatStore.contextMode) }}</span>
             </button>
 
             <Transition name="popover">
@@ -285,60 +287,70 @@ onUnmounted(() => {
     <Transition name="popover">
       <div v-if="popoverOpen" class="absolute left-0 right-0 bottom-full mb-4 z-50 px-4">
         <div ref="modelPopoverPanelRef" class="relative max-w-5xl mx-auto shadow-[0_30px_80px_rgba(0,0,0,0.4)] rounded-[32px] max-h-[400px] flex flex-col overflow-hidden bg-white dark:bg-[#1a1a24] border border-white/10">
-          <!-- Search + Filter -->
-          <div class="px-4 py-3 border-b border-white/5 space-y-3 bg-white/2">
+          
+          <!-- Search + Filter Container -->
+          <div class="shrink-0 px-4 py-3 border-b border-black/[0.03] dark:border-white/5 space-y-3 bg-white/2">
             <div v-if="replacementRequest" class="rounded-xl border border-orange-500/20 bg-orange-500/8 px-3 py-2 text-[11px] text-orange-300">
               正在替换 <span class="font-semibold">{{ appStore.getModel(replacementRequest.oldModelId)?.name }}</span>
             </div>
             <div class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-white/5">
               <Search :size="16" class="text-text-tertiary shrink-0" />
-              <input type="text" :value="searchQuery" @input="handleSearch" placeholder="快速搜索模型基因..." class="flex-1 bg-transparent text-sm text-text-primary outline-none" autofocus />
+              <input type="text" :value="searchQuery" @input="handleSearch" placeholder="搜索模型..." class="flex-1 bg-transparent text-sm text-text-primary outline-none" autofocus />
             </div>
+            
+            <!-- Horizontal Filter Bar (Refined Spacing) -->
             <div class="flex items-center gap-3 overflow-x-auto no-scrollbar scroll-smooth px-1">
-              <button @click="toggleFilterFree" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-emerald-500/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
+              <button @click="toggleFilterFree" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap shadow-sm" 
+                :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
                 免费 <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
               </button>
-              <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)" class="shrink-0 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent shadow-accent/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
-                {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}
+              <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)" 
+                class="shrink-0 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap shadow-sm" 
+                :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
+                {{ tag === 'pro' ? '高端' : tag === 'std' ? '中端' : '入门' }}
               </button>
-              <button @click="toggleFilterVision" class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap" :class="filterVision ? 'bg-purple-500 text-white border-purple-500 shadow-purple-500/20' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-white/5'">
+              <button @click="toggleFilterVision" 
+                class="shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border whitespace-nowrap shadow-sm" 
+                :class="filterVision ? 'bg-purple-500 text-white border-purple-500' : 'bg-black/[0.03] dark:bg-white/5 text-text-tertiary border-black/5 dark:border-white/5'">
                 图片
               </button>
               <div class="shrink-0 w-4"></div>
             </div>
           </div>
 
-          <!-- Provider Tabs -->
-          <div v-if="Object.keys(groupedFiltered).length > 1" class="flex gap-1 px-4 py-2 border-b border-white/5 overflow-x-auto no-scrollbar bg-white/2">
-            <button v-for="provider in Object.keys(groupedFiltered)" :key="provider" @click="scrollToProviderSection(provider)" class="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-white/5 text-text-tertiary hover:text-text-primary transition-all border border-transparent hover:border-white/10 shrink-0">{{ provider }}</button>
+          <!-- Provider Navigation (FIXED: Visible & High Contrast) -->
+          <div v-if="Object.keys(groupedFiltered).length > 1" class="shrink-0 relative z-20 flex gap-1.5 px-4 py-3 border-b border-black/[0.03] dark:border-white/5 overflow-x-auto no-scrollbar bg-black/[0.01] dark:bg-white/[0.02]">
+            <button v-for="provider in Object.keys(groupedFiltered)" :key="provider" @click="scrollToProviderSection(provider)" 
+              class="shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap active:scale-90 bg-white dark:bg-white/5 text-text-primary border-black/10 dark:border-white/10 hover:border-accent shadow-sm">
+              {{ provider }}
+            </button>
           </div>
 
           <!-- Model Grid -->
           <div class="overflow-y-auto flex-1 p-4 custom-scrollbar scroll-smooth" id="chipbar-model-scroll">
             <template v-for="(models, provider) in groupedFiltered" :key="provider">
-              <div :id="'chipbar-section-' + provider" class="flex items-center gap-2 py-4 sticky top-0 bg-white/90 dark:bg-[#1a1a24]/90 backdrop-blur-md z-10">
+              <div :id="'chipbar-section-' + provider" class="flex items-center gap-2 py-4 sticky top-0 bg-white/95 dark:bg-[#1a1a24]/95 backdrop-blur-md z-10">
                 <div class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: getModelColor(provider) }"></div>
-                <span class="text-[9px] font-black uppercase tracking-[0.2em] text-text-tertiary">{{ provider }}</span>
-                <div class="h-px flex-1 bg-white/5 ml-2"></div>
+                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-text-tertiary">{{ provider }}</span>
+                <div class="h-px flex-1 bg-black/[0.03] dark:bg-white/5 ml-2"></div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pb-6">
                 <button v-for="model in models" :key="model.id" @click="selectModel(model.id)"
                   class="flex flex-col items-start p-4 rounded-2xl border transition-all duration-300 text-left relative active:scale-95 group"
-                  :class="replacementRequest ? (isReplacementDisabled(model.id) ? 'opacity-35 cursor-not-allowed border-white/5 bg-white/2' : model.id === replacementRequest.oldModelId ? 'border-orange-500/50 bg-orange-500/5' : 'border-white/5 bg-white/5 hover:border-white/20') : appStore.selectedModelIds.includes(model.id) ? 'border-accent/50 bg-accent/5 shadow-inner' : 'border-white/5 bg-white/5 hover:border-white/20'">
+                  :class="replacementRequest ? (isReplacementDisabled(model.id) ? 'opacity-35 cursor-not-allowed border-white/5 bg-white/2' : model.id === replacementRequest.oldModelId ? 'border-orange-500/50 bg-orange-500/5' : 'border-white/5 bg-white/5 hover:border-white/20') : appStore.selectedModelIds.includes(model.id) ? 'border-accent/50 bg-accent/5 shadow-inner' : 'border-black/5 dark:border-white/5 bg-white/5 hover:border-black/10 dark:hover:border-white/20'">
                   <div class="flex items-center justify-between w-full mb-3">
                     <span class="text-[11px] font-black uppercase tracking-tight text-text-primary truncate pr-6">{{ model.name }}</span>
-                    <div class="w-5 h-5 rounded-full flex items-center justify-center border border-white/10 transition-all" :class="appStore.selectedModelIds.includes(model.id) ? 'bg-accent border-accent text-white scale-110' : ''"><Check v-if="appStore.selectedModelIds.includes(model.id)" :size="12" stroke-width="4" /></div>
+                    <div class="w-5 h-5 rounded-full flex items-center justify-center border border-white/10 transition-all" :class="appStore.selectedModelIds.includes(model.id) ? 'bg-accent border-accent text-white scale-110 shadow-lg shadow-accent/20' : ''"><Check v-if="appStore.selectedModelIds.includes(model.id)" :size="12" stroke-width="4" /></div>
                   </div>
                   <div class="flex flex-wrap gap-1">
                     <span class="text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider" :class="tierClass(model.tier)">{{ tierLabel(model.tier) }}</span>
                     <span v-if="model.free" class="text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-emerald-500/10 text-emerald-400">$0</span>
                     <span v-if="model.supportsVision" class="text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-purple-500/10 text-purple-400">VIS</span>
                   </div>
-                  <span v-if="replacementRequest && model.id === replacementRequest.oldModelId" class="absolute bottom-3 right-4 text-[8px] font-black uppercase text-orange-400">Active</span>
                 </button>
               </div>
             </template>
-            <p v-if="!filteredModels.length" class="text-xs font-black text-text-tertiary text-center py-12 uppercase tracking-widest opacity-40">没有发现匹配的模型基因</p>
+            <p v-if="!filteredModels.length" class="text-xs font-black text-text-tertiary text-center py-12 uppercase tracking-widest opacity-40">没找到匹配的模型</p>
           </div>
         </div>
       </div>
@@ -350,7 +362,8 @@ onUnmounted(() => {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); }
 .popover-enter-active { animation: popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .popover-leave-active { animation: popOut 0.2s ease-in; }
 @keyframes popIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }

@@ -279,7 +279,7 @@ function openImagePreview(src: string) {
 async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
   restoredDraft.value = ''
   if (!hasModels.value) {
-    toast.info('请至少选择 2 个模型')
+    toast.info('先选几个模型呗')
     return
   }
   // Warn if previous round has no selection
@@ -313,7 +313,7 @@ async function restorePrompt(prompt: string) {
   restoredDraft.value = ''
   await nextTick()
   restoredDraft.value = prompt
-  toast.info('已恢复到输入框，可修改后重发')
+  toast.info('内容已恢复，改改再发')
 }
 
 async function retryRoundModel(round: typeof chatStore.rounds[0], modelId: string) {
@@ -344,7 +344,7 @@ async function randomReplaceModel(round: typeof chatStore.rounds[0], oldModelId:
   })
 
   if (!newModelId) {
-    toast.info('没有可用的替换模型')
+    toast.info('暂无可用的模型换')
     return
   }
 
@@ -412,7 +412,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
 <template>
   <div class="flex flex-col h-full overflow-hidden bg-transparent">
     <!-- Group 1: Floating Capsule Header (V3 SPEC Style) -->
-    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
       <header
         data-tauri-drag-region
         class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10"
@@ -432,11 +432,11 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
             </div>
             <div class="min-w-0">
               <h1 class="text-sm font-black text-text-primary truncate tracking-tight">
-                {{ sessionStore.currentSession?.title || '新对话' }}
+                {{ sessionStore.currentSession?.title || '聊天' }}
               </h1>
               <p
                 class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
-                {{ chatStore.rounds.length }} 轮 · {{ appStore.selectedModels.length }} 模型
+                聊过 {{ chatStore.rounds.length }} 轮 · {{ appStore.selectedModels.length }} 个模型
               </p>
             </div>
           </div>
@@ -449,7 +449,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
             class="relative p-2 sm:px-3 sm:py-2 rounded-full bg-white/5 text-text-secondary flex items-center gap-2 hover:bg-white/10 transition-all border border-white/5">
             <Layers :size="18" class="text-accent" />
             <span
-              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest ml-0.5">模型库</span>
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest ml-0.5">选模型</span>
             <span v-if="appStore.selectedModels.length"
               class="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-surface-1">
               {{ appStore.selectedModels.length }}
@@ -465,7 +465,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
                 :is="{ summary: Zap, selected: Target, full: History }[chatStore.contextMode]"
                 :size="18" :stroke-width="3" class="text-accent" />
               <span
-                class="hidden sm:inline ml-0.5">{{ { summary: '摘要模式', selected: '仅选中模式', full: '全文模式' }[chatStore.contextMode] }}</span>
+                class="hidden sm:inline ml-0.5">{{ { summary: '只带重点', selected: '只带选中的回答', full: '全带上' }[chatStore.contextMode] }}</span>
               <ChevronDown :size="10" class="opacity-40" />
             </button>
 
@@ -473,7 +473,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
               <div v-if="showContextMenu"
                 class="absolute right-0 top-full mt-3 w-40 rounded-[28px] border border-white/10 bg-surface-1 shadow-2xl z-50 p-1.5 flex flex-col gap-1">
                 <button
-                  v-for="mode in [{k:'summary',l:'摘要模式',i:Zap},{k:'selected',l:'仅选中模式',i:Target},{k:'full',l:'全文模式',i:History}]"
+                  v-for="mode in [{k:'summary',l:'只带重点',i:Zap},{k:'selected',l:'只带选中的回答',i:Target},{k:'full',l:'全带上',i:History}]"
                   :key="mode.k"
                   @click="chatStore.contextMode = mode.k as any; showContextMenu = false"
                   class="w-full px-4 py-2.5 text-left flex items-center gap-3 rounded-[20px] transition-all"
@@ -490,7 +490,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
             class="p-2 sm:px-4 sm:py-2 rounded-full bg-accent text-white shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
             <Plus :size="18" :stroke-width="4" />
             <span
-              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest">新对话</span>
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest">新开一个</span>
           </button>
         </div>
       </header>
@@ -503,7 +503,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
       <!-- Left: Models List -->
       <div class="flex items-center gap-2 overflow-x-auto no-scrollbar min-w-0">
         <span
-          class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">当前模型:</span>
+          class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">正在用:</span>
         <div class="flex items-center gap-1.5">
           <span v-for="m in appStore.selectedModels" :key="m.id"
             class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tight whitespace-nowrap shrink-0 border border-white/5"
@@ -871,15 +871,15 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
     </div>
 
     <!-- Group 3: Trinity Control Pod (Modern Floating Style) -->
-    <div class="z-30 px-4 pb-4 pt-2 shrink-0">
+    <div class="z-30 px-4 pb-3 pt-1 shrink-0">
       <div
         class="max-w-6xl mx-auto glass-v3 rounded-[36px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 relative flex flex-col overflow-visible border border-white/10">
-        <div class="px-2 pt-2">
+        <div class="px-2 pt-1">
           <ModelChipBar
             class="!border-none !bg-white/5 !dark:bg-white/5 !rounded-[28px] !shadow-none" />
         </div>
 
-        <InputBar class="!bg-transparent !pb-2 !pt-1" :disabled="!hasModels"
+        <InputBar class="!bg-transparent !pb-1.5 !pt-0.5" :disabled="!hasModels"
           :streaming="chatStore.streaming" :placeholder="hasModels ? undefined : '请先选择 2 个以上模型...'"
           :restore-text="restoredDraft" @submit="handleSubmit" @stop="chatStore.stopStreaming"
           @stop-and-edit="handleStopAndEdit" />
