@@ -99,7 +99,9 @@ function scrollToProvider(provider: string) {
 
 function toggleModel(id: string) { appStore.toggleModel(id) }
 
-onMounted(() => { if (!appStore.models.length) appStore.refreshModels() })
+onMounted(() => {
+  appStore.refreshModels()
+})
 </script>
 
 <template>
