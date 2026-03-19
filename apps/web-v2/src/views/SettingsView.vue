@@ -7,7 +7,7 @@ import { useToastStore } from '@/stores/toast'
 import { useTheme } from '@/composables/useTheme'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
 import {
-  ChevronLeft, Menu, Sun, Moon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users
+  ChevronLeft, Menu, Sun, Moon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users, Copy
 } from 'lucide-vue-next'
 import { getCurrentTier } from '@/services/provision'
 
@@ -28,6 +28,10 @@ const saving = ref(false)
 
 const showImport = ref(false)
 const importText = ref('')
+
+const showExport = ref(false)
+const exportOutput = ref('')
+const exportCopied = ref(false)
 
 const showAddProvider = ref(false)
 const newProvider = ref({ id: '', name: '', baseUrl: '' })
@@ -95,6 +99,33 @@ const shareableAccounts = computed(() =>
 
 function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
+}
+
+// 好友模式开启时，自动关闭免费优先和模拟数据
+watch(() => appStore.showFriendsMode, (val) => {
+  if (val) {
+    // 关闭免费优先
+    appStore.preferFree = false
+    // 关闭模拟数据（demo provider）
+    const demoProvider = providerStore.getProvider('demo')
+    if (demoProvider?.enabled) {
+      providerStore.updateProvider('demo', { enabled: false })
+    }
+    useToastStore().info('好友模式已开启，已自动关闭免费优先和模拟数据')
+  }
+})
+
+async function handleExport() {
+  const json = providerStore.exportConfig()
+  exportOutput.value = json
+  try {
+    await navigator.clipboard.writeText(json)
+    exportCopied.value = true
+    useToastStore().success('配置已复制到剪贴板')
+    setTimeout(() => { exportCopied.value = false }, 3000)
+  } catch {
+    useToastStore().error('复制失败，请手动复制')
+  }
 }
 
 async function toggleProviderEnabled(id: string) {
@@ -596,9 +627,9 @@ onMounted(() => {
         <section class="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <button v-for="action in [
             { icon: Upload, label: '导入配置', click: () => showImport = true, color: 'accent' },
+            { icon: Copy, label: '导出配置', click: () => { showExport = true; handleExport() }, color: 'blue-500' },
             { icon: Plus, label: '添加通道', click: () => showAddProvider = true, color: 'purple-500' },
-            { icon: Shield, label: '私密导出', click: () => showShareExport = true, color: 'amber-500' },
-            { icon: Download, label: '私密导入', click: () => showShareImport = true, color: 'emerald-500' }
+            { icon: Shield, label: '私密导出', click: () => showShareExport = true, color: 'amber-500' }
           ]" :key="action.label" @click="action.click"
             class="flex flex-col items-center justify-center gap-3 p-5 rounded-[32px] glass-v3 border border-black/5 dark:border-white/10 hover:border-accent/50 group transition-all duration-500 active:scale-95 shadow-xl">
             <div
@@ -621,10 +652,10 @@ onMounted(() => {
         </section>
 
         <!-- Modals -->
-        <div v-if="showImport || showAddProvider || showShareExport || showShareImport"
+        <div v-if="showImport || showAddProvider || showShareExport || showShareImport || showExport"
           class="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           <div class="absolute inset-0 bg-black/60 backdrop-blur-md"
-            @click="showImport = showAddProvider = showShareExport = showShareImport = false" />
+            @click="showImport = showAddProvider = showShareExport = showShareImport = showExport = false" />
           <div
             class="relative w-full max-w-lg glass-v3 rounded-[32px] border border-white/10 p-8 shadow-2xl animate-scale-in">
             <div v-if="showImport" class="space-y-6">
@@ -638,6 +669,21 @@ onMounted(() => {
                   class="flex-1 bg-accent text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs active:scale-95 transition-all">确认导入</button>
                 <button @click="showImport = false"
                   class="px-8 py-4 rounded-2xl bg-white/5 text-text-tertiary font-black uppercase tracking-widest text-xs">取消</button>
+              </div>
+            </div>
+
+            <div v-if="showExport" class="space-y-6">
+              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导出配置 (Export JSON)</h3>
+              <p class="text-xs text-text-tertiary">导出所有通道配置（不含 API Key），可用于备份或分享到其他设备。</p>
+              <textarea v-model="exportOutput" rows="10" readonly
+                class="w-full text-xs bg-black/20 border border-white/10 rounded-2xl p-4 text-text-primary font-mono focus:outline-none resize-none" />
+              <div class="flex gap-3">
+                <button @click="handleExport"
+                  class="flex-1 bg-accent text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs active:scale-95 transition-all">
+                  {{ exportCopied ? '已复制' : '复制配置' }}
+                </button>
+                <button @click="showExport = false"
+                  class="px-8 py-4 rounded-2xl bg-white/5 text-text-tertiary font-black uppercase tracking-widest text-xs">完成</button>
               </div>
             </div>
 
