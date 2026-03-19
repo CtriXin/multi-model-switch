@@ -218,9 +218,14 @@
 - 超出上限时：
   - 保留最近 10 个完整 session
   - 其余只保留 index / brief
-- `pinned`: 永不自动删除
 
-## 5.3 session 应保存哪些内容
+## 5.3 恢复粒度
+
+- `chat` 里的每一轮都应保存选中回答、Judge 结果，以及 inline discuss 的 phase / synthesis / rollup
+- 流式生成中的中间态也应做 debounce 持久化，避免用户切页或切 session 后只能从头再来
+- 重新进入页面时，优先从 session 回填已保存状态，再决定是否继续请求或提示用户重试
+
+## 5.4 session 应保存哪些内容
 
 建议最少保存：
 

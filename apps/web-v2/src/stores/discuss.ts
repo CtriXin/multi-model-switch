@@ -7,6 +7,7 @@ import { ApiError } from '@/services/api'
 import { pickNeutralModel } from '@/utils/modelSelection'
 
 export type DiscussDepth = 'full' | 'panel' | 'quick'
+export type DiscussRollupPhase = 'idle' | 'streaming' | 'done'
 
 export interface Phase1Result {
   model: string
@@ -43,6 +44,32 @@ export interface RollupResult {
   risks: string
   whenNotToUse: string
   nextSteps: string[]
+}
+
+export interface DiscussSessionState {
+  phase: number
+  streaming: boolean
+  depth: DiscussDepth
+  phase1Results: Phase1Result[]
+  phase2Results: Phase2Result[]
+  phase3Text: string
+  rollupText: string
+  rollupModel: string
+  rollupPhase: DiscussRollupPhase
+}
+
+export function createDiscussSessionState(): DiscussSessionState {
+  return {
+    phase: 0,
+    streaming: false,
+    depth: 'panel',
+    phase1Results: [],
+    phase2Results: [],
+    phase3Text: '',
+    rollupText: '',
+    rollupModel: '',
+    rollupPhase: 'idle',
+  }
 }
 
 const PHASE1_PROMPT = `你是一个分析专家。用户提出了一个问题，请给出你的独立分析。
@@ -257,7 +284,7 @@ export const useDiscussStore = defineStore('discuss', () => {
   const phase3Text = ref('')
   const rollupText = ref('')
   const rollupModel = ref('')
-  const rollupPhase = ref<'idle' | 'streaming' | 'done'>('idle')
+  const rollupPhase = ref<DiscussRollupPhase>('idle')
   const topic = ref('')
   const abortController = ref<AbortController | null>(null)
 

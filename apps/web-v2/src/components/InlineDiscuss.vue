@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onUnmounted } from 'vue'
 import { useAppStore, getModelColor } from '@/stores/app'
+import { useChatStore } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 import { useDiscussSession, type DiscussDepth } from '@/composables/useDiscussSession'
-import { X, Zap, Flame, Rocket, Gavel, Loader2, Share2 } from 'lucide-vue-next'
+import type { DiscussSessionState } from '@/stores/discuss'
+import { X, Zap, Flame, Rocket, Gavel, Loader2, Share2, RotateCcw } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 import { shareText } from '@/composables/useShare'
@@ -10,10 +13,12 @@ import { shareText } from '@/composables/useShare'
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const props = defineProps<{
+  roundId: string
   prompt: string
   responses: Map<string, { content: string; model?: string }>
   selectedModel: string | null
   modelIds: string[]
+  state?: DiscussSessionState | null
 }>()
 
 const emit = defineEmits<{
@@ -21,7 +26,57 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
-const session = useDiscussSession()
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
+let persistTimer: number | null = null
+let lastSyncedState = ''
+
+function serializeState(state?: DiscussSessionState | null): string {
+  return JSON.stringify(state ?? {
+    phase: 0,
+    streaming: false,
+    depth: 'panel',
+    phase1Results: [],
+    phase2Results: [],
+    phase3Text: '',
+    rollupText: '',
+    rollupModel: '',
+    rollupPhase: 'idle',
+  })
+}
+
+function flushPersist(touchUpdatedAt = false) {
+  if (persistTimer !== null) {
+    window.clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  sessionStore.saveCurrentSession({ touchUpdatedAt })
+}
+
+function schedulePersist() {
+  if (persistTimer !== null) window.clearTimeout(persistTimer)
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null
+    sessionStore.saveCurrentSession({ touchUpdatedAt: false })
+  }, 240)
+}
+
+function persistInlineDiscuss(state: DiscussSessionState) {
+  lastSyncedState = serializeState(state)
+  chatStore.updateRoundInlineDiscuss(props.roundId, state)
+
+  const completed = state.phase > 0 && !state.streaming && state.rollupPhase !== 'streaming'
+  if (completed) {
+    flushPersist(true)
+    return
+  }
+  schedulePersist()
+}
+
+const session = useDiscussSession({
+  initialState: props.state,
+  onUpdate: persistInlineDiscuss,
+})
 
 const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: string; icon: typeof Zap }[] = [
   { value: 'quick', label: '快速审查', desc: '指定 1-2 个模型审查，最快', icon: Rocket },
@@ -29,7 +84,7 @@ const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: s
   { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，适用于高风险或复杂决策', hint: '输出为结构化观点，非最终方案。可配合 Rollup 生成行动计划。', icon: Flame },
 ]
 
-const selectedDepth = ref<DiscussDepth>('panel')
+const selectedDepth = ref<DiscussDepth>(props.state?.depth ?? 'panel')
 
 function getModelName(id: string): string {
   if (id === '*') return '全体'
@@ -57,9 +112,17 @@ const sanitizedRollup = computed(() => sanitizeModelOutput(session.rollupText.va
 const synthesisHtml = computed(() => md.render(sanitizedSynthesis.value.content || ''))
 const rollupHtml = computed(() => md.render(sanitizedRollup.value.content || ''))
 
-// Auto-cleanup on unmount
-watch(() => session.isActive.value, (active) => {
-  if (!active && session.phase.value === 0) return
+watch(() => props.state, (state) => {
+  const incoming = serializeState(state)
+  if (incoming === lastSyncedState) return
+  session.hydrate(state)
+  selectedDepth.value = state?.depth ?? 'panel'
+}, { deep: true })
+
+onUnmounted(() => {
+  if (persistTimer !== null) {
+    flushPersist(false)
+  }
 })
 </script>
 
@@ -74,12 +137,22 @@ watch(() => session.isActive.value, (active) => {
           Phase {{ session.phase.value }}/3
         </span>
       </div>
-      <button
-        @click="session.reset(); emit('close')"
-        class="p-1 rounded-lg hover:bg-surface-3 transition-colors"
-      >
-        <X :size="14" class="text-text-tertiary" />
-      </button>
+      <div class="flex items-center gap-1">
+        <button
+          v-if="session.phase.value > 0 && !session.streaming.value"
+          @click="session.reset()"
+          class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-text-tertiary hover:bg-surface-3 transition-colors"
+        >
+          <RotateCcw :size="12" />
+          重来
+        </button>
+        <button
+          @click="emit('close')"
+          class="p-1 rounded-lg hover:bg-surface-3 transition-colors"
+        >
+          <X :size="14" class="text-text-tertiary" />
+        </button>
+      </div>
     </div>
 
     <!-- Depth selector (before starting) -->

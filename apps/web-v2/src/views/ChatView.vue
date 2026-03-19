@@ -27,20 +27,32 @@ const platform = inject<import('vue').Ref<string>>('platform')
 const restoredDraft = ref('')
 
 const scrollContainer = ref<HTMLElement>()
-const hasModels = computed(() => appStore.selectedModels.length >= 2)
 const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
 
-// --- View mode ---
-type ViewMode = 'grid' | 'vertical' | 'horizontal'
-// Desktop: ≤3 models → grid (side-by-side), ≥4 → horizontal scroll
-// Mobile: horizontal (carousel) default, vertical available
-const viewMode = ref<ViewMode>(appStore.selectedModels.length > 3 ? 'horizontal' : 'grid')
-
-// Auto-switch default when model count changes
-watch(() => appStore.selectedModels.length, (count) => {
-  if (count <= 3 && viewMode.value === 'horizontal') viewMode.value = 'grid'
-  else if (count > 3 && viewMode.value === 'grid') viewMode.value = 'horizontal'
+// --- Dynamic layout mode ---
+// 'single': 1 model, centered chat
+// 'grid': 2-3 models, side-by-side
+// 'horizontal': 4+ models, scroll
+const layoutMode = computed(() => {
+  const count = chatStore.activeModelIds.length || appStore.selectedModelIds.length
+  if (count === 1) return 'single'
+  if (count <= 3) return 'grid'
+  return 'horizontal'
 })
+
+// Initialize active models on mount
+onMounted(() => {
+  if (chatStore.activeModelIds.length === 0) {
+    chatStore.initActiveModels([...appStore.selectedModelIds])
+  }
+})
+
+// Watch for external changes and sync
+watch(() => appStore.selectedModelIds, (newIds) => {
+  if (chatStore.activeModelIds.length === 0 && newIds.length > 0) {
+    chatStore.initActiveModels([...newIds])
+  }
+}, { immediate: true })
 
 // Mobile view mode: 'horizontal' (carousel) or 'vertical'
 type MobileViewMode = 'horizontal' | 'vertical'
@@ -91,7 +103,12 @@ function startInlineDiscuss(roundId: string) {
 
 // Either summary or discuss has been expanded for this round
 function isAnyPanelActive(roundId: string): boolean {
-  return !!summaryActiveRound[roundId] || inlineDiscussRound.value === roundId
+  const round = chatStore.rounds.find((item) => item.id === roundId)
+  return !!summaryActiveRound[roundId] || !!round?.judge?.content || inlineDiscussRound.value === roundId
+}
+
+function hasInlineDiscussState(round: typeof chatStore.rounds[0]): boolean {
+  return !!round.inlineDiscuss && round.inlineDiscuss.phase > 0
 }
 
 // --- Tab bar viewing state (separate from selection) ---
@@ -159,7 +176,7 @@ onUnmounted(() => { observer?.disconnect() })
 // --- Context from discuss "继续对话" ---
 onMounted(() => {
   const ctx = route.query.context as string
-  if (ctx && hasModels.value) {
+  if (ctx && hasActiveModels.value) {
     // Clear query param to avoid re-submit on refresh
     router.replace({ path: '/chat', query: {} })
     nextTick(() => handleSubmit(ctx))
@@ -276,14 +293,32 @@ function openImagePreview(src: string) {
   previewImage.value = src
 }
 
+const hasActiveModels = computed(() => chatStore.activeModelIds.length > 0)
+
+const inputPlaceholder = computed(() => {
+  if (!hasActiveModels.value) return '请先选择模型...'
+  if (chatStore.isSingleChat) return '和 AI 聊聊...'
+  return `发给 ${chatStore.activeModelIds.length} 个模型...`
+})
+
+// Keep viewMode for multi-chat layout (grid/horizontal/vertical)
+type ViewMode = 'grid' | 'horizontal' | 'vertical'
+const viewMode = ref<ViewMode>('grid')
+
+// Watch for layout mode changes to sync viewMode
+watch(layoutMode, (mode) => {
+  if (mode === 'grid') viewMode.value = 'grid'
+  else if (mode === 'horizontal') viewMode.value = 'horizontal'
+})
+
 async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
   restoredDraft.value = ''
-  if (!hasModels.value) {
-    toast.info('先选几个模型呗')
+  if (!hasActiveModels.value) {
+    toast.info('先选个模型呗')
     return
   }
   // Warn if previous round has no selection
-  if (chatStore.rounds.length > 0) {
+  if (chatStore.rounds.length > 0 && chatStore.isMultiChat) {
     const lastRound = chatStore.rounds[chatStore.rounds.length - 1]
     if (!lastRound.activeModelId && isRoundDone(lastRound)) {
       if (chatStore.contextMode === 'selected') {
@@ -297,7 +332,7 @@ async function handleSubmit(text: string, attachments: ImageAttachment[] = []) {
     sessionStore.createSession('chat')
   }
   // Fire and don't await — scroll immediately after DOM update
-  chatStore.sendMessage(text, appStore.selectedModelIds, attachments).then(() => {
+  chatStore.sendMessage(text, chatStore.activeModelIds, attachments).then(() => {
     sessionStore.saveCurrentSession()
   })
   // Scroll to the new message after it appears in DOM
@@ -369,6 +404,12 @@ function hasSelection(round: typeof chatStore.rounds[0]): boolean {
   return !!round.activeModelId && isRoundDone(round)
 }
 
+// Get model IDs for a round (backward compatible with old data)
+function getRoundModelIds(round: typeof chatStore.rounds[0]): string[] {
+  // Use saved modelIds if available, otherwise fallback to responses keys
+  return round.modelIds?.length ? round.modelIds : Array.from(round.responses.keys())
+}
+
 const gridClass = computed(() => {
   const count = appStore.selectedModels.length
   if (count <= 2) return 'grid-cols-1 sm:grid-cols-2'
@@ -399,14 +440,6 @@ function switchArchivedModel(round: typeof chatStore.rounds[0], modelId: string)
 function hasModelError(round: typeof chatStore.rounds[0], modelId: string): boolean {
   return !!round.responses.get(modelId)?.error
 }
-
-function handleJudgeComplete(roundId: string, judge: { content: string; modelId: string; isSelfEval: boolean; timestamp: number }) {
-  const round = chatStore.rounds.find(r => r.id === roundId)
-  if (round) {
-    round.judge = judge
-    sessionStore.saveCurrentSession()
-  }
-}
 </script>
 
 <template>
@@ -436,7 +469,9 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
               </h1>
               <p
                 class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
-                聊过 {{ chatStore.rounds.length }} 轮 · {{ appStore.selectedModels.length }} 个模型
+                聊过 {{ chatStore.rounds.length }} 轮 · {{ chatStore.activeModelIds.length }} 个模型
+                <span v-if="chatStore.isSingleChat" class="text-accent">(单聊)</span>
+                <span v-else-if="chatStore.isMultiChat" class="text-accent">(对比)</span>
               </p>
             </div>
           </div>
@@ -497,26 +532,33 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
     </div>
 
     <!-- Current selection bar (Desktop inline) -->
-    <div v-if="appStore.selectedModels.length > 0"
+    <div v-if="chatStore.activeModelIds.length > 0"
       class="max-w-6xl mx-auto w-full px-4 flex items-center justify-between gap-4 mt-2 mb-2">
 
       <!-- Left: Models List -->
       <div class="flex items-center gap-2 overflow-x-auto no-scrollbar min-w-0">
         <span
-          class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">正在用:</span>
+          class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">
+          {{ chatStore.isSingleChat ? '正在聊:' : '正在用:' }}
+        </span>
         <div class="flex items-center gap-1.5">
-          <span v-for="m in appStore.selectedModels" :key="m.id"
+          <span v-for="modelId in chatStore.activeModelIds" :key="modelId"
             class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tight whitespace-nowrap shrink-0 border border-white/5"
-            :style="{ backgroundColor: getModelColor(m.provider) + '10', color: getModelColor(m.provider) }">
+            :style="{ backgroundColor: getModelColor(getProvider(modelId)) + '10', color: getModelColor(getProvider(modelId)) }">
             <span class="w-1.5 h-1.5 rounded-full"
-              :style="{ backgroundColor: getModelColor(m.provider) }" />
-            {{ m.name }}
+              :style="{ backgroundColor: getModelColor(getProvider(modelId)) }" />
+            {{ getModelName(modelId) }}
+          </span>
+          <!-- Add hint for single chat -->
+          <span v-if="chatStore.isSingleChat && chatStore.canAddModel()"
+            class="text-[10px] text-text-tertiary opacity-60 italic">
+            （点击底部 + 添加模型对比）
           </span>
         </div>
       </div>
 
-      <!-- Right: View mode toggle -->
-      <div class="inline-flex items-center gap-0.5 rounded-xl shrink-0">
+      <!-- Right: View mode toggle (only for multi-chat) -->
+      <div v-if="chatStore.isMultiChat" class="inline-flex items-center gap-0.5 rounded-xl shrink-0">
         <!-- Desktop: grid / horizontal / vertical -->
         <template v-if="!isMobile">
           <button v-for="mode in (['grid', 'horizontal', 'vertical'] as const)" :key="mode"
@@ -549,10 +591,13 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
           <Sparkles :size="32" class="text-accent" />
         </div>
         <h2 class="text-2xl font-black text-text-primary mb-3 tracking-tighter">
-          问一次，最多五份答卷
+          {{ chatStore.isSingleChat ? '问 AI' : '问一次，最多五份答卷' }}
         </h2>
         <p class="text-sm text-text-secondary max-w-sm opacity-60 leading-relaxed mx-auto">
-          同一个问题交给多个模型，并排比较后选出最佳回答。选中后还能继续追问，上下文自动接力。
+          {{ chatStore.isSingleChat
+            ? '和一个 AI 深度对话，随时点击 + 添加更多模型对比答案。'
+            : '同一个问题交给多个模型，并排比较后选出最佳回答。选中后还能继续追问，上下文自动接力。'
+          }}
         </p>
       </div>
 
@@ -579,8 +624,47 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
 
           <!-- Desktop responses -->
           <template v-if="!isMobile">
+            <!-- Single chat mode: centered, full-width conversation -->
+            <div v-if="getRoundModelIds(round).length === 1" class="max-w-3xl mx-auto">
+              <div
+                v-for="[singleModelId, msg] of round.responses"
+                :key="singleModelId"
+              >
+                <ModelResponseCard
+                  :model-id="singleModelId"
+                  :model-name="getModelName(singleModelId)"
+                  :provider="getProvider(singleModelId)"
+                  :tier="getTier(singleModelId)"
+                  :content="msg.content"
+                  :elapsed="msg.elapsed"
+                  :error="msg.error"
+                  :error-code="msg.errorCode"
+                  :brief="msg.brief"
+                  :streaming="!!msg.streaming"
+                  :single-mode="true"
+                  @retry="retryRoundModel(round, singleModelId)"
+                  @replace="replaceRoundModel(round, singleModelId)"
+                  @random-replace="randomReplaceModel(round, singleModelId)"
+                />
+              </div>
+              <!-- Summary for single chat (no discuss) -->
+              <template v-if="isRoundDone(round)">
+                <div class="mt-4">
+                  <ChatSummary
+                    :round-id="round.id"
+                    :prompt="round.prompt"
+                    :responses="round.responses"
+                    :judge="round.judge"
+                    :show-discuss="false"
+                    :selected-model-id="chatStore.activeModelIds[0]"
+                    @activate="summaryActiveRound[round.id] = true"
+                  />
+                </div>
+              </template>
+            </div>
+
             <!-- After selection (any mode): tab bar + viewed card full width -->
-            <div v-if="hasSelection(round)">
+            <div v-else-if="hasSelection(round)">
               <!-- Model tab bar -->
               <div class="flex items-stretch gap-1 mb-3 rounded-lg bg-surface-2 p-1">
                 <button v-for="[modelId] of round.responses" :key="modelId"
@@ -702,19 +786,20 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
               </div>
             </div>
 
-            <!-- Summary + Discuss actions (after all responses done) -->
-            <template v-if="isRoundDone(round)">
+            <!-- Summary + Discuss actions (after all responses done) - only for multi-chat -->
+            <template v-if="isRoundDone(round) && getRoundModelIds(round).length >= 2">
               <!-- Initial: 50/50 side by side. After click: vertical full width -->
               <div class="mt-4"
                 :class="isAnyPanelActive(round.id) ? 'space-y-2' : 'flex items-stretch gap-2'">
                 <ChatSummary
                   :class="isAnyPanelActive(round.id) ? 'w-full' : (round.activeModelId ? 'w-1/2' : 'w-full')"
+                  :round-id="round.id"
                   :prompt="round.prompt" :responses="round.responses"
+                  :judge="round.judge"
                   :show-discuss="!!round.activeModelId" :selected-model-id="round.activeModelId"
                   @discuss="startInlineDiscuss(round.id)"
                   @activate="summaryActiveRound[round.id] = true"
-                  @select="(mid: string) => { chatStore.setActiveModel(round.id, mid); viewingModelId[round.id] = mid }"
-                  @judge-complete="(judge) => handleJudgeComplete(round.id, judge)" />
+                  @select="(mid: string) => { chatStore.setActiveModel(round.id, mid); viewingModelId[round.id] = mid }" />
 
                 <button v-if="round.activeModelId && inlineDiscussRound !== round.id"
                   @click="startInlineDiscuss(round.id)" class="flex items-center justify-center gap-2 px-4 py-3
@@ -725,15 +810,15 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
                     class="text-purple-400 group-hover:scale-110 transition-transform" />
                   <span
                     class="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
-                    深入辩论
+                    {{ hasInlineDiscussState(round) ? '继续查看辩论' : '深入辩论' }}
                   </span>
                 </button>
               </div>
 
               <InlineDiscuss v-if="inlineDiscussRound === round.id"
-                :id="'inline-discuss-' + round.id" :prompt="round.prompt"
+                :id="'inline-discuss-' + round.id" :round-id="round.id" :prompt="round.prompt"
                 :responses="round.responses" :selected-model="round.activeModelId"
-                :model-ids="Array.from(round.responses.keys())"
+                :model-ids="Array.from(round.responses.keys())" :state="round.inlineDiscuss"
                 @close="inlineDiscussRound = null" />
             </template>
           </template>
@@ -773,9 +858,44 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
 
           <!-- Mobile: current round -->
           <template v-else-if="isMobile">
+            <!-- Mobile single chat mode -->
+            <div v-if="getRoundModelIds(round).length === 1" class="max-w-3xl mx-auto">
+              <div v-for="[singleModelId, msg] of round.responses" :key="singleModelId">
+                <ModelResponseCard
+                  :model-id="singleModelId"
+                  :model-name="getModelName(singleModelId)"
+                  :provider="getProvider(singleModelId)"
+                  :tier="getTier(singleModelId)"
+                  :content="msg.content"
+                  :elapsed="msg.elapsed"
+                  :error="msg.error"
+                  :error-code="msg.errorCode"
+                  :brief="msg.brief"
+                  :streaming="!!msg.streaming"
+                  :single-mode="true"
+                  @retry="retryRoundModel(round, singleModelId)"
+                  @replace="replaceRoundModel(round, singleModelId)"
+                  @random-replace="randomReplaceModel(round, singleModelId)"
+                />
+              </div>
+              <!-- Summary for single chat (no discuss) -->
+              <template v-if="isRoundDone(round)">
+                <div class="mt-4">
+                  <ChatSummary
+                    :round-id="round.id"
+                    :prompt="round.prompt"
+                    :responses="round.responses"
+                    :judge="round.judge"
+                    :show-discuss="false"
+                    :selected-model-id="chatStore.activeModelIds[0]"
+                    @activate="summaryActiveRound[round.id] = true"
+                  />
+                </div>
+              </template>
+            </div>
 
             <!-- Mobile vertical mode -->
-            <div v-if="mobileViewMode === 'vertical'" class="space-y-3">
+            <div v-else-if="mobileViewMode === 'vertical'" class="space-y-3">
               <ModelResponseCard v-for="[modelId, msg] of round.responses" :key="modelId"
                 :model-id="modelId" :model-name="getModelName(modelId)"
                 :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
@@ -789,7 +909,7 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
                 @random-replace="randomReplaceModel(round, modelId)" />
             </div>
 
-            <!-- Mobile horizontal carousel -->
+            <!-- Mobile horizontal carousel (multi-chat only) -->
             <div v-else>
               <!-- Tab bar for mobile -->
               <div v-if="round.responses.size > 1"
@@ -839,18 +959,19 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
             </div>
           </template>
 
-          <!-- Summary + Inline Discuss (mobile, after responses done) -->
-          <template v-if="isMobile && isRoundDone(round)">
+          <!-- Summary + Inline Discuss (mobile, after responses done) - only for multi-chat -->
+          <template v-if="isMobile && isRoundDone(round) && getRoundModelIds(round).length >= 2">
             <div class="mt-4"
               :class="isAnyPanelActive(round.id) ? 'space-y-2' : 'flex items-stretch gap-2'">
               <ChatSummary
                 :class="isAnyPanelActive(round.id) ? 'w-full' : (round.activeModelId ? 'w-1/2' : 'w-full')"
+                :round-id="round.id"
                 :prompt="round.prompt" :responses="round.responses"
+                :judge="round.judge"
                 :show-discuss="!!round.activeModelId" :selected-model-id="round.activeModelId"
                 @discuss="startInlineDiscuss(round.id)"
                 @activate="summaryActiveRound[round.id] = true"
-                @select="(mid: string) => { chatStore.setActiveModel(round.id, mid); viewingModelId[round.id] = mid }"
-                @judge-complete="(judge) => handleJudgeComplete(round.id, judge)" />
+                @select="(mid: string) => { chatStore.setActiveModel(round.id, mid); viewingModelId[round.id] = mid }" />
 
               <button v-if="round.activeModelId && inlineDiscussRound !== round.id"
                 @click="startInlineDiscuss(round.id)" class="flex flex-col items-center justify-center gap-1.5
@@ -858,13 +979,16 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
                        hover:bg-purple-500/5 transition-colors group"
                 :class="isAnyPanelActive(round.id) ? 'w-full py-3' : 'w-1/2'">
                 <MessageSquare :size="14" class="text-purple-400" />
-                <span class="text-xs text-text-secondary">深入辩论</span>
+                <span class="text-xs text-text-secondary">
+                  {{ hasInlineDiscussState(round) ? '继续查看辩论' : '深入辩论' }}
+                </span>
               </button>
             </div>
 
-            <InlineDiscuss v-if="inlineDiscussRound === round.id" :prompt="round.prompt"
+            <InlineDiscuss v-if="inlineDiscussRound === round.id" :round-id="round.id" :prompt="round.prompt"
               :responses="round.responses" :selected-model="round.activeModelId"
-              :model-ids="Array.from(round.responses.keys())" @close="inlineDiscussRound = null" />
+              :model-ids="Array.from(round.responses.keys())" :state="round.inlineDiscuss"
+              @close="inlineDiscussRound = null" />
           </template>
         </div>
       </div>
@@ -879,8 +1003,9 @@ function handleJudgeComplete(roundId: string, judge: { content: string; modelId:
             class="!border-none !bg-white/5 !dark:bg-white/5 !rounded-[28px] !shadow-none" />
         </div>
 
-        <InputBar class="!bg-transparent !pb-1.5 !pt-0.5" :disabled="!hasModels"
-          :streaming="chatStore.streaming" :placeholder="hasModels ? undefined : '请先选择 2 个以上模型...'"
+        <InputBar class="!bg-transparent !pb-1.5 !pt-0.5" :disabled="!hasActiveModels"
+          :streaming="chatStore.streaming"
+          :placeholder="inputPlaceholder"
           :restore-text="restoredDraft" @submit="handleSubmit" @stop="chatStore.stopStreaming"
           @stop-and-edit="handleStopAndEdit" />
       </div>
