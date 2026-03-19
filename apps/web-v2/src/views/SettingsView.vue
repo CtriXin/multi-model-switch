@@ -101,8 +101,8 @@ function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-// 好友模式开启时，自动关闭免费优先和模拟数据
-watch(() => appStore.showFriendsMode, (val) => {
+// 好友模式开启时，自动关闭免费优先和模拟数据，并解锁 SparkRing 体验通道
+watch(() => appStore.showFriendsMode, async (val) => {
   if (val) {
     // 关闭免费优先
     appStore.preferFree = false
@@ -111,7 +111,13 @@ watch(() => appStore.showFriendsMode, (val) => {
     if (demoProvider?.enabled) {
       providerStore.updateProvider('demo', { enabled: false })
     }
-    useToastStore().info('好友模式已开启，已自动关闭免费优先和模拟数据')
+    // 解锁 SparkRing 体验通道（如果不存在则添加）
+    const sparkring = providerStore.getProvider('sparkring')
+    if (!sparkring) {
+      const { SPARKRING_PROVIDER } = await import('@/stores/provider')
+      providerStore.addProvider(SPARKRING_PROVIDER)
+    }
+    useToastStore().info('好友模式已开启，已自动关闭免费优先和模拟数据，解锁 SparkRing 体验通道')
   }
 })
 
@@ -739,7 +745,20 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-          </div>
+
+            <div class="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20">
+              <div class="flex items-start gap-3">
+                <div class="p-2 bg-purple-500 rounded-lg">
+                  <Key :size="14" class="text-white" stroke-width="3" />
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-text-primary uppercase tracking-widest">已解锁权益</p>
+                  <p class="text-[10px] text-text-secondary mt-1">
+                    <span class="text-purple-400 font-semibold">SparkRing 体验通道</span> 已在 API 通道管理中显示。无需配置 API Key，开箱即用，适合新用户快速体验。
+                  </p>
+                </div>
+              </div>
+            </div>          </div>
         </transition>
 
         <!-- About (Easter Egg: tap version 10x → Max mode) -->
