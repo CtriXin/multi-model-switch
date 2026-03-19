@@ -3,10 +3,11 @@ import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useProviderStore, type ProviderConfig } from '@/stores/provider'
+import { useToastStore } from '@/stores/toast'
 import { useTheme } from '@/composables/useTheme'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
 import {
-  ChevronLeft, Menu, Sun, Moon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket
+  ChevronLeft, Menu, Sun, Moon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users
 } from 'lucide-vue-next'
 import { getCurrentTier } from '@/services/provision'
 
@@ -96,15 +97,15 @@ function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-async function syncModelsAfterProviderChange() {
-  await appStore.refreshModels()
-}
-
 async function toggleProviderEnabled(id: string) {
   const p = providerStore.getProvider(id)
   if (p) {
-    providerStore.updateProvider(id, { enabled: !p.enabled })
-    await syncModelsAfterProviderChange()
+    const nextEnabled = !p.enabled
+    // 如果启用但没有 API Key，提示用户配置
+    if (nextEnabled && !providerStore.keyStatus[id] && p.type !== 'mock') {
+      useToastStore().info(`${p.name} 尚未配置 API Key，请在下方账户池中添加`)
+    }
+    providerStore.updateProvider(id, { enabled: nextEnabled })
   }
 }
 
@@ -126,7 +127,6 @@ async function saveProviderBaseUrl() {
   saving.value = true
   try {
     providerStore.updateProvider(editingProviderId.value, { baseUrl: baseUrlInput.value })
-    await syncModelsAfterProviderChange()
     editingProviderId.value = null
   } finally {
     saving.value = false
@@ -136,7 +136,6 @@ async function saveProviderBaseUrl() {
 async function removeProvider(id: string) {
   if (confirm('确定要删除此自定义通道吗？相关的账号信息也将被移除。')) {
     await providerStore.removeProvider(id)
-    await syncModelsAfterProviderChange()
   }
 }
 
@@ -149,7 +148,6 @@ async function addCustomProvider() {
     baseUrl: newProvider.value.baseUrl,
     enabled: true
   })
-  await syncModelsAfterProviderChange()
   showAddProvider.value = false
   newProvider.value = { id: '', name: '', baseUrl: '' }
 }
@@ -179,7 +177,6 @@ async function addCustomModel() {
   await providerStore.updateProvider(addingModelProvider.value, {
     customModels: [...(p?.customModels || []), newModelId.value.trim()]
   })
-  await syncModelsAfterProviderChange()
   addingModelProvider.value = null
   newModelId.value = ''
 }
@@ -190,7 +187,6 @@ async function removeCustomModel(providerId: string, modelId: string) {
     providerStore.updateProvider(providerId, {
       customModels: p.customModels.filter(m => m !== modelId)
     })
-    await syncModelsAfterProviderChange()
   }
 }
 
@@ -200,23 +196,11 @@ function canAddManualModel(providerId: string) {
 }
 
 async function enableAllProviders() {
-  let changed = false
-  providers.value.forEach((p) => {
-    if (p.enabled) return
-    providerStore.updateProvider(p.id, { enabled: true })
-    changed = true
-  })
-  if (changed) await syncModelsAfterProviderChange()
+  providers.value.forEach(p => { if (!p.enabled) providerStore.updateProvider(p.id, { enabled: true }) })
 }
 
 async function disableAllProviders() {
-  let changed = false
-  providers.value.forEach((p) => {
-    if (!p.enabled) return
-    providerStore.updateProvider(p.id, { enabled: false })
-    changed = true
-  })
-  if (changed) await syncModelsAfterProviderChange()
+  providers.value.forEach(p => { if (p.enabled) providerStore.updateProvider(p.id, { enabled: false }) })
 }
 
 async function handleImport() {
@@ -227,7 +211,7 @@ async function handleImport() {
     importText.value = ''
     showImport.value = false
     await providerStore.refreshKeyStatus()
-    await appStore.refreshModels()
+    // 不自动刷新模型列表，用户切换到模型页面时再按需拉取
   }
 }
 
@@ -246,8 +230,8 @@ async function handleShareImport() {
       shareImportPassword.value = ''
       showShareImport.value = false
       await providerStore.refreshKeyStatus()
-      await appStore.refreshModels()
       resetShareSelection()
+      // 不自动刷新模型列表，用户切换到模型页面时再按需拉取
     }
   } finally {
     shareImporting.value = false
@@ -256,9 +240,9 @@ async function handleShareImport() {
 
 async function clearAllKeys() {
   await providerStore.clearAllCredentials()
-  await appStore.refreshModels()
   shareBundleOutput.value = ''
   resetShareSelection()
+  // 不自动刷新模型列表，用户切换到模型页面时再按需拉取
 }
 
 function scrollToProvider(id: string) {

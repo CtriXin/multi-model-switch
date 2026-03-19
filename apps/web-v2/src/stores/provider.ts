@@ -340,7 +340,11 @@ export const useProviderStore = defineStore('provider', () => {
     keyStatus.value = next
   }
 
-  function syncBuiltinProviderEnabledState() {
+  /**
+   * 禁用所有没有配置 API Key 的 built-in provider
+   * 用于清除所有密钥后的清理操作
+   */
+  function disableBuiltInProvidersWithoutKey() {
     let changed = false
 
     for (const provider of providers.value) {
@@ -452,7 +456,7 @@ export const useProviderStore = defineStore('provider', () => {
     for (const id of ids) next[id] = true
     accountKeyStatus.value = next
     recomputeProviderKeyStatus()
-    syncBuiltinProviderEnabledState()
+    // 不再自动禁用 provider，允许用户先启用再配置 Key
   }
 
   function addProvider(config: Omit<ProviderConfig, 'builtIn'>) {
@@ -557,8 +561,6 @@ export const useProviderStore = defineStore('provider', () => {
     if (provider?.builtIn && provider.type !== 'mock' && !provider.enabled) {
       provider.enabled = true
       saveProviders()
-    } else {
-      syncBuiltinProviderEnabledState()
     }
     saveAccountsOnly()
   }
@@ -572,7 +574,6 @@ export const useProviderStore = defineStore('provider', () => {
     account.lastErrorType = null
     account.suppressedUntil = null
     recomputeProviderKeyStatus()
-    syncBuiltinProviderEnabledState()
     saveAccountsOnly()
   }
 
@@ -618,7 +619,7 @@ export const useProviderStore = defineStore('provider', () => {
     await clearAllKeys()
     accountKeyStatus.value = {}
     recomputeProviderKeyStatus()
-    syncBuiltinProviderEnabledState()
+    disableBuiltInProvidersWithoutKey()
   }
 
   async function importConfig(json: string) {
