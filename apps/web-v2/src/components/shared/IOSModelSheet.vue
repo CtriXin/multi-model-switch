@@ -141,7 +141,7 @@ async function handleModelPress(id: string) {
     appStore.replaceSelectedModel(props.request.oldModelId, id)
     await chatStore.retryModel(props.request.roundId, props.request.oldModelId, { replaceWith: id })
     sessionStore.saveCurrentSession()
-    toast.info('已替换当前卡片模型')
+    toast.info('换好了')
     done()
     return
   }
@@ -273,7 +273,7 @@ function scrollToProviderSection(provider: string) {
             @touchend="onTouchEnd"
             @mousedown="onMouseDown"
           >
-            <div v-if="isMobile" class="w-12 h-1.5 rounded-full bg-text-tertiary/20" />
+            <div v-if="isMobile" class="w-10 h-1 rounded-full bg-text-tertiary/40" />
             <div v-else class="w-full flex justify-end px-8 pt-4">
                <button @click="emit('close')" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all">
                  <X :size="24" class="text-text-tertiary" />

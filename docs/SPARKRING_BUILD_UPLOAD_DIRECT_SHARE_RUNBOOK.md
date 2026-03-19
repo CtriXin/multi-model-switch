@@ -1,167 +1,183 @@
-# SparkRing iOS/macOS 构建、上传与面对面分发手册
+# SparkRing 发布运行手册（iOS + macOS + 面对面直传）
 
 最后更新：2026-03-18  
-适用项目路径：`/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2`
+适用目录：`/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2`
 
-## 1. 你要用的三条发布链路
+## 0. 场景导航（先看这个）
 
-1. `iOS`：`Capacitor + Xcode Archive + App Store Connect 上传`
-2. `macOS App Store/TestFlight`：`Tauri + App Store pkg + Transporter 上传`
-3. `macOS 面对面直传（不走 TestFlight）`：`Developer ID 签名 + Notarization + 发送 pkg`
+1. 你要发 iPhone/iPad 测试包：走「第 2 章 iOS」。
+2. 你要发 mac 的 TestFlight/App Store 包：走「第 3 章 macOS App Store」。
+3. 你要把 mac 安装包面对面发给别人（不走 TestFlight）：走「第 4 章 macOS 直传」。
 
-## 2. iOS：每次迭代怎么 build + 上传
+## 1. 通用规则（所有平台都适用）
 
-### 2.1 每次发布前检查
+### 1.1 版本号规则
 
-1. Bundle ID 一致：`com.xin.lab`
-2. 版本号规则：
-   - `Version (MARKETING_VERSION)`：可不每次改
-   - `Build (CURRENT_PROJECT_VERSION)`：每次上传必须递增（例如 1 -> 2 -> 3）
-3. `Signing & Capabilities`：
-   - Team 选你的团队
-   - `Automatically manage signing` 打开
+1. 任何上传到 Apple 的新构建，`Build` 必须比上次大。
+2. 建议统一版本策略：
+   - `marketing version`（如 `0.3.5`）按功能阶段升级。
+   - `build number`（如 `2 -> 3`）每次上传必加。
+3. 遇到 `duplicate bundle version` 报错，优先检查 build 号。
 
-### 2.2 命令（先同步前端到 iOS）
+### 1.2 Bundle ID 规则
+
+1. 当前项目统一使用：`com.xin.lab`。
+2. App Store Connect、Xcode、配置文件必须一致。
+3. 一旦正式绑定上架记录，不要随意改 Bundle ID。
+
+### 1.3 这套项目的已知配置
+
+1. iOS 已设置：`ITSAppUsesNonExemptEncryption = NO`。
+2. `apps/web-v2/capacitor.config.ts` 里的 `ios.contentInset` 必须保持 `never`，不要改成 `always`。
+   - 改成 `always` 会让 iPhone 全面屏设备出现额外的底部 inset，表现为黑条或底部留白异常。
+   - 如果以后有人误改，恢复成 `never` 后执行 `npm run cap:build`。
+3. mac App Store 路线已设置：`minimumSystemVersion = 12.0`（arm64-only）。
+4. mac 面对面直传路线使用 `Developer ID + Notarization + Staple`。
+
+## 2. iOS 发布（Capacitor + Xcode）
+
+### 2.1 一次迭代的标准流程
+
+1. 前端改动后，先同步到 iOS 工程：
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
 npm run cap:build
+```
+
+2. 打开 Xcode：
+
+```bash
 npm run cap:open
 ```
 
-### 2.3 Xcode 上传路径（逐步点击）
+3. 在 Xcode 检查：
+   - `Targets -> App -> Signing & Capabilities`
+   - `Team` 选你的团队
+   - `Bundle Identifier = com.xin.lab`
+   - `Automatically manage signing` 已开启
+4. 在 `General -> Identity` 检查：
+   - `Version`（可按需更新）
+   - `Build`（每次上传必 +1）
+5. 归档上传：
+   - 顶部设备选 `Any iOS Device (arm64)`
+   - `Product -> Archive`
+   - Organizer -> `Distribute App`
+   - 选 `App Store Connect` -> `Upload` -> 一路 Next
 
-1. 打开 `ios/App/App.xcworkspace`
-2. Target `App` -> `General` -> `Identity`
-   - 确认 `Version/Build`
-3. 顶部设备选择：`Any iOS Device (arm64)`
-4. 菜单：`Product -> Archive`
-5. Organizer 打开后选最新 Archive，点 `Distribute App`
-6. 选择：`App Store Connect`
-7. 选择：`Upload`
-8. 后续默认下一步，直到 `Upload`
+### 2.2 上传后去哪里看
 
-### 2.4 上传后去哪里看
+1. App Store Connect -> `SparkRing` -> `TestFlight`。
+2. 状态 `Processing` 后，等待可测试。
+3. Internal 可立即分发，External 需 Beta 审核。
 
-1. App Store Connect -> `SparkRing` -> `TestFlight`
-2. 等待 `Processing`
-3. `Internal Testing` 可立即分发
-4. `External Testing` 需要 Beta App Review
+### 2.3 iOS 常见问题
 
-### 2.5 iOS 常见报错
-
-1. `The bundle version must be higher...`
-   - 处理：Xcode 把 `Build` +1，重新 Archive 上传
-2. 签名失败
-   - 处理：检查 Team、Bundle ID、自动签名是否开启
+1. `The bundle version must be higher than...`
+   - 处理：Xcode 把 `Build` +1 后重传。
+2. 签名失败或证书不匹配
+   - 处理：检查 Team、Bundle ID、一键自动签名是否开启。
 3. 加密合规弹窗
-   - 你项目包含 Web Crypto（AES-GCM/PBKDF2）逻辑，按问卷选择“标准加密”路径
-   - 已在 iOS `Info.plist` 添加 `ITSAppUsesNonExemptEncryption = NO`
+   - 项目有 Web Crypto 逻辑（AES-GCM/PBKDF2），按标准加密路径填写。
 
-## 3. macOS（App Store/TestFlight）：每次迭代怎么 build + 上传
+## 3. macOS App Store / TestFlight 发布（Tauri）
 
-### 3.1 每次发布前检查
-
-1. 版本号一致：
-   - `apps/web-v2/package.json`
-   - `apps/web-v2/src-tauri/Cargo.toml`
-   - `apps/web-v2/src-tauri/tauri.conf.json`
-2. `cfBundleVersion` 必须递增（否则 Transporter 409）
-3. 当前配置是 `arm64-only + minimumSystemVersion 12.0`
-
-### 3.2 一键脚本（推荐）
+### 3.1 一键脚本（推荐）
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
 npm run release:mac:appstore
 ```
 
-可选：指定版本号（影响输出文件名）
+可指定版本号（仅影响输出文件名）：
 
 ```bash
 bash scripts/release-mac-appstore.sh 0.3.6
 ```
 
-默认输出：`SparkRing-mac-appstore-<version>-<timestamp>.pkg`  
-可通过环境变量覆盖证书名：
+脚本产物：`SparkRing-mac-appstore-<version>-<timestamp>.pkg`
+
+### 3.2 脚本做了什么
+
+1. 校验 `3rd Party Mac Developer Installer` identity。
+2. 用 `src-tauri/tauri.appstore.conf.json` 构建 `.app`。
+3. 用 `productbuild` 生成 App Store 上传用 `pkg`。
+4. 输出基础签名信息，供上传前确认。
+
+### 3.3 上传到 Apple
+
+1. 打开 `Transporter`。
+2. 拖入脚本生成的 `pkg`。
+3. 点击 `Deliver`。
+4. App Store Connect -> `SparkRing` -> `TestFlight` 看处理状态。
+
+### 3.4 环境变量覆盖（可选）
 
 ```bash
 APPSTORE_INSTALLER_IDENTITY="3rd Party Mac Developer Installer: xxx (TEAMID)" \
 bash scripts/release-mac-appstore.sh
 ```
 
-### 3.3 手动命令（兜底）
+### 3.5 mac App Store 常见问题
 
-```bash
-cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
-npm run tauri build -- --bundles app --config src-tauri/tauri.appstore.conf.json
-```
-
-产物：
-- `src-tauri/target/release/bundle/macos/SparkRing.app`
-
-### 3.4 打 App Store 上传用 pkg
-
-```bash
-cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
-xcrun productbuild \
-  --sign "3rd Party Mac Developer Installer: xin song (2HJP9YYL3H)" \
-  --component "src-tauri/target/release/bundle/macos/SparkRing.app" \
-  /Applications \
-  "SparkRing-mac-appstore-<version>.pkg"
-```
-
-### 3.5 上传路径（Transporter）
-
-1. 打开 `Transporter`
-2. 拖入 `SparkRing-mac-appstore-<version>.pkg`
-3. 点 `Deliver`
-4. App Store Connect -> `SparkRing` -> `TestFlight` 查看 `Processing`
-
-### 3.6 mac App Store 常见报错
-
-1. `supports arm64 but not Intel... deployment target must be 12.0 or higher`
-   - 处理：保持 `minimumSystemVersion >= 12.0`
+1. `supports arm64 but not Intel...`
+   - 处理：保持 `minimumSystemVersion >= 12.0`。
 2. `application identifier missing`
-   - 处理：检查 `Entitlements.plist` 与 profile 里的 `com.apple.application-identifier` 一致
+   - 处理：检查 entitlements 与 profile 对齐。
 3. `duplicate bundle version`
-   - 处理：把版本号升高后再构建上传
+   - 处理：升级版本后重构建重传。
 
-## 4. macOS 面对面直传（不走 TestFlight，且尽量不报“损坏”）
+## 4. macOS 面对面直传（不报损坏的标准链路）
 
-关键结论：  
-`Apple Distribution / 3rd Party Installer` 是给 App Store 上传用的，不适合官网直装。  
-面对面直传要用 `Developer ID Application + Developer ID Installer + Notarization`。
+## 4.1 结论先说
 
-### 4.1 一次性准备
-
-1. 在 Apple Developer 创建并安装证书：
+1. 不能用 App Store 证书直传。
+2. 必须使用：
    - `Developer ID Application`
    - `Developer ID Installer`
-2. 准备 notarization 认证（推荐 keychain profile）：
+   - `Notarization`
+   - `Staple`
+
+### 4.2 一次性准备
+
+1. 证书安装到钥匙串并可用：
+
+```bash
+security find-identity -v -p basic | rg "Developer ID Application|Developer ID Installer"
+```
+
+2. 配置 notarytool profile（只需一次）：
 
 ```bash
 xcrun notarytool store-credentials "AC_NOTARY" \
-  --apple-id "<你的AppleID邮箱>" \
-  --team-id "<TEAM_ID>" \
+  --apple-id "<AppleID邮箱>" \
+  --team-id "2HJP9YYL3H" \
   --password "<app-specific-password>"
 ```
 
-### 4.2 一键脚本（推荐）
+### 4.3 一键脚本（推荐）
 
 ```bash
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
 npm run release:mac:direct
 ```
 
-可选：指定版本号
+可指定版本号：
 
 ```bash
 bash scripts/release-mac-direct.sh 0.3.6
 ```
 
-默认输出：`SparkRing-direct-<version>-<timestamp>.pkg`  
-可通过环境变量覆盖：
+脚本会自动做：
+
+1. Tauri build。
+2. `Developer ID Application` 重签 `.app`。
+3. `Developer ID Installer` 打 `.pkg`。
+4. 提交 Apple notary 并等待 `Accepted`。
+5. `stapler staple`。
+6. `spctl/pkgutil/shasum` 验证。
+
+### 4.4 脚本可配置参数（可选）
 
 ```bash
 DEV_ID_APP_IDENTITY="Developer ID Application: xxx (TEAMID)" \
@@ -170,72 +186,57 @@ NOTARY_PROFILE="AC_NOTARY" \
 bash scripts/release-mac-direct.sh
 ```
 
-### 4.3 手动命令（兜底）
+### 4.5 给测试者的发送建议
+
+1. 只发已 notarized + stapled 的 `pkg`。
+2. 同时发送 SHA256 校验值。
+3. 推荐传输方式：AirDrop / 网盘 / U 盘均可。
+4. 若仍提示异常，先校验 SHA，再确认对方系统时间正常。
+
+## 5. TestFlight 分发策略（减少手工）
+
+### 5.1 Internal（内部测试）
+
+1. 只在第一次需要把成员加进测试组。
+2. 之后新 build 加入同一组，成员会自动收到更新通知。
+3. 不需要每次重输邮箱。
+
+### 5.2 External（外部测试）
+
+1. 新 build 通常需要 Beta App Review。
+2. 外部审核期间不要频繁替换正在审核的 build。
+3. 审核通过后，优先使用 `Public Link`，避免逐个邮箱邀请。
+
+### 5.3 你当前建议策略
+
+1. 正在审核的外部 build 不动，先等结果。
+2. 新改动先走 Internal 验证。
+3. 稳定后再提下一次 External，减少排队次数。
+
+## 6. 统一排错速查
+
+1. 上传失败 + 版本重复
+   - 改大 `Build`。
+2. 签名相关
+   - 检查证书 identity、Bundle ID、Team 是否一致。
+3. mac 提示损坏
+   - 检查是否已走 `Developer ID + Notary + Staple`。
+4. Transporter 409 架构问题
+   - arm64-only 时确保 `minimumSystemVersion >= 12.0`。
+5. TestFlight 外部不让下载
+   - 检查 build 是否 `Ready to Test`，组是否启用 `Public Link`。
+
+## 7. 一页命令速查
 
 ```bash
+# iOS（前端同步）
 cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
+npm run cap:build
+npm run cap:open
 
-# 先构建 app（可用 tauri 默认配置，或你自己的 direct 配置）
-npm run tauri build -- --bundles app
+# mac App Store/TestFlight 包
+npm run release:mac:appstore
 
-APP_PATH="src-tauri/target/release/bundle/macos/SparkRing.app"
-
-# 用 Developer ID Application 重签
-codesign --force --deep --options runtime --timestamp \
-  --sign "Developer ID Application: <Your Name> (<TEAM_ID>)" \
-  "$APP_PATH"
+# mac 面对面直传包（签名+公证+staple）
+npm run release:mac:direct
 ```
-
-### 4.4 打直传 pkg + 公证 + 装订
-
-```bash
-cd /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2
-
-APP_PATH="src-tauri/target/release/bundle/macos/SparkRing.app"
-PKG="SparkRing-direct-<version>.pkg"
-
-xcrun productbuild \
-  --sign "Developer ID Installer: <Your Name> (<TEAM_ID>)" \
-  --component "$APP_PATH" /Applications "$PKG"
-
-# 提交公证并等待结果
-xcrun notarytool submit "$PKG" --keychain-profile "AC_NOTARY" --wait
-
-# 装订票据（离线安装更稳）
-xcrun stapler staple "$PKG"
-```
-
-### 4.5 本地验签（发给别人前必须跑）
-
-```bash
-pkgutil --check-signature "SparkRing-direct-<version>.pkg"
-spctl -a -vv --type install "SparkRing-direct-<version>.pkg"
-```
-
-### 4.6 面对面传输建议
-
-1. 优先传 `notarized + stapled` 的 `pkg`，不要直接传裸 `.app`
-2. 传输方式：AirDrop/U 盘/网盘都可以
-3. 建议附带校验值：
-
-```bash
-shasum -a 256 "SparkRing-direct-<version>.pkg"
-```
-
-4. 收件方安装仍异常时：
-   - 先核对 SHA256
-   - 再看系统是否拦截为未知开发者
-   - 只有内部临时测试才考虑手动移除隔离属性（不建议对外）
-
-## 5. 一页速查（你后续只看这段）
-
-1. iOS：
-   - `npm run cap:build` -> Xcode `Archive` -> `Distribute App -> Upload`
-   - 每次只要改 `Build`（+1）
-2. mac App Store：
-   - `npm run tauri build -- --bundles app --config src-tauri/tauri.appstore.conf.json`
-   - `productbuild` 打 `SparkRing-mac-appstore-<version>.pkg`
-   - Transporter 上传
-3. mac 面对面直传不报损坏：
-   - 必须 `Developer ID + Notarization + Staple`
-   - 发 `pkg`，发前跑 `spctl/pkgutil` 验签

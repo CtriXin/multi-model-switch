@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { useToastStore } from '@/stores/toast'
 import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-vue-next'
-import { TransitionGroup, computed } from 'vue'
+import { TransitionGroup, computed, inject, ref } from 'vue'
 
 const toast = useToastStore()
+const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
+const isMobile = computed(() => platform?.value === 'ios')
 
 const iconMap = {
   info: Info,
@@ -29,15 +31,17 @@ const iconColorMap = {
 
 <template>
   <Teleport to="body">
-    <!-- Toast moved to bottom to avoid blocking top navigation -->
-    <div class="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none max-w-[90vw]">
+    <!-- Toast: below model bar on mobile, bottom on desktop -->
+    <div class="fixed left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none max-w-[90vw]"
+         :class="isMobile ? 'top-[120px]' : 'bottom-4'">
       <TransitionGroup name="toast">
         <div
           v-for="t in toast.toasts"
           :key="t.id"
           class="pointer-events-auto flex items-center gap-2.5 px-4 py-2.5 rounded-xl border
-                 glass-strong shadow-lg max-w-sm animate-slide-up relative overflow-hidden"
+                 glass-strong shadow-lg max-w-sm relative overflow-hidden"
           :class="colorMap[t.type]"
+          :style="{ '--slide-offset': '20px' }"
         >
           <!-- Countdown progress bar -->
           <div
@@ -73,9 +77,9 @@ const iconColorMap = {
 </template>
 
 <style scoped>
-.toast-enter-active { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.toast-enter-active { animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .toast-leave-active { animation: fadeOut 0.2s ease-out forwards; }
 .toast-move { transition: transform 0.3s ease; }
 @keyframes fadeOut { to { opacity: 0; transform: translateY(10px); } }
-@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideIn { from { opacity: 0; transform: translateY(var(--slide-offset, 20px)); } to { opacity: 1; transform: translateY(0); } }
 </style>

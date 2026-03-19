@@ -93,7 +93,7 @@ async function processFiles(files: File[]) {
         size: file.size,
       })
     } catch {
-      toast.error(`${file.name} 处理失败`)
+      toast.error(`${file.name} 上传失败`)
     }
   }
 }
@@ -133,7 +133,7 @@ watch(() => props.restoreText, (value) => {
 </script>
 
 <template>
-  <div class="relative w-full px-2">
+  <div class="relative w-full px-1.5">
     <div v-if="attachments.length" class="flex gap-2 mb-3 overflow-x-auto pb-1 px-4">
       <div v-for="img in attachments" :key="img.id" class="relative shrink-0 group/img">
         <img :src="img.dataUrl" class="h-14 w-14 object-cover rounded-xl border border-white/10 shadow-lg transition-transform group-hover/img:scale-[0.98]" />
@@ -147,14 +147,14 @@ watch(() => props.restoreText, (value) => {
     </div>
 
     <div
-      class="flex min-h-[48px] items-end gap-2 transition-all duration-300 relative group"
+      class="relative flex min-h-[44px] items-end gap-1.5 transition-all duration-300 group"
       @dragover.prevent="dragOver = true"
       @dragleave.prevent="dragOver = false"
       @drop.prevent="dragOver = false"
     >
       <!-- Colorful Icon when models are selected -->
       <button v-if="!streaming" @click="openFilePicker" type="button" :disabled="disabled" 
-              class="h-10 w-10 shrink-0 flex items-center justify-center rounded-full transition-all self-end mb-1 ml-2"
+              class="h-10 w-10 shrink-0 flex items-center justify-center rounded-full transition-all self-end mb-0.5 ml-1"
               :class="hasModels 
                 ? 'bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 text-white shadow-lg scale-105' 
                 : 'text-text-tertiary hover:bg-black/5 dark:hover:bg-white/5'">
@@ -168,15 +168,15 @@ watch(() => props.restoreText, (value) => {
         v-model="text"
         @keydown="handleKeydown"
         @paste="onPaste"
-        :placeholder="streaming ? 'AI 正在思考中...' : (placeholder ?? '发送消息...')"
+        :placeholder="streaming ? '正在生成...' : (placeholder ?? '问点什么...')"
         :disabled="disabled || streaming"
         rows="1"
-        class="flex-1 bg-transparent text-base text-text-primary placeholder:text-text-tertiary/40 resize-none py-3 px-1 outline-none max-h-40 min-h-[44px] disabled:opacity-40 font-medium leading-relaxed"
+        class="flex-1 bg-transparent text-base text-text-primary placeholder:text-text-tertiary/40 resize-none py-2 px-1 outline-none max-h-40 min-h-[40px] disabled:opacity-40 font-medium leading-6"
       />
       
-      <div class="flex shrink-0 items-center gap-2 self-end mb-1 mr-2">
+      <div class="flex shrink-0 items-center gap-1.5 self-end mb-0.5 mr-1">
         <button v-if="streaming" @click="emit('stop')" class="h-10 w-10 flex items-center justify-center rounded-full bg-red-500/20 text-red-400"><Square :size="16" fill="currentColor" /></button>
-        <button v-if="streaming" @click="emit('stopAndEdit')" class="h-10 px-4 rounded-xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-text-secondary">终止并编辑</button>
+        <button v-if="streaming" @click="emit('stopAndEdit')" class="h-10 px-4 rounded-xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-text-secondary">停下修改</button>
         <button v-else @click="submit" :disabled="!text.trim() || disabled" 
                 class="h-10 w-10 flex items-center justify-center rounded-full transition-all duration-500" 
                 :class="text.trim() && !disabled ? 'bg-accent text-white shadow-xl scale-105' : 'bg-white/5 text-text-tertiary'">

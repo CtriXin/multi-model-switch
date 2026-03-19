@@ -275,7 +275,7 @@ export const useChatStore = defineStore('chat', () => {
         if (msg.streaming) msg.streaming = false
       }
     }
-    useToastStore().info('已停止生成')
+    useToastStore().info('停了')
   }
 
   function stopAndRestoreDraft() {
@@ -287,7 +287,7 @@ export const useChatStore = defineStore('chat', () => {
     }
     streaming.value = false
     abortController.value = null
-    useToastStore().info('已终止并恢复到输入框')
+    useToastStore().info('内容已恢复，改改再发')
     return prompt
   }
 

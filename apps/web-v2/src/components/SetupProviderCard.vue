@@ -75,147 +75,152 @@ function openLink(url?: string) {
 
 <template>
   <div
-    class="rounded-xl border overflow-hidden transition-all duration-200"
+    class="rounded-[28px] border overflow-hidden transition-all duration-500 shadow-xl"
     :class="hasKey
-      ? 'border-emerald-500/30 bg-emerald-500/5'
-      : 'border-border-default bg-surface-2'"
+      ? 'border-emerald-500/20 bg-emerald-500/5'
+      : 'glass-v3 border-white/10 bg-surface-2'"
   >
     <!-- Card Header -->
     <button
       @click="$emit('toggleExpand')"
-      class="w-full flex items-center gap-3.5 p-4 text-left hover:bg-white/3 transition-colors"
+      class="w-full flex items-center gap-4 p-5 text-left hover:bg-white/5 transition-colors group"
     >
       <!-- Provider Icon -->
       <div
-        class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 shadow-sm"
+        class="w-12 h-12 rounded-2xl flex items-center justify-center text-lg font-black text-white shrink-0 shadow-lg transition-transform duration-500 group-hover:scale-110"
         :style="{ background: provider.color }"
       >{{ provider.name.charAt(0) }}</div>
 
       <!-- Info -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-sm font-semibold text-text-primary">{{ provider.name }}</span>
+          <span class="text-base font-black text-text-primary uppercase tracking-tight">{{ provider.name }}</span>
           <span
             v-if="hasKey"
-            class="text-[10px] px-1.5 py-0.5 bg-emerald-500/15 text-emerald-400 rounded-full font-medium"
-          >已配置</span>
+            class="text-[9px] px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full font-black uppercase tracking-widest border border-emerald-500/20"
+          >已接入</span>
           <span
             v-else
-            class="text-[10px] px-1.5 py-0.5 bg-amber-500/15 text-amber-400 rounded-full font-medium"
+            class="text-[9px] px-2 py-0.5 bg-accent/20 text-accent rounded-full font-black uppercase tracking-widest border border-accent/20"
           >{{ provider.freeBadge }}</span>
         </div>
-        <p class="text-xs text-text-tertiary mt-0.5 truncate">{{ provider.freeInfo }}</p>
+        <p class="text-[11px] text-text-tertiary mt-1 font-medium opacity-60 truncate">{{ provider.freeInfo }}</p>
       </div>
 
       <!-- Expand Arrow -->
-      <ChevronDown
-        :size="16"
-        class="text-text-tertiary shrink-0 transition-transform duration-200"
-        :class="expanded ? 'rotate-180' : ''"
-      />
+      <div class="p-2 rounded-full bg-white/5 group-hover:bg-white/10 transition-colors">
+        <ChevronDown
+          :size="18"
+          stroke-width="3"
+          class="text-text-tertiary shrink-0 transition-transform duration-500"
+          :class="expanded ? 'rotate-180' : ''"
+        />
+      </div>
     </button>
 
     <!-- Expanded Content -->
     <Transition name="expand">
-      <div v-if="expanded" class="px-4 pb-4 border-t border-border-subtle">
+      <div v-if="expanded" class="px-5 pb-6 border-t border-white/5 bg-black/[0.02]">
         <!-- Steps -->
-        <div class="py-4 space-y-3">
+        <div class="py-6 space-y-4">
           <div
             v-for="(step, i) in provider.steps"
             :key="i"
-            class="flex gap-3"
+            class="flex gap-4 items-start"
           >
-            <div class="w-6 h-6 rounded-full bg-surface-3 flex items-center justify-center shrink-0 mt-0.5">
-              <span class="text-xs font-semibold text-text-tertiary">{{ i + 1 }}</span>
+            <div class="w-7 h-7 rounded-full bg-white/5 flex items-center justify-center shrink-0 mt-0.5 border border-white/5">
+              <span class="text-[11px] font-black text-accent">{{ i + 1 }}</span>
             </div>
-            <p class="text-sm text-text-secondary leading-relaxed">{{ step }}</p>
+            <p class="text-sm text-text-secondary leading-relaxed font-medium">{{ step }}</p>
           </div>
         </div>
 
         <!-- Action Links -->
-        <div class="flex gap-2 mb-4">
+        <div class="flex gap-2.5 mb-6 overflow-x-auto pb-1 no-scrollbar">
           <button
             type="button"
             @click="openLink(provider.registerUrl)"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-lg transition-opacity hover:opacity-90 shadow-sm"
+            class="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black text-white rounded-2xl transition-all hover:scale-105 active:scale-95 shadow-lg uppercase tracking-widest whitespace-nowrap"
             :style="{ background: provider.color }"
           >
-            <ExternalLink :size="12" />
+            <ExternalLink :size="14" stroke-width="3" />
             去注册
           </button>
           <button
             type="button"
             @click="openLink(provider.keyUrl)"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary bg-surface-3 rounded-lg hover:bg-surface-4 transition-colors"
+            class="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black text-text-secondary bg-white/5 rounded-2xl hover:bg-white/10 transition-all hover:scale-105 active:scale-95 border border-white/10 uppercase tracking-widest whitespace-nowrap"
           >
-            <KeyRound :size="12" />
-            获取 API Key
+            <KeyRound :size="14" stroke-width="3" />
+            获取密钥
           </button>
           <button
             v-if="provider.modelsUrl"
             type="button"
             @click="openLink(provider.modelsUrl)"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary bg-surface-3 rounded-lg hover:bg-surface-4 transition-colors"
+            class="inline-flex items-center gap-2 px-4 py-2 text-[11px] font-black text-text-secondary bg-white/5 rounded-2xl hover:bg-white/10 transition-all hover:scale-105 active:scale-95 border border-white/10 uppercase tracking-widest whitespace-nowrap"
           >
-            <BookOpen :size="12" />
-            查看模型
+            <BookOpen :size="14" stroke-width="3" />
+            支持列表
           </button>
         </div>
 
         <!-- Key Input -->
-        <div class="relative">
+        <div class="relative group/input">
           <input
             :type="showKey ? 'text' : 'password'"
             :value="keyInput"
             @input="onKeyInput"
             @keydown="handleKeydown"
             :placeholder="hasKey ? '输入新 Key 覆盖...' : '粘贴你的 API Key：' + provider.keyPlaceholder"
-            class="w-full pl-3 pr-20 py-2.5 text-sm font-mono bg-surface-1 rounded-xl border
-                   focus:outline-none focus:border-accent transition-all text-text-primary
-                   placeholder:text-text-tertiary/40"
-            :class="hasKey ? 'border-emerald-500/30' : 'border-border-default'"
+            class="w-full pl-5 pr-24 py-3.5 text-sm font-mono bg-white/5 rounded-2xl border
+                   focus:outline-none focus:border-accent/50 transition-all text-text-primary
+                   placeholder:text-text-tertiary/40 shadow-inner"
+            :class="hasKey ? 'border-emerald-500/30' : 'border-white/10'"
           />
-          <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
             <button
               v-if="keyInput || hasKey"
               @click="showKey = !showKey"
-              class="p-1 text-text-tertiary hover:text-text-secondary rounded transition-colors"
+              class="p-2 text-text-tertiary hover:text-text-secondary rounded-xl transition-colors"
             >
-              <component :is="showKey ? EyeOff : Eye" :size="14" />
+              <component :is="showKey ? EyeOff : Eye" :size="16" stroke-width="3" />
             </button>
             <button
               v-if="keyInput.trim()"
               @click="saveKey"
               :disabled="saving"
-              class="px-2 py-0.5 text-xs font-medium text-white bg-accent rounded-md
-                     hover:bg-accent/90 disabled:opacity-50 transition-colors"
+              class="px-4 py-1.5 text-[10px] font-black text-white bg-accent rounded-xl
+                     hover:scale-105 active:scale-95 disabled:opacity-50 transition-all uppercase tracking-widest shadow-lg"
             >
               {{ saving ? '...' : '保存' }}
             </button>
             <button
               v-if="hasKey && !keyInput.trim()"
               @click="removeKey"
-              class="p-1 text-text-tertiary hover:text-red-400 rounded transition-colors"
+              class="p-2 text-text-tertiary hover:text-red-400 rounded-xl transition-colors"
             >
-              <Trash2 :size="14" />
+              <Trash2 :size="16" stroke-width="3" />
             </button>
           </div>
         </div>
 
         <!-- Validation hint -->
-        <div v-if="hasKey" class="flex items-center gap-1.5 mt-2">
-          <CheckCircle :size="14" class="text-emerald-400" />
-          <span class="text-xs text-emerald-400">Key 已保存（{{ maskedKeyValue }}）</span>
+        <div v-if="hasKey" class="flex items-center gap-2 mt-4 px-1">
+          <CheckCircle :size="14" stroke-width="3" class="text-emerald-400" />
+          <span class="text-[11px] font-black text-emerald-400 uppercase tracking-widest">已保存（{{ maskedKeyValue }}）</span>
         </div>
 
         <!-- Available models -->
-        <div class="mt-3 flex items-center gap-1.5 flex-wrap">
-          <span class="text-[10px] text-text-tertiary">代表模型：</span>
-          <span
-            v-for="mId in provider.models"
-            :key="mId"
-            class="text-[10px] px-1.5 py-0.5 bg-surface-3 text-text-tertiary rounded"
-          >{{ mId }}</span>
+        <div class="mt-4 flex items-center gap-2 flex-wrap px-1">
+          <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-40">代表模型：</span>
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              v-for="mId in provider.models"
+              :key="mId"
+              class="text-[9px] px-2 py-0.5 bg-white/5 text-text-tertiary rounded-lg font-black uppercase tracking-tight border border-white/5"
+            >{{ mId }}</span>
+          </div>
         </div>
       </div>
     </Transition>
@@ -224,18 +229,18 @@ function openLink(url?: string) {
 
 <style scoped>
 .expand-enter-active {
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.5s cubic-bezier(0.32, 0.72, 0, 1);
   overflow: hidden;
 }
 .expand-leave-active {
-  transition: all 0.2s ease-in;
+  transition: all 0.4s cubic-bezier(0.32, 0.72, 0, 1);
   overflow: hidden;
 }
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;
   max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
 }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

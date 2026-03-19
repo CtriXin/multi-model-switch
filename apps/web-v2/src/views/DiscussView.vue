@@ -39,9 +39,9 @@ const hasModels = computed(() => appStore.selectedModels.length >= 2)
 // Depth selector
 const selectedDepth = ref<DiscussDepth>('panel')
 const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: string; icon: typeof Zap }[] = [
-  { value: 'quick', label: '快速审查', desc: '指定 1-2 个模型审查，最快', icon: Rocket },
-  { value: 'panel', label: '全局审查', desc: '每个模型综合评审全场（推荐）', icon: Zap },
-  { value: 'full', label: '深度交叉', desc: '每对模型逐一审查，适用于高风险或复杂决策', hint: '输出为结构化观点，非最终方案。可配合 Rollup 生成行动计划。', icon: Flame },
+  { value: 'quick', label: '快速', desc: '简单过一下，最快', icon: Rocket },
+  { value: 'panel', label: '标准', desc: '互相挑挑毛病，够用（推荐）', icon: Zap },
+  { value: 'full', label: '深度', desc: '逐对盘问，适合大事', hint: '输出为结构化观点，非最终方案。可配合生成最终建议。', icon: Flame },
 ]
 
 // Pending topic — submitted but depth not chosen yet
@@ -57,13 +57,13 @@ onMounted(() => {
 function handleSubmit(text: string) {
   restoredDraft.value = ''
   if (!hasModels.value) {
-    toast.info('请至少选择 2 个模型')
+    toast.info('先选几个模型呗')
     return
   }
   // Don't allow new submit while streaming or results exist
   if (discussStore.streaming) return
   if (discussStore.hasResults) {
-    toast.info('请先点击「新辩论」重置当前辩论')
+    toast.info('先点「再来一次」清空一下')
     return
   }
 
@@ -121,11 +121,11 @@ function getProvider(id: string): string {
   return appStore.models.find(m => m.id === id)?.provider ?? 'unknown'
 }
 
-const phaseLabels = ['', '独立分析', '交叉审查', '综合结论']
+const phaseLabels = ['', '各自表态', '互相挑刺', '总结定论']
 const depthLabel = computed(() => {
-  if (discussStore.depth === 'full') return '深度交叉'
-  if (discussStore.depth === 'panel') return '全局审查'
-  return '快速审查'
+  if (discussStore.depth === 'full') return '深度'
+  if (discussStore.depth === 'panel') return '标准'
+  return '快速'
 })
 
 const sanitizedSynthesis = computed(() => sanitizeModelOutput(discussStore.phase3Text || ''))
@@ -143,7 +143,7 @@ function handleRollup() {
 <template>
   <div class="flex flex-col h-full overflow-hidden bg-transparent">
     <!-- Group 1: Floating Capsule Header (V3 SPEC Style) -->
-    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
       <header
         data-tauri-drag-region
         class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10"
@@ -207,24 +207,23 @@ function handleRollup() {
           <GitMerge :size="28" class="text-purple-400" />
         </div>
         <h2 class="text-lg font-semibold text-text-primary mb-2 animate-slide-up">
-          让模型们吵一架，结论更靠谱
+          有个决定拿不准？
         </h2>
         <p class="text-sm text-text-secondary max-w-sm animate-slide-up"
           style="animation-delay: 50ms">
-          抛出一个决策难题，多个模型各自分析、互相审查、找出分歧，最后综合出一份可落地的行动方案。
+          让几个 AI 各自说说，再互相挑挑毛病，最后给你一份靠谱的建议。
         </p>
         <div class="flex flex-wrap justify-center gap-2 mt-5 max-w-sm animate-slide-up"
           style="animation-delay: 100ms">
           <span
-            class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">三种审查深度可选</span>
+            class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">3 种强度可选</span>
           <span
-            class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">交叉找漏洞</span>
-          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">Rollup
-            出结论</span>
+            class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">互相挑刺</span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] bg-surface-2 text-text-tertiary">最后给准话</span>
         </div>
         <p v-if="!hasModels" class="text-xs text-text-tertiary mt-5 animate-slide-up"
           style="animation-delay: 150ms">
-          {{ platform === 'ios' ? '点击右上角选择 2 个以上模型' : '先从下方选 2 个以上模型，然后输入你的议题' }}
+          {{ platform === 'ios' ? '点击右上角选几个模型' : '先选几个模型，再写你想讨论的事' }}
         </p>
       </div>
 
@@ -235,13 +234,13 @@ function handleRollup() {
           class="rounded-xl border border-purple-500/20 bg-surface-1 overflow-hidden animate-slide-up">
           <!-- Topic preview -->
           <div class="px-4 py-3 border-b border-border-subtle">
-            <span class="text-xs text-text-tertiary">辩论主题</span>
+            <span class="text-xs text-text-tertiary">要讨论的事</span>
             <p class="text-sm text-text-primary mt-1">{{ pendingTopic }}</p>
           </div>
 
           <!-- Depth selector -->
           <div class="p-4">
-            <p class="text-xs text-text-secondary mb-3">选择辩论深度：</p>
+            <p class="text-xs text-text-secondary mb-3">要盘问到什么程度？</p>
             <div class="grid grid-cols-3 gap-2 mb-4">
               <button v-for="opt in depthOptions" :key="opt.value"
                 @click="selectedDepth = opt.value"
@@ -280,7 +279,7 @@ function handleRollup() {
 
             <button @click="startWithDepth" class="w-full py-2.5 rounded-lg bg-purple-500 hover:bg-purple-600
                      text-white text-sm font-medium transition-colors active:scale-[0.98]">
-              开始辩论
+              开始
             </button>
           </div>
         </div>
@@ -291,7 +290,7 @@ function handleRollup() {
         <!-- Topic + depth badge -->
         <div class="mb-6 animate-slide-up">
           <div class="flex items-center gap-2">
-            <span class="text-xs text-text-tertiary uppercase tracking-wider">辩论主题</span>
+            <span class="text-xs text-text-tertiary uppercase tracking-wider">要讨论的事</span>
             <span
               class="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 font-medium">
               {{ depthLabel }}
@@ -449,11 +448,11 @@ function handleRollup() {
               <Gavel :size="14" class="text-amber-400 group-hover:scale-110 transition-transform" />
               <span
                 class="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
-                制定行动计划 — Rollup 综合出可落地方案
+                给我个准话
               </span>
             </button>
             <p class="text-[10px] text-text-tertiary text-center pb-2 px-4">
-              将辩论观点综合为唯一方案，包含取舍、风险和下一步行动
+              综合上面的讨论，给你一个靠谱的建议
             </p>
           </div>
 
@@ -462,10 +461,10 @@ function handleRollup() {
             class="rounded-xl border border-amber-500/20 bg-surface-1 overflow-hidden animate-slide-up">
             <div class="flex items-center gap-2 px-4 py-3 border-b border-border-subtle">
               <Gavel :size="14" class="text-amber-400" />
-              <span class="text-sm font-medium text-text-primary">行动计划</span>
+              <span class="text-sm font-medium text-text-primary">最终建议</span>
               <span v-if="discussStore.rollupModel"
                 class="text-[10px] text-text-tertiary bg-surface-3 px-1.5 py-0.5 rounded">
-                由 {{ discussStore.rollupModel }} 制定
+                {{ discussStore.rollupModel }} 正在整理...
               </span>
               <Loader2 v-if="discussStore.rollupPhase === 'streaming'" :size="12"
                 class="text-amber-400 animate-spin ml-auto" />
@@ -475,13 +474,13 @@ function handleRollup() {
                 <div class="md-body text-sm" v-html="rollupHtml" />
                 <div v-if="sanitizedRollup.hiddenThink"
                   class="mt-3 text-[10px] italic text-text-tertiary">
-                  已隐藏模型思考过程，只展示行动计划
+                  隐藏了思考过程，只展示结论
                 </div>
                 <button v-if="discussStore.rollupPhase === 'done' || (discussStore.rollupText && !discussStore.streaming)"
-                  @click="shareText('行动计划', discussStore.rollupText)"
+                  @click="shareText('最终建议', discussStore.rollupText)"
                   class="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:bg-surface-3 transition-colors border border-border-subtle">
                   <Share2 :size="12" />
-                  分享计划
+                  分享
                 </button>
               </template>
               <div v-else class="space-y-2">
@@ -500,26 +499,26 @@ function handleRollup() {
           class="flex items-center gap-2 mt-4 animate-fade-in">
           <button @click="continueToChat" class="btn-primary flex items-center gap-1.5 text-xs">
             <MessageSquare :size="13" />
-            继续对话
+            接着聊
           </button>
           <button @click="handleReset" class="btn-ghost flex items-center gap-1.5 text-xs">
             <RotateCcw :size="13" />
-            新辩论
+            再来一次
           </button>
         </div>
       </div>
     </div>
 
     <!-- Group 3: Trinity Control Pod (Consistency with Chat) -->
-    <div class="z-30 px-4 pb-4 pt-2 shrink-0">
+    <div class="z-30 px-4 pb-3 pt-1 shrink-0">
       <div
         class="max-w-6xl mx-auto glass-v3 rounded-[36px] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 relative flex flex-col overflow-visible border border-white/10">
-        <div class="px-2 pt-2">
+        <div class="px-2 pt-1">
           <ModelChipBar
             class="!border-none !bg-white/5 !dark:bg-white/5 !rounded-[28px] !shadow-none" />
         </div>
 
-        <InputBar class="!bg-transparent !pb-2 !pt-1"
+        <InputBar class="!bg-transparent !pb-1.5 !pt-0.5"
           :disabled="!hasModels || (discussStore.hasResults && !discussStore.streaming)"
           :streaming="discussStore.streaming"
           :placeholder="discussStore.hasResults ? '点击「新辩论」重置后可输入新主题...' : hasModels ? '输入辩论主题...' : '请先选择 2 个以上模型...'"

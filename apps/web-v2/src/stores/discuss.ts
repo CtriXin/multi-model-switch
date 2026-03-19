@@ -436,16 +436,16 @@ export const useDiscussStore = defineStore('discuss', () => {
         throw error
       }
 
-      toast.success('辩论完成')
+      toast.success('辩论结束了')
 
       const failedPhase1Count = phase1Results.value.filter(item => item.error).length
       const failedPhase2Count = phase2Results.value.filter(item => item.error).length
       if (failedPhase1Count || failedPhase2Count) {
-        toast.info(`本轮有 ${failedPhase1Count} 个独立分析、${failedPhase2Count} 个交叉审查未成功，已保留失败占位`)
+        toast.info(`本轮 ${failedPhase1Count} 个表态、${failedPhase2Count} 个互相挑刺没成功，但留下了记录`)
       }
     } catch (e: any) {
       if (e.name !== 'AbortError' && !signal.aborted) {
-        toast.error('辩论失败: ' + e.message)
+        toast.error('辩论出错了: ' + e.message)
       }
     } finally {
       streaming.value = false
@@ -456,14 +456,14 @@ export const useDiscussStore = defineStore('discuss', () => {
   function stopDiscussion() {
     abortController.value?.abort()
     streaming.value = false
-    useToastStore().info('已停止辩论')
+    useToastStore().info('停了')
   }
 
   function stopAndRestoreDraft() {
     const draft = topic.value
     abortController.value?.abort()
     reset()
-    useToastStore().info('已终止辩论并恢复到输入框')
+    useToastStore().info('内容已恢复，改改再发')
     return draft
   }
 
@@ -534,7 +534,7 @@ ${reviewContext}${synthesisContext}
       toast.success('行动计划已生成')
     } catch (e: any) {
       if (e.name !== 'AbortError' && !signal.aborted) {
-        toast.error('Rollup 失败: ' + e.message)
+        toast.error('生成建议出错了: ' + e.message)
         if (!rollupText.value) {
           rollupText.value = `> Rollup 失败: ${e.message}`
         }
