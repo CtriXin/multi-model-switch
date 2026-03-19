@@ -31,6 +31,12 @@ Judge 模块（= 升级版 Summarizer）
 
 Judge 不是新的独立系统，它取代原来的 Summarizer 位置，用同一条调用链路（`streamChat()`），区别只在 prompt 和输出结构。
 
+实现约束补充：
+
+- Judge 的流式内容要实时写回 chat round，而不是只保存在组件本地
+- 已完成或部分完成的 Judge 结果要随 session 一起恢复，回到页面后能立即显示
+- 若用户在生成过程中切页，至少要保留已生成内容，不能因为组件卸载直接丢失
+
 ---
 
 ## 三、分层策略（成本 vs 可靠性）
@@ -139,5 +145,6 @@ Judge 的输出不是选出"最佳回答"，而是：
 - `fetchModels()` — 已实现，获取模型列表含 tier 信息
 - Provider + Keychain — 已实现
 - 前端卡片组件 — 需新增「决策总结」卡片
+- chat session 持久化 — Judge / InlineDiscuss 中间态需要挂在 round state 上，支持回填
 
 **不依赖后端 / CLI / Gateway。纯前端实现。**

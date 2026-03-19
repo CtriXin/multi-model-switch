@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useChatStore, type ChatRound, type ChatMessage, type ImageAttachment, type ContextMode } from './chat'
-import { useDiscussStore, type Phase1Result, type Phase2Result } from './discuss'
+import { useDiscussStore, type Phase1Result, type Phase2Result, type DiscussSessionState, createDiscussSessionState } from './discuss'
 import { useAppStore } from './app'
 
 export interface SerializedChatRound {
@@ -12,12 +12,9 @@ export interface SerializedChatRound {
   activeModelId: string | null
   selectedModelId: string | null
   timestamp: number
-  judge?: {
-    content: string
-    modelId: string
-    isSelfEval: boolean
-    timestamp: number
-  }
+  modelIds?: string[]  // 该轮创建时的模型列表（optional for backward compat）
+  judge?: ChatRound['judge']
+  inlineDiscuss?: DiscussSessionState
 }
 
 export interface Session {
@@ -58,7 +55,9 @@ function serializeRounds(rounds: ChatRound[]): SerializedChatRound[] {
     activeModelId: r.activeModelId,
     selectedModelId: r.selectedModelId,
     timestamp: r.timestamp,
+    modelIds: r.modelIds?.length ? r.modelIds : undefined,
     judge: r.judge,
+    inlineDiscuss: r.inlineDiscuss,
   }))
 }
 
@@ -71,7 +70,21 @@ function deserializeRounds(data: SerializedChatRound[]): ChatRound[] {
     activeModelId: r.activeModelId,
     selectedModelId: r.selectedModelId ?? null,
     timestamp: r.timestamp,
-    judge: r.judge,
+    modelIds: r.modelIds ?? [],
+    judge: r.judge
+      ? {
+          ...r.judge,
+          status: r.judge.status === 'streaming' ? 'error' : r.judge.status,
+        }
+      : undefined,
+    inlineDiscuss: r.inlineDiscuss
+      ? {
+          ...createDiscussSessionState(),
+          ...r.inlineDiscuss,
+          streaming: false,
+          rollupPhase: r.inlineDiscuss.rollupPhase === 'streaming' ? 'idle' : r.inlineDiscuss.rollupPhase,
+        }
+      : undefined,
   }))
 }
 

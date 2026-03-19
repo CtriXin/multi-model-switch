@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch, onUnmounted } from 'vue'
 import { getModelColor, useAppStore } from '@/stores/app'
+import { useChatStore, type ChatJudge } from '@/stores/chat'
+import { useSessionStore } from '@/stores/session'
 import { streamModelChat } from '@/services/runtime'
 import { pickNeutralModel } from '@/utils/modelSelection'
 import { ChevronDown, ChevronUp, Sparkles, MessageSquare, Check, Maximize2, AlertTriangle, Share2 } from 'lucide-vue-next'
@@ -10,20 +12,23 @@ import { shareText } from '@/composables/useShare'
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const props = defineProps<{
+  roundId: string
   prompt: string
   responses: Map<string, { content: string; model?: string }>
   showDiscuss?: boolean
   selectedModelId?: string | null
+  judge?: ChatJudge | null
 }>()
 
 const emit = defineEmits<{
   discuss: []
   activate: []
   select: [modelId: string]
-  judgeComplete: [judge: { content: string; modelId: string; isSelfEval: boolean; timestamp: number }]
 }>()
 
 const appStore = useAppStore()
+const chatStore = useChatStore()
+const sessionStore = useSessionStore()
 const showRaw = ref(false)
 const summaryText = ref('')
 const streaming = ref(false)
@@ -31,11 +36,13 @@ const done = ref(false)
 const judgeModel = ref('')
 const showDetails = ref(false)
 const error = ref('')
+let persistTimer: number | null = null
 
 // Track which raw response cards are expanded
 const expandedCards = reactive<Record<string, boolean>>({})
 
 const summaryHtml = computed(() => md.render(summaryText.value || ''))
+const hasSummaryContent = computed(() => !!summaryText.value.trim())
 
 function getModelName(id: string): string {
   return appStore.models.find(m => m.id === id)?.name ?? id
@@ -51,6 +58,55 @@ function getResponseTier(id: string): number {
 
 function toggleExpand(modelId: string) {
   expandedCards[modelId] = !expandedCards[modelId]
+}
+
+function formatJudgeModel(modelId: string, isSelfEval: boolean): string {
+  const suffix = isSelfEval ? ' (自评)' : ''
+  return `${getModelName(modelId)}${suffix}`
+}
+
+function applyPersistedJudge(judge?: ChatJudge | null) {
+  if (!judge) {
+    if (!streaming.value) {
+      summaryText.value = ''
+      done.value = false
+      streaming.value = false
+      judgeModel.value = ''
+      error.value = ''
+    }
+    return
+  }
+  if (streaming.value) return
+  summaryText.value = judge.content ?? ''
+  streaming.value = judge.status === 'streaming'
+  done.value = (judge.status ?? 'done') === 'done'
+  judgeModel.value = formatJudgeModel(judge.modelId, judge.isSelfEval)
+  error.value = judge.error ?? ''
+}
+
+function flushPersist(touchUpdatedAt = false) {
+  if (persistTimer !== null) {
+    window.clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  sessionStore.saveCurrentSession({ touchUpdatedAt })
+}
+
+function schedulePersist() {
+  if (persistTimer !== null) window.clearTimeout(persistTimer)
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null
+    sessionStore.saveCurrentSession({ touchUpdatedAt: false })
+  }, 240)
+}
+
+function persistJudge(judge: ChatJudge, final = false) {
+  chatStore.updateRoundJudge(props.roundId, judge)
+  if (final) {
+    flushPersist(true)
+    return
+  }
+  schedulePersist()
 }
 
 /** Pick evaluator: prefer a non-participating model via shared utility. */
@@ -105,16 +161,24 @@ ${responseEntries}
 对本次评估的整体信心：高 / 中 / 低，并说明原因。${singleModelClause}`
 }
 
-async function generateSummary() {
-  if (streaming.value || done.value) return
+async function generateSummary(force = false) {
+  if (streaming.value || (done.value && !force)) return
   emit('activate')
   streaming.value = true
   summaryText.value = ''
+  done.value = false
   error.value = ''
 
   const { modelId, isSelfEval } = pickEvaluator()
-  const model = appStore.models.find((item) => item.id === modelId)
-  judgeModel.value = (model?.name ?? modelId) + (isSelfEval ? ' (自评)' : '')
+  const timestamp = Date.now()
+  judgeModel.value = formatJudgeModel(modelId, isSelfEval)
+  persistJudge({
+    content: '',
+    modelId,
+    isSelfEval,
+    timestamp,
+    status: 'streaming',
+  })
 
   try {
     const prompt = buildJudgePrompt(isSelfEval)
@@ -125,35 +189,65 @@ async function generateSummary() {
 
     for await (const chunk of stream) {
       summaryText.value += chunk
+      persistJudge({
+        content: summaryText.value,
+        modelId,
+        isSelfEval,
+        timestamp,
+        status: 'streaming',
+      })
     }
   } catch (e: any) {
     error.value = e.message
     if (!summaryText.value) {
       summaryText.value = `> 评估失败: ${e.message}`
     }
+    persistJudge({
+      content: summaryText.value,
+      modelId,
+      isSelfEval,
+      timestamp,
+      status: 'error',
+      error: e.message,
+    }, true)
+    streaming.value = false
+    return
   }
 
   streaming.value = false
   done.value = true
-
-  // Emit judge result for persistence
-  if (summaryText.value && !error.value) {
-    emit('judgeComplete', {
-      content: summaryText.value,
-      modelId,
-      isSelfEval,
-      timestamp: Date.now(),
-    })
-  }
+  persistJudge({
+    content: summaryText.value,
+    modelId,
+    isSelfEval,
+    timestamp,
+    status: 'done',
+  }, true)
 }
+
+function startSummary() {
+  void generateSummary()
+}
+
+function restartSummary() {
+  void generateSummary(true)
+}
+
+watch(() => props.judge, applyPersistedJudge, { immediate: true })
+
+onUnmounted(() => {
+  if (persistTimer !== null) {
+    flushPersist(false)
+  }
+})
 </script>
 
 <template>
   <div class="rounded-xl border border-border-subtle bg-surface-1 overflow-hidden animate-slide-up">
     <!-- Header / Trigger -->
     <div
-      v-if="!done && !streaming"
-      @click="generateSummary"
+      v-if="!done && !streaming && !hasSummaryContent"
+      @click="startSummary"
       class="flex items-center justify-center gap-2 px-4 py-3 cursor-pointer
              hover:bg-surface-2 transition-colors group"
     >
@@ -181,6 +275,23 @@ async function generateSummary() {
       <div v-if="error && !summaryText" class="flex items-center gap-2 text-xs text-red-400">
         <AlertTriangle :size="14" />
         {{ error }}
+      </div>
+
+      <div
+        v-if="!done && !streaming && hasSummaryContent"
+        class="mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20
+               bg-amber-500/5 px-3 py-2"
+      >
+        <div class="flex items-center gap-2 text-xs text-text-secondary">
+          <AlertTriangle :size="12" class="text-amber-400 shrink-0" />
+          <span>{{ error ? '上次评估未成功，已保留已生成内容' : '已恢复上次未完成的评估内容' }}</span>
+        </div>
+        <button
+          @click="restartSummary"
+          class="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-amber-300 hover:bg-amber-500/10 transition-colors"
+        >
+          重新生成
+        </button>
       </div>
 
       <div class="md-body text-sm" v-html="summaryHtml" />

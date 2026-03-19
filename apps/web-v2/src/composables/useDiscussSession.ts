@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
 import { pickNeutralModel } from '@/utils/modelSelection'
-import type { Phase1Result, Phase2Result, DiscussDepth, RollupResult } from '@/stores/discuss'
+import { createDiscussSessionState, type Phase1Result, type Phase2Result, type DiscussDepth, type DiscussSessionState, type DiscussRollupPhase, type RollupResult } from '@/stores/discuss'
 
 export type { DiscussDepth }
 
@@ -10,6 +10,11 @@ export interface DiscussSessionOptions {
   prompt: string
   modelIds: string[]
   depth?: DiscussDepth
+}
+
+interface UseDiscussSessionOptions {
+  initialState?: DiscussSessionState | null
+  onUpdate?: (state: DiscussSessionState) => void
 }
 
 const PHASE1_PROMPT = `你是一个分析专家。用户提出了一个问题，请给出你的独立分析。
@@ -111,7 +116,7 @@ async function callModelForSession(
   return result
 }
 
-export function useDiscussSession() {
+export function useDiscussSession(options: UseDiscussSessionOptions = {}) {
   const appStore = useAppStore()
 
   const phase = ref(0)
@@ -122,10 +127,63 @@ export function useDiscussSession() {
   const phase3Text = ref('')
   const rollupText = ref('')
   const rollupModel = ref('')
-  const rollupPhase = ref<'idle' | 'streaming' | 'done'>('idle')
+  const rollupPhase = ref<DiscussRollupPhase>('idle')
   const abortController = ref<AbortController | null>(null)
 
   const isActive = computed(() => phase.value > 0)
+
+  function snapshot(): DiscussSessionState {
+    return {
+      phase: phase.value,
+      streaming: streaming.value,
+      depth: depth.value,
+      phase1Results: phase1Results.value.map((item) => ({
+        ...item,
+        data: {
+          ...item.data,
+          risks: [...item.data.risks],
+          keyDecisions: [...item.data.keyDecisions],
+        },
+      })),
+      phase2Results: phase2Results.value.map((item) => ({
+        ...item,
+        data: { ...item.data },
+      })),
+      phase3Text: phase3Text.value,
+      rollupText: rollupText.value,
+      rollupModel: rollupModel.value,
+      rollupPhase: rollupPhase.value,
+    }
+  }
+
+  function notifyUpdate() {
+    options.onUpdate?.(snapshot())
+  }
+
+  function hydrate(state: DiscussSessionState | null | undefined) {
+    const next = state ?? createDiscussSessionState()
+    phase.value = next.phase
+    streaming.value = next.streaming
+    depth.value = next.depth
+    phase1Results.value = next.phase1Results.map((item) => ({
+      ...item,
+      data: {
+        ...item.data,
+        risks: [...item.data.risks],
+        keyDecisions: [...item.data.keyDecisions],
+      },
+    }))
+    phase2Results.value = next.phase2Results.map((item) => ({
+      ...item,
+      data: { ...item.data },
+    }))
+    phase3Text.value = next.phase3Text
+    rollupText.value = next.rollupText
+    rollupModel.value = next.rollupModel
+    rollupPhase.value = next.rollupPhase
+  }
+
+  hydrate(options.initialState)
 
   async function start(options: DiscussSessionOptions) {
     if (streaming.value) return
@@ -138,6 +196,10 @@ export function useDiscussSession() {
     phase3Text.value = ''
     streaming.value = true
     abortController.value = new AbortController()
+    rollupText.value = ''
+    rollupModel.value = ''
+    rollupPhase.value = 'idle'
+    notifyUpdate()
     const signal = abortController.value.signal
 
     try {
@@ -159,12 +221,14 @@ export function useDiscussSession() {
             },
           })
         }
+        notifyUpdate()
       })
       await Promise.allSettled(phase1Tasks)
       if (signal.aborted) return
 
       // Phase 2: Cross review
       phase.value = 2
+      notifyUpdate()
       const pairs = buildReviewPairs(modelIds, d)
 
       const phase2Tasks = pairs.map(async ([reviewer, target]) => {
@@ -191,12 +255,14 @@ export function useDiscussSession() {
           : { agreement: response.slice(0, 80), challenge: '', betterOption: '' }
 
         phase2Results.value.push({ reviewer, target, data })
+        notifyUpdate()
       })
       await Promise.allSettled(phase2Tasks)
       if (signal.aborted) return
 
       // Phase 3: Synthesis — stream
       phase.value = 3
+      notifyUpdate()
       const summaryContext = phase1Results.value
         .map((r) => `[${r.model}] 方案: ${r.data.approach}; 理由: ${r.data.reasoning}`)
         .join('\n')
@@ -217,16 +283,19 @@ export function useDiscussSession() {
       for await (const chunk of stream) {
         if (signal.aborted) return
         phase3Text.value += chunk
+        notifyUpdate()
       }
     } finally {
       streaming.value = false
       abortController.value = null
+      notifyUpdate()
     }
   }
 
   function stop() {
     abortController.value?.abort()
     streaming.value = false
+    notifyUpdate()
   }
 
   async function startRollup(prompt: string, modelIds: string[], overrideModelId?: string) {
@@ -236,6 +305,7 @@ export function useDiscussSession() {
     rollupPhase.value = 'streaming'
     rollupText.value = ''
     abortController.value = new AbortController()
+    notifyUpdate()
     const signal = abortController.value.signal
 
     // Pick rollup model: prefer non-participating, highest tier
@@ -243,6 +313,7 @@ export function useDiscussSession() {
     const rollupModelId = overrideModelId || neutralModelId
     const modelMeta = appStore.models.find((m) => m.id === rollupModelId)
     rollupModel.value = modelMeta?.name ?? rollupModelId
+    notifyUpdate()
 
     const analysisContext = phase1Results.value
       .map((r) => `[${r.model}] 方案: ${r.data.approach}; 理由: ${r.data.reasoning}; 风险: ${r.data.risks.join(', ')}`)
@@ -266,16 +337,19 @@ export function useDiscussSession() {
       for await (const chunk of stream) {
         if (signal.aborted) return
         rollupText.value += chunk
+        notifyUpdate()
       }
     } catch (e: any) {
       if (e.name !== 'AbortError' && !signal.aborted) {
         if (!rollupText.value) {
           rollupText.value = `> Rollup 失败: ${e.message}`
         }
+        notifyUpdate()
       }
     } finally {
       rollupPhase.value = 'done'
       abortController.value = null
+      notifyUpdate()
     }
   }
 
@@ -288,13 +362,14 @@ export function useDiscussSession() {
     rollupText.value = ''
     rollupModel.value = ''
     rollupPhase.value = 'idle'
+    notifyUpdate()
   }
 
   return {
     phase, streaming, depth, isActive,
     phase1Results, phase2Results, phase3Text,
     rollupText, rollupModel, rollupPhase,
-    start, startRollup, stop, reset,
+    start, startRollup, stop, reset, hydrate, snapshot,
   }
 }
 

@@ -13,3 +13,9 @@
 - [x] 将本次“模型选择与实际启动不一致”的事故沉淀为文档中的反例约束 (source: @codex, created: 2026-03-14, completed: 2026-03-14)
 - [x] 为 Claude 增加更强的仓库级行为约束，限制其直接改动主启动链路 (source: @codex, created: 2026-03-14, completed: 2026-03-14)
 - [x] 对齐 `agent-rules` 的本地启动入口结构，并补上迭代后询问是否提交的门禁 (source: @codex, created: 2026-03-14, completed: 2026-03-14)
+
+## Archived 2026-03-19
+- [x] 修复设置页切换 demo provider 后模型列表需刷新才同步的问题 (source: @codex, created: 2026-03-19, completed: 2026-03-19)
+- [x] 排查 `/models` 路由仍请求 4000 端口的根因并修复 (source: @codex, created: 2026-03-19, completed: 2026-03-19)
+- [x] 回归验证模型列表加载与 SparkRing provisioning 的端口迁移逻辑 (source: @codex, created: 2026-03-19, completed: 2026-03-19)
+- [x] 记录本轮修复涉及的本地 release note 上下文 (source: @codex, created: 2026-03-19, completed: 2026-03-19)

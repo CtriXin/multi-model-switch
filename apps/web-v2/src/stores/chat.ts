@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useToastStore } from './toast'
 import { useAppStore } from './app'
+import type { DiscussSessionState } from './discuss'
 import { ApiError, type ContentPart, type ChatMessage as ApiChatMessage } from '@/services/api'
 import { streamModelChat } from '@/services/runtime'
 import { buildContextMessages } from '@/utils/contextBuilder'
@@ -28,6 +29,17 @@ export interface ChatMessage {
   errorCode?: string
 }
 
+export type ChatJudgeStatus = 'streaming' | 'done' | 'error'
+
+export interface ChatJudge {
+  content: string
+  modelId: string
+  isSelfEval: boolean
+  timestamp: number
+  status?: ChatJudgeStatus
+  error?: string
+}
+
 export interface ChatRound {
   id: string
   prompt: string
@@ -36,11 +48,26 @@ export interface ChatRound {
   activeModelId: string | null
   selectedModelId: string | null
   timestamp: number
-  judge?: {
-    content: string
-    modelId: string
-    isSelfEval: boolean
-    timestamp: number
+  modelIds: string[]  // 该轮创建时使用的模型列表（决定显示布局）
+  judge?: ChatJudge
+  inlineDiscuss?: DiscussSessionState
+}
+
+function cloneDiscussSessionState(state: DiscussSessionState): DiscussSessionState {
+  return {
+    ...state,
+    phase1Results: state.phase1Results.map((item) => ({
+      ...item,
+      data: {
+        ...item.data,
+        risks: [...item.data.risks],
+        keyDecisions: [...item.data.keyDecisions],
+      },
+    })),
+    phase2Results: state.phase2Results.map((item) => ({
+      ...item,
+      data: { ...item.data },
+    })),
   }
 }
 
@@ -51,9 +78,44 @@ export const useChatStore = defineStore('chat', () => {
   const lastSubmittedPrompt = ref('')
   const contextMode = ref<ContextMode>('summary')
 
+  // Dynamic active model IDs (can be changed mid-conversation)
+  const activeModelIds = ref<string[]>([])
+
   const currentRound = computed(() =>
     rounds.value.length ? rounds.value[rounds.value.length - 1] : null
   )
+
+  const isSingleChat = computed(() => activeModelIds.value.length === 1)
+  const isMultiChat = computed(() => activeModelIds.value.length >= 2)
+
+  function initActiveModels(ids: string[]) {
+    activeModelIds.value = [...ids]
+  }
+
+  function addModel(modelId: string) {
+    if (activeModelIds.value.length < 5 && !activeModelIds.value.includes(modelId)) {
+      activeModelIds.value.push(modelId)
+      return true
+    }
+    return false
+  }
+
+  function removeModel(modelId: string) {
+    const idx = activeModelIds.value.indexOf(modelId)
+    if (idx > -1) {
+      activeModelIds.value.splice(idx, 1)
+      return true
+    }
+    return false
+  }
+
+  function canAddModel() {
+    return activeModelIds.value.length < 5
+  }
+
+  function canRemoveModel() {
+    return activeModelIds.value.length > 1
+  }
 
   function shouldSuppressModel(error: ApiError) {
     return error.code === 'model_unavailable' || error.code === 'rate_limited'
@@ -153,6 +215,7 @@ export const useChatStore = defineStore('chat', () => {
       activeModelId: null,
       selectedModelId: null,
       timestamp: Date.now(),
+      modelIds: [...modelIds],  // 保存该轮创建时的模型列表
     }
 
     for (const mid of modelIds) {
@@ -301,12 +364,29 @@ export const useChatStore = defineStore('chat', () => {
     if (r) r.selectedModelId = r.selectedModelId === modelId ? null : modelId
   }
 
+  function updateRoundJudge(roundId: string, judge: ChatJudge | null) {
+    const round = rounds.value.find((item) => item.id === roundId)
+    if (!round) return
+    round.judge = judge ? { ...judge } : undefined
+  }
+
+  function updateRoundInlineDiscuss(roundId: string, state: DiscussSessionState | null) {
+    const round = rounds.value.find((item) => item.id === roundId)
+    if (!round) return
+    round.inlineDiscuss = state && state.phase > 0
+      ? cloneDiscussSessionState(state)
+      : undefined
+  }
+
   function clearHistory() {
     rounds.value = []
   }
 
   return {
     rounds, streaming, currentRound, contextMode,
+    activeModelIds, isSingleChat, isMultiChat,
     sendMessage, retryModel, stopStreaming, stopAndRestoreDraft, setActiveModel, selectModel, clearHistory,
+    initActiveModels, addModel, removeModel, canAddModel, canRemoveModel,
+    replaceModelResponse, updateRoundJudge, updateRoundInlineDiscuss,
   }
 })
