@@ -99,9 +99,12 @@
 | `.sparkring/` | Sparkring 本地配置/缓存 |
 | `.worktrees/` | Git worktree 临时工作区 |
 | `.claude/` | Claude Code 项目配置（含 memory） |
+| `findings.md` / `progress.md` / `task_plan.md` | 本地 planning / handoff 文件，不应作为公开仓库内容 |
 | `DESIGN_V3_SPEC.md` | 本地 UI 设计草案，不作为开源仓库事实来源 |
 | `apps/runtime-api/gateway-config.json` | 网关配置，可能含 API 端点 |
 | `apps/runtime-api/gateway-state.db` | 运行时状态数据库 |
+| `apps/*/.ai/` | app 级 AI 本地计划、release note 与运行上下文 |
+| `apps/*/findings.md` / `progress.md` / `task_plan.md` | app 级本地规划文件，不属于产品源码或公开文档 |
 | `apps/web-v2/GEMINI.md` | 本地 AI 协作上下文，不应作为公开发布内容 |
 | `apps/web-v2/*-worktree/` | 本地临时 worktree，可能包含未整理改动或重复仓库副本 |
 | `apps/web-v2/src-tauri/*.provisionprofile` | Apple 签名证书 |
