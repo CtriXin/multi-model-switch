@@ -1,29 +1,51 @@
 export interface SanitizedModelOutput {
   content: string
   hiddenThink: boolean
+  /** Extracted <think> blocks joined */
+  thinkText: string
+  /** Extracted <BRIEF> blocks joined */
+  briefText: string
 }
 
-const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/gi
-const THINK_OPEN_RE = /<think>[\s\S]*$/i
+const THINK_BLOCK_RE = /<think>([\s\S]*?)<\/think>/gi
+const THINK_OPEN_RE = /<think>([\s\S]*)$/i
 const THINK_CLOSE_ONLY_RE = /<\/think>/gi
+const BRIEF_BLOCK_RE = /<BRIEF>([\s\S]*?)<\/BRIEF>/gi
+const BRIEF_OPEN_RE = /<BRIEF>([\s\S]*)$/i
+const BRIEF_CLOSE_ONLY_RE = /<\/BRIEF>/gi
 const MD_FENCE_RE = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i
 
-export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
-  if (!raw) return { content: '', hiddenThink: false }
+function extractBlocks(text: string, blockRe: RegExp, openRe: RegExp, closeRe: RegExp): { cleaned: string; extracted: string } {
+  const parts: string[] = []
 
-  let hiddenThink = false
+  // Extract complete blocks
+  let cleaned = text.replace(blockRe, (_match, inner) => {
+    parts.push(inner.trim())
+    return ''
+  })
+
+  // Extract unclosed open tag (streaming)
+  cleaned = cleaned.replace(openRe, (_match, inner) => {
+    if (inner.trim()) parts.push(inner.trim())
+    return ''
+  })
+
+  // Remove orphan close tags
+  cleaned = cleaned.replace(closeRe, '')
+
+  return { cleaned, extracted: parts.join('\n\n').trim() }
+}
+
+export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
+  if (!raw) return { content: '', hiddenThink: false, thinkText: '', briefText: '' }
+
   let content = raw
 
-  // Use fresh regexes for .test() to avoid global-flag lastIndex issues
-  if (/<think>[\s\S]*?<\/think>/i.test(content) || /<think>[\s\S]*$/i.test(content) || /<\/think>/i.test(content)) {
-    hiddenThink = true
-  }
+  const think = extractBlocks(content, THINK_BLOCK_RE, THINK_OPEN_RE, THINK_CLOSE_ONLY_RE)
+  content = think.cleaned
 
-  content = content
-    .replace(THINK_BLOCK_RE, '')
-    .replace(THINK_OPEN_RE, '')
-    .replace(THINK_CLOSE_ONLY_RE, '')
-    .trim()
+  const brief = extractBlocks(content, BRIEF_BLOCK_RE, BRIEF_OPEN_RE, BRIEF_CLOSE_ONLY_RE)
+  content = brief.cleaned.trim()
 
   const fenced = content.match(MD_FENCE_RE)
   if (fenced) {
@@ -32,6 +54,8 @@ export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
 
   return {
     content,
-    hiddenThink,
+    hiddenThink: think.extracted.length > 0,
+    thinkText: think.extracted,
+    briefText: brief.extracted,
   }
 }
