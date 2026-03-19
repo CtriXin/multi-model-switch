@@ -42,6 +42,13 @@ apps/web-v2/src-tauri/*.p12
 DESIGN_V3_SPEC.md
 apps/web-v2/GEMINI.md
 apps/web-v2/*-worktree/
+findings.md
+progress.md
+task_plan.md
+apps/*/.ai/
+apps/*/findings.md
+apps/*/progress.md
+apps/*/task_plan.md
 
 # AI tool caches & worktrees
 .ai/cache/
