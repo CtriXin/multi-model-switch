@@ -12,6 +12,7 @@ const HISTORY_TYPE_LABELS: Record<HistoryEntry['type'], string> = {
   investigation_turn: '调查推进',
   special_event: '关键事件',
   summary_snapshot: '阶段总结',
+  ending: '剧情结局',
   ml_round: '证词轮',
 }
 
@@ -20,6 +21,9 @@ const ENDING_GRADE_LABELS: Record<EndingGrade, string> = {
   normal: '普通结局',
   hidden: '隐藏结局',
   optimal: '最佳结局',
+  good: '正向结局',
+  bad: '失控结局',
+  mystery: '悬念结局',
 }
 
 function buildRoundLabel(entry: HistoryEntry) {

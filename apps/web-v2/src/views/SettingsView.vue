@@ -85,8 +85,11 @@ const isMobile = computed(() => platform.value === 'ios')
 
 const providers = computed(() => providerStore.providers)
 const visibleProviders = computed(() => {
-  if (!providerListCollapsed.value) return providers.value
-  return providers.value.filter(p => p.enabled || providerStore.keyStatus[p.id])
+  const filtered = providers.value.filter((provider) =>
+    appStore.showFriendsMode || provider.id !== 'sparkring',
+  )
+  if (!providerListCollapsed.value) return filtered
+  return filtered.filter(p => p.enabled || providerStore.keyStatus[p.id])
 })
 
 const recommendedConfiguredCount = computed(() =>
@@ -101,7 +104,7 @@ function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-// 好友模式开启时，自动关闭免费优先和模拟数据，并解锁 SparkRing 体验通道
+// 好友模式开启时，自动关闭免费优先和模拟数据，并显示 SparkRing 体验通道
 watch(() => appStore.showFriendsMode, async (val) => {
   if (val) {
     // 关闭免费优先
@@ -111,13 +114,9 @@ watch(() => appStore.showFriendsMode, async (val) => {
     if (demoProvider?.enabled) {
       providerStore.updateProvider('demo', { enabled: false })
     }
-    // 解锁 SparkRing 体验通道（如果不存在则添加）
-    const sparkring = providerStore.getProvider('sparkring')
-    if (!sparkring) {
-      const { SPARKRING_PROVIDER } = await import('@/stores/provider')
-      providerStore.addProvider(SPARKRING_PROVIDER)
-    }
     useToastStore().info('好友模式已开启，已自动关闭免费优先和模拟数据，解锁 SparkRing 体验通道')
+  } else {
+    useToastStore().info('好友模式已关闭，SparkRing 体验通道已隐藏')
   }
 })
 

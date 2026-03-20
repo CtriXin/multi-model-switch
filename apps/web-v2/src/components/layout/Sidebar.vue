@@ -8,7 +8,7 @@ import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
   Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
-  Clock, Home, Shield
+  Clock, Home, Shield, Flame, Target, Soup, Clapperboard
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
 import logoMarkUrl from '@/assets/brand/logo-mark.svg'
@@ -47,6 +47,22 @@ function newDiscuss() {
 
 function newAdvisors() {
   router.push('/advisors')
+}
+
+function newChallenge() {
+  router.push('/challenge')
+}
+
+function newStoryLite() {
+  router.push('/story-lite')
+}
+
+function newTurtleSoup() {
+  router.push('/turtle-soup')
+}
+
+function newStoryLive() {
+  router.push('/story-live')
 }
 
 function switchTo(session: { id: string; type: string }) {
@@ -110,6 +126,18 @@ function openCommandPalette() {
         </button>
         <button @click="newAdvisors" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="锦囊团">
           <Users :size="22" stroke-width="3" />
+        </button>
+        <button @click="newChallenge" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/challenge' ? 'bg-accent/20 text-accent' : ''" title="每日一辩">
+          <Flame :size="22" stroke-width="3" />
+        </button>
+        <button @click="newStoryLite" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/story-lite' ? 'bg-accent/20 text-accent' : ''" title="剧情冒险">
+          <Target :size="22" stroke-width="3" />
+        </button>
+        <button @click="newTurtleSoup" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/turtle-soup' ? 'bg-accent/20 text-accent' : ''" title="海龟汤">
+          <Soup :size="22" stroke-width="3" />
+        </button>
+        <button @click="newStoryLive" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/story-live' ? 'bg-accent/20 text-accent' : ''" title="剧情共演">
+          <Clapperboard :size="22" stroke-width="3" />
         </button>
       </div>
 
@@ -195,6 +223,46 @@ function openCommandPalette() {
         >
           <Sparkles :size="16" stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
           <span>AI 锦囊团</span>
+        </button>
+        <button
+          @click="newChallenge"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/challenge'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+        >
+          <Flame :size="16" stroke-width="3" :class="route.path === '/challenge' ? 'text-surface-1' : 'group-hover:text-orange-400 transition-colors'" />
+          <span>每日一辩</span>
+        </button>
+        <button
+          @click="newStoryLite"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/story-lite'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+        >
+          <Target :size="16" stroke-width="3" :class="route.path === '/story-lite' ? 'text-surface-1' : 'group-hover:text-cyan-400 transition-colors'" />
+          <span>剧情冒险</span>
+        </button>
+        <button
+          @click="newTurtleSoup"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/turtle-soup'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+        >
+          <Soup :size="16" stroke-width="3" :class="route.path === '/turtle-soup' ? 'text-surface-1' : 'group-hover:text-emerald-400 transition-colors'" />
+          <span>海龟汤</span>
+        </button>
+        <button
+          @click="newStoryLive"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
+          :class="route.path === '/story-live'
+            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
+            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+        >
+          <Clapperboard :size="16" stroke-width="3" :class="route.path === '/story-live' ? 'text-surface-1' : 'group-hover:text-pink-400 transition-colors'" />
+          <span>剧情共演</span>
         </button>
       </div>
 
