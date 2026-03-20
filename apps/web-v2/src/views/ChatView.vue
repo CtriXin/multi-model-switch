@@ -40,18 +40,20 @@ const layoutMode = computed(() => {
   return 'horizontal'
 })
 
-// Initialize active models on mount
-onMounted(() => {
-  if (chatStore.activeModelIds.length === 0) {
-    chatStore.initActiveModels([...appStore.selectedModelIds])
+function syncActiveModels(modelIds: string[]) {
+  if (
+    modelIds.length === chatStore.activeModelIds.length
+    && modelIds.every((id, index) => chatStore.activeModelIds[index] === id)
+  ) {
+    return
   }
-})
 
-// Watch for external changes and sync
-watch(() => appStore.selectedModelIds, (newIds) => {
-  if (chatStore.activeModelIds.length === 0 && newIds.length > 0) {
-    chatStore.initActiveModels([...newIds])
-  }
+  chatStore.initActiveModels(modelIds)
+}
+
+// Keep next-round chat models in sync with the chip selection.
+watch(() => [...appStore.selectedModelIds], (newIds) => {
+  syncActiveModels(newIds)
 }, { immediate: true })
 
 // Mobile view mode: 'horizontal' (carousel) or 'vertical'
@@ -303,7 +305,7 @@ const inputPlaceholder = computed(() => {
 
 // Keep viewMode for multi-chat layout (grid/horizontal/vertical)
 type ViewMode = 'grid' | 'horizontal' | 'vertical'
-const viewMode = ref<ViewMode>('grid')
+const viewMode = ref<ViewMode>(layoutMode.value === 'horizontal' ? 'horizontal' : 'grid')
 
 // Watch for layout mode changes to sync viewMode
 watch(layoutMode, (mode) => {
