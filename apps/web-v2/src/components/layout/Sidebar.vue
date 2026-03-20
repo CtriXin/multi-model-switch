@@ -8,7 +8,7 @@ import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
   Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
-  Clock, Home
+  Clock, Home, Shield
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
 import logoMarkUrl from '@/assets/brand/logo-mark.svg'
@@ -54,6 +54,10 @@ function switchTo(session: { id: string; type: string }) {
   if (session.type === 'chat') router.push('/chat')
   else if (session.type === 'discuss') router.push('/discuss')
   else router.push('/advisors')
+}
+
+function newMultiLife() {
+  router.push('/multi-life')
 }
 
 function isSessionActive(session: { id: string; type: string }) {
@@ -254,12 +258,22 @@ function openCommandPalette() {
           <kbd class="ml-auto text-[12px] font-black px-1.5 py-0.5 rounded bg-white/5 border border-white/5">⌘K</kbd>
         </button>
         
-        <div class="grid grid-cols-2 gap-1.5">
+        <div class="grid grid-cols-3 gap-1.5">
+          <button
+            @click="router.push('/multi-life')"
+            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
+            :class="route.path === '/multi-life'
+              ? 'bg-text-primary text-surface-1 shadow-lg'
+              : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
+          >
+            <Shield :size="18" stroke-width="3" />
+            <span class="text-[9px] font-black uppercase tracking-widest">多重人生</span>
+          </button>
           <button
             @click="router.push('/models')"
             class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
-            :class="route.path === '/models' 
-              ? 'bg-text-primary text-surface-1 shadow-lg' 
+            :class="route.path === '/models'
+              ? 'bg-text-primary text-surface-1 shadow-lg'
               : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
           >
             <Package :size="18" stroke-width="3" />
@@ -268,8 +282,8 @@ function openCommandPalette() {
           <button
             @click="router.push('/settings')"
             class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
-            :class="route.path === '/settings' 
-              ? 'bg-text-primary text-surface-1 shadow-lg' 
+            :class="route.path === '/settings'
+              ? 'bg-text-primary text-surface-1 shadow-lg'
               : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
           >
             <Settings :size="18" stroke-width="3" />
