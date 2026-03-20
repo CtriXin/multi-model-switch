@@ -11,7 +11,6 @@ import {
   Clock, Home, Shield, Flame, Target, Soup, Clapperboard
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
-import logoMarkUrl from '@/assets/brand/logo-mark.svg'
 
 const route = useRoute()
 const router = useRouter()
@@ -105,8 +104,12 @@ function openCommandPalette() {
   >
     <div class="glass-v3 w-12 flex flex-col items-center py-4 gap-3 rounded-[24px] shadow-2xl border border-white/10 flex-1">
       <!-- Logo in mini mode: No top margin div -->
-      <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2 logo-mark-shell">
-        <img :src="logoMarkUrl" alt="SparkRing logo" class="w-full h-full object-contain transition-transform duration-500 group-hover/logo:scale-110 active:scale-95" />
+      <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2">
+        <div class="absolute inset-0 rounded-full border border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse] group-hover/logo:border-accent/50 transition-colors"></div>
+        <div class="absolute inset-1 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
+        <div class="relative flex items-center justify-center w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-xl shadow-accent/20 transition-all duration-500 group-hover/logo:scale-110 active:scale-90">
+          <Sparkles class="w-3.5 h-3.5 text-white relative z-10 drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
+        </div>
       </div>
 
       <!-- Actions: Unified size 22, stroke 3 -->
@@ -162,18 +165,19 @@ function openCommandPalette() {
       <!-- Header: Pure Brand Identity (No Controls) -->
       <div class="h-20 flex items-center pl-5 pr-2">
         <div class="flex items-center gap-2 group/logo cursor-pointer select-none max-w-full">
-          <!-- SparkRing v4.0.1: Precision Reactor -->
-          <div class="relative flex items-center justify-center w-9 h-9 shrink-0 logo-spin logo-mark-shell">
-            <img :src="logoMarkUrl" alt="SparkRing logo" class="w-full h-full object-contain group-hover/logo:scale-105 transition-transform duration-500" />
+          <div class="relative flex items-center justify-center w-9 h-9 shrink-0">
+            <div class="absolute inset-0 rounded-full border-[1.5px] border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse]"></div>
+            <div class="absolute inset-1.5 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
+            <div class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.5)] group-hover/logo:scale-110 transition-all duration-500">
+              <Sparkles class="w-3.5 h-3.5 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
+            </div>
           </div>
-          
-          <!-- Designer Typography: Syne (Surgically Fit) -->
+
           <div class="flex flex-col select-none relative pt-1 min-w-0">
             <div class="text-[18px] font-[800] tracking-[-0.08em] flex items-center leading-none transform-gpu scale-x-[0.98] origin-left" style="font-family: 'Syne', sans-serif;">
               <span class="text-accent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">SPARK</span>
               <span class="text-text-primary ml-1 whitespace-nowrap">RING</span>
             </div>
-            <!-- Kinetic Accent Line: Entry Animation + Hover Effect -->
             <div class="h-[1.5px] bg-gradient-to-r from-accent via-accent/40 to-transparent mt-1 opacity-40 animate-v3-line-entry group-hover/logo:opacity-100 group-hover/logo:h-[2px] transition-all duration-500"></div>
           </div>
         </div>
@@ -401,19 +405,6 @@ function openCommandPalette() {
 
 .animate-v3-line-entry {
   animation: v3-line-entry 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes logo-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.logo-spin:hover {
-  animation: logo-spin 10s linear infinite;
-}
-
-.logo-mark-shell {
-  filter: drop-shadow(0 8px 14px rgba(88, 96, 255, 0.26));
 }
 
 .animate-pulse-subtle {
