@@ -67,6 +67,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '多重人生', icon: 'users' },
   },
   {
+    path: '/lab',
+    name: 'lab',
+    component: () => import('@/views/InteractiveLabView.vue'),
+    meta: { title: '互动实验室', icon: 'flask-conical' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
