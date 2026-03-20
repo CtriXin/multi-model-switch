@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Concept 1: Orbit Switch — 两条弧线交汇，交汇处有光点 -->
+  <rect width="1024" height="1024" rx="200" fill="#0B0B1A"/>
+
+  <!-- Arc A: 从左上到右下，开口朝右 -->
+  <path d="M 320 220 A 340 340 0 0 1 760 520"
+        stroke="#818CF8" stroke-width="32" stroke-linecap="round" fill="none"/>
+
+  <!-- Arc B: 从右上到左下，开口朝左 -->
+  <path d="M 704 220 A 340 340 0 0 1 264 520"
+        stroke="#6366F1" stroke-width="32" stroke-linecap="round" fill="none"/>
+
+  <!-- Intersection spark — 两弧交汇处 -->
+  <circle cx="512" cy="460" r="36" fill="#C7D2FE"/>
+  <circle cx="512" cy="460" r="18" fill="#FFFFFF"/>
+</svg>
