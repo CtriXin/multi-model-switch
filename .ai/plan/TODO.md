@@ -1,6 +1,10 @@
 # TODO
 
 ## Urgent + Important
+- [x] 同步 `apps/web-v2` 的 `MultiLife` 更新：从 `daily-challenge` worktree 合并新版多重人生交互，并修复模型分配、会话恢复、demo 输出串味等体验问题。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
+- [x] 收口 `apps/web-v2` play modes 导航：确认 `daily-challenge` worktree 的 `每日一辩 / 剧情冒险 / 海龟汤 / 剧情共演` 在当前分支已具备功能代码，仅补桌面侧边栏与 iOS drawer 入口，不重复迁移玩法实现。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
+- [x] 收口 `apps/web-v2` 好友模式行为：开启时显示并启用 `sparkring`，关闭时移除并隐藏该 provider，停止后续模型拉取请求。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
+- [x] 适配 `apps/web-v2` 模型列表新接口：`sparkring` 拉模型改为 `GET /api/models/info?key=xxx`，按 token 分组过滤返回。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [x] 修复 `apps/web-v2` 聊天页单模型选择回归：选中模型后输入框应立即可用，placeholder/空态文案应切到单模型模式，并允许后续轮次继续改模型。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [ ] **[P0]** Context 策略：继续对话时支持三种 context 模式 — ① 中立总结（默认，省 token 且客观）② 仅选中回答 ③ 全量原始回答。前端在输入框上方显示 context chip 可切换，后端拼 prompt 时按 mode 取不同内容。(source: @claude, created: 2026-03-15)
 - [ ] 观察新护栏文档执行后的实际效果，补齐容易被绕开的高风险路径 (source: @codex, created: 2026-03-14)

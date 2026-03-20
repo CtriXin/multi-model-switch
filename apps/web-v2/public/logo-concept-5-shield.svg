@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Concept 5: Hex Switch — 六边形内嵌三条旋转弧线，代表多路并发 -->
+  <rect width="1024" height="1024" rx="200" fill="#0B0B1A"/>
+
+  <!-- Outer hexagon border -->
+  <polygon points="512,120 880,340 880,684 512,904 144,684 144,340"
+           stroke="#312E81" stroke-width="24" fill="none" stroke-linejoin="round"/>
+
+  <!-- Three rotating arcs inside — 代表并发路由 -->
+  <path d="M 512 340 A 172 172 0 0 1 684 512" stroke="#818CF8" stroke-width="36" stroke-linecap="round" fill="none"/>
+  <path d="M 684 512 A 172 172 0 0 1 340 512" stroke="#6366F1" stroke-width="36" stroke-linecap="round" fill="none"/>
+  <path d="M 340 512 A 172 172 0 0 1 512 340" stroke="#4F46E5" stroke-width="36" stroke-linecap="round" fill="none"/>
+
+  <!-- Center convergence point -->
+  <circle cx="512" cy="512" r="32" fill="#C7D2FE" opacity="0.4"/>
+  <circle cx="512" cy="512" r="16" fill="#FFFFFF"/>
+</svg>
