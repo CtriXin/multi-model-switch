@@ -234,6 +234,10 @@ function loadProviders(): ProviderConfig[] {
       return migrated
     })
     for (const savedProvider of saved) {
+      if (!friendsMode && savedProvider.id === 'sparkring') {
+        changed = true
+        continue
+      }
       if (!result.find((item) => item.id === savedProvider.id)) {
         const migrated = migrateLegacyProviderBaseUrl({ ...savedProvider, builtIn: false })
         changed ||= migrated.baseUrl !== savedProvider.baseUrl
@@ -470,6 +474,37 @@ export const useProviderStore = defineStore('provider', () => {
     if (providers.value.find((provider) => provider.id === config.id)) return
     providers.value.push({ ...config, builtIn: false })
     saveProviders()
+  }
+
+  function syncFriendsModeProvider(enabled: boolean) {
+    const index = providers.value.findIndex((provider) => provider.id === 'sparkring')
+
+    if (enabled) {
+      const next = index >= 0
+        ? {
+            ...providers.value[index],
+            ...SPARKRING_PROVIDER,
+            baseUrl: normalizeSparkringBaseUrl(providers.value[index].baseUrl || SPARKRING_PROVIDER.baseUrl),
+            enabled: true,
+            builtIn: true,
+          }
+        : { ...SPARKRING_PROVIDER, enabled: true }
+
+      if (index >= 0) {
+        providers.value[index] = next
+      } else {
+        providers.value.push(next)
+      }
+
+      saveProviders()
+      recomputeProviderKeyStatus()
+      return
+    }
+
+    if (index < 0) return
+    providers.value.splice(index, 1)
+    saveProviders()
+    recomputeProviderKeyStatus()
   }
 
   async function removeProvider(id: string) {
@@ -838,6 +873,7 @@ export const useProviderStore = defineStore('provider', () => {
     enabledProviders,
     configuredProviders,
     addProvider,
+    syncFriendsModeProvider,
     removeProvider,
     updateProvider,
     getProvider,

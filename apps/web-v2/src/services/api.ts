@@ -373,11 +373,13 @@ export async function fetchModels(
   let apiModels: ModelMeta[] = []
   let fetchFailed = false
 
-  // Sparkring provider uses /api/models/info (no auth required)
+  // Sparkring model discovery now groups by token via query param.
   if (provider.id === 'sparkring') {
     try {
       const baseUrl = provider.baseUrl.replace(/\/v1$/, '')
-      const res = await fetch(`${baseUrl}/api/models/info`)
+      const url = new URL(`${baseUrl}/api/models/info`)
+      url.searchParams.set('key', apiKey)
+      const res = await fetch(url.toString())
       if (res.ok) {
         const json = await res.json()
         const rawModels: NewApiModelInfo[] = json.data ?? json

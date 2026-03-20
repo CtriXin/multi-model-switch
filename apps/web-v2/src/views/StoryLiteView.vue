@@ -1,270 +1,359 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { ArrowRight, Heart, History, Pause, Play, RotateCcw, Sparkles, Target, Zap } from 'lucide-vue-next'
-import {
-  STORY_LITE_DEFAULT_MAX_ROUNDS,
-  STORY_LITE_DEFAULT_SEED,
-  type StoryLiteAgentRole,
-} from '@/features/play-modes/story-lite'
-import { STORY_LITE_MOCK_SCENES } from '@/features/play-modes/story-lite/mock'
-import type { HistoryEntry } from '@/features/play-modes/shared'
-import { toHistoryCardViewModel, toResultCardViewModel } from '@/features/play-modes/shared'
+import { computed, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { ArrowRight, Heart, Loader2, RotateCcw, ShieldCheck, Sparkles, Target } from 'lucide-vue-next'
+import { useStoryLiteV2Store } from '@/stores/storyLiteV2'
+import { STORY_LITE_V2_DEFAULT_MAX_ROUNDS, STORY_LITE_V2_ROLES } from '@/features/play-modes/story-lite-v2'
+import type { StoryLiteV2RiskLevel, StoryLiteV2Role } from '@/features/play-modes/story-lite-v2/types'
+import type { EndingGrade } from '@/features/play-modes/shared'
 
-const currentSceneId = ref('start')
-const paused = ref(false)
-const history = ref<HistoryEntry[]>([])
-const focusedRole = ref<StoryLiteAgentRole | null>(null)
+const storyStore = useStoryLiteV2Store()
 
-const ROLE_META: Record<StoryLiteAgentRole, { label: string; icon: any; accent: string }> = {
-  logic: { label: '逻辑', icon: Target, accent: 'text-cyan-400' },
-  emotion: { label: '情感', icon: Heart, accent: 'text-rose-400' },
-  twist: { label: '变数', icon: Zap, accent: 'text-amber-400' },
-}
+const {
+  currentScene,
+  round,
+  processing,
+  error,
+  useMock,
+  modelAssignment,
+  isCompleted,
+  isStarted,
+} = storeToRefs(storyStore)
 
-const currentScene = computed(() => STORY_LITE_MOCK_SCENES[currentSceneId.value])
-const isCompleted = computed(() => Boolean(currentScene.value.ending))
-const round = computed(() => history.value.length + 1)
-const progressValue = computed(() => Math.min(100, Math.round((round.value / STORY_LITE_DEFAULT_MAX_ROUNDS) * 100)))
+const seedInput = ref('公路异变悬疑')
+const gameStarted = computed(() => isStarted.value || processing.value)
 
 const resultCard = computed(() => {
-  if (!currentScene.value.ending) return null
-  return toResultCardViewModel(currentScene.value.ending, currentScene.value.ending.highlights)
+  const ending = currentScene.value?.ending
+  if (!ending) return null
+  return {
+    title: ending.title,
+    grade: ending.kind as EndingGrade,
+    summary: ending.summary,
+    highlights: ending.epilogue ? [ending.epilogue] : [],
+  }
 })
 
-const historyCards = computed(() =>
-  [...history.value].reverse().map((entry) => ({
-    ...toHistoryCardViewModel(entry),
-    title: entry.title,
-  })),
-)
+function getRoleMeta(role: StoryLiteV2Role) {
+  return STORY_LITE_V2_ROLES[role]
+}
 
-const focusCopy = computed(() => {
-  if (!focusedRole.value) return ''
-  return currentScene.value.roleFocus[focusedRole.value] ?? ''
+function riskLabel(risk: StoryLiteV2RiskLevel): string {
+  return risk === 'safe' ? '安全' : risk === 'risky' ? '有风险' : risk === 'dangerous' ? '危险' : risk
+}
+
+function riskTheme(risk: StoryLiteV2RiskLevel) {
+  if (risk === 'safe') {
+    return {
+      shell: 'border-emerald-400/30 bg-emerald-300/[0.08] hover:bg-emerald-300/[0.14]',
+      badge: 'bg-emerald-300/15 text-emerald-100 border-emerald-300/30',
+      icon: 'bg-emerald-300/15 text-emerald-100',
+    }
+  }
+  if (risk === 'risky') {
+    return {
+      shell: 'border-amber-400/30 bg-amber-300/[0.08] hover:bg-amber-300/[0.14]',
+      badge: 'bg-amber-300/15 text-amber-100 border-amber-300/30',
+      icon: 'bg-amber-300/15 text-amber-100',
+    }
+  }
+  return {
+    shell: 'border-red-400/30 bg-red-300/[0.08] hover:bg-red-300/[0.14]',
+    badge: 'bg-red-300/15 text-red-100 border-red-300/30',
+    icon: 'bg-red-300/15 text-red-100',
+  }
+}
+
+async function startGame() {
+  storyStore.init(seedInput.value)
+  await storyStore.startGame()
+}
+
+async function makeChoice(choiceId: string) {
+  await storyStore.makeChoice(choiceId)
+}
+
+function restartGame() {
+  storyStore.restart()
+}
+
+onMounted(() => {
+  storyStore.init(seedInput.value)
 })
-
-function choose(role: StoryLiteAgentRole) {
-  focusedRole.value = focusedRole.value === role ? null : role
-}
-
-function restartStory() {
-  currentSceneId.value = 'start'
-  paused.value = false
-  history.value = []
-  focusedRole.value = null
-}
-
-function togglePause() {
-  if (isCompleted.value) return
-  paused.value = !paused.value
-}
-
-function pickChoice(choiceId: string) {
-  if (paused.value || isCompleted.value) return
-
-  const choice = currentScene.value.choices.find((item) => item.id === choiceId)
-  if (!choice) return
-
-  history.value.push({
-    id: `story-turn-${history.value.length + 1}`,
-    round: round.value,
-    type: 'story_turn',
-    createdAt: new Date().toISOString(),
-    title: currentScene.value.chapter,
-    summary: `${currentScene.value.briefing} 你选择了：${choice.label}`,
-    payload: {
-      sceneId: currentScene.value.id,
-      choiceId: choice.id,
-      choiceLabel: choice.label,
-      badge: currentScene.value.badge,
-    },
-    tags: currentScene.value.badge ? [currentScene.value.badge, choice.risk.toUpperCase()] : [choice.risk.toUpperCase()],
-  })
-
-  currentSceneId.value = choice.nextSceneId
-  focusedRole.value = null
-}
-
-function riskTone(risk: string) {
-  if (risk === 'high') return 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-100'
-  if (risk === 'medium') return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-100'
-  return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-100'
-}
-
-function roleCardClass(role: StoryLiteAgentRole) {
-  if (role === 'logic') return 'border-cyan-400/20 bg-cyan-500/[0.05]'
-  if (role === 'emotion') return 'border-rose-400/20 bg-rose-500/[0.05]'
-  return 'border-amber-400/20 bg-amber-500/[0.05]'
-}
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden bg-surface-0">
-    <!-- Header -->
-    <header
-      class="glass-v3 mx-auto mt-3 flex w-full max-w-6xl shrink-0 items-center justify-between gap-4 rounded-full border border-white/10 bg-white/72 px-4 py-2.5 shadow-2xl dark:bg-white/[0.04] sm:px-6"
+  <div class="h-full overflow-y-auto bg-surface-0 px-3 py-3 sm:px-4 lg:px-6">
+    <section
+      class="relative mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[36px] border border-[#2f323b] bg-[#111318] text-[#f4efe6] shadow-[0_40px_120px_rgba(9,12,18,0.38)]"
     >
-      <div class="min-w-0 flex items-center gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent shadow-2xl shadow-accent/20">
-          <Sparkles :size="16" :stroke-width="3.5" class="text-white" />
-        </div>
+      <!-- 背景光效 -->
+      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(74,222,128,0.08),transparent_28%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.12),transparent_30%)]" />
+
+      <!-- 头部 -->
+      <div class="relative flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-7">
         <div class="min-w-0">
-          <div class="text-[9px] font-black uppercase tracking-[0.32em] text-text-tertiary">互动剧情</div>
-          <div class="truncate text-sm font-black tracking-tight text-text-primary sm:text-base">{{ STORY_LITE_DEFAULT_SEED }}</div>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-2 shrink-0">
-        <div class="hidden sm:flex flex-col items-end mr-2">
-          <div class="text-[9px] font-black uppercase tracking-[0.24em] text-text-tertiary">第{{ Math.min(round, STORY_LITE_DEFAULT_MAX_ROUNDS) }}轮</div>
-          <div class="text-[10px] font-black uppercase tracking-[0.18em] text-accent">{{ currentScene.chapter }}</div>
-        </div>
-        <button
-          class="h-9 w-9 rounded-full glass-v3 border border-white/10 flex items-center justify-center text-text-secondary hover:text-text-primary transition-all active:scale-90"
-          @click="togglePause"
-        >
-          <Play v-if="paused" :size="16" :stroke-width="3.5" />
-          <Pause v-else :size="16" :stroke-width="3.5" />
-        </button>
-        <button
-          class="h-9 w-9 rounded-full glass-v3 border border-white/10 flex items-center justify-center text-text-secondary hover:text-text-primary transition-all active:scale-90"
-          @click="restartStory"
-        >
-          <RotateCcw :size="16" :stroke-width="3.5" />
-        </button>
-      </div>
-    </header>
-
-    <main class="mx-auto flex w-full max-w-6xl flex-1 overflow-hidden py-3 px-3 sm:px-4 lg:px-6">
-      <section
-        class="glass-v3 relative flex w-full flex-1 flex-col overflow-hidden rounded-[32px] border border-white/10 bg-white/70 shadow-2xl dark:bg-white/[0.04]"
-      >
-        <div class="flex flex-1 overflow-hidden">
-          <!-- Main Scenario Area -->
-          <div class="flex flex-1 flex-col overflow-y-auto overscroll-contain border-white/10 xl:border-r">
-            <!-- Scene Intro -->
-            <div class="px-4 pt-5 sm:px-6 sm:pt-6">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="inline-flex items-center rounded-full bg-accent/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-accent">
-                  {{ currentScene.badge ?? 'Story Lite' }}
-                </span>
-                <span class="inline-flex items-center rounded-full bg-white/5 px-3 py-1 text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">
-                  {{ currentScene.chapter }}
-                </span>
-              </div>
-
-              <div class="mt-4 rounded-[28px] border border-white/10 bg-white/82 p-5 shadow-sm dark:bg-white/5">
-                <div class="flex items-center justify-between gap-4 mb-3">
-                  <div class="text-[9px] font-black uppercase tracking-[0.26em] text-text-tertiary">当前简报</div>
-                  <div class="text-[9px] font-black uppercase tracking-[0.22em] text-accent">{{ progressValue }}%</div>
-                </div>
-                <div class="h-1 rounded-full bg-white/5 overflow-hidden">
-                  <div class="h-full rounded-full bg-gradient-to-r from-accent to-cyan-400 transition-all duration-500" :style="{ width: `${progressValue}%` }"></div>
-                </div>
-                <p class="mt-5 text-lg font-black tracking-tight text-text-primary leading-tight sm:text-xl">
-                  {{ currentScene.briefing }}
-                </p>
-                <p class="mt-3 text-sm leading-relaxed text-text-secondary">
-                  {{ currentScene.payload.sceneSummary }}
-                </p>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[9px] font-black uppercase tracking-[0.34em] text-[#c8c2b7]">
+              StoryLite V2
+            </span>
+            <span v-if="currentScene?.chapter" class="inline-flex items-center rounded-full border border-[#3b6cf6]/30 bg-[#3b6cf6]/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.26em] text-[#8db1ff]">
+              {{ currentScene.chapter }}
+            </span>
+          </div>
+          <div class="mt-3 flex items-center gap-3">
+            <div class="flex h-11 w-11 items-center justify-center rounded-full bg-[#4455ff] shadow-[0_0_40px_rgba(68,85,255,0.45)]">
+              <Sparkles :size="16" :stroke-width="3.5" class="text-white" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-[10px] font-black uppercase tracking-[0.34em] text-[#888d9d]">多 AI 共演</div>
+              <div class="truncate text-2xl font-[900] tracking-[-0.08em] text-white" style="font-family: 'Syne', sans-serif">
+                {{ currentScene?.title || '假如模拟器' }}
               </div>
             </div>
+          </div>
+        </div>
 
-            <!-- Agent Insights -->
-            <div class="px-4 py-5 sm:px-6">
-              <div class="text-[9px] font-black uppercase tracking-[0.28em] text-text-tertiary mb-3">智囊团</div>
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <button
-                  v-for="role in (['logic', 'emotion', 'twist'] as const)"
-                  :key="role"
-                  class="rounded-3xl border p-4 text-left transition-all duration-300 hover:shadow-lg active:scale-[0.98]"
-                  :class="[roleCardClass(role), focusedRole === role ? 'ring-2 ring-accent/40 ring-offset-2 ring-offset-surface-0' : '']"
-                  @click="choose(role)"
-                >
-                  <div class="flex items-center gap-2 mb-3">
-                    <component :is="ROLE_META[role].icon" :size="14" :stroke-width="4" :class="ROLE_META[role].accent" />
-                    <span class="text-[9px] font-black uppercase tracking-widest" :class="ROLE_META[role].accent">{{ ROLE_META[role].label }}</span>
+        <div class="flex items-center gap-2">
+          <div class="hidden rounded-full border border-white/10 bg-white/5 px-3 py-2 text-right sm:block">
+            <div class="text-[9px] font-black uppercase tracking-[0.24em] text-[#888d9d]">Round</div>
+            <div class="text-sm font-black tracking-[0.18em] text-white">{{ round }}/{{ STORY_LITE_V2_DEFAULT_MAX_ROUNDS }}</div>
+          </div>
+          <button
+            v-if="gameStarted"
+            class="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#c8c2b7] transition-all hover:bg-white/10 hover:text-white active:scale-95"
+            @click="restartGame"
+          >
+            <RotateCcw :size="16" :stroke-width="3.5" />
+          </button>
+        </div>
+      </div>
+
+      <!-- 主体内容 -->
+      <div class="relative grid flex-1 gap-0 lg:grid-cols-[1fr_0.9fr]">
+        <!-- 左侧：AI 回复区 -->
+        <div class="flex flex-col border-b border-white/10 lg:border-b-0">
+          <div class="flex-1 border-b border-white/10 px-5 py-5 sm:px-7 overflow-y-auto">
+            <!-- 开始界面 -->
+            <div v-if="!gameStarted" class="flex flex-col items-center justify-center h-full py-20">
+              <div class="w-20 h-20 rounded-full bg-[#4455ff] shadow-[0_0_60px_rgba(68,85,255,0.5)] flex items-center justify-center mb-6">
+                <Sparkles :size="32" :stroke-width="3" class="text-white" />
+              </div>
+              <h2 class="text-3xl font-black text-white mb-2" style="font-family: 'Syne', sans-serif">假如模拟器</h2>
+              <p class="text-text-secondary mb-8 text-center max-w-md">
+                输入一个"假如"场景，3 个 AI 将扮演不同角色与你共演剧情
+              </p>
+
+              <!-- 模型选择提示 -->
+              <div class="w-full max-w-md mb-6">
+                <div v-if="useMock" class="rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-sm text-amber-300">
+                  <p class="font-black uppercase tracking-[0.2em] text-[10px] mb-2">Demo 模式</p>
+                  <p>当前使用演示模型，将显示预设剧情数据。</p>
+                  <p class="mt-2 text-xs opacity-70">配置真实 API Key 后体验完整 AI 生成剧情。</p>
+                </div>
+                <div v-else-if="modelAssignment" class="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] px-4 py-3 text-sm text-emerald-300">
+                  <p class="font-black uppercase tracking-[0.2em] text-[10px] mb-2">AI 已就绪</p>
+                  <div class="flex gap-3 text-xs">
+                    <span>引路人：{{ storyStore.getModelName(modelAssignment.guide) }}</span>
+                    <span>·</span>
+                    <span>伙伴：{{ storyStore.getModelName(modelAssignment.partner) }}</span>
+                    <span>·</span>
+                    <span>变量：{{ storyStore.getModelName(modelAssignment.variable) }}</span>
                   </div>
-                  <p class="text-xs font-bold leading-tight text-text-primary line-clamp-2">
-                    {{ role === 'logic' ? currentScene.payload.logic.insight : role === 'emotion' ? currentScene.payload.emotion.feeling : (currentScene.payload.twist.triggered ? currentScene.payload.twist.event : '保持克制') }}
-                  </p>
+                </div>
+              </div>
+
+              <!-- 种子输入 -->
+              <div class="w-full max-w-md space-y-3">
+                <div class="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 border border-white/10">
+                  <input
+                    v-model="seedInput"
+                    type="text"
+                    placeholder="例如：假如我是特工，拿到了一份机密文件..."
+                    class="flex-1 bg-transparent text-sm text-white outline-none"
+                    @keydown.enter.prevent="startGame"
+                  />
+                </div>
+                <button
+                  @click="startGame"
+                  :disabled="processing"
+                  class="w-full py-4 rounded-2xl bg-accent text-white font-black uppercase tracking-[0.2em] text-sm hover:opacity-90 transition-all active:scale-[0.98]"
+                >
+                  开始剧情
                 </button>
               </div>
 
-              <transition name="page">
-                <div v-if="focusedRole && focusCopy" class="mt-4 rounded-2xl border border-accent/20 bg-accent/5 p-4 text-xs leading-relaxed text-text-secondary">
-                  <span class="font-black text-accent uppercase tracking-widest mr-2">{{ focusedRole === 'logic' ? '逻辑' : focusedRole === 'emotion' ? '情感' : '变数' }}视角：</span>
-                  {{ focusCopy }}
-                </div>
-              </transition>
+              <!-- 快速开始 -->
+              <div class="mt-6 flex flex-wrap gap-2 justify-center">
+                <button
+                  v-for="suggestion in ['假如你是特工，拿到了一份机密文件', '假如你醒来发现在太空船里', '假如你发现了一个时间循环']"
+                  :key="suggestion"
+                  @click="seedInput = suggestion; startGame()"
+                  :disabled="processing"
+                  class="px-3 py-1.5 rounded-full bg-white/5 text-xs text-text-secondary hover:bg-white/10 hover:text-white transition-all"
+                >
+                  {{ suggestion }}
+                </button>
+              </div>
             </div>
 
-            <!-- Choices Area -->
-            <div class="mt-auto px-4 pb-6 sm:px-6">
-              <div class="glass-v3 rounded-[32px] border border-white/10 bg-white/40 p-3 sm:p-5 backdrop-blur-md">
-                <div class="flex items-center justify-between gap-4 mb-3 px-2">
-                  <div class="text-[9px] font-black uppercase tracking-[0.28em] text-text-tertiary">可选行动</div>
-                  <div class="text-[9px] font-black uppercase tracking-[0.2em] text-text-tertiary italic">
-                    {{ isCompleted ? '已到达结局' : paused ? '已暂停' : `${currentScene.choices.length} 条路径` }}
-                  </div>
-                </div>
+            <!-- 游戏进行界面 -->
+            <template v-else>
+              <!-- 错误提示 -->
+              <div v-if="error" class="mb-4 rounded-2xl border border-red-400/20 bg-red-500/[0.08] px-4 py-3 text-sm text-red-300">
+                {{ error }}
+              </div>
 
-                <div v-if="isCompleted && resultCard" class="grid gap-3">
-                  <div class="rounded-2xl border border-accent/20 bg-accent/5 p-4">
-                    <div class="text-[9px] font-black uppercase tracking-[0.28em] text-accent mb-1">结局解锁</div>
-                    <div class="text-base font-black tracking-tight text-text-primary mb-2">{{ resultCard.title }}</div>
-                    <p class="text-xs leading-relaxed text-text-secondary">{{ resultCard.summary }}</p>
-                  </div>
-                  <button class="w-full rounded-2xl bg-text-primary py-3.5 text-[10px] font-black uppercase tracking-widest text-surface-1" @click="restartStory">再跑一局</button>
-                </div>
+              <!-- Mock 模式提示 -->
+              <div v-if="useMock && isStarted" class="mb-4 rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] px-4 py-3 text-xs text-amber-300">
+                <span class="font-black uppercase tracking-[0.2em]">Demo Mode</span> · 当前显示预设剧情数据
+              </div>
 
-                <div v-else class="grid gap-2">
-                  <button
-                    v-for="choice in currentScene.choices"
-                    :key="choice.id"
-                    class="group flex items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all hover:bg-white/5 disabled:opacity-40"
-                    :class="riskTone(choice.risk)"
-                    :disabled="paused"
-                    @click="pickChoice(choice.id)"
-                  >
-                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/5 dark:bg-white/10">
-                      <ArrowRight :size="14" :stroke-width="4" />
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <div class="text-[8px] font-black uppercase tracking-widest opacity-60">{{ choice.risk === 'high' ? '高' : choice.risk === 'medium' ? '中' : '低' }}风险</div>
-                      <div class="truncate text-xs font-black text-current">{{ choice.label }}</div>
-                    </div>
-                  </button>
+              <!-- 情境描述 -->
+              <div v-if="currentScene?.premise" class="mb-6 max-w-2xl">
+                <div class="flex flex-wrap items-center gap-2 mb-3">
+                  <span class="inline-flex items-center rounded-full bg-white/5 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-[#d6d0c4]">
+                    {{ currentScene.chapter }}
+                  </span>
+                  <span class="inline-flex items-center rounded-full border border-white/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-[#888d9d]">
+                    3 位 AI 共演
+                  </span>
+                </div>
+                <p class="text-lg leading-8 text-[#c8c2b7]">
+                  {{ currentScene.premise }}
+                </p>
+              </div>
+
+              <!-- 加载中 -->
+              <div v-if="processing && !currentScene?.responses?.length" class="flex flex-col items-center justify-center py-20">
+                <Loader2 :size="32" class="text-accent animate-spin mb-4" />
+                <p class="text-text-secondary text-sm">AI 正在构建剧情...</p>
+              </div>
+
+              <!-- 三个 AI 的回复 -->
+              <div v-if="currentScene?.responses?.length" class="space-y-4">
+                <div
+                  v-for="res in currentScene.responses"
+                  :key="res.role"
+                  class="rounded-[24px] border px-4 py-4 transition-all"
+                  :class="getRoleMeta(res.role).accent.includes('cyan') ? 'border-cyan-400/20 bg-cyan-500/[0.06]' : getRoleMeta(res.role).accent.includes('rose') ? 'border-rose-400/20 bg-rose-500/[0.06]' : 'border-amber-400/20 bg-amber-500/[0.06]'"
+                >
+                  <div class="flex items-center gap-2 mb-3">
+                    <component
+                      :is="getRoleMeta(res.role).icon === 'Target' ? Target : getRoleMeta(res.role).icon === 'Heart' ? Heart : Sparkles"
+                      :size="14"
+                      :stroke-width="3.5"
+                      :class="getRoleMeta(res.role).accent"
+                    />
+                    <span class="text-[10px] font-black uppercase tracking-[0.26em]" :class="getRoleMeta(res.role).accent">
+                      {{ getRoleMeta(res.role).label }}
+                    </span>
+                    <span class="text-[8px] font-black uppercase tracking-[0.2em] text-text-tertiary ml-auto">
+                      {{ res.modelName }}
+                    </span>
+                  </div>
+                  <p class="text-sm leading-7 text-[#dad4c8]">{{ res.text }}</p>
+                  <p v-if="res.tone" class="mt-2 text-[10px] font-black uppercase tracking-[0.24em] text-text-tertiary">
+                    语气：{{ res.tone }}
+                  </p>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 右侧：选择区 -->
+        <div class="flex flex-col bg-[#0d0f14]">
+          <div class="border-b border-white/10 px-5 py-5 sm:px-7">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <div class="text-[10px] font-black uppercase tracking-[0.32em] text-[#888d9d]">行动选项</div>
+                <div class="mt-2 text-xl font-[900] tracking-[-0.06em] text-white" style="font-family: 'Syne', sans-serif">
+                  {{ isCompleted ? '结局已锁定' : '你要回应谁？' }}
                 </div>
               </div>
             </div>
           </div>
 
-            <aside class="hidden w-80 shrink-0 flex-col overflow-y-auto bg-black/[0.01] p-6 xl:flex dark:bg-white/[0.01]">
-            <div class="flex items-center justify-between mb-6 px-1">
-              <div class="flex items-center gap-2">
-                <History :size="16" :stroke-width="3.5" class="text-accent" />
-                <span class="text-[10px] font-black uppercase tracking-[0.28em] text-text-tertiary">路径历史</span>
+          <div class="flex flex-1 flex-col px-5 py-5 sm:px-7 overflow-y-auto">
+            <!-- 结局展示 -->
+            <div v-if="isCompleted && resultCard" class="flex flex-1 flex-col">
+              <div class="rounded-[32px] border border-[#4f5eff]/25 bg-gradient-to-br from-[#1a2041] via-[#121624] to-[#0f1117] p-6 shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+                <div class="text-[10px] font-black uppercase tracking-[0.32em] text-[#9dadff]">结局解锁</div>
+                <div class="mt-3 text-2xl font-[900] leading-none tracking-[-0.08em] text-white" style="font-family: 'Syne', sans-serif">
+                  {{ resultCard.title }}
+                </div>
+                <p class="mt-4 max-w-xl text-sm leading-7 text-[#d4d9ee]">{{ resultCard.summary }}</p>
+                <p v-if="currentScene?.ending?.epilogue" class="mt-3 text-sm italic leading-7 text-[#9dacff]">
+                  {{ currentScene.ending.epilogue }}
+                </p>
               </div>
-              <span class="text-[9px] font-black text-text-tertiary bg-white/5 px-2 py-0.5 rounded-full">{{ history.length }}</span>
+              <button
+                class="mt-4 inline-flex items-center justify-center rounded-[24px] border border-white/10 bg-white px-5 py-4 text-[10px] font-black uppercase tracking-[0.34em] text-[#111318] transition-all hover:opacity-90 active:scale-[0.98]"
+                @click="restartGame"
+              >
+                再跑一局
+              </button>
             </div>
 
-            <div class="space-y-3">
-              <div v-if="!historyCards.length" class="rounded-2xl border border-dashed border-white/10 p-6 text-center text-[10px] text-text-tertiary">
-                尚未开始记录路径
-              </div>
-              <div v-for="item in historyCards" :key="item.id" class="rounded-2xl border border-white/5 bg-white/60 p-4 dark:bg-white/5">
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-accent">{{ item.roundLabel }}</span>
-                  <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary opacity-60">{{ item.typeLabel }}</span>
-                </div>
-                <div class="text-xs font-black text-text-primary mb-1">{{ item.title }}</div>
-                <p class="text-[11px] leading-relaxed text-text-secondary">{{ item.summary }}</p>
-              </div>
+            <!-- 加载中 -->
+            <div v-else-if="processing" class="flex flex-col items-center justify-center flex-1 py-20">
+              <Loader2 :size="32" class="text-accent animate-spin mb-4" />
+              <p class="text-text-secondary text-sm">AI 正在思考剧情走向...</p>
             </div>
-            </aside>
+
+            <!-- 选择按钮 -->
+            <div v-else-if="currentScene?.choices?.length" class="grid flex-1 gap-4">
+              <button
+                v-for="choice in currentScene.choices"
+                :key="choice.id"
+                class="group flex flex-col justify-between rounded-[32px] border p-5 text-left transition-all duration-300 active:scale-[0.985]"
+                :class="riskTheme(choice.risk).shell"
+                @click="makeChoice(choice.id)"
+              >
+                <div>
+                  <div class="flex items-center justify-between gap-3">
+                    <span
+                      class="inline-flex items-center rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em]"
+                      :class="riskTheme(choice.risk).badge"
+                    >
+                      {{ riskLabel(choice.risk) }}
+                    </span>
+                    <span v-if="choice.targetRole" class="text-[8px] font-black uppercase tracking-[0.22em] text-text-tertiary">
+                      回应 {{ getRoleMeta(choice.targetRole).label }}
+                    </span>
+                  </div>
+
+                  <div class="mt-4 flex items-start gap-4">
+                    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" :class="riskTheme(choice.risk).icon">
+                      <ArrowRight :size="18" :stroke-width="3.5" />
+                    </div>
+                    <div class="min-w-0">
+                      <div class="text-xl font-[900] leading-none tracking-[-0.05em] text-white" style="font-family: 'Syne', sans-serif">
+                        {{ choice.label }}
+                      </div>
+                      <p v-if="choice.hint" class="mt-2 text-sm leading-7 text-[#d6d0c4]">
+                        {{ choice.hint }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <!-- 玩法提示 -->
+            <div v-if="!isCompleted && !processing && currentScene?.choices?.length" class="mt-4 rounded-[24px] border border-white/10 bg-white/[0.03] px-4 py-4">
+              <div class="flex items-center gap-2">
+                <ShieldCheck :size="15" :stroke-width="3.5" class="text-[#7de0a8]" />
+                <span class="text-[10px] font-black uppercase tracking-[0.26em] text-[#7de0a8]">玩法说明</span>
+              </div>
+              <p class="mt-2 text-sm leading-7 text-[#c8c2b7]">
+                3 个 AI 扮演不同角色同时输出。选择回应其中一个，你的选择会改变故事走向。
+              </p>
+            </div>
+          </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </section>
   </div>
 </template>

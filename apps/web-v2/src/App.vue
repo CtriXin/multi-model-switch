@@ -12,7 +12,7 @@ import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
 import {
   Sparkles, MessageSquare, GitMerge, Users, Plus, Home, Package, Settings, Sun, Moon,
-  ChevronLeft, Menu, Laptop, Smartphone
+  ChevronLeft, Menu, Laptop, Smartphone, Flame, Target, Soup, Clapperboard
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -293,7 +293,11 @@ watch(() => route.path, () => {
                 { path: '/', icon: Home, label: '首页' },
                 { path: '/chat', icon: MessageSquare, label: '聊天' },
                 { path: '/discuss', icon: GitMerge, label: '辩论' },
-                { path: '/advisors', icon: Users, label: '参谋团' }
+                { path: '/advisors', icon: Users, label: '参谋团' },
+                { path: '/challenge', icon: Flame, label: '每日一辩' },
+                { path: '/story-lite', icon: Target, label: '剧情冒险' },
+                { path: '/turtle-soup', icon: Soup, label: '海龟汤' },
+                { path: '/story-live', icon: Clapperboard, label: '剧情共演' }
               ]" :key="link.path">
                 <button v-if="link.path !== '/' || appStore.showHomeEntry" @click="router.push(link.path); iosDrawerOpen = false" 
                   class="w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-300 active:scale-95" 

@@ -17,10 +17,10 @@ export const PLAY_MODE_REGISTRY: Record<string, PlayModeDefinition> = {
   },
   'story-lite': {
     id: 'story-lite',
-    label: 'Story Lite',
-    promptNamespace: 'story-lite',
-    historyKinds: ['story_turn', 'special_event', 'summary_snapshot'],
-    endingGrades: ['failure', 'normal', 'hidden', 'optimal'],
+    label: '假如模拟器 (多 AI)',
+    promptNamespace: 'story-lite-v2',
+    historyKinds: ['story_turn', 'ending'],
+    endingGrades: ['good', 'normal', 'bad', 'mystery'],
     lifecycle: {
       supportsPause: true,
       supportsResume: true,

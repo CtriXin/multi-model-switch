@@ -115,18 +115,23 @@ export const useAppStore = defineStore('app', () => {
 
   watch(showFriendsMode, async (val) => {
     localStorage.setItem('mms-show-friends', String(val))
-    // When enabling friends mode, trigger provision to add sparkring if not exists
+    const providerStore = useProviderStore()
+    providerStore.syncFriendsModeProvider(val)
+
     if (val) {
-      const providerStore = useProviderStore()
-      const hasSparkring = providerStore.getProvider('sparkring')
-      if (!hasSparkring) {
+      if (!providerStore.keyStatus.sparkring) {
         const result = await provision()
         if (result) {
           await applyProvisionResult(result)
-          await refreshModels()
         }
       }
+      await refreshModels()
+      return
     }
+
+    selectedModelIds.value = selectedModelIds.value.filter((id) => !id.startsWith('sparkring/'))
+    committeeSelectedModelIds.value = committeeSelectedModelIds.value.filter((id) => !id.startsWith('sparkring/'))
+    await refreshModels()
   })
 
   function loadSuppressedModelIds() {
@@ -240,7 +245,9 @@ export const useAppStore = defineStore('app', () => {
     const providerStore = useProviderStore()
     await providerStore.refreshKeyStatus()
 
-    const configured = providerStore.configuredProviders
+    const configured = providerStore.configuredProviders.filter((provider) =>
+      showFriendsMode.value || provider.id !== 'sparkring',
+    )
     if (!configured.length) {
       models.value = []
       error.value = '未配置任何 API 通道，请在设置中配置'

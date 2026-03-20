@@ -41,13 +41,43 @@ export async function collectText(stream: AsyncGenerator<string>) {
   return text.trim()
 }
 
-// --- Model assignment (3 different providers, hard constraint) ---
+/** Stream an async generator into a reactive callback, returns the final text */
+export async function streamInto(
+  stream: AsyncGenerator<string>,
+  onChunk: (chunk: string) => void,
+): Promise<string> {
+  let text = ''
+  for await (const chunk of stream) {
+    text += chunk
+    onChunk(chunk)
+  }
+  return text.trim()
+}
+
+/** Simulate streaming a static string character by character */
+export async function streamMockInto(
+  text: string,
+  onChunk: (chunk: string) => void,
+  speed = 25,
+): Promise<void> {
+  for (const char of text) {
+    onChunk(char)
+    await new Promise((r) => setTimeout(r, speed))
+  }
+}
+
+// --- Model assignment ---
+
+export interface ModelPickResult {
+  assignment: MultiLifeModelAssignment
+  diverse: boolean  // true = 3 different providers
+}
 
 export function chooseCaseModels(
   appStore: ReturnType<typeof useAppStore>,
-): MultiLifeModelAssignment | null {
+): ModelPickResult | null {
   const all = [...appStore.models]
-  if (all.length < 3) return null
+  if (all.length < 1) return null
 
   const preferred = appStore.preferFree
     ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
@@ -62,33 +92,44 @@ export function chooseCaseModels(
     byProvider.get(model.provider)!.push(model)
   }
 
-  if (byProvider.size < 3) return null
-
-  // Pick top model from 3 different providers
-  const picked: { id: string; provider: string }[] = []
-  for (const [, models] of byProvider) {
-    picked.push({ id: models[0].id, provider: models[0].provider })
-    if (picked.length === 3) break
+  if (byProvider.size >= 3) {
+    const picked: { id: string }[] = []
+    for (const [, models] of byProvider) {
+      picked.push({ id: models[0].id })
+      if (picked.length === 3) break
+    }
+    return { assignment: { a: picked[0].id, b: picked[1].id, c: picked[2].id }, diverse: true }
   }
 
+  // Fallback: pick top 3 regardless of provider
+  const top3 = preferred.slice(0, 3)
+  while (top3.length < 3 && all.length > top3.length) {
+    const next = all[top3.length]
+    if (next && !top3.find(m => m.id === next.id)) top3.push(next)
+    else break
+  }
+  if (top3.length < 1) return null
+
   return {
-    a: picked[0].id,
-    b: picked[1].id,
-    c: picked[2].id,
+    assignment: {
+      a: top3[0]?.id ?? top3[0].id,
+      b: top3[1]?.id ?? top3[0].id,
+      c: top3[2]?.id ?? top3[0].id,
+    },
+    diverse: false,
   }
 }
 
 export function normalizeAssignment(
   assignment: MultiLifeModelAssignment | null,
   appStore: ReturnType<typeof useAppStore>,
-): MultiLifeModelAssignment | null {
+): ModelPickResult | null {
   if (!assignment) return chooseCaseModels(appStore)
 
   const ids = [assignment.a, assignment.b, assignment.c]
   if (ids.every((id) => appStore.getModel(id))) {
-    // Verify still 3 different providers
     const providers = new Set(ids.map((id) => appStore.getModel(id)?.provider).filter(Boolean))
-    if (providers.size >= 3) return assignment
+    return { assignment, diverse: providers.size >= 3 }
   }
   return chooseCaseModels(appStore)
 }
@@ -232,7 +273,7 @@ export function normalizeRecord(
     evidenceCards: Array.isArray(meta.evidenceCards) ? meta.evidenceCards : [],
     branchMemory: Array.isArray(meta.branchMemory) ? meta.branchMemory : [],
     challengeUsed: meta.challengeUsed ?? 0,
-    modelAssignment: normalizeAssignment(meta.modelAssignment, appStore),
+    modelAssignment: normalizeAssignment(meta.modelAssignment, appStore)?.assignment ?? null,
   }
 
   const rawRounds = Array.isArray(record.rounds) ? record.rounds : []

@@ -19,9 +19,17 @@ export type HistoryEntryType =
   | 'investigation_turn'
   | 'special_event'
   | 'summary_snapshot'
+  | 'ending'
   | 'ml_round'
 
-export type EndingGrade = 'failure' | 'normal' | 'hidden' | 'optimal'
+export type EndingGrade =
+  | 'failure'
+  | 'normal'
+  | 'hidden'
+  | 'optimal'
+  | 'good'
+  | 'bad'
+  | 'mystery'
 
 export interface SessionSeed {
   id: string
