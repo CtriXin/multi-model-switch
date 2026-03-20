@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTurtleSoupStore } from '@/stores/turtleSoup'
 import {
   CATEGORY_LABELS,
@@ -9,8 +10,9 @@ import {
 import type { HostTag } from '@/features/turtle-soup/types'
 import { useAppStore } from '@/stores/app'
 import { useProviderStore } from '@/stores/provider'
-import { Soup, Lightbulb, ChevronRight, Flag, Trophy, RotateCcw, Home, Loader2, Sparkles, AlertTriangle, Play, PhoneCall } from 'lucide-vue-next'
+import { Soup, Lightbulb, ChevronRight, Flag, Trophy, RotateCcw, Home, Loader2, Sparkles, AlertTriangle, Play, PhoneCall, ArrowLeft } from 'lucide-vue-next'
 
+const router = useRouter()
 const store = useTurtleSoupStore()
 const appStore = useAppStore()
 const providerStore = useProviderStore()
@@ -99,30 +101,6 @@ function answerBody(answer: string): string {
 
     <!-- Cinematic Arena Container -->
     <div class="w-full max-w-4xl flex-1 flex flex-col glass-v3 rounded-[32px] shadow-2xl border border-white/10 overflow-hidden bg-white/70 dark:bg-[#0b0b18]/80 relative z-10 transition-all duration-700 lg:rounded-[40px]">
-
-      <!-- Header -->
-      <header class="flex items-center justify-between px-6 h-14 shrink-0 relative border-b border-black/[0.03] dark:border-white/5 bg-white/40 backdrop-blur-md">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center shadow-lg shadow-accent/10">
-            <Soup :size="14" stroke-width="4" class="text-accent" />
-          </div>
-          <div class="flex flex-col">
-            <h1 class="text-[10px] font-black uppercase tracking-[0.2em] text-text-primary leading-none">海龟汤</h1>
-            <div v-if="store.phase === 'playing'" class="text-[8px] font-black text-accent uppercase tracking-widest mt-1">
-              第{{ store.round }}/25 轮
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            v-if="store.phase !== 'pick_puzzle' && store.phase !== 'loading'"
-            @click="store.reset()"
-            class="flex items-center justify-center w-8 h-8 rounded-full bg-black/[0.03] dark:bg-white/5 text-text-tertiary hover:text-text-primary transition-all active:scale-90"
-          >
-            <Home :size="14" stroke-width="4" />
-          </button>
-        </div>
-      </header>
 
       <!-- Content Area -->
       <main class="flex-1 relative overflow-hidden flex flex-col">
@@ -277,8 +255,8 @@ function answerBody(answer: string): string {
                           <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary">主持人</span>
                         </div>
                         <p class="text-sm leading-relaxed">
-                          <span :class="getTagColor(q.tags[0])" class="font-black mr-1">{{ TAG_LABELS[q.tags[0]] }}</span>
-                          <span v-if="answerBody(q.answer)" class="text-text-primary">{{ answerBody(q.answer) }}</span>
+                          <span :class="getTagColor(q.tags[0])" class="font-black mr-1 animate-pulse">{{ TAG_LABELS[q.tags[0]] }}</span>
+                          <span v-if="answerBody(q.answer)" class="text-text-primary lab-flowing-text">{{ answerBody(q.answer) }}</span>
                         </p>
                         <p v-if="q.guidance" class="mt-2 pl-4 text-[11px] leading-relaxed text-text-secondary/80">
                           {{ q.guidance }}
@@ -340,7 +318,7 @@ function answerBody(answer: string): string {
                       <button
                         @click="submitQuestion"
                         :disabled="!inputText.trim() || store.processing"
-                        class="absolute right-2 top-2 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center shadow-lg shadow-accent/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-20"
+                        class="absolute right-2 top-2 w-8 h-8 rounded-xl bg-accent text-white flex items-center justify-center shadow-lg shadow-accent/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-20 lab-breathing-btn"
                       >
                         <ChevronRight :size="18" stroke-width="4" />
                       </button>
@@ -404,6 +382,27 @@ function answerBody(answer: string): string {
 </template>
 
 <style scoped>
+:deep(svg) { stroke-width: 3.5px !important; }
+
+.lab-flowing-text {
+  animation: flowingText 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) forwards;
+}
+
+@keyframes flowingText {
+  from { opacity: 0; transform: translateY(4px); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.lab-breathing-btn:not(:disabled) {
+  animation: breathing 2.5s ease-in-out infinite;
+}
+
+@keyframes breathing {
+  0% { box-shadow: 0 0 0 0 rgba(110, 89, 255, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(110, 89, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(110, 89, 255, 0); }
+}
+
 .ios-swap-enter-active { animation: iosIn 0.6s cubic-bezier(0.32, 0.72, 0, 1); }
 .ios-swap-leave-active { animation: iosOut 0.5s cubic-bezier(0.32, 0.72, 0, 1); }
 

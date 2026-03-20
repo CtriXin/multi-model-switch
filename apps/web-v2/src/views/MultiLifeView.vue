@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { RotateCcw, AlertTriangle, Loader2, Shield, ChevronRight, Scale, Home, Info, ChevronDown, ChevronUp } from 'lucide-vue-next'
+import { RotateCcw, AlertTriangle, Loader2, Shield, ChevronRight, Scale, Home, Info, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-vue-next'
 import { useMultiLifeStore } from '@/stores/multiLife'
 import { listCases } from '@/features/play-modes/multi-life'
 
+const router = useRouter()
 const store = useMultiLifeStore()
 
 const {
@@ -119,30 +121,6 @@ function handleGenerateEnding() { store.generateEnding() }
 <template>
   <div class="h-full flex flex-col items-center p-3 sm:p-4 lg:p-6 overflow-hidden relative">
     <div class="w-full max-w-5xl flex-1 flex flex-col glass-v3 rounded-[32px] shadow-2xl border border-white/10 overflow-hidden bg-white/70 dark:bg-[#0b0b18]/80 relative z-10 transition-all duration-700 lg:rounded-[40px]">
-
-      <!-- Header -->
-      <header class="flex items-center justify-between px-6 h-14 shrink-0 relative border-b border-black/[0.03] dark:border-white/5 bg-white/40 backdrop-blur-md">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center shadow-lg shadow-accent/10">
-            <Shield :size="14" stroke-width="4" class="text-accent" />
-          </div>
-          <div class="flex flex-col">
-            <h1 class="text-[10px] font-black uppercase tracking-[0.2em] text-text-primary leading-none">多重人生</h1>
-            <div v-if="started" class="text-[8px] font-black text-accent uppercase tracking-widest mt-1">
-              第{{ currentRound }}/{{ caseData?.totalRounds ?? '?' }} 轮
-            </div>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <span v-if="started" class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent/10 text-[8px] font-black text-accent uppercase tracking-widest">
-            <Scale :size="10" stroke-width="4" /> {{ challengeRemaining }}
-          </span>
-          <button v-if="started || caseData" @click="store.restart()"
-            class="flex items-center justify-center w-8 h-8 rounded-full bg-black/[0.03] dark:bg-white/5 text-text-tertiary hover:text-text-primary transition-all active:scale-90">
-            <Home :size="14" stroke-width="4" />
-          </button>
-        </div>
-      </header>
 
       <main class="flex-1 relative overflow-hidden flex flex-col">
         <!-- Banners -->

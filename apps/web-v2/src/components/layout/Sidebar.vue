@@ -8,7 +8,7 @@ import { FREE_PROVIDERS } from '@/data/freeProviders'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
   Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
-  Clock, Home, Shield, Flame, Target, Soup, Clapperboard
+  Clock, Home, FlaskConical
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
 
@@ -32,8 +32,6 @@ const recommendedConfiguredCount = computed(() =>
   FREE_PROVIDERS.filter((provider) => providerStore.keyStatus[provider.id]).length,
 )
 
-const showQuickStartEntry = computed(() => recommendedConfiguredCount.value <= 2)
-
 function newChat() {
   sessionStore.createSession('chat')
   router.push('/chat')
@@ -48,20 +46,8 @@ function newAdvisors() {
   router.push('/advisors')
 }
 
-function newChallenge() {
-  router.push('/challenge')
-}
-
-function newStoryLite() {
-  router.push('/story-lite')
-}
-
-function newTurtleSoup() {
-  router.push('/turtle-soup')
-}
-
-function newStoryLive() {
-  router.push('/story-live')
+function goLab() {
+  router.push('/lab')
 }
 
 function switchTo(session: { id: string; type: string }) {
@@ -69,10 +55,6 @@ function switchTo(session: { id: string; type: string }) {
   if (session.type === 'chat') router.push('/chat')
   else if (session.type === 'discuss') router.push('/discuss')
   else router.push('/advisors')
-}
-
-function newMultiLife() {
-  router.push('/multi-life')
 }
 
 function isSessionActive(session: { id: string; type: string }) {
@@ -103,7 +85,6 @@ function openCommandPalette() {
     class="relative z-50 w-16 shrink-0 flex flex-col items-center py-4 gap-2 h-full"
   >
     <div class="glass-v3 w-12 flex flex-col items-center py-4 gap-3 rounded-[24px] shadow-2xl border border-white/10 flex-1">
-      <!-- Logo in mini mode: No top margin div -->
       <div class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2">
         <div class="absolute inset-0 rounded-full border border-dashed border-accent/20 animate-[spin_10s_linear_infinite_reverse] group-hover/logo:border-accent/50 transition-colors"></div>
         <div class="absolute inset-1 rounded-full border border-white/5 animate-[spin_20s_linear_infinite]"></div>
@@ -112,7 +93,6 @@ function openCommandPalette() {
         </div>
       </div>
 
-      <!-- Actions: Unified size 22, stroke 3 -->
       <button @click="emit('expand')" class="p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="展开侧边栏">
         <PanelLeftOpen :size="22" stroke-width="3" />
       </button>
@@ -121,32 +101,22 @@ function openCommandPalette() {
         <button v-if="appStore.showHomeEntry" @click="router.push('/')" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/' ? 'bg-accent/20 text-accent' : ''" title="首页">
           <Home :size="22" stroke-width="3" />
         </button>
-        <button @click="newChat" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新对话">
+        <button @click="newChat" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/chat' ? 'bg-accent/20 text-accent' : ''" title="新对话">
           <MessageSquare :size="22" stroke-width="3" />
         </button>
-        <button @click="newDiscuss" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="新辩论">
+        <button @click="newDiscuss" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/discuss' ? 'bg-accent/20 text-accent' : ''" title="新辩论">
           <GitMerge :size="22" stroke-width="3" />
         </button>
-        <button @click="newAdvisors" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" title="锦囊团">
+        <button @click="newAdvisors" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/advisors' ? 'bg-accent/20 text-accent' : ''" title="锦囊团">
           <Users :size="22" stroke-width="3" />
         </button>
-        <button @click="newChallenge" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/challenge' ? 'bg-accent/20 text-accent' : ''" title="每日一辩">
-          <Flame :size="22" stroke-width="3" />
-        </button>
-        <button @click="newStoryLite" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/story-lite' ? 'bg-accent/20 text-accent' : ''" title="剧情冒险">
-          <Target :size="22" stroke-width="3" />
-        </button>
-        <button @click="newTurtleSoup" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/turtle-soup' ? 'bg-accent/20 text-accent' : ''" title="海龟汤">
-          <Soup :size="22" stroke-width="3" />
-        </button>
-        <button @click="newStoryLive" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/story-live' ? 'bg-accent/20 text-accent' : ''" title="剧情共演">
-          <Clapperboard :size="22" stroke-width="3" />
+        <button @click="goLab" class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all" :class="route.path === '/lab' || route.path === '/challenge' || route.path === '/turtle-soup' || route.path === '/story-lite' || route.path === '/story-live' || route.path === '/multi-life' ? 'bg-accent/20 text-accent' : ''" title="互动实验室">
+          <FlaskConical :size="22" stroke-width="3" />
         </button>
       </div>
 
       <div class="flex-1" />
 
-      <!-- Bottom mini utils: Unified size 20, stroke 3 -->
       <div class="flex flex-col gap-2 w-full px-1.5 pb-2">
         <button @click="toggleTheme" class="flex items-center justify-center p-2 rounded-xl hover:bg-white/10 text-text-secondary transition-all">
           <Sun v-if="theme === 'dark'" :size="20" stroke-width="3" class="text-amber-400" />
@@ -162,7 +132,6 @@ function openCommandPalette() {
   <!-- Expanded: full floating sidebar -->
   <aside v-else class="relative z-50 w-[280px] shrink-0 flex flex-col p-3 h-full">
     <div class="glass-v3 flex-1 flex flex-col rounded-[32px] shadow-2xl border border-white/10 overflow-hidden relative">
-      <!-- Header: Pure Brand Identity (No Controls) -->
       <div class="h-20 flex items-center pl-5 pr-2">
         <div class="flex items-center gap-2 group/logo cursor-pointer select-none max-w-full">
           <div class="relative flex items-center justify-center w-9 h-9 shrink-0">
@@ -172,7 +141,6 @@ function openCommandPalette() {
               <Sparkles class="w-3.5 h-3.5 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]" :stroke-width="3.5" />
             </div>
           </div>
-
           <div class="flex flex-col select-none relative pt-1 min-w-0">
             <div class="text-[18px] font-[800] tracking-[-0.08em] flex items-center leading-none transform-gpu scale-x-[0.98] origin-left" style="font-family: 'Syne', sans-serif;">
               <span class="text-accent drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]">SPARK</span>
@@ -184,7 +152,7 @@ function openCommandPalette() {
       </div>
 
       <!-- Primary Creation Area -->
-      <div class="px-3 space-y-1.5 mt-2">
+      <div class="px-3 space-y-1.5 mt-2 overflow-y-auto no-scrollbar max-h-[40vh]">
         <button
           v-if="appStore.showHomeEntry"
           @click="router.push('/')"
@@ -225,60 +193,33 @@ function openCommandPalette() {
             ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
             : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <Sparkles :size="16" stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
+          <Users :size="16" stroke-width="3" :class="route.path === '/advisors' ? 'text-surface-1' : 'group-hover:text-amber-400 transition-colors'" />
           <span>AI 锦囊团</span>
         </button>
+        
+        <div class="h-px w-full bg-white/5 my-1"></div>
+        
         <button
-          @click="newChallenge"
+          @click="goLab"
           class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
-          :class="route.path === '/challenge'
+          :class="route.path === '/lab' || route.path === '/challenge' || route.path === '/turtle-soup' || route.path === '/story-lite' || route.path === '/story-live' || route.path === '/multi-life'
             ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
             : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
         >
-          <Flame :size="16" stroke-width="3" :class="route.path === '/challenge' ? 'text-surface-1' : 'group-hover:text-orange-400 transition-colors'" />
-          <span>每日一辩</span>
-        </button>
-        <button
-          @click="newStoryLite"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
-          :class="route.path === '/story-lite'
-            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
-            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
-        >
-          <Target :size="16" stroke-width="3" :class="route.path === '/story-lite' ? 'text-surface-1' : 'group-hover:text-cyan-400 transition-colors'" />
-          <span>剧情冒险</span>
-        </button>
-        <button
-          @click="newTurtleSoup"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
-          :class="route.path === '/turtle-soup'
-            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
-            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
-        >
-          <Soup :size="16" stroke-width="3" :class="route.path === '/turtle-soup' ? 'text-surface-1' : 'group-hover:text-emerald-400 transition-colors'" />
-          <span>海龟汤</span>
-        </button>
-        <button
-          @click="newStoryLive"
-          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-300 group active:scale-95"
-          :class="route.path === '/story-live'
-            ? 'bg-text-primary text-surface-1 shadow-xl shadow-black/20'
-            : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
-        >
-          <Clapperboard :size="16" stroke-width="3" :class="route.path === '/story-live' ? 'text-surface-1' : 'group-hover:text-pink-400 transition-colors'" />
-          <span>剧情共演</span>
+          <FlaskConical :size="16" stroke-width="3" :class="route.path.startsWith('/lab') ? 'text-surface-1' : 'group-hover:text-orange-400 transition-colors'" />
+          <span>互动实验室</span>
+          <span class="ml-auto text-[8px] font-black bg-accent/20 text-accent px-1.5 py-0.5 rounded-full">New</span>
         </button>
       </div>
 
-      <!-- Divider with Label -->
-      <div class="flex items-center gap-3 px-6 my-6 opacity-30">
+      <div class="flex items-center gap-3 px-6 my-6 opacity-30 shrink-0">
         <div class="h-px flex-1 bg-text-tertiary"></div>
         <span class="text-[9px] font-black uppercase tracking-[0.3em] text-text-tertiary">History</span>
         <div class="h-px flex-1 bg-text-tertiary"></div>
       </div>
 
-      <!-- Session history (The refined timeline) -->
-      <div class="px-3 flex-1 overflow-y-auto no-scrollbar pb-4">
+      <!-- Session history -->
+      <div class="px-3 flex-1 overflow-y-auto no-scrollbar pb-4 min-h-0">
         <div v-if="sessionStore.sortedSessions.length" class="space-y-1.5">
           <button
             v-for="session in sessionStore.sortedSessions"
@@ -319,7 +260,7 @@ function openCommandPalette() {
       </div>
 
       <!-- Bottom Utilities Area -->
-      <div class="px-3 py-3 bg-black/5 dark:bg-white/2 border-t border-white/5 space-y-1">
+      <div class="px-3 py-3 bg-black/5 dark:bg-white/2 border-t border-white/5 space-y-1 shrink-0">
         <button
           @click="openCommandPalette"
           class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-[13px] font-black transition-all duration-150 uppercase tracking-widest
@@ -330,17 +271,7 @@ function openCommandPalette() {
           <kbd class="ml-auto text-[12px] font-black px-1.5 py-0.5 rounded bg-white/5 border border-white/5">⌘K</kbd>
         </button>
         
-        <div class="grid grid-cols-3 gap-1.5">
-          <button
-            @click="router.push('/multi-life')"
-            class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
-            :class="route.path === '/multi-life'
-              ? 'bg-text-primary text-surface-1 shadow-lg'
-              : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'"
-          >
-            <Shield :size="18" stroke-width="3" />
-            <span class="text-[9px] font-black uppercase tracking-widest">多重人生</span>
-          </button>
+        <div class="grid grid-cols-2 gap-1.5">
           <button
             @click="router.push('/models')"
             class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-300 border border-transparent"
@@ -363,7 +294,6 @@ function openCommandPalette() {
           </button>
         </div>
 
-        <!-- System Theme & Platform Footer -->
         <div class="flex items-center justify-between px-2 pt-2 pb-1">
           <div class="flex items-center gap-1">
             <button @click="toggleTheme" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all">
@@ -388,7 +318,6 @@ function openCommandPalette() {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* V3 Industrial Stroke Enforcement */
 :deep(svg) {
   stroke-width: 3px !important;
 }
@@ -396,7 +325,6 @@ function openCommandPalette() {
 :deep(.lucide-plus), :deep(.lucide-plus-circle) {
   stroke-width: 4px !important;
 }
-
 
 @keyframes v3-line-entry {
   from { width: 0; opacity: 0; }

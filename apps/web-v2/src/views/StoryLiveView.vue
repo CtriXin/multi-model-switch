@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { Clapperboard, Heart, RotateCcw, Send, Sparkles, Target, Wand2, Loader2 } from 'lucide-vue-next'
+import { Clapperboard, Heart, RotateCcw, Send, Sparkles, Target, Wand2, Loader2, ArrowLeft } from 'lucide-vue-next'
 import MarkdownIt from 'markdown-it'
 import { useAppStore } from '@/stores/app'
 import { useStoryLiveStore } from '@/stores/storyLive'
@@ -170,36 +170,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-surface-0">
-    <!-- Header: Fixed -->
-    <header
-      class="glass-v3 mx-auto mt-3 flex w-full max-w-6xl shrink-0 items-center justify-between gap-4 rounded-full border border-black/5 bg-white/72 px-4 py-3 shadow-2xl dark:border-white/10 dark:bg-white/[0.04] sm:px-6"
-    >
-      <div class="min-w-0 flex items-center gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent shadow-2xl shadow-accent/20">
-          <Clapperboard :size="16" :stroke-width="3.5" class="text-white" />
-        </div>
-        <div class="min-w-0">
-          <div class="text-[9px] font-black uppercase tracking-[0.32em] text-text-tertiary">Director Co-Play</div>
-          <div class="truncate text-sm font-black tracking-tight text-text-primary sm:text-base">剧情共演</div>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <div v-if="started" class="hidden items-center gap-2 sm:flex">
-          <span class="inline-flex items-center rounded-full bg-accent/10 px-3 py-1 text-[9px] font-black uppercase tracking-[0.24em] text-accent">
-            {{ stageStatus }}
-          </span>
-        </div>
-        <button
-          class="glass-v3 flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-text-secondary transition-all hover:text-text-primary active:scale-90"
-          title="重新开始"
-          @click="restart"
-        >
-          <RotateCcw :size="16" :stroke-width="3.5" />
-        </button>
-      </div>
-    </header>
-
     <!-- Main Content: Flex container -->
     <main class="mx-auto flex w-full max-w-6xl flex-1 overflow-hidden py-3 px-3 sm:px-4 lg:px-6">
       <section class="glass-v3 relative flex w-full flex-1 flex-col overflow-hidden rounded-[32px] border border-black/5 bg-white/70 shadow-2xl dark:border-white/10 dark:bg-white/[0.04] lg:rounded-[40px]">
