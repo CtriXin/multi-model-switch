@@ -1,21 +1,9 @@
 # TODO
 
 ## Urgent + Important
-- [x] `apps/web-v2` Provider 多账户账户池：同一 provider 支持多个账户与默认账户，设置页改为按账户配置 key，真实请求失败时在同 provider 可用账户间自动 fallback。 (source: @user, created: 2026-03-16, completed: 2026-03-16)
-- [x] `apps/web-v2` 真实 API 体验收口：随机按钮改成“换一组”并支持重复重掷、失败模型按错误类型当天临时隐藏、`<think>` 默认隐藏、聊天支持终止并编辑恢复草稿、锦囊团结论支持 markdown 展开查看。 (source: @user, created: 2026-03-16, completed: 2026-03-16)
-- [x] `apps/web-v2` 锦囊团升级为完整“角色委员会”：首屏 Hero + 角色矩阵 + 独立 committee 模型池 + 广播/辩论/委员会三种真实运行模式。(source: @user, created: 2026-03-15, completed: 2026-03-15)
-- [x] 统一 `apps/web-v2` 输入区基线：`ModelChipBar` / `InputBar` / `Advisors` 底部输入区收口到同一条 `max-w-5xl + px-4` 容器，并对齐 textarea 与发送按钮位置。 (source: @user, created: 2026-03-15, completed: 2026-03-15)
-- [x] 修复 `apps/web-v2` 对话页卡片布局：移动端 carousel 切换后不再保留上一张卡片的高度占位；macOS grid 卡片统一固定高度，超长内容改为卡片内滚动。 (source: @user, created: 2026-03-15, completed: 2026-03-15)
-- [x] ~~**[P0]** Summarizer + Judge Tier 1/2：chat 模式所有模型回答完成后自动调用 evaluator，输出 共识/分歧/风险/建议行动。Tier 2 检测冲突度高时加入交叉审查。evaluator 从未参与模型中按 tier 降序选。前端加「决策总结」卡片。~~ (completed: 2026-03-15)
-- [x] ~~**[P0]** Rollup 环节：Discuss 完成后手动触发，由第三方模型综合所有观点生成唯一可落地行动计划。输出 final_plan/key_rationale/tradeoffs/risks/next_steps。支持用户自选 Rollup 模型（高级）。Discuss 结果页下方按钮 + 智能提示。~~ (completed: 2026-03-15)
-- [x] ~~**[P0]** 锦囊团 Phase 1：12 预设角色 + 广播模式 + 立场轴防漂移。~~ (completed: 2026-03-15)
-- [x] ~~**[P0]** 锦囊团 Phase 2：委员会模式（系统级汇总）— 广播输出后自动或手动触发结构化收敛结论 + 各立场贡献标注。~~ (source: @user, created: 2026-03-15, completed: 2026-03-15)
+- [x] 修复 `apps/web-v2` 聊天页单模型选择回归：选中模型后输入框应立即可用，placeholder/空态文案应切到单模型模式，并允许后续轮次继续改模型。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [ ] **[P0]** Context 策略：继续对话时支持三种 context 模式 — ① 中立总结（默认，省 token 且客观）② 仅选中回答 ③ 全量原始回答。前端在输入框上方显示 context chip 可切换，后端拼 prompt 时按 mode 取不同内容。(source: @claude, created: 2026-03-15)
 - [ ] 观察新护栏文档执行后的实际效果，补齐容易被绕开的高风险路径 (source: @codex, created: 2026-03-14)
-- [x] ~~Provider 配置 + API Key 管理 + 真实 API 接入（keychain/api/provider store/chat/discuss 全链路）~~ (completed: 2026-03-15)
-- [x] ~~SettingsView Provider 配置 UI + ModelsView 动态适配~~ (completed: 2026-03-15)
-- [x] ~~Discuss depth 参数 (full/panel/quick) 前端实现~~ (completed: 2026-03-15)
-- [x] ~~增加独立诊断脚本，验证 provider/account 连通性、模型 chat 可用性和 Claude 路径兼容性~~ (source: @codex, created: 2026-03-14, completed: 2026-03-15)
 
 ## Important + Not Urgent
 - [ ] 与另一个 agent 同步共享入口文件：`src/router.ts`、`src/components/layout/Sidebar.vue`、`src/views/SettingsView.vue`、`src/views/SetupGuide.vue`，把“角色委员会”入口命名、setup 串联和首屏文案合并到统一体验。(source: @codex, created: 2026-03-15)
