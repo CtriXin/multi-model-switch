@@ -63,6 +63,18 @@ export const PLAY_MODE_REGISTRY: Record<string, PlayModeDefinition> = {
       supportsAbandon: true,
     },
   },
+  'multi-life': {
+    id: 'multi-life',
+    label: '多重人生',
+    promptNamespace: 'multi-life',
+    historyKinds: ['ml_round', 'summary_snapshot'],
+    endingGrades: ['normal'],
+    lifecycle: {
+      supportsPause: true,
+      supportsResume: true,
+      supportsAbandon: true,
+    },
+  },
 }
 
 export function getPlayModeDefinition(modeId: string) {

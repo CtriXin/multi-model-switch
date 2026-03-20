@@ -12,6 +12,7 @@ const HISTORY_TYPE_LABELS: Record<HistoryEntry['type'], string> = {
   investigation_turn: '调查推进',
   special_event: '关键事件',
   summary_snapshot: '阶段总结',
+  ml_round: '证词轮',
 }
 
 const ENDING_GRADE_LABELS: Record<EndingGrade, string> = {

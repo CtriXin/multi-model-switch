@@ -61,6 +61,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '海龟汤', icon: 'soup' },
   },
   {
+    path: '/multi-life',
+    name: 'multi-life',
+    component: () => import('@/views/MultiLifeView.vue'),
+    meta: { title: '多重人生', icon: 'users' },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),

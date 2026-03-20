@@ -4,6 +4,7 @@ export type PlayModeId =
   | 'story-live'
   | 'turtle-soup'
   | 'case-reconstruction'
+  | 'multi-life'
 
 export type SessionStatus =
   | 'pending'
@@ -18,6 +19,7 @@ export type HistoryEntryType =
   | 'investigation_turn'
   | 'special_event'
   | 'summary_snapshot'
+  | 'ml_round'
 
 export type EndingGrade = 'failure' | 'normal' | 'hidden' | 'optimal'
 
