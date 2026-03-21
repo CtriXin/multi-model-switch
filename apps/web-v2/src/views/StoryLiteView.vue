@@ -159,8 +159,8 @@ onUnmounted(() => {
       <div class="w-full max-w-6xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[48px] shadow-2xl border border-white/10 overflow-hidden relative z-10">
         
         <!-- SETUP PHASE -->
-        <div v-if="!gameStarted" class="flex-1 flex flex-col items-center justify-center px-6 py-8 sm:px-16 sm:py-16">
-          <div class="flex flex-col items-center justify-center h-full max-w-lg mx-auto space-y-8 animate-in zoom-in-95 duration-700">
+        <div v-if="!gameStarted" class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-16 sm:py-16">
+          <div class="flex flex-col items-center justify-center min-h-full max-w-lg mx-auto space-y-8 animate-in zoom-in-95 duration-700">
             <div class="text-center space-y-3">
               <h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">设定命运开场</h2>
               <p class="text-xs text-text-tertiary opacity-60">让三种逻辑模型，把你的"假如"撕裂成不同结局</p>
@@ -168,7 +168,13 @@ onUnmounted(() => {
 
             <div class="w-full space-y-4">
               <div class="relative group">
-                <textarea v-model="seedInput" rows="4" :placeholder="currentPlaceholder" class="w-full rounded-[36px] bg-white dark:bg-white/[0.02] border-2 border-black/5 dark:border-white/10 p-8 text-base leading-relaxed outline-none focus:border-accent/40 shadow-xl transition-all" @keydown.enter.prevent="startGame" />
+                <textarea 
+                  v-model="seedInput" 
+                  rows="5" 
+                  :placeholder="currentPlaceholder" 
+                  class="w-full min-h-[160px] rounded-[36px] bg-white dark:bg-white/[0.02] border-2 border-black/5 dark:border-white/10 p-8 text-base leading-relaxed outline-none focus:border-accent/40 shadow-xl transition-all resize-none" 
+                  @keydown.enter.prevent="startGame" 
+                />
               </div>
               <button @click="startGame" :disabled="processing" class="w-full h-16 rounded-3xl bg-accent text-white font-black uppercase tracking-[0.2em] text-xs active:scale-95 lab-breathing-btn shadow-2xl">开启时空裂痕</button>
             </div>
@@ -240,66 +246,77 @@ onUnmounted(() => {
           </div>
 
           <!-- Phase 2: Choices Panel (Slides Up) -->
-          <div v-else-if="phase === 'choosing'" class="flex flex-col h-full">
+          <div v-else-if="phase === 'choosing'" class="flex flex-col h-full overflow-hidden">
             <!-- Collapsed Story Preview -->
-            <div class="shrink-0 px-6 py-4 sm:px-16 sm:py-6 border-b border-white/10 bg-surface-0/50 backdrop-blur-xl">
+            <div class="shrink-0 px-6 py-3 sm:px-16 sm:py-4 border-b border-white/10 bg-surface-0/50 backdrop-blur-xl">
               <div class="max-w-4xl mx-auto">
-                <div class="flex items-center gap-3 mb-2 opacity-40">
+                <div class="flex items-center gap-2 mb-1 opacity-40">
                   <div class="w-1 h-1 rounded-full bg-text-primary" />
                   <span class="text-[9px] font-black uppercase tracking-[0.2em]">当前情境</span>
                 </div>
-                <p class="text-sm sm:text-base text-text-secondary italic line-clamp-2">
+                <p class="text-xs sm:text-sm text-text-secondary italic line-clamp-2 leading-relaxed">
                   {{ currentScene?.premise }}
                 </p>
               </div>
             </div>
 
             <!-- Choices Area -->
-            <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 sm:px-16 sm:py-8">
-              <div class="max-w-4xl mx-auto space-y-6">
-                <!-- Header -->
-                <div class="flex items-center justify-between">
-                  <h3 class="text-xs font-black text-text-primary uppercase tracking-[0.3em]">命运分叉点 · Fate Fork</h3>
-                  <button @click="phase = 'reading'" class="p-2 rounded-full hover:bg-white/10 text-text-tertiary transition-colors" title="返回阅读">
-                    <X :size="16" stroke-width="3" />
-                  </button>
+            <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 sm:px-16 sm:py-6">
+              <div class="max-w-4xl mx-auto space-y-4 pb-20">
+                <!-- Header with Risk Tags -->
+                <div class="flex items-center justify-between gap-4">
+                  <h3 class="text-xs font-black text-text-primary uppercase tracking-[0.3em] shrink-0">命运分叉点 · Fate Fork</h3>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                      <div class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      <span class="text-[8px] font-black uppercase tracking-widest text-emerald-500">主线</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/20">
+                      <div class="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                      <span class="text-[8px] font-black uppercase tracking-widest text-orange-500">关系</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-rose-500/10 border border-rose-500/20">
+                      <div class="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                      <span class="text-[8px] font-black uppercase tracking-widest text-rose-500">变数</span>
+                    </div>
+                    <button @click="phase = 'reading'" class="ml-2 p-2 rounded-full hover:bg-white/10 text-text-tertiary transition-colors shrink-0" title="返回阅读">
+                      <X :size="16" stroke-width="3" />
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Choice Cards - Vertical Stack -->
-                <div class="space-y-4">
+                <div class="space-y-3">
                   <button v-for="(choice, idx) in currentScene?.choices" :key="choice.id"
                           @click="makeChoice(choice.id)"
-                          class="group w-full text-left p-6 sm:p-8 rounded-[32px] border-2 transition-all duration-500 active:scale-[0.98] hover:-translate-y-1 hover:shadow-2xl relative overflow-hidden"
+                          class="group w-full text-left p-5 sm:p-6 rounded-[28px] border-2 transition-all duration-300 active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-xl relative overflow-hidden"
                           :class="[riskTheme(choice.risk).border, riskTheme(choice.risk).bg, riskTheme(choice.risk).glow]"
-                          :style="{ animationDelay: `${idx * 100}ms` }">
-                    <!-- Risk Indicator -->
-                    <div class="absolute top-6 right-6 sm:top-8 sm:right-8">
-                      <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-0/80 backdrop-blur-sm border border-white/10">
-                        <div class="w-1.5 h-1.5 rounded-full" :class="riskTheme(choice.risk).dot" />
-                        <span class="text-[9px] font-black uppercase tracking-widest" :class="riskTheme(choice.risk).text">{{ riskLabel(choice.risk) }}</span>
+                          :style="{ animationDelay: `${idx * 80}ms` }">
+                    <!-- Top Row: Label + Risk Dot -->
+                    <div class="flex items-start gap-3 mb-2">
+                      <div class="flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                          <div class="w-2 h-2 rounded-full shrink-0" :class="riskTheme(choice.risk).dot" />
+                          <span class="text-[10px] font-black uppercase tracking-widest opacity-60" :class="riskTheme(choice.risk).text">{{ riskLabel(choice.risk) }}</span>
+                        </div>
+                        <h4 class="text-base sm:text-lg font-black text-text-primary leading-snug group-hover:text-accent transition-colors">
+                          {{ choice.label }}
+                        </h4>
                       </div>
-                    </div>
-
-                    <!-- Content -->
-                    <div class="pr-20 sm:pr-24">
-                      <h4 class="text-lg sm:text-xl font-black text-text-primary leading-tight group-hover:text-accent transition-colors mb-3">
-                        {{ choice.label }}
-                      </h4>
-                      <p class="text-xs sm:text-sm text-text-tertiary leading-relaxed opacity-70">
-                        {{ choice.hint }}
-                      </p>
-                    </div>
-
-                    <!-- Arrow -->
-                    <div class="absolute bottom-6 right-6 sm:bottom-8 sm:right-8">
-                      <div class="w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all duration-300 group-hover:bg-accent group-hover:border-accent group-hover:text-white"
+                      <!-- Arrow -->
+                      <div class="w-9 h-9 rounded-full border-2 flex items-center justify-center shrink-0 transition-all duration-200 group-hover:bg-accent group-hover:border-accent group-hover:text-white mt-0.5"
                            :class="[riskTheme(choice.risk).border, riskTheme(choice.risk).text]">
-                        <ArrowRight :size="18" stroke-width="4" class="group-hover:translate-x-0.5 transition-transform" />
+                        <ArrowRight :size="16" stroke-width="4" class="group-hover:translate-x-0.5 transition-transform" />
                       </div>
                     </div>
+
+                    <!-- Hint -->
+                    <p class="text-xs text-text-tertiary leading-relaxed opacity-60 pl-4">
+                      {{ choice.hint }}
+                    </p>
 
                     <!-- Keyboard Hint -->
-                    <div class="absolute bottom-6 left-6 sm:bottom-8 sm:left-8 opacity-0 group-hover:opacity-40 transition-opacity">
+                    <div class="absolute bottom-4 left-5 sm:bottom-5 sm:left-6 opacity-0 group-hover:opacity-40 transition-opacity">
                       <span class="text-[10px] font-black text-text-tertiary">按 {{ idx + 1 }}</span>
                     </div>
                   </button>
