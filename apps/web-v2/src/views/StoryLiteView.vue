@@ -184,10 +184,10 @@ onUnmounted(() => {
         <!-- PLAYING PHASE -->
         <template v-else>
           <!-- Phase 1: Full Screen Reading -->
-          <div v-if="phase === 'reading'" class="flex-1 flex flex-col relative">
+          <div v-if="phase === 'reading'" class="flex-1 flex flex-col min-h-0">
             <!-- Scrollable Content -->
-            <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-16 sm:py-16">
-              <div class="max-w-4xl mx-auto space-y-16 py-8">
+            <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-16 sm:py-16 relative">
+              <div class="max-w-4xl mx-auto space-y-16 pb-24">
                 <!-- Premise -->
                 <div v-if="currentScene?.premise || streamingPremise" class="space-y-6 animate-in fade-in zoom-in-95 duration-700">
                   <div class="flex items-center gap-3 opacity-40">
@@ -222,7 +222,7 @@ onUnmounted(() => {
 
             <!-- Floating Action Button - Make Choice -->
             <div v-if="!processing && currentScene?.choices?.length && !currentScene?.ending" 
-                 class="absolute bottom-0 left-0 right-0 p-6 sm:p-10 flex flex-col items-center gap-4 bg-gradient-to-t from-surface-0 via-surface-0/95 to-transparent">
+                 class="shrink-0 p-4 sm:p-6 flex flex-col items-center gap-3 bg-gradient-to-t from-surface-0 via-surface-0/95 to-transparent border-t border-white/5">
               <button @click="phase = 'choosing'" 
                       class="group relative px-8 py-4 rounded-full bg-accent text-white font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-accent/30 active:scale-95 transition-all duration-300 hover:shadow-accent/50">
                 <span class="flex items-center gap-3">
@@ -237,7 +237,7 @@ onUnmounted(() => {
 
             <!-- Ending Button -->
             <div v-if="!processing && currentScene?.ending" 
-                 class="absolute bottom-0 left-0 right-0 p-6 sm:p-10 flex justify-center bg-gradient-to-t from-surface-0 via-surface-0/95 to-transparent">
+                 class="shrink-0 p-4 sm:p-6 flex justify-center bg-gradient-to-t from-surface-0 via-surface-0/95 to-transparent border-t border-white/5">
               <button @click="phase = 'completed'" 
                       class="px-8 py-4 rounded-full bg-text-primary text-surface-0 font-black uppercase tracking-[0.2em] text-xs shadow-2xl active:scale-95 transition-all">
                 查看结局
