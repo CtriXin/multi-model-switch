@@ -24,6 +24,37 @@ import {
 
 const ROLE_ORDER: StoryLiteV2Role[] = ['guide', 'partner', 'variable']
 const DEMO_MODEL_IDS = ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro']
+const STORAGE_KEY = 'mms-story-lite-v2-session'
+
+interface SavedSession {
+  seedLabel: string
+  round: number
+  sceneHistory: SceneHistoryEntry[]
+  currentScene: StoryLiteV2Scene | null
+  isCompleted: boolean
+  manuallyEnded: boolean
+  timestamp: number
+}
+
+function saveSession(state: SavedSession) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch { /* ignore */ }
+}
+
+function loadSession(): SavedSession | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return null
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch { /* ignore */ }
+}
 
 async function collectText(stream: AsyncGenerator<string>): Promise<string> {
   let text = ''
@@ -483,9 +514,26 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     return currentScene.value
   }
 
-  function init(seed?: string) {
-    const nextSeed = seed?.trim() || '公路异变悬疑'
+  function init(seed?: string, restoredSession?: SavedSession | null) {
+    // If no restored session provided, try to load from localStorage
+    if (!restoredSession) {
+      restoredSession = loadSession()
+    }
 
+    if (restoredSession && Date.now() - restoredSession.timestamp < 24 * 60 * 60 * 1000) {
+      // Restore from saved session (valid for 24 hours)
+      seedLabel.value = restoredSession.seedLabel
+      round.value = restoredSession.round
+      sceneHistory.value = restoredSession.sceneHistory
+      currentScene.value = restoredSession.currentScene
+      manuallyEnded.value = restoredSession.manuallyEnded
+      streamingPremise.value = ''
+      syncModelAssignment()
+      return
+    }
+
+    // New game initialization
+    const nextSeed = seed?.trim() || '公路异变悬疑'
     seedLabel.value = nextSeed
     round.value = 0
     currentScene.value = null
@@ -498,6 +546,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     manuallyEnded.value = false
     streamingPremise.value = ''
     syncModelAssignment()
+    clearSession()
   }
 
   async function startGame() {
@@ -539,6 +588,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       await streamPremise(scene.premise, 25)
     } finally {
       processing.value = false
+      persist()
     }
   }
 
@@ -583,15 +633,32 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     } finally {
       processing.value = false
       activeChoiceLabel.value = ''
+      persist()
     }
   }
 
+  function persist() {
+    if (!isStarted.value) return
+    const state: SavedSession = {
+      seedLabel: seedLabel.value,
+      round: round.value,
+      sceneHistory: sceneHistory.value,
+      currentScene: currentScene.value,
+      isCompleted: isCompleted.value,
+      manuallyEnded: manuallyEnded.value,
+      timestamp: Date.now(),
+    }
+    saveSession(state)
+  }
+
   function restart() {
+    clearSession()
     init(seedLabel.value)
   }
 
   function endStory() {
     manuallyEnded.value = true
+    persist()
   }
 
   return {
@@ -617,6 +684,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     makeChoice,
     restart,
     endStory,
+    persist,
     getModelName,
   }
 })
