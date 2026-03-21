@@ -1,23 +1,36 @@
-import { ref, watchEffect, reactive, watch } from 'vue'
+import { ref, watchEffect, reactive, watch, computed } from 'vue'
 
-type Theme = 'dark' | 'light'
+export type ThemeMode = 'dark' | 'light' | 'auto'
 
-function detectSystemTheme(): Theme {
+function detectSystemTheme(): 'dark' | 'light' {
   if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: light)').matches) {
     return 'light'
   }
   return 'dark'
 }
 
-function getInitialTheme(): Theme {
+function getInitialMode(): ThemeMode {
   if (typeof localStorage !== 'undefined') {
-    const saved = localStorage.getItem('mms-theme') as Theme | null
-    if (saved === 'dark' || saved === 'light') return saved
+    const saved = localStorage.getItem('mms-theme')
+    if (saved === 'dark' || saved === 'light' || saved === 'auto') return saved as ThemeMode
   }
-  return detectSystemTheme()
+  return 'light'
 }
 
-const theme = ref<Theme>(getInitialTheme())
+const themeMode = ref<ThemeMode>(getInitialMode())
+const systemTheme = ref<'dark' | 'light'>(detectSystemTheme())
+
+// Track system theme changes for auto mode
+if (typeof window !== 'undefined') {
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+    systemTheme.value = e.matches ? 'light' : 'dark'
+  })
+}
+
+// Resolved theme: what's actually applied to the DOM
+const theme = computed<'dark' | 'light'>(() =>
+  themeMode.value === 'auto' ? systemTheme.value : themeMode.value
+)
 
 // V3 Cinematic Parameters State
 const defaultV3Config = {
@@ -44,7 +57,6 @@ function getInitialV3Config() {
 
 const v3Config = reactive(getInitialV3Config())
 
-// Sync V3 config to localStorage
 watch(v3Config, (newVal) => {
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem('mms-v3-config', JSON.stringify(newVal))
@@ -52,20 +64,10 @@ watch(v3Config, (newVal) => {
 }, { deep: true })
 
 export function useTheme() {
-  // Listen for system theme changes (only applies if user hasn't manually set)
-  if (typeof window !== 'undefined') {
-    const mq = window.matchMedia('(prefers-color-scheme: light)')
-    mq.addEventListener('change', (e) => {
-      // Only auto-follow if no manual override stored
-      if (!localStorage.getItem('mms-theme')) {
-        theme.value = e.matches ? 'light' : 'dark'
-      }
-    })
-  }
-
   watchEffect(() => {
+    const resolved = theme.value
     const el = document.documentElement
-    if (theme.value === 'light') {
+    if (resolved === 'light') {
       el.classList.add('light')
       el.classList.remove('dark')
     } else {
@@ -73,18 +75,23 @@ export function useTheme() {
       el.classList.remove('light')
     }
 
-    // Sync V3 parameters to CSS variables
     el.style.setProperty('--v3-blur', `${v3Config.blurAmount}px`)
     el.style.setProperty('--v3-saturate', `${v3Config.saturation}%`)
     el.style.setProperty('--v3-border-opacity', `${v3Config.borderOpacity / 100}`)
     el.style.setProperty('--v3-noise', `${v3Config.noiseOpacity / 100}`)
   })
 
-  function toggle() {
-    theme.value = theme.value === 'dark' ? 'light' : 'dark'
-    localStorage.setItem('mms-theme', theme.value)
+  function setThemeMode(mode: ThemeMode) {
+    themeMode.value = mode
+    localStorage.setItem('mms-theme', mode)
   }
 
-  return { theme, toggle, v3Config }
-}
+  // Cycles light → auto → dark → light (for mobile button)
+  function toggle() {
+    const cycle: ThemeMode[] = ['light', 'auto', 'dark']
+    const idx = cycle.indexOf(themeMode.value)
+    setThemeMode(cycle[(idx + 1) % 3])
+  }
 
+  return { theme, themeMode, toggle, setThemeMode, v3Config }
+}
