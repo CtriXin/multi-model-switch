@@ -137,8 +137,10 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
                 {{ assignmentLabel }}
               </div>
             </div>
-            <textarea v-model="userInput" rows="2" class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all" placeholder="接下去演..." @keydown.enter.prevent="continueStory" />
-            <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
+            <div class="relative">
+              <textarea v-model="userInput" rows="2" class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all" placeholder="接下去演..." @keydown.enter.prevent="continueStory" />
+              <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
+            </div>
           </div>
         </div>
       </div>
