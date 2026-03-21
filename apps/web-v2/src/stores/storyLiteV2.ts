@@ -222,6 +222,12 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       let rawText = ''
       for await (const chunk of streamModelChat({
         modelId,
+        traceLabel: `story-lite:${sceneId}:${role}`,
+        traceMeta: {
+          round: sceneRound,
+          seed: seedLabel.value,
+          connectionMode: connectionMode.value,
+        },
         messages: [
           { role: 'system', content: buildStoryLiteV2SystemPrompt(role) },
           {

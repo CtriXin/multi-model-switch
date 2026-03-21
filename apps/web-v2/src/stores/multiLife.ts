@@ -3,6 +3,7 @@ import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
+import { preferLiveAutoModels } from '@/utils/modelSelection'
 import type { PlayModeSessionEnvelope } from '@/features/play-modes/shared'
 import {
   getCase,
@@ -227,8 +228,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
 
   function pickRandomModels() {
     const appStore = useAppStore()
-    const liveOnly = appStore.models.filter((model) => !model.id.startsWith('demo/'))
-    const autoPool = liveOnly.length ? liveOnly : [...appStore.models]
+    const autoPool = preferLiveAutoModels([...appStore.models])
     const all = appStore.preferFree
       ? (autoPool.filter((model) => model.free).length ? autoPool.filter((model) => model.free) : autoPool)
       : autoPool
@@ -382,6 +382,11 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
           const sceneResult = await streamInto(
               streamModelChat({
                 modelId: models.assignment.a,
+                traceLabel: 'multi-life:scene',
+                traceMeta: {
+                  caseId: c.id,
+                  round: nextRound,
+                },
                 messages: [
                   { role: 'system', content: buildSceneSystemPrompt() },
                   { role: 'user', content: buildSceneUserPrompt(c, roundConfig) },
@@ -443,6 +448,11 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             const text = await streamInto(
               streamModelChat({
                 modelId: resp.modelId,
+                traceLabel: `multi-life:role:${role.id}`,
+                traceMeta: {
+                  caseId: c.id,
+                  round: nextRound,
+                },
                 messages: [
                   { role: 'system', content: systemPrompt },
                   { role: 'user', content: userPrompt },
@@ -570,6 +580,11 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
           const text = await streamInto(
             streamModelChat({
               modelId: resp.modelId,
+              traceLabel: `multi-life:challenge:${roleId}`,
+              traceMeta: {
+                caseId: caseData.value.id,
+                round: last.roundNumber,
+              },
               messages: [
                 { role: 'system', content: buildRoleSystemPrompt(role, caseData.value) },
                 { role: 'user', content: challengePrompt },
@@ -640,6 +655,11 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         const text = await collectText(
           streamModelChat({
             modelId,
+            traceLabel: 'multi-life:ending',
+            traceMeta: {
+              caseId: caseData.value.id,
+              rounds: rounds.value.length,
+            },
             messages: [
               { role: 'system', content: buildEndingSystemPrompt() },
               {

@@ -2,6 +2,7 @@ import { streamChat, ApiError, type ChatMessage } from '@/services/api'
 import { getApiKey } from '@/services/keychain'
 import { useAppStore } from '@/stores/app'
 import { useProviderStore, type ProviderAccount, type ProviderConfig } from '@/stores/provider'
+import { createTimingSpan } from '@/utils/timingLogger'
 
 export interface RuntimeCandidate {
   provider: ProviderConfig
@@ -84,13 +85,27 @@ export async function* streamModelChat(options: {
   modelId: string
   messages: ChatMessage[]
   signal?: AbortSignal
+  traceLabel?: string
+  traceMeta?: Record<string, unknown>
 }): AsyncGenerator<string> {
   const providerStore = useProviderStore()
+  const trace = createTimingSpan(options.traceLabel || `runtime:${options.modelId}`, {
+    modelId: options.modelId,
+    ...options.traceMeta,
+  })
   const candidates = await getRuntimeCandidates(options.modelId)
+  trace.mark('candidates_resolved', { candidateCount: candidates.length })
   let lastError: unknown = null
+  let chunkCount = 0
+  let firstChunkSeen = false
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index]
+    trace.mark('attempt_start', {
+      attempt: index + 1,
+      providerId: candidate.provider.id,
+      accountId: candidate.account?.id ?? null,
+    })
 
     try {
       for await (const chunk of streamChat({
@@ -100,12 +115,25 @@ export async function* streamModelChat(options: {
         messages: options.messages,
         signal: options.signal,
       })) {
+        chunkCount += 1
+        if (!firstChunkSeen) {
+          firstChunkSeen = true
+          trace.mark('first_chunk', {
+            attempt: index + 1,
+            providerId: candidate.provider.id,
+          })
+        }
         yield chunk
       }
 
       if (candidate.account) {
         providerStore.markAccountUsed(candidate.account.id)
       }
+      trace.success({
+        attempt: index + 1,
+        providerId: candidate.provider.id,
+        chunkCount,
+      })
       return
     } catch (error) {
       if (isAbortError(error) || options.signal?.aborted) throw error
@@ -116,10 +144,22 @@ export async function* streamModelChat(options: {
       }
 
       if (!shouldRetryWithAnotherAccount(error) || index === candidates.length - 1) {
+        trace.error(error, {
+          attempt: index + 1,
+          providerId: candidate.provider.id,
+          chunkCount,
+        })
         throw error
       }
+
+      trace.mark('retry_next_account', {
+        attempt: index + 1,
+        providerId: candidate.provider.id,
+        chunkCount,
+      })
     }
   }
 
+  trace.error(lastError, { chunkCount })
   throw lastError instanceof Error ? lastError : new Error('请求失败')
 }

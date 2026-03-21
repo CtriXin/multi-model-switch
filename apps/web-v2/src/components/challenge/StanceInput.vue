@@ -6,10 +6,16 @@ import { ref, computed, watch } from 'vue'
 const props = defineProps<{
   topic: TopicCandidate
   defaultRole?: UserDebateRole
+  openingPreview?: {
+    status: 'loading' | 'done' | 'error'
+    text: string
+    modelName: string
+  } | null
 }>()
 const emit = defineEmits<{
   submit: [payload: { role: UserDebateRole; argument: string }]
   back: []
+  roleChange: [role: UserDebateRole]
 }>()
 
 const role = ref<UserDebateRole>(props.defaultRole ?? 'pro')
@@ -18,6 +24,10 @@ const argument = ref('')
 watch(() => props.defaultRole, (nextRole) => {
   role.value = nextRole ?? 'pro'
 }, { immediate: true })
+
+watch(role, (nextRole) => {
+  emit('roleChange', nextRole)
+})
 
 const roleMeta = computed(() => {
   if (role.value === 'pro') return {
@@ -46,8 +56,16 @@ const roleMeaning = computed(() => {
   return '裁判视角：你将旁观双方对垒，并在最后总结。'
 })
 
+const needsOpeningArgument = computed(() => role.value === 'pro')
+const submitLabel = computed(() => needsOpeningArgument.value ? '提交开场观点' : '进入论战现场')
+const helperText = computed(() => {
+  if (role.value === 'pro') return '你的开场发言会作为第一回合直接入场。'
+  if (role.value === 'con') return '正方会先发言。你看到开场后，再进入反驳回合。'
+  return '双方会先走完一轮交锋，你最后再给总结。'
+})
+
 function submit() {
-  if (!argument.value.trim()) return
+  if (needsOpeningArgument.value && !argument.value.trim()) return
   emit('submit', { role: role.value, argument: argument.value.trim() })
 }
 </script>
@@ -97,6 +115,23 @@ function submit() {
         {{ roleMeaning }}
       </div>
     </div>
+    <div class="px-2">
+      <div class="px-4 py-3 rounded-[20px] bg-accent/5 border border-accent/10 text-[11px] font-medium text-text-tertiary">
+        {{ helperText }}
+      </div>
+    </div>
+    <div v-if="role !== 'pro'" class="px-2">
+      <div class="p-4 rounded-[24px] border border-white/10 bg-white/5 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-[10px] font-black uppercase tracking-widest text-accent">正方预铺发言</span>
+          <span v-if="props.openingPreview?.status === 'loading'" class="text-[9px] font-black uppercase tracking-widest text-text-tertiary">预载中...</span>
+          <span v-else-if="props.openingPreview?.status === 'done'" class="text-[9px] text-text-tertiary truncate max-w-[140px]">{{ props.openingPreview.modelName }}</span>
+        </div>
+        <p v-if="props.openingPreview?.text" class="text-[12px] text-text-secondary leading-relaxed whitespace-pre-wrap">{{ props.openingPreview.text }}</p>
+        <p v-else-if="props.openingPreview?.status === 'error'" class="text-[12px] text-amber-500 leading-relaxed">预铺开场失败，进入现场后会实时生成。</p>
+        <p v-else class="text-[12px] text-text-tertiary leading-relaxed">正在提前生成正方的一辩开场，让你进入现场后不必从空白开始等。</p>
+      </div>
+    </div>
 
     <!-- 输入终端 -->
     <div class="flex-1 flex flex-col min-h-0 relative group">
@@ -108,6 +143,7 @@ function submit() {
                text-sm text-text-primary placeholder:text-text-tertiary/30
                focus:outline-none focus:border-green-500/60 focus:ring-4 focus:ring-green-500/5 focus:bg-white/20 dark:focus:bg-black/30 
                transition-all duration-500 resize-none no-scrollbar shadow-sm"
+        :disabled="!needsOpeningArgument"
         @keydown.meta.enter="submit"
       />
       
@@ -127,11 +163,12 @@ function submit() {
         <!-- 右侧动作按钮 -->
         <button
           @click="submit"
-          :disabled="!argument.trim()"
+          :disabled="needsOpeningArgument && !argument.trim()"
           class="pointer-events-auto w-14 h-14 rounded-[22px] transition-all duration-500 shadow-2xl flex items-center justify-center active:scale-90"
-          :class="argument.trim()
+          :class="(!needsOpeningArgument || argument.trim())
             ? 'bg-accent text-white shadow-accent/30 hover:shadow-accent/50 hover:-translate-y-1'
             : 'bg-white/5 text-text-tertiary opacity-20 cursor-not-allowed'"
+          :title="submitLabel"
         >
           <Send :size="24" stroke-width="3.5" />
         </button>

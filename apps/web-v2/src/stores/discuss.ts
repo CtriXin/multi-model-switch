@@ -159,6 +159,7 @@ async function callModel(
   try {
     const stream = streamModelChat({
       modelId,
+      traceLabel: `discuss:call:${modelId}`,
       messages: [{ role: 'user', content: prompt }],
       signal,
     })
@@ -304,6 +305,7 @@ export const useDiscussStore = defineStore('discuss', () => {
       try {
         const stream = streamModelChat({
           modelId,
+          traceLabel: `discuss:fallback:${modelId}`,
           messages,
           signal,
         })

@@ -31,6 +31,14 @@ function goBack() { router.push('/lab') }
 function handleTopicSelect(payload: { topic: TopicCandidate; role: UserDebateRole }) {
   defaultRole.value = payload.role
   store.selectTopic(payload.topic)
+  store.prefetchOpening(payload.topic, payload.role)
+}
+
+function handleRoleChange(role: UserDebateRole) {
+  defaultRole.value = role
+  if (store.selectedTopic) {
+    store.prefetchOpening(store.selectedTopic, role)
+  }
 }
 </script>
 
@@ -67,7 +75,7 @@ function handleTopicSelect(payload: { topic: TopicCandidate; role: UserDebateRol
         <div class="flex-1 flex flex-col overflow-hidden relative">
             <div class="mx-auto w-full max-w-3xl flex-1 flex flex-col overflow-hidden p-6 sm:p-10">
               <TopicPicker v-if="store.phase === 'pick_topic'" :candidates="store.candidates" :categories="store.categories" :loading="store.loading" @select="handleTopicSelect($event)" @refresh="store.refreshTopics()" @dismiss="store.dismissTopic($event)" @update-categories="store.updateCategories($event)" />
-              <StanceInput v-else-if="store.phase === 'pick_stance'" :topic="store.selectedTopic!" :default-role="defaultRole" @submit="store.startDebate($event)" @back="store.phase = 'pick_topic'" />
+              <StanceInput v-else-if="store.phase === 'pick_stance'" :topic="store.selectedTopic!" :default-role="defaultRole" :opening-preview="store.openingPreview" @submit="store.startDebate($event)" @role-change="handleRoleChange($event)" @back="store.phase = 'pick_topic'" />
               <DebateStage v-else-if="store.phase === 'debating'" :topic="store.selectedTopic!" :messages="store.messages" :debating="store.debating" :error="store.error" :user-role="store.userRole" :awaiting-user-input="store.awaitingUserInput" :awaiting-decision="store.awaitingDecision" :current-round="store.currentRound" class="lab-flowing-text" @submit-turn="store.submitUserTurn($event)" @continue="store.continueDebate()" @finish="store.finishDebate()" />
               <ResultCard v-else-if="store.phase === 'result'" :topic="store.selectedTopic" :pro-text="store.proText" :con-text="store.conText" :takeaway="store.takeaway" :snapshot="store.snapshot" :current-card="store.currentCard" :user-stance="store.userStance" :user-reason="store.userReason" :streak="store.streak" :messages="store.messages" @save="store.saveCurrentCard($event)" @retry="store.reset()" @go-history="store.goToHistory()" @go-home="store.reset()" />
               <ChallengeHistory v-else-if="store.phase === 'history'" :cards="store.recentCards" :streak="store.streak" />

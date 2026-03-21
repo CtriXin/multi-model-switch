@@ -124,10 +124,17 @@ export const useCommitteeStore = defineStore('committee', () => {
     return roleAssignments.value.find((item) => item.roleId === roleId)?.modelId || ''
   }
 
-  async function collectStream(modelId: string, systemPrompt: string, userPrompt: string, onChunk?: (chunk: string) => void) {
+  async function collectStream(
+    modelId: string,
+    systemPrompt: string,
+    userPrompt: string,
+    onChunk?: (chunk: string) => void,
+    traceLabel?: string,
+  ) {
     let raw = ''
     for await (const chunk of streamModelChat({
       modelId,
+      traceLabel,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
@@ -160,6 +167,8 @@ export const useCommitteeStore = defineStore('committee', () => {
           modelId,
           buildRolePersonaPrompt(role, { mode: sessionMode.value, prompt: promptText }, pack, preset),
           promptText,
+          undefined,
+          `committee:phase1:${role.id}`,
         )
         const parsed = parseRoleOutput(raw)
         phase1Summaries.value.splice(index, 1, {
@@ -231,6 +240,8 @@ export const useCommitteeStore = defineStore('committee', () => {
             }] : undefined,
           }, pack, preset),
           promptText,
+          undefined,
+          `committee:phase2:${role.id}->${target.id}`,
         )
         const parsed = parseDebateOutput(raw)
         phase2Reviews.value.splice(index, 1, {
@@ -307,6 +318,7 @@ export const useCommitteeStore = defineStore('committee', () => {
         buildSystemModeratorPrompt(promptText, goodSummaries, roles, pack, preset),
         `请基于以上角色观点，生成本轮锦囊团结论。议题：${promptText}${debateSection}`,
         (chunk) => { phase3Content.value += chunk },
+        'committee:phase3:moderator',
       )
       const parsed = parseModeratorOutput(raw, roles, {
         ...fallback,
