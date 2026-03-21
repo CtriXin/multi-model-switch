@@ -153,6 +153,7 @@ function goBack() { router.push('/lab') }
                     <p class="leading-loose">
                       <span :class="getTagColor(q.tags[0])" class="font-black mr-2 uppercase text-sm tracking-wide">{{ TAG_LABELS[q.tags[0]] }}</span>
                       <span v-if="answerBody(q.answer)" class="text-text-primary text-sm whitespace-pre-wrap opacity-80">{{ answerBody(q.answer) }}</span>
+                      <span v-else class="text-text-tertiary text-sm opacity-40 italic">无需补充说明</span>
                     </p>
                   </div>
                 </div>
