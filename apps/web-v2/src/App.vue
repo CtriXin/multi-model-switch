@@ -15,14 +15,16 @@ const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const providerStore = useProviderStore()
-useTheme()
+useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
 
+// --- Robust Dual-End Logic ---
 const platform = ref(Capacitor.getPlatform())
 const windowWidth = ref(window.innerWidth)
-const isSmallScreen = computed(() => windowWidth.value < 1024)
+// Threshold 1024px for Sidebar vs Drawer
+const isMobileLayout = computed(() => windowWidth.value < 1024 || platform.value === 'ios')
 
 provide('platform', platform)
-provide('isSmallScreen', isSmallScreen)
+provide('isSmallScreen', isMobileLayout)
 
 function handleResize() { windowWidth.value = window.innerWidth }
 
@@ -30,7 +32,6 @@ const iosDrawerOpen = ref(false)
 function handleOpenDrawer() { iosDrawerOpen.value = true }
 
 onMounted(async () => {
-  // CRITICAL: Await store initialization before anything else
   await appStore.initialize()
   window.addEventListener('resize', handleResize)
   window.addEventListener('open-drawer', () => { iosDrawerOpen.value = true })
@@ -43,33 +44,33 @@ onMounted(async () => {
 onUnmounted(() => { window.removeEventListener('resize', handleResize) })
 
 const isLabActive = computed(() => {
-  return route.path.startsWith('/lab') || ['/challenge', '/story-lite', '/turtle-soup', '/story-live', '/multi-life'].includes(route.path)
+  return route.path.startsWith('/lab') || ['/challenge', '/turtle-soup', '/story-lite', '/story-live', '/multi-life'].includes(route.path)
 })
 </script>
 
 <template>
-  <!-- Force bg-surface-0 on root to prevent black flickers -->
-  <div class="flex h-screen w-screen overflow-hidden bg-surface-0 font-sans text-text-primary selection:bg-accent/30 selection:text-text-primary transition-colors duration-300">
+  <!-- Base: Force bg-surface-0 to prevent black flickering -->
+  <div class="flex h-screen w-screen overflow-hidden bg-surface-0 font-sans text-text-primary selection:bg-accent/30 transition-colors duration-300">
     
-    <!-- Sidebar -->
-    <Sidebar v-if="!isSmallScreen" :collapsed="appStore.sidebarCollapsed" @collapse="appStore.toggleSidebar" @expand="appStore.toggleSidebar" />
+    <!-- Sidebar: Only on wide screens -->
+    <Sidebar v-if="!isMobileLayout" :collapsed="appStore.sidebarCollapsed" @collapse="appStore.toggleSidebar" @expand="appStore.toggleSidebar" />
 
-    <!-- Main Content: Ensure bg-surface-0 is always here -->
+    <!-- Main Content: Always flexible and clear -->
     <main :class="['flex-1 flex flex-col min-w-0 relative z-10 overflow-x-hidden bg-surface-0', platform === 'ios' ? 'safe-top safe-bottom' : '']">
       <router-view v-slot="{ Component }">
-        <component :is="Component" v-if="Component" />
+        <component :is="Component" :key="route.fullPath" />
       </router-view>
     </main>
 
-    <!-- MOBILE DRAWER -->
+    <!-- UNIFIED MOBILE DRAWER -->
     <Transition name="drawer">
-      <div v-if="iosDrawerOpen" class="fixed inset-0 z-[100] flex flex-col bg-surface-0 transition-colors duration-300">
+      <div v-if="iosDrawerOpen" class="fixed inset-0 z-[100] flex flex-col bg-surface-0">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5">
           <div class="flex items-center gap-2">
             <Sparkles :size="20" stroke-width="3.5" class="text-accent" />
             <span class="font-black tracking-tight uppercase">SparkRing</span>
           </div>
-          <button @click="iosDrawerOpen = false" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-all">
+          <button @click="iosDrawerOpen = false" class="p-2 rounded-full hover:bg-black/5 transition-all">
             <X :size="20" stroke-width="3.5" />
           </button>
         </div>
@@ -81,13 +82,13 @@ const isLabActive = computed(() => {
             { path: '/advisors', icon: Users, label: '锦囊参谋' },
             { path: '/lab', icon: FlaskConical, label: '互动实验室' }
           ]" :key="link.path">
-            <button @click="router.push(link.path); iosDrawerOpen = false" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl transition-all active:scale-95" :class="(link.path === '/lab' ? isLabActive : route.path === link.path) ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-transparent text-text-primary hover:bg-black/5 dark:hover:bg-white/5'">
+            <button @click="router.push(link.path); iosDrawerOpen = false" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl transition-all active:scale-95" :class="(link.path === '/lab' ? isLabActive : route.path === link.path) ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-transparent text-text-primary hover:bg-black/5'">
               <component :is="link.icon" :size="20" stroke-width="3.5" />
               <span class="font-black text-sm uppercase tracking-widest">{{ link.label }}</span>
             </button>
           </template>
         </div>
-        <div class="p-6 border-t border-black/5 dark:border-white/5 grid grid-cols-2 gap-3">
+        <div class="p-6 border-t border-black/5 grid grid-cols-2 gap-3">
           <button @click="router.push('/models'); iosDrawerOpen = false" class="flex flex-col items-center gap-2 p-4 rounded-3xl bg-white/5 border border-white/5 active:scale-95 transition-all">
             <Package :size="20" stroke-width="3" /><span class="text-[10px] font-black uppercase tracking-widest">模型管理</span>
           </button>
@@ -98,7 +99,7 @@ const isLabActive = computed(() => {
       </div>
     </Transition>
 
-    <IOSModelSheet :open="false" />
+    <IOSModelSheet />
     <ToastContainer />
     <CommandPalette />
   </div>

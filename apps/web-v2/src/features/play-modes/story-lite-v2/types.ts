@@ -94,6 +94,24 @@ export interface StoryLiteV2PromptContext {
   modelAssignment: Record<StoryLiteV2Role, string>
 }
 
+/** 导演 AI 生成的场景结构（JSON 解析后） */
+export interface DirectorSceneOutput {
+  premise: string
+  choices: Array<{
+    id: string
+    label: string
+    risk: StoryLiteV2RiskLevel
+    hint?: string
+  }>
+}
+
+/** 导演 AI 的上下文积累条目 */
+export interface SceneHistoryEntry {
+  round: number
+  premise: string
+  choiceLabel?: string
+}
+
 /** 角色定义常量 */
 export const STORY_LITE_V2_ROLES: Record<StoryLiteV2Role, StoryLiteV2RoleMeta> = {
   guide: {

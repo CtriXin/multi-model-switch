@@ -22,12 +22,16 @@ const { theme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
 
-const currentMode = ref<'none' | 'demo' | 'full'>('none')
+function resolveInitialMode(): 'none' | 'demo' | 'full' {
+  const savedMode = getExperienceMode()
+  if (savedMode === 'demo') return 'demo'
+  if (savedMode === 'byok') return 'full'
+  return 'none'
+}
+
+const currentMode = ref<'none' | 'demo' | 'full'>(resolveInitialMode())
 
 onMounted(() => {
-  const savedMode = getExperienceMode()
-  if (savedMode === 'demo') currentMode.value = 'demo'
-  else if (savedMode === 'byok') currentMode.value = 'full'
   providerStore.refreshKeyStatus()
 })
 
@@ -69,7 +73,7 @@ const coreTiles = [
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-10">
         
-        <transition name="fade-slide" mode="out-in">
+        
           <!-- Selection Phase -->
           <section v-if="currentMode === 'none'" class="py-10 space-y-10">
             <div class="text-center space-y-4">
@@ -122,7 +126,7 @@ const coreTiles = [
               <p class="text-[10px] text-text-tertiary leading-relaxed">进入“互动实验室”探索全新模式。切换模式请前往设置。</p>
             </div>
           </section>
-        </transition>
+        
 
       </div>
     </div>
@@ -131,8 +135,5 @@ const coreTiles = [
 
 <style scoped>
 :deep(svg) { stroke-width: 3.5px !important; }
-.fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.4s cubic-bezier(0.32, 0.72, 0, 1); }
-.fade-slide-enter-from { opacity: 0; transform: translateY(10px); }
-.fade-slide-leave-to { opacity: 0; transform: translateY(-10px); }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 </style>

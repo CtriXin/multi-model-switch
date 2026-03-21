@@ -86,8 +86,8 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
       </header>
     </div>
 
-    <main class="flex-1 relative overflow-hidden flex flex-col p-3 sm:p-4 lg:p-6">
-      <div class="w-full max-w-6xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[40px] shadow-2xl border border-white/10 overflow-hidden relative">
+    <main class="flex-1 relative overflow-hidden flex flex-col px-3 sm:px-6 pb-3 sm:pb-6">
+      <div class="w-full max-w-6xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[48px] shadow-2xl border border-white/10 overflow-hidden bg-white/95 dark:bg-white/[0.03] relative">
         
         <div ref="transcriptRef" class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 space-y-8">
           <!-- Setup Phase -->

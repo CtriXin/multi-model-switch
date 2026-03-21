@@ -121,7 +121,7 @@ function handleGenerateEnding() {
     <main class="flex-1 relative overflow-hidden flex flex-col p-3 sm:p-4 lg:p-6">
       <div class="w-full max-w-5xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[40px] shadow-2xl border border-white/10 overflow-hidden bg-white/95 dark:bg-white/[0.03] relative z-10">
         
-        <transition name="ios-swap" mode="out-in">
+        
           <div :key="phase" class="flex-1 flex flex-col overflow-hidden relative">
 
             <!-- Phase: Selection -->
@@ -242,7 +242,7 @@ function handleGenerateEnding() {
             </div>
 
           </div>
-        </transition>
+        
       </div>
     </main>
   </div>

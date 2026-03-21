@@ -17,6 +17,7 @@ const isSmallScreen = inject<import('vue').Ref<boolean>>('isSmallScreen', ref(fa
 
 const {
   currentScene, round, processing, error, useMock, modelAssignment, isCompleted, isStarted,
+  manuallyEnded, streamingPremise,
 } = storeToRefs(storyStore)
 
 const seedInput = ref('')
@@ -42,6 +43,14 @@ function cyclePlaceholder() {
 }
 
 const resultCard = computed(() => {
+  if (manuallyEnded.value && currentScene.value) {
+    return {
+      title: '假如暂停',
+      grade: 'normal' as EndingGrade,
+      summary: `你经历了 ${round.value} 轮命运抉择。最后一幕：${currentScene.value.premise}`,
+      highlights: [],
+    }
+  }
   const ending = currentScene.value?.ending
   if (!ending) return null
   return {
@@ -69,6 +78,7 @@ async function startGame() {
 }
 async function makeChoice(choiceId: string) { await storyStore.makeChoice(choiceId) }
 function restartGame() { storyStore.restart(); seedInput.value = '' }
+function endStory() { storyStore.endStory() }
 function goBack() { router.push('/lab') }
 
 onMounted(() => { storyStore.init(seedInput.value); cyclePlaceholder() })
@@ -117,9 +127,9 @@ onUnmounted(() => { if (placeholderTimer) clearInterval(placeholderTimer) })
           <!-- Playing Phase -->
           <template v-else>
             <div class="max-w-4xl mx-auto space-y-16">
-              <div v-if="currentScene?.premise" class="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <div v-if="currentScene?.premise || streamingPremise" class="space-y-4">
                 <div class="flex items-center gap-3 opacity-40"><div class="w-1 h-1 rounded-full bg-text-primary" /><span class="text-[10px] font-black uppercase tracking-[0.2em]">剧本脉络</span></div>
-                <p class="text-xl sm:text-2xl leading-relaxed text-text-primary italic font-medium lab-flowing-text whitespace-pre-wrap">{{ currentScene.premise }}</p>
+                <p class="text-xl sm:text-2xl leading-relaxed text-text-primary italic font-medium whitespace-pre-wrap">{{ streamingPremise || currentScene?.premise }}</p>
               </div>
 
               <div v-if="currentScene?.responses?.length" class="space-y-12">
@@ -141,13 +151,13 @@ onUnmounted(() => { if (placeholderTimer) clearInterval(placeholderTimer) })
         </div>
 
         <!-- FATE CONTROLLER -->
-        <transition name="deck-slide">
+        
           <div v-if="gameStarted && !processing" class="shrink-0 relative z-20 border-t border-black/5 dark:border-white/10 bg-white/95 dark:bg-[#0d0f14]/95 backdrop-blur-3xl shadow-[0_-20px_50px_rgba(0,0,0,0.15)]">
             
             <!-- Result State -->
             <div v-if="isCompleted && resultCard" class="p-8 max-w-4xl mx-auto animate-in zoom-in-95 duration-700 text-center">
               <div class="p-10 rounded-[48px] bg-accent/5 border border-accent/20 shadow-inner mb-6">
-                <div class="text-[10px] font-black uppercase tracking-widest text-accent mb-4">结局已解锁</div>
+                <div class="text-[10px] font-black uppercase tracking-widest text-accent mb-4">假如暂歇</div>
                 <h4 class="text-3xl font-black text-text-primary uppercase tracking-tight">{{ resultCard.title }}</h4>
                 <p class="mt-6 text-base text-text-secondary leading-loose">{{ resultCard.summary }}</p>
               </div>
@@ -211,8 +221,15 @@ onUnmounted(() => { if (placeholderTimer) clearInterval(placeholderTimer) })
               </div>
 
             </template>
+
+            <!-- END STORY BUTTON -->
+            <div v-if="!isCompleted" class="flex justify-center pb-4">
+              <button @click="endStory" class="px-4 py-1.5 rounded-full text-[8px] font-black uppercase tracking-widest text-text-quaternary opacity-30 hover:opacity-60 transition-opacity border border-black/5 dark:border-white/5">
+                结束这场假如
+              </button>
+            </div>
           </div>
-        </transition>
+        
 
       </div>
     </main>
@@ -223,8 +240,6 @@ onUnmounted(() => { if (placeholderTimer) clearInterval(placeholderTimer) })
 :deep(svg) { stroke-width: 3.5px !important; }
 
 /* Deck Slide Animation */
-.deck-slide-enter-active { transition: all 0.8s cubic-bezier(0.32, 0.72, 0, 1); }
-.deck-slide-enter-from { transform: translateY(100%); }
 
 .lab-flowing-text { animation: flowingText 0.8s cubic-bezier(0.215, 0.61, 0.355, 1) forwards; }
 @keyframes flowingText { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
