@@ -6,7 +6,7 @@ import { sanitizeModelOutput } from '@/utils/modelOutput'
 import {
   STORY_LITE_V2_ROLES,
   STORY_LITE_V2_BRANCHES,
-  STORY_LITE_V2_MOCK_SCENES,
+  buildStoryLiteV2SeededScene,
   buildStoryLiteV2SystemPrompt,
   buildStoryLiteV2UserPrompt,
   type StoryLiteV2ConnectionMode,
@@ -62,12 +62,12 @@ function shouldFallbackToMock(text: string) {
   ].some((marker) => normalized.includes(marker))
 }
 
-async function collectText(stream: AsyncGenerator<string>) {
-  let text = ''
-  for await (const chunk of stream) {
-    text += chunk
-  }
-  return text.trim()
+function createRoleState(status: 'idle' | 'loading' | 'done' = 'idle') {
+  return {
+    guide: status,
+    partner: status,
+    variable: status,
+  } satisfies Record<StoryLiteV2Role, 'idle' | 'loading' | 'done'>
 }
 
 export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
@@ -81,10 +81,16 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   const useMock = ref(false)
   const modelAssignment = ref<Record<StoryLiteV2Role, string> | null>(null)
   const connectionMode = ref<StoryLiteV2ConnectionMode>('demo')
+  const activeChoiceLabel = ref('')
+  const responseStates = ref(createRoleState())
+  const requestNonce = ref(0)
 
   const isCompleted = computed(() => currentScene.value?.ending != null)
   const isStarted = computed(() => round.value > 0 || currentScene.value != null)
   const usesLiveModels = computed(() => connectionMode.value !== 'demo')
+  const readyResponseCount = computed(() =>
+    Object.values(responseStates.value).filter((status) => status === 'done').length,
+  )
 
   function getModelName(modelId: string) {
     if (modelId.startsWith('mock-')) return '模拟角色'
@@ -122,6 +128,29 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     modelAssignment.value = assignRoles(resolvedIds)
   }
 
+  function resetResponseState(status: 'idle' | 'loading' | 'done' = 'idle') {
+    responseStates.value = createRoleState(status)
+  }
+
+  function setResponseState(role: StoryLiteV2Role, status: 'idle' | 'loading' | 'done') {
+    responseStates.value = {
+      ...responseStates.value,
+      [role]: status,
+    }
+  }
+
+  function updateSceneResponse(role: StoryLiteV2Role, patch: Partial<StoryLiteV2Response>) {
+    const scene = currentScene.value
+    if (!scene) return
+    const nextResponses = scene.responses.map((response) =>
+      response.role === role ? { ...response, ...patch } : response,
+    )
+    currentScene.value = {
+      ...scene,
+      responses: nextResponses,
+    }
+  }
+
   function buildFallbackResponse(role: StoryLiteV2Role, scene: StoryLiteV2Scene): StoryLiteV2Response {
     const assignment = modelAssignment.value
     const fallback = scene.responses.find((item) => item.role === role)
@@ -138,7 +167,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
   function buildSceneFromMock(sceneId: string) {
     const assignment = modelAssignment.value
-    const template = STORY_LITE_V2_MOCK_SCENES[sceneId] || STORY_LITE_V2_MOCK_SCENES.start
+    const template = buildStoryLiteV2SeededScene(seedLabel.value, sceneId)
 
     return {
       ...template,
@@ -153,6 +182,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
               modelName: getModelName(modelId),
               text: fallback?.text || `${STORY_LITE_V2_ROLES[role].label}正在观察局势。`,
               tone: fallback?.tone,
+              status: 'done',
             }
           })
         : [],
@@ -161,59 +191,110 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     } satisfies StoryLiteV2Scene
   }
 
-  async function callModel(modelId: string, systemPrompt: string, userPrompt: string) {
-    return collectText(streamModelChat({
-      modelId,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    }))
-  }
-
-  async function buildLiveScene(sceneId: string, lastChoice?: StoryLiteV2Choice) {
+  function buildPendingScene(sceneId: string) {
     const baseScene = buildSceneFromMock(sceneId)
     const assignment = modelAssignment.value
     if (!assignment || baseScene.responses.length === 0) return baseScene
 
-    const responses: StoryLiteV2Response[] = []
-    for (const role of ROLE_ORDER) {
-      const fallback = buildFallbackResponse(role, baseScene)
-      const modelId = assignment[role]
-
-      try {
-        const rawText = await callModel(
-          modelId,
-          buildStoryLiteV2SystemPrompt(role),
-          buildStoryLiteV2UserPrompt(
-            seedLabel.value,
-            round.value + 1,
-            baseScene.premise,
-            lastChoice
-              ? {
-                  role: lastChoice.targetRole ? STORY_LITE_V2_ROLES[lastChoice.targetRole].label : '当前局面',
-                  label: lastChoice.label,
-                }
-              : undefined,
-          ),
-        )
-
-        const content = sanitizeModelOutput(rawText).content.trim()
-        responses.push({
-          ...fallback,
-          modelId,
-          modelName: getModelName(modelId),
-          text: shouldFallbackToMock(content) ? fallback.text : content,
-        })
-      } catch {
-        responses.push(fallback)
-      }
-    }
-
     return {
       ...baseScene,
-      responses,
+      responses: ROLE_ORDER.map((role) => ({
+        ...buildFallbackResponse(role, baseScene),
+        text: '',
+        status: 'pending',
+      })),
+      choices: [],
     } satisfies StoryLiteV2Scene
+  }
+
+  async function streamRoleResponse(sceneId: string, role: StoryLiteV2Role, sceneRound: number, requestId: number, lastChoice?: StoryLiteV2Choice) {
+    const assignment = modelAssignment.value
+    const baseScene = buildSceneFromMock(sceneId)
+    if (!assignment) return
+
+    const fallback = buildFallbackResponse(role, baseScene)
+    const modelId = assignment[role]
+
+    setResponseState(role, 'loading')
+    updateSceneResponse(role, { status: 'streaming' })
+
+    try {
+      let rawText = ''
+      for await (const chunk of streamModelChat({
+        modelId,
+        messages: [
+          { role: 'system', content: buildStoryLiteV2SystemPrompt(role) },
+          {
+            role: 'user',
+            content: buildStoryLiteV2UserPrompt(
+              seedLabel.value,
+              sceneRound,
+              baseScene.premise,
+              lastChoice
+                ? {
+                    role: lastChoice.targetRole ? STORY_LITE_V2_ROLES[lastChoice.targetRole].label : '当前局面',
+                    label: lastChoice.label,
+                  }
+                : undefined,
+            ),
+          },
+        ],
+      })) {
+        if (requestNonce.value !== requestId) return
+
+        rawText += chunk
+        const cleaned = sanitizeModelOutput(rawText).content.trim()
+        if (cleaned && !shouldFallbackToMock(cleaned)) {
+          updateSceneResponse(role, {
+            text: cleaned,
+            status: 'streaming',
+          })
+        }
+      }
+
+      if (requestNonce.value !== requestId) return
+
+      const finalContent = sanitizeModelOutput(rawText).content.trim()
+      updateSceneResponse(role, {
+        text: finalContent && !shouldFallbackToMock(finalContent) ? finalContent : fallback.text,
+        status: 'done',
+      })
+    } catch {
+      if (requestNonce.value !== requestId) return
+      updateSceneResponse(role, {
+        ...fallback,
+        status: 'error',
+      })
+    } finally {
+      if (requestNonce.value === requestId) {
+        setResponseState(role, 'done')
+      }
+    }
+  }
+
+  async function buildLiveScene(sceneId: string, sceneRound: number, lastChoice?: StoryLiteV2Choice) {
+    const baseScene = buildSceneFromMock(sceneId)
+    const assignment = modelAssignment.value
+    if (!assignment || baseScene.responses.length === 0) return baseScene
+
+    const requestId = requestNonce.value + 1
+    requestNonce.value = requestId
+    currentScene.value = buildPendingScene(sceneId)
+    resetResponseState('loading')
+
+    await Promise.allSettled(
+      ROLE_ORDER.map((role) => streamRoleResponse(sceneId, role, sceneRound, requestId, lastChoice)),
+    )
+
+    if (requestNonce.value !== requestId || !currentScene.value) return baseScene
+
+    currentScene.value = {
+      ...currentScene.value,
+      choices: baseScene.choices.map((choice) => ({ ...choice })),
+      ending: baseScene.ending ? { ...baseScene.ending } : undefined,
+    }
+
+    return currentScene.value
   }
 
   function init(seed?: string) {
@@ -224,6 +305,9 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     currentScene.value = null
     processing.value = false
     error.value = ''
+    activeChoiceLabel.value = ''
+    requestNonce.value += 1
+    resetResponseState()
     syncModelAssignment()
   }
 
@@ -240,16 +324,23 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
     processing.value = true
     error.value = ''
+    activeChoiceLabel.value = ''
 
     try {
-      currentScene.value = useMock.value
-        ? buildSceneFromMock('start')
-        : await buildLiveScene('start')
-      round.value = 1
+      const nextRound = 1
+      round.value = nextRound
+
+      if (useMock.value) {
+        currentScene.value = buildSceneFromMock('start')
+        resetResponseState('done')
+      } else {
+        currentScene.value = await buildLiveScene('start', nextRound)
+      }
     } catch (e: any) {
       error.value = e?.message || '生成场景失败'
       currentScene.value = buildSceneFromMock('start')
       round.value = 1
+      resetResponseState('done')
     } finally {
       processing.value = false
     }
@@ -263,19 +354,27 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
     processing.value = true
     error.value = ''
+    activeChoiceLabel.value = choice.label
 
     try {
       const nextSceneId = STORY_LITE_V2_BRANCHES[currentScene.value.id]?.[choiceId] || 'ending-normal'
-      currentScene.value = useMock.value
-        ? buildSceneFromMock(nextSceneId)
-        : await buildLiveScene(nextSceneId, choice)
-      round.value += 1
+      const nextRound = round.value + 1
+      round.value = nextRound
+
+      if (useMock.value) {
+        currentScene.value = buildSceneFromMock(nextSceneId)
+        resetResponseState('done')
+      } else {
+        currentScene.value = await buildLiveScene(nextSceneId, nextRound, choice)
+      }
     } catch (e: any) {
       error.value = e?.message || '推进剧情失败'
       currentScene.value = buildSceneFromMock('ending-normal')
       round.value += 1
+      resetResponseState('done')
     } finally {
       processing.value = false
+      activeChoiceLabel.value = ''
     }
   }
 
@@ -292,9 +391,12 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     useMock,
     modelAssignment,
     connectionMode,
+    activeChoiceLabel,
+    responseStates,
     isCompleted,
     isStarted,
     usesLiveModels,
+    readyResponseCount,
     init,
     startGame,
     makeChoice,

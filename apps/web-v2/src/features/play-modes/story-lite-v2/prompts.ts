@@ -1,4 +1,10 @@
-import { STORY_LITE_V2_ROLES, type StoryLiteV2Role } from './types'
+import {
+  STORY_LITE_V2_ROLES,
+  type StoryLiteV2Choice,
+  type StoryLiteV2Response,
+  type StoryLiteV2Role,
+  type StoryLiteV2Scene,
+} from './types'
 
 /**
  * 构建每个 AI 角色的 prompt
@@ -36,10 +42,267 @@ ${context}
 - 不要和其他角色说同一种话`
 }
 
+function normalizeSeedLabel(seedLabel: string) {
+  const trimmed = seedLabel.trim().replace(/\s+/g, ' ')
+  const withoutTrailingDots = trimmed.replace(/[.。!！?？~～…]+$/gu, '')
+  return withoutTrailingDots || '你突然被抛进一场高压两难'
+}
+
+function formatSeedHook(seedLabel: string) {
+  const normalized = normalizeSeedLabel(seedLabel)
+  if (/^(假如|如果|当|设想)/.test(normalized)) return normalized
+  return `假如${normalized}`
+}
+
+function buildSeededResponses(
+  entries: Array<{ role: StoryLiteV2Role; modelName: string; text: string; tone: string }>,
+): StoryLiteV2Response[] {
+  return entries.map((entry, index) => ({
+    ...entry,
+    modelId: `mock-${index + 1}`,
+  }))
+}
+
+function buildSeededChoices(sceneId: string): StoryLiteV2Choice[] {
+  if (sceneId === 'start') {
+    return [
+      {
+        id: 'secure-shield',
+        label: '先稳住主线，别让局面继续失控',
+        targetRole: 'guide',
+        risk: 'safe',
+        hint: '先止损，但你得接受关系代价会被继续拖欠',
+      },
+      {
+        id: 'save-mother',
+        label: '先保住最重要的人或关系',
+        targetRole: 'partner',
+        risk: 'risky',
+        hint: '你先接住人心，但主线窗口会因此继续缩短',
+      },
+      {
+        id: 'trace-signal',
+        label: '先追查题面里最不合理的异常',
+        targetRole: 'variable',
+        risk: 'dangerous',
+        hint: '也许能撕开第三条路，也可能两边一起加速恶化',
+      },
+    ]
+  }
+
+  if (sceneId === 'secure-shield') {
+    return [
+      {
+        id: 'reroute-shield',
+        label: '继续把主线推进到底，先把盘面彻底稳住',
+        targetRole: 'guide',
+        risk: 'safe',
+        hint: '大局最先被保住，但你可能亲手放大关系裂痕',
+      },
+      {
+        id: 'call-mother',
+        label: '抽身处理关系代价，别让最重要的人先掉队',
+        targetRole: 'partner',
+        risk: 'risky',
+        hint: '你会补回人的那一边，但主线代价会马上来讨债',
+      },
+      {
+        id: 'open-maintenance-path',
+        label: '掉头追异常点，赌题面之外还有出口',
+        targetRole: 'variable',
+        risk: 'dangerous',
+        hint: '有机会改写二选一，也可能让局面彻底失控',
+      },
+    ]
+  }
+
+  if (sceneId === 'save-mother') {
+    return [
+      {
+        id: 'borrow-substation',
+        label: '回头补主线，争取把失去的时间抢回来',
+        targetRole: 'guide',
+        risk: 'risky',
+        hint: '你会重新接盘，但眼前的人和关系又得被暂时放下',
+      },
+      {
+        id: 'extract-now',
+        label: '继续把关系放在第一位，不再追加代价',
+        targetRole: 'partner',
+        risk: 'safe',
+        hint: '你守住最重要的人，但系统层面的损耗会被坐实',
+      },
+      {
+        id: 'follow-red-led',
+        label: '顺着异常继续往下查，看看谁在设计这一切',
+        targetRole: 'variable',
+        risk: 'risky',
+        hint: '也许能看见幕后规则，也可能把现在仅有的安全感一起掀翻',
+      },
+    ]
+  }
+
+  if (sceneId === 'trace-signal') {
+    return [
+      {
+        id: 'decode-route',
+        label: '继续深挖异常，赌第三条路真的存在',
+        targetRole: 'variable',
+        risk: 'dangerous',
+        hint: '最接近跳出题面，但也最可能一脚踩空',
+      },
+      {
+        id: 'return-mainline',
+        label: '带着新线索回主线，把局面重新接住',
+        targetRole: 'guide',
+        risk: 'safe',
+        hint: '你回到可控路径，但已经被异常拖走了不少时间',
+      },
+      {
+        id: 'keep-mother-awake',
+        label: '先确认最重要的人或关系还来不来得及守住',
+        targetRole: 'partner',
+        risk: 'risky',
+        hint: '你会先照顾人的那一边，也可能因此错过唯一出口',
+      },
+    ]
+  }
+
+  return []
+}
+
+export function buildStoryLiteV2SeededScene(seedLabel: string, sceneId: string): StoryLiteV2Scene {
+  const hook = formatSeedHook(seedLabel)
+
+  if (sceneId === 'secure-shield') {
+    return {
+      id: 'secure-shield',
+      chapter: '第 2 幕',
+      title: '主线加压',
+      premise: `你决定先沿主线推进「${hook}」。表面局势暂时被按住了，但你最在乎的人或关系开始掉队，而那个异常点也没有消失，反而像是在提醒你：题面根本不是完整的。`,
+      responses: buildSeededResponses([
+        { role: 'guide', modelName: 'Claude', text: '别松手。你既然先押主线，就要把最直接的失控点彻底压住。', tone: '推进' },
+        { role: 'partner', modelName: 'GPT-4', text: '你现在稳住的是盘面，不是人心。真正会在事后留下裂痕的部分，已经开始发生了。', tone: '提醒' },
+        { role: 'variable', modelName: 'Gemini', text: '最奇怪的是，异常点并没有因为你押主线就退场，它像是在故意等你回头看它。', tone: '逼近' },
+      ]),
+      choices: buildSeededChoices(sceneId),
+    }
+  }
+
+  if (sceneId === 'save-mother') {
+    return {
+      id: 'save-mother',
+      chapter: '第 2 幕',
+      title: '关系优先',
+      premise: `你先选择守住关系线「${hook}」。你在乎的人、承诺或底线暂时被接住了，但主线压力迅速上涨，那个异常细节也越来越像有人故意把你引到这里。`,
+      responses: buildSeededResponses([
+        { role: 'guide', modelName: 'Claude', text: '你先救了人的这一边，现在得立刻想办法把主线损耗追回来。', tone: '补救' },
+        { role: 'partner', modelName: 'GPT-4', text: '至少这一刻，你没有把最重要的人丢给“等事情忙完再说”。这不是小事。', tone: '撑住' },
+        { role: 'variable', modelName: 'Gemini', text: '异常像是专门配合你的选择被点亮的。它不是背景噪音，更像有人在引导你站队。', tone: '引导' },
+      ]),
+      choices: buildSeededChoices(sceneId),
+    }
+  }
+
+  if (sceneId === 'trace-signal') {
+    return {
+      id: 'trace-signal',
+      chapter: '第 2 幕',
+      title: '题面裂开',
+      premise: `你先追向异常线「${hook}」。表面的二选一被你撕开了一道口子，但主线窗口还在收缩，关系代价也没有因为你看见更多真相就自动消失。`,
+      responses: buildSeededResponses([
+        { role: 'guide', modelName: 'Claude', text: '真相重要，但它不能代替止损。你必须尽快决定这些新线索该服务哪条主线。', tone: '收束' },
+        { role: 'partner', modelName: 'GPT-4', text: '你在追真相的时候，别忘了真正会疼的人和关系还留在现实那一边。', tone: '牵引' },
+        { role: 'variable', modelName: 'Gemini', text: '异常线已经回应你了。问题不是“有没有第三条路”，而是你敢不敢继续赌。', tone: '诱发' },
+      ]),
+      choices: buildSeededChoices(sceneId),
+    }
+  }
+
+  if (sceneId === 'ending-good') {
+    return {
+      id: 'ending-good',
+      chapter: '终章',
+      title: '第三答案',
+      premise: `在「${hook}」这道设定里，你没有完全接受别人递给你的二选一，而是硬生生拧出了第三个答案。真正被你保住的，不只是结果，还有你拒绝被题面牵着走的那部分自己。`,
+      responses: [],
+      choices: [],
+      ending: {
+        kind: 'good',
+        title: '第三答案',
+        summary: '你没有只在主线、关系和异常之间站队，而是逼出了原本不存在的出口。',
+        epilogue: '最难的从来不是选得更狠，而是敢怀疑题目本身。',
+      },
+    }
+  }
+
+  if (sceneId === 'ending-bad') {
+    return {
+      id: 'ending-bad',
+      chapter: '终章',
+      title: '两边皆失',
+      premise: `在「${hook}」这道设定里，你试图抓住更多，却同时把两边都拖进了坠落。真正可怕的不是输掉，而是你直到最后一刻都知道，自己差一点就能改写题面。`,
+      responses: [],
+      choices: [],
+      ending: {
+        kind: 'bad',
+        title: '两边皆失',
+        summary: '你想赌一个更大的答案，却被失控的时间差吞掉了全部筹码。',
+      },
+    }
+  }
+
+  if (sceneId === 'ending-mystery') {
+    return {
+      id: 'ending-mystery',
+      chapter: '终章',
+      title: '题面之外',
+      premise: `在「${hook}」这道设定里，你终于摸到了题面外缘。你看见了那只安排分叉的手，却还没来得及真正抓住它。你离答案已经很近，只是还没近到能把它说完整。`,
+      responses: [],
+      choices: [],
+      ending: {
+        kind: 'mystery',
+        title: '题面之外',
+        summary: '你看见了分叉背后的规则影子，但还没来得及看清操盘者的脸。',
+        epilogue: '最危险的异常，不是你看到的那一个，而是你还没学会怎么命名它。',
+      },
+    }
+  }
+
+  if (sceneId === 'ending-normal') {
+    return {
+      id: 'ending-normal',
+      chapter: '终章',
+      title: '代价成立',
+      premise: `在「${hook}」这道设定里，你保住了一边，也承认了另一边的损耗。局面没有彻底崩坏，但你很清楚，这不是“皆大欢喜”，而是一种需要你长期背着走的清醒。`,
+      responses: [],
+      choices: [],
+      ending: {
+        kind: 'normal',
+        title: '代价成立',
+        summary: '你做出了能自圆其说的选择，也接受了它必然留下的裂痕。',
+      },
+    }
+  }
+
+  return {
+    id: 'start',
+    chapter: '第 1 幕',
+    title: '命题落下',
+    premise: `设定成立：${hook}。局面刚一展开，你就发现自己被同时拉向三边：一条是最直接的主线，一条牵动你最重要的人与关系，另一条则指向一个明显不合理的异常。现在还没有标准答案，只有你准备先相信哪一种判断。`,
+    responses: buildSeededResponses([
+      { role: 'guide', modelName: 'Claude', text: '先处理最会立刻失控的那条主线。越晚止损，后面的每一步都会更贵。', tone: '决断' },
+      { role: 'partner', modelName: 'GPT-4', text: '别把你最在乎的人或关系放到“等忙完再说”的位置，那通常就是来不及。', tone: '拉扯' },
+      { role: 'variable', modelName: 'Gemini', text: '题面被设计得太像二选一了。真正该看的，是那个不该这么整齐出现的异常。', tone: '诡异' },
+    ]),
+    choices: buildSeededChoices('start'),
+  }
+}
+
 /**
  * Mock 数据 - 多 AI 版本
  */
-export const STORY_LITE_V2_MOCK_SCENES: Record<string, import('./types').StoryLiteV2Scene> = {
+export const STORY_LITE_V2_MOCK_SCENES: Record<string, StoryLiteV2Scene> = {
   start: {
     id: 'start',
     chapter: '第 1 幕',

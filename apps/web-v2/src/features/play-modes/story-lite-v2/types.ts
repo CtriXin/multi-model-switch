@@ -38,6 +38,7 @@ export interface StoryLiteV2Response {
   modelName: string
   text: string
   tone?: string           // 语气提示，如"冷静"、"焦虑"、"神秘"
+  status?: 'pending' | 'streaming' | 'done' | 'error'
 }
 
 /** 玩家选择项 */
