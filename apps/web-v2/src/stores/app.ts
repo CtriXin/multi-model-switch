@@ -2,7 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
-import { fetchModels } from '@/services/api'
+import {
+  fetchModels,
+  fetchSparkringModelSpeeds,
+  type SparkringModelSpeedSnapshot,
+} from '@/services/api'
 import { getFetchRuntime } from '@/services/runtime'
 import { provision, isProvisioned, getCurrentTier, type ProvisionResult } from '@/services/provision'
 
@@ -44,8 +48,43 @@ export interface ModelFilterOptions {
   useAllWhenNoTags?: boolean
 }
 
+export interface ModelSpeedMeta {
+  modelId: string
+  channelId: number
+  latencyMs: number | null
+  status: string
+  testedAt: string
+}
+
+type SparkringSpeedSource = 'none' | 'live' | 'cache'
+
+interface SparkringSpeedCachePayload extends SparkringModelSpeedSnapshot {
+  cachedAt: string
+}
+
 const MODEL_SUPPRESSION_KEY = 'mms-disabled-models'
 const FAILURE_COUNTS_KEY = 'mms-failure-counts'
+const SPARKRING_SPEED_CACHE_KEY = 'mms-sparkring-speed-cache'
+const SPARKRING_SPEED_LAST_DAY_KEY = 'mms-sparkring-speed-last-day'
+const DOMESTIC_MODEL_KEYWORDS = [
+  'qwen',
+  'qwq',
+  'qvq',
+  'deepseek',
+  'glm',
+  'zhipu',
+  'kimi',
+  'moonshot',
+  'doubao',
+  'hunyuan',
+  'baichuan',
+  'minimax',
+  'abab',
+  'yi-',
+  'lingyi',
+  'step',
+  'ernie',
+]
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
@@ -85,6 +124,63 @@ function shuffleArray<T>(items: T[]): T[] {
   return next
 }
 
+function getLocalDayStamp(value = new Date()) {
+  const year = value.getFullYear()
+  const month = `${value.getMonth() + 1}`.padStart(2, '0')
+  const day = `${value.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function normalizeSparkringModelId(model: string) {
+  return model.startsWith('sparkring/') ? model : `sparkring/${model}`
+}
+
+function isSpeedOk(status: string) {
+  return status === 'ok'
+}
+
+function isDomesticModel(model: ModelMeta) {
+  const text = `${model.id} ${model.name}`.toLowerCase()
+  return DOMESTIC_MODEL_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function buildSpeedMap(snapshot: SparkringModelSpeedSnapshot | null): Record<string, ModelSpeedMeta> {
+  if (!snapshot) return {}
+
+  return Object.fromEntries(
+    snapshot.results.map((item) => {
+      const modelId = normalizeSparkringModelId(item.model)
+      return [modelId, {
+        modelId,
+        channelId: item.channelId,
+        latencyMs: Number.isFinite(item.latencyMs) ? item.latencyMs : null,
+        status: item.status,
+        testedAt: snapshot.testedAt,
+      } satisfies ModelSpeedMeta]
+    }),
+  )
+}
+
+function loadSparkringSpeedCache(): SparkringSpeedCachePayload | null {
+  try {
+    const raw = localStorage.getItem(SPARKRING_SPEED_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as SparkringSpeedCachePayload
+    if (!parsed?.testedAt || !Array.isArray(parsed?.results)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function persistSparkringSpeedCache(snapshot: SparkringModelSpeedSnapshot) {
+  const payload: SparkringSpeedCachePayload = {
+    ...snapshot,
+    cachedAt: new Date().toISOString(),
+  }
+  localStorage.setItem(SPARKRING_SPEED_CACHE_KEY, JSON.stringify(payload))
+}
+
 const MOCK_PRESETS: Preset[] = [
   { id: 'preset-full-demo', name: '全流程演示', models: ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro', 'demo/deepseek-r1'], builtin: true, icon: '🎬' },
   { id: 'preset-reasoning', name: '深度推理', models: ['demo/claude-sonnet-4', 'demo/deepseek-r1', 'demo/qwen-max'], builtin: true, icon: '🧠' },
@@ -94,6 +190,7 @@ const MOCK_PRESETS: Preset[] = [
 ]
 
 export const useAppStore = defineStore('app', () => {
+  const initialSpeedCache = loadSparkringSpeedCache()
   const models = ref<ModelMeta[]>([])
   const presets = ref<Preset[]>(MOCK_PRESETS)
   const selectedModelIds = ref<string[]>([])
@@ -104,6 +201,10 @@ export const useAppStore = defineStore('app', () => {
   const preferFree = ref(localStorage.getItem('mms-prefer-free') !== 'false')
   const showHomeEntry = ref(localStorage.getItem('mms-show-home') !== 'false')
   const showFriendsMode = ref(localStorage.getItem('mms-show-friends') === 'true')
+  const sparkringSpeedMap = ref<Record<string, ModelSpeedMeta>>(buildSpeedMap(initialSpeedCache))
+  const sparkringSpeedTestedAt = ref<string | null>(initialSpeedCache?.testedAt ?? null)
+  const sparkringSpeedSource = ref<SparkringSpeedSource>(initialSpeedCache ? 'cache' : 'none')
+  const sparkringSpeedLastDay = ref(localStorage.getItem(SPARKRING_SPEED_LAST_DAY_KEY) ?? '')
 
   watch(preferFree, (val) => {
     localStorage.setItem('mms-prefer-free', String(val))
@@ -177,6 +278,151 @@ export const useAppStore = defineStore('app', () => {
     return map
   })
 
+  const hasSparkringSpeedData = computed(() => Object.keys(sparkringSpeedMap.value).length > 0)
+
+  function getVisibleConfiguredProviders() {
+    const providerStore = useProviderStore()
+    return providerStore.configuredProviders.filter((provider) =>
+      showFriendsMode.value || provider.id !== 'sparkring',
+    )
+  }
+
+  function hasVisibleSparkringProvider() {
+    return getVisibleConfiguredProviders().some((provider) => provider.id === 'sparkring')
+  }
+
+  function shouldUseSparkringSpeed() {
+    return hasVisibleSparkringProvider() && hasSparkringSpeedData.value
+  }
+
+  function getModelSpeed(id: string): ModelSpeedMeta | null {
+    return sparkringSpeedMap.value[id] ?? null
+  }
+
+  function compareBySpeed(left: ModelMeta, right: ModelMeta) {
+    const leftSpeed = getModelSpeed(left.id)
+    const rightSpeed = getModelSpeed(right.id)
+    const leftOk = leftSpeed ? isSpeedOk(leftSpeed.status) : false
+    const rightOk = rightSpeed ? isSpeedOk(rightSpeed.status) : false
+
+    if (leftOk !== rightOk) return leftOk ? -1 : 1
+    if (leftSpeed?.latencyMs != null && rightSpeed?.latencyMs != null && leftSpeed.latencyMs !== rightSpeed.latencyMs) {
+      return leftSpeed.latencyMs - rightSpeed.latencyMs
+    }
+    if (leftSpeed?.latencyMs != null) return -1
+    if (rightSpeed?.latencyMs != null) return 1
+    return left.name.localeCompare(right.name)
+  }
+
+  function sortModelsBySpeed(source: ModelMeta[]) {
+    return [...source].sort(compareBySpeed)
+  }
+
+  function getSparkringFastBucket(source: ModelMeta[], count = 3) {
+    const ranked = sortModelsBySpeed(source)
+    const okModels = ranked.filter((model) => {
+      const speed = getModelSpeed(model.id)
+      return speed && isSpeedOk(speed.status)
+    })
+    const base = okModels.length ? okModels : ranked
+    const bucketSize = Math.max(
+      count,
+      Math.min(base.length, Math.max(count + 1, Math.ceil(base.length * 0.35))),
+    )
+    return base.slice(0, bucketSize)
+  }
+
+  function getLabAutoPool(source = models.value): ModelMeta[] {
+    const liveModels = source.filter((model) => !model.id.startsWith('demo/'))
+    const basePool = liveModels.length ? liveModels : source
+    if (!basePool.length) return []
+
+    if (!shouldUseSparkringSpeed()) {
+      return shuffleArray(basePool)
+    }
+
+    const sparkring = basePool.filter((model) => model.provider === 'sparkring')
+    if (!sparkring.length) return shuffleArray(basePool)
+
+    const domesticSparkring = sparkring.filter(isDomesticModel)
+    const domesticSource = domesticSparkring.length ? domesticSparkring : sparkring
+    const fastBucket = shuffleArray(getSparkringFastBucket(domesticSource))
+    const fastIds = new Set(fastBucket.map((model) => model.id))
+    const otherDomestic = shuffleArray(domesticSource.filter((model) => !fastIds.has(model.id)))
+    const otherDomesticIds = new Set(otherDomestic.map((model) => model.id))
+    const otherSparkring = shuffleArray(
+      sparkring.filter((model) => !fastIds.has(model.id) && !otherDomesticIds.has(model.id)),
+    )
+    const others = shuffleArray(basePool.filter((model) => model.provider !== 'sparkring'))
+    return [...fastBucket, ...otherDomestic, ...otherSparkring, ...others]
+  }
+
+  function pickLabModelIds(count = 3, source = models.value): string[] {
+    const pool = getLabAutoPool(source)
+    if (!pool.length) return []
+
+    const picked: string[] = []
+    for (const model of pool) {
+      if (picked.includes(model.id)) continue
+      picked.push(model.id)
+      if (picked.length >= count) break
+    }
+
+    while (picked.length < count) {
+      const fallback = pool[picked.length % pool.length]
+      if (!fallback) break
+      picked.push(fallback.id)
+    }
+
+    return picked
+  }
+
+  function pickLabModelId(source = models.value): string | null {
+    return pickLabModelIds(1, source)[0] ?? null
+  }
+
+  function applySparkringSpeedSnapshot(
+    snapshot: SparkringModelSpeedSnapshot,
+    source: Exclude<SparkringSpeedSource, 'none'>,
+  ) {
+    sparkringSpeedMap.value = buildSpeedMap(snapshot)
+    sparkringSpeedTestedAt.value = snapshot.testedAt
+    sparkringSpeedSource.value = source
+    persistSparkringSpeedCache(snapshot)
+  }
+
+  async function ensureSparkringSpeedTestForToday() {
+    if (!hasVisibleSparkringProvider()) return
+
+    const today = getLocalDayStamp()
+    const cached = loadSparkringSpeedCache()
+    if (cached && !hasSparkringSpeedData.value) {
+      applySparkringSpeedSnapshot(cached, 'cache')
+    }
+
+    if (sparkringSpeedLastDay.value === today) return
+
+    sparkringSpeedLastDay.value = today
+    localStorage.setItem(SPARKRING_SPEED_LAST_DAY_KEY, today)
+
+    try {
+      const runtime = await getFetchRuntime('sparkring')
+      if (!runtime) return
+      const snapshot = await fetchSparkringModelSpeeds(runtime.provider, runtime.apiKey)
+      applySparkringSpeedSnapshot(snapshot, 'live')
+    } catch (e: any) {
+      if (e?.status === 429 && cached) {
+        applySparkringSpeedSnapshot(cached, 'cache')
+        return
+      }
+      if (!cached) {
+        sparkringSpeedMap.value = {}
+        sparkringSpeedTestedAt.value = null
+        sparkringSpeedSource.value = 'none'
+      }
+    }
+  }
+
   async function initialize() {
     if (initialized.value) return
     initialized.value = true
@@ -245,9 +491,7 @@ export const useAppStore = defineStore('app', () => {
     const providerStore = useProviderStore()
     await providerStore.refreshKeyStatus()
 
-    const configured = providerStore.configuredProviders.filter((provider) =>
-      showFriendsMode.value || provider.id !== 'sparkring',
-    )
+    const configured = getVisibleConfiguredProviders()
     if (!configured.length) {
       models.value = []
       error.value = '未配置任何 API 通道，请在设置中配置'
@@ -290,6 +534,7 @@ export const useAppStore = defineStore('app', () => {
       (id) => models.value.some((m) => m.id === id),
     )
     ensureCommitteeSelection()
+    await ensureSparkringSpeedTestForToday()
   }
 
   function getSelectionRef(mode: ModelSelectionMode = 'chat') {
@@ -323,6 +568,10 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function pickDiverseModelIds(pool: ModelMeta[], count = 3): string[] {
+    if (shouldUseSparkringSpeed() && pool.some((model) => model.provider === 'sparkring')) {
+      return pickLabModelIds(count, pool)
+    }
+
     const byProvider: Record<string, ModelMeta[]> = {}
     for (const m of pool) {
       ;(byProvider[m.provider] ??= []).push(m)
@@ -452,8 +701,7 @@ export const useAppStore = defineStore('app', () => {
       : eligible
 
     const pool = preferred.length ? preferred : eligible
-    const shuffled = shuffleArray(pool)
-    return shuffled[0]?.id ?? null
+    return pickLabModelId(pool)
   }
 
   function copySelection(from: ModelSelectionMode, to: ModelSelectionMode) {
@@ -591,5 +839,12 @@ export const useAppStore = defineStore('app', () => {
     getModel,
     activateMaxChannel,
     showFriendsMode,
+    sparkringSpeedTestedAt,
+    sparkringSpeedSource,
+    getModelSpeed,
+    shouldUseSparkringSpeed,
+    pickLabModelIds,
+    pickLabModelId,
+    getLabAutoPool,
   }
 })

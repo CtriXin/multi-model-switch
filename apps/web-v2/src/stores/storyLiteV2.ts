@@ -107,8 +107,9 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   function syncModelAssignment() {
     const selectedIds = appStore.selectedModelIds.filter((id) => appStore.getModel(id))
     const selectedLiveIds = selectedIds.filter(isLiveModelId)
-    const availableLiveIds = appStore.models
-      .filter((model) => isLiveModelId(model.id))
+    const availableLiveIds = appStore.getLabAutoPool(
+      appStore.models.filter((model) => isLiveModelId(model.id)),
+    )
       .map((model) => model.id)
 
     let resolvedIds: string[] = selectedIds

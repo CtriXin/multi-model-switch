@@ -1,5 +1,4 @@
 import { sanitizeModelOutput } from '@/utils/modelOutput'
-import { preferLiveAutoModels } from '@/utils/modelSelection'
 import { useAppStore } from '@/stores/app'
 import {
   PLAY_MODE_SCHEMA_VERSION,
@@ -87,35 +86,10 @@ export function chooseModelIds(appStore: ReturnType<typeof useAppStore>): StoryL
     }
   }
 
-  const all = preferLiveAutoModels([...appStore.models])
-  if (!all.length) return null
-  const preferred = appStore.preferFree
-    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
-    : all
-
-  const picked = selected.slice(0, 3)
-  const providers = new Set<string>()
-  for (const modelId of picked) {
-    const model = appStore.getModel(modelId)
-    if (model) providers.add(model.provider)
-  }
-
-  for (const model of preferred) {
-    if (picked.includes(model.id)) continue
-    if (providers.has(model.provider)) continue
-    picked.push(model.id)
-    providers.add(model.provider)
-    if (picked.length === 3) break
-  }
-
-  for (const model of preferred) {
-    if (picked.length === 3) break
-    if (!picked.includes(model.id)) picked.push(model.id)
-  }
-
+  const picked = appStore.pickLabModelIds(3)
   const [logic, emotion, twist] = picked.length >= 3
     ? picked
-    : [preferred[0]?.id, preferred[1]?.id ?? preferred[0]?.id, preferred[2]?.id ?? preferred[0]?.id]
+    : [picked[0], picked[1] ?? picked[0], picked[2] ?? picked[0]]
 
   if (!logic || !emotion || !twist) return null
   return { logic, emotion, twist }
