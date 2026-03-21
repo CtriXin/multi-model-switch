@@ -1,6 +1,7 @@
 # TODO
 
 ## Urgent + Important
+- [x] 修复 `design-play/apps/web-v2` 的 `MultiLife` 开始调查与流式叙事体验：补齐案件详情页 `handleBegin` 链路，保留段落换行，并拦截流式过程中的 `<BRIEF>` / `## 结论` 等内部草稿内容。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [x] 同步 `apps/web-v2` 的 `MultiLife` 更新：从 `daily-challenge` worktree 合并新版多重人生交互，并修复模型分配、会话恢复、demo 输出串味等体验问题。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [x] 收口 `apps/web-v2` play modes 导航：确认 `daily-challenge` worktree 的 `每日一辩 / 剧情冒险 / 海龟汤 / 剧情共演` 在当前分支已具备功能代码，仅补桌面侧边栏与 iOS drawer 入口，不重复迁移玩法实现。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
 - [x] 收口 `apps/web-v2` 好友模式行为：开启时显示并启用 `sparkring`，关闭时移除并隐藏该 provider，停止后续模型拉取请求。 (source: @user, created: 2026-03-20, completed: 2026-03-20)
