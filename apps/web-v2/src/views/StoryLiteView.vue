@@ -309,6 +309,13 @@ onUnmounted(() => {
                 <button @click="endStory" class="w-full py-4 rounded-2xl border border-dashed border-text-quaternary/20 text-text-quaternary/40 hover:text-text-quaternary/60 hover:border-text-quaternary/40 transition-all text-[10px] font-black uppercase tracking-widest">
                   结束这场假如
                 </button>
+
+                <!-- Keyboard Shortcuts Hint -->
+                <div class="flex items-center justify-center gap-4 pt-2 text-[9px] font-black uppercase tracking-widest text-text-quaternary/30">
+                  <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">1</kbd> <kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">2</kbd> <kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">3</kbd> 选择</span>
+                  <span class="w-1 h-1 rounded-full bg-text-quaternary/20" />
+                  <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">Esc</kbd> 返回</span>
+                </div>
               </div>
             </div>
           </div>

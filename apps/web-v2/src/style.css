@@ -54,6 +54,12 @@
   /* V3 Cinematic Global Icon Stroke Enforcement */
   svg { stroke-width: 3px !important; }
   svg.lucide-plus, svg.lucide-plus-circle { stroke-width: 4px !important; }
+
+  /* iOS Safari Input Fixes - Prevent rounded corner rendering issues */
+  input, textarea, select {
+    -webkit-appearance: none;
+    border-radius: inherit;
+  }
 }
 
 @layer utilities {

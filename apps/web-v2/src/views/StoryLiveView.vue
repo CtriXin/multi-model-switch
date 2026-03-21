@@ -19,6 +19,24 @@ const storyLiveStore = useStoryLiveStore()
 const { pendingEndingText, continueStory: flowContinueStory, confirmEnding, dismissEnding } = useStoryFlow()
 const transcriptRef = ref<HTMLElement | null>(null)
 const premiseDraft = ref('')
+const inputRef = ref<HTMLTextAreaElement | null>(null)
+const inputHeight = ref(48) // min height
+
+// Auto-resize textarea
+function resizeInput() {
+  nextTick(() => {
+    if (!inputRef.value) return
+    inputRef.value.style.height = 'auto'
+    const scrollHeight = inputRef.value.scrollHeight
+    inputHeight.value = Math.min(144, Math.max(48, scrollHeight)) // max 144px (6 rows)
+    inputRef.value.style.height = inputHeight.value + 'px'
+  })
+}
+
+// Watch input changes for auto-resize
+watch(userInput, () => {
+  resizeInput()
+})
 
 const { turns, draftInput, processing, started, latestDirectorCue, modelAssignment, assignmentMode, assignmentLabel } = storeToRefs(storyLiveStore)
 
@@ -46,7 +64,7 @@ const ROLE_META = {
   emotion: { label: '情感', accent: 'text-rose-400', icon: Heart },
 }
 
-const userInput = computed({ get: () => draftInput.value, set: (v) => storyLiveStore.updateDraft(v) })
+const userInput = computed({ get: () => draftInput.value, set: (v) => { storyLiveStore.updateDraft(v); resizeInput() } })
 function renderMarkdown(text: string) { return md.render(sanitizeModelOutput(text).content || '') }
 function scrollLatest() { nextTick(() => { if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight }) }
 function roleModelName(role: StoryLiveRole) {
@@ -138,7 +156,14 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
               </div>
             </div>
             <div class="relative">
-              <textarea v-model="userInput" rows="2" class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all" placeholder="接下去演..." @keydown.enter.prevent="continueStory" />
+              <textarea 
+                ref="inputRef"
+                v-model="userInput" 
+                :style="{ height: inputHeight + 'px' }"
+                class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all resize-none overflow-y-auto" 
+                placeholder="接下去演..." 
+                @keydown.enter.prevent="continueStory" 
+              />
               <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
             </div>
           </div>
