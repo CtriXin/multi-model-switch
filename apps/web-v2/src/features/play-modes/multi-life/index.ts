@@ -22,6 +22,8 @@ export {
 export { getCase, listCases } from './cases'
 
 export {
+  buildSceneSystemPrompt,
+  buildSceneUserPrompt,
   buildRoleSystemPrompt,
   buildRoleUserPrompt,
   buildChallengePrompt,

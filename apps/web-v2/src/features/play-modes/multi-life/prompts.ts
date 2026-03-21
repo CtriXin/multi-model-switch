@@ -1,5 +1,42 @@
 import type { MultiLifeCase, MultiLifeCaseRole, MultiLifeRoundConfig } from './types'
 
+// --- Scene Narration Prompt ---
+
+export function buildSceneSystemPrompt(): string {
+  return `你是悬疑互动故事的场景旁白。
+
+你的任务：
+- 把案件当前场景写成有镜头感的中文叙事
+- 营造紧张、克制、压迫的悬疑气氛
+- 只输出正文，不要标题，不要解释，不要列表，不要 markdown 标记
+
+严格要求：
+- 输出 2 到 4 个短段落
+- 每个段落 1 到 2 句
+- 段落之间保留一个空行
+- 先写环境，再写动作，再写异常细节
+- 总长度控制在 70 到 140 字
+- 不要写“作为旁白”“镜头切换”等说明性词语`
+}
+
+export function buildSceneUserPrompt(
+  caseData: MultiLifeCase,
+  roundConfig: MultiLifeRoundConfig,
+): string {
+  return `案件背景：${caseData.premise}
+
+本轮基础场景：${roundConfig.scene}
+
+请把这一轮场景改写成适合流式展示的悬疑叙事短文。
+
+记住：
+- 输出 2 到 4 个短段落
+- 段落之间空一行
+- 第一段先交代环境压迫感
+- 第二段写人物或动作推进
+- 最后一段落点放在异常细节、危险信号或未说透的线索上`
+}
+
 // --- Role System Prompt ---
 
 export function buildRoleSystemPrompt(role: MultiLifeCaseRole, caseData: MultiLifeCase): string {

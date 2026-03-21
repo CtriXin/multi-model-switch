@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 import type { PlayModeSessionEnvelope } from '@/features/play-modes/shared'
 import {
   getCase,
@@ -13,6 +14,8 @@ import {
   type MultiLifeRoleResponse,
 } from '@/features/play-modes/multi-life'
 import {
+  buildSceneSystemPrompt,
+  buildSceneUserPrompt,
   buildRoleSystemPrompt,
   buildRoleUserPrompt,
   buildChallengePrompt,
@@ -67,6 +70,50 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     const next = { ...streamingTexts.value }
     delete next[key]
     streamingTexts.value = next
+  }
+
+  function formatStreamedText(raw: string) {
+    return sanitizeModelOutput(raw)
+      .content
+      .replace(/\r\n?/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  function paragraphizeNarrative(text: string) {
+    const normalized = formatStreamedText(text)
+    if (!normalized) return ''
+
+    const existingParagraphs = normalized
+      .split(/\n{2,}/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+
+    if (existingParagraphs.length > 1) {
+      return existingParagraphs.join('\n\n')
+    }
+
+    const sentences = normalized
+      .split(/(?<=[。！？])/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+
+    if (sentences.length <= 1) return normalized
+
+    const chunkSize = sentences.length >= 4 ? 2 : 1
+    const paragraphs: string[] = []
+
+    for (let index = 0; index < sentences.length; index += chunkSize) {
+      paragraphs.push(sentences.slice(index, index + chunkSize).join(''))
+    }
+
+    if (paragraphs.length > 3) {
+      const head = paragraphs.slice(0, 2)
+      const tail = paragraphs.slice(2).join('')
+      return [...head, tail].join('\n\n')
+    }
+
+    return paragraphs.join('\n\n')
   }
 
   function createEmptyEnvelope(): PlayModeSessionEnvelope {
@@ -311,27 +358,39 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
       roundStarting.value = false
 
       // Stream scene text (paragraph by paragraph)
-      const sceneText = roundConfig.scene
+      const sceneText = paragraphizeNarrative(roundConfig.scene)
       streamingScene.value = ''
-      const sceneLines = sceneText.split('\n')
       if (models.mock) {
-        for (let i = 0; i < sceneLines.length; i++) {
-          streamingScene.value += (i > 0 ? '\n' : '') + sceneLines[i]
-          await new Promise(r => setTimeout(r, 600))
-        }
+        await streamMockInto(sceneText, (chunk) => {
+          streamingScene.value += chunk
+        }, 24)
       } else {
         try {
+          let sceneRaw = ''
+          let sceneUseFallback = false
           const sceneResult = await streamInto(
               streamModelChat({
                 modelId: models.assignment.a,
                 messages: [
-                  { role: 'system', content: '用2-3句话描述这个场景，制造悬疑氛围。直接输出场景描述文字，不要任何标题或标记。' },
-                  { role: 'user', content: `案件背景：${c.premise}\n\n请描述第${nextRound}轮的场景氛围。` },
+                  { role: 'system', content: buildSceneSystemPrompt() },
+                  { role: 'user', content: buildSceneUserPrompt(c, roundConfig) },
                 ],
               }),
-              (chunk) => { streamingScene.value += chunk },
+              (chunk) => {
+                sceneRaw += chunk
+                if (sceneUseFallback || shouldFallbackToNarrative(sceneRaw)) {
+                  sceneUseFallback = true
+                  streamingScene.value = sceneText
+                  return
+                }
+                const cleaned = paragraphizeNarrative(sceneRaw)
+                if (cleaned) streamingScene.value = cleaned
+              },
             )
-          streamingScene.value = shouldFallbackToNarrative(sceneResult) ? sceneText : sceneResult
+          const cleanedScene = paragraphizeNarrative(sceneResult)
+          streamingScene.value = sceneUseFallback || shouldFallbackToNarrative(sceneResult)
+            ? sceneText
+            : (cleanedScene || sceneText)
         } catch {
           streamingScene.value = sceneText
         }
@@ -368,6 +427,8 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             )
 
             const key = `${roundObj.id}-${role.id}`
+            let responseRaw = ''
+            let responseUseFallback = false
             const text = await streamInto(
               streamModelChat({
                 modelId: resp.modelId,
@@ -377,11 +438,21 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
                 ],
               }),
               (chunk) => {
-                appendStream(key, chunk)
+                responseRaw += chunk
+                if (responseUseFallback || shouldFallbackToNarrative(responseRaw)) {
+                  responseUseFallback = true
+                  emitStream(key, fallbackText)
+                  return
+                }
+                const cleaned = formatStreamedText(responseRaw)
+                if (cleaned) emitStream(key, cleaned)
               },
             )
 
-            resp.text = shouldFallbackToNarrative(text) ? fallbackText : (text || fallbackText)
+            const cleanedText = formatStreamedText(text)
+            resp.text = responseUseFallback || shouldFallbackToNarrative(text)
+              ? fallbackText
+              : (cleanedText || fallbackText)
             resp.status = 'done'
             clearStream(key)
           } catch (e) {
@@ -483,6 +554,8 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
           ? generateMockChallengeHonest(role, contradiction?.topic ?? '证词')
           : generateMockChallengeLiar(role, contradiction?.topic ?? '证词')
         try {
+          let challengeRaw = ''
+          let challengeUseFallback = false
           const text = await streamInto(
             streamModelChat({
               modelId: resp.modelId,
@@ -492,10 +565,20 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
               ],
             }),
             (chunk) => {
-              appendStream(key, chunk)
+              challengeRaw += chunk
+              if (challengeUseFallback || shouldFallbackToNarrative(challengeRaw)) {
+                challengeUseFallback = true
+                emitStream(key, fallbackText)
+                return
+              }
+              const cleaned = formatStreamedText(challengeRaw)
+              if (cleaned) emitStream(key, cleaned)
             },
           )
-          resp.challengeResponse = shouldFallbackToNarrative(text) ? fallbackText : (text || fallbackText)
+          const cleanedText = formatStreamedText(text)
+          resp.challengeResponse = challengeUseFallback || shouldFallbackToNarrative(text)
+            ? fallbackText
+            : (cleanedText || fallbackText)
         } catch {
           resp.challengeResponse = fallbackText
         }
@@ -713,9 +796,17 @@ function shouldFallbackToNarrative(text: string): boolean {
   const normalized = text.trim()
   if (!normalized) return true
 
+  if (/<\/?BR(?:I(?:E(?:F)?)?)?>?/i.test(normalized)) {
+    return true
+  }
+
   return [
     '<BRIEF>',
+    '<BRIE',
+    '<BRI',
+    '<BR',
     '## 结论',
+    '## 关键点',
     '转化率 / 错误率 / 时延',
     '先做小闭环',
     '先上线最小版本',
