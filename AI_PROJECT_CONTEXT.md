@@ -67,6 +67,7 @@
 - Folder picker: NSOpenPanel via `@tauri-apps/plugin-dialog` (App Store compliant)
 - Setup guide: first-run provider configuration flow
 - Model management: dynamic model list from provider APIs, suppression, failure counting
+- SparkRing speed snapshot: `GET /api/models/speed?key=...` with local daily cache fallback; lab/chat auto-pick can prefer fastest domestic SparkRing models
 - Theme: dark/light with aurora gradient background
 - Sidebar: collapsible, all navigation entries
 - **Play Modes** (see §4 for architecture):
