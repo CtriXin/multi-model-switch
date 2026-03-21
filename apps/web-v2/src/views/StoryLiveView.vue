@@ -22,6 +22,8 @@ const premiseDraft = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
 const inputHeight = ref(48) // min height
 
+const { turns, draftInput, processing, started, latestDirectorCue, modelAssignment, assignmentMode, assignmentLabel } = storeToRefs(storyLiveStore)
+
 // Auto-resize textarea
 function resizeInput() {
   nextTick(() => {
@@ -32,13 +34,6 @@ function resizeInput() {
     inputRef.value.style.height = inputHeight.value + 'px'
   })
 }
-
-// Watch input changes for auto-resize
-watch(userInput, () => {
-  resizeInput()
-})
-
-const { turns, draftInput, processing, started, latestDirectorCue, modelAssignment, assignmentMode, assignmentLabel } = storeToRefs(storyLiveStore)
 
 // Dynamic Placeholder Logic
 const placeholders = [
@@ -65,6 +60,11 @@ const ROLE_META = {
 }
 
 const userInput = computed({ get: () => draftInput.value, set: (v) => { storyLiveStore.updateDraft(v); resizeInput() } })
+
+// Watch input changes for auto-resize
+watch(userInput, () => {
+  resizeInput()
+})
 function renderMarkdown(text: string) { return md.render(sanitizeModelOutput(text).content || '') }
 function scrollLatest() { nextTick(() => { if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight }) }
 function roleModelName(role: StoryLiveRole) {
