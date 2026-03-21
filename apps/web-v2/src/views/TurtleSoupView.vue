@@ -161,21 +161,45 @@ function goBack() { router.push('/lab') }
               <div v-if="store.processing" class="flex justify-start"><div class="px-6 py-4 rounded-full bg-white dark:bg-white/[0.05] border-2 border-black/5 dark:border-white/5 opacity-40">...</div></div>
             </div>
 
+            <!-- HINT BUTTON (Floating) -->
+            <div v-if="store.canAskHint || store.callingPhase !== 'idle'" class="absolute bottom-24 left-1/2 -translate-x-1/2 z-10">
+              <button
+                @click="store.requestHint()"
+                :disabled="store.processing || store.callingPhase !== 'idle'"
+                class="group flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-500 hover:bg-amber-500/20 transition-all disabled:opacity-40"
+              >
+                <Lightbulb :size="14" class="group-hover:scale-110 transition-transform" />
+                <span class="text-[10px] font-black uppercase tracking-widest">
+                  {{ store.callingPhase === 'ringing' ? '呼叫中...' : store.callingPhase === 'connected' ? '通话中...' : '场外求助' }}
+                </span>
+                <span class="text-[9px] opacity-60">({{ 3 - store.hintLevel }}次)</span>
+              </button>
+            </div>
+
+            <!-- Current Hint Display -->
+            <div v-if="store.currentHint" class="absolute bottom-20 left-4 right-4 z-10">
+              <div class="max-w-3xl mx-auto p-4 rounded-[20px] bg-amber-50 dark:bg-amber-500/5 border border-amber-500/20 text-center">
+                <p class="text-sm text-amber-600 dark:text-amber-400 font-medium">
+                  <span class="font-black">提示：</span>{{ store.currentHint }}
+                </p>
+              </div>
+            </div>
+
             <!-- ACTION POD -->
             <div class="absolute bottom-0 left-0 right-0 p-4 sm:p-6 bg-white/90 dark:bg-[#0d0f14]/90 backdrop-blur-xl border-t border-black/5 dark:border-white/5">
               <div class="relative max-w-3xl mx-auto group">
                 <div class="relative flex items-center bg-white dark:bg-[#1a1d24] border-2 border-black/5 dark:border-white/10 rounded-[32px] p-1.5 shadow-xl transition-all group-focus-within:border-accent/40">
-                  <input 
-                    v-model="inputText" 
-                    @keydown="handleKeydown" 
-                    :disabled="store.processing" 
-                    type="text" 
-                    placeholder="向主持人提问细节..." 
-                    class="flex-1 h-12 px-6 bg-transparent outline-none text-sm font-black placeholder:text-text-quaternary text-text-primary" 
+                  <input
+                    v-model="inputText"
+                    @keydown="handleKeydown"
+                    :disabled="store.processing"
+                    type="text"
+                    placeholder="向主持人提问细节..."
+                    class="flex-1 h-12 px-6 bg-transparent outline-none text-sm font-black placeholder:text-text-quaternary text-text-primary"
                   />
-                  <button 
-                    @click="submitQuestion" 
-                    :disabled="!inputText.trim() || store.processing" 
+                  <button
+                    @click="submitQuestion"
+                    :disabled="!inputText.trim() || store.processing"
                     class="w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 transition-all"
                   >
                     <ChevronRight :size="24" stroke-width="4" />
