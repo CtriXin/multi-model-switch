@@ -572,25 +572,51 @@ export const STORY_LITE_V2_MOCK_SCENES: Record<string, StoryLiteV2Scene> = {
 // --- Director Prompt (Live 动态场景生成) ---
 
 export function buildDirectorSystemPrompt(): string {
-  return `你是一个互动叙事导演。玩家正在体验一个"假如模拟器"——通过选择推进故事，三个 AI 角色（引路人、伙伴、变量）会从不同角度点评。
+  return `你是一位资深互动叙事导演，擅长创作沉浸式"假如"场景。你的任务是根据玩家设定和剧情走向，生成引人入胜的下一场景。
 
-规则：
-1. 根据玩家的故事设定、历史走向和最新选择，写出下一段场景描述（premise）
-2. 提供 3 个选择，分别对应：
-   - safe：稳妥、理性的推进方向
-   - risky：有情感张力或关系变化的推进方向
-   - dangerous：高风险、可能颠覆走向的方向
-3. 必须返回 JSON，不要有任何其他文字
+## 核心规则
 
-返回格式（严格遵守）：
+1. **场景描述 (premise)**：必须是具体的、有画面感的当下场景，不是总结或概述
+2. **三个选择**必须真实反映玩家在此时此刻的抉择，对应三种思维模式：
+   - **safe (主线)**：理性、稳妥、可预期的推进，关注任务/目标/大局
+   - **risky (关系)**：情感驱动，涉及人际取舍、道德代价、内心挣扎
+   - **dangerous (变量)**：打破常规，挑战规则，可能发现隐藏真相或引爆危机
+3. **选择必须直接回应**玩家上一轮的选择，体现"因果"而非"平行宇宙"
+
+## 选择设计原则
+
+**safe (主线)**：
+- 聚焦：任务进度、资源获取、风险控制、大局稳定
+- 风格：务实、冷静、有明确收益预期
+- 例："立即向主控室报告异常读数"
+
+**risky (关系)**：
+- 聚焦：人物情感、信任建立/破裂、道德边界、个人代价
+- 风格：有人情味但可能带来麻烦
+- 例："先安抚恐慌的船员，暂不汇报"
+
+**dangerous (变量)**：
+- 聚焦：质疑前提、打破规则、追查异常、赌一把
+- 风格：神秘、非常规、高风险高回报
+- 例："逆向追踪信号来源，看谁在监控"
+
+## 叙事技巧
+
+- **开场**：从感官细节入手（声音、气味、光影），立即建立临场感
+- **推进**：每轮必须出现新的信息或转折，不能原地打转
+- **张力**：让玩家感到"选哪个都有代价"
+- **悬念**：留一个未解的钩子，但不要故弄玄虚
+
+## 输出格式（严格遵守）
+
 {"premise":"场景描述","choices":[{"id":"a","label":"选择文字","risk":"safe","hint":"简短提示"},{"id":"b","label":"选择文字","risk":"risky","hint":"简短提示"},{"id":"c","label":"选择文字","risk":"dangerous","hint":"简短提示"}]}
 
-风格要求：
-- premise：50-100 字，有画面感，留悬念，不要替玩家做决定
-- 每个 choice.label：10-20 字，动词开头，具体可执行
-- 每个 hint：10 字以内，暗示后果而非说破
-- 每一轮都要推进剧情，不要原地踏步
-- 保持世界观一致性，角色和事件要有前后关联`
+## 格式要求
+
+- premise：60-120字，必须是**现在进行时**的场景描写，有具体细节
+- choice.label：12-18字，动词开头，避免抽象词（如"思考""观察"）
+- choice.hint：8-12字，暗示后果，制造选择焦虑
+- 禁止出现："你决定""你意识到"等元叙事，直接呈现情境`
 }
 
 export function buildDirectorUserPrompt(
@@ -600,27 +626,48 @@ export function buildDirectorUserPrompt(
 ): string {
   const historyLines = sceneHistory.length > 0
     ? sceneHistory
-        .slice(-5)
+        .slice(-4)
         .map((entry) => {
           const choiceStr = entry.choiceLabel
-            ? ` → 玩家选择：${entry.choiceLabel}`
+            ? `\n   → 玩家选择：${entry.choiceLabel}`
             : ''
           return `第${entry.round}轮：${entry.premise}${choiceStr}`
         })
-        .join('\n')
-    : '（这是故事的开场）'
-
-  const choiceLine = lastChoice
-    ? `\n玩家刚刚选择了：${lastChoice.label}`
+        .join('\n\n')
     : ''
 
-  return `当前故事设定：${seedLabel}
+  // 构建因果上下文
+  let causalContext = ''
+  if (lastChoice) {
+    const riskType = lastChoice.label.includes('risk') || lastChoice.label.includes('danger')
+      ? '这是一步险棋，后果开始显现'
+      : lastChoice.label.includes('safe') || lastChoice.label.includes('稳妥')
+        ? '稳妥的选择带来可预期的结果，但可能错失机会'
+        : '玩家的选择正在产生连锁反应'
+    causalContext = `\n\n【因果聚焦】玩家刚刚选择了："${lastChoice.label}"\n${riskType}。你的场景必须直接呈现这个选择的后果，不要生成平行宇宙。`
+  }
 
-历史剧情摘要：
-${historyLines}
-${choiceLine}
+  const roundNum = sceneHistory.length + 1
+  const narrativePhase =
+    roundNum === 1 ? '【节奏：开场】建立情境，抛出第一个真实两难' :
+    roundNum === 2 ? '【节奏：升温】局势出现新变数，压力开始累积' :
+    roundNum === 3 ? '【节奏：转折】出现关键信息或意外，可能改变局面' :
+    roundNum === 4 ? '【节奏：收紧】选择空间收窄，代价更加清晰' :
+    '【节奏：收束】逼向关键抉择，真相或代价浮出水面'
 
-请生成下一段剧情和 3 个选择。只返回 JSON，不要有任何其他文字。`
+  return `【故事设定】${seedLabel}
+
+${historyLines ? `【剧情履历】${historyLines}` : '【当前状态】这是故事的第一幕，需要建立强烈的情境感。'}
+${causalContext}
+
+【当前任务】第${roundNum}轮场景生成
+${narrativePhase}
+
+要求：
+1. 场景必须直接回应玩家的上一个选择（如有）
+2. 呈现当下正在发生的具体情境（而非总结）
+3. 三个选择要让玩家感到"选哪个都有代价"
+4. 只返回 JSON，不要任何解释`
 }
 
 /** 导演 AI JSON 解析失败时的 fallback 三选一 */
