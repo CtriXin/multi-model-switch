@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDailyChallengeStore } from '@/stores/dailyChallenge'
@@ -8,11 +8,13 @@ import StanceInput from '@/components/challenge/StanceInput.vue'
 import DebateStage from '@/components/challenge/DebateStage.vue'
 import ResultCard from '@/components/challenge/ResultCard.vue'
 import ChallengeHistory from '@/components/challenge/ChallengeHistory.vue'
+import type { TopicCandidate, UserDebateRole } from '@/features/challenge/types'
 import { Flame, History, Home, Zap, FlaskConical, ArrowLeft } from 'lucide-vue-next'
 
 const router = useRouter()
 const appStore = useAppStore()
 const store = useDailyChallengeStore()
+const defaultRole = ref<UserDebateRole>('pro')
 
 // INITIALIZATION LOCK: Ensure appStore is ready
 const isReady = computed(() => appStore.models.length > 0)
@@ -25,6 +27,11 @@ onMounted(async () => {
 })
 
 function goBack() { router.push('/lab') }
+
+function handleTopicSelect(payload: { topic: TopicCandidate; role: UserDebateRole }) {
+  defaultRole.value = payload.role
+  store.selectTopic(payload.topic)
+}
 </script>
 
 <template>
@@ -59,8 +66,8 @@ function goBack() { router.push('/lab') }
       <div v-else class="w-full max-w-5xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[40px] shadow-2xl border border-white/10 overflow-hidden relative">
         <div class="flex-1 flex flex-col overflow-hidden relative">
             <div class="mx-auto w-full max-w-3xl flex-1 flex flex-col overflow-hidden p-6 sm:p-10">
-              <TopicPicker v-if="store.phase === 'pick_topic'" :candidates="store.candidates" :categories="store.categories" :loading="store.loading" @select="store.selectTopic($event)" @refresh="store.refreshTopics()" @dismiss="store.dismissTopic($event)" @update-categories="store.updateCategories($event)" />
-              <StanceInput v-else-if="store.phase === 'pick_stance'" :topic="store.selectedTopic!" @submit="store.startDebate($event)" @back="store.phase = 'pick_topic'" />
+              <TopicPicker v-if="store.phase === 'pick_topic'" :candidates="store.candidates" :categories="store.categories" :loading="store.loading" @select="handleTopicSelect($event)" @refresh="store.refreshTopics()" @dismiss="store.dismissTopic($event)" @update-categories="store.updateCategories($event)" />
+              <StanceInput v-else-if="store.phase === 'pick_stance'" :topic="store.selectedTopic!" :default-role="defaultRole" @submit="store.startDebate($event)" @back="store.phase = 'pick_topic'" />
               <DebateStage v-else-if="store.phase === 'debating'" :topic="store.selectedTopic!" :messages="store.messages" :debating="store.debating" :error="store.error" :user-role="store.userRole" :awaiting-user-input="store.awaitingUserInput" :awaiting-decision="store.awaitingDecision" :current-round="store.currentRound" class="lab-flowing-text" @submit-turn="store.submitUserTurn($event)" @continue="store.continueDebate()" @finish="store.finishDebate()" />
               <ResultCard v-else-if="store.phase === 'result'" :topic="store.selectedTopic" :pro-text="store.proText" :con-text="store.conText" :takeaway="store.takeaway" :snapshot="store.snapshot" :current-card="store.currentCard" :user-stance="store.userStance" :user-reason="store.userReason" :streak="store.streak" :messages="store.messages" @save="store.saveCurrentCard($event)" @retry="store.reset()" @go-history="store.goToHistory()" @go-home="store.reset()" />
               <ChallengeHistory v-else-if="store.phase === 'history'" :cards="store.recentCards" :streak="store.streak" />

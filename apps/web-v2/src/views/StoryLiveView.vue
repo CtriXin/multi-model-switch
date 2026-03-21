@@ -20,7 +20,7 @@ const { pendingEndingText, continueStory: flowContinueStory, confirmEnding, dism
 const transcriptRef = ref<HTMLElement | null>(null)
 const premiseDraft = ref('')
 
-const { turns, draftInput, processing, started, latestDirectorCue } = storeToRefs(storyLiveStore)
+const { turns, draftInput, processing, started, latestDirectorCue, modelAssignment, assignmentMode, assignmentLabel } = storeToRefs(storyLiveStore)
 
 // Dynamic Placeholder Logic
 const placeholders = [
@@ -49,6 +49,11 @@ const ROLE_META = {
 const userInput = computed({ get: () => draftInput.value, set: (v) => storyLiveStore.updateDraft(v) })
 function renderMarkdown(text: string) { return md.render(sanitizeModelOutput(text).content || '') }
 function scrollLatest() { nextTick(() => { if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight }) }
+function roleModelName(role: StoryLiveRole) {
+  const assignment = modelAssignment.value
+  if (!assignment) return ''
+  return storyLiveStore.getModelName(assignment[role])
+}
 
 async function startStory() { 
   const seed = premiseDraft.value.trim() || currentPlaceholder.value
@@ -91,6 +96,14 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
               <div class="w-20 h-20 rounded-[32px] bg-accent/10 flex items-center justify-center mx-auto shadow-xl"><Clapperboard :size="32" stroke-width="3.5" class="text-accent" /></div>
               <h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">开启你的剧本</h2>
               <p class="text-sm text-text-tertiary opacity-60">实时接戏，与导演组共同推进剧情</p>
+              <div class="flex flex-wrap items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                <span class="px-2.5 py-1 rounded-full border" :class="assignmentMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : 'border-white/10 bg-white/5 text-text-tertiary'">
+                  {{ assignmentLabel }}
+                </span>
+                <span v-if="modelAssignment" class="text-text-tertiary normal-case tracking-normal">
+                  逻辑 {{ roleModelName('logic') }} / 情感 {{ roleModelName('emotion') }} / 异动 {{ roleModelName('twist') }}
+                </span>
+              </div>
             </div>
             <div class="space-y-4">
               <textarea v-model="premiseDraft" rows="3" class="w-full rounded-[28px] glass-v3 border border-white/10 p-6 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all placeholder:transition-opacity placeholder:duration-500" :placeholder="currentPlaceholder" />
@@ -116,6 +129,10 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
         <div v-if="started" class="p-6 bg-white/5 border-t border-white/5 backdrop-blur-md">
           <div class="max-w-3xl mx-auto relative">
             <div v-if="latestDirectorCue" class="absolute -top-10 left-4 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-black text-cyan-500 uppercase tracking-widest animate-fade-in">{{ latestDirectorCue }}</div>
+            <div class="absolute -top-10 right-4 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest"
+              :class="assignmentMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : 'border-white/10 bg-white/5 text-text-tertiary'">
+              {{ assignmentLabel }}
+            </div>
             <textarea v-model="userInput" rows="2" class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all" placeholder="接下去演..." @keydown.enter.prevent="continueStory" />
             <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
           </div>

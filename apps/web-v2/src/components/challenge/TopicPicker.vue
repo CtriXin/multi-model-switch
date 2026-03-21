@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { DailyCategory, TopicCandidate } from '@/features/challenge/types'
+import type { DailyCategory, TopicCandidate, UserDebateRole } from '@/features/challenge/types'
 import { CATEGORY_ICONS } from '@/features/challenge/types'
 import {
   RefreshCw, Zap, Cpu, Globe, Briefcase, Activity, Heart, PieChart,
@@ -14,7 +14,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  select: [topic: TopicCandidate]
+  select: [payload: { topic: TopicCandidate; role: UserDebateRole }]
   refresh: []
   dismiss: [topicId: string]
   updateCategories: [cats: DailyCategory[]]
@@ -61,9 +61,9 @@ function onTouchMove(e: TouchEvent) {
 function onTouchEnd(topic: TopicCandidate) {
   isDragging.value = false
   if (dragX.value < -100) {
-    handleDismiss(topic.id)
+    emit('select', { topic, role: 'con' })
   } else if (dragX.value > 100) {
-    emit('select', topic)
+    emit('select', { topic, role: 'pro' })
   }
   dragX.value = 0
 }
@@ -170,15 +170,15 @@ function toggleCategory(cat: DailyCategory) {
             @touchstart="onTouchStart"
             @touchmove="onTouchMove"
             @touchend="onTouchEnd(topic)"
-            @click="emit('select', topic)"
+            @click="emit('select', { topic, role: 'pro' })"
             :style="topCardStyle"
             class="relative w-full h-full p-8 rounded-[48px] glass-v3 border-white/10 bg-white shadow-2xl flex flex-col justify-between overflow-hidden group select-none cursor-pointer md:cursor-pointer active:cursor-grabbing"
           >
             <!-- 视觉反馈覆盖层 -->
             <div class="absolute inset-0 pointer-events-none transition-opacity duration-300 flex items-center justify-center z-50"
                  :style="{ opacity: Math.min(Math.abs(dragX) / 100, 0.8), backgroundColor: dragX < 0 ? 'rgba(239, 68, 68, 0.2)' : 'rgba(99, 102, 241, 0.2)' }">
-               <div v-if="dragX < -20" class="p-4 rounded-full border-4 border-red-500 text-red-500 rotate-[-12deg] font-black text-2xl uppercase tracking-tighter">DISCARD</div>
-               <div v-if="dragX > 20" class="p-4 rounded-full border-4 border-accent text-accent rotate-[12deg] font-black text-2xl uppercase tracking-tighter">DEPLOY</div>
+               <div v-if="dragX < -20" class="p-4 rounded-full border-4 border-red-500 text-red-500 rotate-[-12deg] font-black text-2xl uppercase tracking-tighter">CON</div>
+               <div v-if="dragX > 20" class="p-4 rounded-full border-4 border-accent text-accent rotate-[12deg] font-black text-2xl uppercase tracking-tighter">PRO</div>
             </div>
 
             <!-- 卡片头部: 领域 & 难度 -->
@@ -215,10 +215,10 @@ function toggleCategory(cat: DailyCategory) {
             <!-- 底部对立面提示 -->
             <div class="pt-6 border-t border-black/[0.03] flex items-center justify-between relative z-10">
                <div class="flex flex-col gap-1">
-                  <span class="text-[9px] font-black text-text-tertiary uppercase tracking-widest">Initial Consensus</span>
+                  <span class="text-[9px] font-black text-text-tertiary uppercase tracking-widest">Swipe / Pick A Side</span>
                   <div class="flex items-center gap-2">
-                     <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                     <span class="text-[11px] font-bold text-text-secondary">{{ topic.sideA.slice(0,10) }}...</span>
+                     <span class="w-2 h-2 rounded-full bg-accent"></span>
+                     <span class="text-[11px] font-bold text-text-secondary">右滑正方 · 左滑反方</span>
                   </div>
                </div>
                <div class="w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg shadow-accent/20 group-hover:scale-110 transition-transform">
@@ -234,18 +234,24 @@ function toggleCategory(cat: DailyCategory) {
     </div>
 
     <!-- 底部操作暗示 -->
-    <div class="flex items-center justify-center gap-12 py-4 shrink-0">
+    <div class="flex items-center justify-center gap-6 py-4 shrink-0">
        <button @click="handleDismiss(topCandidate?.id)" class="flex flex-col items-center gap-2 group">
           <div class="w-12 h-12 rounded-full border border-red-500/20 flex items-center justify-center text-red-500 group-active:scale-90 transition-all hover:bg-red-500 hover:text-white">
              <X :size="20" stroke-width="4" />
           </div>
           <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary">不感兴趣</span>
        </button>
-       <button @click="topCandidate && emit('select', topCandidate)" class="flex flex-col items-center gap-2 group">
-          <div class="w-12 h-12 rounded-full border border-accent/20 flex items-center justify-center text-accent group-active:scale-90 transition-all hover:bg-accent hover:text-white shadow-xl shadow-accent/5">
+       <button @click="topCandidate && emit('select', { topic: topCandidate, role: 'pro' })" class="flex flex-col items-center gap-2 group">
+          <div class="w-12 h-12 rounded-full border border-emerald-500/20 flex items-center justify-center text-emerald-500 group-active:scale-90 transition-all hover:bg-emerald-500 hover:text-white shadow-xl shadow-emerald-500/5">
              <Check :size="20" stroke-width="4" />
           </div>
-          <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary">立即开辩</span>
+          <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary">我是正方</span>
+       </button>
+       <button @click="topCandidate && emit('select', { topic: topCandidate, role: 'con' })" class="flex flex-col items-center gap-2 group">
+          <div class="w-12 h-12 rounded-full border border-amber-500/20 flex items-center justify-center text-amber-500 group-active:scale-90 transition-all hover:bg-amber-500 hover:text-white shadow-xl shadow-amber-500/5">
+             <ArrowRight :size="20" stroke-width="4" class="rotate-180" />
+          </div>
+          <span class="text-[8px] font-black uppercase tracking-widest text-text-tertiary">我是反方</span>
        </button>
     </div>
 

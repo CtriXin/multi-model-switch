@@ -15,7 +15,8 @@ const store = useMultiLifeStore()
 
 const {
   caseData, processing, error, phase, currentRound, challengeRemaining, started, rounds, 
-  evidenceCards, ending, streamingTexts, streamingScene, modelPicked, modelWarning
+  evidenceCards, ending, streamingTexts, streamingScene, modelPicked, modelWarning,
+  assignmentLabel, assignmentMode
 } = storeToRefs(store)
 
 const cases = listCases()
@@ -108,6 +109,10 @@ function handleGenerateEnding() {
         </div>
         <div class="flex items-center gap-2">
           <div v-if="started" class="flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent/10 text-[8px] font-black text-accent uppercase tracking-widest"><Scale :size="10" stroke-width="4" /> {{ challengeRemaining }}</div>
+          <div v-if="modelPicked" class="flex items-center gap-1 px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-widest"
+            :class="assignmentMode === 'live' ? 'bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'bg-amber-500/10 text-amber-500' : 'bg-white/10 text-text-tertiary'">
+            {{ assignmentLabel }}
+          </div>
           <button v-if="started || caseData" @click="store.restart()" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all"><RotateCcw :size="18" stroke-width="3.5" /></button>
         </div>
       </header>
@@ -138,6 +143,15 @@ function handleGenerateEnding() {
                     </div>
                   </div>
                   <div v-if="introDone" class="grid grid-cols-1 gap-3 animate-in fade-in duration-1000">
+                    <div v-if="modelPicked || modelWarning" class="p-4 rounded-[24px] border border-white/10 bg-white/70 text-left shadow-sm">
+                      <div class="flex items-center justify-between gap-3">
+                        <span class="text-[10px] font-black uppercase tracking-widest"
+                          :class="assignmentMode === 'live' ? 'text-emerald-500' : assignmentMode === 'demo' ? 'text-amber-500' : 'text-text-tertiary'">
+                          {{ assignmentLabel }}
+                        </span>
+                        <span v-if="modelWarning" class="text-[10px] text-amber-500 font-medium">{{ modelWarning }}</span>
+                      </div>
+                    </div>
                     <div v-for="(role, idx) in caseData.roles" :key="role.id" class="p-5 rounded-[32px] border border-white/5 bg-white shadow-sm flex items-center justify-between" :class="ROLE_STYLES[idx].border">
                       <div class="flex items-center gap-4">
                         <div class="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center shadow-inner" :class="ROLE_STYLES[idx].accent"><component :is="ROLE_STYLES[idx].icon" :size="20" stroke-width="3.5" /></div>

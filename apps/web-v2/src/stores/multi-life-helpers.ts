@@ -79,9 +79,11 @@ export function chooseCaseModels(
   const all = [...appStore.models]
   if (all.length < 1) return null
 
+  const liveOnly = all.filter((item) => !item.id.startsWith('demo/'))
+  const autoPool = liveOnly.length ? liveOnly : all
   const preferred = appStore.preferFree
-    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
-    : all
+    ? (autoPool.filter((item) => item.free).length ? autoPool.filter((item) => item.free) : autoPool)
+    : autoPool
 
   // Group by provider, pick one model per provider
   const byProvider = new Map<string, typeof preferred>()
@@ -118,6 +120,19 @@ export function chooseCaseModels(
     },
     diverse: false,
   }
+}
+
+export function getAssignmentMode(assignment: MultiLifeModelAssignment | null) {
+  if (!assignment) return 'unavailable' as const
+
+  const ids = [assignment.a, assignment.b, assignment.c].filter(Boolean)
+  if (!ids.length) return 'unavailable' as const
+  if (ids.every((id) => id.startsWith('mock'))) return 'mock' as const
+
+  const demoCount = ids.filter((id) => id.startsWith('demo/')).length
+  if (demoCount === 0) return 'live' as const
+  if (demoCount === ids.length) return 'demo' as const
+  return 'mixed' as const
 }
 
 export function normalizeAssignment(

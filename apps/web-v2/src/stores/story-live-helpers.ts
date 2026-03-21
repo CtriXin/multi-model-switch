@@ -89,14 +89,21 @@ export function chooseModelIds(appStore: ReturnType<typeof useAppStore>): StoryL
   const all = [...appStore.models]
   if (!all.length) return null
 
+  const liveOnly = all.filter((item) => !item.id.startsWith('demo/'))
+  const autoPool = liveOnly.length ? liveOnly : all
   const preferred = appStore.preferFree
-    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
-    : all
+    ? (autoPool.filter((item) => item.free).length ? autoPool.filter((item) => item.free) : autoPool)
+    : autoPool
 
-  const picked: string[] = []
+  const picked = selected.slice(0, 3)
   const providers = new Set<string>()
+  for (const modelId of picked) {
+    const model = appStore.getModel(modelId)
+    if (model) providers.add(model.provider)
+  }
 
   for (const model of preferred) {
+    if (picked.includes(model.id)) continue
     if (providers.has(model.provider)) continue
     picked.push(model.id)
     providers.add(model.provider)
@@ -114,6 +121,18 @@ export function chooseModelIds(appStore: ReturnType<typeof useAppStore>): StoryL
 
   if (!logic || !emotion || !twist) return null
   return { logic, emotion, twist }
+}
+
+export function getAssignmentMode(assignment: StoryLiveModelAssignment | null) {
+  if (!assignment) return 'unavailable' as const
+
+  const ids = [assignment.logic, assignment.emotion, assignment.twist].filter(Boolean)
+  if (!ids.length) return 'unavailable' as const
+
+  const demoCount = ids.filter((id) => id.startsWith('demo/')).length
+  if (demoCount === 0) return 'live' as const
+  if (demoCount === ids.length) return 'demo' as const
+  return 'mixed' as const
 }
 
 export function normalizeAssignment(
