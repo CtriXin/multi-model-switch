@@ -181,7 +181,7 @@ onUnmounted(() => {
           <div v-if="phase === 'reading'" class="flex-1 flex flex-col relative">
             <!-- Scrollable Content -->
             <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-16 sm:py-16">
-              <div class="max-w-4xl mx-auto space-y-16 min-h-full flex flex-col justify-center">
+              <div class="max-w-4xl mx-auto space-y-16 py-8">
                 <!-- Premise -->
                 <div v-if="currentScene?.premise || streamingPremise" class="space-y-6 animate-in fade-in zoom-in-95 duration-700">
                   <div class="flex items-center gap-3 opacity-40">
