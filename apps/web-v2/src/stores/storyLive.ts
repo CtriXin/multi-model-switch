@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useAppStore } from './app'
 import { streamModelChat } from '@/services/runtime'
+import { sanitizeModelOutput } from '@/utils/modelOutput'
 import type { PlayModeSessionEnvelope } from '@/features/play-modes/shared'
 import {
   buildStoryLiveFallback,
@@ -35,6 +36,7 @@ import {
   collectText,
   createEnvelope,
   extractDirectorCue,
+  getAssignmentMode,
   getMeta,
   isoNow,
   normalizeAssignment,
@@ -64,9 +66,34 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
   const phase = computed<StoryLivePhase>(() => getMeta(envelope.value).phase)
   const storyState = computed<StoryLiveStoryState>(() => getMeta(envelope.value).storyState)
   const lastTwistRound = computed(() => getMeta(envelope.value).lastTwistRound)
+  const assignmentMode = computed(() => getAssignmentMode(modelAssignment.value))
+  const assignmentLabel = computed(() => {
+    if (assignmentMode.value === 'live') return 'Live Multi-Model'
+    if (assignmentMode.value === 'demo') return 'Mock Demo'
+    if (assignmentMode.value === 'mixed') return 'Mixed Assignment'
+    return 'No Models'
+  })
 
   function getModelName(id: string) {
     return useAppStore().getModel(id)?.name || id
+  }
+
+  function shouldFallbackRoleText(text: string) {
+    const normalized = sanitizeModelOutput(text).content.trim()
+    if (!normalized) return true
+
+    return [
+      '<BRIEF>',
+      '<BRIE',
+      '<BRI',
+      '<BR',
+      '## 结论',
+      '## 关键点',
+      '先做小闭环',
+      '先上线最小版本',
+      '转化率 / 错误率 / 时延',
+      '围绕“故事开场”',
+    ].some((marker) => normalized.includes(marker))
   }
 
   function updateMeta(patch: Partial<StoryLiveSessionMeta>) {
@@ -276,7 +303,11 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
         }),
       )
 
-      const finalText = text || buildStoryLiveFallback(role, premise.value)
+      const fallbackText = buildStoryLiveFallback(role, premise.value)
+      const cleanedText = sanitizeModelOutput(text).content.trim()
+      const finalText = shouldFallbackRoleText(text)
+        ? fallbackText
+        : (cleanedText || fallbackText)
       turn.responses[role].text = finalText
       turn.responses[role].status = 'done'
 
@@ -506,6 +537,8 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
     wrapBusy,
     phase,
     storyState,
+    assignmentMode,
+    assignmentLabel,
     init,
     markPaused,
     markActive,

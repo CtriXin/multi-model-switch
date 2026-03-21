@@ -9,13 +9,11 @@ import {
 } from '@/features/turtle-soup'
 import type { HostTag } from '@/features/turtle-soup/types'
 import { useAppStore } from '@/stores/app'
-import { useProviderStore } from '@/stores/provider'
 import { Soup, Lightbulb, ChevronRight, Flag, Trophy, RotateCcw, Home, Loader2, Sparkles, AlertTriangle, Play, PhoneCall, ArrowLeft } from 'lucide-vue-next'
 
 const router = useRouter()
 const store = useTurtleSoupStore()
 const appStore = useAppStore()
-const providerStore = useProviderStore()
 const inputText = ref('')
 const chatRef = ref<HTMLElement | null>(null)
 
@@ -65,6 +63,12 @@ function getTagColor(tag: HostTag): string {
 function answerBody(answer: string): string {
   const cut = answer.indexOf('。')
   return cut >= 0 ? answer.slice(cut + 1).trim() : ''
+}
+
+function runtimeLabel() {
+  if (store.runtimeMode === 'live') return 'Live Host'
+  if (store.runtimeMode === 'demo') return 'Mock Demo'
+  return 'No Models'
 }
 
 function goBack() { router.push('/lab') }
@@ -127,10 +131,21 @@ function goBack() { router.push('/lab') }
                       “{{ store.currentPuzzle.surfaceText }}”
                     </div>
                     <div class="max-w-xs mx-auto space-y-6">
+                      <div class="flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                        <span class="px-2.5 py-1 rounded-full border" :class="store.runtimeMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : 'border-amber-500/20 bg-amber-500/10 text-amber-500'">
+                          {{ runtimeLabel() }}
+                        </span>
+                        <span v-if="store.selectedHostModel" class="text-text-tertiary normal-case tracking-normal truncate max-w-[180px]">
+                          {{ store.selectedHostModel.name }}
+                        </span>
+                      </div>
                       <select v-model="modelSelectValue" class="w-full h-12 px-5 rounded-2xl bg-white/5 border border-white/10 text-sm text-text-primary outline-none focus:border-accent/40 focus:ring-4 focus:ring-accent/5 appearance-none">
                         <option :value="null">推荐：智能均衡模式</option>
                         <option v-for="m in store.availableModels" :key="m.id" :value="m.id">{{ m.name }}</option>
                       </select>
+                      <p class="text-[11px] text-text-tertiary leading-relaxed opacity-70">
+                        {{ store.runtimeMode === 'live' ? '当前会优先使用真实主持模型。' : '当前没有 live 主持模型，会走 Demo 或本地兜底。' }}
+                      </p>
                       <button @click="store.startGame()" class="w-full h-14 rounded-2xl bg-accent text-white font-black uppercase tracking-widest text-xs hover:opacity-90 active:scale-95 lab-breathing-btn shadow-lg shadow-accent/20">开始解密</button>
                     </div>
                   </div>
@@ -142,9 +157,19 @@ function goBack() { router.push('/lab') }
             <div v-else-if="store.phase === 'playing'" class="flex-1 flex flex-col overflow-hidden">
               <!-- Case Briefing Visibility Improved -->
               <div class="p-5 border-b border-white/10 bg-accent/10 backdrop-blur-xl">
-                <p class="text-sm font-black text-text-primary leading-relaxed text-center drop-shadow-sm">
-                  <span class="text-accent mr-2">当前谜面：</span>“{{ store.currentPuzzle?.surfaceText }}”
-                </p>
+                <div class="space-y-2">
+                  <p class="text-sm font-black text-text-primary leading-relaxed text-center drop-shadow-sm">
+                    <span class="text-accent mr-2">当前谜面：</span>“{{ store.currentPuzzle?.surfaceText }}”
+                  </p>
+                  <div class="flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest">
+                    <span class="px-2 py-1 rounded-full border" :class="store.runtimeMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : 'border-amber-500/20 bg-amber-500/10 text-amber-500'">
+                      {{ runtimeLabel() }}
+                    </span>
+                    <span v-if="store.selectedHostModel" class="text-text-tertiary normal-case tracking-normal truncate max-w-[180px]">
+                      {{ store.selectedHostModel.name }}
+                    </span>
+                  </div>
+                </div>
               </div>
               
               <div ref="chatRef" class="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-6">

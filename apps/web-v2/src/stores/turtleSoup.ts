@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useAppStore } from './app'
+import { useAppStore, type ModelMeta } from './app'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { streamModelChat } from '@/services/runtime'
@@ -131,15 +131,32 @@ const VERIFIER_META_PATTERNS = [
 // Reuse app store's preferFree and tier logic instead of hardcoding provider assumption.
 // Host: medium model (tier 0 or 1, free first if preferFree)
 
-function pickHostModel(appStore: ReturnType<typeof useAppStore>): string | null {
-  const models = appStore.models.filter(m => !m.id.startsWith('demo/'))
-  if (!models.length) return null
+function listPlayableHostModels(
+  appStore: ReturnType<typeof useAppStore>,
+  providerStore: ReturnType<typeof useProviderStore>,
+): ModelMeta[] {
+  const playable = appStore.models.filter((model) => {
+    if (model.id.startsWith('demo/')) return true
+    return providerStore.getFallbackAccounts(model.provider).length > 0
+  })
+
+  const liveModels = playable.filter((model) => !model.id.startsWith('demo/'))
+  const source = liveModels.length ? liveModels : playable
+  return source
+}
+
+function pickHostModel(
+  appStore: ReturnType<typeof useAppStore>,
+  providerStore: ReturnType<typeof useProviderStore>,
+): string | null {
+  const available = listPlayableHostModels(appStore, providerStore)
+  if (!available.length) return null
 
   const pool = appStore.preferFree
-    ? (models.filter(m => m.free).length ? models.filter(m => m.free) : models)
-    : models
+    ? (available.filter((model) => model.free).length ? available.filter((model) => model.free) : available)
+    : available
 
-  // Prefer tier 0 (basic) for host — medium is enough
+  // Prefer tier 0 (basic) for host — medium is enough.
   const basic = pool.filter(m => m.tier === 0)
   if (basic.length) {
     const sorted = [...basic].sort((a, b) => (a.priceInput + a.priceOutput) - (b.priceInput + b.priceOutput))
@@ -171,16 +188,22 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
   const selectedHostModelId = ref<string | null>(null)
   const userPickedModel = ref(false)
   const callingPhase = ref<'idle' | 'ringing' | 'connected' | 'done'>('idle')
+  const selectedHostModel = computed(() =>
+    availableModels.value.find((model) => model.id === selectedHostModelId.value) ?? null,
+  )
+  const runtimeMode = computed<'live' | 'demo' | 'unavailable'>(() => {
+    const selected = selectedHostModel.value
+    if (selected) return selected.id.startsWith('demo/') ? 'demo' : 'live'
+    if (!availableModels.value.length) return 'unavailable'
+    return availableModels.value.some((model) => !model.id.startsWith('demo/')) ? 'live' : 'demo'
+  })
 
   // Models that have at least one active account with API key (or demo)
   const availableModels = computed(() => {
     const appStore = useAppStore()
     const providerStore = useProviderStore()
     if (!appStore.initialized) return []
-    return appStore.models.filter(m => {
-      if (m.id.startsWith('demo/')) return true
-      return providerStore.getFallbackAccounts(m.provider).length > 0
-    })
+    return listPlayableHostModels(appStore, providerStore)
   })
 
   const remainingRounds = computed(() => MAX_ROUNDS - round.value)
@@ -208,6 +231,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     error.value = null
 
     const appStore = useAppStore()
+    const providerStore = useProviderStore()
     await appStore.initialize()
 
     // Use seed puzzles
@@ -227,7 +251,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
           hintLevel.value = recentSession.metadata.hintLevel
           questions.value = recentSession.metadata.questions
           startedAt.value = recentSession.startedAt
-          selectedHostModelId.value = pickHostModel(appStore) ?? selectedHostModelId.value
+          selectedHostModelId.value = pickHostModel(appStore, providerStore) ?? selectedHostModelId.value
           phase.value = 'playing'
           return
         }
@@ -274,7 +298,8 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
     // Auto-pick default, user can override
     const appStore = useAppStore()
-    selectedHostModelId.value = pickHostModel(appStore)
+    const providerStore = useProviderStore()
+    selectedHostModelId.value = pickHostModel(appStore, providerStore)
     userPickedModel.value = false
 
     phase.value = 'pick_puzzle' // stay on pick to show model selection UI
@@ -286,11 +311,18 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
   }
 
   async function startGame() {
-    if (!selectedHostModelId.value && availableModels.value.length === 0) {
+    const appStore = useAppStore()
+    const providerStore = useProviderStore()
+    if (!selectedHostModelId.value) {
+      selectedHostModelId.value = pickHostModel(appStore, providerStore)
+    }
+
+    if (!selectedHostModelId.value) {
       const toast = useToastStore()
-      toast.error('没有可用模型，请先在设置中配置 Provider 和 API Key')
+      toast.error('没有可用模型，请先配置 Provider，或保留 Demo 模式')
       return
     }
+
     phase.value = 'playing'
     const session = buildSession('playing')
     await saveSession(session)
@@ -302,6 +334,15 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
     const puzzle = currentPuzzle.value
     const toast = useToastStore()
+    const appStore = useAppStore()
+    const providerStore = useProviderStore()
+    const hostModelId = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
+    if (!hostModelId) {
+      toast.error('当前没有可用主持模型，请先配置 Provider 或切回 Demo')
+      return
+    }
+
+    selectedHostModelId.value = hostModelId
     processing.value = true
     error.value = null
     round.value++
@@ -319,7 +360,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       const hostUser = buildHostUserPrompt(playerQuestion, round.value)
 
       const hostText = await collectFullText(streamModelChat({
-        modelId: selectedHostModelId.value || '',
+        modelId: hostModelId,
         messages: [
           { role: 'system', content: hostSystem },
           { role: 'user', content: hostUser },
@@ -337,7 +378,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       const verifierUser = buildVerifierUserPrompt(buildFinalAnswer(finalTag, finalFollowUp), playerQuestion)
 
       const verifierText = await collectFullText(streamModelChat({
-        modelId: selectedHostModelId.value || '',
+        modelId: hostModelId,
         messages: [
           { role: 'system', content: verifierSystem },
           { role: 'user', content: verifierUser },
@@ -543,7 +584,9 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
     try {
       const prompt = buildHintPrompt(puzzle, nextLevel, getTouchedClueIds())
-      const hintModel = selectedHostModelId.value
+      const appStore = useAppStore()
+      const providerStore = useProviderStore()
+      const hintModel = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
 
       let hint = ''
       if (hintModel) {
@@ -604,7 +647,9 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     if (!currentPuzzle.value) return
 
     const puzzle = currentPuzzle.value
-    const recapModel = selectedHostModelId.value
+    const appStore = useAppStore()
+    const providerStore = useProviderStore()
+    const recapModel = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
 
     if (recapModel) {
       try {
@@ -699,6 +744,8 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     selectedHostModelId,
     userPickedModel,
     callingPhase,
+    selectedHostModel,
+    runtimeMode,
     // Computed
     availableModels,
     remainingRounds,

@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import type { TopicCandidate, UserDebateRole } from '@/features/challenge/types'
 import { ArrowLeft, Send, Swords, Scale, ShieldQuestion, Zap } from 'lucide-vue-next'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
-const props = defineProps<{ topic: TopicCandidate }>()
+const props = defineProps<{
+  topic: TopicCandidate
+  defaultRole?: UserDebateRole
+}>()
 const emit = defineEmits<{
   submit: [payload: { role: UserDebateRole; argument: string }]
   back: []
 }>()
 
-const role = ref<UserDebateRole>('pro')
+const role = ref<UserDebateRole>(props.defaultRole ?? 'pro')
 const argument = ref('')
+
+watch(() => props.defaultRole, (nextRole) => {
+  role.value = nextRole ?? 'pro'
+}, { immediate: true })
 
 const roleMeta = computed(() => {
   if (role.value === 'pro') return {
@@ -31,6 +38,12 @@ const roleMeta = computed(() => {
     status: '你将在最后总结',
     icon: Scale
   }
+})
+
+const roleMeaning = computed(() => {
+  if (role.value === 'pro') return `正方主张：${props.topic.sideA}`
+  if (role.value === 'con') return `反方主张：${props.topic.sideB}`
+  return '裁判视角：你将旁观双方对垒，并在最后总结。'
 })
 
 function submit() {
@@ -58,6 +71,10 @@ function submit() {
       <p class="text-[12px] text-text-secondary mt-3 leading-relaxed opacity-70 line-clamp-2 relative z-10">
         {{ topic.prompt }}
       </p>
+      <div class="mt-4 flex flex-wrap gap-2 relative z-10">
+        <span class="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-[10px] font-black tracking-widest uppercase">正方 {{ topic.sideA }}</span>
+        <span class="px-3 py-1 rounded-full bg-amber-500/10 text-amber-500 text-[10px] font-black tracking-widest uppercase">反方 {{ topic.sideB }}</span>
+      </div>
     </div>
 
     <!-- 分段角色选择器 -->
@@ -74,6 +91,11 @@ function submit() {
         <component :is="r === 'pro' ? Swords : r === 'con' ? ShieldQuestion : Scale" :size="16" stroke-width="3" />
         <span>{{ r === 'pro' ? '正方' : r === 'con' ? '反方' : '裁判' }}</span>
       </button>
+    </div>
+    <div class="px-2">
+      <div class="px-4 py-3 rounded-[20px] bg-white/5 border border-white/10 text-[11px] font-medium text-text-secondary">
+        {{ roleMeaning }}
+      </div>
     </div>
 
     <!-- 输入终端 -->

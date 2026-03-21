@@ -32,6 +32,7 @@ import {
   streamMockInto,
   createEnvelope,
   getMeta,
+  getAssignmentMode,
   normalizeAssignment,
   buildBranchMemory,
   generateEvidenceCard,
@@ -149,6 +150,14 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
   const lastRound = computed(() => rounds.value.at(-1) ?? null)
   const hasContradiction = computed(() => (lastRound.value?.contradictions.length ?? 0) > 0)
   const started = computed(() => rounds.value.length > 0)
+  const assignmentMode = computed(() => getAssignmentMode(modelAssignment.value))
+  const assignmentLabel = computed(() => {
+    if (assignmentMode.value === 'live') return 'Live Multi-Model'
+    if (assignmentMode.value === 'demo') return 'Mock Demo'
+    if (assignmentMode.value === 'mock') return 'Local Mock'
+    if (assignmentMode.value === 'mixed') return 'Mixed Assignment'
+    return 'No Models'
+  })
 
   // --- Actions ---
 
@@ -218,9 +227,11 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
 
   function pickRandomModels() {
     const appStore = useAppStore()
+    const liveOnly = appStore.models.filter((model) => !model.id.startsWith('demo/'))
+    const autoPool = liveOnly.length ? liveOnly : [...appStore.models]
     const all = appStore.preferFree
-      ? (appStore.models.filter(m => m.free).length ? appStore.models.filter(m => m.free) : [...appStore.models])
-      : [...appStore.models]
+      ? (autoPool.filter((model) => model.free).length ? autoPool.filter((model) => model.free) : autoPool)
+      : autoPool
 
     modelWarning.value = ''
 
@@ -737,6 +748,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     meta, phase, currentRound, challengeRemaining,
     modelAssignment, evidenceCards, trustMap, branchMemory,
     ending, lastRound, hasContradiction, started,
+    assignmentMode, assignmentLabel,
     init, selectCase, pickRandomModels, getAssignedModelName,
     startRound, acceptRound,
     challengeRole, generateEnding, restart, getModelName,
