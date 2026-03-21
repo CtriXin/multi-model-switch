@@ -150,9 +150,9 @@ function goBack() { router.push('/lab') }
                 </div>
                 <div class="flex justify-start">
                   <div class="max-w-[85%] px-6 py-4 rounded-[28px] rounded-bl-md bg-white dark:bg-white/[0.05] border-2 border-black/5 dark:border-white/5 shadow-sm">
-                    <p class="text-base leading-loose font-medium">
-                      <span :class="getTagColor(q.tags[0])" class="font-black mr-2 uppercase text-xs tracking-tighter">{{ TAG_LABELS[q.tags[0]] }}</span>
-                      <span v-if="answerBody(q.answer)" class="text-text-primary whitespace-pre-wrap">{{ answerBody(q.answer) }}</span>
+                    <p class="leading-loose">
+                      <span :class="getTagColor(q.tags[0])" class="font-black mr-2 uppercase text-sm tracking-wide">{{ TAG_LABELS[q.tags[0]] }}</span>
+                      <span v-if="answerBody(q.answer)" class="text-text-primary text-sm whitespace-pre-wrap opacity-80">{{ answerBody(q.answer) }}</span>
                     </p>
                   </div>
                 </div>
