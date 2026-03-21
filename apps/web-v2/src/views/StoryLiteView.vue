@@ -3,28 +3,35 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ArrowRight, Heart, Loader2, RotateCcw, ShieldCheck, Sparkles, Target, ArrowLeft } from 'lucide-vue-next'
+import { useAppStore } from '@/stores/app'
 import { useStoryLiteV2Store } from '@/stores/storyLiteV2'
-import { STORY_LITE_V2_DEFAULT_MAX_ROUNDS, STORY_LITE_V2_ROLES } from '@/features/play-modes/story-lite-v2'
-import type { StoryLiteV2RiskLevel, StoryLiteV2Role } from '@/features/play-modes/story-lite-v2/types'
+import { STORY_LITE_V2_ROLES } from '@/features/play-modes/story-lite-v2'
+import type { StoryLiteV2RiskLevel, StoryLiteV2Role, StoryLiteV2ConnectionMode } from '@/features/play-modes/story-lite-v2/types'
 import type { EndingGrade } from '@/features/play-modes/shared'
 
 const router = useRouter()
+const appStore = useAppStore()
 const storyStore = useStoryLiteV2Store()
 
 const {
-  currentScene, round, processing, error, useMock, modelAssignment, isCompleted, isStarted,
+  currentScene, processing, error, modelAssignment, connectionMode, isCompleted, isStarted,
 } = storeToRefs(storyStore)
 
 const seedInput = ref('')
 const gameStarted = computed(() => isStarted.value || processing.value)
+const ROLE_ICONS = {
+  guide: Target,
+  partner: Heart,
+  variable: Sparkles,
+} satisfies Record<StoryLiteV2Role, typeof Target>
 
 // Dynamic Placeholder Logic
 const placeholders = [
-  '假如我穿越到了古代，成了一名带刀侍卫...',
-  '假如我醒来发现在太空船里，人工智能正在报警...',
-  '假如我发现整个世界其实是一场巨大的楚门世界...',
-  '假如我拥有了停止时间的能力，但每次只能停 5 秒...',
-  '假如我是最后一名幸存的机械师，正面临外神入侵...'
+  '假如我是唯一能阻止坠毁卫星的人，但母亲此刻在另一端求救...',
+  '假如我掌握能救一座城的密码，但密码会暴露我最重要的人...',
+  '假如我发现世界末日前的唯一逃生舱，只够带走一个人...',
+  '假如我能逆转一次灾难，但代价是抹掉某段亲密关系...',
+  '假如我是最后一名守城者，却发现敌人正用我的家人逼我做选择...'
 ]
 const currentPlaceholder = ref(placeholders[0])
 let placeholderTimer: any = null
@@ -48,15 +55,58 @@ const resultCard = computed(() => {
   }
 })
 
+const connectionCopy = computed(() => {
+  const copy: Record<StoryLiteV2ConnectionMode, { badge: string; title: string; desc: string; shell: string }> = {
+    demo: {
+      badge: 'Mock Demo',
+      title: '当前使用演示剧情骨架',
+      desc: '接入真实模型后，三位角色的回复会实时生成。',
+      shell: 'border-white/10 bg-white/[0.03]',
+    },
+    'selected-live': {
+      badge: 'Live Multi-Model',
+      title: '已接入当前选中的真实模型',
+      desc: '三位角色的回复由真实模型生成，分叉骨架暂时沿用演示剧情。',
+      shell: 'border-emerald-400/20 bg-emerald-400/[0.06]',
+    },
+    'auto-live': {
+      badge: 'Live Auto-Assign',
+      title: '检测到可用 provider，已自动接入真实模型',
+      desc: '你没手动指定模型时，系统会先用可用 live 模型扮演三种决策框架。',
+      shell: 'border-cyan-400/20 bg-cyan-400/[0.06]',
+    },
+  }
+
+  return copy[connectionMode.value]
+})
+
+const assignmentCards = computed(() =>
+  (['guide', 'partner', 'variable'] as const).map((role) => ({
+    role,
+    meta: STORY_LITE_V2_ROLES[role],
+    modelName: modelAssignment.value ? storyStore.getModelName(modelAssignment.value[role]) : '待分配',
+  })),
+)
+
 function getRoleMeta(role: StoryLiteV2Role) { return STORY_LITE_V2_ROLES[role] }
+function getRoleIcon(role: StoryLiteV2Role) { return ROLE_ICONS[role] }
 function riskLabel(risk: StoryLiteV2RiskLevel): string {
-  return risk === 'safe' ? '安全' : risk === 'risky' ? '有风险' : '危险'
+  return risk === 'safe' ? '稳妥' : risk === 'risky' ? '冒险' : '失控'
 }
 
 function riskTheme(risk: StoryLiteV2RiskLevel) {
-  if (risk === 'safe') return { shell: 'border-emerald-400/30 bg-emerald-300/[0.08] hover:bg-emerald-300/[0.14]', badge: 'bg-emerald-300/15 text-emerald-100 border-emerald-300/30', icon: 'bg-emerald-300/15 text-emerald-100' }
-  if (risk === 'risky') return { shell: 'border-amber-400/30 bg-amber-300/[0.08] hover:bg-amber-300/[0.14]', badge: 'bg-amber-300/15 text-amber-100 border-amber-300/30', icon: 'bg-amber-300/15 text-amber-100' }
-  return { shell: 'border-red-400/30 bg-red-300/[0.08] hover:bg-red-300/[0.14]', badge: 'bg-red-300/15 text-red-100 border-red-300/30', icon: 'bg-red-300/15 text-red-100' }
+  if (risk === 'safe') return { shell: 'border-emerald-400/30 bg-emerald-300/[0.08] hover:bg-emerald-300/[0.14]', badge: 'bg-emerald-300/15 text-emerald-100 border-emerald-300/30' }
+  if (risk === 'risky') return { shell: 'border-amber-400/30 bg-amber-300/[0.08] hover:bg-amber-300/[0.14]', badge: 'bg-amber-300/15 text-amber-100 border-amber-300/30' }
+  return { shell: 'border-red-400/30 bg-red-300/[0.08] hover:bg-red-300/[0.14]', badge: 'bg-red-300/15 text-red-100 border-red-300/30' }
+}
+
+function getChoiceTarget(role?: StoryLiteV2Role) {
+  return role ? STORY_LITE_V2_ROLES[role] : null
+}
+
+function getChoiceModelName(role?: StoryLiteV2Role) {
+  if (!role || !modelAssignment.value) return null
+  return storyStore.getModelName(modelAssignment.value[role])
 }
 
 async function startGame() { 
@@ -74,6 +124,16 @@ onMounted(() => {
   storyStore.init(seedInput.value)
   cyclePlaceholder()
 })
+
+watch(
+  () => [appStore.selectedModelIds.join('|'), appStore.models.length] as const,
+  () => {
+    if (!gameStarted.value) {
+      storyStore.init(seedInput.value)
+    }
+  },
+)
+
 onUnmounted(() => {
   if (placeholderTimer) clearInterval(placeholderTimer)
 })
@@ -119,7 +179,34 @@ onUnmounted(() => {
                 </div>
                 <div class="text-center space-y-2">
                   <h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">设定开场</h2>
-                  <p class="text-xs text-text-tertiary opacity-60">发挥你的想象力，输入一个不可能的瞬间</p>
+                  <p class="text-xs text-text-tertiary opacity-60">输入一个高压两难，让三种决策框架把命运往不同方向撕开</p>
+                </div>
+                <div class="w-full p-5 rounded-[28px] glass-v3 border border-white/10 space-y-4" :class="connectionCopy.shell">
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="space-y-1">
+                      <p class="text-[10px] font-black uppercase tracking-widest text-accent">{{ connectionCopy.badge }}</p>
+                      <p class="text-sm font-black text-text-primary">{{ connectionCopy.title }}</p>
+                      <p class="text-[11px] text-text-tertiary leading-relaxed">{{ connectionCopy.desc }}</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-2xl bg-accent/10 text-accent flex items-center justify-center shrink-0">
+                      <ShieldCheck :size="18" stroke-width="3.5" />
+                    </div>
+                  </div>
+
+                  <div class="grid gap-3 sm:grid-cols-3">
+                    <div
+                      v-for="item in assignmentCards"
+                      :key="item.role"
+                      class="rounded-[22px] border border-white/10 bg-white/[0.04] p-4 space-y-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <component :is="getRoleIcon(item.role)" :size="14" stroke-width="4" :class="item.meta.accent" />
+                        <span class="text-[10px] font-black uppercase tracking-widest" :class="item.meta.accent">{{ item.meta.label }}</span>
+                      </div>
+                      <p class="text-[10px] font-black text-text-primary uppercase tracking-wider">{{ item.meta.title }}</p>
+                      <p class="text-[11px] text-text-tertiary leading-snug">{{ item.modelName }}</p>
+                    </div>
+                  </div>
                 </div>
                 <div class="w-full space-y-4">
                   <div class="relative">
@@ -130,15 +217,32 @@ onUnmounted(() => {
               </div>
 
               <template v-else>
+                <div v-if="error" class="mb-6 p-4 rounded-[24px] border border-red-400/20 bg-red-400/[0.06] text-[11px] leading-relaxed text-red-100">
+                  {{ error }}
+                </div>
                 <div v-if="currentScene?.premise" class="mb-10 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                  <div class="flex items-center gap-2"><div class="w-1 h-4 bg-accent rounded-full" /><span class="text-[10px] font-black uppercase tracking-widest text-text-tertiary">场景描述</span></div>
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-2">
+                      <div class="w-1 h-4 bg-accent rounded-full" />
+                      <span class="text-[10px] font-black uppercase tracking-widest text-text-tertiary">场景描述</span>
+                    </div>
+                    <div v-if="currentScene" class="text-[10px] font-black uppercase tracking-widest text-text-quaternary opacity-60">
+                      {{ currentScene.chapter }} · {{ currentScene.title }}
+                    </div>
+                  </div>
                   <p class="text-base leading-relaxed text-text-primary italic lab-flowing-text opacity-90">{{ currentScene.premise }}</p>
                 </div>
                 <div v-if="currentScene?.responses?.length" class="space-y-6">
                   <div v-for="res in currentScene.responses" :key="res.role" class="p-6 rounded-[32px] border border-white/5 bg-white/[0.02] shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-700">
-                    <div class="flex items-center gap-3 mb-4">
-                      <component :is="getRoleMeta(res.role).icon === 'Target' ? Target : Heart" :size="14" stroke-width="4" :class="getRoleMeta(res.role).accent" />
-                      <span class="text-[10px] font-black uppercase tracking-widest" :class="getRoleMeta(res.role).accent">{{ getRoleMeta(res.role).label }}</span>
+                    <div class="flex items-start justify-between gap-4 mb-4">
+                      <div class="flex items-center gap-3">
+                        <component :is="getRoleIcon(res.role)" :size="14" stroke-width="4" :class="getRoleMeta(res.role).accent" />
+                        <div>
+                          <span class="block text-[10px] font-black uppercase tracking-widest" :class="getRoleMeta(res.role).accent">{{ getRoleMeta(res.role).label }}</span>
+                          <span class="block text-[10px] font-black uppercase tracking-wider text-text-quaternary opacity-60">{{ getRoleMeta(res.role).title }}</span>
+                        </div>
+                      </div>
+                      <span class="text-[10px] text-text-tertiary uppercase tracking-widest opacity-70">{{ res.modelName }}</span>
                     </div>
                     <p class="text-sm leading-relaxed text-text-secondary lab-flowing-text">{{ res.text }}</p>
                   </div>
@@ -151,7 +255,12 @@ onUnmounted(() => {
           <!-- Right: Choices (Delayed Display) -->
           <transition name="action-panel">
             <div v-if="gameStarted" class="flex flex-col bg-white/[0.02] backdrop-blur-sm transition-all duration-700">
-              <div class="p-6 border-b border-white/5"><h3 class="text-lg font-black text-text-primary uppercase tracking-tight">{{ isCompleted ? '命定结局' : '下一步动作' }}</h3></div>
+              <div class="p-6 border-b border-white/5 space-y-2">
+                <h3 class="text-lg font-black text-text-primary uppercase tracking-tight">{{ isCompleted ? '命定结局' : '命运分叉' }}</h3>
+                <p v-if="!isCompleted" class="text-[11px] text-text-tertiary leading-relaxed">
+                  这一轮你不是在找标准答案，而是在决定继续相信主线、关系，还是异常。
+                </p>
+              </div>
               <div class="flex-1 px-6 py-6 overflow-y-auto custom-scrollbar">
                 <div v-if="isCompleted && resultCard" class="space-y-6 animate-in zoom-in-95 duration-700">
                   <div class="p-8 rounded-[40px] border border-accent/20 bg-accent/5 shadow-inner">
@@ -165,10 +274,19 @@ onUnmounted(() => {
                   <button v-for="choice in currentScene.choices" :key="choice.id" class="group p-6 rounded-[32px] border text-left transition-all duration-300 active:scale-95 shadow-sm" :class="riskTheme(choice.risk).shell" @click="makeChoice(choice.id)">
                     <div class="flex items-center justify-between mb-4">
                       <span class="px-2 py-1 rounded-lg border text-[8px] font-black uppercase tracking-widest" :class="riskTheme(choice.risk).badge">{{ riskLabel(choice.risk) }}</span>
+                      <span v-if="getChoiceTarget(choice.targetRole)" class="text-[9px] font-black uppercase tracking-widest opacity-60" :class="getChoiceTarget(choice.targetRole)?.accent">
+                        {{ getChoiceTarget(choice.targetRole)?.title }}
+                      </span>
                     </div>
                     <div class="flex items-start gap-4">
                       <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-accent group-hover:text-white transition-all shrink-0"><ArrowRight :size="18" stroke-width="3.5" /></div>
-                      <div class="min-w-0"><h4 class="text-lg font-black text-text-primary uppercase tracking-tight">{{ choice.label }}</h4><p class="mt-1 text-[11px] text-text-tertiary opacity-60 truncate">{{ choice.hint }}</p></div>
+                      <div class="min-w-0 space-y-1.5">
+                        <h4 class="text-lg font-black text-text-primary uppercase tracking-tight">{{ choice.label }}</h4>
+                        <p v-if="choice.targetRole" class="text-[10px] font-black uppercase tracking-widest" :class="getChoiceTarget(choice.targetRole)?.accent">
+                          站队 {{ getChoiceTarget(choice.targetRole)?.label }} · {{ getChoiceModelName(choice.targetRole) }}
+                        </p>
+                        <p class="text-[11px] text-text-tertiary opacity-70 leading-relaxed">{{ choice.hint }}</p>
+                      </div>
                     </div>
                   </button>
                 </div>

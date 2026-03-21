@@ -9,6 +9,7 @@ import {
   STORY_LITE_V2_MOCK_SCENES,
   buildStoryLiteV2SystemPrompt,
   buildStoryLiteV2UserPrompt,
+  type StoryLiteV2ConnectionMode,
   type StoryLiteV2Choice,
   type StoryLiteV2Response,
   type StoryLiteV2Role,
@@ -20,6 +21,10 @@ const DEMO_MODEL_IDS = ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5
 
 function isUsingDemoModels(modelIds: string[]) {
   return modelIds.length > 0 && modelIds.every((id) => id.startsWith('demo/'))
+}
+
+function isLiveModelId(modelId: string) {
+  return !modelId.startsWith('demo/')
 }
 
 function fillModelIds(modelIds: string[]) {
@@ -75,13 +80,46 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   const error = ref('')
   const useMock = ref(false)
   const modelAssignment = ref<Record<StoryLiteV2Role, string> | null>(null)
+  const connectionMode = ref<StoryLiteV2ConnectionMode>('demo')
 
   const isCompleted = computed(() => currentScene.value?.ending != null)
   const isStarted = computed(() => round.value > 0 || currentScene.value != null)
+  const usesLiveModels = computed(() => connectionMode.value !== 'demo')
 
   function getModelName(modelId: string) {
     if (modelId.startsWith('mock-')) return '模拟角色'
+    if (modelId.startsWith('demo/')) {
+      const raw = modelId.split('/')[1] || modelId
+      return raw
+        .split('-')
+        .map((part) => part.toUpperCase() === 'GPT' ? 'GPT' : part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+    }
     return appStore.getModel(modelId)?.name || modelId
+  }
+
+  function syncModelAssignment() {
+    const selectedIds = appStore.selectedModelIds.filter((id) => appStore.getModel(id))
+    const selectedLiveIds = selectedIds.filter(isLiveModelId)
+    const availableLiveIds = appStore.models
+      .filter((model) => isLiveModelId(model.id))
+      .map((model) => model.id)
+
+    let resolvedIds: string[] = selectedIds
+
+    if (selectedLiveIds.length) {
+      connectionMode.value = 'selected-live'
+      resolvedIds = selectedLiveIds
+    } else if (availableLiveIds.length) {
+      connectionMode.value = 'auto-live'
+      resolvedIds = availableLiveIds
+    } else {
+      connectionMode.value = 'demo'
+      resolvedIds = selectedIds.length ? selectedIds : DEMO_MODEL_IDS
+    }
+
+    useMock.value = connectionMode.value === 'demo' || isUsingDemoModels(resolvedIds)
+    modelAssignment.value = assignRoles(resolvedIds)
   }
 
   function buildFallbackResponse(role: StoryLiteV2Role, scene: StoryLiteV2Scene): StoryLiteV2Response {
@@ -180,19 +218,21 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
   function init(seed?: string) {
     const nextSeed = seed?.trim() || '公路异变悬疑'
-    const selectedIds = appStore.selectedModelIds.filter((id) => appStore.getModel(id))
 
     seedLabel.value = nextSeed
     round.value = 0
     currentScene.value = null
     processing.value = false
     error.value = ''
-    useMock.value = selectedIds.length === 0 || isUsingDemoModels(selectedIds)
-    modelAssignment.value = assignRoles(selectedIds)
+    syncModelAssignment()
   }
 
   async function startGame() {
     if (processing.value) return
+
+    await appStore.ensureModelsLoaded()
+    syncModelAssignment()
+
     if (!modelAssignment.value) {
       error.value = '当前没有可用模型，请先选择模型后再开始。'
       return
@@ -251,8 +291,10 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     error,
     useMock,
     modelAssignment,
+    connectionMode,
     isCompleted,
     isStarted,
+    usesLiveModels,
     init,
     startGame,
     makeChoice,
