@@ -128,6 +128,7 @@ export interface QuestionRecord {
   tags: HostTag[]
   verifierResult: 'approved' | 'rejected' | 'fallback'
   latencyMs?: number
+  status?: 'pending' | 'done'
 }
 
 export interface TurtleSoupResult {

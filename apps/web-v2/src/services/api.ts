@@ -252,6 +252,18 @@ interface NewApiModelInfo {
   enabled?: boolean
 }
 
+export interface SparkringModelSpeedEntry {
+  model: string
+  channelId: number
+  latencyMs: number
+  status: string
+}
+
+export interface SparkringModelSpeedSnapshot {
+  testedAt: string
+  results: SparkringModelSpeedEntry[]
+}
+
 const ALWAYS_FREE_PROVIDER_IDS = new Set([
   'groq',
   'google',
@@ -468,6 +480,46 @@ export async function fetchModels(
   }
 
   return rebucketModelsByUnifiedScore(apiModels)
+}
+
+export async function fetchSparkringModelSpeeds(
+  provider: ProviderConfig,
+  apiKey: string,
+): Promise<SparkringModelSpeedSnapshot> {
+  if (provider.id !== 'sparkring') {
+    throw new ApiError('只有 SparkRing 支持模型测速接口', 400, 'provider_unsupported')
+  }
+
+  const baseUrl = provider.baseUrl.replace(/\/v1$/, '')
+  const url = new URL(`${baseUrl}/api/models/speed`)
+  url.searchParams.set('key', apiKey)
+
+  const res = await fetch(url.toString())
+  if (!res.ok) {
+    const body = await res.text()
+    if (res.status === 429) {
+      throw new ApiError(
+        '测速接口 5 分钟内只能请求一次，先使用缓存结果',
+        429,
+        'speed_rate_limited',
+        extractApiErrorDetail(body),
+      )
+    }
+    throw buildApiError(res.status, body)
+  }
+
+  const json = await res.json()
+  const rawItems = Array.isArray(json?.data) ? json.data : []
+
+  return {
+    testedAt: typeof json?.tested_at === 'string' ? json.tested_at : new Date().toISOString(),
+    results: rawItems.map((item: any) => ({
+      model: typeof item?.model === 'string' ? item.model : '',
+      channelId: typeof item?.channel_id === 'number' ? item.channel_id : 0,
+      latencyMs: typeof item?.latency_ms === 'number' ? item.latency_ms : Number(item?.latency_ms ?? 0),
+      status: typeof item?.status === 'string' ? item.status : 'error',
+    })).filter((item: SparkringModelSpeedEntry) => !!item.model),
+  }
 }
 
 /** Map NewAPI /api/models/info format to ModelMeta */

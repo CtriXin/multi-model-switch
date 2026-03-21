@@ -143,29 +143,16 @@ function listPlayableHostModels(
 
   const liveModels = playable.filter((model) => !model.id.startsWith('demo/'))
   const source = liveModels.length ? liveModels : playable
-  return source
+  return appStore.getLabAutoPool(source)
 }
 
 function pickHostModel(
   appStore: ReturnType<typeof useAppStore>,
-  providerStore: ReturnType<typeof useProviderStore>,
 ): string | null {
+  const providerStore = useProviderStore()
   const available = listPlayableHostModels(appStore, providerStore)
   if (!available.length) return null
-
-  const pool = appStore.preferFree
-    ? (available.filter((model) => model.free).length ? available.filter((model) => model.free) : available)
-    : available
-
-  // Prefer tier 0 (basic) for host — medium is enough.
-  const basic = pool.filter(m => m.tier === 0)
-  if (basic.length) {
-    const sorted = [...basic].sort((a, b) => (a.priceInput + a.priceOutput) - (b.priceInput + b.priceOutput))
-    return sorted[0]?.id || null
-  }
-  // Fallback: cheapest in pool
-  const sorted = [...pool].sort((a, b) => (a.priceInput + a.priceOutput) - (b.priceInput + b.priceOutput))
-  return sorted[0]?.id || null
+  return appStore.pickLabModelId(available)
 }
 
 // ─── Store ──────────────────────────────────────────────
@@ -252,7 +239,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
           hintLevel.value = recentSession.metadata.hintLevel
           questions.value = recentSession.metadata.questions
           startedAt.value = recentSession.startedAt
-          selectedHostModelId.value = pickHostModel(appStore, providerStore) ?? selectedHostModelId.value
+          selectedHostModelId.value = pickHostModel(appStore) ?? selectedHostModelId.value
           phase.value = 'playing'
           return
         }
@@ -299,8 +286,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
     // Auto-pick default, user can override
     const appStore = useAppStore()
-    const providerStore = useProviderStore()
-    selectedHostModelId.value = pickHostModel(appStore, providerStore)
+    selectedHostModelId.value = pickHostModel(appStore)
     userPickedModel.value = false
 
     phase.value = 'pick_puzzle' // stay on pick to show model selection UI
@@ -313,9 +299,8 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
   async function startGame() {
     const appStore = useAppStore()
-    const providerStore = useProviderStore()
     if (!selectedHostModelId.value) {
-      selectedHostModelId.value = pickHostModel(appStore, providerStore)
+      selectedHostModelId.value = pickHostModel(appStore)
     }
 
     if (!selectedHostModelId.value) {
@@ -336,8 +321,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     const puzzle = currentPuzzle.value
     const toast = useToastStore()
     const appStore = useAppStore()
-    const providerStore = useProviderStore()
-    const hostModelId = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
+    const hostModelId = selectedHostModelId.value ?? pickHostModel(appStore)
     if (!hostModelId) {
       toast.error('当前没有可用主持模型，请先配置 Provider 或切回 Demo')
       return
@@ -353,6 +337,15 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     abortController.value = ac
 
     const startTime = Date.now()
+    const record: QuestionRecord = {
+      round: round.value,
+      question: playerQuestion,
+      answer: '',
+      tags: [],
+      verifierResult: 'approved',
+      status: 'pending',
+    }
+    questions.value.push(record)
 
     try {
       // Step 1: Host generates answer
@@ -454,16 +447,12 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       // Step 3: Local solve detection (check solveKeywords against player question)
       const solvedLocally = checkLocalSolve(playerQuestion, puzzle)
 
-      const record: QuestionRecord = {
-        round: round.value,
-        question: playerQuestion,
-        answer: displayAnswer,
-        guidance: displayGuidance,
-        tags: [finalTag],
-        verifierResult: guardResult.safe ? (vOutput?.approved === false ? 'rejected' : 'approved') : 'fallback',
-        latencyMs: Date.now() - startTime,
-      }
-      questions.value.push(record)
+      record.answer = displayAnswer
+      record.guidance = displayGuidance
+      record.tags = [finalTag]
+      record.verifierResult = guardResult.safe ? (vOutput?.approved === false ? 'rejected' : 'approved') : 'fallback'
+      record.latencyMs = Date.now() - startTime
+      record.status = 'done'
 
       if (solvedLocally) {
         const solveQuality = hintLevel.value === 0
@@ -505,6 +494,10 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
         await generateRecap()
       }
     } catch (e: any) {
+      const pendingIndex = questions.value.indexOf(record)
+      if (pendingIndex >= 0 && record.status === 'pending') {
+        questions.value.splice(pendingIndex, 1)
+      }
       if (e?.name === 'AbortError') return
       error.value = e?.message || '处理提问时出错'
       toast.error(error.value!)
@@ -597,7 +590,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       const prompt = buildHintPrompt(puzzle, nextLevel, getTouchedClueIds())
       const appStore = useAppStore()
       const providerStore = useProviderStore()
-      const hintModel = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
+      const hintModel = selectedHostModelId.value ?? pickHostModel(appStore)
 
       let hint = ''
       if (hintModel) {
@@ -665,7 +658,7 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     const puzzle = currentPuzzle.value
     const appStore = useAppStore()
     const providerStore = useProviderStore()
-    const recapModel = selectedHostModelId.value ?? pickHostModel(appStore, providerStore)
+    const recapModel = selectedHostModelId.value ?? pickHostModel(appStore)
 
     if (recapModel) {
       try {

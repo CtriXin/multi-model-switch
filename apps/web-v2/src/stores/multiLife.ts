@@ -3,7 +3,6 @@ import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
-import { preferLiveAutoModels } from '@/utils/modelSelection'
 import type { PlayModeSessionEnvelope } from '@/features/play-modes/shared'
 import {
   getCase,
@@ -228,14 +227,14 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
 
   function pickRandomModels() {
     const appStore = useAppStore()
-    const autoPool = preferLiveAutoModels([...appStore.models])
-    const all = appStore.preferFree
-      ? (autoPool.filter((model) => model.free).length ? autoPool.filter((model) => model.free) : autoPool)
-      : autoPool
+    const pickedIds = appStore.pickLabModelIds(3)
+    const pickedModels = pickedIds
+      .map((id) => appStore.getModel(id))
+      .filter(Boolean)
 
     modelWarning.value = ''
 
-    if (all.length === 0) {
+    if (pickedModels.length === 0) {
       modelWarning.value = '没有可用模型，将使用模拟数据'
       modelDiverse.value = false
       useMock.value = true
@@ -244,10 +243,9 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
       return
     }
 
-    const shuffled = [...all].sort(() => Math.random() - 0.5)
-    const picked = shuffled.slice(0, 3)
+    const picked = pickedModels.slice(0, 3)
     while (picked.length < 3) {
-      picked.push(all[Math.floor(Math.random() * all.length)])
+      picked.push(pickedModels[picked.length % pickedModels.length])
     }
 
     const ids = picked.map(m => m.id)

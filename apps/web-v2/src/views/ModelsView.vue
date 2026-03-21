@@ -36,6 +36,23 @@ const modelsByProvider = computed(() => {
   for (const m of filteredModels.value) {
     ;(map[m.provider] ??= []).push(m)
   }
+  for (const provider of Object.keys(map)) {
+    map[provider] = provider === 'sparkring'
+      ? [...map[provider]].sort((left, right) => {
+          const leftSpeed = appStore.getModelSpeed(left.id)
+          const rightSpeed = appStore.getModelSpeed(right.id)
+          const leftOk = leftSpeed?.status === 'ok'
+          const rightOk = rightSpeed?.status === 'ok'
+          if (leftOk !== rightOk) return leftOk ? -1 : 1
+          if (leftSpeed?.latencyMs != null && rightSpeed?.latencyMs != null && leftSpeed.latencyMs !== rightSpeed.latencyMs) {
+            return leftSpeed.latencyMs - rightSpeed.latencyMs
+          }
+          if (leftSpeed?.latencyMs != null) return -1
+          if (rightSpeed?.latencyMs != null) return 1
+          return left.name.localeCompare(right.name)
+        })
+      : map[provider]
+  }
   return map
 })
 
@@ -98,6 +115,39 @@ function scrollToProvider(provider: string) {
 }
 
 function toggleModel(id: string) { appStore.toggleModel(id) }
+
+function getModelSpeedMeta(model: ModelMeta) {
+  return appStore.getModelSpeed(model.id)
+}
+
+function formatLatency(latencyMs: number | null | undefined) {
+  return latencyMs == null ? '未测速' : `${latencyMs} ms`
+}
+
+function isSpeedDegraded(model: ModelMeta) {
+  const speed = getModelSpeedMeta(model)
+  return !!speed && speed.status !== 'ok'
+}
+
+function speedStatusLabel(model: ModelMeta) {
+  const speed = getModelSpeedMeta(model)
+  if (!speed) return ''
+  return speed.status === 'ok' ? '测速正常' : speed.status.toUpperCase()
+}
+
+function speedDotClass(model: ModelMeta) {
+  const speed = getModelSpeedMeta(model)
+  if (!speed) return 'bg-black/10 dark:bg-white/10'
+  if (speed.status === 'ok') return 'bg-cyan-400'
+  return 'bg-zinc-400'
+}
+
+function formatSpeedTestedAt(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+}
 
 onMounted(() => {
   appStore.refreshModels()
@@ -187,6 +237,9 @@ onMounted(() => {
                   <h2 class="text-xl font-black text-text-primary uppercase tracking-tight truncate">{{ provider }}</h2>
                   <div class="flex items-center gap-2 mt-1">
                     <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-60">{{ modelsByProvider[provider].length }} 基因已就绪</span>
+                    <span v-if="provider === 'sparkring' && appStore.sparkringSpeedTestedAt" class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-50">
+                      延迟样本 {{ formatSpeedTestedAt(appStore.sparkringSpeedTestedAt) }}
+                    </span>
                   </div>
                 </div>
                 <div class="h-px flex-1 bg-black/5 dark:bg-white/5 ml-4"></div>
@@ -198,7 +251,9 @@ onMounted(() => {
                   class="group relative flex flex-col p-6 rounded-[32px] border transition-all duration-500 cursor-pointer active:scale-[0.98]"
                   :class="appStore.selectedModelIds.includes(model.id) 
                     ? 'bg-accent/10 border-accent/40 shadow-[0_20px_50px_rgba(99,102,241,0.15)] ring-1 ring-accent/20' 
-                    : 'bg-white/5 border-black/5 dark:border-white/10 hover:border-black/10 dark:hover:border-white/20 hover:bg-white/8 shadow-xl'">
+                    : isSpeedDegraded(model)
+                      ? 'bg-black/[0.03] dark:bg-white/[0.03] border-black/5 dark:border-white/10 opacity-55'
+                      : 'bg-white/5 border-black/5 dark:border-white/10 hover:border-black/10 dark:hover:border-white/20 hover:bg-white/8 shadow-xl'">
                   
                   <div class="absolute top-6 right-6 w-6 h-6 rounded-full flex items-center justify-center border transition-all"
                        :class="appStore.selectedModelIds.includes(model.id) ? 'bg-accent border-accent text-white scale-110 shadow-lg shadow-accent/20' : 'border-black/10 dark:border-white/10 opacity-30'">
@@ -212,6 +267,16 @@ onMounted(() => {
                             :class="tierClass(model.tier, appStore.selectedModelIds.includes(model.id))">{{ tierLabel(model.tier) }}</span>
                       <span v-if="model.free" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Free</span>
                       <span v-if="model.supportsVision" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">Vision</span>
+                      <span v-if="model.provider === 'sparkring' && getModelSpeedMeta(model)" class="inline-flex items-center gap-1.5 pl-1">
+                        <span class="h-1.5 w-1.5 rounded-full" :class="speedDotClass(model)" />
+                        <span class="text-[9px] font-black uppercase tracking-wider"
+                              :class="isSpeedDegraded(model) ? 'text-text-tertiary' : 'text-cyan-500'">
+                          {{ formatLatency(getModelSpeedMeta(model)?.latencyMs) }}
+                        </span>
+                        <span v-if="isSpeedDegraded(model)" class="text-[8px] font-black uppercase tracking-widest text-text-quaternary">
+                          {{ speedStatusLabel(model) }}
+                        </span>
+                      </span>
                     </div>
                   </div>
 

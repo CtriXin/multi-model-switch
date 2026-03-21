@@ -1,5 +1,4 @@
 import { useAppStore } from '@/stores/app'
-import { preferLiveAutoModels } from '@/utils/modelSelection'
 import {
   PLAY_MODE_SCHEMA_VERSION,
   type PlayModeSessionEnvelope,
@@ -77,46 +76,21 @@ export interface ModelPickResult {
 export function chooseCaseModels(
   appStore: ReturnType<typeof useAppStore>,
 ): ModelPickResult | null {
-  const all = preferLiveAutoModels([...appStore.models])
-  if (all.length < 1) return null
-  const preferred = appStore.preferFree
-    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
-    : all
+  const pickedIds = appStore.pickLabModelIds(3)
+  if (!pickedIds.length) return null
 
-  // Group by provider, pick one model per provider
-  const byProvider = new Map<string, typeof preferred>()
-  for (const model of preferred) {
-    if (!byProvider.has(model.provider)) {
-      byProvider.set(model.provider, [])
-    }
-    byProvider.get(model.provider)!.push(model)
-  }
-
-  if (byProvider.size >= 3) {
-    const picked: { id: string }[] = []
-    for (const [, models] of byProvider) {
-      picked.push({ id: models[0].id })
-      if (picked.length === 3) break
-    }
-    return { assignment: { a: picked[0].id, b: picked[1].id, c: picked[2].id }, diverse: true }
-  }
-
-  // Fallback: pick top 3 regardless of provider
-  const top3 = preferred.slice(0, 3)
-  while (top3.length < 3 && all.length > top3.length) {
-    const next = all[top3.length]
-    if (next && !top3.find(m => m.id === next.id)) top3.push(next)
-    else break
-  }
-  if (top3.length < 1) return null
+  const pickedModels = pickedIds
+    .map((id) => appStore.getModel(id))
+    .filter(Boolean)
+  if (!pickedModels.length) return null
 
   return {
     assignment: {
-      a: top3[0]?.id ?? top3[0].id,
-      b: top3[1]?.id ?? top3[0].id,
-      c: top3[2]?.id ?? top3[0].id,
+      a: pickedIds[0],
+      b: pickedIds[1] ?? pickedIds[0],
+      c: pickedIds[2] ?? pickedIds[0],
     },
-    diverse: false,
+    diverse: new Set(pickedModels.map((model) => model!.provider)).size >= 3 && new Set(pickedIds.slice(0, 3)).size >= 3,
   }
 }
 

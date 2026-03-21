@@ -159,7 +159,8 @@ function pickCheapModel(appStore: ReturnType<typeof useAppStore>): string | null
 }
 
 function getAvailableModels(appStore: ReturnType<typeof useAppStore>): ModelMeta[] {
-  return preferLiveAutoModels(appStore.models)
+  const liveModels = preferLiveAutoModels(appStore.models)
+  return liveModels.length ? liveModels : appStore.models
 }
 
 function modelCost(model: ModelMeta): number {
@@ -253,6 +254,17 @@ function pickDebateModels(
 ): { pro: string; con: string; moderator: string } | null {
   const pool = getAvailableModels(appStore)
   if (!pool.length) return null
+
+  if (appStore.shouldUseSparkringSpeed() && pool.some((model) => model.provider === 'sparkring')) {
+    const picked = appStore.pickLabModelIds(3, pool)
+    const [pro, con, moderator] = picked
+    if (!pro) return null
+    return {
+      pro,
+      con: con ?? pro,
+      moderator: moderator ?? con ?? pro,
+    }
+  }
 
   const takenIds = new Set<string>()
   const takenProviders = new Set<string>()
