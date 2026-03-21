@@ -126,12 +126,16 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
           </template>
         </div>
 
-        <div v-if="started" class="p-6 bg-white/5 border-t border-white/5 backdrop-blur-md">
-          <div class="max-w-3xl mx-auto relative">
-            <div v-if="latestDirectorCue" class="absolute -top-10 left-4 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-black text-cyan-500 uppercase tracking-widest animate-fade-in">{{ latestDirectorCue }}</div>
-            <div class="absolute -top-10 right-4 px-3 py-1 rounded-full border text-[10px] font-black uppercase tracking-widest"
-              :class="assignmentMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : 'border-white/10 bg-white/5 text-text-tertiary'">
-              {{ assignmentLabel }}
+        <div v-if="started" class="p-4 sm:p-6 bg-white/5 border-t border-white/5 backdrop-blur-md">
+          <div class="max-w-3xl mx-auto space-y-3">
+            <!-- Info Tags Row -->
+            <div class="flex items-center justify-between gap-2">
+              <div v-if="latestDirectorCue" class="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-black text-cyan-500 uppercase tracking-widest">{{ latestDirectorCue }}</div>
+              <div v-else class="w-px"></div>
+              <div class="px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shrink-0"
+                :class="assignmentMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : 'border-white/10 bg-white/5 text-text-tertiary'">
+                {{ assignmentLabel }}
+              </div>
             </div>
             <textarea v-model="userInput" rows="2" class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all" placeholder="接下去演..." @keydown.enter.prevent="continueStory" />
             <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
