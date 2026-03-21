@@ -9,15 +9,29 @@ import {
   buildStoryLiteV2SeededScene,
   buildStoryLiteV2SystemPrompt,
   buildStoryLiteV2UserPrompt,
+  buildDirectorSystemPrompt,
+  buildDirectorUserPrompt,
+  extractDirectorJson,
+  buildFallbackChoices,
+  buildFallbackPremise,
   type StoryLiteV2ConnectionMode,
   type StoryLiteV2Choice,
   type StoryLiteV2Response,
   type StoryLiteV2Role,
   type StoryLiteV2Scene,
+  type SceneHistoryEntry,
 } from '@/features/play-modes/story-lite-v2'
 
 const ROLE_ORDER: StoryLiteV2Role[] = ['guide', 'partner', 'variable']
 const DEMO_MODEL_IDS = ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro']
+
+async function collectText(stream: AsyncGenerator<string>): Promise<string> {
+  let text = ''
+  for await (const chunk of stream) {
+    text += chunk
+  }
+  return text.trim()
+}
 
 function isUsingDemoModels(modelIds: string[]) {
   return modelIds.length > 0 && modelIds.every((id) => id.startsWith('demo/'))
@@ -84,8 +98,21 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   const activeChoiceLabel = ref('')
   const responseStates = ref(createRoleState())
   const requestNonce = ref(0)
+  const sceneHistory = ref<SceneHistoryEntry[]>([])
+  const manuallyEnded = ref(false)
+  const streamingPremise = ref('')
 
-  const isCompleted = computed(() => currentScene.value?.ending != null)
+  /** 流式显示 premise，像讲故事一样逐字出现 */
+  async function streamPremise(fullText: string, speed = 30): Promise<void> {
+    streamingPremise.value = ''
+    const chars = fullText.split('')
+    for (let i = 0; i < chars.length; i++) {
+      streamingPremise.value = fullText.slice(0, i + 1)
+      await new Promise((r) => setTimeout(r, speed))
+    }
+  }
+
+  const isCompleted = computed(() => currentScene.value?.ending != null || manuallyEnded.value)
   const isStarted = computed(() => round.value > 0 || currentScene.value != null)
   const usesLiveModels = computed(() => connectionMode.value !== 'demo')
   const readyResponseCount = computed(() =>
@@ -279,6 +306,158 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     }
   }
 
+  async function generateDirectorScene(
+    lastChoice?: StoryLiteV2Choice,
+  ): Promise<{ premise: string; choices: StoryLiteV2Choice[] }> {
+    const assignment = modelAssignment.value
+    if (!assignment) return { premise: buildFallbackPremise(), choices: buildFallbackChoices() }
+
+    const directorModelId = assignment.guide
+
+    try {
+      const rawText = await collectText(
+        streamModelChat({
+          modelId: directorModelId,
+          traceLabel: 'story-lite:director',
+          traceMeta: { round: round.value, seed: seedLabel.value },
+          messages: [
+            { role: 'system', content: buildDirectorSystemPrompt() },
+            { role: 'user', content: buildDirectorUserPrompt(seedLabel.value, sceneHistory.value, lastChoice ? { label: lastChoice.label } : undefined) },
+          ],
+        }),
+      )
+
+      if (!rawText) return { premise: buildFallbackPremise(), choices: buildFallbackChoices() }
+
+      const result = extractDirectorJson(rawText)
+      if (result) return result
+    } catch { /* fallback below */ }
+
+    return { premise: buildFallbackPremise(), choices: buildFallbackChoices() }
+  }
+
+  async function buildLiveSceneDynamic(sceneRound: number, lastChoice?: StoryLiteV2Choice) {
+    const assignment = modelAssignment.value
+    if (!assignment) return buildSceneFromMock('start')
+
+    // Phase 1: 导演 AI 生成 premise + choices
+    const directorResult = await generateDirectorScene(lastChoice)
+
+    const sceneId = `round-${sceneRound}`
+    const requestId = requestNonce.value + 1
+    requestNonce.value = requestId
+
+    // 先开始流式显示 premise
+    const premisePromise = streamPremise(directorResult.premise, 25)
+
+    // 创建 pending scene
+    currentScene.value = {
+      id: sceneId,
+      chapter: `第 ${sceneRound} 幕`,
+      title: '',
+      premise: directorResult.premise,
+      responses: ROLE_ORDER.map((role) => ({
+        role,
+        modelId: assignment[role],
+        modelName: getModelName(assignment[role]),
+        text: '',
+        status: 'pending',
+      })),
+      choices: [],
+    }
+    resetResponseState('loading')
+
+    // 等待 premise 流式完成
+    await premisePromise
+
+    // Phase 2: 并行 streaming 3 个角色回应
+    await Promise.allSettled(
+      ROLE_ORDER.map((role) =>
+        streamRoleResponseDynamic(sceneId, role, sceneRound, requestId, directorResult.premise, lastChoice),
+      ),
+    )
+
+    if (requestNonce.value !== requestId || !currentScene.value) return currentScene.value!
+
+    // 写入 choices（等角色回应完成后再展示选择按钮）
+    currentScene.value = {
+      ...currentScene.value,
+      choices: directorResult.choices,
+    }
+
+    return currentScene.value
+  }
+
+  async function streamRoleResponseDynamic(
+    sceneId: string,
+    role: StoryLiteV2Role,
+    sceneRound: number,
+    requestId: number,
+    premise: string,
+    lastChoice?: StoryLiteV2Choice,
+  ) {
+    const assignment = modelAssignment.value
+    if (!assignment) return
+
+    const modelId = assignment[role]
+    const fallbackText = `${STORY_LITE_V2_ROLES[role].label}正在观察局势。`
+
+    setResponseState(role, 'loading')
+    updateSceneResponse(role, { status: 'streaming' })
+
+    try {
+      let rawText = ''
+      for await (const chunk of streamModelChat({
+        modelId,
+        traceLabel: `story-lite:${sceneId}:${role}`,
+        traceMeta: { round: sceneRound, seed: seedLabel.value },
+        messages: [
+          { role: 'system', content: buildStoryLiteV2SystemPrompt(role) },
+          {
+            role: 'user',
+            content: buildStoryLiteV2UserPrompt(
+              seedLabel.value,
+              sceneRound,
+              premise,
+              lastChoice
+                ? {
+                    role: lastChoice.targetRole
+                      ? STORY_LITE_V2_ROLES[lastChoice.targetRole].label
+                      : '当前局面',
+                    label: lastChoice.label,
+                  }
+                : undefined,
+            ),
+          },
+        ],
+      })) {
+        if (requestNonce.value !== requestId) return
+
+        rawText += chunk
+        const cleaned = sanitizeModelOutput(rawText).content.trim()
+        if (cleaned && !shouldFallbackToMock(cleaned)) {
+          updateSceneResponse(role, { text: cleaned, status: 'streaming' })
+        }
+      }
+
+      if (requestNonce.value !== requestId) return
+
+      const finalContent = sanitizeModelOutput(rawText).content.trim()
+      updateSceneResponse(role, {
+        text: finalContent && !shouldFallbackToMock(finalContent) ? finalContent : fallbackText,
+        status: 'done',
+      })
+    } catch {
+      if (requestNonce.value !== requestId) return
+      updateSceneResponse(role, {
+        text: fallbackText,
+        status: 'error',
+      })
+    } finally {
+      if (requestNonce.value === requestId) setResponseState(role, 'done')
+    }
+  }
+
   async function buildLiveScene(sceneId: string, sceneRound: number, lastChoice?: StoryLiteV2Choice) {
     const baseScene = buildSceneFromMock(sceneId)
     const assignment = modelAssignment.value
@@ -315,6 +494,9 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     activeChoiceLabel.value = ''
     requestNonce.value += 1
     resetResponseState()
+    sceneHistory.value = []
+    manuallyEnded.value = false
+    streamingPremise.value = ''
     syncModelAssignment()
   }
 
@@ -338,16 +520,23 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       round.value = nextRound
 
       if (useMock.value) {
-        currentScene.value = buildSceneFromMock('start')
+        const scene = buildSceneFromMock('start')
+        currentScene.value = scene
         resetResponseState('done')
+        await streamPremise(scene.premise, 25)
       } else {
-        currentScene.value = await buildLiveScene('start', nextRound)
+        currentScene.value = await buildLiveSceneDynamic(nextRound)
+        if (currentScene.value) {
+          sceneHistory.value = [{ round: nextRound, premise: currentScene.value.premise }]
+        }
       }
     } catch (e: any) {
       error.value = e?.message || '生成场景失败'
-      currentScene.value = buildSceneFromMock('start')
+      const scene = buildSceneFromMock('start')
+      currentScene.value = scene
       round.value = 1
       resetResponseState('done')
+      await streamPremise(scene.premise, 25)
     } finally {
       processing.value = false
     }
@@ -364,21 +553,33 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     activeChoiceLabel.value = choice.label
 
     try {
-      const nextSceneId = STORY_LITE_V2_BRANCHES[currentScene.value.id]?.[choiceId] || 'ending-normal'
       const nextRound = round.value + 1
       round.value = nextRound
 
       if (useMock.value) {
-        currentScene.value = buildSceneFromMock(nextSceneId)
+        const nextSceneId = STORY_LITE_V2_BRANCHES[currentScene.value.id]?.[choiceId] || 'ending-normal'
+        const scene = buildSceneFromMock(nextSceneId)
+        currentScene.value = scene
         resetResponseState('done')
+        await streamPremise(scene.premise, 25)
       } else {
-        currentScene.value = await buildLiveScene(nextSceneId, nextRound, choice)
+        currentScene.value = await buildLiveSceneDynamic(nextRound, choice)
+        if (currentScene.value) {
+          sceneHistory.value = [
+            ...sceneHistory.value,
+            { round: nextRound, premise: currentScene.value.premise, choiceLabel: choice.label },
+          ]
+        }
       }
     } catch (e: any) {
       error.value = e?.message || '推进剧情失败'
-      currentScene.value = buildSceneFromMock('ending-normal')
-      round.value += 1
-      resetResponseState('done')
+      if (useMock.value) {
+        const scene = buildSceneFromMock('ending-normal')
+        currentScene.value = scene
+        round.value += 1
+        resetResponseState('done')
+        await streamPremise(scene.premise, 25)
+      }
     } finally {
       processing.value = false
       activeChoiceLabel.value = ''
@@ -387,6 +588,10 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
   function restart() {
     init(seedLabel.value)
+  }
+
+  function endStory() {
+    manuallyEnded.value = true
   }
 
   return {
@@ -400,14 +605,18 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     connectionMode,
     activeChoiceLabel,
     responseStates,
+    sceneHistory,
+    streamingPremise,
     isCompleted,
     isStarted,
     usesLiveModels,
     readyResponseCount,
+    manuallyEnded,
     init,
     startGame,
     makeChoice,
     restart,
+    endStory,
     getModelName,
   }
 })

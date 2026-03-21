@@ -3,7 +3,9 @@ import {
   type StoryLiteV2Choice,
   type StoryLiteV2Response,
   type StoryLiteV2Role,
+  type StoryLiteV2RiskLevel,
   type StoryLiteV2Scene,
+  type SceneHistoryEntry,
 } from './types'
 
 /**
@@ -565,6 +567,119 @@ export const STORY_LITE_V2_MOCK_SCENES: Record<string, StoryLiteV2Scene> = {
       epilogue: '最危险的变量，不是选择本身，而是谁给了你这些选择。',
     },
   },
+}
+
+// --- Director Prompt (Live 动态场景生成) ---
+
+export function buildDirectorSystemPrompt(): string {
+  return `你是一个互动叙事导演。玩家正在体验一个"假如模拟器"——通过选择推进故事，三个 AI 角色（引路人、伙伴、变量）会从不同角度点评。
+
+规则：
+1. 根据玩家的故事设定、历史走向和最新选择，写出下一段场景描述（premise）
+2. 提供 3 个选择，分别对应：
+   - safe：稳妥、理性的推进方向
+   - risky：有情感张力或关系变化的推进方向
+   - dangerous：高风险、可能颠覆走向的方向
+3. 必须返回 JSON，不要有任何其他文字
+
+返回格式（严格遵守）：
+{"premise":"场景描述","choices":[{"id":"a","label":"选择文字","risk":"safe","hint":"简短提示"},{"id":"b","label":"选择文字","risk":"risky","hint":"简短提示"},{"id":"c","label":"选择文字","risk":"dangerous","hint":"简短提示"}]}
+
+风格要求：
+- premise：50-100 字，有画面感，留悬念，不要替玩家做决定
+- 每个 choice.label：10-20 字，动词开头，具体可执行
+- 每个 hint：10 字以内，暗示后果而非说破
+- 每一轮都要推进剧情，不要原地踏步
+- 保持世界观一致性，角色和事件要有前后关联`
+}
+
+export function buildDirectorUserPrompt(
+  seedLabel: string,
+  sceneHistory: SceneHistoryEntry[],
+  lastChoice?: { label: string },
+): string {
+  const historyLines = sceneHistory.length > 0
+    ? sceneHistory
+        .slice(-5)
+        .map((entry) => {
+          const choiceStr = entry.choiceLabel
+            ? ` → 玩家选择：${entry.choiceLabel}`
+            : ''
+          return `第${entry.round}轮：${entry.premise}${choiceStr}`
+        })
+        .join('\n')
+    : '（这是故事的开场）'
+
+  const choiceLine = lastChoice
+    ? `\n玩家刚刚选择了：${lastChoice.label}`
+    : ''
+
+  return `当前故事设定：${seedLabel}
+
+历史剧情摘要：
+${historyLines}
+${choiceLine}
+
+请生成下一段剧情和 3 个选择。只返回 JSON，不要有任何其他文字。`
+}
+
+/** 导演 AI JSON 解析失败时的 fallback 三选一 */
+export function buildFallbackChoices(): StoryLiteV2Choice[] {
+  return [
+    { id: 'fallback-a', label: '继续推进当前方向', risk: 'safe', hint: '稳妥前行' },
+    { id: 'fallback-b', label: '转向情感或关系的线索', risk: 'risky', hint: '代价未知' },
+    { id: 'fallback-c', label: '追查题面中不合理的异常', risk: 'dangerous', hint: '高风险' },
+  ]
+}
+
+export function buildFallbackPremise(): string {
+  return '局势继续发展，新的变数正在浮现。你面前的选项将决定下一步的走向。'
+}
+
+/**
+ * 尝试从 AI 输出中提取 JSON
+ */
+export function extractDirectorJson(raw: string): { premise: string; choices: StoryLiteV2Choice[] } | null {
+  // 1. 直接解析
+  try {
+    const parsed = JSON.parse(raw.trim())
+    if (parsed.premise && Array.isArray(parsed.choices)) {
+      return validateDirectorOutput(parsed)
+    }
+  } catch { /* continue */ }
+
+  // 2. 提取 {...} 子串
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      if (parsed.premise && Array.isArray(parsed.choices)) {
+        return validateDirectorOutput(parsed)
+      }
+    } catch { /* continue */ }
+  }
+
+  return null
+}
+
+function validateDirectorOutput(
+  raw: { premise: string; choices: any[] },
+): { premise: string; choices: StoryLiteV2Choice[] } | null {
+  if (!raw.premise || typeof raw.premise !== 'string') return null
+  if (!Array.isArray(raw.choices) || raw.choices.length < 2) return null
+
+  const validRisks = new Set<string>(['safe', 'risky', 'dangerous'])
+  const choices: StoryLiteV2Choice[] = raw.choices
+    .filter((c: any) => c.label && typeof c.label === 'string')
+    .map((c: any, i: number) => ({
+      id: c.id || `choice-${i}`,
+      label: c.label,
+      risk: validRisks.has(c.risk) ? (c.risk as StoryLiteV2RiskLevel) : 'safe',
+      hint: c.hint || undefined,
+    }))
+
+  if (choices.length < 2) return null
+  return { premise: raw.premise, choices }
 }
 
 /** 简单的分支映射表 */

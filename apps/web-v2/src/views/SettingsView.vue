@@ -725,7 +725,7 @@ onMounted(() => {
         </div>
 
         <!-- Friend Program (Conditional) -->
-        <transition name="expand">
+        
           <div v-if="appStore.showFriendsMode" class="glass-v3 rounded-[32px] p-6 space-y-6 border border-purple-500/20 shadow-2xl animate-fade-in">
             <div class="flex items-center gap-3 px-1">
               <div class="p-2 bg-purple-500 rounded-xl shadow-lg">
@@ -768,7 +768,7 @@ onMounted(() => {
                 </div>
               </div>
             </div>          </div>
-        </transition>
+        
 
         <!-- About (Easter Egg: tap version 10x → Max mode) -->
         <div class="glass-v3 rounded-[32px] p-6 space-y-4 border border-white/10 shadow-2xl">
@@ -790,7 +790,7 @@ onMounted(() => {
           </div>
 
           <!-- Max Mode Easter Egg -->
-          <transition name="expand">
+          
             <div v-if="showMaxMode" class="pt-4 border-t border-white/5 space-y-4 animate-scale-in">
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg text-white">
@@ -813,7 +813,7 @@ onMounted(() => {
                 <span class="text-[10px] font-black uppercase tracking-widest text-amber-500">Max 模式已激活</span>
               </div>
             </div>
-          </transition>
+          
         </div>
       </div>
     </div>
