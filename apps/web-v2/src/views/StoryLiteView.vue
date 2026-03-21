@@ -14,6 +14,7 @@ import type { EndingGrade } from '@/features/play-modes/shared'
 const router = useRouter()
 const storyStore = useStoryLiteV2Store()
 const isSmallScreen = inject<import('vue').Ref<boolean>>('isSmallScreen', ref(false))
+const isIOS = computed(() => /iPad|iPhone|iPod/.test(navigator.userAgent))
 
 const {
   currentScene, round, processing, error, useMock, modelAssignment, isCompleted, isStarted,
@@ -263,26 +264,12 @@ onUnmounted(() => {
             <!-- Choices Area -->
             <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 sm:px-16 sm:py-6">
               <div class="max-w-4xl mx-auto space-y-4 pb-20">
-                <!-- Header with Risk Tags -->
+                <!-- Header -->
                 <div class="flex items-center justify-between gap-4">
-                  <h3 class="text-xs font-black text-text-primary uppercase tracking-[0.3em] shrink-0">命运分叉点 · Fate Fork</h3>
-                  <div class="flex items-center gap-2 shrink-0">
-                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-                      <div class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span class="text-[8px] font-black uppercase tracking-widest text-emerald-500">主线</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-orange-500/10 border border-orange-500/20">
-                      <div class="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                      <span class="text-[8px] font-black uppercase tracking-widest text-orange-500">关系</span>
-                    </div>
-                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-rose-500/10 border border-rose-500/20">
-                      <div class="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                      <span class="text-[8px] font-black uppercase tracking-widest text-rose-500">变数</span>
-                    </div>
-                    <button @click="phase = 'reading'" class="ml-2 p-2 rounded-full hover:bg-white/10 text-text-tertiary transition-colors shrink-0" title="返回阅读">
-                      <X :size="16" stroke-width="3" />
-                    </button>
-                  </div>
+                  <h3 class="text-xs font-black text-text-primary uppercase tracking-[0.3em]">命运分叉点 · Fate Fork</h3>
+                  <button @click="phase = 'reading'" class="p-2 rounded-full hover:bg-white/10 text-text-tertiary transition-colors shrink-0" title="返回阅读">
+                    <X :size="16" stroke-width="3" />
+                  </button>
                 </div>
 
                 <!-- Choice Cards - Vertical Stack -->
@@ -327,8 +314,8 @@ onUnmounted(() => {
                   结束这场假如
                 </button>
 
-                <!-- Keyboard Shortcuts Hint -->
-                <div class="flex items-center justify-center gap-4 pt-2 text-[9px] font-black uppercase tracking-widest text-text-quaternary/30">
+                <!-- Keyboard Shortcuts Hint (hidden on iOS) -->
+                <div v-if="!isIOS" class="flex items-center justify-center gap-4 pt-2 text-[9px] font-black uppercase tracking-widest text-text-quaternary/30">
                   <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">1</kbd> <kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">2</kbd> <kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">3</kbd> 选择</span>
                   <span class="w-1 h-1 rounded-full bg-text-quaternary/20" />
                   <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">Esc</kbd> 返回</span>
