@@ -7,14 +7,14 @@ import { useToastStore } from '@/stores/toast'
 import { useTheme } from '@/composables/useTheme'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
 import {
-  ChevronLeft, Menu, Sun, Moon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users, Copy
+  ChevronLeft, Menu, Sun, Moon, SunMoon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users, Copy
 } from 'lucide-vue-next'
 import { getCurrentTier } from '@/services/provision'
 
 const router = useRouter()
 const appStore = useAppStore()
 const providerStore = useProviderStore()
-const { theme, toggle: toggleTheme, v3Config } = useTheme()
+const { theme, themeMode, toggle: toggleTheme, setThemeMode, v3Config } = useTheme()
 
 const sidebarExpanded = ref(localStorage.getItem('mms-sidebar-expanded') !== 'false')
 watch(sidebarExpanded, (val) => {
@@ -370,18 +370,28 @@ onMounted(() => {
               <div>
                 <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">系统主题
                 </p>
-                <p class="text-[9px] text-text-tertiary font-medium">暗色 / 浅色切换</p>
+                <p class="text-[9px] text-text-tertiary font-medium">
+                  {{ themeMode === 'light' ? '白天模式' : themeMode === 'dark' ? '黑夜模式' : '跟随系统' }}
+                </p>
               </div>
-              <button @click="toggleTheme"
-                class="relative w-12 h-6 rounded-full transition-colors duration-300"
-                :class="theme === 'dark' ? 'bg-accent' : 'bg-black/10 dark:bg-white/10'">
-                <span
-                  class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center"
-                  :class="theme === 'dark' ? 'translate-x-6' : 'translate-x-0.5'">
-                  <Moon v-if="theme === 'dark'" :size="10" class="text-accent" stroke-width="3" />
-                  <Sun v-else :size="10" class="text-amber-500" stroke-width="3" />
-                </span>
-              </button>
+              <!-- 3-position segmented switch: light | auto | dark -->
+              <div class="flex items-center bg-black/10 dark:bg-white/10 rounded-full p-0.5 gap-0.5">
+                <button @click="setThemeMode('light')"
+                  class="flex items-center justify-center w-8 h-6 rounded-full transition-all duration-200"
+                  :class="themeMode === 'light' ? 'bg-amber-400 text-white shadow-sm' : 'text-text-tertiary hover:text-text-secondary'">
+                  <Sun :size="10" stroke-width="3" />
+                </button>
+                <button @click="setThemeMode('auto')"
+                  class="flex items-center justify-center w-8 h-6 rounded-full transition-all duration-200"
+                  :class="themeMode === 'auto' ? 'bg-white/90 dark:bg-white/25 text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'">
+                  <SunMoon :size="10" stroke-width="3" />
+                </button>
+                <button @click="setThemeMode('dark')"
+                  class="flex items-center justify-center w-8 h-6 rounded-full transition-all duration-200"
+                  :class="themeMode === 'dark' ? 'bg-accent text-white shadow-sm' : 'text-text-tertiary hover:text-text-secondary'">
+                  <Moon :size="10" stroke-width="3" />
+                </button>
+              </div>
             </div>
 
             <!-- Prefer Free Models Switch -->
