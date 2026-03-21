@@ -1,4 +1,5 @@
 import { useAppStore } from '@/stores/app'
+import { preferLiveAutoModels } from '@/utils/modelSelection'
 import {
   PLAY_MODE_SCHEMA_VERSION,
   type PlayModeSessionEnvelope,
@@ -76,14 +77,11 @@ export interface ModelPickResult {
 export function chooseCaseModels(
   appStore: ReturnType<typeof useAppStore>,
 ): ModelPickResult | null {
-  const all = [...appStore.models]
+  const all = preferLiveAutoModels([...appStore.models])
   if (all.length < 1) return null
-
-  const liveOnly = all.filter((item) => !item.id.startsWith('demo/'))
-  const autoPool = liveOnly.length ? liveOnly : all
   const preferred = appStore.preferFree
-    ? (autoPool.filter((item) => item.free).length ? autoPool.filter((item) => item.free) : autoPool)
-    : autoPool
+    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
+    : all
 
   // Group by provider, pick one model per provider
   const byProvider = new Map<string, typeof preferred>()

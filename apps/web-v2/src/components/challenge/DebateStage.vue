@@ -188,9 +188,14 @@ const expandedThink = reactive<Record<string, boolean>>({})
           </div>
 
           <!-- Main Content -->
-          <div v-if="msg.status === 'generating'" class="flex items-center gap-3 py-2">
-            <Loader2 :size="16" stroke-width="3" class="animate-spin text-accent" />
-            <span class="text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary animate-pulse">构建论点中...</span>
+          <div v-if="msg.status === 'generating'" class="space-y-3">
+            <div v-if="msg.text" class="text-[14px] text-text-primary leading-relaxed md-body prose-invert prose-sm max-w-none" v-html="renderMsg(msg.text)" />
+            <div class="flex items-center gap-3 py-2">
+              <Loader2 :size="16" stroke-width="3" class="animate-spin text-accent" />
+              <span class="text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary animate-pulse">
+                {{ msg.text ? '继续生成中...' : '构建论点中...' }}
+              </span>
+            </div>
           </div>
           <div v-else class="text-[14px] text-text-primary leading-relaxed md-body prose-invert prose-sm max-w-none" v-html="renderMsg(msg.text)" />
           

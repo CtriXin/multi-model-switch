@@ -172,6 +172,11 @@ export const useChatStore = defineStore('chat', () => {
 
       const stream = streamModelChat({
         modelId,
+        traceLabel: `chat:${modelId}`,
+        traceMeta: {
+          attachmentCount: attachments.length,
+          contextTurns: contextMsgs.length,
+        },
         messages: [...contextMsgs, { role: 'user', content: userContent }],
         signal,
       })

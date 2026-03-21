@@ -3,6 +3,8 @@ import { ref, computed } from 'vue'
 import { useAppStore, type ModelMeta } from './app'
 import { useToastStore } from './toast'
 import { streamModelChat } from '@/services/runtime'
+import { preferLiveAutoModels } from '@/utils/modelSelection'
+import { createTimingSpan } from '@/utils/timingLogger'
 import { TOPIC_SEEDS } from '@/features/challenge/topicSeeds'
 import { buildTopicGeneratorPrompt, buildRoundDebaterPrompt, buildModeratorTaggerPrompt } from '@/features/challenge/prompts'
 import type {
@@ -100,6 +102,15 @@ interface BatchCache {
   topics: TopicCandidate[]
 }
 
+interface OpeningPreview {
+  topicId: string
+  userRole: 'con' | 'judge'
+  modelId: string
+  modelName: string
+  text: string
+  status: 'loading' | 'done' | 'error'
+}
+
 function loadBatchCache(): BatchCache | null {
   try {
     const raw = localStorage.getItem(BATCH_CACHE_KEY)
@@ -148,8 +159,7 @@ function pickCheapModel(appStore: ReturnType<typeof useAppStore>): string | null
 }
 
 function getAvailableModels(appStore: ReturnType<typeof useAppStore>): ModelMeta[] {
-  const liveModels = appStore.models.filter((model) => !model.id.startsWith('demo/'))
-  return liveModels.length ? liveModels : appStore.models
+  return preferLiveAutoModels(appStore.models)
 }
 
 function modelCost(model: ModelMeta): number {
@@ -197,6 +207,10 @@ function rankModels(
   mode: DebateModelMode,
   role: 'pro' | 'con' | 'moderator',
 ): ModelMeta[] {
+  if (source.every((model) => model.id.startsWith('demo/'))) {
+    return [...source]
+  }
+
   const priority = buildRolePriority(mode, role)
   const tierIndex = new Map(priority.tierOrder.map((tier, index) => [tier, index]))
 
@@ -270,6 +284,97 @@ async function collectFullText(gen: AsyncGenerator<string>): Promise<string> {
     text += chunk
   }
   return text
+}
+
+async function streamText(
+  gen: AsyncGenerator<string>,
+  onText: (text: string) => void,
+): Promise<string> {
+  let text = ''
+  for await (const chunk of gen) {
+    text += chunk
+    onText(text)
+  }
+  return text
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function streamLocalText(text: string, onText: (text: string) => void) {
+  const step = Math.max(8, Math.ceil(text.length / 14))
+  for (let index = 0; index < text.length; index += step) {
+    onText(text.slice(0, index + step))
+    if (index + step < text.length) {
+      await wait(18)
+    }
+  }
+}
+
+function clipText(text: string, max = 22) {
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
+
+function buildFallbackDebaterText(opts: {
+  topic: TopicCandidate
+  stance: 'pro' | 'con'
+  round: number
+  history: DebateMessage[]
+}) {
+  const own = opts.stance === 'pro' ? opts.topic.sideA : opts.topic.sideB
+  const other = opts.stance === 'pro' ? opts.topic.sideB : opts.topic.sideA
+  const opponentSide = opts.stance === 'pro' ? 'con' : 'pro'
+  const opponentLast = [...opts.history]
+    .reverse()
+    .find((message) => message.side === opponentSide && message.status === 'done')
+    ?.text
+    ?.replace(/\s+/g, ' ')
+    .trim()
+
+  if (opts.round === 1) {
+    return [
+      `${own}。`,
+      '',
+      `第一，这道题真正要比较的是“先保住什么，代价才最可控”。`,
+      `第二，${own}并不是否定${other}，而是承认顺序一旦错了，后续补救会更贵。`,
+      `第三，面对冲突场景，优先级本身就是判断力，不能只看眼前情绪。`,
+    ].join('\n')
+  }
+
+  return [
+    opponentLast
+      ? `你刚才强调“${clipText(opponentLast)}”，但这并没有推翻 ${own} 应该先被守住。`
+      : `对方的发言看似完整，但仍然没有推翻 ${own} 应该先被守住。`,
+    '',
+    `第一，你把局部感受放大成了整体优先级，却没有回答延误之后谁来承担连锁代价。`,
+    `第二，即使承认 ${other} 有价值，也不代表它该排在 ${own} 前面。`,
+    `第三，真正稳的选择不是谁都顾，而是先守住最难回补的那一端。`,
+  ].join('\n')
+}
+
+function buildFallbackModeratorResult(opts: {
+  topic: TopicCandidate
+  userRole: UserDebateRole
+}) {
+  return {
+    takeaway: {
+      strongestPointFor: `正方最强的一点是把重点放在“${opts.topic.sideA}”的长期连锁代价上。`,
+      strongestPointAgainst: `反方最强的一点是提醒“${opts.topic.sideB}”背后的具体人和即时损失不能被抽象吞掉。`,
+      decisiveQuestion: '这道题真正的分水岭，是你更在意不可逆后果，还是眼前责任。',
+      oneLineVerdict: '两边都不是错，关键在于你认定哪一种代价更不能回补。',
+    },
+    thinkingSnapshot: {
+      axes: {
+        evidence_intuition: { score: opts.userRole === 'judge' ? 50 : 58, confidence: 0.45, note: '当前演示模式使用本地总结，不代表真实测评。' },
+        decisive_exploratory: { score: 52, confidence: 0.4, note: '你会先形成立场，再继续追问。' },
+        risk_seeking_risk_aware: { score: 57, confidence: 0.4, note: '你的表达更关注代价控制。' },
+        self_systems: { score: 55, confidence: 0.4, note: '你会同时看个人责任与系统后果。' },
+      },
+      dominantAxes: ['evidence_intuition'],
+      summary: '演示模式下给出的是保守快照，真实模型时会根据完整辩论重新判断。',
+    },
+  }
 }
 
 function parseJSON<T>(text: string): T | null {
@@ -358,6 +463,9 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
   const error = ref<string | null>(null)
   const debateModels = ref<{ generator: string; pro: string; con: string; moderator: string } | null>(null)
   const profile = ref<UserProfile>(loadProfile())
+  const openingPreview = ref<OpeningPreview | null>(null)
+  const openingPreviewNonce = ref(0)
+  let openingPreviewTask: Promise<void> | null = null
 
   const todayCard = computed(() =>
     cards.value.find(c => c.challengeDate === todayStr())
@@ -460,6 +568,10 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
         const text = await collectFullText(
           streamModelChat({
             modelId: genModel,
+            traceLabel: 'daily-challenge:topic-generator',
+            traceMeta: {
+              categories: categories.value.join(','),
+            },
             messages: [{ role: 'user', content: prompt }],
           })
         )
@@ -519,12 +631,143 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
   // ─── Select topic ─────────────────────────────────────
   function selectTopic(topic: TopicCandidate) {
     selectedTopic.value = topic
+    clearOpeningPreview()
     // Track selection in profile
     const p = profile.value
     p.categoryHits[topic.category] = (p.categoryHits[topic.category] || 0) + 1
     p.updatedAt = Date.now()
     saveProfile(p)
     phase.value = 'pick_stance'
+  }
+
+  function clearOpeningPreview() {
+    openingPreviewNonce.value += 1
+    openingPreview.value = null
+    openingPreviewTask = null
+  }
+
+  function getMatchingOpeningPreview(topicId: string, role: UserDebateRole, modelId: string) {
+    const preview = openingPreview.value
+    if (!preview) return null
+    if (preview.topicId !== topicId) return null
+    if (preview.userRole !== role) return null
+    if (preview.modelId !== modelId) return null
+    return preview
+  }
+
+  async function prefetchOpening(topic: TopicCandidate, role: UserDebateRole) {
+    if (role !== 'con' && role !== 'judge') {
+      clearOpeningPreview()
+      return
+    }
+
+    const appStore = useAppStore()
+    const pickedModels = pickDebateModels(appStore, modelMode.value || 'auto')
+    if (!pickedModels) {
+      clearOpeningPreview()
+      return
+    }
+
+    const nonce = openingPreviewNonce.value + 1
+    openingPreviewNonce.value = nonce
+    const modelId = pickedModels.pro
+    openingPreview.value = {
+      topicId: topic.id,
+      userRole: role,
+      modelId,
+      modelName: appStore.getModel(modelId)?.name || modelId,
+      text: '',
+      status: 'loading',
+    }
+
+    if (modelId.startsWith('demo/')) {
+      const trace = createTimingSpan('daily-challenge:prefetch:pro-opening', {
+        modelId,
+        topicId: topic.id,
+        userRole: role,
+        source: 'local-demo',
+      })
+      const text = buildFallbackDebaterText({
+        topic,
+        stance: 'pro',
+        round: 1,
+        history: [],
+      })
+
+      openingPreviewTask = (async () => {
+        let marked = false
+        await streamLocalText(text, (nextText) => {
+          if (openingPreviewNonce.value !== nonce) return
+          const current = getMatchingOpeningPreview(topic.id, role, modelId)
+          if (!current) return
+          current.text = nextText
+          if (!marked && nextText) {
+            marked = true
+            trace.mark('first_chunk', { localDemo: true })
+          }
+        })
+
+        if (openingPreviewNonce.value !== nonce) return
+        openingPreview.value = {
+          topicId: topic.id,
+          userRole: role,
+          modelId,
+          modelName: appStore.getModel(modelId)?.name || modelId,
+          text,
+          status: 'done',
+        }
+        trace.success({ localDemo: true, charCount: text.length })
+      })()
+
+      await openingPreviewTask
+      return
+    }
+
+    openingPreviewTask = (async () => {
+      try {
+        const text = await streamText(streamModelChat({
+          modelId,
+          traceLabel: 'daily-challenge:prefetch:pro-opening',
+          traceMeta: {
+            topicId: topic.id,
+            userRole: role,
+          },
+          messages: [{ role: 'user', content: buildRoundDebaterPrompt({
+            topic,
+            stance: 'pro',
+            round: 1,
+            history: [],
+          }) }],
+        }), (nextText) => {
+          if (openingPreviewNonce.value !== nonce) return
+          const current = getMatchingOpeningPreview(topic.id, role, modelId)
+          if (!current) return
+          current.text = nextText
+        })
+
+        if (openingPreviewNonce.value !== nonce) return
+        openingPreview.value = {
+          topicId: topic.id,
+          userRole: role,
+          modelId,
+          modelName: appStore.getModel(modelId)?.name || modelId,
+          text,
+          status: 'done',
+        }
+      } catch {
+        if (openingPreviewNonce.value !== nonce) return
+        openingPreview.value = {
+          topicId: topic.id,
+          userRole: role,
+          modelId,
+          modelName: appStore.getModel(modelId)?.name || modelId,
+          text: openingPreview.value?.text || '',
+          status: 'error',
+        }
+      }
+    })()
+
+    await openingPreviewTask
   }
 
   // ─── Start debate (多轮聊天式) ──────────────────────────
@@ -535,7 +778,7 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
     const argument = typeof payload.argument === 'string' ? payload.argument.trim() : ''
     const selectedMode = payload.modelMode || modelMode.value || 'auto'
 
-    if (!argument) {
+    if (role === 'pro' && !argument) {
       error.value = '请先输入你的开场观点'
       return
     }
@@ -585,7 +828,17 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
       turnIndex.value = 1
       await advanceDebate(ac)
     } else {
-      // For judge mode or con mode: AI goes first
+      const cachedOpening = openingPreview.value
+      if (
+        cachedOpening
+        && cachedOpening.status === 'done'
+        && cachedOpening.topicId === selectedTopic.value.id
+        && cachedOpening.userRole === role
+        && cachedOpening.modelId === pickedModels.pro
+      ) {
+        addMessage(firstTurn, cachedOpening.text)
+        turnIndex.value = 1
+      }
       await advanceDebate(ac)
     }
   }
@@ -636,44 +889,105 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
           status: 'generating',
         })
 
+        const placeholder = messages.value.find((message) => message.id === placeholderId)
+        const isOpeningPreviewTurn = turn.side === 'pro'
+          && turn.round === 1
+          && turnIndex.value === 0
+          && (userRole.value === 'con' || userRole.value === 'judge')
+
+        if (isOpeningPreviewTurn && placeholder?.modelId) {
+          const preview = getMatchingOpeningPreview(topic.id, userRole.value, placeholder.modelId)
+          if (preview?.text) {
+            placeholder.text = preview.text
+          }
+
+          if (preview?.status === 'loading' && openingPreviewTask) {
+            try {
+              await openingPreviewTask
+            } catch {
+              // ignore preview failure and fallback to normal generation below
+            }
+          }
+
+          const latestPreview = getMatchingOpeningPreview(topic.id, userRole.value, placeholder.modelId)
+          if (latestPreview?.status === 'done' && latestPreview.text) {
+            placeholder.text = latestPreview.text
+            placeholder.status = 'done'
+            proText.value = latestPreview.text
+            turnIndex.value++
+            continue
+          }
+        }
+
         if (turn.side === 'judge') {
           // Judge/moderator: summarize everything + thinking snapshot
           const allProText = messages.value.filter(m => m.side === 'pro' && m.status === 'done').map(m => m.text).join('\n\n')
           const allConText = messages.value.filter(m => m.side === 'con' && m.status === 'done').map(m => m.text).join('\n\n')
+          const moderatorModelId = debateModels.value?.moderator || ''
 
-          const modResult = await collectFullText(streamModelChat({
-            modelId: debateModels.value?.moderator || '',
-            messages: [{ role: 'user', content: buildModeratorTaggerPrompt({
+          if (moderatorModelId.startsWith('demo/')) {
+            const trace = createTimingSpan('daily-challenge:moderator', {
+              modelId: moderatorModelId,
+              topicId: topic.id,
+              round: currentRound.value,
+              source: 'local-demo',
+            })
+            const fallback = buildFallbackModeratorResult({
               topic,
-              proText: allProText,
-              conText: allConText,
-              userStance: userRole.value === 'pro' ? topic.sideA : userRole.value === 'con' ? topic.sideB : '裁判',
-              userReason: userArgument.value,
-            })}],
-            signal: ac.signal,
-          }))
-
-          const parsed = parseJSON<{
-            takeaway: DebateTakeaway
-            thinkingSnapshot: { axes: Record<AxisId, any>; dominantAxes: AxisId[]; summary: string }
-          }>(modResult)
-
-          takeaway.value = parsed?.takeaway || {
-            strongestPointFor: '正方提出了有力论点',
-            strongestPointAgainst: '反方也有合理反驳',
-            decisiveQuestion: '核心问题仍待你自己判断',
-            oneLineVerdict: '双方各有道理，关键在于你的具体场景',
-          }
-
-          if (parsed?.thinkingSnapshot) {
+              userRole: userRole.value,
+            })
+            takeaway.value = fallback.takeaway
             snapshot.value = {
               version: 'v1',
               label: '思维快照 (AI 观察，仅供参考)',
-              modelId: debateModels.value?.moderator || '',
+              modelId: moderatorModelId,
               generatedAt: Date.now(),
-              axes: parsed.thinkingSnapshot.axes,
-              dominantAxes: parsed.thinkingSnapshot.dominantAxes || [],
-              summary: parsed.thinkingSnapshot.summary || '',
+              axes: fallback.thinkingSnapshot.axes,
+              dominantAxes: fallback.thinkingSnapshot.dominantAxes,
+              summary: fallback.thinkingSnapshot.summary,
+            }
+            trace.mark('first_chunk', { localDemo: true })
+            trace.success({ localDemo: true })
+          } else {
+            const modResult = await collectFullText(streamModelChat({
+              modelId: moderatorModelId,
+              traceLabel: 'daily-challenge:moderator',
+              traceMeta: {
+                topicId: topic.id,
+                round: currentRound.value,
+              },
+              messages: [{ role: 'user', content: buildModeratorTaggerPrompt({
+                topic,
+                proText: allProText,
+                conText: allConText,
+                userStance: userRole.value === 'pro' ? topic.sideA : userRole.value === 'con' ? topic.sideB : '裁判',
+                userReason: userArgument.value,
+              })}],
+              signal: ac.signal,
+            }))
+
+            const parsed = parseJSON<{
+              takeaway: DebateTakeaway
+              thinkingSnapshot: { axes: Record<AxisId, any>; dominantAxes: AxisId[]; summary: string }
+            }>(modResult)
+
+            takeaway.value = parsed?.takeaway || {
+              strongestPointFor: '正方提出了有力论点',
+              strongestPointAgainst: '反方也有合理反驳',
+              decisiveQuestion: '核心问题仍待你自己判断',
+              oneLineVerdict: '双方各有道理，关键在于你的具体场景',
+            }
+
+            if (parsed?.thinkingSnapshot) {
+              snapshot.value = {
+                version: 'v1',
+                label: '思维快照 (AI 观察，仅供参考)',
+                modelId: moderatorModelId,
+                generatedAt: Date.now(),
+                axes: parsed.thinkingSnapshot.axes,
+                dominantAxes: parsed.thinkingSnapshot.dominantAxes || [],
+                summary: parsed.thinkingSnapshot.summary || '',
+              }
             }
           }
 
@@ -687,10 +1001,52 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
           // Pro or Con AI turn
           const modelId = debateModels.value?.[turn.side] || ''
 
+          if (modelId.startsWith('demo/')) {
+            const trace = createTimingSpan(`daily-challenge:${turn.side}:round-${turn.round}`, {
+              modelId,
+              topicId: topic.id,
+              side: turn.side,
+              round: turn.round,
+              source: 'local-demo',
+            })
+            const text = buildFallbackDebaterText({
+              topic,
+              stance: turn.side as 'pro' | 'con',
+              round: turn.round,
+              history: messages.value.filter(m => m.status === 'done'),
+            })
+            let marked = false
+            await streamLocalText(text, (nextText) => {
+              const msg = messages.value.find(m => m.id === placeholderId)
+              if (msg) msg.text = nextText
+              if (!marked && nextText) {
+                marked = true
+                trace.mark('first_chunk', { localDemo: true })
+              }
+            })
+
+            const msg = messages.value.find(m => m.id === placeholderId)
+            if (msg) {
+              msg.text = text
+              msg.status = 'done'
+            }
+            if (turn.side === 'pro') proText.value = text
+            if (turn.side === 'con') conText.value = text
+            trace.success({ localDemo: true, charCount: text.length })
+            turnIndex.value++
+            continue
+          }
+
           // For judge mode, round 1 pro and con can be parallel
           // But for simplicity and chat feel, keep sequential
-          const aiText = await collectFullText(streamModelChat({
+          const aiText = await streamText(streamModelChat({
             modelId,
+            traceLabel: `daily-challenge:${turn.side}:round-${turn.round}`,
+            traceMeta: {
+              topicId: topic.id,
+              side: turn.side,
+              round: turn.round,
+            },
             messages: [{ role: 'user', content: buildRoundDebaterPrompt({
               topic,
               stance: turn.side as 'pro' | 'con',
@@ -698,7 +1054,10 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
               history: messages.value.filter(m => m.status === 'done'),
             })}],
             signal: ac.signal,
-          }))
+          }), (nextText) => {
+            const msg = messages.value.find(m => m.id === placeholderId)
+            if (msg) msg.text = nextText
+          })
 
           // Update placeholder
           const msg = messages.value.find(m => m.id === placeholderId)
@@ -728,6 +1087,13 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
       phase.value = 'result'
     } catch (e: any) {
       if (e?.name === 'AbortError') return
+      for (const message of messages.value) {
+        if (message.status !== 'generating') continue
+        message.status = 'done'
+        if (!message.text.trim()) {
+          message.text = '这一轮生成失败了，请重试或切换模型后继续。'
+        }
+      }
       error.value = e?.message || '辩论过程出错'
       toast.error(error.value!)
       debating.value = false
@@ -911,6 +1277,7 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
   function reset() {
     phase.value = 'pick_topic'
     selectedTopic.value = null
+    clearOpeningPreview()
     userStance.value = 'support'
     userRole.value = 'pro'
     userArgument.value = ''
@@ -940,8 +1307,9 @@ export const useDailyChallengeStore = defineStore('dailyChallenge', () => {
     messages, awaitingUserInput, awaitingDecision, currentRound,
     todayCard, recentCards, streak,
     init, updateCategories, updateModelMode, generateTopics, refreshTopics,
-    dismissTopic, selectTopic,
+    dismissTopic, selectTopic, prefetchOpening, clearOpeningPreview,
     startDebate, submitUserTurn, continueDebate, finishDebate,
     saveCurrentCard, abort, reset, goToHistory,
+    openingPreview,
   }
 })

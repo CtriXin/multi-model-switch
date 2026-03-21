@@ -1,4 +1,5 @@
 import { sanitizeModelOutput } from '@/utils/modelOutput'
+import { preferLiveAutoModels } from '@/utils/modelSelection'
 import { useAppStore } from '@/stores/app'
 import {
   PLAY_MODE_SCHEMA_VERSION,
@@ -86,14 +87,11 @@ export function chooseModelIds(appStore: ReturnType<typeof useAppStore>): StoryL
     }
   }
 
-  const all = [...appStore.models]
+  const all = preferLiveAutoModels([...appStore.models])
   if (!all.length) return null
-
-  const liveOnly = all.filter((item) => !item.id.startsWith('demo/'))
-  const autoPool = liveOnly.length ? liveOnly : all
   const preferred = appStore.preferFree
-    ? (autoPool.filter((item) => item.free).length ? autoPool.filter((item) => item.free) : autoPool)
-    : autoPool
+    ? (all.filter((item) => item.free).length ? all.filter((item) => item.free) : all)
+    : all
 
   const picked = selected.slice(0, 3)
   const providers = new Set<string>()

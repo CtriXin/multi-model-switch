@@ -4,6 +4,7 @@ import { useAppStore, type ModelMeta } from './app'
 import { useProviderStore } from './provider'
 import { useToastStore } from './toast'
 import { streamModelChat } from '@/services/runtime'
+import { filterAutoPlayableModels } from '@/utils/modelSelection'
 import { SEED_PUZZLES } from '@/features/turtle-soup/puzzles/seeds'
 import {
   buildHostSystemPrompt,
@@ -135,7 +136,7 @@ function listPlayableHostModels(
   appStore: ReturnType<typeof useAppStore>,
   providerStore: ReturnType<typeof useProviderStore>,
 ): ModelMeta[] {
-  const playable = appStore.models.filter((model) => {
+  const playable = filterAutoPlayableModels(appStore.models).filter((model) => {
     if (model.id.startsWith('demo/')) return true
     return providerStore.getFallbackAccounts(model.provider).length > 0
   })
@@ -361,6 +362,11 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
       const hostText = await collectFullText(streamModelChat({
         modelId: hostModelId,
+        traceLabel: 'turtle-soup:host',
+        traceMeta: {
+          puzzleId: puzzle.id,
+          round: round.value,
+        },
         messages: [
           { role: 'system', content: hostSystem },
           { role: 'user', content: hostUser },
@@ -379,6 +385,11 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
       const verifierText = await collectFullText(streamModelChat({
         modelId: hostModelId,
+        traceLabel: 'turtle-soup:verifier',
+        traceMeta: {
+          puzzleId: puzzle.id,
+          round: round.value,
+        },
         messages: [
           { role: 'system', content: verifierSystem },
           { role: 'user', content: verifierUser },
@@ -592,6 +603,11 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       if (hintModel) {
         const text = await collectFullText(streamModelChat({
           modelId: hintModel,
+          traceLabel: 'turtle-soup:hint',
+          traceMeta: {
+            puzzleId: puzzle.id,
+            hintLevel: nextLevel,
+          },
           messages: [{ role: 'user', content: prompt }],
         }))
 
@@ -668,6 +684,12 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
 
         const text = await collectFullText(streamModelChat({
           modelId: recapModel,
+          traceLabel: 'turtle-soup:recap',
+          traceMeta: {
+            puzzleId: puzzle.id,
+            round: round.value,
+            hintLevel: hintLevel.value,
+          },
           messages: [{ role: 'user', content: prompt }],
         }))
 

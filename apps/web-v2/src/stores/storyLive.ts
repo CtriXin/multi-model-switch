@@ -284,6 +284,11 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
       const text = await collectText(
         streamModelChat({
           modelId,
+          traceLabel: `story-live:${role}`,
+          traceMeta: {
+            round: turns.value.length + 1,
+            phase: phase.value,
+          },
           messages: [
             { role: 'system', content: buildStoryLiveSystemPrompt(role) },
             {
@@ -470,6 +475,11 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
       const text = await collectText(
         streamModelChat({
           modelId,
+          traceLabel: `story-live:wrap:${mode}`,
+          traceMeta: {
+            round: turns.value.length,
+            phase: phase.value,
+          },
           messages: [
             { role: 'system', content: buildStoryLiveWrapSystemPrompt(mode) },
             {
