@@ -289,17 +289,17 @@ onUnmounted(() => {
                 <div class="space-y-3">
                   <button v-for="(choice, idx) in currentScene?.choices" :key="choice.id"
                           @click="makeChoice(choice.id)"
-                          class="group w-full text-left p-5 sm:p-6 rounded-[28px] border-2 transition-all duration-300 active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-xl relative overflow-hidden"
+                          class="group w-full text-left p-5 sm:p-6 rounded-[28px] border-2 transition-all duration-300 active:scale-[0.98] hover:-translate-y-0.5 hover:shadow-xl relative"
                           :class="[riskTheme(choice.risk).border, riskTheme(choice.risk).bg, riskTheme(choice.risk).glow]"
                           :style="{ animationDelay: `${idx * 80}ms` }">
                     <!-- Top Row: Label + Risk Dot -->
                     <div class="flex items-start gap-3 mb-2">
-                      <div class="flex-1">
+                      <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1">
                           <div class="w-2 h-2 rounded-full shrink-0" :class="riskTheme(choice.risk).dot" />
                           <span class="text-[10px] font-black uppercase tracking-widest opacity-60" :class="riskTheme(choice.risk).text">{{ riskLabel(choice.risk) }}</span>
                         </div>
-                        <h4 class="text-base sm:text-lg font-black text-text-primary leading-snug group-hover:text-accent transition-colors">
+                        <h4 class="text-base sm:text-lg font-black text-text-primary leading-snug group-hover:text-accent transition-colors break-words">
                           {{ choice.label }}
                         </h4>
                       </div>
@@ -311,7 +311,7 @@ onUnmounted(() => {
                     </div>
 
                     <!-- Hint -->
-                    <p class="text-xs text-text-tertiary leading-relaxed opacity-60 pl-4">
+                    <p class="text-xs text-text-tertiary leading-relaxed opacity-60 pl-4 break-words">
                       {{ choice.hint }}
                     </p>
 
