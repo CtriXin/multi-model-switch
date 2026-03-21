@@ -20,6 +20,8 @@ const {
 } = storeToRefs(store)
 
 const cases = listCases()
+const selectedCaseId = ref<string | null>(null)
+const previewCase = computed(() => cases.find(c => c.id === selectedCaseId.value))
 const flippedCards = reactive<Record<string, boolean>>({})
 const scrollContainer = ref<HTMLElement | null>(null)
 
@@ -69,7 +71,9 @@ const ROLE_STYLES = [
 
 onMounted(() => store.init())
 function goBack() { router.push('/lab') }
-function handleStart() { if (cases.length > 0) store.selectCase(cases[0].id) }
+function handleSelectCase(caseId: string) { selectedCaseId.value = caseId }
+function handleConfirmCase() { if (selectedCaseId.value) store.selectCase(selectedCaseId.value) }
+function handleBackToSelection() { selectedCaseId.value = null }
 function handleAccept() { store.acceptRound() }
 function handleChallenge(roleId: string) { 
   store.challengeRole(roleId)
@@ -124,11 +128,89 @@ function handleGenerateEnding() {
         
           <div :key="phase" class="flex-1 flex flex-col overflow-hidden relative">
 
-            <!-- Phase: Selection -->
-            <div v-if="phase === 'setup' && !caseData" class="flex-1 flex flex-col items-center justify-center gap-8 px-6 animate-in zoom-in-95 duration-700">
-              <div class="w-20 h-20 rounded-[32px] bg-accent/10 flex items-center justify-center shadow-xl rotate-3"><Shield :size="32" stroke-width="3.5" class="text-accent" /></div>
-              <div class="text-center space-y-2"><h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">多重人生</h2><p class="text-sm text-text-tertiary opacity-60">谎言与真相交织。找出矛盾，还原当晚。</p></div>
-              <button @click="handleStart" class="h-14 px-8 rounded-2xl bg-accent text-white font-black uppercase tracking-widest text-xs active:scale-95 lab-breathing-btn shadow-lg shadow-accent/20">开始解密卷宗</button>
+            <!-- Phase: Case Selection -->
+            <div v-if="phase === 'setup' && !caseData && !selectedCaseId" class="flex-1 flex flex-col overflow-hidden">
+              <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-10 sm:py-10">
+                <div class="max-w-4xl mx-auto space-y-8">
+                  <div class="text-center space-y-2">
+                    <h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">多重人生</h2>
+                    <p class="text-sm text-text-tertiary opacity-60">谎言与真相交织。找出矛盾，还原当晚。</p>
+                    <p class="text-xs text-text-quaternary">共 {{ cases.length }} 个案件可选</p>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      v-for="c in cases"
+                      :key="c.id"
+                      @click="handleSelectCase(c.id)"
+                      class="group text-left p-5 rounded-[24px] border border-white/10 bg-white/50 hover:bg-white hover:border-accent/30 transition-all duration-300 shadow-sm hover:shadow-xl"
+                    >
+                      <div class="flex items-start justify-between mb-3">
+                        <h3 class="text-sm font-black text-text-primary uppercase tracking-tight group-hover:text-accent transition-colors">{{ c.title }}</h3>
+                        <span class="text-[9px] font-black text-text-quaternary uppercase tracking-widest opacity-40">{{ c.totalRounds }} 轮</span>
+                      </div>
+                      <p class="text-xs text-text-secondary leading-relaxed line-clamp-2 opacity-70">{{ c.premise }}</p>
+                      <div class="mt-4 flex items-center gap-2">
+                        <div class="flex -space-x-1">
+                          <div v-for="(role, i) in c.roles.slice(0, 3)" :key="role.id" class="w-6 h-6 rounded-full bg-surface-1 border border-white/10 flex items-center justify-center text-[8px] font-black text-text-tertiary">{{ role.name.charAt(0) }}</div>
+                        </div>
+                        <span class="text-[9px] text-text-quaternary">{{ c.roles.length }} 个角色</span>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Phase: Case Detail Preview -->
+            <div v-else-if="phase === 'setup' && !caseData && selectedCaseId" class="flex-1 flex flex-col overflow-hidden"
+            >
+              <div class="flex-1 overflow-y-auto custom-scrollbar px-6 py-8 sm:px-10 sm:py-10">
+                <div class="max-w-2xl mx-auto space-y-8" v-if="previewCase">
+                  <div class="text-center space-y-2">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-text-quaternary">案件预览</span>
+                    <h2 class="text-3xl font-black text-text-primary uppercase tracking-tight">{{ previewCase.title }}</h2>
+                  </div>
+
+                  <div class="p-8 rounded-[40px] bg-accent/5 border border-accent/10 text-base text-text-primary leading-loose shadow-inner">
+                    <p class="italic opacity-80">{{ previewCase.premise }}</p>
+                  </div>
+
+                  <div class="space-y-3">
+                    <h3 class="text-[10px] font-black uppercase tracking-widest text-text-quaternary px-2">涉案角色</h3>
+                    <div class="grid grid-cols-1 gap-3">
+                      <div v-for="(role, idx) in previewCase.roles" :key="role.id" class="p-4 rounded-[24px] border border-white/10 bg-white/50 flex items-center gap-4">
+                        <div class="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center shadow-inner" :class="ROLE_STYLES[idx].accent">
+                          <component :is="ROLE_STYLES[idx].icon" :size="18" stroke-width="3.5" />
+                        </div>
+                        <div>
+                          <p class="text-sm font-black text-text-primary">{{ role.name }}</p>
+                          <p class="text-[10px] text-text-tertiary line-clamp-1">{{ role.personality.slice(0, 40) }}...</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center justify-center gap-6 text-center">
+                    <div>
+                      <div class="text-2xl font-black text-text-primary">{{ previewCase.totalRounds }}</div>
+                      <div class="text-[9px] font-black uppercase tracking-widest text-text-quaternary">调查轮次</div>
+                    </div>
+                    <div class="w-px h-8 bg-white/10"></div>
+                    <div>
+                      <div class="text-2xl font-black text-accent">{{ previewCase.challengeBudget }}</div>
+                      <div class="text-[9px] font-black uppercase tracking-widest text-text-quaternary">质疑次数</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="p-6 bg-white/90 dark:bg-white/[0.05] backdrop-blur-2xl border-t border-white/10">
+                <div class="max-w-md mx-auto space-y-3">
+                  <button @click="handleConfirmCase" class="w-full h-14 rounded-2xl bg-accent text-white font-black tracking-widest text-[11px] active:scale-95 shadow-xl transition-all">确认选择此案件</button>
+                  <button @click="handleBackToSelection" class="w-full h-12 rounded-2xl border border-white/10 text-text-tertiary font-black tracking-widest text-[11px] active:scale-95 transition-all hover:bg-white/5">返回案件列表</button>
+                </div>
+              </div>
             </div>
 
             <!-- Phase: Case Detail -->
@@ -169,6 +251,7 @@ function handleGenerateEnding() {
                 <div class="max-w-md mx-auto space-y-3">
                   <button @click="store.pickRandomModels()" class="w-full h-14 rounded-2xl border-2 border-accent/20 text-accent font-black tracking-widest text-[11px] active:scale-95 transition-all flex items-center justify-center gap-3">随机分配</button>
                   <button @click="handleBegin" class="w-full h-14 rounded-2xl bg-accent text-white font-black tracking-widest text-[11px] active:scale-95 shadow-xl flex items-center justify-center gap-3 transition-all">开始调查</button>
+                  <button @click="handleBackToSelection" class="w-full h-12 rounded-2xl border border-white/10 text-text-tertiary font-black tracking-widest text-[11px] active:scale-95 transition-all hover:bg-white/5">返回案件列表</button>
                 </div>
               </div>
             </div>
