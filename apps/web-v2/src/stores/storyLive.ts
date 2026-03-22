@@ -362,8 +362,10 @@ export const useStoryLiveStore = defineStore('storyLive', () => {
 
     // Phase 1: logic + emotion first
     const currentState = storyState.value
-    await generateRole(turn, 'logic', currentState)
-    await generateRole(turn, 'emotion', currentState)
+    await Promise.allSettled([
+      generateRole(turn, 'logic', currentState),
+      generateRole(turn, 'emotion', currentState),
+    ])
 
     // Update story state after logic+emotion (before twist evaluation)
     const intermediateState = updateStoryState(

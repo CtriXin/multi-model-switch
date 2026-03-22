@@ -58,7 +58,7 @@ export async function streamInto(
 export async function streamMockInto(
   text: string,
   onChunk: (chunk: string) => void,
-  speed = 25,
+  speed = 12,
 ): Promise<void> {
   for (const char of text) {
     onChunk(char)

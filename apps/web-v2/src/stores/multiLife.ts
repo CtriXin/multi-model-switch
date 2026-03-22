@@ -362,8 +362,6 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         updateMeta({ modelAssignment: models.assignment as any })
       }
 
-      // Wait for transition to complete before streaming
-      await new Promise(r => setTimeout(r, 700))
       roundStarting.value = false
 
       // Stream scene text (paragraph by paragraph)
@@ -372,7 +370,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
       if (models.mock) {
         await streamMockInto(sceneText, (chunk) => {
           streamingScene.value += chunk
-        }, 24)
+        }, 10)
       } else {
         try {
           let sceneRaw = ''
@@ -410,32 +408,32 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         }
       }
 
-      // Stream roles SEQUENTIALLY — each person speaks one at a time
       if (models.mock) {
-        for (const role of c.roles) {
+        const tasks = c.roles.map(async (role) => {
           const resp = roundObj.responses.find((r) => r.roleId === role.id)!
           const fullText = generateMockTestimony(role, roundConfig.roleDirectives[role.id], nextRound)
-          const sentences = fullText.split(/(?<=[。！？])/)
+          const sentences = fullText.split(/(?<=[。！？])/).filter(Boolean)
           const key = `${roundObj.id}-${role.id}`
           for (let si = 0; si < sentences.length; si++) {
             const soFar = sentences.slice(0, si + 1).join('')
             emitStream(key, soFar)
-            await new Promise(r => setTimeout(r, 400))
+            await new Promise(r => setTimeout(r, 140))
           }
           resp.text = fullText
           resp.status = 'done'
           clearStream(key)
-        }
+        })
+        await Promise.allSettled(tasks)
       } else {
-        for (const role of c.roles) {
+        const previousResponses = rounds.value
+          .slice(0, -1)
+          .flatMap((r) => r.responses.filter((rr) => rr.status === 'done').map((rr) => ({ roleId: rr.roleId, text: rr.text })))
+
+        const tasks = c.roles.map(async (role) => {
           const resp = roundObj.responses.find((r) => r.roleId === role.id)!
           const fallbackText = generateMockTestimony(role, roundConfig.roleDirectives[role.id], nextRound)
           try {
             const systemPrompt = buildRoleSystemPrompt(role, c)
-            const previousResponses = rounds.value
-              .slice(0, -1)
-              .flatMap((r) => r.responses.filter((rr) => rr.status === 'done').map((rr) => ({ roleId: rr.roleId, text: rr.text })))
-
             const userPrompt = buildRoleUserPrompt(
               role, c, roundConfig, previousResponses, branchMemory.value,
             )
@@ -480,7 +478,8 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             resp.text = fallbackText
             clearStream(`${roundObj.id}-${role.id}`)
           }
-        }
+        })
+        await Promise.allSettled(tasks)
       }
 
       roundObj.contradictions = detectContradictions(roundConfig, roundObj.responses)
@@ -554,7 +553,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         const key = `${last.id}-ch-${roleId}`
         await streamMockInto(fullText, (chunk) => {
           appendStream(key, chunk)
-        }, 35 + Math.random() * 15)
+        }, 18 + Math.random() * 6)
         resp.isChallenged = true
         resp.challengeResponse = fullText
         clearStream(key)
@@ -646,7 +645,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
       let endingData: MultiLifeSessionMeta['ending']
 
       if (models.mock) {
-        await new Promise((r) => setTimeout(r, 1000))
+        await new Promise((r) => setTimeout(r, 200))
         endingData = generateMockEnding(caseData.value, rounds.value, meta.value)
       } else {
         const modelId = models.assignment.a

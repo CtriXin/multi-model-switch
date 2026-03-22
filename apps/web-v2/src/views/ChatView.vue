@@ -826,7 +826,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
           </template>
 
           <!-- Mobile: archived settled round -->
-          <div v-else-if="isSettled(ri)" class="archived-round flex gap-2">
+          <div v-else-if="isSettled(ri)" class="archived-round flex items-start gap-2">
             <!-- Left: stacked dots for non-selected models -->
             <div v-if="getArchivedModels(round).length"
               class="flex flex-col items-center gap-1.5 pt-4 shrink-0">
@@ -935,11 +935,11 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                   @touchstart.passive="(e: TouchEvent) => onTouchStart(round.id, e)"
                   @touchmove.passive="(e: TouchEvent) => onTouchMove(round.id, e, round.responses.size)"
                   @touchend="() => onTouchEnd(round.id, round.responses.size)">
-                  <div class="flex items-stretch"
+                  <div class="flex items-start"
                     :class="isDragging[round.id] ? '' : 'carousel-snap'"
                     :style="{ transform: getTransform(round.id) }">
                     <div v-for="([modelId, msg], cardIdx) in Array.from(round.responses.entries())"
-                      :key="modelId" class="w-full shrink-0 flex"
+                      :key="modelId" class="w-full shrink-0 flex items-start"
                       :style="{ width: CARD_WIDTH_PCT + '%' }">
                       <div class="w-full rounded-xl transition-all duration-300"
                         :class="getActiveIndex(round.id) === cardIdx ? 'carousel-active' : 'carousel-inactive'">
@@ -949,6 +949,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                           :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief" :streaming="!!msg.streaming"
                           :active="getActiveIndex(round.id) === cardIdx"
                           :selected="round.activeModelId === modelId"
+                          class="mobile-response-card"
                           @select="chatStore.setActiveModel(round.id, modelId)"
                           @retry="retryRoundModel(round, modelId)"
                           @replace="replaceRoundModel(round, modelId)"
@@ -1044,6 +1045,10 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
 .carousel-inactive {
   opacity: 0.4;
   transform: scale(0.96);
+}
+
+.mobile-response-card {
+  height: auto !important;
 }
 
 /* Archived round dots */

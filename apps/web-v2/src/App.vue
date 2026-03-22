@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, watch, computed, reactive, inject } from 'vue'
+import { ref, provide, onMounted, onUnmounted, computed, reactive } from 'vue'
 import { Capacitor } from '@capacitor/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { useProviderStore } from '@/stores/provider'
+import { useSessionStore } from '@/stores/session'
 import { useTheme } from '@/composables/useTheme'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
@@ -14,7 +14,7 @@ import { Sparkles, MessageSquare, GitMerge, Users, Home, Package, Settings, Flas
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const providerStore = useProviderStore()
+const sessionStore = useSessionStore()
 useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
 
 // --- Robust Dual-End Logic ---
@@ -22,6 +22,8 @@ const platform = ref(Capacitor.getPlatform())
 const windowWidth = ref(window.innerWidth)
 // Threshold 1024px for Sidebar vs Drawer
 const isMobileLayout = computed(() => windowWidth.value < 1024 || platform.value === 'ios')
+const EDGE_SWIPE_WIDTH = 24
+const SWIPE_TRIGGER_DISTANCE = 72
 
 provide('platform', platform)
 provide('isSmallScreen', isMobileLayout)
@@ -30,18 +32,146 @@ function handleResize() { windowWidth.value = window.innerWidth }
 
 const iosDrawerOpen = ref(false)
 function handleOpenDrawer() { iosDrawerOpen.value = true }
+function handleOpenModels() {
+  router.push('/models')
+  iosDrawerOpen.value = false
+}
+
+const rootSwipe = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  triggered: false,
+})
+
+const drawerSwipe = reactive({
+  active: false,
+  startX: 0,
+  startY: 0,
+  triggered: false,
+})
+
+function resetRootSwipe() {
+  rootSwipe.active = false
+  rootSwipe.startX = 0
+  rootSwipe.startY = 0
+  rootSwipe.triggered = false
+}
+
+function resetDrawerSwipe() {
+  drawerSwipe.active = false
+  drawerSwipe.startX = 0
+  drawerSwipe.startY = 0
+  drawerSwipe.triggered = false
+}
+
+function onRootTouchStart(e: TouchEvent) {
+  if (platform.value !== 'ios' || iosDrawerOpen.value) return
+  const touch = e.touches[0]
+  if (!touch || touch.clientX > EDGE_SWIPE_WIDTH) {
+    resetRootSwipe()
+    return
+  }
+
+  rootSwipe.active = true
+  rootSwipe.startX = touch.clientX
+  rootSwipe.startY = touch.clientY
+  rootSwipe.triggered = false
+}
+
+function onRootTouchMove(e: TouchEvent) {
+  if (!rootSwipe.active || rootSwipe.triggered) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - rootSwipe.startX
+  const dy = touch.clientY - rootSwipe.startY
+
+  if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) {
+    resetRootSwipe()
+    return
+  }
+
+  if (dx > SWIPE_TRIGGER_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+    iosDrawerOpen.value = true
+    rootSwipe.triggered = true
+  }
+}
+
+function onRootTouchEnd() {
+  resetRootSwipe()
+}
+
+function onDrawerTouchStart(e: TouchEvent) {
+  if (platform.value !== 'ios' || !iosDrawerOpen.value) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  drawerSwipe.active = true
+  drawerSwipe.startX = touch.clientX
+  drawerSwipe.startY = touch.clientY
+  drawerSwipe.triggered = false
+}
+
+function onDrawerTouchMove(e: TouchEvent) {
+  if (!drawerSwipe.active || drawerSwipe.triggered) return
+  const touch = e.touches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - drawerSwipe.startX
+  const dy = touch.clientY - drawerSwipe.startY
+
+  if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) {
+    resetDrawerSwipe()
+    return
+  }
+
+  if (dx < -SWIPE_TRIGGER_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+    iosDrawerOpen.value = false
+    drawerSwipe.triggered = true
+  }
+}
+
+function onDrawerTouchEnd() {
+  resetDrawerSwipe()
+}
+
+function iosNewChat() {
+  sessionStore.createSession('chat')
+  router.push('/chat')
+  iosDrawerOpen.value = false
+}
+
+function iosSwitchSession(session: { id: string; type: string }) {
+  sessionStore.switchSession(session.id)
+  if (session.type === 'chat') router.push('/chat')
+  else router.push('/discuss')
+  iosDrawerOpen.value = false
+}
+
+function isDrawerSessionActive(session: { id: string; type: string }) {
+  if (route.path === '/chat') {
+    return session.type === 'chat' && sessionStore.currentSessionId === session.id
+  }
+  if (route.path === '/discuss') {
+    return session.type === 'discuss' && sessionStore.currentSessionId === session.id
+  }
+  return false
+}
 
 onMounted(async () => {
   await appStore.initialize()
+  sessionStore.loadSessions()
   window.addEventListener('resize', handleResize)
-  window.addEventListener('open-drawer', () => { iosDrawerOpen.value = true })
-  window.addEventListener('open-models', () => { 
-    router.push('/models')
-    iosDrawerOpen.value = false
-  })
+  window.addEventListener('open-drawer', handleOpenDrawer)
+  window.addEventListener('open-models', handleOpenModels)
 })
 
-onUnmounted(() => { window.removeEventListener('resize', handleResize) })
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('open-drawer', handleOpenDrawer)
+  window.removeEventListener('open-models', handleOpenModels)
+})
 
 const isLabActive = computed(() => {
   return route.path.startsWith('/lab') || ['/challenge', '/turtle-soup', '/story-lite', '/story-live', '/multi-life'].includes(route.path)
@@ -50,7 +180,12 @@ const isLabActive = computed(() => {
 
 <template>
   <!-- Base: Force bg-surface-0 to prevent black flickering -->
-  <div class="flex h-screen w-screen overflow-hidden bg-surface-0 font-sans text-text-primary selection:bg-accent/30 transition-colors duration-300">
+  <div
+    class="flex h-screen w-screen overflow-hidden bg-surface-0 font-sans text-text-primary selection:bg-accent/30 transition-colors duration-300"
+    @touchstart.passive="onRootTouchStart"
+    @touchmove.passive="onRootTouchMove"
+    @touchend.passive="onRootTouchEnd"
+    @touchcancel.passive="onRootTouchEnd">
     
     <!-- Sidebar: Only on wide screens -->
     <Sidebar v-if="!isMobileLayout" :collapsed="appStore.sidebarCollapsed" @collapse="appStore.toggleSidebar" @expand="appStore.toggleSidebar" />
@@ -64,7 +199,13 @@ const isLabActive = computed(() => {
 
     <!-- UNIFIED MOBILE DRAWER -->
     <Transition name="drawer">
-      <div v-if="iosDrawerOpen" :class="['fixed inset-0 z-[100] flex flex-col bg-surface-0', platform === 'ios' ? 'safe-top' : '']">
+      <div
+        v-if="iosDrawerOpen"
+        :class="['fixed inset-0 z-[100] flex flex-col bg-surface-0', platform === 'ios' ? 'safe-top' : '']"
+        @touchstart.passive="onDrawerTouchStart"
+        @touchmove.passive="onDrawerTouchMove"
+        @touchend.passive="onDrawerTouchEnd"
+        @touchcancel.passive="onDrawerTouchEnd">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5">
           <div class="flex items-center gap-2">
             <Sparkles :size="20" stroke-width="3.5" class="text-accent" />
@@ -75,6 +216,11 @@ const isLabActive = computed(() => {
           </button>
         </div>
         <div class="flex-1 overflow-y-auto px-4 py-6 space-y-2">
+          <button @click="iosNewChat" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl bg-text-primary text-surface-1 shadow-xl active:scale-95 transition-all">
+            <MessageSquare :size="20" stroke-width="3.5" />
+            <span class="font-black text-sm uppercase tracking-widest">新对话</span>
+          </button>
+
           <template v-for="link in [
             { path: '/', icon: Home, label: '首页体验' }, 
             { path: '/chat', icon: MessageSquare, label: '多问几家' }, 
@@ -87,6 +233,25 @@ const isLabActive = computed(() => {
               <span class="font-black text-sm uppercase tracking-widest">{{ link.label }}</span>
             </button>
           </template>
+
+          <div v-if="sessionStore.sortedSessions.length" class="mt-6 border-t border-black/5 dark:border-white/5 pt-5 space-y-2">
+            <p class="px-2 text-[10px] font-black uppercase tracking-[0.28em] text-text-tertiary opacity-50">最近的</p>
+            <button
+              v-for="session in sessionStore.sortedSessions"
+              :key="session.id"
+              @click="iosSwitchSession(session)"
+              class="w-full flex items-start gap-3 px-4 py-3.5 rounded-2xl text-left transition-all active:scale-[0.98]"
+              :class="isDrawerSessionActive(session)
+                ? 'bg-text-primary text-surface-1 shadow-lg'
+                : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'">
+              <div class="flex-1 min-w-0">
+                <div class="text-xs font-bold truncate">{{ session.title }}</div>
+                <div class="text-[9px] mt-1 uppercase font-black tracking-widest opacity-45">
+                  {{ sessionStore.formatTime(session.updatedAt) }} · {{ session.messageCount }} 轮
+                </div>
+              </div>
+            </button>
+          </div>
         </div>
         <div class="p-6 border-t border-black/5 grid grid-cols-2 gap-3">
           <button @click="router.push('/models'); iosDrawerOpen = false" class="flex flex-col items-center gap-2 p-4 rounded-3xl bg-white/5 border border-white/5 active:scale-95 transition-all">

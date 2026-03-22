@@ -84,8 +84,9 @@ async function handleShare() {
 
 <template>
   <div
-    class="glass-v3 rounded-[24px] overflow-hidden transition-all duration-300 group flex h-full min-h-0 flex-col cursor-pointer"
+    class="glass-v3 rounded-[24px] overflow-hidden transition-all duration-300 group flex flex-col cursor-pointer"
     :class="[
+      carousel ? 'h-auto' : 'h-full min-h-0',
       selected
         ? 'ring-2 shadow-2xl scale-[1.01] z-10'
         : active
@@ -141,7 +142,7 @@ async function handleShare() {
     </div>
 
     <!-- Content area (scrollable) -->
-    <div class="px-4 py-3 flex-1 min-h-0 overflow-y-auto">
+    <div class="px-4 py-3" :class="carousel ? 'overflow-visible' : 'flex-1 min-h-0 overflow-y-auto'">
       <!-- Error state -->
       <div v-if="error" class="relative py-4">
         <div class="rounded-2xl border border-red-500/20 bg-surface-2/60 px-4 py-3 pr-5">

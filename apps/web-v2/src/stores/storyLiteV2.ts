@@ -134,7 +134,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   const streamingPremise = ref('')
 
   /** 流式显示 premise，像讲故事一样逐字出现 */
-  async function streamPremise(fullText: string, speed = 30): Promise<void> {
+  async function streamPremise(fullText: string, speed = 12): Promise<void> {
     streamingPremise.value = ''
     const chars = fullText.split('')
     for (let i = 0; i < chars.length; i++) {
@@ -572,7 +572,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
         const scene = buildSceneFromMock('start')
         currentScene.value = scene
         resetResponseState('done')
-        await streamPremise(scene.premise, 25)
+        await streamPremise(scene.premise, 12)
       } else {
         currentScene.value = await buildLiveSceneDynamic(nextRound)
         if (currentScene.value) {
@@ -585,7 +585,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       currentScene.value = scene
       round.value = 1
       resetResponseState('done')
-      await streamPremise(scene.premise, 25)
+      await streamPremise(scene.premise, 12)
     } finally {
       processing.value = false
       persist()
@@ -611,7 +611,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
         const scene = buildSceneFromMock(nextSceneId)
         currentScene.value = scene
         resetResponseState('done')
-        await streamPremise(scene.premise, 25)
+        await streamPremise(scene.premise, 12)
       } else {
         currentScene.value = await buildLiveSceneDynamic(nextRound, choice)
         if (currentScene.value) {
