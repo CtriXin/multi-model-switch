@@ -64,7 +64,7 @@ const isLabActive = computed(() => {
 
     <!-- UNIFIED MOBILE DRAWER -->
     <Transition name="drawer">
-      <div v-if="iosDrawerOpen" class="fixed inset-0 z-[100] flex flex-col bg-surface-0">
+      <div v-if="iosDrawerOpen" :class="['fixed inset-0 z-[100] flex flex-col bg-surface-0', platform === 'ios' ? 'safe-top' : '']">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5">
           <div class="flex items-center gap-2">
             <Sparkles :size="20" stroke-width="3.5" class="text-accent" />
