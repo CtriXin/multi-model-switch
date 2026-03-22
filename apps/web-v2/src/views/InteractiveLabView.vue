@@ -71,7 +71,7 @@ function goHome() {
   <div class="flex flex-col h-full overflow-hidden bg-surface-0 transition-colors duration-500">
     
     <!-- Unified V3 Capsule Header -->
-    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
       <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-black/5 dark:border-white/10 bg-white/80 dark:bg-white/[0.05]">
         <div class="flex items-center gap-2">
           <button @click="goHome" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-text-secondary transition-colors" title="返回首页">
@@ -106,12 +106,12 @@ function goHome() {
         </section>
 
         <!-- Features Grid: Refined for Light/Dark -->
-        <section class="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8 pb-10">
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 items-start gap-3 sm:gap-8 pb-10">
           <button 
             v-for="(item, idx) in labFeatures" 
             :key="item.id"
             @click="handleEnter(item.path)"
-            class="group relative flex flex-col p-4 sm:p-8 rounded-[28px] sm:rounded-[40px] glass-v3 border border-black/5 dark:border-white/5 shadow-xl transition-all duration-500 hover:-translate-y-2 hover:border-accent/30 text-left overflow-hidden active:scale-95 animate-in fade-in slide-in-from-bottom-4 bg-white/95 dark:bg-white/[0.03]"
+            class="group relative self-start flex flex-col p-4 sm:p-8 rounded-[28px] sm:rounded-[40px] glass-v3 border border-black/5 dark:border-white/5 shadow-xl transition-all duration-500 hover:-translate-y-2 hover:border-accent/30 text-left overflow-hidden active:scale-95 animate-in fade-in slide-in-from-bottom-4 bg-white/95 dark:bg-white/[0.03]"
             :style="{ animationDelay: `${idx * 50}ms` }"
           >
             <!-- Hover Gradient -->

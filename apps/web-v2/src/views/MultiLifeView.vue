@@ -54,7 +54,7 @@ async function streamIntro(text: string) {
   await nextTick()
   for (let i = 0; i < paragraphs.length; i++) {
     introVisibleCount.value = i + 1
-    await new Promise(r => setTimeout(r, 400))
+    await new Promise(r => setTimeout(r, 180))
   }
   introDone.value = true
 }

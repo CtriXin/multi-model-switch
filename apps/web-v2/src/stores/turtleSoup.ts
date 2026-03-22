@@ -118,6 +118,19 @@ function parseJSON<T>(text: string): T | null {
   }
 }
 
+function shouldRunVerifier(
+  hostOutput: HostOutput | null,
+  tag: HostTag,
+  followUp: string,
+): boolean {
+  if (!hostOutput) return true
+  if (tag === 'yes_and_no') return true
+  if (followUp.length > 16) return true
+  if (/[；：;]/.test(followUp)) return true
+  if (/(真相|答案|因为|其实|也就是说|意味着|关键|就是)/.test(followUp)) return true
+  return false
+}
+
 const VERIFIER_META_PATTERNS = [
   /改为/,
   /建议/,
@@ -367,30 +380,34 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
         signal: ac.signal,
       }))
 
-      let hostOutput = parseJSON<HostOutput>(hostText)
+      const hostOutput = parseJSON<HostOutput>(hostText)
       let finalTag: HostTag = hostOutput?.tag || 'irrelevant'
-      let finalFollowUp = hostOutput?.followUp || ''
+      let finalFollowUp = sanitizeFollowUp(hostOutput?.followUp || '')
 
       // Step 2: Verifier 审核（置信度联动）
       let verifierGuidance = ''
-      const verifierSystem = buildVerifierSystemPrompt(puzzle, round.value)
-      const verifierUser = buildVerifierUserPrompt(buildFinalAnswer(finalTag, finalFollowUp), playerQuestion)
+      let vOutput: VerifierOutput | null = null
 
-      const verifierText = await collectFullText(streamModelChat({
-        modelId: hostModelId,
-        traceLabel: 'turtle-soup:verifier',
-        traceMeta: {
-          puzzleId: puzzle.id,
-          round: round.value,
-        },
-        messages: [
-          { role: 'system', content: verifierSystem },
-          { role: 'user', content: verifierUser },
-        ],
-        signal: ac.signal,
-      }))
+      if (shouldRunVerifier(hostOutput, finalTag, finalFollowUp)) {
+        const verifierSystem = buildVerifierSystemPrompt(puzzle, round.value)
+        const verifierUser = buildVerifierUserPrompt(buildFinalAnswer(finalTag, finalFollowUp), playerQuestion)
 
-      const vOutput = parseJSON<VerifierOutput>(verifierText)
+        const verifierText = await collectFullText(streamModelChat({
+          modelId: hostModelId,
+          traceLabel: 'turtle-soup:verifier',
+          traceMeta: {
+            puzzleId: puzzle.id,
+            round: round.value,
+          },
+          messages: [
+            { role: 'system', content: verifierSystem },
+            { role: 'user', content: verifierUser },
+          ],
+          signal: ac.signal,
+        }))
+
+        vOutput = parseJSON<VerifierOutput>(verifierText)
+      }
 
       const needsRefinement = Boolean(
         vOutput && (!vOutput.approved || vOutput.confidence < 0.8 || (vOutput.leakRisk && vOutput.leakRisk !== 'low')),
@@ -582,8 +599,8 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
     processing.value = true
     callingPhase.value = 'ringing'
 
-    // Ringing phase: wait 1.8s to simulate dialing
-    await new Promise(resolve => setTimeout(resolve, 1800))
+    // Ringing phase: keep a short transition, but avoid blocking too long
+    await new Promise(resolve => setTimeout(resolve, 650))
     callingPhase.value = 'connected'
 
     try {
@@ -622,13 +639,13 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       await saveSession(buildSession('playing'))
 
       // Reset calling UI after showing hint
-      setTimeout(() => { callingPhase.value = 'idle' }, 3000)
+      setTimeout(() => { callingPhase.value = 'idle' }, 1200)
     } catch {
       const preHint = puzzle.hints.find(h => h.level === nextLevel)
       currentHint.value = preHint?.text || '换个方向想想。'
       hintLevel.value = nextLevel
       callingPhase.value = 'done'
-      setTimeout(() => { callingPhase.value = 'idle' }, 3000)
+      setTimeout(() => { callingPhase.value = 'idle' }, 1200)
     } finally {
       processing.value = false
     }
