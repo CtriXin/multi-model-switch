@@ -31,6 +31,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '锦囊团', icon: 'users' },
   },
   {
+    path: '/advisors-v2',
+    name: 'advisors-v2',
+    component: () => import('@/views/AdvisorsV2View.vue'),
+    meta: { title: '锦囊团 v2', icon: 'users' },
+  },
+  {
     path: '/challenge',
     name: 'challenge',
     component: () => import('@/views/DailyChallengeView.vue'),

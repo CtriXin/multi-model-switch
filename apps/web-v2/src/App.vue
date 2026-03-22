@@ -9,7 +9,7 @@ import Sidebar from '@/components/layout/Sidebar.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
 import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
-import { Sparkles, MessageSquare, GitMerge, Users, Home, Package, Settings, FlaskConical, X } from 'lucide-vue-next'
+import { Sparkles, MessageSquare, GitMerge, Users, Home, Package, Settings, FlaskConical, X, Compass } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -216,16 +216,11 @@ const isLabActive = computed(() => {
           </button>
         </div>
         <div class="flex-1 overflow-y-auto px-4 py-6 space-y-2">
-          <button @click="iosNewChat" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl bg-text-primary text-surface-1 shadow-xl active:scale-95 transition-all">
-            <MessageSquare :size="20" stroke-width="3.5" />
-            <span class="font-black text-sm uppercase tracking-widest">新对话</span>
-          </button>
-
           <template v-for="link in [
             { path: '/', icon: Home, label: '首页体验' }, 
             { path: '/chat', icon: MessageSquare, label: '多问几家' }, 
             { path: '/discuss', icon: GitMerge, label: '深度对质' }, 
-            { path: '/advisors', icon: Users, label: '锦囊参谋' },
+            { path: '/advisors-v2', icon: Compass, label: '锦囊参谋' },
             { path: '/lab', icon: FlaskConical, label: '互动实验室' }
           ]" :key="link.path">
             <button @click="router.push(link.path); iosDrawerOpen = false" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl transition-all active:scale-95" :class="(link.path === '/lab' ? isLabActive : route.path === link.path) ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-transparent text-text-primary hover:bg-black/5'">
