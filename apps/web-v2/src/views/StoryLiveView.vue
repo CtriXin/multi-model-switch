@@ -20,7 +20,7 @@ const { pendingEndingText, continueStory: flowContinueStory, confirmEnding, dism
 const transcriptRef = ref<HTMLElement | null>(null)
 const premiseDraft = ref('')
 const inputRef = ref<HTMLTextAreaElement | null>(null)
-const inputHeight = ref(48) // min height
+const inputHeight = ref(92) // keep iOS composer in a roomy multi-line state
 
 const { turns, draftInput, processing, started, latestDirectorCue, modelAssignment, assignmentMode, assignmentLabel } = storeToRefs(storyLiveStore)
 
@@ -30,7 +30,7 @@ function resizeInput() {
     if (!inputRef.value) return
     inputRef.value.style.height = 'auto'
     const scrollHeight = inputRef.value.scrollHeight
-    inputHeight.value = Math.min(144, Math.max(48, scrollHeight)) // max 144px (6 rows)
+    inputHeight.value = Math.min(144, Math.max(92, scrollHeight))
     inputRef.value.style.height = inputHeight.value + 'px'
   })
 }
@@ -68,7 +68,54 @@ watch(userInput, () => {
 function renderMarkdown(text: string) {
   return md.render(sanitizeModelOutput(text).visibleContent || '')
 }
-function scrollLatest() { nextTick(() => { if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight }) }
+function scrollLatest() {
+  nextTick(() => {
+    if (!transcriptRef.value) return
+    transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight
+  })
+}
+
+function shortenCueLabel(text: string) {
+  const compact = text
+    .replace(/[“”"。！？]/g, '')
+    .replace(/^(你(要|先|可以)?|不如|先|那就|试着)/, '')
+    .trim()
+  if (!compact) return ''
+  return compact.length > 10 ? `${compact.slice(0, 10)}…` : compact
+}
+
+function normalizeCuePrompt(text: string) {
+  const compact = text.replace(/[“”"。！？]/g, '').trim()
+  if (!compact) return ''
+  return /^(先|继续|追|查|问|看|回|跟|躲|走|试|把|朝|往|留在)/.test(compact)
+    ? compact
+    : `先${compact}`
+}
+
+const quickCueOptions = computed(() => {
+  const cue = latestDirectorCue.value.replace(/\s+/g, ' ').trim()
+  if (!cue) return []
+
+  const separator = ['还是', '或者', '或是'].find((token) => cue.includes(token))
+  if (separator) {
+    const [left, right] = cue.split(separator, 2).map(part => part.trim()).filter(Boolean)
+    if (!left || !right) return []
+
+    return [
+      { key: 'A', display: shortenCueLabel(left) || '选项 A', prompt: normalizeCuePrompt(left) || left },
+      { key: 'B', display: shortenCueLabel(right) || '选项 B', prompt: normalizeCuePrompt(right) || right },
+    ]
+  }
+
+  const clauses = cue.split(/[，；。]/).map(part => part.trim()).filter(Boolean)
+  const primary = clauses.at(-1) || cue
+  const secondary = clauses.at(-2) || '换个角度试探'
+
+  return [
+    { key: 'A', display: shortenCueLabel(primary) || '继续推进', prompt: normalizeCuePrompt(primary) || primary },
+    { key: 'B', display: shortenCueLabel(secondary) || '换个角度', prompt: normalizeCuePrompt(secondary) || secondary },
+  ]
+})
 function roleModelName(role: StoryLiveRole) {
   const assignment = modelAssignment.value
   if (!assignment) return ''
@@ -77,13 +124,22 @@ function roleModelName(role: StoryLiveRole) {
 
 async function startStory() { 
   const seed = premiseDraft.value.trim() || currentPlaceholder.value
-  await storyLiveStore.startStory(seed) 
+  await storyLiveStore.startStory(seed)
+  scrollLatest()
 }
-async function continueStory() { await flowContinueStory(userInput.value) }
+async function continueStory(payload = userInput.value) {
+  await flowContinueStory(payload)
+  scrollLatest()
+}
+async function chooseCueOption(prompt: string) {
+  if (processing.value) return
+  await continueStory(prompt)
+}
 function restart() { storyLiveStore.restart(premiseDraft.value); premiseDraft.value = '' }
 function goBack() { router.push('/lab') }
 
-watch(() => turns.value.length, () => scrollLatest())
+watch(turns, () => scrollLatest(), { deep: true, flush: 'post' })
+watch(processing, () => scrollLatest(), { flush: 'post' })
 onMounted(async () => { await storyLiveStore.init(); storyLiveStore.markActive(); scrollLatest(); cyclePlaceholder() })
 onUnmounted(() => { if (placeholderTimer) clearInterval(placeholderTimer) })
 onBeforeUnmount(() => storyLiveStore.markPaused())
@@ -149,10 +205,22 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
         <div v-if="started" class="p-4 sm:p-6 bg-white/5 border-t border-white/5 backdrop-blur-md">
           <div class="max-w-3xl mx-auto space-y-3">
             <!-- Info Tags Row -->
+            <div v-if="quickCueOptions.length" class="grid grid-cols-2 gap-2 sm:hidden">
+              <button
+                v-for="option in quickCueOptions"
+                :key="option.key"
+                @click="chooseCueOption(option.prompt)"
+                :disabled="processing"
+                class="flex items-center gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-left text-cyan-500 transition-all active:scale-[0.98] disabled:opacity-40"
+              >
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-cyan-500 text-[10px] font-black text-white">{{ option.key }}</span>
+                <span class="min-w-0 truncate text-[11px] font-black">{{ option.display }}</span>
+              </button>
+            </div>
             <div class="flex items-center justify-between gap-2">
-              <div v-if="latestDirectorCue" class="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-black text-cyan-500 uppercase tracking-widest">{{ latestDirectorCue }}</div>
+              <div v-if="latestDirectorCue" class="px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-[10px] font-black text-cyan-500 uppercase tracking-widest max-sm:text-[9px] max-sm:tracking-[0.15em] max-sm:truncate" :class="quickCueOptions.length ? 'hidden sm:block' : 'block'">{{ latestDirectorCue }}</div>
               <div v-else class="w-px"></div>
-              <div class="px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shrink-0"
+              <div class="hidden sm:flex px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shrink-0"
                 :class="assignmentMode === 'live' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-500' : assignmentMode === 'demo' ? 'border-amber-500/20 bg-amber-500/10 text-amber-500' : 'border-white/10 bg-white/5 text-text-tertiary'">
                 {{ assignmentLabel }}
               </div>

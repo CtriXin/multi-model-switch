@@ -18,7 +18,7 @@ const isIOS = computed(() => /iPad|iPhone|iPod/.test(navigator.userAgent))
 
 const {
   currentScene, round, processing, error, useMock, modelAssignment, isCompleted, isStarted,
-  manuallyEnded, streamingPremise,
+  manuallyEnded, streamingPremise, activeChoiceLabel, readyResponseCount,
 } = storeToRefs(storyStore)
 
 const seedInput = ref('')
@@ -51,6 +51,15 @@ const placeholders = [
 ]
 const currentPlaceholder = ref(placeholders[0])
 let placeholderTimer: any = null
+const loadingCopy = ref('导演在重写时间线...')
+const loadingStages = [
+  '导演在重写时间线...',
+  '正在焖煮下一幕冲突...',
+  '角色动机正在发酵...',
+  '把选择的后果推到台前...',
+]
+let loadingTimer: any = null
+const showTransitionOnly = computed(() => processing.value && !currentScene.value && !streamingPremise.value)
 
 function cyclePlaceholder() {
   let idx = 0
@@ -59,6 +68,30 @@ function cyclePlaceholder() {
     currentPlaceholder.value = placeholders[idx]
   }, 3500)
 }
+
+function startLoadingTicker() {
+  stopLoadingTicker()
+  let idx = 0
+  loadingCopy.value = loadingStages[0]
+  loadingTimer = setInterval(() => {
+    idx = (idx + 1) % loadingStages.length
+    loadingCopy.value = loadingStages[idx]
+  }, 1400)
+}
+
+function stopLoadingTicker() {
+  if (!loadingTimer) return
+  clearInterval(loadingTimer)
+  loadingTimer = null
+}
+
+watch(processing, (active) => {
+  if (active) {
+    startLoadingTicker()
+    return
+  }
+  stopLoadingTicker()
+}, { immediate: true })
 
 const resultCard = computed(() => {
   if (manuallyEnded.value && currentScene.value) {
@@ -134,6 +167,7 @@ onMounted(() => {
 
 onUnmounted(() => { 
   if (placeholderTimer) clearInterval(placeholderTimer) 
+  stopLoadingTicker()
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>
@@ -214,9 +248,25 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Processing State -->
-                <div v-if="processing" class="py-10 flex flex-col items-center gap-4 opacity-40">
-                  <Loader2 :size="24" class="animate-spin text-accent" />
-                  <p class="text-[10px] font-black uppercase tracking-[0.3em] text-text-tertiary">时间线坍缩中...</p>
+                <div
+                  v-if="processing"
+                  class="flex justify-center"
+                  :class="showTransitionOnly ? 'min-h-[42vh] items-center py-16' : 'py-10'"
+                >
+                  <div class="w-full max-w-lg rounded-[28px] border border-accent/10 bg-accent/5 px-5 py-5 shadow-lg shadow-accent/5">
+                    <div class="flex items-center gap-3">
+                      <div class="flex items-center gap-1.5 text-accent">
+                        <span class="w-2 h-2 rounded-full bg-current animate-pulse" />
+                        <span class="w-2 h-2 rounded-full bg-current animate-pulse" style="animation-delay:.2s" />
+                        <span class="w-2 h-2 rounded-full bg-current animate-pulse" style="animation-delay:.4s" />
+                      </div>
+                      <p class="text-[11px] font-black uppercase tracking-[0.25em] text-accent">{{ loadingCopy }}</p>
+                    </div>
+                    <div class="mt-3 flex items-center justify-between gap-3 text-[10px] text-text-tertiary">
+                      <span class="truncate">{{ activeChoiceLabel ? `刚才选择：${activeChoiceLabel}` : '开场铺陈中' }}</span>
+                      <span class="shrink-0">{{ readyResponseCount }}/3 已就位</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

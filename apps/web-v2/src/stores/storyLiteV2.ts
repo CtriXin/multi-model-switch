@@ -610,6 +610,9 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     processing.value = true
     error.value = ''
     activeChoiceLabel.value = choice.label
+    streamingPremise.value = ''
+    currentScene.value = null
+    resetResponseState()
 
     try {
       const nextRound = round.value + 1

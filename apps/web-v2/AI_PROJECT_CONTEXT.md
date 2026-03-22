@@ -299,6 +299,11 @@
 - **Sidebar navigation:** When adding a new route, update BOTH the collapsed (icon rail) AND expanded sidebar sections in `src/components/layout/Sidebar.vue`.
 - **CLI env injection for `claude`:** Use pattern from `launchSpec.ts` — inject `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` (strip `/v1` suffix), `ANTHROPIC_MODEL`, plus all `ANTHROPIC_DEFAULT_*_MODEL` variants.
 - **stream-json format:** `claude --print --verbose --output-format stream-json` emits newline-delimited JSON. Event types are `message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`. Do NOT assume type `assistant` or `tool_result` at top level.
+- **StoryLive mobile footer:** On small screens, prefer compact A/B cue actions over long `latestDirectorCue` copy. The footer should keep the user near the latest turn instead of stacking dense hint text above the input.
+- **MultiLife mobile header:** Keep mobile header badges minimal. If quick-pick collapses provider diversity, message it as a fast-lane tradeoff, not as missing providers.
+- **StoryLite chapter transitions:** After a choice is submitted, archive the previous chapter immediately. Do not leave the old scene visible under the loading state; show transition copy until the new scene actually arrives.
+- **MultiLife round layout:** Only the latest round should render as the active scene. Older rounds belong in an archived stack so users never mistake previous testimony for the current round.
+- **Lab auto-pick degradation:** If a “fast” model times out twice in one day, deprioritize it for lab auto-picks and replacements before considering full suppression.
 
 ### Code style
 - Vue 3 Composition API with `<script setup lang="ts">`
