@@ -117,6 +117,27 @@ export function getAvatarUrl(persona: PersonaDefinition, size = 64): string {
   return `${DICEBEAR_BASE}?${persona.avatarParams}&size=${size}&radius=50&backgroundColor=transparent`
 }
 
+// 像素风头像 - Dicebear pixel-art
+const PIXEL_AVATAR_SEEDS: Record<string, string> = {
+  'laochuanzhang': 'captain-strategy',
+  'fengtouyan': 'vc-hunter',
+  'chuishaoren': 'whistle-blower',
+  'wuyazui': 'black-swan',
+  'shouyiren': 'craftsman',
+  'ziyuantong': 'resource-master',
+  'shengyijing': 'growth-hacker',
+  'touzijia': 'investor',
+  'tiexinren': 'user-friendly',
+  'lengyankan': 'cold-eye',
+  'tuijinzhe': 'pusher',
+  'zhiguanyuan': 'gatekeeper',
+}
+
+export function getPixelAvatarUrl(roleId: string, size = 64): string {
+  const seed = PIXEL_AVATAR_SEEDS[roleId] || roleId
+  return `https://api.dicebear.com/9.x/pixel-art/svg?seed=${encodeURIComponent(seed)}&size=${size}&radius=50`
+}
+
 export function getStanceLabels(stance: StanceAxes) {
   return {
     cognition: stance.cognition > 0.3 ? '押注型' : stance.cognition < -0.3 ? '避险型' : '中间派',
