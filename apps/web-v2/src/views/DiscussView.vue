@@ -130,8 +130,8 @@ const depthLabel = computed(() => {
 
 const sanitizedSynthesis = computed(() => sanitizeModelOutput(discussStore.phase3Text || ''))
 const sanitizedRollup = computed(() => sanitizeModelOutput(discussStore.rollupText || ''))
-const synthesis = computed(() => md.render(sanitizedSynthesis.value.content || ''))
-const rollupHtml = computed(() => md.render(sanitizedRollup.value.content || ''))
+const synthesis = computed(() => md.render(sanitizedSynthesis.value.visibleContent || ''))
+const rollupHtml = computed(() => md.render(sanitizedRollup.value.visibleContent || ''))
 
 function handleRollup() {
   discussStore.startRollup(appStore.selectedModelIds).then(() => {
