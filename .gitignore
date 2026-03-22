@@ -11,6 +11,7 @@ test-results/
 .ai/discuss/
 .ai/discuss-assets/
 docs/archive/todo-archive-*.md
+docs/archive/todo-snapshot-*.md
 .claude/
 apps/runtime-api/gateway-config.json
 apps/runtime-api/gateway-state.db
