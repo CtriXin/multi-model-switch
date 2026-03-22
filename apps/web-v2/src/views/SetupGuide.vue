@@ -54,7 +54,7 @@ const coreTiles = [
   <div class="flex flex-col h-full overflow-hidden bg-transparent">
     
     <!-- Unified V3 Capsule Header -->
-    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
       <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10">
         <div class="flex items-center gap-2">
           <button @click="openDrawer" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors"><Menu :size="18" stroke-width="3.5" /></button>
