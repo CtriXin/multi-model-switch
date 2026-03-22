@@ -64,12 +64,14 @@ const showRoundTransition = computed(() =>
   !!lastRound.value && (roundStarting.value || (processing.value && !latestSceneText.value)),
 )
 
-const allResponsesDone = computed(() => {
-  if (!lastRound.value) return false
-  return lastRound.value.responses.every((resp) => resp.status === 'done' || resp.status === 'error')
-    && !latestRoundHasActiveStreams.value
-    && !processing.value
-    && !roundStarting.value
+const canInteractWithLatestRound = computed(() => {
+  const round = lastRound.value
+  if (!round) return false
+  if (roundStarting.value) return false
+  return round.responses.every((resp) => {
+    const streamed = streamingTexts.value[`${round.id}-${resp.roleId}`] || ''
+    return Boolean(streamed.trim() || resp.text.trim() || resp.status === 'error')
+  })
 })
 
 async function streamIntro(text: string) {
@@ -386,12 +388,26 @@ function handleGenerateEnding() {
 
               <!-- Sticky Actions -->
               <div v-if="lastRound && !lastRound.playerChoice" 
-                class="shrink-0 p-4 sm:p-6 border-t border-white/10 bg-white/90 backdrop-blur-2xl absolute bottom-0 left-0 right-0 shadow-2xl transition-all duration-500"
-                :class="allResponsesDone ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'">
+                class="shrink-0 p-4 sm:p-6 border-t border-white/10 bg-white/90 backdrop-blur-2xl absolute bottom-0 left-0 right-0 shadow-2xl transition-all duration-500">
                 <div class="max-w-3xl mx-auto space-y-4">
-                  <button @click="handleAccept" class="w-full h-14 sm:h-16 rounded-2xl bg-accent text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 lab-breathing-btn font-black uppercase tracking-widest text-sm">接受当前版本</button>
+                  <button
+                    @click="handleAccept"
+                    :disabled="!canInteractWithLatestRound"
+                    class="w-full h-14 sm:h-16 rounded-2xl bg-accent text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 font-black uppercase tracking-widest text-sm disabled:opacity-45 disabled:shadow-none disabled:cursor-not-allowed"
+                    :class="canInteractWithLatestRound ? 'lab-breathing-btn' : ''"
+                  >
+                    {{ canInteractWithLatestRound ? '接受当前版本' : '证词整理中...' }}
+                  </button>
                   <div class="grid grid-cols-3 gap-2">
-                    <button v-for="resp in lastRound.responses" :key="'ch-' + resp.roleId" @click="handleChallenge(resp.roleId)" class="flex-1 h-12 rounded-xl bg-white border-2 border-black/5 text-amber-500 active:scale-95 transition-all flex items-center justify-center"><span class="text-[9px] font-black truncate uppercase px-1">质疑 {{ caseData?.roles.find(r => r.id === resp.roleId)?.name }}</span></button>
+                    <button
+                      v-for="resp in lastRound.responses"
+                      :key="'ch-' + resp.roleId"
+                      @click="handleChallenge(resp.roleId)"
+                      :disabled="!canInteractWithLatestRound"
+                      class="flex-1 h-12 rounded-xl bg-white border-2 border-black/5 text-amber-500 active:scale-95 transition-all flex items-center justify-center disabled:opacity-45 disabled:cursor-not-allowed"
+                    >
+                      <span class="text-[9px] font-black truncate uppercase px-1">质疑 {{ caseData?.roles.find(r => r.id === resp.roleId)?.name }}</span>
+                    </button>
                   </div>
                 </div>
               </div>
