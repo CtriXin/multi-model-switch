@@ -256,7 +256,7 @@ function pickDebateModels(
   if (!pool.length) return null
 
   if (appStore.shouldUseSparkringSpeed() && pool.some((model) => model.provider === 'sparkring')) {
-    const picked = appStore.pickLabModelIds(3, pool)
+    const picked = appStore.pickLabModelIds(3, pool, `daily-challenge:${mode}`)
     const [pro, con, moderator] = picked
     if (!pro) return null
     return {
@@ -281,6 +281,15 @@ function pickDebateModels(
 
   const moderatorModel = pickRoleModel(rankModels(pool, mode, 'moderator'), takenIds, takenProviders)
   const finalModerator = moderatorModel || finalCon || proModel
+
+  appStore.debugLabSelection(`daily-challenge:${mode}`, [
+    proModel.id,
+    finalCon.id,
+    finalModerator.id,
+  ], {
+    poolSize: pool.length,
+    strategy: 'ranked',
+  })
 
   return {
     pro: proModel.id,

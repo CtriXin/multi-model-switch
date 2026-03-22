@@ -1,3 +1,5 @@
+import { appendLocalDebugLog } from '@/utils/localDebugLog'
+
 export type TimingPhase =
   | 'start'
   | 'mark'
@@ -14,6 +16,7 @@ export interface TimingLogEntry {
 }
 
 const GLOBAL_KEY = '__MMS_TIMING_LOGS__'
+const STORAGE_KEY = 'mms-timing-logs'
 
 function nowMono() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -57,11 +60,7 @@ export function pushTimingLog(
     meta,
   }
 
-  const root = globalThis as typeof globalThis & {
-    [GLOBAL_KEY]?: TimingLogEntry[]
-  }
-  root[GLOBAL_KEY] = root[GLOBAL_KEY] || []
-  root[GLOBAL_KEY]!.push(entry)
+  appendLocalDebugLog<TimingLogEntry>(GLOBAL_KEY, STORAGE_KEY, entry)
 
   if (isEnabled()) {
     console.info('[mms-timing]', entry)
@@ -95,4 +94,3 @@ export function createTimingSpan(label: string, meta?: Record<string, unknown>) 
     },
   }
 }
-

@@ -14,6 +14,12 @@ function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+function previewChunk(chunk: string, maxLength = 80) {
+  const compact = chunk.replace(/\s+/g, ' ').trim()
+  if (!compact) return ''
+  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact
+}
+
 export function shouldRetryWithAnotherAccount(error: unknown) {
   return error instanceof ApiError
     && ['invalid_key', 'rate_limited', 'model_unavailable'].includes(error.code || '')
@@ -98,6 +104,8 @@ export async function* streamModelChat(options: {
   let lastError: unknown = null
   let chunkCount = 0
   let firstChunkSeen = false
+  let firstThinkChunkSeen = false
+  let thinkChunkCount = 0
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index]
@@ -116,12 +124,26 @@ export async function* streamModelChat(options: {
         signal: options.signal,
       })) {
         chunkCount += 1
+        const containsThinkTag = chunk.includes('<think>') || chunk.includes('</think>')
         if (!firstChunkSeen) {
           firstChunkSeen = true
           trace.mark('first_chunk', {
             attempt: index + 1,
             providerId: candidate.provider.id,
+            containsThinkTag,
+            preview: previewChunk(chunk),
           })
+        }
+        if (containsThinkTag) {
+          thinkChunkCount += 1
+          if (!firstThinkChunkSeen) {
+            firstThinkChunkSeen = true
+            trace.mark('first_think_chunk', {
+              attempt: index + 1,
+              providerId: candidate.provider.id,
+              preview: previewChunk(chunk),
+            })
+          }
         }
         yield chunk
       }
@@ -133,6 +155,8 @@ export async function* streamModelChat(options: {
         attempt: index + 1,
         providerId: candidate.provider.id,
         chunkCount,
+        sawThinkTag: firstThinkChunkSeen,
+        thinkChunkCount,
       })
       return
     } catch (error) {
@@ -148,6 +172,8 @@ export async function* streamModelChat(options: {
           attempt: index + 1,
           providerId: candidate.provider.id,
           chunkCount,
+          sawThinkTag: firstThinkChunkSeen,
+          thinkChunkCount,
         })
         throw error
       }
@@ -156,10 +182,12 @@ export async function* streamModelChat(options: {
         attempt: index + 1,
         providerId: candidate.provider.id,
         chunkCount,
+        sawThinkTag: firstThinkChunkSeen,
+        thinkChunkCount,
       })
     }
   }
 
-  trace.error(lastError, { chunkCount })
+  trace.error(lastError, { chunkCount, sawThinkTag: firstThinkChunkSeen, thinkChunkCount })
   throw lastError instanceof Error ? lastError : new Error('请求失败')
 }

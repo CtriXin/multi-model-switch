@@ -227,7 +227,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
 
   function pickRandomModels() {
     const appStore = useAppStore()
-    const pickedIds = appStore.pickLabModelIds(3)
+    const pickedIds = appStore.pickLabModelIds(3, undefined, 'multi-life:auto')
     const pickedModels = pickedIds
       .map((id) => appStore.getModel(id))
       .filter(Boolean)
