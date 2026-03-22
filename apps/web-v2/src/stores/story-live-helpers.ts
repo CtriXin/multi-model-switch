@@ -86,7 +86,7 @@ export function chooseModelIds(appStore: ReturnType<typeof useAppStore>): StoryL
     }
   }
 
-  const picked = appStore.pickLabModelIds(3)
+  const picked = appStore.pickLabModelIds(3, undefined, 'story-live:auto')
   const [logic, emotion, twist] = picked.length >= 3
     ? picked
     : [picked[0], picked[1] ?? picked[0], picked[2] ?? picked[0]]

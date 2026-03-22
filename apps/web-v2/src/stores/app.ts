@@ -10,6 +10,7 @@ import {
 import { getFetchRuntime } from '@/services/runtime'
 import { provision, isProvisioned, getCurrentTier, type ProvisionResult } from '@/services/provision'
 import { getImmediateRegionHint, resolveRegionHintForToday, type RegionHint } from '@/utils/regionHint'
+import { appendLocalDebugLog } from '@/utils/localDebugLog'
 
 export interface ModelMeta {
   id: string
@@ -100,6 +101,8 @@ const DOMESTIC_REASONING_HEAVY_KEYWORDS = [
   'k2.5',
   'deepseek-r1',
 ]
+const LAB_PICK_LOG_GLOBAL_KEY = '__MMS_LAB_PICK_LOGS__'
+const LAB_PICK_LOG_STORAGE_KEY = 'mms-lab-pick-logs'
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
@@ -326,6 +329,39 @@ export const useAppStore = defineStore('app', () => {
     return sparkringSpeedMap.value[id] ?? null
   }
 
+  function describeLabSelection(modelId: string) {
+    const model = getModel(modelId)
+    const speed = getModelSpeed(modelId)
+    return {
+      id: modelId,
+      name: model?.name ?? modelId,
+      provider: model?.provider ?? 'unknown',
+      latencyMs: speed?.latencyMs ?? null,
+      speedStatus: speed?.status ?? null,
+      tags: model?.tags ?? [],
+      domestic: model ? isDomesticModel(model) : false,
+      reasoningHeavy: model ? isDomesticReasoningHeavyModel(model) : false,
+    }
+  }
+
+  function debugLabSelection(
+    scope: string,
+    modelIds: string[],
+    extra: Record<string, unknown> = {},
+  ) {
+    if (!modelIds.length) return
+    const entry = {
+      ts: new Date().toISOString(),
+      scope,
+      regionHint: regionHint.value,
+      useSparkringSpeed: shouldUseSparkringSpeed(),
+      picks: modelIds.map(describeLabSelection),
+      ...extra,
+    }
+    appendLocalDebugLog(LAB_PICK_LOG_GLOBAL_KEY, LAB_PICK_LOG_STORAGE_KEY, entry)
+    console.info('[mms-lab-pick]', entry)
+  }
+
   function compareBySpeed(left: ModelMeta, right: ModelMeta) {
     const leftSpeed = getModelSpeed(left.id)
     const rightSpeed = getModelSpeed(right.id)
@@ -391,7 +427,7 @@ export const useAppStore = defineStore('app', () => {
     return [...fastBucket, ...preferredDomesticRest, ...otherDomestic, ...otherSparkring, ...others]
   }
 
-  function pickLabModelIds(count = 3, source = models.value): string[] {
+  function pickLabModelIds(count = 3, source = models.value, scope = 'lab-auto'): string[] {
     const pool = getLabAutoPool(source)
     if (!pool.length) return []
 
@@ -408,11 +444,17 @@ export const useAppStore = defineStore('app', () => {
       picked.push(fallback.id)
     }
 
+    debugLabSelection(scope, picked, {
+      requestedCount: count,
+      poolSize: pool.length,
+      poolPreview: pool.slice(0, Math.min(pool.length, 6)).map((model) => describeLabSelection(model.id)),
+    })
+
     return picked
   }
 
-  function pickLabModelId(source = models.value): string | null {
-    return pickLabModelIds(1, source)[0] ?? null
+  function pickLabModelId(source = models.value, scope = 'lab-auto'): string | null {
+    return pickLabModelIds(1, source, scope)[0] ?? null
   }
 
   function applySparkringSpeedSnapshot(
@@ -881,6 +923,7 @@ export const useAppStore = defineStore('app', () => {
     getSuppressedModelIds,
     restoreSuppressedModels,
     getModel,
+    debugLabSelection,
     activateMaxChannel,
     showFriendsMode,
     regionHint,

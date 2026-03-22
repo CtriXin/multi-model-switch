@@ -165,7 +165,7 @@ function pickHostModel(
   const providerStore = useProviderStore()
   const available = listPlayableHostModels(appStore, providerStore)
   if (!available.length) return null
-  return appStore.pickLabModelId(available)
+  return appStore.pickLabModelId(available, 'turtle-soup:auto-host')
 }
 
 // ─── Store ──────────────────────────────────────────────

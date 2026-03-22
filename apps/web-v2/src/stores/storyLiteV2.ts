@@ -185,6 +185,16 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
 
     useMock.value = connectionMode.value === 'demo' || isUsingDemoModels(resolvedIds)
     modelAssignment.value = assignRoles(resolvedIds)
+    if (connectionMode.value === 'auto-live' && modelAssignment.value) {
+      appStore.debugLabSelection(
+        'story-lite:auto-live',
+        Object.values(modelAssignment.value),
+        {
+          connectionMode: connectionMode.value,
+          availableLiveCount: availableLiveIds.length,
+        },
+      )
+    }
   }
 
   function resetResponseState(status: 'idle' | 'loading' | 'done' = 'idle') {
@@ -398,15 +408,14 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
     }
     resetResponseState('loading')
 
-    // 等待 premise 流式完成
-    await premisePromise
-
-    // Phase 2: 并行 streaming 3 个角色回应
-    await Promise.allSettled(
+    // Phase 2: premise 动画与 3 个角色流并行，先回来的卡片先显示
+    const rolePromise = Promise.allSettled(
       ROLE_ORDER.map((role) =>
         streamRoleResponseDynamic(sceneId, role, sceneRound, requestId, directorResult.premise, lastChoice),
       ),
     )
+
+    await Promise.allSettled([premisePromise, rolePromise])
 
     if (requestNonce.value !== requestId || !currentScene.value) return currentScene.value!
 
