@@ -1,5 +1,6 @@
 export interface SanitizedModelOutput {
   content: string
+  visibleContent: string
   hiddenThink: boolean
   /** Extracted <think> blocks joined */
   thinkText: string
@@ -37,7 +38,7 @@ function extractBlocks(text: string, blockRe: RegExp, openRe: RegExp, closeRe: R
 }
 
 export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
-  if (!raw) return { content: '', hiddenThink: false, thinkText: '', briefText: '' }
+  if (!raw) return { content: '', visibleContent: '', hiddenThink: false, thinkText: '', briefText: '' }
 
   let content = raw
 
@@ -54,6 +55,7 @@ export function sanitizeModelOutput(raw: string): SanitizedModelOutput {
 
   return {
     content,
+    visibleContent: content || think.extracted,
     hiddenThink: think.extracted.length > 0,
     thinkText: think.extracted,
     briefText: brief.extracted,

@@ -15,7 +15,7 @@ const props = defineProps<{
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
 const expanded = reactive<Record<string, boolean>>({})
 const sanitized = computed(() => sanitizeModelOutput(props.content || props.synthesis?.content || ''))
-const rendered = computed(() => md.render(sanitized.value.content || ''))
+const rendered = computed(() => md.render(sanitized.value.visibleContent || ''))
 
 function getSanitizedText(text: string) {
   return sanitizeModelOutput(text || '')
@@ -26,7 +26,7 @@ function toggle(id: string) {
 }
 
 function renderMarkdown(text: string) {
-  return md.render(getSanitizedText(text).content || '')
+  return md.render(getSanitizedText(text).visibleContent || '')
 }
 
 function hiddenThink(text: string) {
@@ -34,7 +34,7 @@ function hiddenThink(text: string) {
 }
 
 function isLong(text: string) {
-  const content = getSanitizedText(text).content
+  const content = getSanitizedText(text).visibleContent
   return content.length > 180 || content.includes('\n') || content.includes('|') || content.includes('```')
 }
 </script>

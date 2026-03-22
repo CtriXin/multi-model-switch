@@ -65,7 +65,9 @@ const userInput = computed({ get: () => draftInput.value, set: (v) => { storyLiv
 watch(userInput, () => {
   resizeInput()
 })
-function renderMarkdown(text: string) { return md.render(sanitizeModelOutput(text).content || '') }
+function renderMarkdown(text: string) {
+  return md.render(sanitizeModelOutput(text).visibleContent || '')
+}
 function scrollLatest() { nextTick(() => { if (transcriptRef.value) transcriptRef.value.scrollTop = transcriptRef.value.scrollHeight }) }
 function roleModelName(role: StoryLiveRole) {
   const assignment = modelAssignment.value

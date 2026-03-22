@@ -28,7 +28,8 @@ const emit = defineEmits<{ select: []; discuss: []; retry: []; replace: []; rand
 
 const copied = ref(false)
 const sanitized = computed(() => sanitizeModelOutput(props.content || ''))
-const html = computed(() => md.render(sanitized.value.content || ''))
+const showThinkingPreview = computed(() => !sanitized.value.content && !!sanitized.value.thinkText)
+const html = computed(() => md.render(sanitized.value.visibleContent || ''))
 const color = computed(() => getModelColor(props.provider))
 const initial = computed(() => (props.modelName || props.modelId || '?').charAt(0).toUpperCase())
 const isDone = computed(() => !!props.elapsed && !props.streaming)
@@ -175,7 +176,7 @@ async function handleShare() {
       </div>
 
       <!-- Rendered markdown content -->
-      <div v-else-if="sanitized.content" class="md-body max-w-none" v-html="html" />
+      <div v-else-if="sanitized.visibleContent" class="md-body max-w-none" v-html="html" />
 
       <!-- Streaming typing indicator -->
       <div v-if="streaming && content" class="mt-3 flex items-center gap-1.5">
@@ -193,8 +194,12 @@ async function handleShare() {
         />
       </div>
 
+      <div v-if="showThinkingPreview" class="mt-3 text-[10px] italic text-amber-400">
+        模型思考中，先把思路流给你
+      </div>
+
       <div
-        v-if="sanitized.hiddenThink"
+        v-else-if="sanitized.hiddenThink"
         class="mt-3 text-[10px] italic text-text-tertiary"
       >
         已隐藏模型思考过程，只展示最终内容

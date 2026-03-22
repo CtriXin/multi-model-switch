@@ -109,8 +109,8 @@ function handleRollup() {
 
 const sanitizedSynthesis = computed(() => sanitizeModelOutput(session.phase3Text.value || ''))
 const sanitizedRollup = computed(() => sanitizeModelOutput(session.rollupText.value || ''))
-const synthesisHtml = computed(() => md.render(sanitizedSynthesis.value.content || ''))
-const rollupHtml = computed(() => md.render(sanitizedRollup.value.content || ''))
+const synthesisHtml = computed(() => md.render(sanitizedSynthesis.value.visibleContent || ''))
+const rollupHtml = computed(() => md.render(sanitizedRollup.value.visibleContent || ''))
 
 watch(() => props.state, (state) => {
   const incoming = serializeState(state)
