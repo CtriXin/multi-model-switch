@@ -14,6 +14,9 @@ import ChatSummary from '@/components/ChatSummary.vue'
 import InlineDiscuss from '@/components/InlineDiscuss.vue'
 import { startWindowDrag } from '@/utils/windowDrag'
 import type { ImageAttachment } from '@/stores/chat'
+import { getExperienceMode } from '@/utils/experienceMode'
+import { CHAT_PROMPT_EXAMPLES } from '@/data/inputExamples'
+import { useRotatingPrompt } from '@/composables/useRotatingPrompt'
 import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2, Menu, Sun, Moon, Layers, Zap, Target, History } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -25,6 +28,7 @@ const toast = useToastStore()
 const { theme, toggle: toggleTheme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform')
 const restoredDraft = ref('')
+const experienceMode = ref(getExperienceMode())
 
 const scrollContainer = ref<HTMLElement>()
 const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
@@ -296,9 +300,17 @@ function openImagePreview(src: string) {
 }
 
 const hasActiveModels = computed(() => chatStore.activeModelIds.length > 0)
+const canUseSamplePrompt = computed(() =>
+  hasActiveModels.value
+  && !chatStore.streaming
+  && (experienceMode.value === 'demo' || chatStore.rounds.length === 0),
+)
+const rotatingChatPrompt = useRotatingPrompt(CHAT_PROMPT_EXAMPLES, canUseSamplePrompt)
+const samplePrompt = computed(() => canUseSamplePrompt.value ? rotatingChatPrompt.value : '')
 
 const inputPlaceholder = computed(() => {
   if (!hasActiveModels.value) return '请先选择模型...'
+  if (samplePrompt.value) return `试试：${samplePrompt.value}`
   if (chatStore.isSingleChat) return '和 AI 聊聊...'
   return `发给 ${chatStore.activeModelIds.length} 个模型...`
 })
@@ -1009,6 +1021,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
         <InputBar class="!bg-transparent !pb-1.5 !pt-0.5" :disabled="!hasActiveModels"
           :streaming="chatStore.streaming"
           :placeholder="inputPlaceholder"
+          :sample-prompt="samplePrompt"
           :restore-text="restoredDraft" @submit="handleSubmit" @stop="chatStore.stopStreaming"
           @stop-and-edit="handleStopAndEdit" />
       </div>

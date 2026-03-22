@@ -10,6 +10,7 @@ const props = defineProps<{
   streaming?: boolean
   placeholder?: string
   restoreText?: string
+  samplePrompt?: string
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +29,9 @@ const attachments = ref<ImageAttachment[]>([])
 const dragOver = ref(false)
 
 const hasModels = computed(() => appStore.selectedModels.length > 0)
+const samplePromptText = computed(() => props.samplePrompt?.trim() ?? '')
+const canSubmit = computed(() => !props.disabled && (!!text.value.trim() || !!samplePromptText.value))
+const isUsingSamplePrompt = computed(() => !text.value.trim() && !!samplePromptText.value)
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -37,7 +41,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 function submit() {
-  const val = text.value.trim()
+  const val = text.value.trim() || samplePromptText.value
   if (!val || props.disabled) return
   emit('submit', val, [...attachments.value])
   text.value = ''
@@ -177,9 +181,10 @@ watch(() => props.restoreText, (value) => {
       <div class="flex shrink-0 items-center gap-1.5 self-end mb-0.5 mr-1">
         <button v-if="streaming" @click="emit('stop')" class="h-10 w-10 flex items-center justify-center rounded-full bg-red-500/20 text-red-400"><Square :size="16" fill="currentColor" /></button>
         <button v-if="streaming" @click="emit('stopAndEdit')" class="h-10 px-4 rounded-xl bg-white/5 border border-white/5 text-[10px] font-black uppercase text-text-secondary">停下修改</button>
-        <button v-else @click="submit" :disabled="!text.trim() || disabled" 
+        <button v-else @click="submit" :disabled="!canSubmit"
+                :title="isUsingSamplePrompt ? '发送当前示例' : '发送'"
                 class="h-10 w-10 flex items-center justify-center rounded-full transition-all duration-500" 
-                :class="text.trim() && !disabled ? 'bg-accent text-white shadow-xl scale-105' : 'bg-white/5 text-text-tertiary'">
+                :class="canSubmit ? 'bg-accent text-white shadow-xl scale-105' : 'bg-white/5 text-text-tertiary'">
           <Send :size="18" />
         </button>
       </div>
