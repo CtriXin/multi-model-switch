@@ -300,7 +300,7 @@ onBeforeRouteLeave(() => {
 <template>
   <div class="flex flex-col h-full overflow-hidden bg-transparent">
     <!-- Group 1: Floating Capsule Header (V3 SPEC Style) -->
-    <div class="z-40 px-4 pt-2 sm:pt-4 pb-2 shrink-0">
+    <div class="z-40 px-4 pt-4 pb-2 shrink-0">
       <header
         data-tauri-drag-region
         class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10"
