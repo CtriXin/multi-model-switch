@@ -12,6 +12,9 @@ import MarkdownIt from 'markdown-it'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 import { startWindowDrag } from '@/utils/windowDrag'
 import { shareText } from '@/composables/useShare'
+import { getExperienceMode } from '@/utils/experienceMode'
+import { DISCUSS_PROMPT_EXAMPLES } from '@/data/inputExamples'
+import { useRotatingPrompt } from '@/composables/useRotatingPrompt'
 import {
   MessageSquare, CheckCircle, AlertTriangle, Lightbulb,
   ArrowRight, RotateCcw, GitMerge, Zap, Flame, Rocket,
@@ -28,13 +31,27 @@ const sessionStore = useSessionStore()
 const toast = useToastStore()
 const { theme, toggle: toggleTheme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform')
+const experienceMode = ref(getExperienceMode())
 
 function openDrawer() { window.dispatchEvent(new CustomEvent('open-drawer')) }
 function openModels() { window.dispatchEvent(new CustomEvent('open-models')) }
 
 const restoredDraft = ref('')
+const currentDiscussMessageCount = computed(() =>
+  sessionStore.currentSession?.type === 'discuss' ? sessionStore.currentSession.messageCount : 0,
+)
+const pendingTopic = ref<string | null>(null)
 
 const hasModels = computed(() => appStore.selectedModels.length >= 2)
+const canUseSamplePrompt = computed(() =>
+  hasModels.value
+  && !discussStore.hasResults
+  && !discussStore.streaming
+  && !pendingTopic.value
+  && (experienceMode.value === 'demo' || currentDiscussMessageCount.value === 0),
+)
+const rotatingDiscussPrompt = useRotatingPrompt(DISCUSS_PROMPT_EXAMPLES, canUseSamplePrompt)
+const samplePrompt = computed(() => canUseSamplePrompt.value ? rotatingDiscussPrompt.value : '')
 
 // Depth selector
 const selectedDepth = ref<DiscussDepth>('panel')
@@ -43,9 +60,6 @@ const depthOptions: { value: DiscussDepth; label: string; desc: string; hint?: s
   { value: 'panel', label: '标准', desc: '互相挑挑毛病，够用（推荐）', icon: Zap },
   { value: 'full', label: '深度', desc: '逐对盘问，适合大事', hint: '输出为结构化观点，非最终方案。可配合生成最终建议。', icon: Flame },
 ]
-
-// Pending topic — submitted but depth not chosen yet
-const pendingTopic = ref<string | null>(null)
 
 onMounted(() => {
   const ctx = route.query.context as string
@@ -521,7 +535,14 @@ function handleRollup() {
         <InputBar class="!bg-transparent !pb-1.5 !pt-0.5"
           :disabled="!hasModels || (discussStore.hasResults && !discussStore.streaming)"
           :streaming="discussStore.streaming"
-          :placeholder="discussStore.hasResults ? '点击「新辩论」重置后可输入新主题...' : hasModels ? '输入辩论主题...' : '请先选择 2 个以上模型...'"
+          :placeholder="discussStore.hasResults
+            ? '点击「新辩论」重置后可输入新主题...'
+            : !hasModels
+              ? '请先选择 2 个以上模型...'
+              : samplePrompt
+                ? `试试：${samplePrompt}`
+                : '输入辩论主题...'"
+          :sample-prompt="samplePrompt"
           :restore-text="restoredDraft" @submit="handleSubmit" @stop="discussStore.stopDiscussion"
           @stop-and-edit="handleStopAndEdit" />
       </div>
