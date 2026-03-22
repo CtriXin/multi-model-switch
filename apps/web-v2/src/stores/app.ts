@@ -9,6 +9,7 @@ import {
 } from '@/services/api'
 import { getFetchRuntime } from '@/services/runtime'
 import { provision, isProvisioned, getCurrentTier, type ProvisionResult } from '@/services/provision'
+import { getImmediateRegionHint, resolveRegionHintForToday, type RegionHint } from '@/utils/regionHint'
 
 export interface ModelMeta {
   id: string
@@ -85,6 +86,20 @@ const DOMESTIC_MODEL_KEYWORDS = [
   'step',
   'ernie',
 ]
+const DOMESTIC_REASONING_HEAVY_KEYWORDS = [
+  'thinking',
+  'reasoning',
+  'r1',
+  'qwq',
+  'qvq',
+  'qwen-max',
+  'qwen3-max',
+  'qwen3.5-plus',
+  'glm-4.7',
+  'glm-5',
+  'k2.5',
+  'deepseek-r1',
+]
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
@@ -142,6 +157,17 @@ function isSpeedOk(status: string) {
 function isDomesticModel(model: ModelMeta) {
   const text = `${model.id} ${model.name}`.toLowerCase()
   return DOMESTIC_MODEL_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function isDomesticReasoningHeavyModel(model: ModelMeta) {
+  const text = `${model.id} ${model.name} ${model.tags.join(' ')}`.toLowerCase()
+  if (model.tags.includes('reasoning')) return true
+  return DOMESTIC_REASONING_HEAVY_KEYWORDS.some((keyword) => text.includes(keyword))
+}
+
+function getDomesticFastLaneCandidates(source: ModelMeta[]) {
+  const preferred = source.filter((model) => isDomesticModel(model) && !isDomesticReasoningHeavyModel(model))
+  return preferred.length ? preferred : source
 }
 
 function buildSpeedMap(snapshot: SparkringModelSpeedSnapshot | null): Record<string, ModelSpeedMeta> {
@@ -205,6 +231,7 @@ export const useAppStore = defineStore('app', () => {
   const sparkringSpeedTestedAt = ref<string | null>(initialSpeedCache?.testedAt ?? null)
   const sparkringSpeedSource = ref<SparkringSpeedSource>(initialSpeedCache ? 'cache' : 'none')
   const sparkringSpeedLastDay = ref(localStorage.getItem(SPARKRING_SPEED_LAST_DAY_KEY) ?? '')
+  const regionHint = ref<RegionHint>(getImmediateRegionHint())
 
   watch(preferFree, (val) => {
     localStorage.setItem('mms-prefer-free', String(val))
@@ -346,15 +373,22 @@ export const useAppStore = defineStore('app', () => {
 
     const domesticSparkring = sparkring.filter(isDomesticModel)
     const domesticSource = domesticSparkring.length ? domesticSparkring : sparkring
-    const fastBucket = shuffleArray(getSparkringFastBucket(domesticSource))
+    const preferredDomestic = regionHint.value === 'cn'
+      ? getDomesticFastLaneCandidates(domesticSource)
+      : domesticSource
+    const fastBucket = shuffleArray(getSparkringFastBucket(preferredDomestic))
     const fastIds = new Set(fastBucket.map((model) => model.id))
-    const otherDomestic = shuffleArray(domesticSource.filter((model) => !fastIds.has(model.id)))
+    const preferredDomesticRest = shuffleArray(preferredDomestic.filter((model) => !fastIds.has(model.id)))
+    const preferredDomesticIds = new Set(preferredDomesticRest.map((model) => model.id))
+    const otherDomestic = shuffleArray(
+      domesticSource.filter((model) => !fastIds.has(model.id) && !preferredDomesticIds.has(model.id)),
+    )
     const otherDomesticIds = new Set(otherDomestic.map((model) => model.id))
     const otherSparkring = shuffleArray(
-      sparkring.filter((model) => !fastIds.has(model.id) && !otherDomesticIds.has(model.id)),
+      sparkring.filter((model) => !fastIds.has(model.id) && !preferredDomesticIds.has(model.id) && !otherDomesticIds.has(model.id)),
     )
     const others = shuffleArray(basePool.filter((model) => model.provider !== 'sparkring'))
-    return [...fastBucket, ...otherDomestic, ...otherSparkring, ...others]
+    return [...fastBucket, ...preferredDomesticRest, ...otherDomestic, ...otherSparkring, ...others]
   }
 
   function pickLabModelIds(count = 3, source = models.value): string[] {
@@ -426,11 +460,20 @@ export const useAppStore = defineStore('app', () => {
   async function initialize() {
     if (initialized.value) return
     initialized.value = true
+    void refreshRegionHintForToday()
 
     // Auto-provision: first-time users get a free key from NewAPI
     await tryAutoProvision()
 
     await refreshModels()
+  }
+
+  async function refreshRegionHintForToday() {
+    try {
+      regionHint.value = await resolveRegionHintForToday(regionHint.value)
+    } catch {
+      // Keep the immediate locale-based hint when probing is unavailable.
+    }
   }
 
   /**
@@ -488,6 +531,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshModels() {
+    void refreshRegionHintForToday()
     const providerStore = useProviderStore()
     await providerStore.refreshKeyStatus()
 
@@ -839,6 +883,7 @@ export const useAppStore = defineStore('app', () => {
     getModel,
     activateMaxChannel,
     showFriendsMode,
+    regionHint,
     sparkringSpeedTestedAt,
     sparkringSpeedSource,
     getModelSpeed,

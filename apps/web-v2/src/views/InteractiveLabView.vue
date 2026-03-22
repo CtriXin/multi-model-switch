@@ -106,12 +106,12 @@ function goHome() {
         </section>
 
         <!-- Features Grid: Refined for Light/Dark -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 items-start gap-3 sm:gap-8 pb-10">
+        <section class="flex items-start gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-8 sm:overflow-visible pb-10">
           <button 
             v-for="(item, idx) in labFeatures" 
             :key="item.id"
             @click="handleEnter(item.path)"
-            class="group relative self-start flex flex-col p-4 sm:p-8 rounded-[28px] sm:rounded-[40px] glass-v3 border border-black/5 dark:border-white/5 shadow-xl transition-all duration-500 hover:-translate-y-2 hover:border-accent/30 text-left overflow-hidden active:scale-95 animate-in fade-in slide-in-from-bottom-4 bg-white/95 dark:bg-white/[0.03]"
+            class="group relative self-start flex shrink-0 w-[78vw] max-w-[320px] sm:w-auto sm:max-w-none flex-col p-4 sm:p-8 rounded-[28px] sm:rounded-[40px] glass-v3 border border-black/5 dark:border-white/5 shadow-xl transition-all duration-500 hover:-translate-y-2 hover:border-accent/30 text-left overflow-hidden active:scale-95 animate-in fade-in slide-in-from-bottom-4 bg-white/95 dark:bg-white/[0.03]"
             :style="{ animationDelay: `${idx * 50}ms` }"
           >
             <!-- Hover Gradient -->
