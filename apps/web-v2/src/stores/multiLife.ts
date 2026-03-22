@@ -40,6 +40,25 @@ import {
   normalizeRecord,
 } from './multi-life-helpers'
 
+const SCENE_STREAM_TIMEOUT_MS = 9000
+const ROLE_STREAM_TIMEOUT_MS = 12000
+const CHALLENGE_STREAM_TIMEOUT_MS = 10000
+const ENDING_STREAM_TIMEOUT_MS = 12000
+
+function createTimeoutController(timeoutMs: number) {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  return {
+    signal: controller.signal,
+    stop() {
+      window.clearTimeout(timer)
+    },
+    get timedOut() {
+      return controller.signal.aborted
+    },
+  }
+}
+
 export const useMultiLifeStore = defineStore('multi-life', () => {
   // --- State ---
   const envelope = ref<PlayModeSessionEnvelope>(createEmptyEnvelope())
@@ -256,7 +275,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     if (uniqueIds.size < ids.length) {
       modelWarning.value = '模型不足，部分角色将使用相同模型，证词差异可能较小'
     } else if (providers.size < 3) {
-      modelWarning.value = '可用 provider 不足 3 个，角色差异可能不明显'
+      modelWarning.value = '当前优先使用快答模型，部分角色可能来自同一 provider'
     }
 
     updateMeta({ modelAssignment: { a: ids[0], b: ids[1], c: ids[2] } as any })
@@ -314,7 +333,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     const modelMap = models.assignment as unknown as Record<string, string>
     useMock.value = models.mock
     if (!models.mock && !models.diverse && !modelWarning.value) {
-      modelWarning.value = '可用 provider 不足 3 个，角色差异可能不明显'
+      modelWarning.value = '当前优先使用快答模型，部分角色可能来自同一 provider'
     }
 
     processing.value = true
@@ -372,12 +391,14 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
           streamingScene.value += chunk
         }, 10)
       } else {
+        const timeout = createTimeoutController(SCENE_STREAM_TIMEOUT_MS)
         try {
           let sceneRaw = ''
           let sceneUseFallback = false
           const sceneResult = await streamInto(
               streamModelChat({
                 modelId: models.assignment.a,
+                signal: timeout.signal,
                 traceLabel: 'multi-life:scene',
                 traceMeta: {
                   caseId: c.id,
@@ -404,7 +425,12 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             ? sceneText
             : (cleanedScene || sceneText)
         } catch {
+          if (timeout.timedOut) {
+            appStore.recordSlowResponse(models.assignment.a)
+          }
           streamingScene.value = sceneText
+        } finally {
+          timeout.stop()
         }
       }
 
@@ -432,6 +458,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         const tasks = c.roles.map(async (role) => {
           const resp = roundObj.responses.find((r) => r.roleId === role.id)!
           const fallbackText = generateMockTestimony(role, roundConfig.roleDirectives[role.id], nextRound)
+          const timeout = createTimeoutController(ROLE_STREAM_TIMEOUT_MS)
           try {
             const systemPrompt = buildRoleSystemPrompt(role, c)
             const userPrompt = buildRoleUserPrompt(
@@ -444,6 +471,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             const text = await streamInto(
               streamModelChat({
                 modelId: resp.modelId,
+                signal: timeout.signal,
                 traceLabel: `multi-life:role:${role.id}`,
                 traceMeta: {
                   caseId: c.id,
@@ -473,13 +501,29 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             resp.status = 'done'
             clearStream(key)
           } catch (e) {
+            if (timeout.timedOut) {
+              appStore.recordSlowResponse(resp.modelId)
+            }
             resp.status = 'done'
             resp.error = undefined
             resp.text = fallbackText
             clearStream(`${roundObj.id}-${role.id}`)
+          } finally {
+            timeout.stop()
           }
         })
         await Promise.allSettled(tasks)
+      }
+
+      for (const response of roundObj.responses) {
+        if (response.status !== 'done' && response.status !== 'error') {
+          response.status = 'done'
+          response.text ||= generateMockTestimony(
+            c.roles.find((role) => role.id === response.roleId)!,
+            roundConfig.roleDirectives[response.roleId],
+            nextRound,
+          )
+        }
       }
 
       roundObj.contradictions = detectContradictions(roundConfig, roundObj.responses)
@@ -534,6 +578,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     if (!last || last.playerChoice) return
     if (!caseData.value) return
     if (meta.value.challengeRemaining <= 0) return
+    const appStore = useAppStore()
 
     const role = caseData.value.roles.find((r) => r.id === roleId)
     if (!role) return
@@ -571,12 +616,14 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         const fallbackText = isHonest
           ? generateMockChallengeHonest(role, contradiction?.topic ?? '证词')
           : generateMockChallengeLiar(role, contradiction?.topic ?? '证词')
+        const timeout = createTimeoutController(CHALLENGE_STREAM_TIMEOUT_MS)
         try {
           let challengeRaw = ''
           let challengeUseFallback = false
           const text = await streamInto(
             streamModelChat({
               modelId: resp.modelId,
+              signal: timeout.signal,
               traceLabel: `multi-life:challenge:${roleId}`,
               traceMeta: {
                 caseId: caseData.value.id,
@@ -603,7 +650,12 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
             ? fallbackText
             : (cleanedText || fallbackText)
         } catch {
+          if (timeout.timedOut) {
+            appStore.recordSlowResponse(resp.modelId)
+          }
           resp.challengeResponse = fallbackText
+        } finally {
+          timeout.stop()
         }
         resp.isChallenged = true
         clearStream(key)
@@ -649,35 +701,46 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
         endingData = generateMockEnding(caseData.value, rounds.value, meta.value)
       } else {
         const modelId = models.assignment.a
-        const text = await collectText(
-          streamModelChat({
-            modelId,
-            traceLabel: 'multi-life:ending',
-            traceMeta: {
-              caseId: caseData.value.id,
-              rounds: rounds.value.length,
-            },
-            messages: [
-              { role: 'system', content: buildEndingSystemPrompt() },
-              {
-                role: 'user',
-                content: buildEndingUserPrompt(
-                  caseData.value,
-                  rounds.value.map((r) => ({ playerChoice: r.playerChoice, contradictions: r.contradictions })),
-                  meta.value.evidenceCards,
-                  meta.value.trustMap,
-                  meta.value.challengeUsed,
-                ),
+        const timeout = createTimeoutController(ENDING_STREAM_TIMEOUT_MS)
+        try {
+          const text = await collectText(
+            streamModelChat({
+              modelId,
+              signal: timeout.signal,
+              traceLabel: 'multi-life:ending',
+              traceMeta: {
+                caseId: caseData.value.id,
+                rounds: rounds.value.length,
               },
-            ],
-          }),
-        )
-        const sections = parseEndingSections(text)
-        endingData = {
-          playerNarrative: sections.playerNarrative,
-          truthNarrative: sections.truthNarrative,
-          deviationAnalysis: sections.deviationAnalysis,
-          unexploredBranches: sections.unexploredBranches,
+              messages: [
+                { role: 'system', content: buildEndingSystemPrompt() },
+                {
+                  role: 'user',
+                  content: buildEndingUserPrompt(
+                    caseData.value,
+                    rounds.value.map((r) => ({ playerChoice: r.playerChoice, contradictions: r.contradictions })),
+                    meta.value.evidenceCards,
+                    meta.value.trustMap,
+                    meta.value.challengeUsed,
+                  ),
+                },
+              ],
+            }),
+          )
+          const sections = parseEndingSections(text)
+          endingData = {
+            playerNarrative: sections.playerNarrative,
+            truthNarrative: sections.truthNarrative,
+            deviationAnalysis: sections.deviationAnalysis,
+            unexploredBranches: sections.unexploredBranches,
+          }
+        } catch {
+          if (timeout.timedOut) {
+            appStore.recordSlowResponse(modelId)
+          }
+          endingData = generateMockEnding(caseData.value, rounds.value, meta.value)
+        } finally {
+          timeout.stop()
         }
       }
 

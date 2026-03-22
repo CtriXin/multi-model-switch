@@ -485,3 +485,11 @@ apps/web-v2/
 ├── src-tauri/                    # Tauri Rust backend
 └── package.json                  # Version: 0.3.5
 ```
+
+Additional working notes:
+- `apps/web-v2/src/views/StoryLiveView.vue` on mobile should collapse long director cues into compact A/B actions and keep transcript scroll pinned to the latest exchange.
+- `apps/web-v2/src/views/StoryLiteView.vue` should use vivid transitional copy while the next scene is being generated, instead of a static spinner-only wait state.
+- `apps/web-v2/src/views/MultiLifeView.vue` mobile header must stay low-density; when fast-pick reuses a provider, describe it as a speed bias rather than a provider shortage.
+- `apps/web-v2/src/views/StoryLiteView.vue` should archive the previous chapter immediately after a choice is made; never leave old copy visible under the next-scene waiting state.
+- `apps/web-v2/src/views/MultiLifeView.vue` should render only the newest round as the live scene and collapse previous rounds into an archived stack so chronology stays clear.
+- `apps/web-v2/src/stores/app.ts` should deprioritize lab auto-pick models that timed out twice in the same day before escalating to full suppression.

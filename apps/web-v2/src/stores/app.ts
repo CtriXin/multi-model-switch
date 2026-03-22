@@ -66,6 +66,7 @@ interface SparkringSpeedCachePayload extends SparkringModelSpeedSnapshot {
 
 const MODEL_SUPPRESSION_KEY = 'mms-disabled-models'
 const FAILURE_COUNTS_KEY = 'mms-failure-counts'
+const SLOW_COUNTS_KEY = 'mms-slow-model-counts'
 const SPARKRING_SPEED_CACHE_KEY = 'mms-sparkring-speed-cache'
 const SPARKRING_SPEED_LAST_DAY_KEY = 'mms-sparkring-speed-last-day'
 const DOMESTIC_MODEL_KEYWORDS = [
@@ -208,6 +209,43 @@ function persistSparkringSpeedCache(snapshot: SparkringModelSpeedSnapshot) {
     cachedAt: new Date().toISOString(),
   }
   localStorage.setItem(SPARKRING_SPEED_CACHE_KEY, JSON.stringify(payload))
+}
+
+function updateDailyCounter(
+  storageKey: string,
+  modelId: string,
+) {
+  const today = new Date().toISOString().slice(0, 10)
+  let data: Record<string, { date: string; count: number }> = {}
+  try {
+    data = JSON.parse(localStorage.getItem(storageKey) || '{}')
+  } catch {
+    data = {}
+  }
+
+  const entry = data[modelId]
+  if (entry?.date === today) {
+    entry.count += 1
+  } else {
+    data[modelId] = { date: today, count: 1 }
+  }
+
+  localStorage.setItem(storageKey, JSON.stringify(data))
+  return data[modelId].count
+}
+
+function getDailyCounter(
+  storageKey: string,
+  modelId: string,
+) {
+  try {
+    const data = JSON.parse(localStorage.getItem(storageKey) || '{}')
+    const today = new Date().toISOString().slice(0, 10)
+    const entry = data[modelId]
+    return entry?.date === today ? entry.count : 0
+  } catch {
+    return 0
+  }
 }
 
 const MOCK_PRESETS: Preset[] = [
@@ -400,12 +438,16 @@ export const useAppStore = defineStore('app', () => {
     const basePool = liveModels.length ? liveModels : source
     if (!basePool.length) return []
 
+    const preferredPool = basePool.filter((model) => !isSlowModelToday(model.id))
+    const primaryPool = preferredPool.length ? preferredPool : basePool
+    const deferredSlowPool = basePool.filter((model) => !primaryPool.some((item) => item.id === model.id))
+
     if (!shouldUseSparkringSpeed()) {
-      return shuffleArray(basePool)
+      return [...shuffleArray(primaryPool), ...shuffleArray(deferredSlowPool)]
     }
 
-    const sparkring = basePool.filter((model) => model.provider === 'sparkring')
-    if (!sparkring.length) return shuffleArray(basePool)
+    const sparkring = primaryPool.filter((model) => model.provider === 'sparkring')
+    if (!sparkring.length) return [...shuffleArray(primaryPool), ...shuffleArray(deferredSlowPool)]
 
     const domesticSparkring = sparkring.filter(isDomesticModel)
     const domesticSource = domesticSparkring.length ? domesticSparkring : sparkring
@@ -423,8 +465,8 @@ export const useAppStore = defineStore('app', () => {
     const otherSparkring = shuffleArray(
       sparkring.filter((model) => !fastIds.has(model.id) && !preferredDomesticIds.has(model.id) && !otherDomesticIds.has(model.id)),
     )
-    const others = shuffleArray(basePool.filter((model) => model.provider !== 'sparkring'))
-    return [...fastBucket, ...preferredDomesticRest, ...otherDomestic, ...otherSparkring, ...others]
+    const others = shuffleArray(primaryPool.filter((model) => model.provider !== 'sparkring'))
+    return [...fastBucket, ...preferredDomesticRest, ...otherDomestic, ...otherSparkring, ...others, ...shuffleArray(deferredSlowPool)]
   }
 
   function pickLabModelIds(count = 3, source = models.value, scope = 'lab-auto'): string[] {
@@ -782,11 +824,13 @@ export const useAppStore = defineStore('app', () => {
 
     if (!eligible.length) return null
 
+    const nonSlowEligible = eligible.filter((model) => !isSlowModelToday(model.id))
+    const prioritizedEligible = nonSlowEligible.length ? nonSlowEligible : eligible
     const preferred = preferFree.value
-      ? eligible.filter(model => model.free)
-      : eligible
+      ? prioritizedEligible.filter(model => model.free)
+      : prioritizedEligible
 
-    const pool = preferred.length ? preferred : eligible
+    const pool = preferred.length ? preferred : prioritizedEligible
     return pickLabModelId(pool)
   }
 
@@ -838,39 +882,33 @@ export const useAppStore = defineStore('app', () => {
 
   /** Record a model failure. Auto-suppresses after 3 failures in one day. */
   function recordFailure(modelId: string) {
-    const today = new Date().toISOString().slice(0, 10)
-    let data: Record<string, { date: string; count: number }> = {}
-    try {
-      data = JSON.parse(localStorage.getItem(FAILURE_COUNTS_KEY) || '{}')
-    } catch {
-      data = {}
-    }
+    const count = updateDailyCounter(FAILURE_COUNTS_KEY, modelId)
 
-    const entry = data[modelId]
-    if (entry && entry.date === today) {
-      entry.count += 1
-    } else {
-      data[modelId] = { date: today, count: 1 }
-    }
-
-    localStorage.setItem(FAILURE_COUNTS_KEY, JSON.stringify(data))
-
-    if (data[modelId].count >= 3) {
+    if (count >= 3) {
       const model = models.value.find((m) => m.id === modelId)
-      useToastStore().info(`${model?.name ?? modelId} 今天挂了 ${data[modelId].count} 次，先让它歇会儿`)
+      useToastStore().info(`${model?.name ?? modelId} 今天挂了 ${count} 次，先让它歇会儿`)
       suppressModelForToday(modelId)
     }
   }
 
   function getFailureCount(modelId: string): number {
-    try {
-      const data = JSON.parse(localStorage.getItem(FAILURE_COUNTS_KEY) || '{}')
-      const today = new Date().toISOString().slice(0, 10)
-      const entry = data[modelId]
-      return entry?.date === today ? entry.count : 0
-    } catch {
-      return 0
+    return getDailyCounter(FAILURE_COUNTS_KEY, modelId)
+  }
+
+  function recordSlowResponse(modelId: string) {
+    const count = updateDailyCounter(SLOW_COUNTS_KEY, modelId)
+    if (count === 2) {
+      const model = models.value.find((item) => item.id === modelId)
+      useToastStore().info(`${model?.name ?? modelId} 连续两次过慢，实验室默认会先换更快的`)
     }
+  }
+
+  function getSlowResponseCount(modelId: string): number {
+    return getDailyCounter(SLOW_COUNTS_KEY, modelId)
+  }
+
+  function isSlowModelToday(modelId: string) {
+    return getSlowResponseCount(modelId) >= 2
   }
 
   /** Get list of currently suppressed model IDs (not expired) */
@@ -919,7 +957,9 @@ export const useAppStore = defineStore('app', () => {
     ensureCommitteeSelection,
     suppressModelForToday,
     recordFailure,
+    recordSlowResponse,
     getFailureCount,
+    getSlowResponseCount,
     getSuppressedModelIds,
     restoreSuppressedModels,
     getModel,
