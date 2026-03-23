@@ -6,7 +6,7 @@ import {
   Sparkles, Square, Users, Swords, Target, Mic, ChevronRight, UserCircle2, Crown,
   ArrowRight, X, Play, Zap, Lightbulb, Shield, TrendingUp, Code, Briefcase, Eye, Hammer,
   Radio, MessagesSquare, GitCompare, ClipboardCheck, Wand2, ArrowUpRight, Crown as CrownIcon,
-  Target as TargetIcon, MessageCircleMore, CheckCheck, ChevronDown, XCircle
+  Target as TargetIcon, MessageCircleMore, CheckCheck, ChevronDown, XCircle, Compass
 } from 'lucide-vue-next'
 import CommitteeDebateCard from '@/components/advisors/CommitteeDebateCard.vue'
 import CommitteePhaseSection from '@/components/advisors/CommitteePhaseSection.vue'
@@ -32,7 +32,7 @@ const committeeStore = useCommitteeStore()
 const personaStore = usePersonaStore()
 const { theme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
-const isMobile = computed(() => platform.value === 'ios' || window.innerWidth < 768)
+const isSmallScreen = inject<import('vue').Ref<boolean>>('isSmallScreen', ref(false))
 
 function openDrawer() { window.dispatchEvent(new CustomEvent('open-drawer')) }
 
@@ -183,7 +183,7 @@ const currentExamples = computed(() => {
 
 const inputPlaceholder = computed(() => {
   const roleCount = personaStore.activePersonaIds.length
-  if (roleCount === 0) return '先请几位参谋，再输入你想商量的事...'
+  if (roleCount === 0) return '先选择参谋角色，再描述你想商量的事...'
   const examples = currentExamples.value
   return examples[currentExampleIndex.value % examples.length]
 })
@@ -429,14 +429,14 @@ const phase3Status = computed(() => {
 
         <!-- 左侧：菜单按钮 + Logo -->
         <div class="flex items-center gap-2.5">
-          <button @click="openDrawer" class="p-2 -ml-1 rounded-full hover:bg-white/10 text-text-secondary transition-colors">
+          <button v-if="isSmallScreen" @click="openDrawer" class="p-2 -ml-1 rounded-full hover:bg-white/10 text-text-secondary transition-colors">
             <Menu :size="20" stroke-width="3" />
           </button>
           <div class="flex items-center justify-center w-8 h-8 rounded-full bg-accent text-white shadow-lg shadow-accent/20 shrink-0">
-            <Sparkles :size="16" stroke-width="3.5" />
+            <Compass :size="16" stroke-width="3.5" />
           </div>
           <div>
-            <h1 class="text-sm font-black text-text-primary tracking-tight">AI 锦囊团</h1>
+            <h1 class="text-sm font-black text-text-primary tracking-tight">锦囊参谋</h1>
             <p class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50">
               {{ personaStore.activePersonaIds.length }} 角色 · {{ appStore.committeeSelectedModelIds.length }} 模型
             </p>
@@ -541,13 +541,13 @@ const phase3Status = computed(() => {
               STEP 2
             </div>
             <h2 class="text-3xl font-bold text-text-primary mb-2">选择 AI 模型</h2>
-            <p class="text-sm text-text-tertiary">谁来扮演这些参谋？</p>
+            <p class="text-sm text-text-tertiary">选择扮演参谋的模型</p>
           </div>
 
           <!-- 模型卡片 -->
           <div class="p-6 rounded-3xl bg-white/[0.03] border border-white/[0.08] mb-6">
             <div class="flex items-center justify-between mb-4">
-              <span class="text-sm font-semibold text-text-primary">已选模型</span>
+              <span class="text-sm font-semibold text-text-primary">已选择</span>
               <span class="px-2 py-0.5 rounded-full bg-accent/20 text-accent text-xs font-bold">
                 {{ appStore.committeeSelectedModels.length }}
               </span>
@@ -582,17 +582,17 @@ const phase3Status = computed(() => {
             <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[10px] font-bold mb-4">
               STEP 3
             </div>
-            <h2 class="text-3xl font-bold text-text-primary mb-2">配置参谋团队</h2>
-            <p class="text-sm text-text-tertiary">选择角色，提出你的问题</p>
+            <h2 class="text-3xl font-bold text-text-primary mb-2">配置参谋团</h2>
+            <p class="text-sm text-text-tertiary">选择参谋，提出你的问题</p>
           </div>
 
           <div class="grid lg:grid-cols-2 gap-6">
             <!-- 左侧：角色选择 -->
             <div class="space-y-4">
-              <!-- 已选预览 -->
+              <!-- 已选择预览 -->
               <div v-if="activeRoles.length > 0" class="p-4 rounded-2xl bg-white/[0.03] border border-white/[0.08]">
                 <div class="flex items-center justify-between mb-3">
-                  <span class="text-xs font-semibold text-text-primary">已选参谋</span>
+                  <span class="text-xs font-semibold text-text-primary">已选择参谋</span>
                   <button @click="personaStore.clearActive()" class="text-[10px] text-text-tertiary hover:text-rose-400">清空</button>
                 </div>
                 <div class="flex flex-wrap gap-2">
@@ -742,7 +742,7 @@ const phase3Status = computed(() => {
             <div class="flex items-center justify-between mb-4">
               <div>
                 <h4 class="text-base font-semibold text-text-primary">各自表态</h4>
-                <p class="text-xs text-text-tertiary">{{ committeeStore.activeRoleCount }} 位参谋依次发言</p>
+                <p class="text-xs text-text-tertiary">{{ committeeStore.activeRoleCount }} 位参谋参与讨论</p>
               </div>
               <span v-if="phase1Status === 'running'" class="flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 text-accent text-xs">
                 <Loader2 :size="12" class="animate-spin" /> 进行中

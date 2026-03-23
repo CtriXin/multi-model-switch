@@ -6,7 +6,7 @@ import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
 import {
   MessageSquare, GitMerge, Users, Plus, Settings, Package, Search,
-  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone, Sparkles,
+  Sun, Moon, Trash2, PanelLeftClose, PanelLeftOpen, Smartphone,
   Clock, Home, FlaskConical, Compass
 } from 'lucide-vue-next'
 import { computed, inject, onMounted, ref } from 'vue'
@@ -73,10 +73,11 @@ function deleteSession(id: string, e: Event) {
       <div
         class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2"
         @click="router.push('/')">
-        <div
-          class="relative flex items-center justify-center w-6.5 h-6.5 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-xl">
-          <Sparkles class="w-3.5 h-3.5 text-white" :stroke-width="3.5" />
-        </div>
+        <img
+          src="/logos/logo-v36-transparent.svg"
+          alt="SparkRing"
+          class="w-9 h-9 object-contain transition-transform duration-300 group-hover/logo:scale-110 drop-shadow-[0_0_12px_rgba(99,102,241,0.2)]"
+        />
       </div>
 
       <button @click="emit('expand')"
@@ -106,10 +107,9 @@ function deleteSession(id: string, e: Event) {
           <Users :size="22" stroke-width="3" />
         </button>
         <button @click="router.push('/advisors-v2')"
-          class="flex items-center justify-center p-2.5 rounded-xl hover:bg-accent/20 text-accent transition-all relative"
-          :class="route.path === '/advisors-v2' ? 'bg-accent text-white' : ''">
-          <Sparkles :size="20" stroke-width="3" />
-          <span class="absolute -top-1 -right-1 w-2 h-2 bg-accent rounded-full"></span>
+          class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all"
+          :class="route.path === '/advisors-v2' ? 'bg-accent/20 text-accent' : ''">
+          <Compass :size="20" stroke-width="3" />
         </button>
         <button @click="goLab"
           class="flex items-center justify-center p-2.5 rounded-xl hover:bg-white/10 text-text-secondary transition-all"
@@ -133,15 +133,18 @@ function deleteSession(id: string, e: Event) {
       <div class="h-20 flex items-center pl-5 pr-2">
         <div class="flex items-center gap-2 group/logo cursor-pointer select-none"
           @click="router.push('/')">
-          <div class="relative flex items-center justify-center w-9 h-9 shrink-0">
-            <div
-              class="relative flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-tr from-accent to-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.5)]">
-              <Sparkles class="w-3.5 h-3.5 text-white" :stroke-width="3.5" />
+          <img
+            src="/logos/logo-v36-transparent.svg"
+            alt="SparkRing"
+            class="w-12 h-12 object-contain shrink-0 transition-transform duration-300 group-hover/logo:scale-105 drop-shadow-[0_8px_16px_rgba(79,70,229,0.12)]"
+          />
+          <div class="flex flex-col ml-1">
+            <div class="flex items-center text-[14px] font-black uppercase leading-tight tracking-[0.15em] select-none">
+              <span class="bg-gradient-to-r from-indigo-950 via-indigo-800 to-purple-700 bg-clip-text text-transparent">Spark</span>
+              <span class="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Ring</span>
             </div>
-          </div>
-          <div class="flex flex-col pt-1">
-            <div class="text-[18px] font-black tracking-tight flex items-center leading-none">
-              <span class="text-accent">SPARK</span><span class="text-text-primary ml-1">RING</span>
+            <div class="flex w-full justify-between pr-1.5 -mt-0.5 text-[10px] font-bold uppercase text-text-tertiary opacity-70">
+              <span>思</span><span>路</span><span>集</span>
             </div>
           </div>
         </div>
@@ -153,7 +156,14 @@ function deleteSession(id: string, e: Event) {
           :class="route.path === '/' ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'">
           <Home :size="16" stroke-width="3"
             :class="route.path === '/' ? 'text-surface-1' : 'group-hover:text-emerald-400'" />
-          <span>首页体验</span>
+          <span>首页</span>
+        </button>
+        <button @click="newChat"
+          class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all group active:scale-95"
+          :class="route.path === '/chat' ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'">
+          <MessageSquare :size="16" stroke-width="3"
+            :class="route.path === '/chat' ? 'text-surface-1' : 'group-hover:text-blue-400'" />
+          <span>多问几家</span>
         </button>
         <button @click="newDiscuss"
           class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all group active:scale-95"
@@ -164,8 +174,8 @@ function deleteSession(id: string, e: Event) {
         </button>
         <button @click="router.push('/advisors-v2')"
           class="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all group active:scale-95"
-          :class="route.path === '/advisors-v2' ? 'bg-accent text-white shadow-xl' : 'bg-accent/10 text-accent hover:bg-accent/20'">
-          <Compass :size="16" stroke-width="3" />
+          :class="route.path === '/advisors-v2' ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'">
+          <Compass :size="16" stroke-width="3" :class="route.path === '/advisors-v2' ? 'text-surface-1' : 'group-hover:text-emerald-400'" />
           <span>锦囊参谋</span>
         </button>
         <button @click="goLab"
@@ -173,7 +183,7 @@ function deleteSession(id: string, e: Event) {
           :class="route.path.startsWith('/lab') || ['/challenge', '/turtle-soup', '/story-lite', '/story-live', '/multi-life'].includes(route.path) ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary'">
           <FlaskConical :size="16" stroke-width="3"
             :class="route.path.startsWith('/lab') ? 'text-surface-1' : 'group-hover:text-orange-400'" />
-          <span>互动实验室</span>
+          <span>创意实验室</span>
           <span
             class="ml-auto text-[8px] font-black bg-accent/20 text-accent px-1.5 py-0.5 rounded-full">New</span>
         </button>
@@ -182,7 +192,7 @@ function deleteSession(id: string, e: Event) {
       <div class="flex items-center gap-3 px-6 my-6 opacity-30 shrink-0">
         <div class="h-px flex-1 bg-text-tertiary"></div>
         <span
-          class="text-[9px] font-black uppercase tracking-[0.3em] text-text-tertiary">History</span>
+          class="text-[9px] font-black uppercase tracking-[0.3em] text-text-tertiary">历史</span>
         <div class="h-px flex-1 bg-text-tertiary"></div>
       </div>
 
@@ -213,12 +223,12 @@ function deleteSession(id: string, e: Event) {
           <button @click="router.push('/models')"
             class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all border border-transparent bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary">
             <Package :size="18" stroke-width="3" /><span
-              class="text-[9px] font-black uppercase tracking-widest">模型管理</span>
+              class="text-[9px] font-black uppercase tracking-widest">模型库</span>
           </button>
           <button @click="router.push('/settings')"
             class="flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all border border-transparent bg-white/5 text-text-secondary hover:bg-white/10 hover:text-text-primary">
             <Settings :size="18" stroke-width="3" /><span
-              class="text-[9px] font-black uppercase tracking-widest">偏好设置</span>
+              class="text-[9px] font-black uppercase tracking-widest">设置</span>
           </button>
         </div>
       </div>

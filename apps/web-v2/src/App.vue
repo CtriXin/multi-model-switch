@@ -9,16 +9,22 @@ import Sidebar from '@/components/layout/Sidebar.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
 import ToastContainer from '@/components/shared/ToastContainer.vue'
 import CommandPalette from '@/components/shared/CommandPalette.vue'
-import { Sparkles, MessageSquare, GitMerge, Users, Home, Package, Settings, FlaskConical, X, Compass } from 'lucide-vue-next'
+import { MessageSquare, GitMerge, Users, Home, Package, Settings, FlaskConical, X, Compass } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
 useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
+const screenshotMode = import.meta.env.VITE_SCREENSHOT_MODE === '1'
 
 // --- Robust Dual-End Logic ---
-const platform = ref(Capacitor.getPlatform())
+const detectedPlatform = ref(Capacitor.getPlatform())
+const platform = computed(() => {
+  const override = typeof route.query.platform === 'string' ? route.query.platform : ''
+  if (override === 'ios' || override === 'web' || override === 'macos') return override
+  return detectedPlatform.value
+})
 const windowWidth = ref(window.innerWidth)
 // Threshold 1024px for Sidebar vs Drawer
 const isMobileLayout = computed(() => windowWidth.value < 1024 || platform.value === 'ios')
@@ -162,6 +168,17 @@ function isDrawerSessionActive(session: { id: string; type: string }) {
 onMounted(async () => {
   await appStore.initialize()
   sessionStore.loadSessions()
+
+  if (screenshotMode) {
+    router.replace({
+      path: '/chat',
+      query: {
+        showcase: 'compare',
+        platform: 'ios',
+      },
+    })
+  }
+
   window.addEventListener('resize', handleResize)
   window.addEventListener('open-drawer', handleOpenDrawer)
   window.addEventListener('open-models', handleOpenModels)
@@ -207,9 +224,21 @@ const isLabActive = computed(() => {
         @touchend.passive="onDrawerTouchEnd"
         @touchcancel.passive="onDrawerTouchEnd">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5">
-          <div class="flex items-center gap-2">
-            <Sparkles :size="20" stroke-width="3.5" class="text-accent" />
-            <span class="font-black tracking-tight uppercase">SparkRing</span>
+          <div class="flex items-center gap-2.5">
+            <img
+              src="/logos/logo-v36-transparent.svg"
+              alt="SparkRing"
+              class="w-10 h-10 object-contain shrink-0 drop-shadow-[0_4px_12px_rgba(79,70,229,0.1)]"
+            />
+            <div class="flex flex-col">
+              <div class="flex items-center text-[13px] font-black uppercase leading-tight tracking-[0.15em] select-none">
+                <span class="bg-gradient-to-r from-indigo-950 via-indigo-800 to-purple-700 bg-clip-text text-transparent">Spark</span>
+                <span class="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Ring</span>
+              </div>
+              <div class="flex w-full justify-between pr-1 -mt-0.5 text-[9px] font-bold uppercase text-text-tertiary opacity-60">
+                <span>思</span><span>路</span><span>集</span>
+              </div>
+            </div>
           </div>
           <button @click="iosDrawerOpen = false" class="p-2 rounded-full hover:bg-black/5 transition-all">
             <X :size="20" stroke-width="3.5" />
@@ -217,11 +246,11 @@ const isLabActive = computed(() => {
         </div>
         <div class="flex-1 overflow-y-auto px-4 py-6 space-y-2">
           <template v-for="link in [
-            { path: '/', icon: Home, label: '首页体验' }, 
+            { path: '/', icon: Home, label: '首页' }, 
             { path: '/chat', icon: MessageSquare, label: '多问几家' }, 
             { path: '/discuss', icon: GitMerge, label: '深度对质' }, 
             { path: '/advisors-v2', icon: Compass, label: '锦囊参谋' },
-            { path: '/lab', icon: FlaskConical, label: '互动实验室' }
+            { path: '/lab', icon: FlaskConical, label: '创意实验室' }
           ]" :key="link.path">
             <button @click="router.push(link.path); iosDrawerOpen = false" class="w-full flex items-center gap-4 px-5 py-4 rounded-3xl transition-all active:scale-95" :class="(link.path === '/lab' ? isLabActive : route.path === link.path) ? 'bg-text-primary text-surface-1 shadow-xl' : 'bg-transparent text-text-primary hover:bg-black/5'">
               <component :is="link.icon" :size="20" stroke-width="3.5" />
@@ -250,10 +279,10 @@ const isLabActive = computed(() => {
         </div>
         <div class="p-6 border-t border-black/5 grid grid-cols-2 gap-3">
           <button @click="router.push('/models'); iosDrawerOpen = false" class="flex flex-col items-center gap-2 p-4 rounded-3xl bg-white/5 border border-white/5 active:scale-95 transition-all">
-            <Package :size="20" stroke-width="3" /><span class="text-[10px] font-black uppercase tracking-widest">模型管理</span>
+            <Package :size="20" stroke-width="3" /><span class="text-[10px] font-black uppercase tracking-widest">模型库</span>
           </button>
           <button @click="router.push('/settings'); iosDrawerOpen = false" class="flex flex-col items-center gap-2 p-4 rounded-3xl bg-white/5 border border-white/5 active:scale-95 transition-all">
-            <Settings :size="20" stroke-width="3" /><span class="text-[10px] font-black uppercase tracking-widest">偏好设置</span>
+            <Settings :size="20" stroke-width="3" /><span class="text-[10px] font-black uppercase tracking-widest">设置</span>
           </button>
         </div>
       </div>

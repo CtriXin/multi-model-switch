@@ -1,15 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="logo-grad" x1="30" y1="24" x2="98" y2="104" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8C95FF" />
-      <stop offset="1" stop-color="#6A67F6" />
+    <radialGradient id="pureCore" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#ffffff; stop-opacity:1"/>
+      <stop offset="35%" style="stop-color:#8b5cf6; stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#6366f1; stop-opacity:1"/>
+    </radialGradient>
+    <linearGradient id="pureSilk" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#818cf8; stop-opacity:0"/>
+      <stop offset="30%" style="stop-color:#818cf8; stop-opacity:0.8"/>
+      <stop offset="70%" style="stop-color:#fff; stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#818cf8; stop-opacity:0"/>
     </linearGradient>
+    <filter id="pureGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
   </defs>
 
-  <circle cx="64" cy="64" r="54" stroke="#CFD5FF" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 6" />
-  <circle cx="64" cy="64" r="36" fill="url(#logo-grad)" />
-  <circle cx="64" cy="64" r="35" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="2" />
+  <rect width="200" height="200" fill="#ffffff" />
 
-  <path d="M64 46L67 58L79 61L67 64L64 76L61 64L49 61L61 58L64 46Z" fill="white" />
-  <path d="M83 46L84.2 51L89 52.2L84.2 53.4L83 58.2L81.8 53.4L77 52.2L81.8 51L83 46Z" fill="white" fill-opacity="0.98" />
+  <g transform="translate(100, 100)">
+    <g>
+      <path d="M 0,-92 Q 58,-92 84,-46 T 62,42 Q 42,72 0,75" fill="none" stroke="url(#pureSilk)" stroke-width="1.8" stroke-linecap="round" />
+      <path d="M 0,-86 Q 52,-86 76,-43 T 58,39 Q 39,68 0,71" fill="none" stroke="url(#pureSilk)" stroke-width="1.2" opacity="0.6" stroke-linecap="round" />
+    </g>
+    <g transform="rotate(120)">
+      <path d="M 0,-92 Q 58,-92 84,-46 T 62,42 Q 42,72 0,75" fill="none" stroke="url(#pureSilk)" stroke-width="1.8" stroke-linecap="round" />
+      <path d="M 0,-86 Q 52,-86 76,-43 T 58,39 Q 39,68 0,71" fill="none" stroke="url(#pureSilk)" stroke-width="1.2" opacity="0.6" stroke-linecap="round" />
+    </g>
+    <g transform="rotate(240)">
+      <path d="M 0,-92 Q 58,-92 84,-46 T 62,42 Q 42,72 0,75" fill="none" stroke="url(#pureSilk)" stroke-width="1.8" stroke-linecap="round" />
+      <path d="M 0,-86 Q 52,-86 76,-43 T 58,39 Q 39,68 0,71" fill="none" stroke="url(#pureSilk)" stroke-width="1.2" opacity="0.6" stroke-linecap="round" />
+    </g>
+  </g>
+
+  <circle cx="100" cy="100" r="58" fill="url(#pureCore)" filter="drop-shadow(0 8px 16px rgba(79, 70, 229, 0.15))" />
+
+  <g transform="translate(100, 100)">
+    <circle r="7" fill="white" filter="url(#pureGlow)" />
+    <path d="M 0,-32 L 5,-5 L 32,0 L 5,5 L 0,32 L -5,5 L -32,0 L -5,-5 Z" fill="white" />
+  </g>
+
+  <path d="M 65,72 Q 100,58 135,72" fill="none" stroke="white" stroke-width="2" opacity="0.12" stroke-linecap="round" />
 </svg>
