@@ -3,8 +3,8 @@ import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, getModelColor, type ModelMeta, type ModelPoolTag } from '@/stores/app'
-import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare, ToggleLeft, ToggleRight, Check } from 'lucide-vue-next'
-import { useChatStore, type ContextMode } from '@/stores/chat'
+import { X, Plus, Search, Dices, Bot, DollarSign, Image, Clock, Zap, Target, History, ChevronDown, Sparkles, MessageSquare, ToggleLeft, ToggleRight, Check, Brain } from 'lucide-vue-next'
+import { useChatStore, type ContextMode, type ThinkingMode } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
 import { useToastStore } from '@/stores/toast'
 import { getSearchHistory, addSearchHistory } from '@/utils/searchHistory'
@@ -24,9 +24,11 @@ const filterFree = ref(appStore.preferFree)
 const tierFilters = ref<ModelPoolTag[]>([])
 const recentSearches = ref<string[]>([])
 const contextMenuOpen = ref(false)
+const thinkingMenuOpen = ref(false)
 const modelPopoverButtonRef = ref<HTMLElement | null>(null)
 const modelPopoverPanelRef = ref<HTMLElement | null>(null)
 const contextMenuRef = ref<HTMLElement | null>(null)
+const thinkingMenuRef = ref<HTMLElement | null>(null)
 const replacementRequest = ref<{
   mode: 'replace'
   roundId: string
@@ -49,6 +51,16 @@ function getContextModeIcon(key: ContextMode): any {
 }
 
 const filteredModels = ref<typeof appStore.models>([])
+
+const thinkingModes: { key: ThinkingMode; label: string; description: string }[] = [
+  { key: 'fast', label: 'FAST', description: '快速响应，少思考' },
+  { key: 'auto', label: 'AUTO', description: '默认行为，保持思考' },
+  { key: 'deep', label: 'DEEP', description: '深度思考' },
+]
+
+const hasThinkingControlModel = computed(() =>
+  appStore.selectedModels.some(m => m.supportsThinkingControl),
+)
 
 const groupedFiltered = computed(() => {
   const map: Record<string, ModelMeta[]> = {}
@@ -91,7 +103,7 @@ async function selectModel(id: string) {
     sessionStore.saveCurrentSession()
     replacementRequest.value = null
     popoverOpen.value = false
-    toast.info('换好了')
+    toast.info('已替换')
     return
   }
 
@@ -186,6 +198,10 @@ onClickOutside(contextMenuRef, () => {
   contextMenuOpen.value = false
 })
 
+onClickOutside(thinkingMenuRef, () => {
+  thinkingMenuOpen.value = false
+})
+
 onClickOutside(modelPopoverPanelRef, () => {
   popoverOpen.value = false
   replacementRequest.value = null
@@ -234,7 +250,7 @@ onUnmounted(() => {
           <!-- Random: always amber, compact when idle on mobile -->
           <button @click="randomPickFromFilters"
             class="rounded-full transition-all active:scale-90 p-0.5 lg:p-2 text-amber-400 hover:bg-amber-500/10"
-            title="换一批">
+            title="随机换一批">
             <Dices class="w-5 h-5 lg:w-[18px] lg:h-[18px]" stroke-width="3" />
           </button>
 
@@ -248,7 +264,7 @@ onUnmounted(() => {
               : 'px-0.5 py-0.5 lg:px-3 lg:py-1.5 text-text-secondary hover:text-accent lg:text-accent lg:bg-accent/5 lg:border lg:border-accent/20 lg:hover:bg-accent/10'"
           >
             <Bot class="w-5 h-5 lg:w-4 lg:h-4" stroke-width="3" />
-            <span class="hidden lg:inline">{{ replacementRequest ? '换一个' : '选模型' }}</span>
+            <span class="hidden lg:inline">{{ replacementRequest ? '更换模型' : '选择模型' }}</span>
           </button>
 
           <!-- Context mode: mobile compact when idle, styled when active -->
@@ -258,7 +274,7 @@ onUnmounted(() => {
               :class="contextMenuOpen
                 ? 'px-3 py-1.5 bg-accent/10 text-accent border border-accent/30'
                 : 'px-0.5 py-0.5 lg:px-3 lg:py-1.5 text-text-secondary hover:text-accent lg:hover:bg-accent/10 lg:hover:text-accent'"
-              title="上下文策略"
+              title="上下文长度策略"
             >
               <component :is="getContextModeIcon(chatStore.contextMode)" class="w-5 h-5 lg:w-4 lg:h-4 text-accent" stroke-width="3" />
               <span class="hidden lg:inline">{{ getContextModeLabel(chatStore.contextMode) }}</span>
@@ -274,6 +290,35 @@ onUnmounted(() => {
                   <div class="flex-1 min-w-0">
                     <div class="text-[11px] font-bold leading-tight">{{ mode.label }}</div>
                     <div class="text-[9px] opacity-50 font-medium tracking-tight uppercase">{{ mode.description }}</div>
+                  </div>
+                </button>
+              </div>
+            </Transition>
+          </div>
+
+          <!-- Thinking mode toggle -->
+          <div v-if="hasThinkingControlModel" ref="thinkingMenuRef" class="relative">
+            <button @click="thinkingMenuOpen = !thinkingMenuOpen"
+              class="flex items-center gap-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
+              :class="thinkingMenuOpen
+                ? 'px-3 py-1.5 bg-violet-500/10 text-violet-400 border border-violet-500/20'
+                : 'px-0.5 py-0.5 lg:px-3 lg:py-1.5 text-text-secondary hover:text-violet-400 lg:hover:bg-violet-500/5 lg:hover:text-violet-400'"
+              title="思考深度"
+            >
+              <Brain class="w-5 h-5 lg:w-4 lg:h-4" :class="chatStore.thinkingMode === 'deep' ? 'text-violet-400' : chatStore.thinkingMode === 'fast' ? 'text-amber-400' : 'text-text-secondary'" stroke-width="3" />
+              <span class="hidden lg:inline" :class="chatStore.thinkingMode === 'deep' ? 'text-violet-400' : chatStore.thinkingMode === 'fast' ? 'text-amber-400' : ''">{{ chatStore.thinkingMode.toUpperCase() }}</span>
+            </button>
+
+            <Transition name="popover">
+              <div v-if="thinkingMenuOpen" class="absolute right-0 bottom-full mb-3 w-44 shadow-[0_20px_50px_rgba(0,0,0,0.3)] rounded-[28px] overflow-hidden bg-white dark:bg-[#1a1a24] border border-white/10 z-50 p-1.5 flex flex-col gap-1">
+                <div class="px-3 py-2 text-[9px] font-black text-text-tertiary uppercase tracking-[0.2em] border-b border-white/5 mb-1">Thinking Depth</div>
+                <button v-for="mode in thinkingModes" :key="mode.key" @click="chatStore.thinkingMode = mode.key; thinkingMenuOpen = false"
+                  class="w-full px-3 py-2.5 text-left flex items-center gap-3 rounded-[20px] transition-all"
+                  :class="chatStore.thinkingMode === mode.key ? 'bg-violet-500 text-white shadow-lg' : 'text-text-secondary hover:bg-white/5'">
+                  <Brain :size="14" :stroke-width="3" :class="chatStore.thinkingMode === mode.key ? '' : mode.key === 'fast' ? 'text-amber-400' : mode.key === 'deep' ? 'text-violet-400' : ''" />
+                  <div class="flex-1 min-w-0">
+                    <div class="text-[11px] font-bold leading-tight">{{ mode.label }}</div>
+                    <div class="text-[9px] opacity-50 font-medium tracking-tight">{{ mode.description }}</div>
                   </div>
                 </button>
               </div>
@@ -327,7 +372,7 @@ onUnmounted(() => {
           </div>
 
           <!-- Model Grid -->
-          <div class="overflow-y-auto flex-1 p-4 custom-scrollbar scroll-smooth" id="chipbar-model-scroll">
+          <div class="overflow-y-auto flex-1 px-4 pb-4 custom-scrollbar scroll-smooth" id="chipbar-model-scroll">
             <template v-for="(models, provider) in groupedFiltered" :key="provider">
               <div :id="'chipbar-section-' + provider" class="flex items-center gap-2 py-4 sticky top-0 bg-white/95 dark:bg-[#1a1a24]/95 backdrop-blur-md z-10">
                 <div class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: getModelColor(provider) }"></div>
@@ -350,7 +395,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </template>
-            <p v-if="!filteredModels.length" class="text-xs font-black text-text-tertiary text-center py-12 uppercase tracking-widest opacity-40">没找到匹配的模型</p>
+            <p v-if="!filteredModels.length" class="text-xs font-black text-text-tertiary text-center py-12 uppercase tracking-widest opacity-40">没有找到匹配的模型</p>
           </div>
         </div>
       </div>

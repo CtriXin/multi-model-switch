@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { useProviderStore } from '@/stores/provider'
 import { useTheme } from '@/composables/useTheme'
 import {
-  Sparkles, MessageSquare, GitMerge, Users, Zap, Check, ChevronRight,
+  MessageSquare, GitMerge, Users, Zap, Check, ChevronRight,
   Settings, Package, Shield, ExternalLink, Key, Menu, ArrowRight,
   ChevronLeft, Globe, Compass, Rocket, Info, ArrowLeft, Heart, Gift,
   FlaskConical
@@ -19,8 +19,7 @@ const providerStore = useProviderStore()
 const router = useRouter()
 const { theme } = useTheme()
 
-const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
-const isMobile = computed(() => platform.value === 'ios')
+const isSmallScreen = inject<import('vue').Ref<boolean>>('isSmallScreen', ref(false))
 
 function resolveInitialMode(): 'none' | 'demo' | 'full' {
   const savedMode = getExperienceMode()
@@ -43,10 +42,10 @@ function selectMode(mode: 'demo' | 'full') {
 function openDrawer() { window.dispatchEvent(new CustomEvent('open-drawer')) }
 
 const coreTiles = [
-  { id: 'chat', name: '多问几家', desc: '一问多证', icon: MessageSquare, path: '/chat', color: 'from-blue-500 to-indigo-600', stats: () => `${appStore.selectedModelIds.length} 选` },
-  { id: 'discuss', name: '对质一下', desc: '互相挑刺', icon: GitMerge, path: '/discuss', color: 'from-purple-500 to-fuchsia-600', stats: () => '3 步' },
-  { id: 'advisors', name: '找人商量', desc: '12 角色', icon: Users, path: '/advisors', color: 'from-emerald-500 to-teal-600', stats: () => '12 人' },
-  { id: 'lab', name: '互动实验室', desc: '创意玩法', icon: FlaskConical, path: '/lab', color: 'from-orange-400 to-rose-500', stats: () => '5 实验' }
+  { id: 'chat', name: '多问几家', desc: '货比三家不吃亏', icon: MessageSquare, path: '/chat', color: 'from-blue-500 to-indigo-600', stats: () => `${appStore.selectedModelIds.length} 选` },
+  { id: 'discuss', name: '深度对质', desc: '让 AI 们吵一架', icon: GitMerge, path: '/discuss', color: 'from-purple-500 to-fuchsia-600', stats: () => '3 步' },
+  { id: 'advisors', name: '锦囊参谋', desc: '你的私人董事会', icon: Users, path: '/advisors', color: 'from-emerald-500 to-teal-600', stats: () => '12 人' },
+  { id: 'lab', name: '创意实验室', desc: '玩转 AI 的新方式', icon: FlaskConical, path: '/lab', color: 'from-orange-400 to-rose-500', stats: () => '5 实验' }
 ]
 </script>
 
@@ -56,13 +55,24 @@ const coreTiles = [
     <!-- Unified V3 Capsule Header -->
     <div class="z-40 px-4 pt-4 pb-2 shrink-0">
       <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10">
-        <div class="flex items-center gap-2">
-          <button @click="openDrawer" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors"><Menu :size="18" stroke-width="3.5" /></button>
-          <div class="hidden sm:flex items-center justify-center w-8 h-8 rounded-full bg-accent text-white shadow-lg shrink-0"><Sparkles :size="16" stroke-width="3.5" /></div>
-        </div>
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div class="sm:hidden flex items-center justify-center w-7 h-7 rounded-full bg-accent text-white shadow-lg shrink-0"><Sparkles :size="14" stroke-width="3.5" /></div>
-          <h1 class="text-sm font-black text-text-primary truncate uppercase">SparkRing Hub</h1>
+        <div class="flex items-center gap-3">
+          <button v-if="isSmallScreen" @click="openDrawer" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors"><Menu :size="18" stroke-width="3.5" /></button>
+          <div v-if="isSmallScreen" class="flex items-center gap-3 group/logo cursor-pointer select-none" @click="router.push('/')">
+            <img
+              src="/logos/logo-v36-transparent.svg"
+              alt="SparkRing"
+              class="w-10 h-10 sm:w-11 sm:h-11 object-contain shrink-0 transition-transform duration-300 group-hover/logo:scale-105 drop-shadow-[0_4px_12px_rgba(79,70,229,0.12)]"
+            />
+            <div class="flex flex-col">
+              <div class="flex items-center text-[14px] sm:text-[15px] font-black uppercase leading-tight tracking-[0.15em] select-none">
+                <span class="bg-gradient-to-r from-indigo-950 via-indigo-800 to-purple-700 bg-clip-text text-transparent">Spark</span>
+                <span class="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Ring</span>
+              </div>
+              <div class="flex w-full justify-between pr-1 -mt-0.5 text-[10px] sm:text-[11px] font-bold uppercase text-text-tertiary opacity-70">
+                <span>思</span><span>路</span><span>集</span>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="flex items-center gap-2">
           <button @click="router.push('/settings')" class="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-all"><Settings :size="18" stroke-width="3.5" /></button>
@@ -77,20 +87,20 @@ const coreTiles = [
           <!-- Selection Phase -->
           <section v-if="currentMode === 'none'" class="py-10 space-y-10">
             <div class="text-center space-y-4">
-              <h2 class="text-4xl sm:text-6xl font-black text-text-primary tracking-tighter">开启你的<span class="text-accent">AI 实验室</span></h2>
-              <p class="text-text-tertiary text-sm max-w-md mx-auto leading-relaxed">连接大模型，开启充满电影感的协作流。</p>
+              <h2 class="text-4xl sm:text-6xl font-black text-text-primary tracking-tighter">不再纠结<span class="text-accent">该信哪个 AI</span></h2>
+              <p class="text-text-tertiary text-sm max-w-md mx-auto leading-relaxed">把同一个问题丢给多个顶尖模型，让它们 PK，你坐收渔翁之利。</p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
               <button @click="selectMode('demo')" class="group p-8 rounded-[40px] glass-v3 border border-white/5 hover:border-accent/30 transition-all duration-500 text-left overflow-hidden active:scale-95 shadow-2xl">
                 <div class="w-14 h-14 rounded-2xl bg-accent text-white flex items-center justify-center mb-8 shadow-xl"><Rocket :size="28" stroke-width="3.5" /></div>
                 <h3 class="text-2xl font-black text-text-primary mb-3">先试试看</h3>
-                <p class="text-xs text-text-tertiary leading-relaxed mb-8 opacity-70">无需配置，直接体验精选模型。适合快速探索。</p>
+                <p class="text-xs text-text-tertiary leading-relaxed mb-8 opacity-70">不用填 Key，直接体验。适合快速上手。</p>
                 <div class="flex items-center text-accent text-[10px] font-black uppercase tracking-widest gap-2"><span>立刻开始</span><ArrowRight :size="14" stroke-width="4" /></div>
               </button>
               <button @click="selectMode('full')" class="group p-8 rounded-[40px] glass-v3 border border-white/5 hover:border-purple-500/30 transition-all duration-500 text-left overflow-hidden active:scale-95 shadow-2xl">
                 <div class="w-14 h-14 rounded-2xl bg-purple-500 text-white flex items-center justify-center mb-8 shadow-xl"><Key :size="28" stroke-width="3.5" /></div>
                 <h3 class="text-2xl font-black text-text-primary mb-3">连接 API</h3>
-                <p class="text-xs text-text-tertiary leading-relaxed mb-8 opacity-70">支持国内外主流模型。释放完整生产力。</p>
+                <p class="text-xs text-text-tertiary leading-relaxed mb-8 opacity-70">接入你自己的模型，解锁全部能力。</p>
                 <div class="flex items-center text-purple-400 text-[10px] font-black uppercase tracking-widest gap-2"><span>配置秘钥</span><ArrowRight :size="14" stroke-width="4" /></div>
               </button>
             </div>
@@ -99,8 +109,8 @@ const coreTiles = [
           <!-- Core Dashboard (Refined for iOS) -->
           <section v-else class="space-y-8 animate-in fade-in duration-700">
             <div class="text-center space-y-2">
-              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black uppercase tracking-widest">CONTROL CENTER</div>
-              <h2 class="text-3xl sm:text-5xl font-black text-text-primary tracking-tighter uppercase leading-none">核心任务中枢</h2>
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black uppercase tracking-widest">SparkRing v0.5.1</div>
+              <h2 class="text-3xl sm:text-5xl font-black text-text-primary tracking-tighter uppercase leading-none">核心功能</h2>
             </div>
 
             <!-- Grid Layout optimized for narrow screens -->
@@ -123,7 +133,7 @@ const coreTiles = [
 
             <div class="p-5 rounded-[28px] bg-white/5 border border-white/5 flex items-start gap-3 max-w-xl mx-auto opacity-60">
               <Info :size="16" stroke-width="3.5" class="text-accent shrink-0 mt-0.5" />
-              <p class="text-[10px] text-text-tertiary leading-relaxed">进入“互动实验室”探索全新模式。切换模式请前往设置。</p>
+              <p class="text-[10px] text-text-tertiary leading-relaxed">进入「创意实验室」探索更多玩法。切换模式请前往设置。</p>
             </div>
           </section>
         

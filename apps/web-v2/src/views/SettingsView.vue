@@ -66,7 +66,7 @@ function onVersionTap() {
 
   if (versionTapCount.value >= 10 && !showMaxMode.value) {
     showMaxMode.value = true
-    maxMessage.value = '你为什么一直戳我？算了，给你开个后门吧。'
+    maxMessage.value = '被你发现了！给你开个后门吧。'
     versionTapCount.value = 0
   }
 }
@@ -76,7 +76,7 @@ async function doActivateMax() {
   const ok = await appStore.activateMaxChannel()
   maxActivating.value = false
   if (ok) {
-    maxMessage.value = '大份已上桌，慢用 🍜'
+    maxMessage.value = '已解锁，尽情享用 🍜'
   }
 }
 
@@ -104,17 +104,17 @@ function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-// 好友模式开启时，自动关闭免费优先和模拟数据，并显示 SparkRing 体验通道
+// 好友模式开启时，自动关闭优先免费模型和模拟数据，并显示 SparkRing 体验通道
 watch(() => appStore.showFriendsMode, async (val) => {
   if (val) {
-    // 关闭免费优先
+    // 关闭优先免费模型
     appStore.preferFree = false
     // 关闭模拟数据（demo provider）
     const demoProvider = providerStore.getProvider('demo')
     if (demoProvider?.enabled) {
       providerStore.updateProvider('demo', { enabled: false })
     }
-    useToastStore().info('好友模式已开启，已自动关闭免费优先和模拟数据，解锁 SparkRing 体验通道')
+    useToastStore().info('好友模式已开启，已自动关闭优先免费模型和模拟数据，解锁 SparkRing 体验通道')
   } else {
     useToastStore().info('好友模式已关闭，SparkRing 体验通道已隐藏')
   }
@@ -170,7 +170,7 @@ async function saveProviderBaseUrl() {
 }
 
 async function removeProvider(id: string) {
-  if (confirm('确定要删除此自定义通道吗？相关的账号信息也将被移除。')) {
+  if (confirm('确认要删除此自定义通道吗？相关的账号信息也将被移除。')) {
     await providerStore.removeProvider(id)
   }
 }
@@ -199,7 +199,7 @@ function getProviderAccounts(providerId: string) {
 function getProviderSummary(providerId: string) {
   const accs = getProviderAccounts(providerId)
   const configured = accs.filter(a => providerStore.accountKeyStatus[a.id]).length
-  return `${accs.length} 个账户 (${configured} 已配置)`
+  return `${accs.length} 个账户 (${configured} 已接入)`
 }
 
 function startAddModel(providerId: string) {
@@ -311,10 +311,10 @@ onMounted(() => {
             </div>
             <div class="min-w-0">
               <h1 class="text-sm font-black text-text-primary truncate tracking-tight uppercase">
-                系统配置</h1>
+                偏好设置</h1>
               <p
                 class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
-                Preferences & Identity</p>
+                设置与账户</p>
             </div>
           </div>
         </div>
@@ -342,11 +342,11 @@ onMounted(() => {
                 (Setup)</p>
               <p
                 class="text-[10px] text-text-tertiary font-bold uppercase tracking-widest opacity-50 truncate">
-                已配置 {{ recommendedConfiguredCount }} 个推荐厂商</p>
+                已接入 {{ recommendedConfiguredCount }} 个推荐通道</p>
             </div>
           </div>
           <button @click="router.push('/setup')"
-            class="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-accent text-white text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all whitespace-nowrap">立即开始配置</button>
+            class="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-accent text-white text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all whitespace-nowrap">开始配置</button>
         </div>
 
         <!-- Appearance & Global Defaults -->
@@ -356,10 +356,10 @@ onMounted(() => {
               <Sun :size="18" class="text-surface-1 dark:text-black" stroke-width="3" />
             </div>
             <div>
-              <h2 class="text-lg font-black text-text-primary tracking-tighter uppercase">视觉与偏好</h2>
+              <h2 class="text-lg font-black text-text-primary tracking-tighter uppercase">外观与偏好</h2>
               <p
                 class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50">
-                Visuals & Behavior</p>
+                界面与行为</p>
             </div>
           </div>
 
@@ -368,10 +368,10 @@ onMounted(() => {
             <div
               class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">系统主题
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">主题
                 </p>
                 <p class="text-[9px] text-text-tertiary font-medium">
-                  {{ themeMode === 'light' ? '白天模式' : themeMode === 'dark' ? '黑夜模式' : '跟随系统' }}
+                  {{ themeMode === 'light' ? '浅色' : themeMode === 'dark' ? '深色' : '自动' }}
                 </p>
               </div>
               <!-- 3-position segmented switch: light | auto | dark -->
@@ -397,8 +397,8 @@ onMounted(() => {
             <!-- Prefer Free Models Switch -->
             <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">免费优先</p>
-                <p class="text-[9px] text-text-tertiary font-medium">全局过滤收费模型</p>
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">优先免费模型</p>
+                <p class="text-[9px] text-text-tertiary font-medium">过滤掉收费的模型</p>
               </div>
               <button @click="appStore.preferFree = !appStore.preferFree" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.preferFree ? 'bg-emerald-500' : 'bg-black/10 dark:bg-white/10'">
                 <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.preferFree ? 'translate-x-6' : 'translate-x-0.5'">
@@ -410,8 +410,8 @@ onMounted(() => {
             <!-- Show Home Entry Switch -->
             <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">显示首页入口</p>
-                <p class="text-[9px] text-text-tertiary font-medium">在侧边栏显示首页链接</p>
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">显示首页</p>
+                <p class="text-[9px] text-text-tertiary font-medium">侧边栏显示首页入口</p>
               </div>
               <button @click="appStore.showHomeEntry = !appStore.showHomeEntry" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.showHomeEntry ? 'bg-accent' : 'bg-black/10 dark:bg-white/10'">
                 <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.showHomeEntry ? 'translate-x-6' : 'translate-x-0.5'">
@@ -423,8 +423,8 @@ onMounted(() => {
             <!-- Friends Mode Switch -->
             <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
               <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">开启好友模式</p>
-                <p class="text-[9px] text-text-tertiary font-medium">解锁邀请奖励与更多福利功能</p>
+                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">好友模式</p>
+                <p class="text-[9px] text-text-tertiary font-medium">解锁邀请奖励和专属功能</p>
               </div>
               <button @click="appStore.showFriendsMode = !appStore.showFriendsMode" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.showFriendsMode ? 'bg-purple-500' : 'bg-black/10 dark:bg-white/10'">
                 <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.showFriendsMode ? 'translate-x-6' : 'translate-x-0.5'">
@@ -439,27 +439,27 @@ onMounted(() => {
             <div class="px-1">
               <p class="text-[10px] font-black text-accent uppercase tracking-[0.2em] mb-1">
                 SparkRing V3 Cinematic Fluid</p>
-              <p class="text-[10px] text-text-tertiary">物理引擎调节：控制界面的磨砂感与视觉深度</p>
+              <p class="text-[10px] text-text-tertiary">调整界面磨砂玻璃效果和视觉深度</p>
             </div>
             <div
               class="grid grid-cols-1 gap-3 bg-black/[0.02] dark:bg-black/20 p-5 rounded-[24px] border border-black/5 dark:border-white/5 shadow-inner">
               <div class="space-y-3">
                 <div class="flex justify-between text-[9px] font-black uppercase tracking-widest">
-                  <span class="text-text-secondary">模糊强度 Blur</span><span
+                  <span class="text-text-secondary">模糊强度</span><span
                     class="text-accent font-mono">{{ v3Config.blurAmount }}px</span></div>
                 <input type="range" v-model="v3Config.blurAmount" min="0" max="80"
                   class="w-full h-1 bg-black/10 dark:bg-white/10 rounded-full appearance-none cursor-pointer accent-accent" />
               </div>
               <div class="space-y-3">
                 <div class="flex justify-between text-[9px] font-black uppercase tracking-widest">
-                  <span class="text-text-secondary">色彩饱和 Saturate</span><span
+                  <span class="text-text-secondary">色彩饱和度</span><span
                     class="text-accent font-mono">{{ v3Config.saturation }}%</span></div>
                 <input type="range" v-model="v3Config.saturation" min="0" max="200"
                   class="w-full h-1 bg-black/10 dark:bg-white/10 rounded-full appearance-none cursor-pointer accent-accent" />
               </div>
               <div class="space-y-3">
                 <div class="flex justify-between text-[9px] font-black uppercase tracking-widest">
-                  <span class="text-text-secondary">高光边框 Stroke</span><span
+                  <span class="text-text-secondary">边框亮度</span><span
                     class="text-accent font-mono">{{ v3Config.borderOpacity }}%</span></div>
                 <input type="range" v-model="v3Config.borderOpacity" min="0" max="100"
                   class="w-full h-1 bg-black/10 dark:bg-white/10 rounded-full appearance-none cursor-pointer accent-accent" />
@@ -477,25 +477,25 @@ onMounted(() => {
                 <Key :size="18" class="text-white" stroke-width="3" />
               </div>
               <div>
-                <h2 class="text-lg font-black text-text-primary tracking-tighter uppercase">API 通道管理
+                <h2 class="text-lg font-black text-text-primary tracking-tighter uppercase">模型通道
                 </h2>
                 <p
                   class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50">
-                  Identity & API Lifecycle</p>
+                  API 配置管理</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
               <button @click="providerListCollapsed = !providerListCollapsed"
-                class="text-[10px] font-black uppercase tracking-widest text-text-secondary px-4 py-2 rounded-xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/10 transition-all shadow-sm active:scale-95">{{ providerListCollapsed ? '显示全部' : '精简视图' }}</button>
+                class="text-[10px] font-black uppercase tracking-widest text-text-secondary px-4 py-2 rounded-xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/10 transition-all shadow-sm active:scale-95">{{ providerListCollapsed ? '展开全部' : '收起视图' }}</button>
               <div class="h-4 w-px bg-white/10 mx-1"></div>
               <button @click="enableAllProviders"
                 class="p-2 text-text-tertiary hover:text-emerald-400 transition-all active:scale-90"
-                title="一键开启所有通道">
+                title="开启全部">
                 <Zap :size="16" stroke-width="3" />
               </button>
               <button @click="disableAllProviders"
                 class="p-2 text-text-tertiary hover:text-red-400 transition-all active:scale-90"
-                title="一键关闭所有通道">
+                title="关闭全部">
                 <ShieldOff :size="16" stroke-width="3" />
               </button>
             </div>
@@ -781,7 +781,7 @@ onMounted(() => {
             <button @click="onVersionTap"
               class="w-full flex items-center justify-between select-none active:scale-[0.99] transition-transform">
               <span class="text-text-tertiary font-black uppercase tracking-widest">版本 Version</span>
-              <span class="text-text-primary font-black">v0.3.5-V3-Cinema</span>
+              <span class="text-text-primary font-black">v0.5.1</span>
             </button>
             <div class="flex items-center justify-between"><span
                 class="text-text-tertiary font-black uppercase tracking-widest">内核 Core</span><span

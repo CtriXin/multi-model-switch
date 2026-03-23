@@ -13,7 +13,7 @@ const labFeatures = [
   {
     id: 'challenge',
     name: '每日论战',
-    desc: '今日话题对战，锻炼批判思维',
+    desc: '每日话题挑战，训练批判思维',
     icon: Flame,
     path: '/challenge',
     color: 'from-orange-500 to-red-600',
@@ -22,7 +22,7 @@ const labFeatures = [
   {
     id: 'turtle-soup',
     name: '海龟汤',
-    desc: '离奇案件卷宗，通过提问解密',
+    desc: '离奇案件，通过提问揭开真相',
     icon: Soup,
     path: '/turtle-soup',
     color: 'from-emerald-500 to-teal-600',
@@ -31,7 +31,7 @@ const labFeatures = [
   {
     id: 'story-lite',
     name: '假如模拟器',
-    desc: '设定一个场景，看 AI 如何演绎',
+    desc: '设定场景，看 AI 如何发挥',
     icon: Sparkles,
     path: '/story-lite',
     color: 'from-blue-500 to-indigo-600',
@@ -40,7 +40,7 @@ const labFeatures = [
   {
     id: 'story-live',
     name: '剧情共演',
-    desc: '实时接戏，与导演组共同推进',
+    desc: '实时互动，与 AI 共同推进剧情',
     icon: Clapperboard,
     path: '/story-live',
     color: 'from-purple-500 to-fuchsia-600',
@@ -49,7 +49,7 @@ const labFeatures = [
   {
     id: 'multi-life',
     name: '多重人生',
-    desc: '三个角色各执一词，还原真相',
+    desc: '多方陈述，还原事件真相',
     icon: Shield,
     path: '/multi-life',
     color: 'from-cyan-500 to-blue-600',
@@ -68,40 +68,40 @@ function goHome() {
 
 <template>
   <!-- Main Container: Unified background system -->
-  <div class="flex flex-col h-full overflow-hidden bg-surface-0 transition-colors duration-500">
+  <div class="flex flex-col h-full overflow-hidden bg-transparent">
     
     <!-- Unified V3 Capsule Header -->
     <div class="z-40 px-4 pt-4 pb-2 shrink-0">
-      <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-black/5 dark:border-white/10 bg-white/80 dark:bg-white/[0.05]">
+      <header class="glass-v3 max-w-6xl mx-auto rounded-full px-4 sm:px-6 py-2.5 transition-all duration-500 shadow-2xl relative flex items-center justify-between border border-white/10">
         <div class="flex items-center gap-2">
-          <button @click="goHome" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-text-secondary transition-colors" title="返回首页">
+          <button v-if="isSmallScreen" @click="goHome" class="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-text-secondary transition-colors" title="返回首页">
             <ArrowLeft :size="18" stroke-width="3.5" />
           </button>
-          <div class="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center shadow-lg shadow-accent/10">
-            <FlaskConical :size="16" stroke-width="3.5" class="text-accent" />
+          <div class="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center shadow-lg shadow-accent/20">
+            <FlaskConical :size="16" stroke-width="3.5" />
           </div>
-          <h1 class="text-sm font-black text-text-primary truncate uppercase tracking-widest">互动实验室</h1>
+          <h1 class="text-sm font-black text-text-primary truncate uppercase tracking-widest ml-1">创意实验室</h1>
         </div>
 
         <div class="flex items-center gap-2">
-          <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10">
+          <div class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-black/5 dark:bg-white/5 border border-white/10">
             <Zap :size="10" stroke-width="4" class="text-accent" />
-            <span class="text-[8px] font-black text-text-tertiary uppercase tracking-widest">5 实验就绪</span>
+            <span class="text-[8px] font-black text-text-tertiary uppercase tracking-widest">5 个玩法就绪</span>
           </div>
         </div>
       </header>
     </div>
 
-    <main class="flex-1 overflow-y-auto custom-scrollbar">
-      <div class="max-w-6xl mx-auto p-4 sm:p-10 space-y-8 sm:space-y-12">
+    <div class="flex-1 overflow-y-auto custom-scrollbar">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-10">
         
         <!-- Welcome Section -->
-        <section class="max-w-2xl px-2 animate-in fade-in duration-700">
-          <h2 class="text-2xl sm:text-4xl font-black text-text-primary tracking-tight leading-tight mb-2 sm:mb-4 uppercase">
-            欢迎来到<span class="text-accent">互动实验室</span>
+        <section class="text-center space-y-2">
+          <h2 class="text-3xl sm:text-5xl font-black text-text-primary tracking-tighter uppercase leading-none">
+            欢迎来到<span class="text-accent">创意实验室</span>
           </h2>
-          <p class="text-[11px] sm:text-sm text-text-tertiary leading-loose opacity-80 font-medium">
-            在这里，我们探索 AI 交互的无限可能。每一个实验都是一段全新的叙事旅程。
+          <p class="text-text-tertiary text-sm max-w-md mx-auto leading-relaxed">
+            探索 AI 的创意玩法，每个实验都是新体验。
           </p>
         </section>
 
@@ -127,7 +127,7 @@ function goHome() {
                 <component :is="item.icon" :size="20" stroke-width="3.5" class="sm:hidden" />
                 <component :is="item.icon" :size="28" stroke-width="3.5" class="hidden sm:block" />
               </div>
-              <span class="px-1.5 py-0.5 rounded-md bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/10 text-[7px] sm:text-[8px] font-black uppercase tracking-widest text-text-tertiary">
+              <span class="px-1.5 py-0.5 rounded-md bg-black/5 dark:bg-white/5 border border-white/10 text-[7px] sm:text-[8px] font-black uppercase tracking-widest text-text-tertiary">
                 {{ item.tag }}
               </span>
             </div>
@@ -159,14 +159,14 @@ function goHome() {
             <Info :size="20" stroke-width="3.5" class="hidden sm:block" />
           </div>
           <div class="space-y-0.5 sm:space-y-1">
-            <p class="text-[9px] sm:text-xs font-black text-text-primary uppercase tracking-widest leading-none sm:leading-normal">实验协议</p>
+            <p class="text-[9px] sm:text-xs font-black text-text-primary uppercase tracking-widest leading-none sm:leading-normal">说明</p>
             <p class="text-[9px] sm:text-[11px] text-text-tertiary leading-relaxed">
-              这些模式处于快速迭代中。任何奇思妙想，欢迎反馈。
+              玩法持续更新中，欢迎反馈意见。
             </p>
           </div>
         </div>
       </div>
-    </main>
+    </div>
   </div>
 </template>
 

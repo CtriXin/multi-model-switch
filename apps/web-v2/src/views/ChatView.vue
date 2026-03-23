@@ -16,6 +16,7 @@ import { startWindowDrag } from '@/utils/windowDrag'
 import type { ImageAttachment } from '@/stores/chat'
 import { getExperienceMode } from '@/utils/experienceMode'
 import { CHAT_PROMPT_EXAMPLES } from '@/data/inputExamples'
+import { getChatShowcaseScenario, isChatShowcaseId } from '@/data/chatShowcase'
 import { useRotatingPrompt } from '@/composables/useRotatingPrompt'
 import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2, Menu, Sun, Moon, Layers, Zap, Target, History } from 'lucide-vue-next'
 
@@ -29,6 +30,11 @@ const { theme, toggle: toggleTheme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform')
 const restoredDraft = ref('')
 const experienceMode = ref(getExperienceMode())
+const showcaseId = computed(() => {
+  const raw = route.query.showcase
+  return typeof raw === 'string' && isChatShowcaseId(raw) ? raw : null
+})
+const showcaseScenario = computed(() => showcaseId.value ? getChatShowcaseScenario(showcaseId.value) : null)
 
 const scrollContainer = ref<HTMLElement>()
 const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
@@ -179,8 +185,53 @@ onMounted(() => {
 
 onUnmounted(() => { observer?.disconnect() })
 
+function applyShowcaseScenario() {
+  const scenario = showcaseScenario.value
+  if (!scenario) return
+
+  appStore.selectedModelIds = [...scenario.selectedModelIds]
+  chatStore.initActiveModels(scenario.selectedModelIds)
+  chatStore.contextMode = scenario.contextMode
+  chatStore.clearHistory()
+  chatStore.rounds = scenario.rounds.map((round) => ({
+    ...round,
+    attachments: [...round.attachments],
+    responses: new Map(round.responses),
+    modelIds: [...round.modelIds],
+    judge: round.judge ? { ...round.judge } : undefined,
+    inlineDiscuss: round.inlineDiscuss
+      ? {
+          ...round.inlineDiscuss,
+          phase1Results: round.inlineDiscuss.phase1Results.map((item) => ({
+            ...item,
+            data: {
+              ...item.data,
+              risks: [...item.data.risks],
+              keyDecisions: [...item.data.keyDecisions],
+            },
+          })),
+          phase2Results: round.inlineDiscuss.phase2Results.map((item) => ({
+            ...item,
+            data: { ...item.data },
+          })),
+        }
+      : undefined,
+  }))
+  inlineDiscussRound.value = scenario.inlineDiscussRoundId ?? null
+  restoredDraft.value = ''
+
+  nextTick(() => {
+    scrollToBottom()
+  })
+}
+
+watch(showcaseId, () => {
+  applyShowcaseScenario()
+}, { immediate: true })
+
 // --- Context from discuss "继续对话" ---
 onMounted(() => {
+  if (showcaseScenario.value) return
   const ctx = route.query.context as string
   if (ctx && hasActiveModels.value) {
     // Clear query param to avoid re-submit on refresh
@@ -307,12 +358,17 @@ const canUseSamplePrompt = computed(() =>
 )
 const rotatingChatPrompt = useRotatingPrompt(CHAT_PROMPT_EXAMPLES, canUseSamplePrompt)
 const samplePrompt = computed(() => canUseSamplePrompt.value ? rotatingChatPrompt.value : '')
+const headerTitle = computed(() => showcaseScenario.value?.title ?? sessionStore.currentSession?.title ?? '对话')
+const headerSubtitle = computed(() => {
+  if (showcaseScenario.value) return showcaseScenario.value.description
+  return `已对话 ${chatStore.rounds.length} 轮 · ${chatStore.activeModelIds.length} 个模型`
+})
 
 const inputPlaceholder = computed(() => {
-  if (!hasActiveModels.value) return '请先选择模型...'
+  if (!hasActiveModels.value) return '先选择模型...'
   if (samplePrompt.value) return `试试：${samplePrompt.value}`
   if (chatStore.isSingleChat) return '和 AI 聊聊...'
-  return `发给 ${chatStore.activeModelIds.length} 个模型...`
+  return `问 ${chatStore.activeModelIds.length} 个模型...`
 })
 
 // Keep viewMode for multi-chat layout (grid/horizontal/vertical)
@@ -362,7 +418,7 @@ async function restorePrompt(prompt: string) {
   restoredDraft.value = ''
   await nextTick()
   restoredDraft.value = prompt
-  toast.info('内容已恢复，改改再发')
+  toast.info('内容已恢复，修改后可重发')
 }
 
 async function retryRoundModel(round: typeof chatStore.rounds[0], modelId: string) {
@@ -393,7 +449,7 @@ async function randomReplaceModel(round: typeof chatStore.rounds[0], oldModelId:
   })
 
   if (!newModelId) {
-    toast.info('暂无可用的模型换')
+    toast.info('没有可替换的模型')
     return
   }
 
@@ -479,13 +535,13 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
             </div>
             <div class="min-w-0">
               <h1 class="text-sm font-black text-text-primary truncate tracking-tight">
-                {{ sessionStore.currentSession?.title || '聊天' }}
+                {{ headerTitle }}
               </h1>
               <p
-                class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
-                聊过 {{ chatStore.rounds.length }} 轮 · {{ chatStore.activeModelIds.length }} 个模型
-                <span v-if="chatStore.isSingleChat" class="text-accent">(单聊)</span>
-                <span v-else-if="chatStore.isMultiChat" class="text-accent">(对比)</span>
+              class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
+                {{ headerSubtitle }}
+                <span v-if="!showcaseScenario && chatStore.isSingleChat" class="text-accent">(单模型)</span>
+                <span v-else-if="!showcaseScenario && chatStore.isMultiChat" class="text-accent">(多模型对比)</span>
               </p>
             </div>
           </div>
@@ -498,7 +554,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
             class="relative p-2 sm:px-3 sm:py-2 rounded-full bg-white/5 text-text-secondary flex items-center gap-2 hover:bg-white/10 transition-all border border-white/5">
             <Layers :size="18" class="text-accent" />
             <span
-              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest ml-0.5">选模型</span>
+              class="hidden sm:inline text-[10px] font-black uppercase tracking-widest ml-0.5">选择模型</span>
             <span v-if="appStore.selectedModels.length"
               class="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[9px] font-black text-white shadow-sm ring-2 ring-surface-1">
               {{ appStore.selectedModels.length }}
@@ -553,7 +609,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
       <div class="flex items-center gap-2 overflow-x-auto no-scrollbar min-w-0">
         <span
           class="text-[10px] font-black text-text-tertiary uppercase tracking-widest shrink-0 opacity-40">
-          {{ chatStore.isSingleChat ? '正在聊:' : '正在用:' }}
+          {{ chatStore.isSingleChat ? '当前对话:' : '当前模型:' }}
         </span>
         <div class="flex items-center gap-1.5">
           <span v-for="modelId in chatStore.activeModelIds" :key="modelId"
@@ -566,7 +622,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
           <!-- Add hint for single chat -->
           <span v-if="chatStore.isSingleChat && chatStore.canAddModel()"
             class="text-[10px] text-text-tertiary opacity-60 italic">
-            （点击底部 + 添加模型对比）
+            （点击 + 添加模型对比）
           </span>
         </div>
       </div>
@@ -596,7 +652,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
     </div>
 
     <!-- Chat history -->
-    <div ref="scrollContainer" class="flex-1 overflow-y-auto" @scroll.passive="onScroll">
+    <div ref="scrollContainer" data-chat-scroll="true" class="flex-1 overflow-y-auto" @scroll.passive="onScroll">
       <!-- Empty state -->
       <div v-if="!chatStore.rounds.length"
         class="flex flex-col items-center justify-center h-[calc(100vh-14rem)] text-center px-6">
@@ -605,12 +661,12 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
           <Sparkles :size="32" class="text-accent" />
         </div>
         <h2 class="text-2xl font-black text-text-primary mb-3 tracking-tighter">
-          {{ chatStore.isSingleChat ? '问 AI' : '问一次，最多五份答卷' }}
+          {{ chatStore.isSingleChat ? '开始对话' : '一次提问，最多五份答卷' }}
         </h2>
         <p class="text-sm text-text-secondary max-w-sm opacity-60 leading-relaxed mx-auto">
           {{ chatStore.isSingleChat
-            ? '和一个 AI 深度对话，随时点击 + 添加更多模型对比答案。'
-            : '同一个问题交给多个模型，并排比较后选出最佳回答。选中后还能继续追问，上下文自动接力。'
+            ? '先和一个 AI 聊聊，随时添加更多模型对比答案。'
+            : '把问题抛给多个 AI，答案好坏一目了然。选中满意的继续追问。'
           }}
         </p>
       </div>
@@ -618,6 +674,12 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
       <!-- Rounds -->
       <div v-else class="mx-auto py-4 space-y-10"
         :class="isMobile ? 'max-w-lg px-4' : 'max-w-6xl px-4'">
+        <div v-if="showcaseScenario && showcaseScenario.showHero !== false" class="rounded-[28px] border border-accent/15 bg-gradient-to-br from-accent/10 via-white/70 to-surface-1 px-5 py-4 shadow-[0_24px_60px_rgba(110,95,255,0.12)] backdrop-blur-sm">
+          <div class="text-[10px] font-black uppercase tracking-[0.28em] text-accent/80">{{ showcaseScenario.heroEyebrow }}</div>
+          <div class="mt-2 text-xl font-black tracking-tight text-text-primary">{{ showcaseScenario.heroTitle }}</div>
+          <p class="mt-2 text-sm leading-6 text-text-secondary">{{ showcaseScenario.heroBody }}</p>
+        </div>
+
         <div v-for="(round, ri) in chatStore.rounds" :key="round.id" :id="'round-' + round.id"
           class="animate-slide-up" :style="{ animationDelay: ri * 30 + 'ms' }">
           <!-- User prompt -->
@@ -696,7 +758,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                   <span v-if="hasModelError(round, modelId)" class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
                   <span v-if="round.activeModelId === modelId" class="ml-auto text-[9px] shrink-0"
                     :style="{ color: getModelColor(getProvider(modelId)) }">
-                    ✓ 已选
+                    ✓ 已选择
                   </span>
                   <span v-else class="ml-auto text-[9px] text-text-tertiary shrink-0">
                     {{ round.responses.get(modelId)?.elapsed?.toFixed(1) }}s
@@ -824,7 +886,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                     class="text-purple-400 group-hover:scale-110 transition-transform" />
                   <span
                     class="text-sm text-text-secondary group-hover:text-text-primary transition-colors">
-                    {{ hasInlineDiscussState(round) ? '继续查看辩论' : '深入辩论' }}
+                    {{ hasInlineDiscussState(round) ? '继续对质' : '深度对质' }}
                   </span>
                 </button>
               </div>
@@ -995,7 +1057,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                 :class="isAnyPanelActive(round.id) ? 'w-full py-3' : 'w-1/2'">
                 <MessageSquare :size="14" class="text-purple-400" />
                 <span class="text-xs text-text-secondary">
-                  {{ hasInlineDiscussState(round) ? '继续查看辩论' : '深入辩论' }}
+                    {{ hasInlineDiscussState(round) ? '继续对质' : '深度对质' }}
                 </span>
               </button>
             </div>
