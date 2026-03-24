@@ -236,11 +236,48 @@ def _account_env(account):
         session_library = os.path.join(session_home, "Library")
         if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
             os.symlink(real_library, session_library)
+        if cli_name == "codex":
+            _overlay_codex_shared_resume(home_dir, session_home)
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
+
+
+def _overlay_codex_shared_resume(home_dir, session_home):
+    account_codex_dir = os.path.join(home_dir, ".codex")
+    if not os.path.isdir(account_codex_dir):
+        return
+
+    session_codex_dir = os.path.join(session_home, ".codex")
+    if os.path.islink(session_codex_dir):
+        os.unlink(session_codex_dir)
+    os.makedirs(session_codex_dir, exist_ok=True)
+
+    shared_entries = {
+        "archived_sessions",
+        "history.jsonl",
+        "session_index.jsonl",
+        "sessions",
+        "shell_snapshots",
+    }
+    for entry in os.listdir(account_codex_dir):
+        if entry in shared_entries:
+            continue
+        src = os.path.join(account_codex_dir, entry)
+        dst = os.path.join(session_codex_dir, entry)
+        if not os.path.exists(dst) and not os.path.islink(dst):
+            os.symlink(src, dst)
+
+    real_codex_dir = os.path.expanduser("~/.codex")
+    for entry in shared_entries:
+        source_root = real_codex_dir if os.path.isdir(real_codex_dir) else account_codex_dir
+        src = os.path.join(source_root, entry)
+        dst = os.path.join(session_codex_dir, entry)
+        if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            continue
+        os.symlink(src, dst)
 
 
 def validate_account_for_cli(cli, account):
@@ -286,6 +323,52 @@ def _resolve_model(model_info):
     return model_info.get("model", model_info.get("sonnet", ""))
 
 
+def _normalized_model_name(model_name):
+    if not isinstance(model_name, str):
+        return ""
+    return model_name.strip()
+
+
+def _primary_claude_model(model_info):
+    if isinstance(model_info, dict):
+        for key in ("model", "sonnet", "opus", "haiku"):
+            value = _normalized_model_name(model_info.get(key))
+            if value:
+                return value
+        return ""
+    return _normalized_model_name(model_info)
+
+
+def _apply_claude_model_overrides(target, model_info):
+    primary_model = _primary_claude_model(model_info)
+    if not primary_model:
+        return ""
+
+    if isinstance(model_info, dict):
+        opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
+        sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
+        haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
+        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = opus_model
+        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = sonnet_model
+        target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model
+        target["ANTHROPIC_MODEL"] = primary_model
+        target["ANTHROPIC_REASONING_MODEL"] = sonnet_model or primary_model
+        subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
+        target["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
+        return primary_model
+
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        target[key] = primary_model
+    return primary_model
+
+
 def launch_claude(model_info, runtime, once=False):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
     auth_mode = runtime.get("auth_mode", "api_key")
@@ -300,7 +383,13 @@ def launch_claude(model_info, runtime, once=False):
         else:
             cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
         bridge_cfg = cleanup_ctx.__enter__()
-        env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"], heavy_model=bridge_model)
+        env = _claude_gateway_env(
+            runtime,
+            base_url=bridge_cfg["base_url"],
+            auth_token=bridge_cfg["api_key"],
+            heavy_model=bridge_model,
+            selected_model=bridge_model,
+        )
         state_home = None
     else:
         gateway_health_check(runtime)
@@ -343,6 +432,7 @@ def launch_claude(model_info, runtime, once=False):
                     heavy_model=probe_model,
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
+                    selected_model=probe_model,
                 )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
@@ -352,7 +442,7 @@ def launch_claude(model_info, runtime, once=False):
                 console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
                 # 探测成功：使用探测到的 URL
-                env = _claude_gateway_env(runtime, base_url=anthropic_url)
+                env = _claude_gateway_env(runtime, base_url=anthropic_url, selected_model=probe_model)
                 cleanup_ctx = None
             state_home = None
 
@@ -375,6 +465,7 @@ def launch_claude(model_info, runtime, once=False):
                 heavy_model=probe_model,
                 medium_model=lb_medium or None,
                 light_model=lb_light or None,
+                selected_model=probe_model,
             )
             state_home = None
 
@@ -390,7 +481,21 @@ def launch_claude(model_info, runtime, once=False):
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None)
             bridge_cfg = cleanup_ctx.__enter__()
-            env = _claude_gateway_env(runtime, base_url=bridge_cfg["base_url"], auth_token=bridge_cfg["api_key"], heavy_model=probe_model)
+            env = _claude_gateway_env(
+                runtime,
+                base_url=bridge_cfg["base_url"],
+                auth_token=bridge_cfg["api_key"],
+                heavy_model=probe_model,
+                medium_model=lb_medium or None,
+                light_model=lb_light or None,
+                selected_model=probe_model,
+            )
+            parts = [f"heavy: {probe_model}"]
+            if lb_medium:
+                parts.append(f"medium: {lb_medium}")
+            if lb_light:
+                parts.append(f"light: {lb_light}")
+            console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             state_home = None
 
         elif lb_light or lb_medium:
@@ -413,18 +518,25 @@ def launch_claude(model_info, runtime, once=False):
                     heavy_model=probe_model,
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
+                    selected_model=probe_model,
                 )
+                parts = [f"heavy: {probe_model}"]
+                if lb_medium:
+                    parts.append(f"medium: {lb_medium}")
+                if lb_light:
+                    parts.append(f"light: {lb_light}")
+                console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
                 state_home = None
             else:
                 console.print("[red]✗ 无 OpenAI 端点，无法启用智能路由[/red]")
-                env = _claude_gateway_env(runtime, base_url=None)
+                env = _claude_gateway_env(runtime, base_url=None, selected_model=probe_model)
                 state_home = None
                 cleanup_ctx = None
 
         else:
             # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
             console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
-            env = _claude_gateway_env(runtime, base_url=None)
+            env = _claude_gateway_env(runtime, base_url=None, selected_model=probe_model)
             state_home = None
             cleanup_ctx = None
 
@@ -439,41 +551,17 @@ def launch_claude(model_info, runtime, once=False):
 
     if isinstance(model_info, dict):
         if not _skip_model:
-            if "opus" in model_info:
-                env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = model_info["opus"]
-            if "sonnet" in model_info:
-                env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = model_info["sonnet"]
-            if "haiku" in model_info:
-                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model_info["haiku"]
-            subagent = model_info.get("subagent", model_info.get("sonnet", ""))
-            if subagent:
-                env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent
-
-            # 单模型模式：把同一个模型设给所有 slot
-            if "model" in model_info and "opus" not in model_info:
-                m = model_info["model"]
-                env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = m
-                env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = m
-                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = m
-                env["CLAUDE_CODE_SUBAGENT_MODEL"] = m
+            _apply_claude_model_overrides(env, model_info)
 
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
     elif not _skip_model:
-        m = model_info
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = m
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = m
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = m
-        env["CLAUDE_CODE_SUBAGENT_MODEL"] = m
+        _apply_claude_model_overrides(env, model_info)
 
     cmd = ["claude"]
     if runtime.get("bypass"):
         cmd.append("--dangerously-skip-permissions")
-    try:
-        _exec_or_run(cmd, env, once, state_home=state_home, cleanup_context=cleanup_ctx)
-    finally:
-        if cleanup_ctx is not None:
-            cleanup_ctx.__exit__(None, None, None)
+    _exec_or_run(cmd, env, once, state_home=state_home, cleanup_context=cleanup_ctx)
 
 
 def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
@@ -586,7 +674,7 @@ def _cleanup_stale_sessions(sessions_dir):
             pass  # 进程存在但无权限发信号，跳过
 
 
-def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=None, medium_model=None, light_model=None):
+def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=None, medium_model=None, light_model=None, selected_model=None):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
     - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
     - 启动时清理已死进程的残留目录
@@ -677,11 +765,12 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=Non
     # ── settings.json：继承用户配置 + 覆盖 gateway 必要字段 ──
     effective_token = auth_token or runtime["api_key"]
     provider_id = runtime.get("id", "")
-    # bridge 模式下：使用标准 Claude 模型名作为 slot，bridge 负责映射到实际模型
-    # 直连模式：从 gateway 拉模型列表，或对 bailian-codingplan 使用其 fallback 模型
+    # 启动首帧优先写本次选中的真实模型名，避免 statusline / 初始 active model
+    # 先落到 slot 占位名；bridge 仍负责把请求路由到实际目标模型。
     if auth_token:
-        # 使用标准 Claude 模型名，让 Claude Code 通过校验；bridge 会替换为 heavy_model
-        best_model = "claude-sonnet-4-6"
+        best_model = selected_model or heavy_model or "claude-sonnet-4-6"
+    elif selected_model:
+        best_model = selected_model
     elif provider_id == "bailian-codingplan":
         # 百炼 CodingPlan：使用其支持的模型名（如 qwen3.5-plus）
         fallback = runtime.get("fallback_models", [])
@@ -698,6 +787,8 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=Non
                     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_REASONING_MODEL"):
             settings_env[key] = best_model
+    if selected_model:
+        _apply_claude_model_overrides(settings_env, selected_model)
     # 读取用户真实 settings.json 作为基础
     real_settings_path = os.path.join(real_claude_dir, "settings.json")
     settings_data: dict = {}
@@ -725,13 +816,15 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=Non
                     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_REASONING_MODEL"):
             env[key] = best_model
+    if selected_model:
+        _apply_claude_model_overrides(env, selected_model)
     env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
 
     # ── 写入 route_status.json 供 statusline 读取 ──
     # bridge 模式下用 heavy_model，直连模式下用 best_model
-    status_model = heavy_model if auth_token else (best_model or "unknown")
+    status_model = selected_model or heavy_model or best_model or "unknown"
     status_tier = "heavy" if auth_token else "-"
-    status_reason = "bridge_ready" if auth_token else "direct"
+    status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
     try:
         _write_route_status(status_tier, status_model, status_reason)
     except Exception:
@@ -815,26 +908,102 @@ def _codex_gateway_env(runtime, base_url):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
 
-    # 复制用户 config.toml，但把 base_url 替换成 gateway 地址
-    # Codex CLI 优先读 config 里的 base_url，env var 不一定能覆盖
+    def _set_top_level_scalar(text, key, value):
+        import re
+        section_match = re.search(r'^\[', text, flags=re.MULTILINE)
+        preamble_end = section_match.start() if section_match else len(text)
+        preamble = text[:preamble_end]
+        rest = text[preamble_end:]
+        pattern = rf'^{re.escape(key)}\s*=\s*"[^"]*"\s*$'
+        replacement = f'{key} = "{value}"'
+        if re.search(pattern, preamble, flags=re.MULTILINE):
+            preamble = re.sub(pattern, replacement, preamble, count=1, flags=re.MULTILINE)
+        else:
+            if preamble and not preamble.endswith("\n"):
+                preamble += "\n"
+            preamble += f"{replacement}\n"
+        return preamble + rest
+
+    def _set_project_base_url(text, project_path, value):
+        import re
+        escaped_path = re.escape(project_path)
+        header_pattern = rf'^\[projects\."{escaped_path}"\]\s*$'
+        match = re.search(header_pattern, text, flags=re.MULTILINE)
+        if not match:
+            block = f'\n[projects."{project_path}"]\nbase_url = "{value}"\n'
+            return text.rstrip() + block + "\n"
+
+        block_start = match.end()
+        next_header = re.search(r'^\[', text[block_start:], flags=re.MULTILINE)
+        block_end = block_start + next_header.start() if next_header else len(text)
+        block = text[block_start:block_end]
+        if re.search(r'^\s*base_url\s*=\s*"[^"]*"', block, flags=re.MULTILINE):
+            block = re.sub(
+                r'^\s*base_url\s*=\s*"[^"]*"',
+                f'base_url = "{value}"',
+                block,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            if block and not block.endswith("\n"):
+                block += "\n"
+            block += f'base_url = "{value}"\n'
+        return text[:block_start] + block + text[block_end:]
+
+    def _set_table_scalar(text, table_header, key, value):
+        import re
+        escaped_header = re.escape(table_header)
+        header_pattern = rf'^\[{escaped_header}\]\s*$'
+        match = re.search(header_pattern, text, flags=re.MULTILINE)
+        if not match:
+            block = f'\n[{table_header}]\n{key} = "{value}"\n'
+            return text.rstrip() + block + "\n"
+
+        block_start = match.end()
+        next_header = re.search(r'^\[', text[block_start:], flags=re.MULTILINE)
+        block_end = block_start + next_header.start() if next_header else len(text)
+        block = text[block_start:block_end]
+        key_pattern = rf'^\s*{re.escape(key)}\s*=\s*"[^"]*"\s*$'
+        if re.search(key_pattern, block, flags=re.MULTILINE):
+            block = re.sub(
+                key_pattern,
+                f'{key} = "{value}"',
+                block,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            if block and not block.endswith("\n"):
+                block += "\n"
+            block += f'{key} = "{value}"\n'
+        return text[:block_start] + block + text[block_end:]
+
+    # 复制用户 config.toml，但把顶层和当前项目的 base_url 都替换成隔离地址
+    # Codex CLI 会读取 project-scoped config，单改顶层 base_url 不够。
     real_config = os.path.expanduser("~/.codex/config.toml")
     gateway_config = os.path.join(codex_dir, "config.toml")
     if os.path.exists(real_config):
         try:
             with open(real_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
-            import re
-            config_text = re.sub(
-                r'^base_url\s*=\s*"[^"]*"',
-                f'base_url = "{base_url}"',
-                config_text,
-                count=1,
-                flags=re.MULTILINE,
-            )
+            config_text = _set_top_level_scalar(config_text, "base_url", base_url)
+            config_text = _set_project_base_url(config_text, os.getcwd(), base_url)
+            config_text = _set_table_scalar(config_text, "model_providers.custom", "base_url", base_url)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
             shutil.copy2(real_config, gateway_config)
+    else:
+        with open(gateway_config, "w", encoding="utf-8") as f:
+            f.write(f'base_url = "{base_url}"\n')
+            f.write('\n[model_providers.custom]\n')
+            f.write('name = "custom"\n')
+            f.write('wire_api = "responses"\n')
+            f.write('requires_openai_auth = true\n')
+            f.write(f'base_url = "{base_url}"\n')
+            f.write(f'\n[projects."{os.getcwd()}"]\n')
+            f.write(f'base_url = "{base_url}"\n')
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
     real_codex_dir = os.path.expanduser("~/.codex")
@@ -863,9 +1032,16 @@ def _is_gpt_model(model_name):
     return any(kw in lower for kw in ("gpt-", "gpt4", "gpt5", "o1", "o3", "o4"))
 
 
+def _codex_provider_base_url(base_url):
+    normalized = (base_url or "").rstrip("/")
+    if normalized and not normalized.endswith("/v1"):
+        normalized += "/v1"
+    return normalized
+
+
 def launch_codex(model_info, runtime, once=False):
     """启动 Codex，支持 provider 和 OAuth 账号档案两种模式。
-    非 GPT 模型自动走 Chat Completions bridge（gateway 的 /v1/responses 只支持 GPT）。"""
+    GPT 模型优先直连 Responses API；非 GPT 模型走本地 Chat Completions bridge。"""
     auth_mode = runtime.get("auth_mode", "api_key")
     if auth_mode == "oauth":
         env = _account_env(runtime)
@@ -881,18 +1057,21 @@ def launch_codex(model_info, runtime, once=False):
     gateway_health_check(runtime)
     model = _resolve_model(model_info)
     gateway_url = _openai_base_url(runtime)
+    provider_base_url = _codex_provider_base_url(gateway_url)
+    api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
 
     if not _is_gpt_model(model):
-        # Non-GPT model: gateway /v1/responses doesn't support it,
-        # use local bridge to translate Responses API → Chat Completions API
-        console.print(f"[dim]非 GPT 模型 ({model})，启动 Chat Completions bridge...[/dim]")
-        api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
-        with codex_chatcompletions_bridge(gateway_url, api_key, model_name=model) as bridge_cfg:
+        bridge_label = f"模型 {model}" if model else "当前模型"
+        console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
+        with codex_chatcompletions_bridge(gateway_url, api_key, model_name=model or "unknown") as bridge_cfg:
+            bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
             env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
             env["OPENAI_API_KEY"] = bridge_cfg["api_key"]
-            env["OPENAI_BASE_URL"] = bridge_cfg["base_url"]
+            env["OPENAI_BASE_URL"] = bridge_base_url
             cmd = ["codex"]
-            cmd += ["-c", f'base_url="{bridge_cfg["base_url"]}/v1"']
+            cmd += ["-c", 'model_provider="custom"']
+            cmd += ["-c", f'openai_base_url="{bridge_base_url}"']
+            cmd += ["-c", f'model_providers.custom.base_url="{bridge_base_url}"']
             cmd += ["-c", "features.responses_websockets=false"]
             cmd += ["-c", "features.responses_websockets_v2=false"]
             if model:
@@ -906,17 +1085,18 @@ def launch_codex(model_info, runtime, once=False):
                 sys.exit(0)
         return
 
-    # GPT model: direct Responses API to gateway
     env = _codex_gateway_env(runtime, gateway_url)
+    env["OPENAI_BASE_URL"] = provider_base_url
     cmd = ["codex"]
-    cmd += ["-c", f'base_url="{gateway_url}"']
+    cmd += ["-c", 'model_provider="custom"']
+    cmd += ["-c", f'openai_base_url="{provider_base_url}"']
+    cmd += ["-c", f'model_providers.custom.base_url="{provider_base_url}"']
     cmd += ["-c", "features.responses_websockets=false"]
     cmd += ["-c", "features.responses_websockets_v2=false"]
     if model:
         cmd += ["-m", model]
     if runtime.get("bypass"):
         cmd.append("--dangerously-bypass-approvals-and-sandbox")
-
     _exec_or_run(cmd, env, once)
 
 
@@ -1125,5 +1305,7 @@ def _exec_or_run(cmd, env, once, cleanup_path=None, state_home=None, cleanup_con
         finally:
             if cleanup_path and os.path.exists(cleanup_path):
                 os.remove(cleanup_path)
+            if cleanup_context is not None:
+                cleanup_context.__exit__(None, None, None)
     else:
         os.execvpe(exe, cmd, env)

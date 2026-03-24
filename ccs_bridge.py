@@ -4,6 +4,7 @@ import re
 import socket
 import subprocess
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -774,6 +775,17 @@ def codex_claude_bridge(account, model_name):
     server.bridge_source_cli = "codex"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    for _ in range(50):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.1)
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            if result == 0:
+                break
+        except Exception:
+            pass
+        time.sleep(0.1)
     try:
         yield {
             "base_url": f"http://127.0.0.1:{port}",
@@ -896,19 +908,36 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             path = "/v1/messages"
 
         # ── debug: 记录每次 bridge 收到的请求 ──
-        _lb_debug = os.path.expanduser("~/.config/mms/lb_debug.log")
+        _lb_debug_paths = [os.path.expanduser("~/.config/mms/lb_debug.log")]
+        _real_home = os.environ.get("HOME", "")
+        _gateway_marker = f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}"
+        if _gateway_marker in _real_home:
+            _user_home = _real_home.split(_gateway_marker, 1)[0]
+            if _user_home:
+                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms", "lb_debug.log"))
+        elif f"{os.sep}claude-gateway{os.sep}" in _real_home:
+            _user_home = _real_home.split(f"{os.sep}claude-gateway{os.sep}", 1)[0]
+            if _user_home.endswith(f"{os.sep}.config{os.sep}mms"):
+                _user_home = os.path.dirname(os.path.dirname(_user_home))
+            if _user_home:
+                _lb_debug_paths.append(os.path.join(_user_home, ".config", "mms", "lb_debug.log"))
         try:
-            os.makedirs(os.path.dirname(_lb_debug), exist_ok=True)
             light_model = getattr(self.server, "light_model", None)
             medium_model = getattr(self.server, "medium_model", None)
             heavy_model = getattr(self.server, "heavy_model", None)
             user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
-            with open(_lb_debug, "a") as _f:
-                _f.write(f"[POST {self.path}→{path}] heavy={heavy_model} medium={medium_model} light={light_model} "
-                         f"user_msgs={len(user_msgs)} model={payload.get('model','?')}\n")
-                if user_msgs:
-                    raw = _extract_user_text(user_msgs[-1].get("content", ""))
-                    _f.write(f"  last_user_text({len(raw)}): {raw[:120]}\n")
+            log_line = (f"[POST {self.path}→{path}] heavy={heavy_model} medium={medium_model} light={light_model} "
+                        f"user_msgs={len(user_msgs)} model={payload.get('model','?')}\n")
+            if user_msgs:
+                raw = _extract_user_text(user_msgs[-1].get("content", ""))
+                log_line += f"  last_user_text({len(raw)}): {raw[:120]}\n"
+            for _lb_debug in _lb_debug_paths:
+                try:
+                    os.makedirs(os.path.dirname(_lb_debug), exist_ok=True)
+                    with open(_lb_debug, "a") as _f:
+                        _f.write(log_line)
+                except OSError:
+                    pass
         except Exception:
             pass
 
@@ -1036,7 +1065,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 response = httpx.post(target_url, headers=fwd_headers, json=payload, timeout=60)
                 body_out = response.content
                 self.send_response(response.status_code)
-                self.send_header("Content-Type", response.headers.get("content-type", "application/json"))
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body_out)))
                 self.end_headers()
                 self.wfile.write(body_out)
