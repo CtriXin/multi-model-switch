@@ -240,6 +240,7 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
 - `account` 表示官方 OAuth 账号档案
 - 每个账号档案都绑定一个独立 `home_dir`
 - `codex` 会通过隔离 `HOME` / `XDG_CONFIG_HOME` 实现登录态分离
+- `codex` 账号模式下会继续隔离 `auth.json` / `config.toml`，但共享全局 `resume/history` 相关目录，避免切账号后本地会话列表消失
 - `claude` / `gemini` 会保留真实系统用户上下文，只切换各自应用的本地状态目录，避免 macOS Keychain 和首次引导异常
 
 当前优先级是先把“多绑、多选、不互相污染”做稳，所以首轮支持两种方式：
@@ -263,6 +264,7 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
   - 仍然启动 `claude`
   - 不会切去对应的官方 CLI
   - `claude` 请求会转到本地 bridge，再由 bridge 复用官方 OAuth 去请求上游
+  - 启动第一刻的默认模型和底栏状态会直接显示你选中的真实模型名，不再先显示 `opus / sonnet` 这类 slot 占位名
 - 这条 `官方桥接` 当前已支持：
   - `claude <- codex`
   - `claude <- gemini`
@@ -350,6 +352,12 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 它没有类似 Claude Code 的多 slot 默认模型环境变量机制，所以这里不会伪装成 `opus / sonnet / haiku` 那种多模型注入。
 
 但在交互层里，`codex` 不会再被强制绑定到固定的两档场景预设；你仍然可以走全量模型选择路径。
+
+`mms --export codex` 只导出直连 `Responses API` 所需的环境变量；如果目标模型需要本地 `Chat Completions bridge` 才能跑，仍应通过 `mms` 直接启动，而不是只靠 export。
+
+通过 `mms` 直接启动 `codex` 时，`api_key` 路径会优先走本地 bridge，再转发到 gateway 的 `chat/completions`，避免不同 provider 的 `responses` 流式兼容差异直接暴露给 Codex CLI。
+
+当 `codex` 走 `--account <id>` 时，MMS 会继续隔离账号登录态和项目级配置，但把 `history.jsonl`、`sessions/`、`session_index.jsonl`、`shell_snapshots/` 这类 `resume/history` 数据切回共享层。这样切换不同 `codex` 账号后，本地 `resume` 列表仍然可见，不会因为账号目录分裂而“像丢历史”。
 
 ## `mms chat` / `mms discuss`
 

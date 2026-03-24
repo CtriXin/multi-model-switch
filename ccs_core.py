@@ -1878,7 +1878,8 @@ def _probe_models(provider, emit_output=True):
 
     if "openai_chat_completions" not in protocols:
         result["error_kind"] = "protocol_unsupported"
-        result["error"] = f"provider '{provider_id}' 未声明 openai_chat_completions，无法探测 /v1/models"
+        models_endpoint = provider.get("models_endpoint", "/models")
+        result["error"] = f"provider '{provider_id}' 未声明 openai_chat_completions，无法探测 {models_endpoint}"
     elif httpx is None:
         result["error_kind"] = "missing_httpx"
         result["error"] = "缺少 httpx，请执行: pip install httpx"
@@ -1895,13 +1896,22 @@ def _probe_models(provider, emit_output=True):
         # 尝试 base_url 和 alt_url（/v1 互转），以第一个能返回有效 JSON 的为准
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
         last_exc = None
+        models_endpoint = provider.get("models_endpoint", "/models")
+        if not models_endpoint.startswith("/"):
+            models_endpoint = "/" + models_endpoint
         for try_url in [base_url, alt_url]:
             try:
-                response = httpx.get(
-                    f"{try_url}/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=15,
-                )
+                if "{key}" in models_endpoint:
+                    endpoint_url = models_endpoint.replace("{key}", api_key)
+                elif "?" in models_endpoint:
+                    endpoint_url = f"{models_endpoint}&key={api_key}"
+                else:
+                    endpoint_url = models_endpoint
+                full_url = f"{try_url}{endpoint_url}"
+                headers = {}
+                if "/api/models/info" not in models_endpoint:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                response = httpx.get(full_url, headers=headers, timeout=15)
                 response.raise_for_status()
                 data = response.json()
                 models = [m["id"] for m in data.get("data", [])]
