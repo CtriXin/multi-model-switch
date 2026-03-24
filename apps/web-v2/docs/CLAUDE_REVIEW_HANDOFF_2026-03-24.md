@@ -63,20 +63,22 @@
 [src/services/api.ts](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2/src/services/api.ts) 已对 NewAPI 的额度错误做映射：
 
 - `daily_quota_exceeded` -> `今日额度已用完，明天 UTC 0 点重置`
-- `pre_consume_token_quota_failed` / `quota_not_enough` -> `账户额度已耗尽`
+- `pre_consume_token_quota_failed` / `quota_not_enough` -> `账户额度已耗尽，请联系支持申请更多额度`
 
 当前主线表现是：
 
 - 聊天/辩论里会出现“额度已用完/已耗尽”的错误提示
+- `quota_not_enough` 不再是纯死胡同文案，而是会提示用户联系支持申请更多额度
 - 但 `main` 不包含 wallet/top-up UI 主路径
 - 真正的余额展示、Lite mode、top-up、consume gating 仍在独立 `wallet-lite` 线，不在这次送审主线里
+- 上述文案成立的前提是后端继续稳定区分 `daily_quota_exceeded` 与 `quota_not_enough` / `pre_consume_token_quota_failed`
 
 ## 当前验证状态
 
 - `npm run build` ✅
-- `npm run type-check` ⚠️ 仍失败，但已清掉本轮 screenshot/mock 直接相关错误
+- `npm run type-check` ✅
 
-当前剩余 type-check 主要在：
+本轮额外清掉了原先会影响可达实验室页面的类型错误：
 
 - `src/features/play-modes/story-lite/mock.ts`
 - `src/stores/dailyChallenge.ts`
@@ -84,6 +86,33 @@
 - `src/stores/storyLiteV2.ts`
 - `src/views/DailyChallengeView.vue`
 - `src/views/StoryLiveView.vue`
+
+这些页面当前都还在主路由 / 实验室入口中可达：
+
+- `/challenge`
+- `/story-lite`
+- `/story-live`
+- `/multi-life`
+
+所以这轮把它们清绿是必要动作，不只是“顺手修类型”。
+
+## 送审前必检补充
+
+- 审核 / 演示安装实例要预置足够额度，避免审核员在首轮体验里直接撞到 `quota_not_enough`
+- 后端必须继续稳定返回不同错误码：`daily_quota_exceeded` vs `quota_not_enough` / `pre_consume_token_quota_failed`
+- `POST /api/provision` 至少要有设备 / IP 级基础限频，避免安装实例 provisioning 被刷穿
+- visible lab entries 至少要做到“可进入、不白屏、不报明显 runtime 错误”，不要再把 type risk 当成不可达模块忽略
+
+## 关于 Wallet Contract 文档
+
+暂不建议归档 [WALLET_BACKEND_BLOCKER_CONTRACT.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2/docs/WALLET_BACKEND_BLOCKER_CONTRACT.md)。
+
+原因不是要把 wallet 合回 `main`，而是其中的错误码契约
+
+- `daily_quota_exceeded`
+- `quota_depleted` / `quota_not_enough`
+
+仍然直接影响送审版当前的前端提示语义。
 
 ## 建议 Claude Review 重点
 
@@ -93,7 +122,7 @@
 2. 去掉 `好友模式` 概念后，是否还有任何地方错误地把 `sparkring` 隐藏掉
 3. 正式路由是否还存在 screenshot/mock/showcase 可达注入点
 4. “额度不足”是否已经能在主路径里给出可理解提示，而不是表现成坏掉或无模型
-5. 剩余 `type-check` 错误里，哪些会真实阻塞送审可见路径
+5. `provision` 的后端限频 / 防刷是否已经具备基本可上线约束
 
 ## 不要误做的事
 

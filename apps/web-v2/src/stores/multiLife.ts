@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
-import { useAppStore } from '@/stores/app'
+import { useAppStore, type ModelMeta } from '@/stores/app'
 import { streamModelChat } from '@/services/runtime'
 import { sanitizeModelOutput } from '@/utils/modelOutput'
 import type { PlayModeSessionEnvelope } from '@/features/play-modes/shared'
@@ -249,7 +249,7 @@ export const useMultiLifeStore = defineStore('multi-life', () => {
     const pickedIds = appStore.pickLabModelIds(3, undefined, 'multi-life:auto')
     const pickedModels = pickedIds
       .map((id) => appStore.getModel(id))
-      .filter(Boolean)
+      .filter((model): model is ModelMeta => Boolean(model))
 
     modelWarning.value = ''
 

@@ -3,6 +3,7 @@ import { onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useDailyChallengeStore } from '@/stores/dailyChallenge'
+import type { TopicCandidate, UserDebateRole } from '@/features/challenge/types'
 import TopicPicker from '@/components/challenge/TopicPicker.vue'
 import StanceInput from '@/components/challenge/StanceInput.vue'
 import DebateStage from '@/components/challenge/DebateStage.vue'
@@ -20,6 +21,11 @@ onMounted(async () => {
   if (appStore.models.length === 0) await appStore.initialize()
   store.init() 
 })
+
+function handleTopicSelect(payload: { topic: TopicCandidate; role: UserDebateRole }) {
+  store.selectTopic(payload.topic)
+  void store.prefetchOpening(payload.topic, payload.role)
+}
 
 function goBack() { router.push('/lab') }
 </script>
@@ -56,7 +62,7 @@ function goBack() { router.push('/lab') }
       <div v-else class="w-full max-w-5xl mx-auto flex-1 flex flex-col glass-v3 rounded-[32px] lg:rounded-[48px] shadow-2xl border border-black/5 dark:border-white/10 overflow-hidden relative bg-white/95 dark:bg-[#0d0f14]/90 transition-none">
         <div class="flex-1 flex flex-col overflow-hidden relative">
           <div class="flex-1 flex flex-col overflow-hidden p-6 sm:p-10">
-            <TopicPicker v-if="store.phase === 'pick_topic'" :candidates="store.candidates" :categories="store.categories" :loading="store.loading" @select="store.selectTopic($event)" @refresh="store.refreshTopics()" @dismiss="store.dismissTopic($event)" @update-categories="store.updateCategories($event)" />
+            <TopicPicker v-if="store.phase === 'pick_topic'" :candidates="store.candidates" :categories="store.categories" :loading="store.loading" @select="handleTopicSelect" @refresh="store.refreshTopics()" @dismiss="store.dismissTopic($event)" @update-categories="store.updateCategories($event)" />
             <StanceInput v-else-if="store.phase === 'pick_stance'" :topic="store.selectedTopic!" @submit="store.startDebate($event)" @back="store.phase = 'pick_topic'" />
             <DebateStage v-else-if="store.phase === 'debating'" :topic="store.selectedTopic!" :messages="store.messages" :debating="store.debating" :error="store.error" :user-role="store.userRole" :awaiting-user-input="store.awaitingUserInput" :awaiting-decision="store.awaitingDecision" :current-round="store.currentRound" @submit-turn="store.submitUserTurn($event)" @continue="store.continueDebate()" @finish="store.finishDebate()" />
             <ResultCard v-else-if="store.phase === 'result'" :topic="store.selectedTopic" :pro-text="store.proText" :con-text="store.conText" :takeaway="store.takeaway" :snapshot="store.snapshot" :current-card="store.currentCard" :user-stance="store.userStance" :user-reason="store.userReason" :streak="store.streak" :messages="store.messages" @save="store.saveCurrentCard($event)" @retry="store.reset()" @go-history="store.goToHistory()" @go-home="store.reset()" />
