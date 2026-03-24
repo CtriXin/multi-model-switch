@@ -1289,7 +1289,9 @@ def launch_codex(model_info, runtime, once=False):
             cmd += ["-m", model]
         if runtime.get("bypass"):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
-        _exec_or_run(cmd, env, once)
+        # 本地 responses bridge 运行在当前 Python 进程内；交互模式若 exec 替换自身，
+        # bridge 线程会一并消失，Codex 随后访问 127.0.0.1:port 只会得到 5xx/连接失败。
+        _exec_or_run(cmd, env, once, force_subprocess=True)
 
 
 def launch_qwen(model_info, provider, once=False):

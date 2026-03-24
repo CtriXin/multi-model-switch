@@ -2338,6 +2338,7 @@ _PROBE_CACHE = {}
 _PROBE_CACHE_TTL = 300  # 5 分钟内复用（内存）
 _PROBE_FILE_CACHE_DIR = os.path.join(PRIMARY_CONFIG_DIR, "cache")
 _PROBE_FILE_CACHE_TTL = 86400  # 文件缓存 24 小时
+_PROBE_FILE_CACHE_NEGATIVE_TTL = 600  # 失败/空模型列表缓存 10 分钟，避免频繁慢探测
 
 
 def _probe_file_cache_path(provider_id):
@@ -2361,27 +2362,34 @@ def _load_probe_file_cache(provider_id):
         import time as _time
         if not os.path.exists(path):
             return None
-        age = _time.time() - os.path.getmtime(path)
-        if age > _PROBE_FILE_CACHE_TTL:
-            return None
         with open(path, "r") as f:
             data = json.load(f)
-        cached_models = _normalize_model_id_list(data.get("raw_models") or data.get("models") or [])
-        if cached_models:
-            normalized = dict(data)
-            normalized["raw_models"] = cached_models
-            normalized.setdefault("base_source", "remote")
-            return normalized
+        raw_models = _normalize_model_id_list(data.get("raw_models") or data.get("models") or [])
+        error_kind = data.get("error_kind")
+        ttl = _PROBE_FILE_CACHE_NEGATIVE_TTL if error_kind or not raw_models else _PROBE_FILE_CACHE_TTL
+        age = _time.time() - os.path.getmtime(path)
+        if age > ttl:
+            return None
+        normalized = dict(data)
+        normalized["raw_models"] = raw_models
+        normalized["models"] = list(raw_models)
+        normalized.setdefault("base_source", "remote")
+        normalized.setdefault("error", None)
+        normalized.setdefault("error_kind", None)
+        normalized.setdefault("details", [])
+        return normalized
     except Exception:
         pass
     return None
 
 
 def _save_probe_file_cache(provider_id, result):
-    """将成功的 probe 结果写入文件缓存。"""
-    if result.get("base_source") != "remote":
-        return
-    if not result.get("raw_models"):
+    """将 probe 结果写入文件缓存。
+
+    remote 成功结果、fallback 模型结果、负缓存都应落盘，避免模型选择页反复慢探测。
+    """
+    base_source = result.get("base_source")
+    if base_source not in {"remote", "fallback"}:
         return
     try:
         os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
@@ -2389,9 +2397,11 @@ def _save_probe_file_cache(provider_id, result):
         with open(path, "w") as f:
             json.dump(
                 {
-                    "raw_models": result["raw_models"],
+                    "raw_models": result.get("raw_models") or [],
                     "working_url": result.get("working_url"),
-                    "base_source": result.get("base_source", "remote"),
+                    "base_source": base_source or "remote",
+                    "error": result.get("error"),
+                    "error_kind": result.get("error_kind"),
                 },
                 f,
             )
@@ -3285,6 +3295,10 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
             option_models = [selected_model]
         else:
             option_models = cli_models
+
+        if not option_models:
+            _probe_debug_logger.info("  %s: SKIP (no option models for cli=%s)", pid, cli_name)
+            continue
 
         _probe_debug_logger.info("  %s: ADDED (option_models=%s)", pid, option_models)
         options.append({
