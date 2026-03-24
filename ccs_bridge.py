@@ -9,6 +9,8 @@ import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from ccs_speed_stats import record_model_speed
+
 
 class _SilentHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer that silences BrokenPipeError/ConnectionResetError on client disconnect."""
@@ -30,6 +32,53 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
 
 _ROUTE_STATUS_PATH = os.path.join(os.path.expanduser("~/.config/mms"), "route_status.json")
+
+
+def _now_ms():
+    return time.monotonic() * 1000.0
+
+
+def _extract_output_tokens(payload):
+    if not isinstance(payload, dict):
+        return None
+
+    usage_candidates = []
+    for key in ("usage",):
+        usage = payload.get(key)
+        if isinstance(usage, dict):
+            usage_candidates.append(usage)
+    response_payload = payload.get("response")
+    if isinstance(response_payload, dict):
+        usage = response_payload.get("usage")
+        if isinstance(usage, dict):
+            usage_candidates.append(usage)
+    message_payload = payload.get("message")
+    if isinstance(message_payload, dict):
+        usage = message_payload.get("usage")
+        if isinstance(usage, dict):
+            usage_candidates.append(usage)
+
+    for usage in usage_candidates:
+        for key in ("output_tokens", "completion_tokens"):
+            value = usage.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return int(value)
+    return None
+
+
+def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens=None):
+    if first_byte_ms is None:
+        return
+    total_ms = max(0.0, _now_ms() - started_ms)
+    ttfb_ms = max(0.0, first_byte_ms - started_ms)
+    if total_ms <= 0 or ttfb_ms <= 0:
+        return
+    record_model_speed(
+        model_name,
+        ttfb_ms=ttfb_ms,
+        total_ms=total_ms,
+        output_tokens=output_tokens,
+    )
 
 
 def _write_route_status(tier, model, reason):
@@ -874,13 +923,19 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid bridge token"}})
             return
         if self.path == "/v1/models":
-            # 动态构建模型列表：heavy + medium + light + Claude 默认（兜底）
+            # 动态构建模型列表：优先使用调用方提供的 advertised_models，再补兜底。
             seen = set()
             models = []
-            for m in (getattr(self.server, "heavy_model", None),
-                      getattr(self.server, "medium_model", None),
-                      getattr(self.server, "light_model", None),
-                      "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"):
+            advertised_models = list(getattr(self.server, "advertised_models", []) or [])
+            fallback_models = [
+                getattr(self.server, "heavy_model", None),
+                getattr(self.server, "medium_model", None),
+                getattr(self.server, "light_model", None),
+                "claude-sonnet-4-6",
+                "claude-opus-4-6",
+                "claude-haiku-4-5-20251001",
+            ]
+            for m in advertised_models + fallback_models:
                 if m and m not in seen:
                     seen.add(m)
                     models.append({"id": m, "object": "model"})
@@ -1019,6 +1074,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
         # 剥离 query string 再匹配路由（Claude Code 会发 /v1/messages?beta=true）
         path_bare = path.split("?")[0]
+        should_record_speed = path_bare != "/v1/messages/count_tokens"
 
         if path_bare not in ("/v1/messages", "/v1/messages/count_tokens"):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
@@ -1049,26 +1105,61 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # 智能路由模式下强制非流式（避免 OpenAI/Anthropic SSE 格式不匹配导致无法结束）
         if has_routing:
             stream = False
+        metrics_model = str(payload.get("model") or "")
+        started_ms = _now_ms()
+        first_byte_ms = None
+        output_tokens = None
 
         try:
-            if stream:
-                with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
+            with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
+                if stream:
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
                     self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "keep-alive")
+                    self.send_header("Connection", "close")
                     self.end_headers()
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    body_chunks = []
                     for chunk in response.iter_bytes():
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
-            else:
-                response = httpx.post(target_url, headers=fwd_headers, json=payload, timeout=60)
-                body_out = response.content
-                self.send_response(response.status_code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body_out)))
-                self.end_headers()
-                self.wfile.write(body_out)
+                        if first_byte_ms is None and chunk:
+                            first_byte_ms = _now_ms()
+                        body_chunks.append(chunk)
+                    body_out = b"".join(body_chunks)
+                    if body_out:
+                        try:
+                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                        except Exception:
+                            output_tokens = None
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+                if should_record_speed and response.status_code < 400:
+                    _record_bridge_speed(
+                        metrics_model,
+                        started_ms=started_ms,
+                        first_byte_ms=first_byte_ms,
+                        output_tokens=output_tokens,
+                    )
         except BrokenPipeError:
             return  # 客户端已断开（Ctrl+C），静默忽略
         except Exception as exc:
@@ -1408,6 +1499,134 @@ class _ChatCompletionsToResponsesTranslator:
         return events
 
 
+class _ResponsesProxyHandler(BaseHTTPRequestHandler):
+    """Local proxy for Codex direct Responses traffic with patched /v1/models."""
+
+    server_version = "MMSCodexResponsesProxy/0.1"
+
+    def log_message(self, *_args):
+        return
+
+    def _json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authorized(self):
+        expected = getattr(self.server, "bridge_token")
+        gateway_key = getattr(self.server, "gateway_key", "")
+        auth = self.headers.get("authorization", "").strip()
+        bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        key = self.headers.get("x-api-key", "").strip()
+        token = key or bearer
+        return token and token in {expected, gateway_key}
+
+    def do_GET(self):
+        if self.path == "/v1/models":
+            advertised_models = list(getattr(self.server, "advertised_models", []) or [])
+            model = getattr(self.server, "model_name", "unknown")
+            if not advertised_models:
+                advertised_models = [model]
+            self._json(200, {
+                "object": "list",
+                "data": [{"id": item, "object": "model", "owned_by": "gateway"} for item in advertised_models if item],
+            })
+            return
+        self._json(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self._authorized():
+            self._json(401, {"error": {"message": "invalid token"}})
+            return
+
+        length = int(self.headers.get("content-length") or 0)
+        raw_body = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except json.JSONDecodeError:
+            self._json(400, {"error": {"message": "invalid json"}})
+            return
+
+        if self.path not in ("/v1/responses", "/responses"):
+            self._json(404, {"error": {"message": f"unsupported path: {self.path}"}})
+            return
+
+        if httpx is None:
+            self._json(502, {"error": {"message": "缺少 httpx"}})
+            return
+
+        gateway_url = getattr(self.server, "gateway_url")
+        gateway_key = getattr(self.server, "gateway_key")
+        model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
+        target_url = gateway_url.rstrip("/") + "/responses"
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {gateway_key}",
+        }
+
+        started_ms = _now_ms()
+        first_byte_ms = None
+        output_tokens = None
+
+        try:
+            with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
+                content_type = response.headers.get("content-type", "application/json")
+                is_stream = "text/event-stream" in content_type.lower()
+                if is_stream:
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    body_chunks = []
+                    for chunk in response.iter_bytes():
+                        if first_byte_ms is None and chunk:
+                            first_byte_ms = _now_ms()
+                        body_chunks.append(chunk)
+                    body_out = b"".join(body_chunks)
+                    if body_out:
+                        try:
+                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                        except Exception:
+                            output_tokens = None
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+                if response.status_code < 400:
+                    _record_bridge_speed(
+                        model_name,
+                        started_ms=started_ms,
+                        first_byte_ms=first_byte_ms,
+                        output_tokens=output_tokens,
+                    )
+        except Exception as exc:
+            self._json(502, {"error": {"message": str(exc)}})
+
+
 class _ResponsesToChatHandler(BaseHTTPRequestHandler):
     """Local bridge: accepts Codex's /v1/responses requests,
     translates to /v1/chat/completions, forwards to gateway."""
@@ -1446,10 +1665,13 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle /v1/models for Codex model metadata queries."""
         if self.path == "/v1/models":
+            advertised_models = list(getattr(self.server, "advertised_models", []) or [])
             model = getattr(self.server, "model_name", "unknown")
+            if not advertised_models:
+                advertised_models = [model]
             self._json(200, {
                 "object": "list",
-                "data": [{"id": model, "object": "model", "owned_by": "gateway"}],
+                "data": [{"id": item, "object": "model", "owned_by": "gateway"} for item in advertised_models if item],
             })
             return
         self._json(404, {"error": "not found"})
@@ -1501,6 +1723,9 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
         }
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
+        started_ms = _now_ms()
+        first_byte_ms = None
+        output_tokens = None
         try:
             with httpx.stream("POST", target_url, headers=fwd_headers,
                               json=chat_payload, timeout=300) as response:
@@ -1512,10 +1737,12 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
+                self.send_header("Connection", "close")
                 self.end_headers()
 
                 for raw_line in response.iter_lines():
+                    if first_byte_ms is None:
+                        first_byte_ms = _now_ms()
                     line = raw_line.strip()
                     if not line:
                         continue
@@ -1528,14 +1755,24 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
                         except json.JSONDecodeError:
                             continue
                         for event_name, event_payload in translator.process_chunk(chunk):
+                            extracted = _extract_output_tokens(event_payload)
+                            if extracted is not None:
+                                output_tokens = extracted
                             self._sse(event_name, event_payload)
+                self.close_connection = True
+                _record_bridge_speed(
+                    model_name,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                )
 
         except Exception as exc:
             self._json(502, {"error": {"message": str(exc)}})
 
 
 @contextmanager
-def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown"):
+def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
     Use this when the gateway only supports Chat Completions for non-GPT models
@@ -1549,6 +1786,7 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown")
     server.gateway_url = gateway_url
     server.gateway_key = gateway_key
     server.model_name = model_name
+    server.advertised_models = list(advertised_models or [])
     server.bridge_token = bridge_token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1564,7 +1802,32 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown")
 
 
 @contextmanager
-def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None):
+def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None):
+    if httpx is None:
+        raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
+    port = _find_free_port()
+    bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
+    server = _SilentHTTPServer(("127.0.0.1", port), _ResponsesProxyHandler)
+    server.gateway_url = gateway_url
+    server.gateway_key = gateway_key
+    server.model_name = model_name
+    server.advertised_models = list(advertised_models or [])
+    server.bridge_token = bridge_token
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield {
+            "base_url": f"http://127.0.0.1:{port}",
+            "api_key": bridge_token,
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+@contextmanager
+def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None, advertised_models=None):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
 
@@ -1583,6 +1846,7 @@ def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_mod
     server.heavy_model = heavy_model
     server.medium_model = medium_model
     server.light_model = light_model
+    server.advertised_models = list(advertised_models or [])
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

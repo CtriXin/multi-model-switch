@@ -9,8 +9,8 @@ import tempfile
 from datetime import datetime
 
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, _write_route_status
-from ccs_core import detect_working_base_url
+from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
+from ccs_core import _probe_models, detect_working_base_url
 from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from ccs_session_index import finalize_claude_session, record_claude_session_start
 
@@ -22,6 +22,7 @@ except ImportError:
 console = Console()
 RUNTIME_DIR = os.path.expanduser("~/.config/mms/runtime")
 HEALTH_CHECK_PATH = os.path.expanduser("~/.config/mms/health_check.json")
+ANTHROPIC_URL_CACHE_PATH = os.path.expanduser("~/.config/mms/cache/anthropic_base_urls.json")
 
 # Anthropic URL 探测结果缓存（内存，TTL 1h）
 # key: provider_id → {"url": str, "ts": datetime}
@@ -37,6 +38,40 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 # agent-im daemon 路径（auto-start on mms launch）
 _AGENT_IM_DIR = os.path.expanduser("~/auto-skills/CtriXin-repo/agent-im")
 _AGENT_IM_SOCK = os.path.expanduser("~/.agent-im/agent-im.sock")
+
+
+def _anthropic_cache_key(provider_id, configured_url):
+    return f"{provider_id}::{configured_url.rstrip('/')}"
+
+
+def _load_anthropic_url_file_cache():
+    try:
+        with open(ANTHROPIC_URL_CACHE_PATH, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_anthropic_url_file_cache(cache_data):
+    try:
+        os.makedirs(os.path.dirname(ANTHROPIC_URL_CACHE_PATH), exist_ok=True)
+        tmp_path = ANTHROPIC_URL_CACHE_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(cache_data, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+        os.replace(tmp_path, ANTHROPIC_URL_CACHE_PATH)
+    except Exception:
+        pass
+
+
+def _remember_anthropic_url(provider_id, configured_url, resolved_url):
+    now_iso = datetime.now().isoformat()
+    cache_key = _anthropic_cache_key(provider_id, configured_url)
+    _ANTHROPIC_URL_CACHE[provider_id] = {"url": resolved_url, "ts": datetime.now()}
+    cache_data = _load_anthropic_url_file_cache()
+    cache_data[cache_key] = {"url": resolved_url, "ts": now_iso}
+    _save_anthropic_url_file_cache(cache_data)
 
 
 def _ensure_agent_im():
@@ -365,12 +400,14 @@ def _apply_claude_model_overrides(target, model_info):
 def launch_claude(model_info, runtime, once=False):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
     auth_mode = runtime.get("auth_mode", "api_key")
+    advertised_models = []
     if auth_mode == "oauth":
         env = _account_env(runtime)
         state_home = None  # per-PID HOME 已隔离，不需要 swap .claude.json
         cleanup_ctx = None
     elif auth_mode == "oauth_bridge":
         bridge_model = runtime.get("bridge_model") or _resolve_model(model_info)
+        advertised_models = [bridge_model] if bridge_model else []
         if runtime.get("bridge_source_cli") == "gemini":
             cleanup_ctx = gemini_claude_bridge(runtime, bridge_model)
         else:
@@ -386,6 +423,10 @@ def launch_claude(model_info, runtime, once=False):
         state_home = None
     else:
         gateway_health_check(runtime)
+        try:
+            advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
+        except Exception:
+            advertised_models = []
 
         # ---- 三级兼容策略 ----
         # 1. 自动探测正确的 ANTHROPIC_BASE_URL（缓存 1h，避免重复请求）
@@ -408,15 +449,16 @@ def launch_claude(model_info, runtime, once=False):
         lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
 
         if anthropic_url is not None:
+            bridge_gw_url = anthropic_url.rstrip("/")
+            if not bridge_gw_url.endswith("/v1"):
+                bridge_gw_url += "/v1"
             if lb_light or lb_medium:
                 # 智能路由：通过本地 bridge 路由，以便拦截并切换模型
-                bridge_gw_url = anthropic_url.rstrip("/")
-                if not bridge_gw_url.endswith("/v1"):
-                    bridge_gw_url += "/v1"
                 cleanup_ctx = gateway_claude_bridge(bridge_gw_url, runtime["api_key"],
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium or None,
-                                                    light_model=lb_light or None)
+                                                    light_model=lb_light or None,
+                                                    advertised_models=advertised_models)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -434,9 +476,21 @@ def launch_claude(model_info, runtime, once=False):
                     parts.append(f"light: {lb_light}")
                 console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
-                # 探测成功：使用探测到的 URL
-                env = _claude_gateway_env(runtime, base_url=anthropic_url, selected_model=probe_model)
-                cleanup_ctx = None
+                # 直连 Anthropic provider 也统一过本地 bridge，补齐测速与 patched /v1/models。
+                cleanup_ctx = gateway_claude_bridge(
+                    bridge_gw_url,
+                    runtime["api_key"],
+                    heavy_model=probe_model,
+                    advertised_models=advertised_models,
+                )
+                bridge_cfg = cleanup_ctx.__enter__()
+                env = _claude_gateway_env(
+                    runtime,
+                    base_url=bridge_cfg["base_url"],
+                    auth_token=bridge_cfg["api_key"],
+                    heavy_model=probe_model,
+                    selected_model=probe_model,
+                )
             state_home = None
 
         elif runtime.get("bridge_source_cli"):
@@ -472,7 +526,8 @@ def launch_claude(model_info, runtime, once=False):
             cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
-                                                light_model=lb_light or None)
+                                                light_model=lb_light or None,
+                                                advertised_models=advertised_models)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _claude_gateway_env(
                 runtime,
@@ -502,7 +557,8 @@ def launch_claude(model_info, runtime, once=False):
                 cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium,
-                                                    light_model=lb_light)
+                                                    light_model=lb_light,
+                                                    advertised_models=advertised_models)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -593,6 +649,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
 
     # 预处理 URL
     url = configured.rstrip("/")
+    normalized_url = url[:-3] if url.endswith("/v1") else url
 
     # ---- 内存缓存（TTL 1h）----
     cached = _ANTHROPIC_URL_CACHE.get(provider_id)
@@ -601,10 +658,30 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         if age < 3600:
             return cached["url"], "cached"
 
+    # ---- 文件缓存（跨进程，TTL 7d）----
+    cache_key = _anthropic_cache_key(provider_id, url)
+    file_cached = _load_anthropic_url_file_cache().get(cache_key)
+    if isinstance(file_cached, dict):
+        cached_url = str(file_cached.get("url", "")).strip()
+        cached_ts = str(file_cached.get("ts", "")).strip()
+        if cached_url and cached_ts:
+            try:
+                age = (datetime.now() - datetime.fromisoformat(cached_ts)).total_seconds()
+            except ValueError:
+                age = 999999
+            if age < 7 * 24 * 3600:
+                _ANTHROPIC_URL_CACHE[provider_id] = {"url": cached_url, "ts": datetime.now()}
+                return cached_url, "file_cached"
+
+    # ---- 快速兼容：Claude SDK 自己会拼 /v1/messages，配置尾部 /v1 时直接裁掉 ----
+    if url.endswith("/v1"):
+        _remember_anthropic_url(provider_id, url, normalized_url)
+        return normalized_url, "normalized"
+
     # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
     if provider_id == "bailian-codingplan":
         console.print(f"[dim]百炼 CodingPlan：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
-        _ANTHROPIC_URL_CACHE[provider_id] = {"url": url, "ts": datetime.now()}
+        _remember_anthropic_url(provider_id, url, url)
         return url, "bypass_for_bailian"
 
     # ---- 使用公共工具探测（复用 ccs_core.detect_working_base_url）----
@@ -623,7 +700,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5)
 
     if candidate is not None:
-        _ANTHROPIC_URL_CACHE[provider_id] = {"url": candidate, "ts": datetime.now()}
+        _remember_anthropic_url(provider_id, url, candidate)
         if candidate != url:
             console.print(f"[dim]✓ Anthropic 端点自动修正: {url} → {candidate}[/dim]")
         return candidate, "probed"
@@ -1124,13 +1201,21 @@ def launch_codex(model_info, runtime, once=False):
     gateway_health_check(runtime)
     model = _resolve_model(model_info)
     gateway_url = _openai_base_url(runtime)
-    provider_base_url = _codex_provider_base_url(gateway_url)
     api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
+    try:
+        advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
+    except Exception:
+        advertised_models = [model] if model else []
 
     if not _is_gpt_model(model):
         bridge_label = f"模型 {model}" if model else "当前模型"
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
-        with codex_chatcompletions_bridge(gateway_url, api_key, model_name=model or "unknown") as bridge_cfg:
+        with codex_chatcompletions_bridge(
+            gateway_url,
+            api_key,
+            model_name=model or "unknown",
+            advertised_models=advertised_models,
+        ) as bridge_cfg:
             bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
             env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
             env["OPENAI_API_KEY"] = bridge_cfg["api_key"]
@@ -1152,19 +1237,27 @@ def launch_codex(model_info, runtime, once=False):
                 sys.exit(0)
         return
 
-    env = _codex_gateway_env(runtime, gateway_url)
-    env["OPENAI_BASE_URL"] = provider_base_url
-    cmd = ["codex"]
-    cmd += ["-c", 'model_provider="custom"']
-    cmd += ["-c", f'openai_base_url="{provider_base_url}"']
-    cmd += ["-c", f'model_providers.custom.base_url="{provider_base_url}"']
-    cmd += ["-c", "features.responses_websockets=false"]
-    cmd += ["-c", "features.responses_websockets_v2=false"]
-    if model:
-        cmd += ["-m", model]
-    if runtime.get("bypass"):
-        cmd.append("--dangerously-bypass-approvals-and-sandbox")
-    _exec_or_run(cmd, env, once)
+    with codex_responses_bridge(
+        gateway_url,
+        api_key,
+        model_name=model or "unknown",
+        advertised_models=advertised_models,
+    ) as bridge_cfg:
+        bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
+        env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
+        env["OPENAI_API_KEY"] = bridge_cfg["api_key"]
+        env["OPENAI_BASE_URL"] = bridge_base_url
+        cmd = ["codex"]
+        cmd += ["-c", 'model_provider="custom"']
+        cmd += ["-c", f'openai_base_url="{bridge_base_url}"']
+        cmd += ["-c", f'model_providers.custom.base_url="{bridge_base_url}"']
+        cmd += ["-c", "features.responses_websockets=false"]
+        cmd += ["-c", "features.responses_websockets_v2=false"]
+        if model:
+            cmd += ["-m", model]
+        if runtime.get("bypass"):
+            cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        _exec_or_run(cmd, env, once)
 
 
 def launch_qwen(model_info, provider, once=False):
@@ -1270,19 +1363,10 @@ def _show_launch_info(cli, runtime, auth_mode):
     # ── gateway 可用模型列表 ──
     if auth_mode == "api_key":
         try:
-            import httpx as _httpx
-            base_url = _openai_base_url(runtime) or _anthropic_base_url(runtime)
-            api_key = runtime.get("api_key", "")
-            if base_url and api_key:
-                url_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-                r = _httpx.get(f"{url_v1}/models",
-                               headers={"Authorization": f"Bearer {api_key}"},
-                               timeout=5, follow_redirects=True)
-                if r.status_code == 200:
-                    models = [m.get("id", "") for m in r.json().get("data", []) if m.get("id")]
-                    if models:
-                        console.print(f"[dim]可用模型 ({len(models)}): {', '.join(models[:8])}"
-                                      f"{'…' if len(models) > 8 else ''}[/dim]")
+            models = list(_probe_models(runtime, emit_output=False).get("models") or [])
+            if models:
+                console.print(f"[dim]可用模型 ({len(models)}): {', '.join(models[:8])}"
+                              f"{'…' if len(models) > 8 else ''}[/dim]")
         except Exception:
             pass
 
