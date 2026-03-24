@@ -116,6 +116,12 @@ return { ..., "openai_api_key": openai_api_key }
 provider["openai_api_key"] = credentials.get("openai_api_key", "")
 ```
 
+### 后续收口
+`save_provider_credentials()` 现在会在通过 MMS 的 provider 编辑流程保存凭据时，同步刷新
+`CCS_PROVIDER_<ID>_OPENAI_API_KEY`。当前交互式 UI 只输入一把 key，因此保存时默认让
+OpenAI 路径与通用 `API_KEY` 保持一致，避免旧的 `OPENAI_API_KEY` 残留导致 `codex`
+继续命中过期 token。
+
 ---
 
 ## 问题 5：Claude gateway 模式 `claude-sonnet-4-6[1m]` 找不到
