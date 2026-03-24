@@ -13,6 +13,7 @@ from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude
 from ccs_core import _probe_models, detect_working_base_url
 from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from ccs_session_index import finalize_claude_session, record_claude_session_start
+from ccs_speed_stats import build_provider_speed_scope
 
 try:
     from rich.console import Console
@@ -423,6 +424,7 @@ def launch_claude(model_info, runtime, once=False):
         state_home = None
     else:
         gateway_health_check(runtime)
+        speed_scope = build_provider_speed_scope(runtime)
         try:
             advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
         except Exception:
@@ -458,7 +460,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium or None,
                                                     light_model=lb_light or None,
-                                                    advertised_models=advertised_models)
+                                                    advertised_models=advertised_models,
+                                                    speed_scope=speed_scope)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -482,6 +485,7 @@ def launch_claude(model_info, runtime, once=False):
                     runtime["api_key"],
                     heavy_model=probe_model,
                     advertised_models=advertised_models,
+                    speed_scope=speed_scope,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
@@ -527,7 +531,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None,
-                                                advertised_models=advertised_models)
+                                                advertised_models=advertised_models,
+                                                speed_scope=speed_scope)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _claude_gateway_env(
                 runtime,
@@ -558,7 +563,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium,
                                                     light_model=lb_light,
-                                                    advertised_models=advertised_models)
+                                                    advertised_models=advertised_models,
+                                                    speed_scope=speed_scope)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -1202,6 +1208,7 @@ def launch_codex(model_info, runtime, once=False):
     model = _resolve_model(model_info)
     gateway_url = _openai_base_url(runtime)
     api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
+    speed_scope = build_provider_speed_scope(runtime)
     try:
         advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
     except Exception:
@@ -1215,6 +1222,7 @@ def launch_codex(model_info, runtime, once=False):
             api_key,
             model_name=model or "unknown",
             advertised_models=advertised_models,
+            speed_scope=speed_scope,
         ) as bridge_cfg:
             bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
             env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
@@ -1242,6 +1250,7 @@ def launch_codex(model_info, runtime, once=False):
         api_key,
         model_name=model or "unknown",
         advertised_models=advertised_models,
+        speed_scope=speed_scope,
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
