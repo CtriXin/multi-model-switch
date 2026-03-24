@@ -343,6 +343,62 @@ def _sanitize_provider_id(provider_id):
     return cleaned or DEFAULT_PROVIDER_ID.upper()
 
 
+def _normalize_model_id_list(values):
+    if isinstance(values, str):
+        values = [chunk.strip() for chunk in values.split(",")]
+    normalized = []
+    seen = set()
+    for item in values or []:
+        model_id = str(item or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        normalized.append(model_id)
+    return normalized
+
+
+def _normalize_models_endpoint(value):
+    endpoint = str(value or "").strip()
+    if not endpoint:
+        return "/models"
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return endpoint
+
+
+def _model_source_label(source):
+    mapping = {
+        "remote": "远端列表",
+        "fallback": "内置回退",
+        "extra": "手工补充",
+    }
+    return mapping.get(str(source or "").strip(), str(source or "-").strip() or "-")
+
+
+def _ttfb_label(ttfb_ms):
+    if not isinstance(ttfb_ms, (int, float)):
+        return "暂无数据"
+    if ttfb_ms < 1200:
+        return "很快"
+    if ttfb_ms < 2500:
+        return "正常"
+    if ttfb_ms < 4500:
+        return "偏慢"
+    return "很慢"
+
+
+def _tps_label(tps_value):
+    if not isinstance(tps_value, (int, float)):
+        return "暂无数据"
+    if tps_value >= 80:
+        return "很快"
+    if tps_value >= 40:
+        return "正常"
+    if tps_value >= 20:
+        return "偏慢"
+    return "很慢"
+
+
 def _provider_env_name(provider_id, field):
     return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
 
@@ -374,6 +430,10 @@ def _normalize_provider(provider):
     merged["note"] = str(merged.get("note", "")).strip()
     merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
     merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
+    merged["fallback_models"] = _normalize_model_id_list(merged.get("fallback_models", []))
+    merged["extra_models"] = _normalize_model_id_list(merged.get("extra_models", []))
+    merged["hidden_models"] = _normalize_model_id_list(merged.get("hidden_models", []))
+    merged["models_endpoint"] = _normalize_models_endpoint(merged.get("models_endpoint", "/models"))
     return merged
 
 
@@ -1179,6 +1239,15 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         current.get("supported_clis", list(CLI_NAMES)),
         list(CLI_NAMES),
     )
+    use_custom_models_endpoint = Confirm.ask(
+        "模型拉取使用自定义 endpoint？",
+        default=current.get("models_endpoint", "/models") != "/models",
+    )
+    models_endpoint = "/models"
+    if use_custom_models_endpoint:
+        models_endpoint = _normalize_models_endpoint(
+            Prompt.ask("模型列表接口路径", default=current.get("models_endpoint", "/models"))
+        )
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
@@ -1187,6 +1256,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         "name": name,
         "protocols": protocols,
         "supported_clis": supported_clis,
+        "models_endpoint": models_endpoint,
         "priority": priority,
         "note": note,
         "enabled": enabled,
@@ -1375,6 +1445,10 @@ def _quick_connect_gateway(cfg, preset_id=None):
         "id": provider_id,
         "name": name,
     })
+    if Confirm.ask("模型拉取使用自定义 endpoint？", default=False):
+        provider["models_endpoint"] = _normalize_models_endpoint(
+            Prompt.ask("模型列表接口路径", default=provider.get("models_endpoint", "/models"))
+        )
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
     setup_provider_credentials(provider)
@@ -1608,37 +1682,220 @@ def _select_manage_target(cfg):
         console.print(f"[red]请输入 1-{len(targets)} 的编号[/red]")
 
 
+def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hidden_models=None, models_endpoint=None):
+    updated_cfg = dict(cfg)
+    providers = []
+    for item in cfg.get("providers", []):
+        if item.get("id") != provider_id:
+            providers.append(item)
+            continue
+        updated = dict(item)
+        if extra_models is not None:
+            updated["extra_models"] = _normalize_model_id_list(extra_models)
+        if hidden_models is not None:
+            updated["hidden_models"] = _normalize_model_id_list(hidden_models)
+        if models_endpoint is not None:
+            updated["models_endpoint"] = _normalize_models_endpoint(models_endpoint)
+        providers.append(_normalize_provider(updated))
+    updated_cfg["providers"] = providers
+    save_config(updated_cfg)
+    _invalidate_probe_cache(provider_id)
+    return load_config()
+
+
+def _display_provider_model_table(provider, probe):
+    from ccs_speed_stats import get_speed_entry
+
+    table = Table(title=f"{provider.get('name', provider.get('id'))} · 模型列表", show_lines=True)
+    table.add_column("模型", style="cyan")
+    table.add_column("来源", style="green")
+    table.add_column("首字节延迟", style="yellow")
+    table.add_column("生成速度", style="magenta")
+    table.add_column("样本", style="white")
+    table.add_column("最近更新", style="blue")
+
+    for model_id in probe.get("models") or []:
+        speed = get_speed_entry(model_id)
+        ttfb = "暂无数据"
+        tps = "暂无数据"
+        samples = "-"
+        updated = "-"
+        if speed:
+            ttfb_value = speed.get("ttfb_avg_ms")
+            ttfb = f"{ttfb_value:.0f}ms / {_ttfb_label(ttfb_value)}" if isinstance(ttfb_value, (int, float)) else "暂无数据"
+            tps_value = speed.get("tps_avg")
+            tps = f"{tps_value:.1f} / {_tps_label(tps_value)}" if isinstance(tps_value, (int, float)) else "暂无数据"
+            samples = str(speed.get("samples", 0))
+            if speed.get("warming_up"):
+                samples = f"{samples}（预热中）"
+            updated = str(speed.get("last_updated") or "-")
+            if speed.get("is_stale"):
+                updated = f"{updated} (stale)"
+        table.add_row(
+            model_id,
+            _model_source_label((probe.get("model_sources") or {}).get(model_id, probe.get("base_source", "remote"))),
+            ttfb,
+            tps,
+            samples,
+            updated,
+        )
+    console.print(table)
+    hidden_models = probe.get("hidden_models") or []
+    extra_models = probe.get("extra_models") or []
+    if extra_models:
+        console.print(f"[dim]手工补充模型: {', '.join(extra_models)}[/dim]")
+    if hidden_models:
+        console.print(f"[dim]已隐藏模型: {', '.join(hidden_models)}[/dim]")
+    raw_models = probe.get("raw_models") or []
+    if raw_models and raw_models != (probe.get("models") or []):
+        console.print(f"[dim]原始模型数: {len(raw_models)} | 最终展示模型数: {len(probe.get('models') or [])}[/dim]")
+
+
+def _manage_provider_models(cfg, provider_id):
+    changed = False
+    current_cfg = cfg
+    while True:
+        provider = resolve_provider_context(current_cfg, provider_id)
+        probe = _probe_models(provider, emit_output=True)
+        console.print(Panel(
+            f"[bold]Provider:[/bold] {provider.get('name', provider_id)}\n"
+            f"[bold]模型列表接口:[/bold] {provider.get('models_endpoint', '/models')}\n"
+            f"[bold]基础来源:[/bold] {_model_source_label(probe.get('base_source', 'remote'))}\n"
+            f"[bold]最终展示模型数:[/bold] {len(probe.get('models') or [])}",
+            title="模型管理",
+            border_style="cyan",
+        ))
+        console.print("  1. 查看当前模型列表")
+        console.print("  2. 刷新远端模型列表")
+        console.print("  3. 添加补充模型")
+        console.print("  4. 隐藏模型")
+        console.print("  5. 移除补充/取消隐藏")
+        console.print("  6. 恢复默认模型补丁")
+        console.print("  7. 编辑模型列表接口")
+        console.print("  8. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="8")
+        if choice == "1":
+            _display_provider_model_table(provider, probe)
+            continue
+        if choice == "2":
+            probe = _probe_models(provider, emit_output=True, force_refresh=True)
+            console.print(f"[green]✓ 已刷新远端模型列表，共 {len(probe.get('models') or [])} 个模型[/green]")
+            changed = True
+            continue
+        if choice == "3":
+            raw = Prompt.ask("输入要补充的模型 ID（逗号分隔）", default="")
+            additions = _normalize_model_id_list(raw)
+            if not additions:
+                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
+                continue
+            next_extra = _normalize_model_id_list((provider.get("extra_models") or []) + additions)
+            next_hidden = [item for item in provider.get("hidden_models", []) if item not in additions]
+            current_cfg = _update_provider_model_overrides(
+                current_cfg,
+                provider_id,
+                extra_models=next_extra,
+                hidden_models=next_hidden,
+            )
+            console.print(f"[green]✓ 已补充模型: {', '.join(additions)}[/green]")
+            changed = True
+            continue
+        if choice == "4":
+            raw = Prompt.ask("输入要隐藏的模型 ID（逗号分隔）", default="")
+            hidden = _normalize_model_id_list(raw)
+            if not hidden:
+                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
+                continue
+            next_extra = [item for item in provider.get("extra_models", []) if item not in hidden]
+            next_hidden = _normalize_model_id_list((provider.get("hidden_models") or []) + hidden)
+            current_cfg = _update_provider_model_overrides(
+                current_cfg,
+                provider_id,
+                extra_models=next_extra,
+                hidden_models=next_hidden,
+            )
+            console.print(f"[green]✓ 已隐藏模型: {', '.join(hidden)}[/green]")
+            changed = True
+            continue
+        if choice == "5":
+            raw = Prompt.ask("输入要移除的模型 ID（会同时从 extra/hidden 里清理，逗号分隔）", default="")
+            removals = set(_normalize_model_id_list(raw))
+            if not removals:
+                console.print("[yellow]没有输入有效模型，已取消[/yellow]")
+                continue
+            next_extra = [item for item in provider.get("extra_models", []) if item not in removals]
+            next_hidden = [item for item in provider.get("hidden_models", []) if item not in removals]
+            current_cfg = _update_provider_model_overrides(
+                current_cfg,
+                provider_id,
+                extra_models=next_extra,
+                hidden_models=next_hidden,
+            )
+            console.print(f"[green]✓ 已移除模型补丁: {', '.join(sorted(removals))}[/green]")
+            changed = True
+            continue
+        if choice == "6":
+            current_cfg = _update_provider_model_overrides(
+                current_cfg,
+                provider_id,
+                extra_models=[],
+                hidden_models=[],
+            )
+            console.print("[green]✓ 已恢复默认模型补丁[/green]")
+            changed = True
+            continue
+        if choice == "7":
+            new_endpoint = _normalize_models_endpoint(
+                Prompt.ask("模型列表接口路径", default=provider.get("models_endpoint", "/models"))
+            )
+            current_cfg = _update_provider_model_overrides(
+                current_cfg,
+                provider_id,
+                models_endpoint=new_endpoint,
+            )
+            console.print(f"[green]✓ 已更新模型列表接口: {new_endpoint}[/green]")
+            changed = True
+            continue
+        return current_cfg, changed
+
+
 def _manage_provider_target(cfg, provider_id):
     provider = resolve_provider_context(cfg, provider_id)
     while True:
         default_tag = "是" if cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID) == provider_id else "否"
+        extra_count = len(provider.get("extra_models", []) or [])
+        hidden_count = len(provider.get("hidden_models", []) or [])
         console.print(Panel(
             f"[bold]网关通道[/bold]  {provider.get('name', provider_id)}\n"
             f"[bold]内部标识:[/bold]  {provider_id}\n"
             f"[bold]默认通道:[/bold]  {default_tag}\n"
             f"[bold]OpenAI 地址:[/bold]      {_provider_openai_base_url(provider) or '(未设置)'}\n"
             f"[bold]Anthropic 地址:[/bold]   {_provider_anthropic_base_url(provider) or '(未设置)'}\n"
+            f"[bold]模型列表接口:[/bold] {provider.get('models_endpoint', '/models')}\n"
+            f"[bold]模型补丁:[/bold]   补充 {extra_count} 个 / 隐藏 {hidden_count} 个\n"
             f"[bold]协议:[/bold]      {', '.join(provider.get('protocols', []))}\n"
             f"[bold]CLI:[/bold]       {', '.join(provider.get('supported_clis', []))}",
             title="通道详情",
             border_style="cyan",
         ))
         console.print("  1. 查看本地统计")
-        console.print("  2. 设为默认网关")
-        console.print("  3. 重命名这个通道")
-        console.print("  4. 编辑地址和 Key")
-        console.print("  5. 删除这个通道")
-        console.print("  6. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6"], default="6")
+        console.print("  2. 模型管理")
+        console.print("  3. 设为默认网关")
+        console.print("  4. 重命名这个通道")
+        console.print("  5. 编辑地址和 Key")
+        console.print("  6. 删除这个通道")
+        console.print("  7. 返回")
+        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7"], default="7")
         if choice == "1":
             _display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
             continue
         if choice == "2":
+            return _manage_provider_models(cfg, provider_id)
+        if choice == "3":
             cfg.setdefault("provider", {})["default"] = provider_id
             save_config(cfg)
             console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
             return load_config(), True
-        if choice == "3":
+        if choice == "4":
             new_id = _normalize_provider_id_input(Prompt.ask("新的内部标识", default=provider_id).strip())
             new_name = Prompt.ask("新的显示名", default=provider.get("name", provider_id)).strip() or new_id
             if new_id == provider_id and new_name == provider.get("name", provider_id):
@@ -1646,10 +1903,10 @@ def _manage_provider_target(cfg, provider_id):
                 return cfg, False
             _handle_provider_rename_config(cfg, [provider_id, new_id, new_name])
             return load_config(), True
-        if choice == "4":
+        if choice == "5":
             _handle_provider_credentials_config(cfg, [provider_id])
             return load_config(), True
-        if choice == "5":
+        if choice == "6":
             before = set(_provider_map(cfg).keys())
             _handle_provider_remove_config(cfg, [provider_id])
             after_cfg = load_config()
@@ -1821,6 +2078,16 @@ def _probe_file_cache_path(provider_id):
     return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
 
 
+def _invalidate_probe_cache(provider_id):
+    _PROBE_CACHE.pop(provider_id, None)
+    path = _probe_file_cache_path(provider_id)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def _load_probe_file_cache(provider_id):
     """从文件读取 probe 缓存，TTL 内有效则返回 result dict，否则 None。"""
     path = _probe_file_cache_path(provider_id)
@@ -1833,8 +2100,12 @@ def _load_probe_file_cache(provider_id):
             return None
         with open(path, "r") as f:
             data = json.load(f)
-        if data.get("models"):
-            return data
+        cached_models = _normalize_model_id_list(data.get("raw_models") or data.get("models") or [])
+        if cached_models:
+            normalized = dict(data)
+            normalized["raw_models"] = cached_models
+            normalized.setdefault("base_source", "remote")
+            return normalized
     except Exception:
         pass
     return None
@@ -1842,19 +2113,65 @@ def _load_probe_file_cache(provider_id):
 
 def _save_probe_file_cache(provider_id, result):
     """将成功的 probe 结果写入文件缓存。"""
-    if not result.get("models"):
+    if result.get("base_source") != "remote":
+        return
+    if not result.get("raw_models"):
         return
     try:
         os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
         path = _probe_file_cache_path(provider_id)
         with open(path, "w") as f:
-            json.dump({"models": result["models"], "working_url": result.get("working_url")}, f)
+            json.dump(
+                {
+                    "raw_models": result["raw_models"],
+                    "working_url": result.get("working_url"),
+                    "base_source": result.get("base_source", "remote"),
+                },
+                f,
+            )
     except Exception:
         pass
 
 
-def _probe_models(provider, emit_output=True):
+def _apply_provider_model_patch(provider, base_result):
+    result = dict(base_result)
+    base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
+    extra_models = _normalize_model_id_list(provider.get("extra_models", []))
+    hidden_requested = set(_normalize_model_id_list(provider.get("hidden_models", [])))
+    base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
+
+    effective_models = []
+    model_sources = {}
+    for model_id in base_models:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = base_source
+        effective_models.append(model_id)
+
+    for model_id in extra_models:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = "extra"
+        effective_models.append(model_id)
+
+    hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
+    if hidden_requested:
+        effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
+    visible_sources = {model_id: model_sources.get(model_id, base_source) for model_id in effective_models}
+
+    result["raw_models"] = base_models
+    result["models"] = effective_models
+    result["model_sources"] = visible_sources
+    result["extra_models"] = extra_models
+    result["hidden_models"] = hidden_applied
+    result["base_source"] = base_source
+    return result
+
+
+def _probe_models(provider, emit_output=True, force_refresh=False):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+    if force_refresh:
+        _invalidate_probe_cache(provider_id)
 
     # 1. 内存缓存命中
     import time as _time
@@ -1862,24 +2179,27 @@ def _probe_models(provider, emit_output=True):
     if cached:
         cached_at, cached_result = cached
         if _time.time() - cached_at < _PROBE_CACHE_TTL:
+            patched_cached = _apply_provider_model_patch(provider, cached_result)
             if emit_output and cached_result.get("error"):
                 style = "yellow" if cached_result.get("error_kind") == "protocol_unsupported" else "red"
                 console.print(f"[{style}]{cached_result['error']}[/{style}]")
-            return cached_result
+            return patched_cached
 
     # 2. 文件缓存命中（24h TTL）
     file_cached = _load_probe_file_cache(provider_id)
     if file_cached:
-        result = {
+        base_result = {
             "provider_id": provider_id,
-            "models": file_cached["models"],
+            "raw_models": list(file_cached["raw_models"]),
+            "models": list(file_cached["raw_models"]),
             "error": None,
             "error_kind": None,
             "working_url": file_cached.get("working_url"),
             "details": [],
+            "base_source": file_cached.get("base_source", "remote"),
         }
-        _PROBE_CACHE[provider_id] = (_time.time(), result)
-        return result
+        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
+        return _apply_provider_model_patch(provider, base_result)
 
     protocols = provider.get("protocols", [])
     base_url = _provider_openai_base_url(provider)
@@ -1887,11 +2207,13 @@ def _probe_models(provider, emit_output=True):
     result = {
         "provider_id": provider_id,
         "models": None,
+        "raw_models": None,
         "error": None,
         "error_kind": None,
         "working_url": None,
         "details": [],
         "working_url": None,
+        "base_source": "remote",
     }
 
     if "openai_chat_completions" not in protocols:
@@ -1934,6 +2256,7 @@ def _probe_models(provider, emit_output=True):
                 data = response.json()
                 models = [m["id"] for m in data.get("data", [])]
                 models.sort()
+                result["raw_models"] = models
                 result["models"] = models
                 result["working_url"] = try_url
                 if try_url != base_url and emit_output:
@@ -1951,10 +2274,12 @@ def _probe_models(provider, emit_output=True):
             # 网络请求失败，尝试 fallback 到内置模型列表
             fallback = provider.get("fallback_models")
             if fallback:
+                result["raw_models"] = list(fallback)
                 result["models"] = list(fallback)
                 result["working_url"] = base_url
                 result["error"] = None
                 result["error_kind"] = None
+                result["base_source"] = "fallback"
                 if emit_output:
                     console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
             else:
@@ -1977,7 +2302,7 @@ def _probe_models(provider, emit_output=True):
     # 写入缓存（成功或失败都缓存，避免重复请求）
     _PROBE_CACHE[provider_id] = (_time.time(), result)
     _save_probe_file_cache(provider_id, result)
-    return result
+    return _apply_provider_model_patch(provider, result)
 
 
 def _warm_probe_cache_async(cfg, default_provider):
@@ -2590,7 +2915,7 @@ def _provider_candidates(cfg, default_provider, default_models):
             continue
         # 优先从文件缓存加载模型列表，避免网络请求
         file_cached = _load_probe_file_cache(provider_id)
-        cached_models = file_cached["models"] if file_cached else None
+        cached_models = list((file_cached or {}).get("raw_models") or [])
         candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
         seen_ids.add(provider_id)
     return candidates
@@ -3543,6 +3868,7 @@ def _handle_provider_edit_config(cfg, args_rest):
     provider = _prompt_provider_metadata(existing=providers[provider_id], preset_id=provider_id)
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
+    _invalidate_probe_cache(provider_id)
     console.print(f"[green]✓ 已更新模型源: {provider_id}[/green]")
 
 
@@ -3572,6 +3898,7 @@ def _handle_provider_remove_config(cfg, args_rest):
         updated_cfg["provider"] = {"default": updated_cfg["providers"][0]["id"]}
     save_config(updated_cfg)
     _delete_provider_credentials(provider_id)
+    _invalidate_probe_cache(provider_id)
     console.print(f"[green]✓ 已删除模型源: {provider_id}[/green]")
 
 
@@ -3787,6 +4114,8 @@ def _handle_provider_rename_config(cfg, args_rest):
     updated_cfg["provider"] = provider_cfg
     save_config(updated_cfg)
     _rename_usage_provider(old_id, new_id, new_name)
+    _invalidate_probe_cache(old_id)
+    _invalidate_probe_cache(new_id)
     console.print(f"[green]✓ 已重命名模型源: {old_id} -> {new_id}[/green]")
     console.print(f"[dim]显示名: {new_name}[/dim]")
     console.print(f"[dim]备份目录: {backup_dir}[/dim]")
