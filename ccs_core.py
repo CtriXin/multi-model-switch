@@ -817,18 +817,36 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     }
 
 
-def save_provider_credentials(provider_id, base_url, api_key, openai_base_url="", anthropic_base_url=""):
+def save_provider_credentials(provider_id, base_url, api_key, openai_base_url="", anthropic_base_url="", openai_api_key=None):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     values = _load_env_file(CREDENTIALS_PATH) if os.path.exists(CREDENTIALS_PATH) else {}
+    base_key = _provider_env_name(provider_id, "BASE_URL")
+    openai_base_key = _provider_env_name(provider_id, "OPENAI_BASE_URL")
+    anthropic_base_key = _provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
+    api_key_name = _provider_env_name(provider_id, "API_KEY")
+    openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
     base_url = base_url.rstrip("/")
     openai_base_url = openai_base_url.rstrip("/")
     anthropic_base_url = anthropic_base_url.rstrip("/")
-    values[_provider_env_name(provider_id, "BASE_URL")] = base_url
+    values[base_key] = base_url
     if openai_base_url:
-        values[_provider_env_name(provider_id, "OPENAI_BASE_URL")] = openai_base_url
+        values[openai_base_key] = openai_base_url
+    else:
+        values.pop(openai_base_key, None)
     if anthropic_base_url:
-        values[_provider_env_name(provider_id, "ANTHROPIC_BASE_URL")] = anthropic_base_url
-    values[_provider_env_name(provider_id, "API_KEY")] = api_key
+        values[anthropic_base_key] = anthropic_base_url
+    else:
+        values.pop(anthropic_base_key, None)
+    values[api_key_name] = api_key
+    if openai_api_key is None:
+        if openai_base_url:
+            values[openai_api_key_name] = api_key
+        else:
+            values.pop(openai_api_key_name, None)
+    elif openai_api_key:
+        values[openai_api_key_name] = openai_api_key
+    else:
+        values.pop(openai_api_key_name, None)
 
     if provider_id == DEFAULT_PROVIDER_ID:
         values[API_URL_ENV_NAME] = base_url
