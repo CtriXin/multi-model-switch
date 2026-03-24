@@ -34,10 +34,12 @@ export interface StoryTurnPayload {
   sceneSummary: string
   logic: {
     insight: string
+    risk?: string
     suggestions: string[]
   }
   emotion: {
     feeling: string
+    motivation?: string
     tension: string
   }
   twist: {

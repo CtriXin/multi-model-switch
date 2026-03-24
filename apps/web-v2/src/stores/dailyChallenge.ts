@@ -377,7 +377,10 @@ function buildFallbackDebaterText(opts: {
 function buildFallbackModeratorResult(opts: {
   topic: TopicCandidate
   userRole: UserDebateRole
-}) {
+}): {
+  takeaway: DebateTakeaway
+  thinkingSnapshot: Pick<ThinkingPatternSnapshot, 'axes' | 'dominantAxes' | 'summary'>
+} {
   return {
     takeaway: {
       strongestPointFor: `正方最强的一点是把重点放在“${opts.topic.sideA}”的长期连锁代价上。`,

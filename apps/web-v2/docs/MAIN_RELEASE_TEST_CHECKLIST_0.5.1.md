@@ -16,6 +16,13 @@
 - [ ] `npm run type-check` passes, or failures are confirmed as historical and unrelated
 - [ ] iOS package installs successfully on simulator / device
 
+## Latest Local Validation
+
+- 2026-03-24: `npm run type-check` ✅
+- 2026-03-24: `npm run build` ✅
+- 当前仅剩既有的 Vite chunk warning:
+  - `src/stores/provider.ts` 被 dynamic import 和 static import 同时引用，不构成本轮阻塞
+
 ## Smoke Flow
 
 ### First Launch
@@ -62,6 +69,7 @@
 - [ ] [InteractiveLabView.vue](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/apps/web-v2/src/views/InteractiveLabView.vue) opens
 - [ ] all visible lab cards can enter corresponding route
 - [ ] no empty / broken page for visible entries
+- [ ] visible routes `challenge / story-lite / story-live / multi-life / turtle-soup` all enter without white screen
 
 ### Settings
 
@@ -93,6 +101,10 @@
 - [ ] no dead-end share入口暴露到主路径
 - [ ] no screenshot / showcase query path can inject mock data into production routes
 - [ ] no debug wording or mock-only wording in user-facing core path
+- [ ] review / demo install has enough quota and will not immediately hit `quota_not_enough`
+- [ ] `quota_not_enough` copy gives next step guidance instead of pure dead-end
+- [ ] backend returns distinct `daily_quota_exceeded` vs `quota_not_enough` / `pre_consume_token_quota_failed`
+- [ ] `POST /api/provision` has basic anti-abuse limit by device / install / IP
 
 ## Known Current Release Position
 

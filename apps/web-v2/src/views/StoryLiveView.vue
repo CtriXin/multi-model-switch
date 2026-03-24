@@ -131,6 +131,11 @@ async function continueStory(payload = userInput.value) {
   await flowContinueStory(payload)
   scrollLatest()
 }
+async function submitStoryTurn() {
+  const payload = userInput.value.trim()
+  if (!payload || processing.value) return
+  await continueStory(payload)
+}
 async function chooseCueOption(prompt: string) {
   if (processing.value) return
   await continueStory(prompt)
@@ -232,9 +237,9 @@ onBeforeUnmount(() => storyLiveStore.markPaused())
                 :style="{ height: inputHeight + 'px' }"
                 class="w-full rounded-[28px] glass-v3 border border-white/10 p-5 pr-16 text-sm leading-relaxed outline-none focus:border-accent/40 transition-all resize-none overflow-y-auto" 
                 placeholder="接下去演..." 
-                @keydown.enter.prevent="continueStory" 
+                @keydown.enter.prevent="submitStoryTurn" 
               />
-              <button @click="continueStory" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
+              <button @click="submitStoryTurn" :disabled="processing || !userInput.trim()" class="absolute right-3 bottom-3 w-12 h-12 rounded-2xl bg-accent text-white flex items-center justify-center shadow-lg active:scale-95 disabled:opacity-20 lab-breathing-btn"><Send :size="20" stroke-width="4" /></button>
             </div>
           </div>
         </div>

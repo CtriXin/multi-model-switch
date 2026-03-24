@@ -602,9 +602,10 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
   }
 
   async function makeChoice(choiceId: string) {
-    if (!currentScene.value || processing.value) return
+    const sceneBeforeChoice = currentScene.value
+    if (!sceneBeforeChoice || processing.value) return
 
-    const choice = currentScene.value.choices.find((item) => item.id === choiceId)
+    const choice = sceneBeforeChoice.choices.find((item) => item.id === choiceId)
     if (!choice) return
 
     processing.value = true
@@ -619,7 +620,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       round.value = nextRound
 
       if (useMock.value) {
-        const nextSceneId = STORY_LITE_V2_BRANCHES[currentScene.value.id]?.[choiceId] || 'ending-normal'
+        const nextSceneId = STORY_LITE_V2_BRANCHES[sceneBeforeChoice.id]?.[choiceId] || 'ending-normal'
         const scene = buildSceneFromMock(nextSceneId)
         currentScene.value = scene
         resetResponseState('done')
