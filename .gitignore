@@ -38,6 +38,22 @@ apps/web-v2/*.pkg
 apps/web-v2/*.dmg
 apps/web-v2/src-tauri/*.provisionprofile
 apps/web-v2/src-tauri/*.p12
+apps/web-v2/build/
+apps/web-v2/output/
+apps/web-v2/docs/app-store-screenshots/
+apps/web-v2/docs/archive/
+apps/web-v2/docs/APP_STORE_SCREENSHOT_REVISED.md
+apps/web-v2/docs/管理层摘要-*.md
+apps/web-v2/scripts/capture-*.mjs
+apps/web-v2/scripts/render-*-posters.mjs
+apps/web-v2/scripts/render-store-v4-elevated.mjs
+apps/web-v2/scripts/render-phone-showcase-png.mjs
+apps/web-v2/scripts/create_app_store_screenshots.py
+apps/web-v2/scripts/create_handdrawn_screenshot.py
+apps/web-v2/scripts/create_messy_handdrawn.py
+apps/web-v2/src/data/chatShowcase.ts
+apps/web-v2/src/data/screenshotScenarios.ts
+apps/worktree-app-store-launch/
 
 # local AI context / scratch files
 DESIGN_V3_SPEC.md
