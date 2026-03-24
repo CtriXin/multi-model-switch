@@ -66,7 +66,7 @@ def _extract_output_tokens(payload):
     return None
 
 
-def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens=None):
+def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens=None, provider_scope=None):
     if first_byte_ms is None:
         return
     total_ms = max(0.0, _now_ms() - started_ms)
@@ -78,6 +78,7 @@ def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens
         ttfb_ms=ttfb_ms,
         total_ms=total_ms,
         output_tokens=output_tokens,
+        provider=provider_scope,
     )
 
 
@@ -1159,6 +1160,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         started_ms=started_ms,
                         first_byte_ms=first_byte_ms,
                         output_tokens=output_tokens,
+                        provider_scope=getattr(self.server, "speed_scope", None),
                     )
         except BrokenPipeError:
             return  # 客户端已断开（Ctrl+C），静默忽略
@@ -1622,6 +1624,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         started_ms=started_ms,
                         first_byte_ms=first_byte_ms,
                         output_tokens=output_tokens,
+                        provider_scope=getattr(self.server, "speed_scope", None),
                     )
         except Exception as exc:
             self._json(502, {"error": {"message": str(exc)}})
@@ -1765,6 +1768,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
                     started_ms=started_ms,
                     first_byte_ms=first_byte_ms,
                     output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
                 )
 
         except Exception as exc:
@@ -1772,7 +1776,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None):
+def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None, speed_scope=None):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
     Use this when the gateway only supports Chat Completions for non-GPT models
@@ -1787,6 +1791,7 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown",
     server.gateway_key = gateway_key
     server.model_name = model_name
     server.advertised_models = list(advertised_models or [])
+    server.speed_scope = dict(speed_scope or {})
     server.bridge_token = bridge_token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1802,7 +1807,7 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown",
 
 
 @contextmanager
-def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None):
+def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None, speed_scope=None):
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
     port = _find_free_port()
@@ -1812,6 +1817,7 @@ def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", adver
     server.gateway_key = gateway_key
     server.model_name = model_name
     server.advertised_models = list(advertised_models or [])
+    server.speed_scope = dict(speed_scope or {})
     server.bridge_token = bridge_token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1827,7 +1833,7 @@ def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", adver
 
 
 @contextmanager
-def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None, advertised_models=None):
+def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None, advertised_models=None, speed_scope=None):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
 
@@ -1847,6 +1853,7 @@ def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_mod
     server.medium_model = medium_model
     server.light_model = light_model
     server.advertised_models = list(advertised_models or [])
+    server.speed_scope = dict(speed_scope or {})
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
