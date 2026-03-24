@@ -1715,7 +1715,7 @@ def _display_provider_model_table(provider, probe):
     table.add_column("最近更新", style="blue")
 
     for model_id in probe.get("models") or []:
-        speed = get_speed_entry(model_id)
+        speed = get_speed_entry(model_id, provider=provider)
         ttfb = "暂无数据"
         tps = "暂无数据"
         samples = "-"
@@ -1856,6 +1856,250 @@ def _manage_provider_models(cfg, provider_id):
             changed = True
             continue
         return current_cfg, changed
+
+
+def _select_provider_for_models(cfg):
+    providers = [item for item in _list_manage_targets(cfg) if item.get("kind") == "provider"]
+    if not providers:
+        console.print("[yellow]当前还没有可管理的网关通道[/yellow]")
+        return None
+
+    table = Table(title="模型与测速 · 选择通道", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("显示名", style="yellow")
+    table.add_column("内部标识", style="green")
+    table.add_column("默认", style="magenta", width=6)
+    table.add_column("状态", style="white")
+    for index, provider in enumerate(providers, 1):
+        table.add_row(
+            str(index),
+            provider.get("title", ""),
+            provider.get("id", ""),
+            provider.get("default_label", ""),
+            provider.get("status", ""),
+        )
+    console.print(table)
+
+    while True:
+        raw = Prompt.ask("选择要查看的通道，直接回车返回", default="")
+        if not raw:
+            return None
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(providers):
+                return providers[idx - 1]["id"]
+        console.print(f"[red]请输入 1-{len(providers)} 的编号[/red]")
+
+
+def _select_provider_for_warm(cfg):
+    return _select_provider_for_models(cfg)
+
+
+def _recent_models_for_provider(provider_id):
+    recent = []
+    seen = set()
+    for item in _usage_rows_for_runtime("provider", provider_id):
+        last_model = str(item.get("last_model", "")).strip()
+        if last_model and last_model not in seen:
+            seen.add(last_model)
+            recent.append(last_model)
+        for model_name, _count in sorted((item.get("models") or {}).items(), key=lambda pair: pair[1], reverse=True):
+            model_name = str(model_name or "").strip()
+            if model_name and model_name not in seen:
+                seen.add(model_name)
+                recent.append(model_name)
+    return recent
+
+
+def _pick_manual_models(models):
+    if not models:
+        return []
+    table = Table(title="选择要预热的模型", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("模型", style="green")
+    for idx, model_name in enumerate(models, 1):
+        table.add_row(str(idx), model_name)
+    console.print(table)
+    raw = Prompt.ask("输入模型编号，支持逗号分隔；直接回车取消", default="")
+    if not raw.strip():
+        return []
+    selected = []
+    seen = set()
+    for chunk in raw.split(","):
+        value = chunk.strip()
+        if not value.isdigit():
+            continue
+        idx = int(value)
+        if 1 <= idx <= len(models):
+            model_name = models[idx - 1]
+            if model_name not in seen:
+                seen.add(model_name)
+                selected.append(model_name)
+    return selected
+
+
+def _warm_model_request(provider, model_name):
+    model_name = str(model_name or "").strip()
+    if not model_name:
+        return False, "empty model"
+    if httpx is None:
+        return False, "缺少 httpx"
+
+    protocols = provider.get("protocols", [])
+    api_key = provider.get("api_key", "")
+    openai_api_key = provider.get("openai_api_key") or api_key
+    timeout = 30
+    if not api_key and not openai_api_key:
+        return False, "缺少 API Key"
+
+    use_anthropic = "anthropic_messages" in protocols and "claude" in model_name.lower()
+    try:
+        if use_anthropic:
+            from ccs_launchers import _resolve_anthropic_base_url
+
+            base_url, _method = _resolve_anthropic_base_url(provider, probe_model=model_name)
+            if not base_url:
+                return False, "无法解析 Anthropic 地址"
+            response = httpx.post(
+                f"{base_url.rstrip('/')}/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_name,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "warmup"}],
+                },
+                timeout=timeout,
+            )
+        else:
+            base_url = _provider_openai_base_url(provider)
+            if not base_url:
+                return False, "缺少 OpenAI 地址"
+            response = httpx.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "warmup"}],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                    "stream": False,
+                },
+                timeout=timeout,
+            )
+        if response.status_code >= 400:
+            detail = response.text.strip().replace("\n", " ")
+            if len(detail) > 120:
+                detail = detail[:117] + "..."
+            return False, f"HTTP {response.status_code}: {detail or 'request failed'}"
+        return True, "ok"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def handle_warm_command(cfg, argv):
+    if argv and argv[0] in {"-h", "--help"}:
+        console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} warm [provider_id]"))
+        console.print("[dim]不带参数时先选通道，再选择最近使用 / 手动选择 / 全部模型。[/dim]")
+        return
+
+    provider_id = str(argv[0]).strip() if argv else ""
+    providers = _provider_map(cfg)
+    if provider_id:
+        if provider_id not in providers:
+            console.print(f"[red]未找到模型源: {provider_id}[/red]")
+            console.print(f"[dim]可用模型源: {', '.join(sorted(providers.keys()))}[/dim]")
+            sys.exit(1)
+    else:
+        provider_id = _select_provider_for_warm(cfg)
+        if not provider_id:
+            return
+
+    provider = resolve_provider_context(cfg, provider_id)
+    probe = _probe_models(provider, emit_output=False)
+    models = list(probe.get("models") or [])
+    if not models:
+        console.print("[yellow]当前通道没有可预热的模型[/yellow]")
+        return
+
+    recent_models = [item for item in _recent_models_for_provider(provider_id) if item in models]
+
+    console.print(Panel(
+        f"[bold]通道:[/bold] {provider.get('name', provider_id)}\n"
+        f"[bold]可用模型数:[/bold] {len(models)}\n"
+        f"[dim]预热会真实发请求，建议优先预热最近常用模型，不建议默认全量预热。[/dim]",
+        title="模型预热",
+        border_style="cyan",
+    ))
+    console.print("  1. 预热最近使用模型（推荐）")
+    console.print("  2. 手动选择模型")
+    console.print("  3. 预热全部模型（不推荐）")
+    console.print("  4. 返回")
+    choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4"], default="1")
+
+    selected_models = []
+    if choice == "1":
+        selected_models = recent_models
+        if not selected_models:
+            console.print("[yellow]当前没有最近使用模型，已改为手动选择[/yellow]")
+            selected_models = _pick_manual_models(models)
+    elif choice == "2":
+        selected_models = _pick_manual_models(models)
+    elif choice == "3":
+        if not Confirm.ask("确认预热当前通道全部模型？这会产生真实请求成本。", default=False):
+            console.print("[yellow]已取消全量预热[/yellow]")
+            return
+        selected_models = models
+    else:
+        return
+
+    if not selected_models:
+        console.print("[yellow]没有选择任何模型，已取消预热[/yellow]")
+        return
+
+    results = []
+    for model_name in selected_models:
+        console.print(f"[dim]正在预热 {model_name} ...[/dim]")
+        ok, detail = _warm_model_request(provider, model_name)
+        results.append((model_name, ok, detail))
+
+    table = Table(title=f"{provider.get('name', provider_id)} · 预热结果", show_lines=True)
+    table.add_column("模型", style="cyan")
+    table.add_column("结果", style="green")
+    table.add_column("详情", style="yellow")
+    success_count = 0
+    for model_name, ok, detail in results:
+        if ok:
+            success_count += 1
+        table.add_row(model_name, "成功" if ok else "失败", detail)
+    console.print(table)
+    console.print(f"[green]✓ 已完成预热：成功 {success_count} / {len(results)}[/green]")
+
+
+def handle_models_command(cfg, argv):
+    if argv and argv[0] in {"-h", "--help"}:
+        console.print("[cyan]用法:[/cyan]", Text(f"{current_command()} ls [provider_id]"))
+        console.print("[dim]不带参数时先选通道，再进入模型列表与测速页。[/dim]")
+        return
+    provider_id = str(argv[0]).strip() if argv else ""
+    providers = _provider_map(cfg)
+    if provider_id:
+        if provider_id not in providers:
+            console.print(f"[red]未找到模型源: {provider_id}[/red]")
+            console.print(f"[dim]可用模型源: {', '.join(sorted(providers.keys()))}[/dim]")
+            sys.exit(1)
+    else:
+        provider_id = _select_provider_for_models(cfg)
+        if not provider_id:
+            return
+
+    _manage_provider_models(cfg, provider_id)
 
 
 def _manage_provider_target(cfg, provider_id):
@@ -4778,6 +5022,12 @@ def main():
             from ccs_usage import usage_main
 
             usage_main(_load_command_config(), sys.argv[2:])
+            return
+        if command in {"models", "ls"}:
+            handle_models_command(_load_command_config(), sys.argv[2:])
+            return
+        if command == "warm":
+            handle_warm_command(_load_command_config(), sys.argv[2:])
             return
         if command == "session":
             handle_session_command(sys.argv[2:])
