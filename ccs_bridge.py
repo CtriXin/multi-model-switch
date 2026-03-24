@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import socket
@@ -8,6 +9,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 from ccs_speed_stats import record_model_speed
 
@@ -26,6 +28,96 @@ try:
     import httpx
 except ImportError:
     httpx = None
+
+
+# ---------------------------------------------------------------------------
+# 公共 URL 构造：仅对裸域名补 /v1
+# ---------------------------------------------------------------------------
+
+def _build_gateway_url(base_url, endpoint):
+    """构造网关请求 URL。
+
+    规则：
+    - `https://host` -> `https://host/v1/...`
+    - `https://host/v1` -> `https://host/v1/...`
+    - `https://host/openai` / `https://host/api/paas/v4` -> 直接拼 endpoint
+
+    base_url: 网关地址（可能是裸域名，也可能已带 path prefix）
+    endpoint: 端点路径（如 /responses, /chat/completions）
+    """
+    base = base_url.rstrip("/")
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    path = urlsplit(base).path.rstrip("/")
+    if not path:
+        return base + "/v1" + endpoint
+    return base + endpoint
+
+
+# ---------------------------------------------------------------------------
+# Bridge mode 缓存：记录 (provider, model) 是否需要 chatcompletions fallback
+# ---------------------------------------------------------------------------
+
+_BRIDGE_MODE_CACHE_DIR = os.path.join(
+    os.environ.get("CCS_CONFIG_DIR", os.path.expanduser("~/.config/ccs")),
+    "cache",
+)
+_BRIDGE_MODE_CACHE_FILE = os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_mode_cache.json")
+_bridge_mode_cache_memory = {}  # 内存缓存，避免重复读文件
+
+_bridge_error_logger = logging.getLogger("bridge_error")
+_bridge_error_logger.setLevel(logging.DEBUG)
+if not _bridge_error_logger.handlers:
+    os.makedirs(_BRIDGE_MODE_CACHE_DIR, exist_ok=True)
+    _beh = logging.FileHandler(
+        os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_error.log"),
+        mode="a", encoding="utf-8",
+    )
+    _beh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    _bridge_error_logger.addHandler(_beh)
+
+
+def _load_bridge_mode_cache():
+    """加载 bridge mode 缓存。返回 dict: {\"provider:model\": \"chatcompletions\"}"""
+    global _bridge_mode_cache_memory
+    if _bridge_mode_cache_memory:
+        return _bridge_mode_cache_memory
+    try:
+        if os.path.exists(_BRIDGE_MODE_CACHE_FILE):
+            with open(_BRIDGE_MODE_CACHE_FILE, "r") as f:
+                _bridge_mode_cache_memory = json.load(f)
+        else:
+            _bridge_mode_cache_memory = {}
+    except (OSError, json.JSONDecodeError):
+        _bridge_mode_cache_memory = {}
+    return _bridge_mode_cache_memory
+
+
+def _save_bridge_mode_cache(cache):
+    """持久化 bridge mode 缓存到文件。"""
+    global _bridge_mode_cache_memory
+    _bridge_mode_cache_memory = cache
+    try:
+        os.makedirs(_BRIDGE_MODE_CACHE_DIR, exist_ok=True)
+        with open(_BRIDGE_MODE_CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def _record_bridge_fallback(provider_id, model_name):
+    """记录 (provider, model) 需要走 chatcompletions bridge。"""
+    cache = _load_bridge_mode_cache()
+    key = f"{provider_id}:{model_name}"
+    if cache.get(key) != "chatcompletions":
+        cache[key] = "chatcompletions"
+        _save_bridge_mode_cache(cache)
+
+
+def _needs_chatcompletions_bridge(provider_id, model_name):
+    """检查 (provider, model) 是否已知需要 chatcompletions bridge。"""
+    cache = _load_bridge_mode_cache()
+    return cache.get(f"{provider_id}:{model_name}") == "chatcompletions"
 
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1528,6 +1620,14 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         token = key or bearer
         return token and token in {expected, gateway_key}
 
+    def _sse(self, event_name, payload):
+        body = (
+            f"event: {event_name}\n"
+            f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        ).encode("utf-8")
+        self.wfile.write(body)
+        self.wfile.flush()
+
     def do_GET(self):
         if self.path == "/v1/models":
             advertised_models = list(getattr(self.server, "advertised_models", []) or [])
@@ -1565,7 +1665,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         gateway_url = getattr(self.server, "gateway_url")
         gateway_key = getattr(self.server, "gateway_key")
         model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
-        target_url = gateway_url.rstrip("/") + "/responses"
+        provider_id = getattr(self.server, "provider_id", "")
+        target_url = _build_gateway_url(gateway_url, "/responses")
         fwd_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
@@ -1575,46 +1676,77 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         first_byte_ms = None
         output_tokens = None
 
+        # 检查是否已知需要 chatcompletions fallback
+        if provider_id and _needs_chatcompletions_bridge(provider_id, model_name):
+            self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
+                                             started_ms)
+            return
+
         try:
             with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
                 content_type = response.headers.get("content-type", "application/json")
                 is_stream = "text/event-stream" in content_type.lower()
+
+                def _forward_sse_line(raw_line):
+                    nonlocal output_tokens
+                    stripped = raw_line.strip()
+                    if stripped.startswith("data:"):
+                        data_str = stripped[5:].strip()
+                        if data_str and data_str != "[DONE]":
+                            try:
+                                event_payload = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                event_payload = None
+                            extracted = _extract_output_tokens(event_payload)
+                            if extracted is not None:
+                                output_tokens = extracted
+                    self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                    if raw_line == "":
+                        self.wfile.flush()
+
+                # 检测上游是否真正支持 Responses API（空 body = 假支持）
+                cl_header = response.headers.get("content-length", "")
+                if response.status_code >= 400 or (cl_header and int(cl_header) == 0):
+                    response.close()
+                    if provider_id:
+                        _record_bridge_fallback(provider_id, model_name)
+                    self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
+                                                     _now_ms())
+                    return
+
                 if is_stream:
+                    lines = response.iter_lines()
+                    first_line = next(lines, None)
+                    if first_line is None:
+                        response.close()
+                        if provider_id:
+                            _record_bridge_fallback(provider_id, model_name)
+                        self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key, _now_ms())
+                        return
+                    first_byte_ms = _now_ms()
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", content_type)
                     self.send_header("Cache-Control", "no-cache")
                     self.send_header("Connection", "close")
                     self.end_headers()
-                    for raw_line in response.iter_lines():
-                        if first_byte_ms is None:
-                            first_byte_ms = _now_ms()
-                        stripped = raw_line.strip()
-                        if stripped.startswith("data:"):
-                            data_str = stripped[5:].strip()
-                            if data_str and data_str != "[DONE]":
-                                try:
-                                    event_payload = json.loads(data_str)
-                                except json.JSONDecodeError:
-                                    event_payload = None
-                                extracted = _extract_output_tokens(event_payload)
-                                if extracted is not None:
-                                    output_tokens = extracted
-                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
-                        if raw_line == "":
-                            self.wfile.flush()
+                    _forward_sse_line(first_line)
+                    for raw_line in lines:
+                        _forward_sse_line(raw_line)
                     self.close_connection = True
                 else:
-                    body_chunks = []
-                    for chunk in response.iter_bytes():
-                        if first_byte_ms is None and chunk:
-                            first_byte_ms = _now_ms()
-                        body_chunks.append(chunk)
-                    body_out = b"".join(body_chunks)
-                    if body_out:
-                        try:
-                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
-                        except Exception:
-                            output_tokens = None
+                    body_out = response.read()
+                    if not body_out:
+                        response.close()
+                        if provider_id:
+                            _record_bridge_fallback(provider_id, model_name)
+                        self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
+                                                         _now_ms())
+                        return
+                    first_byte_ms = _now_ms()
+                    try:
+                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                    except Exception:
+                        output_tokens = None
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", content_type)
                     self.send_header("Content-Length", str(len(body_out)))
@@ -1629,6 +1761,79 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         provider_scope=getattr(self.server, "speed_scope", None),
                     )
         except Exception as exc:
+            _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
+            self._json(502, {"error": {"message": str(exc)}})
+
+    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms):
+        """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
+        target_url = _build_gateway_url(gateway_url, "/chat/completions")
+        _bridge_error_logger.info("FALLBACK to chatcompletions: model=%s url=%s", model_name, target_url)
+        chat_messages = _responses_input_to_messages(
+            payload.get("instructions", ""),
+            payload.get("input", []),
+        )
+        chat_payload = {
+            "model": model_name,
+            "messages": chat_messages,
+            "stream": True,
+        }
+        chat_tools = _responses_tools_to_chat(payload.get("tools"))
+        if chat_tools:
+            chat_payload["tools"] = chat_tools
+
+        target_url = _build_gateway_url(gateway_url, "/chat/completions")
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {gateway_key}",
+        }
+
+        translator = _ChatCompletionsToResponsesTranslator(model_name)
+        first_byte_ms = None
+        output_tokens = None
+        try:
+            with httpx.stream("POST", target_url, headers=fwd_headers,
+                              json=chat_payload, timeout=300) as response:
+                if response.status_code >= 400:
+                    body = response.read().decode("utf-8", errors="replace")
+                    self._json(response.status_code, {"error": {"message": body}})
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+                for raw_line in response.iter_lines():
+                    if first_byte_ms is None:
+                        first_byte_ms = _now_ms()
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        for event_name, event_payload in translator.process_chunk(chunk):
+                            extracted = _extract_output_tokens(event_payload)
+                            if extracted is not None:
+                                output_tokens = extracted
+                            self._sse(event_name, event_payload)
+                self.close_connection = True
+                _record_bridge_speed(
+                    model_name,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
+                )
+        except Exception as exc:
+            _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
+            # fallback 也失败，返回 502
             self._json(502, {"error": {"message": str(exc)}})
 
 
@@ -1721,7 +1926,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             chat_payload["tools"] = chat_tools
 
         # Forward to gateway /v1/chat/completions
-        target_url = gateway_url.rstrip("/") + "/chat/completions"
+        target_url = _build_gateway_url(gateway_url, "/chat/completions")
         fwd_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
@@ -1824,6 +2029,7 @@ def codex_responses_bridge(
     advertised_models=None,
     speed_scope=None,
     route_status_paths=None,
+    provider_id="",
 ):
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
@@ -1837,6 +2043,7 @@ def codex_responses_bridge(
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
+    server.provider_id = provider_id
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import json
 import shutil
+import logging
 from datetime import datetime, timezone
 
 try:
@@ -38,6 +39,22 @@ from ccs_account_state import seed_claude_state, seed_gemini_state
 from ccs_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 
 console = Console()
+
+# Provider 调试日志（写入文件，不影响 TUI 输出）
+_PROBE_DEBUG_DIR = os.path.join(
+    os.environ.get("CCS_CONFIG_DIR", os.path.expanduser("~/.config/ccs")),
+    "cache",
+)
+_probe_debug_logger = logging.getLogger("probe_debug")
+_probe_debug_logger.setLevel(logging.DEBUG)
+if not _probe_debug_logger.handlers:
+    os.makedirs(_PROBE_DEBUG_DIR, exist_ok=True)
+    _dh = logging.FileHandler(
+        os.path.join(_PROBE_DEBUG_DIR, "provider_debug.log"),
+        mode="a", encoding="utf-8",
+    )
+    _dh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    _probe_debug_logger.addHandler(_dh)
 
 APP_NAME = "Multi-Model Switch"
 LEGACY_COMMAND = "ccs"
@@ -1030,6 +1047,11 @@ def _provider_anthropic_base_url(provider):
     explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
     if explicit:
         return explicit
+    protocols = provider.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    if "anthropic_messages" not in protocols:
+        return ""
     return str(provider.get("base_url", "")).strip().rstrip("/")
 
 
@@ -3159,7 +3181,7 @@ def _provider_candidates(cfg, default_provider, default_models):
             continue
         # 优先从文件缓存加载模型列表，避免网络请求
         file_cached = _load_probe_file_cache(provider_id)
-        cached_models = list((file_cached or {}).get("raw_models") or [])
+        cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
         candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
         seen_ids.add(provider_id)
     return candidates
@@ -3169,6 +3191,17 @@ def _provider_models_for_cli(cli_name, models):
     if cli_name in CLI_MODEL_FAMILY_HINTS:
         return _models_for_cli_family(cli_name, models)
     return list(models or [])
+
+
+def _provider_effective_models(provider, cached_models):
+    if cached_models is None:
+        return list(_probe_models(provider, emit_output=False).get("models") or [])
+    base_models = list(cached_models or [])
+    patched = _apply_provider_model_patch(
+        provider,
+        {"raw_models": base_models, "models": base_models, "base_source": "remote"},
+    )
+    return list(patched.get("models") or [])
 
 
 def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models):
@@ -3181,9 +3214,7 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
-        models = list(cached_models or [])
-        if cached_models is None:
-            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        models = _provider_effective_models(provider, cached_models)
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized or normalized in seen:
@@ -3207,9 +3238,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
-        models = list(cached_models or [])
-        if cached_models is None:
-            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        models = _provider_effective_models(provider, cached_models)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
         pname = _provider_label(provider)
         for model_name in models:
@@ -3226,28 +3255,38 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
+    _probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
     options = []
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        pid = provider.get("id", "?")
         if not provider.get("enabled", True):
+            _probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
             continue
         if not _provider_supports_cli_name(provider, cli_name):
+            _probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
+            _probe_debug_logger.debug("  %s: SKIP (no base_url=%s or api_key=%s)", pid, bool(provider.get("base_url")), bool(provider.get("api_key")))
             continue
 
         models = cached_models
         if models is None:
-            models = _probe_models(provider, emit_output=False).get("models")
-        models = list(models or [])
+            _probe_debug_logger.debug("  %s: cached_models=None, probing...", pid)
+            models = _provider_effective_models(provider, None)
+        else:
+            _probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
+        models = _provider_effective_models(provider, models)
         cli_models = _provider_models_for_cli(cli_name, models)
 
         if selected_model:
             if selected_model not in models:
+                _probe_debug_logger.info("  %s: SKIP (model '%s' not in %s)", pid, selected_model, models[:5])
                 continue
             option_models = [selected_model]
         else:
             option_models = cli_models
 
+        _probe_debug_logger.info("  %s: ADDED (option_models=%s)", pid, option_models)
         options.append({
             "kind": "provider",
             "id": provider.get("id"),

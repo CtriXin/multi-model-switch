@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime
 
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
+from ccs_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
 from ccs_core import _probe_models, detect_working_base_url
 from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from ccs_session_index import finalize_claude_session, record_claude_session_start
@@ -122,9 +122,9 @@ def _gateway_ping(base_url, api_key):
         return None
     if not base_url or not api_key:
         return None
-    url_with_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    models_url = _build_gateway_url(base_url, "/models")
     try:
-        r = _httpx.get(f"{url_with_v1}/models", headers={"Authorization": f"Bearer {api_key}"}, timeout=8)
+        r = _httpx.get(models_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=8)
         return r.status_code < 500
     except Exception:
         return False
@@ -1266,12 +1266,14 @@ def launch_codex(model_info, runtime, once=False):
                 sys.exit(0)
         return
 
+    provider_id = runtime.get("id", "")
     with codex_responses_bridge(
         gateway_url,
         api_key,
         model_name=model or "unknown",
         advertised_models=advertised_models,
         speed_scope=speed_scope,
+        provider_id=provider_id,
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"])

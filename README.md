@@ -382,7 +382,12 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 
 `mms --export codex` 只导出直连 `Responses API` 所需的环境变量；如果目标模型需要本地 `Chat Completions bridge` 才能跑，仍应通过 `mms` 直接启动，而不是只靠 export。
 
-通过 `mms` 直接启动 `codex` 时，`api_key` 路径会优先走本地 bridge，再转发到 gateway 的 `chat/completions`，避免不同 provider 的 `responses` 流式兼容差异直接暴露给 Codex CLI。
+通过 `mms` 直接启动 `codex` 时，`api_key` 路径会按模型能力分流：
+
+- `gpt-*` / `o*` / `codex-*` 优先走本地 `Responses bridge`
+- 其余模型走本地 `Chat Completions bridge`
+- 如果上游 `Responses API` 返回错误、空体或已知不兼容，MMS 会自动回退到 `chat/completions`
+- 如果 provider 的 `openai_base_url` 已经带 path 前缀（例如 `/openai`、`/api/paas/v4`），bridge 会直接拼接目标 endpoint，不再额外强补 `/v1`
 
 当 `codex` 走 `--account <id>` 时，MMS 会继续隔离账号登录态和项目级配置，但把 `history.jsonl`、`sessions/`、`session_index.jsonl`、`shell_snapshots/` 这类 `resume/history` 数据切回共享层。这样切换不同 `codex` 账号后，本地 `resume` 列表仍然可见，不会因为账号目录分裂而“像丢历史”。
 
