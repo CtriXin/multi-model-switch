@@ -31,8 +31,6 @@ except ImportError:
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
 
-_ROUTE_STATUS_PATH = os.path.join(os.path.expanduser("~/.config/mms"), "route_status.json")
-
 
 def _now_ms():
     return time.monotonic() * 1000.0
@@ -82,50 +80,34 @@ def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens
     )
 
 
-def _write_route_status(tier, model, reason):
-    """写路由状态供 statusline 读取，非阻塞，失败静默。
+def _current_route_status_path():
+    return os.path.join(os.path.expanduser("~/.config/mms"), "route_status.json")
 
-    同时写入隔离目录和真实 HOME（如果在隔离环境中），
-    确保用户在 Claude Code 内外都能看到状态。
-    """
+
+def _dedupe_status_paths(paths):
+    normalized = []
+    seen = set()
+    for path in paths or []:
+        value = os.path.abspath(str(path or "").strip())
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _write_route_status(tier, model, reason, *, status_paths=None):
+    """写路由状态供 statusline 读取，非阻塞，失败静默。"""
     try:
-        import time
         data = json.dumps({"tier": tier, "model": model, "reason": reason, "ts": time.time()})
-
-        # 写入当前 HOME（可能是隔离目录）
-        try:
-            tmp = _ROUTE_STATUS_PATH + ".tmp"
-            os.makedirs(os.path.dirname(_ROUTE_STATUS_PATH), exist_ok=True)
-            with open(tmp, "w") as f:
-                f.write(data)
-            os.replace(tmp, _ROUTE_STATUS_PATH)
-        except OSError:
-            pass
-
-        # 如果在隔离环境中，同时写入真实 HOME。
-        # 典型隔离目录：~/\.config/mms/claude-gateway/s/<pid>
-        real_home = os.environ.get("HOME", "")
-        real_status_path = None
-        gateway_marker = f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}"
-        if gateway_marker in real_home:
-            user_home = real_home.split(gateway_marker, 1)[0]
-            if user_home:
-                real_status_path = os.path.join(user_home, ".config", "mms", "route_status.json")
-        elif f"{os.sep}claude-gateway{os.sep}" in real_home:
-            # 兼容旧目录结构
-            user_home = real_home.split(f"{os.sep}claude-gateway{os.sep}", 1)[0]
-            if user_home.endswith(f"{os.sep}.config{os.sep}mms"):
-                user_home = os.path.dirname(os.path.dirname(user_home))
-            if user_home:
-                real_status_path = os.path.join(user_home, ".config", "mms", "route_status.json")
-
-        if real_status_path and os.path.abspath(real_status_path) != os.path.abspath(_ROUTE_STATUS_PATH):
+        targets = _dedupe_status_paths(status_paths or [_current_route_status_path()])
+        for path in targets:
             try:
-                tmp = real_status_path + ".tmp"
-                os.makedirs(os.path.dirname(real_status_path), exist_ok=True)
-                with open(tmp, "w") as f:
+                tmp = path + ".tmp"
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(tmp, "w", encoding="utf-8") as f:
                     f.write(data)
-                os.replace(tmp, real_status_path)
+                os.replace(tmp, path)
             except OSError:
                 pass
     except Exception:
@@ -1057,21 +1039,41 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     # heavy 保持 payload["model"]（已设为 heavy_model）
                     log_route(level, reason, payload.get("model", "?"), last_text)
                     # 写状态文件供 statusline 读取
-                    _write_route_status(level, payload.get("model", ""), reason)
+                    _write_route_status(
+                        level,
+                        payload.get("model", ""),
+                        reason,
+                        status_paths=getattr(self.server, "route_status_paths", None),
+                    )
                     # 保存 level 供后续使用
                     self.server._last_level = level
                 else:
                     # 智能路由开启但无法提取文本，默认用 heavy
-                    _write_route_status("heavy", payload.get("model", ""), "no_text")
+                    _write_route_status(
+                        "heavy",
+                        payload.get("model", ""),
+                        "no_text",
+                        status_paths=getattr(self.server, "route_status_paths", None),
+                    )
                     self.server._last_level = "heavy"
             else:
                 # 智能路由开启但没有用户消息，默认用 heavy
-                _write_route_status("heavy", payload.get("model", ""), "no_user_msg")
+                _write_route_status(
+                    "heavy",
+                    payload.get("model", ""),
+                    "no_user_msg",
+                    status_paths=getattr(self.server, "route_status_paths", None),
+                )
                 self.server._last_level = "heavy"
 
         # 无论是否路由，都写 status 供 statusline 显示真实 model
         if not has_routing and "/messages" in path.split("?")[0]:
-            _write_route_status("-", payload.get("model", ""), "direct")
+            _write_route_status(
+                "-",
+                payload.get("model", ""),
+                "direct",
+                status_paths=getattr(self.server, "route_status_paths", None),
+            )
 
         # 剥离 query string 再匹配路由（Claude Code 会发 /v1/messages?beta=true）
         path_bare = path.split("?")[0]
@@ -1776,7 +1778,14 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None, speed_scope=None):
+def codex_chatcompletions_bridge(
+    gateway_url,
+    gateway_key,
+    model_name="unknown",
+    advertised_models=None,
+    speed_scope=None,
+    route_status_paths=None,
+):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
     Use this when the gateway only supports Chat Completions for non-GPT models
@@ -1792,6 +1801,7 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown",
     server.model_name = model_name
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
+    server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1807,7 +1817,14 @@ def codex_chatcompletions_bridge(gateway_url, gateway_key, model_name="unknown",
 
 
 @contextmanager
-def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", advertised_models=None, speed_scope=None):
+def codex_responses_bridge(
+    gateway_url,
+    gateway_key,
+    model_name="unknown",
+    advertised_models=None,
+    speed_scope=None,
+    route_status_paths=None,
+):
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
     port = _find_free_port()
@@ -1818,6 +1835,7 @@ def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", adver
     server.model_name = model_name
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
+    server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -1833,7 +1851,16 @@ def codex_responses_bridge(gateway_url, gateway_key, model_name="unknown", adver
 
 
 @contextmanager
-def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_model=None, heavy_model=None, advertised_models=None, speed_scope=None):
+def gateway_claude_bridge(
+    gateway_url,
+    gateway_key,
+    light_model=None,
+    medium_model=None,
+    heavy_model=None,
+    advertised_models=None,
+    speed_scope=None,
+    route_status_paths=None,
+):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
 
@@ -1854,6 +1881,7 @@ def gateway_claude_bridge(gateway_url, gateway_key, light_model=None, medium_mod
     server.light_model = light_model
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
+    server.route_status_paths = list(route_status_paths or [])
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

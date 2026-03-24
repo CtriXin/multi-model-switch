@@ -28,6 +28,7 @@ MMS 自己把测速结果写到：
       "provider_id": "xin",
       "provider_name": "Xin",
       "model": "claude-sonnet-4-6",
+      "upstream_provider": "anthropic",
       "ttfb_avg_ms": 300.0,
       "tps_avg": 110.0,
       "samples": 2,
@@ -62,6 +63,7 @@ MMS 自己把测速结果写到：
 - `_providers`: 按 provider 作用域分组的完整统计
 - `_scoped_models`: 扁平化后的 provider+model 视图，适合 Hive 这类外部消费者直接读取
 - `provider_key`: provider 稳定标识，优先按 endpoint 指纹生成；只改 provider 名称时不变
+- `upstream_provider`: 根据真实模型名推断出的上游厂商标识，例如 `anthropic` / `openai` / `qwen` / `kimi` / `minimax`
 
 ## 更新策略
 

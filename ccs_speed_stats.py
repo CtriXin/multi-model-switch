@@ -40,6 +40,29 @@ def _normalize_url(url: str | None) -> str:
     return str(url or "").strip().rstrip("/")
 
 
+def _infer_upstream_provider(model_name: str | None) -> str:
+    raw = _normalize_model_name(model_name).lower()
+    if not raw:
+        return "unknown"
+    parts = raw.rsplit("/", 1)
+    candidates = [raw] if len(parts) == 1 else [raw, parts[-1]]
+    rules = [
+        ("anthropic", ("claude",)),
+        ("openai", ("gpt-", "gpt4", "gpt5", "o1", "o3", "o4", "codex")),
+        ("google", ("gemini",)),
+        ("qwen", ("qwen",)),
+        ("deepseek", ("deepseek",)),
+        ("kimi", ("kimi",)),
+        ("minimax", ("minimax",)),
+        ("glm", ("glm",)),
+    ]
+    for provider_name, keywords in rules:
+        for candidate in candidates:
+            if any(keyword in candidate for keyword in keywords):
+                return provider_name
+    return "unknown"
+
+
 def _is_speed_entry(entry: object) -> bool:
     return isinstance(entry, dict) and any(
         key in entry
@@ -252,6 +275,7 @@ def _rebuild_compat_views(stats: dict, *, touch: bool) -> dict:
                 "provider_id": provider_id,
                 "provider_name": provider_name,
                 "model": model_id,
+                "upstream_provider": _infer_upstream_provider(model_id),
                 "ttfb_avg_ms": entry.get("ttfb_avg_ms"),
                 "tps_avg": entry.get("tps_avg"),
                 "samples": int(entry.get("samples") or 0),
@@ -325,6 +349,7 @@ def get_speed_entry(model_name: str, *, provider: dict | None = None, max_age_se
                 entry["provider_key"] = provider_scope.get("provider_key")
                 entry["provider_id"] = provider_entry.get("provider_id") or provider_scope.get("provider_id")
                 entry["provider_name"] = provider_entry.get("provider_name") or provider_scope.get("provider_name")
+                entry["upstream_provider"] = str(entry.get("upstream_provider") or _infer_upstream_provider(normalized))
 
     if entry is None:
         fallback = stats.get(normalized)
@@ -333,6 +358,7 @@ def get_speed_entry(model_name: str, *, provider: dict | None = None, max_age_se
 
     if entry is None:
         return None
+    entry["upstream_provider"] = str(entry.get("upstream_provider") or _infer_upstream_provider(normalized))
 
     age = _age_seconds(entry.get("last_updated"))
     entry["age_seconds"] = age
@@ -402,6 +428,7 @@ def record_model_speed(
         tps_samples = int(entry.get("tps_samples") or 0)
 
         updated = {
+            "upstream_provider": _infer_upstream_provider(normalized),
             "ttfb_avg_ms": round(_rolling_average(entry.get("ttfb_avg_ms"), samples, float(ttfb_ms)), 2),
             "tps_avg": entry.get("tps_avg"),
             "samples": samples + 1,
