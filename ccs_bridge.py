@@ -64,6 +64,7 @@ _BRIDGE_MODE_CACHE_DIR = os.path.join(
 )
 _BRIDGE_MODE_CACHE_FILE = os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_mode_cache.json")
 _bridge_mode_cache_memory = {}  # 内存缓存，避免重复读文件
+_BRIDGE_MODE_CACHE_TTL = 6 * 3600
 
 _bridge_error_logger = logging.getLogger("bridge_error")
 _bridge_error_logger.setLevel(logging.DEBUG)
@@ -109,15 +110,63 @@ def _record_bridge_fallback(provider_id, model_name):
     """记录 (provider, model) 需要走 chatcompletions bridge。"""
     cache = _load_bridge_mode_cache()
     key = f"{provider_id}:{model_name}"
-    if cache.get(key) != "chatcompletions":
-        cache[key] = "chatcompletions"
+    entry = cache.get(key)
+    if not isinstance(entry, dict) or entry.get("mode") != "chatcompletions":
+        cache[key] = {"mode": "chatcompletions", "ts": time.time()}
         _save_bridge_mode_cache(cache)
 
 
 def _needs_chatcompletions_bridge(provider_id, model_name):
     """检查 (provider, model) 是否已知需要 chatcompletions bridge。"""
     cache = _load_bridge_mode_cache()
-    return cache.get(f"{provider_id}:{model_name}") == "chatcompletions"
+    entry = cache.get(f"{provider_id}:{model_name}")
+    # 兼容旧格式，但不再信任无时间戳的字符串缓存，避免历史错误把 provider 永久锁死。
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("mode") != "chatcompletions":
+        return False
+    ts = entry.get("ts")
+    if not isinstance(ts, (int, float)):
+        return False
+    if time.time() - ts > _BRIDGE_MODE_CACHE_TTL:
+        return False
+    return True
+
+
+def _clear_bridge_fallback(provider_id, model_name):
+    cache = _load_bridge_mode_cache()
+    key = f"{provider_id}:{model_name}"
+    if key in cache:
+        cache.pop(key, None)
+        _save_bridge_mode_cache(cache)
+
+
+def _build_gateway_candidate_urls(base_url, endpoint):
+    primary = _build_gateway_url(base_url, endpoint)
+    candidates = [primary]
+    base = (base_url or "").rstrip("/")
+    path = urlsplit(base).path.rstrip("/")
+    if path and not path.endswith("/v1"):
+        alt = f"{base}/v1{endpoint if endpoint.startswith('/') else '/' + endpoint}"
+        if alt not in candidates:
+            candidates.append(alt)
+    return candidates
+
+
+def _should_try_chatcompletions_fallback(status_code, body_text):
+    if status_code in (404, 405, 410, 501):
+        return True
+    if status_code != 400:
+        return False
+    lower = (body_text or "").lower()
+    unsupported_markers = (
+        "messages array is required",
+        "field messages is required",
+        "unsupported path",
+        "route /",
+        "not found",
+    )
+    return any(marker in lower for marker in unsupported_markers)
 
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1704,9 +1753,27 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     if raw_line == "":
                         self.wfile.flush()
 
-                # 检测上游是否真正支持 Responses API（空 body = 假支持）
+                # 检测上游是否真正支持 Responses API。仅在明确“不支持 Responses”时才 fallback；
+                # 普通 4xx 业务错误应原样透传，避免把可用 provider 误判为 chat completions-only。
                 cl_header = response.headers.get("content-length", "")
-                if response.status_code >= 400 or (cl_header and int(cl_header) == 0):
+                if response.status_code >= 400:
+                    body_out = response.read()
+                    body_text = body_out.decode("utf-8", errors="replace")
+                    if _should_try_chatcompletions_fallback(response.status_code, body_text):
+                        response.close()
+                        if provider_id:
+                            _record_bridge_fallback(provider_id, model_name)
+                        self._do_chatcompletions_fallback(
+                            payload, model_name, gateway_url, gateway_key, _now_ms()
+                        )
+                        return
+                    self.send_response(response.status_code)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+                    return
+                if cl_header and int(cl_header) == 0:
                     response.close()
                     if provider_id:
                         _record_bridge_fallback(provider_id, model_name)
@@ -1733,6 +1800,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     for raw_line in lines:
                         _forward_sse_line(raw_line)
                     self.close_connection = True
+                    if provider_id:
+                        _clear_bridge_fallback(provider_id, model_name)
                 else:
                     body_out = response.read()
                     if not body_out:
@@ -1752,6 +1821,8 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     self.send_header("Content-Length", str(len(body_out)))
                     self.end_headers()
                     self.wfile.write(body_out)
+                    if provider_id:
+                        _clear_bridge_fallback(provider_id, model_name)
                 if response.status_code < 400:
                     _record_bridge_speed(
                         model_name,
@@ -1766,8 +1837,6 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
 
     def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
-        target_url = _build_gateway_url(gateway_url, "/chat/completions")
-        _bridge_error_logger.info("FALLBACK to chatcompletions: model=%s url=%s", model_name, target_url)
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
@@ -1781,7 +1850,6 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         if chat_tools:
             chat_payload["tools"] = chat_tools
 
-        target_url = _build_gateway_url(gateway_url, "/chat/completions")
         fwd_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
@@ -1791,46 +1859,53 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         first_byte_ms = None
         output_tokens = None
         try:
-            with httpx.stream("POST", target_url, headers=fwd_headers,
-                              json=chat_payload, timeout=300) as response:
-                if response.status_code >= 400:
-                    body = response.read().decode("utf-8", errors="replace")
-                    self._json(response.status_code, {"error": {"message": body}})
-                    return
-
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "close")
-                self.end_headers()
-
-                for raw_line in response.iter_lines():
-                    if first_byte_ms is None:
-                        first_byte_ms = _now_ms()
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    if line.startswith("data:"):
-                        data_str = line[5:].strip()
-                        if data_str == "[DONE]":
-                            continue
-                        try:
-                            chunk = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-                        for event_name, event_payload in translator.process_chunk(chunk):
-                            extracted = _extract_output_tokens(event_payload)
-                            if extracted is not None:
-                                output_tokens = extracted
-                            self._sse(event_name, event_payload)
-                self.close_connection = True
-                _record_bridge_speed(
-                    model_name,
-                    started_ms=started_ms,
-                    first_byte_ms=first_byte_ms,
-                    output_tokens=output_tokens,
-                    provider_scope=getattr(self.server, "speed_scope", None),
+            last_body = None
+            for target_url in _build_gateway_candidate_urls(gateway_url, "/chat/completions"):
+                _bridge_error_logger.info(
+                    "FALLBACK to chatcompletions: model=%s url=%s", model_name, target_url
                 )
+                with httpx.stream(
+                    "POST", target_url, headers=fwd_headers, json=chat_payload, timeout=300
+                ) as response:
+                    if response.status_code >= 400:
+                        last_body = response.read().decode("utf-8", errors="replace")
+                        continue
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+
+                    for raw_line in response.iter_lines():
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("data:"):
+                            data_str = line[5:].strip()
+                            if data_str == "[DONE]":
+                                continue
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+                            for event_name, event_payload in translator.process_chunk(chunk):
+                                extracted = _extract_output_tokens(event_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                                self._sse(event_name, event_payload)
+                    self.close_connection = True
+                    _record_bridge_speed(
+                        model_name,
+                        started_ms=started_ms,
+                        first_byte_ms=first_byte_ms,
+                        output_tokens=output_tokens,
+                        provider_scope=getattr(self.server, "speed_scope", None),
+                    )
+                    return
+            self._json(404, {"error": {"message": last_body or "chat completions fallback failed"}})
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
             # fallback 也失败，返回 502
