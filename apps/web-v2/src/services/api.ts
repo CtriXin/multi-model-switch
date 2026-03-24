@@ -78,7 +78,11 @@ export function buildApiError(status: number, body: string): ApiError {
   if (detail.includes('daily_quota_exceeded')) {
     return new ApiError('今日额度已用完，明天 UTC 0 点重置', status, 'quota_exceeded', detail)
   }
-  if (detail.includes('pre_consume_token_quota_failed') || detail.includes('quota_not_enough')) {
+  if (
+    detail.includes('pre_consume_token_quota_failed')
+    || detail.includes('quota_not_enough')
+    || detail.includes('insufficient_user_quota')
+  ) {
     return new ApiError('账户额度已耗尽，请联系支持申请更多额度', status, 'quota_depleted', detail)
   }
 

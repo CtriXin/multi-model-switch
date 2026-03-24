@@ -601,14 +601,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function activateMaxChannel() {
     const toast = useToastStore()
-    const result = await provision('max')
-    if (!result) {
-      toast.error('连接失败，请检查网络后重试')
-      return false
-    }
-    await applyProvisionResult(result)
-    await refreshModels()
-    toast.success('大份已上桌，慢用 🍜')
+    toast.info('当前送审版未开放 Max 通道')
     return true
   }
 
