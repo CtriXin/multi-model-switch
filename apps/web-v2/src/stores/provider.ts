@@ -215,12 +215,7 @@ function migrateLegacyProviderBaseUrl(provider: ProviderConfig): ProviderConfig 
 function loadProviders(): ProviderConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    const friendsMode = localStorage.getItem('mms-show-friends') === 'true'
-
-    // 好友模式开启时才添加 sparkring 通道
-    const providersToLoad = friendsMode
-      ? [...BUILTIN_PROVIDERS, SPARKRING_PROVIDER]
-      : BUILTIN_PROVIDERS
+    const providersToLoad = [...BUILTIN_PROVIDERS, SPARKRING_PROVIDER]
 
     if (!raw) return providersToLoad.map((provider) => ({ ...provider }))
     const saved: ProviderConfig[] = JSON.parse(raw)
@@ -234,10 +229,6 @@ function loadProviders(): ProviderConfig[] {
       return migrated
     })
     for (const savedProvider of saved) {
-      if (!friendsMode && savedProvider.id === 'sparkring') {
-        changed = true
-        continue
-      }
       if (!result.find((item) => item.id === savedProvider.id)) {
         const migrated = migrateLegacyProviderBaseUrl({ ...savedProvider, builtIn: false })
         changed ||= migrated.baseUrl !== savedProvider.baseUrl

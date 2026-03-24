@@ -16,7 +16,6 @@ const route = useRoute()
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
 useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
-const screenshotMode = import.meta.env.VITE_SCREENSHOT_MODE === '1'
 
 // --- Robust Dual-End Logic ---
 const detectedPlatform = ref(Capacitor.getPlatform())
@@ -168,16 +167,6 @@ function isDrawerSessionActive(session: { id: string; type: string }) {
 onMounted(async () => {
   await appStore.initialize()
   sessionStore.loadSessions()
-
-  if (screenshotMode) {
-    router.replace({
-      path: '/chat',
-      query: {
-        showcase: 'compare',
-        platform: 'ios',
-      },
-    })
-  }
 
   window.addEventListener('resize', handleResize)
   window.addEventListener('open-drawer', handleOpenDrawer)

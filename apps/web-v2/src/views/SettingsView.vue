@@ -85,9 +85,7 @@ const isMobile = computed(() => platform.value === 'ios')
 
 const providers = computed(() => providerStore.providers)
 const visibleProviders = computed(() => {
-  const filtered = providers.value.filter((provider) =>
-    appStore.showFriendsMode || provider.id !== 'sparkring',
-  )
+  const filtered = providers.value
   if (!providerListCollapsed.value) return filtered
   return filtered.filter(p => p.enabled || providerStore.keyStatus[p.id])
 })

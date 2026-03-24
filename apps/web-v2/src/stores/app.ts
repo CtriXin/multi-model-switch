@@ -350,9 +350,7 @@ export const useAppStore = defineStore('app', () => {
 
   function getVisibleConfiguredProviders() {
     const providerStore = useProviderStore()
-    return providerStore.configuredProviders.filter((provider) =>
-      showFriendsMode.value || provider.id !== 'sparkring',
-    )
+    return providerStore.configuredProviders
   }
 
   function hasVisibleSparkringProvider() {

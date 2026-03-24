@@ -16,7 +16,6 @@ import { startWindowDrag } from '@/utils/windowDrag'
 import type { ImageAttachment } from '@/stores/chat'
 import { getExperienceMode } from '@/utils/experienceMode'
 import { CHAT_PROMPT_EXAMPLES } from '@/data/inputExamples'
-import { getChatShowcaseScenario, isChatShowcaseId } from '@/data/chatShowcase'
 import { useRotatingPrompt } from '@/composables/useRotatingPrompt'
 import { Sparkles, LayoutGrid, List, GalleryHorizontalEnd, MessageSquare, Plus, TextQuote, Check, ChevronDown, CheckCircle2, Menu, Sun, Moon, Layers, Zap, Target, History } from 'lucide-vue-next'
 
@@ -30,11 +29,6 @@ const { theme, toggle: toggleTheme } = useTheme()
 const platform = inject<import('vue').Ref<string>>('platform')
 const restoredDraft = ref('')
 const experienceMode = ref(getExperienceMode())
-const showcaseId = computed(() => {
-  const raw = route.query.showcase
-  return typeof raw === 'string' && isChatShowcaseId(raw) ? raw : null
-})
-const showcaseScenario = computed(() => showcaseId.value ? getChatShowcaseScenario(showcaseId.value) : null)
 
 const scrollContainer = ref<HTMLElement>()
 const hasRounds = computed(() => chatStore.currentRound && !chatStore.streaming)
@@ -185,53 +179,8 @@ onMounted(() => {
 
 onUnmounted(() => { observer?.disconnect() })
 
-function applyShowcaseScenario() {
-  const scenario = showcaseScenario.value
-  if (!scenario) return
-
-  appStore.selectedModelIds = [...scenario.selectedModelIds]
-  chatStore.initActiveModels(scenario.selectedModelIds)
-  chatStore.contextMode = scenario.contextMode
-  chatStore.clearHistory()
-  chatStore.rounds = scenario.rounds.map((round) => ({
-    ...round,
-    attachments: [...round.attachments],
-    responses: new Map(round.responses),
-    modelIds: [...round.modelIds],
-    judge: round.judge ? { ...round.judge } : undefined,
-    inlineDiscuss: round.inlineDiscuss
-      ? {
-          ...round.inlineDiscuss,
-          phase1Results: round.inlineDiscuss.phase1Results.map((item) => ({
-            ...item,
-            data: {
-              ...item.data,
-              risks: [...item.data.risks],
-              keyDecisions: [...item.data.keyDecisions],
-            },
-          })),
-          phase2Results: round.inlineDiscuss.phase2Results.map((item) => ({
-            ...item,
-            data: { ...item.data },
-          })),
-        }
-      : undefined,
-  }))
-  inlineDiscussRound.value = scenario.inlineDiscussRoundId ?? null
-  restoredDraft.value = ''
-
-  nextTick(() => {
-    scrollToBottom()
-  })
-}
-
-watch(showcaseId, () => {
-  applyShowcaseScenario()
-}, { immediate: true })
-
 // --- Context from discuss "继续对话" ---
 onMounted(() => {
-  if (showcaseScenario.value) return
   const ctx = route.query.context as string
   if (ctx && hasActiveModels.value) {
     // Clear query param to avoid re-submit on refresh
@@ -358,11 +307,8 @@ const canUseSamplePrompt = computed(() =>
 )
 const rotatingChatPrompt = useRotatingPrompt(CHAT_PROMPT_EXAMPLES, canUseSamplePrompt)
 const samplePrompt = computed(() => canUseSamplePrompt.value ? rotatingChatPrompt.value : '')
-const headerTitle = computed(() => showcaseScenario.value?.title ?? sessionStore.currentSession?.title ?? '对话')
-const headerSubtitle = computed(() => {
-  if (showcaseScenario.value) return showcaseScenario.value.description
-  return `已对话 ${chatStore.rounds.length} 轮 · ${chatStore.activeModelIds.length} 个模型`
-})
+const headerTitle = computed(() => sessionStore.currentSession?.title ?? '对话')
+const headerSubtitle = computed(() => `已对话 ${chatStore.rounds.length} 轮 · ${chatStore.activeModelIds.length} 个模型`)
 
 const inputPlaceholder = computed(() => {
   if (!hasActiveModels.value) return '先选择模型...'
@@ -540,8 +486,8 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
               <p
               class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">
                 {{ headerSubtitle }}
-                <span v-if="!showcaseScenario && chatStore.isSingleChat" class="text-accent">(单模型)</span>
-                <span v-else-if="!showcaseScenario && chatStore.isMultiChat" class="text-accent">(多模型对比)</span>
+                <span v-if="chatStore.isSingleChat" class="text-accent">(单模型)</span>
+                <span v-else-if="chatStore.isMultiChat" class="text-accent">(多模型对比)</span>
               </p>
             </div>
           </div>
@@ -674,12 +620,6 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
       <!-- Rounds -->
       <div v-else class="mx-auto py-4 space-y-10"
         :class="isMobile ? 'max-w-lg px-4' : 'max-w-6xl px-4'">
-        <div v-if="showcaseScenario && showcaseScenario.showHero !== false" class="rounded-[28px] border border-accent/15 bg-gradient-to-br from-accent/10 via-white/70 to-surface-1 px-5 py-4 shadow-[0_24px_60px_rgba(110,95,255,0.12)] backdrop-blur-sm">
-          <div class="text-[10px] font-black uppercase tracking-[0.28em] text-accent/80">{{ showcaseScenario.heroEyebrow }}</div>
-          <div class="mt-2 text-xl font-black tracking-tight text-text-primary">{{ showcaseScenario.heroTitle }}</div>
-          <p class="mt-2 text-sm leading-6 text-text-secondary">{{ showcaseScenario.heroBody }}</p>
-        </div>
-
         <div v-for="(round, ri) in chatStore.rounds" :key="round.id" :id="'round-' + round.id"
           class="animate-slide-up" :style="{ animationDelay: ri * 30 + 'ms' }">
           <!-- User prompt -->
