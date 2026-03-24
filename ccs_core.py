@@ -4316,6 +4316,115 @@ def _load_command_config():
     return apply_local_overrides(cfg)
 
 
+def _session_status_label(item):
+    session_id = str(item.get("session_id") or "").strip()
+    if not session_id:
+        return "active"
+    if item.get("stale_cleanup"):
+        return "stale-finalized"
+    if item.get("exit_code") is None:
+        return "active"
+    return f"exit:{item.get('exit_code')}"
+
+
+def _session_display_id(item):
+    session_id = str(item.get("session_id") or "").strip()
+    if session_id:
+        return session_id
+    pid = item.get("pid")
+    return f"pid-{pid}" if pid is not None else "-"
+
+
+def _handle_session_ls(cli_name):
+    from ccs_session_index import list_indexed_sessions
+
+    rows = list_indexed_sessions(cli_name=cli_name)
+    if not rows:
+        console.print(f"[yellow]当前没有已索引的 {cli_name} session[/yellow]")
+        return
+
+    table = Table(title=f"{cli_name} session 列表", show_lines=True)
+    table.add_column("ID", style="cyan")
+    table.add_column("项目", style="green")
+    table.add_column("来源", style="magenta")
+    table.add_column("状态", style="yellow")
+    table.add_column("最近活动", style="blue")
+    for item in rows:
+        project_name = os.path.basename(str(item.get("project_path", "")).rstrip(os.sep)) or "-"
+        source_label = str(item.get("account_id") or item.get("runtime_kind") or "-")
+        last_active = str(item.get("last_active_at") or item.get("started_at") or "-")
+        table.add_row(
+            _session_display_id(item),
+            project_name,
+            source_label,
+            _session_status_label(item),
+            last_active,
+        )
+    console.print(table)
+
+
+def _handle_session_info(session_id, cli_name):
+    from ccs_session_index import get_indexed_session
+
+    item = get_indexed_session(session_id, cli_name=cli_name)
+    if item is None:
+        console.print(f"[red]找不到 session: {session_id}[/red]")
+        sys.exit(1)
+
+    table = Table(title=f"{cli_name} session 详情")
+    table.add_column("字段", style="cyan")
+    table.add_column("值", style="green")
+    ordered_keys = [
+        "session_id",
+        "project_key",
+        "project_path",
+        "account_id",
+        "runtime_kind",
+        "pid",
+        "cwd",
+        "started_at",
+        "last_active_at",
+        "exit_code",
+        "stale_cleanup",
+        "slot_home",
+        "_path",
+    ]
+    seen = set()
+    for key in ordered_keys:
+        seen.add(key)
+        table.add_row(key, str(item.get(key, "")))
+    for key in sorted(item):
+        if key in seen:
+            continue
+        table.add_row(str(key), str(item.get(key, "")))
+    console.print(table)
+
+
+def handle_session_command(argv):
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} session",
+        description="查看 MMS 托管的 CLI session 元数据",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    ls_parser = subparsers.add_parser("ls", help="列出已索引 session")
+    ls_parser.add_argument("--cli", default="claude", choices=["claude"])
+
+    info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
+    info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
+    info_parser.add_argument("--cli", default="claude", choices=["claude"])
+
+    args = parser.parse_args(argv)
+    if args.subcommand == "ls":
+        _handle_session_ls(args.cli)
+        return
+    if args.subcommand == "info":
+        _handle_session_info(args.session_id, args.cli)
+        return
+
+    parser.print_help()
+
+
 def main():
     if len(sys.argv) >= 2:
         command = sys.argv[1]
@@ -4340,6 +4449,9 @@ def main():
             from ccs_usage import usage_main
 
             usage_main(_load_command_config(), sys.argv[2:])
+            return
+        if command == "session":
+            handle_session_command(sys.argv[2:])
             return
 
     if len(sys.argv) >= 2 and sys.argv[1] == "discuss":

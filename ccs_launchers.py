@@ -11,6 +11,8 @@ from datetime import datetime
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
 from ccs_bridge import codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, _write_route_status
 from ccs_core import detect_working_base_url
+from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from ccs_session_index import finalize_claude_session, record_claude_session_start
 
 try:
     from rich.console import Console
@@ -181,7 +183,7 @@ def _account_env(account):
         sessions_dir = os.path.join(home_dir, "s")
         session_home = os.path.join(sessions_dir, str(os.getpid()))
         os.makedirs(session_home, exist_ok=True)
-        _cleanup_stale_sessions(sessions_dir)
+        _cleanup_stale_sessions(sessions_dir, stale_callback=_finalize_claude_slot)
         # 复制账号的 .claude.json 到 per-session 目录
         import json as _json
         account_json = os.path.join(home_dir, ".claude.json")
@@ -203,16 +205,7 @@ def _account_env(account):
             os.symlink(real_library, session_library)
         # .claude/ 目录：创建真实目录，分项 symlink
         session_claude_dir = os.path.join(session_home, ".claude")
-        real_claude_dir = os.path.expanduser("~/.claude")
-        if os.path.islink(session_claude_dir):
-            os.unlink(session_claude_dir)
-        os.makedirs(session_claude_dir, exist_ok=True)
-        if os.path.isdir(real_claude_dir):
-            for entry in os.listdir(real_claude_dir):
-                src = os.path.join(real_claude_dir, entry)
-                dst = os.path.join(session_claude_dir, entry)
-                if not os.path.exists(dst) and not os.path.islink(dst):
-                    os.symlink(src, dst)
+        _prepare_claude_session_tree(session_home, session_claude_dir, account_id=account.get("id", ""), runtime_kind="oauth")
         env["HOME"] = session_home
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
@@ -561,7 +554,19 @@ def launch_claude(model_info, runtime, once=False):
     cmd = ["claude"]
     if runtime.get("bypass"):
         cmd.append("--dangerously-skip-permissions")
-    _exec_or_run(cmd, env, once, state_home=state_home, cleanup_context=cleanup_ctx)
+    session_home = env.get("HOME")
+    exit_callback = None
+    if session_home:
+        exit_callback = lambda exit_code: _finalize_claude_slot(session_home, exit_code=exit_code)
+    _exec_or_run(
+        cmd,
+        env,
+        once,
+        state_home=state_home,
+        cleanup_context=cleanup_ctx,
+        exit_callback=exit_callback,
+        force_subprocess=bool(exit_callback),
+    )
 
 
 def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
@@ -658,7 +663,7 @@ def _pick_gateway_model(runtime, base_url):
     return None
 
 
-def _cleanup_stale_sessions(sessions_dir):
+def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
     """清理已死进程的残留 session 目录。"""
     if not os.path.isdir(sessions_dir):
         return
@@ -669,12 +674,80 @@ def _cleanup_stale_sessions(sessions_dir):
         except (ValueError, ProcessLookupError):
             # PID 无效或进程已死 → 清理
             stale = os.path.join(sessions_dir, name)
+            if stale_callback is not None:
+                try:
+                    stale_callback(stale, stale_cleanup=True)
+                except Exception:
+                    pass
             shutil.rmtree(stale, ignore_errors=True)
         except PermissionError:
             pass  # 进程存在但无权限发信号，跳过
 
 
-def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=None, medium_model=None, light_model=None, selected_model=None):
+def _prepare_claude_session_tree(session_home, session_claude_dir, *, account_id="", runtime_kind="api_key", skip_real_entries=None):
+    current_cwd = os.path.realpath(os.getcwd())
+    store = ensure_claude_project_store(current_cwd)
+    skip_real_entries = set(skip_real_entries or ())
+    real_claude_dir = os.path.expanduser("~/.claude")
+    if os.path.islink(session_claude_dir):
+        os.unlink(session_claude_dir)
+    os.makedirs(session_claude_dir, exist_ok=True)
+    if os.path.isdir(real_claude_dir):
+        for entry in os.listdir(real_claude_dir):
+            if entry in skip_real_entries or entry in CLAUDE_PERSISTENT_ENTRIES:
+                continue
+            src = os.path.join(real_claude_dir, entry)
+            dst = os.path.join(session_claude_dir, entry)
+            if not os.path.exists(dst) and not os.path.islink(dst):
+                os.symlink(src, dst)
+    for entry in CLAUDE_PERSISTENT_ENTRIES:
+        dst = os.path.join(session_claude_dir, entry)
+        target = str(claude_raw_entry_path(entry, current_cwd))
+        if not os.path.exists(dst) and not os.path.islink(dst):
+            os.symlink(target, dst)
+    record_claude_session_start(
+        cwd=current_cwd,
+        account_id=str(account_id or ""),
+        pid=os.getpid(),
+        runtime_kind=runtime_kind,
+        slot_home=session_home,
+    )
+    write_slot_marker(
+        session_home,
+        cwd=current_cwd,
+        project_key_value=store["project_key"],
+        account_id=str(account_id or ""),
+        runtime_kind=runtime_kind,
+    )
+
+
+def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
+    marker = read_slot_marker(session_home)
+    if not marker:
+        return
+    try:
+        pid = int(os.path.basename(str(session_home)))
+    except (TypeError, ValueError):
+        return
+    cwd = marker.get("cwd") or os.getcwd()
+    finalize_claude_session(
+        cwd=cwd,
+        pid=pid,
+        exit_code=exit_code,
+        stale_cleanup=stale_cleanup,
+    )
+
+
+def _claude_gateway_env(
+    runtime,
+    base_url=None,
+    auth_token=None,
+    heavy_model=None,
+    medium_model=None,
+    light_model=None,
+    selected_model=None,
+    runtime_kind=None,
+):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
     - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
     - 启动时清理已死进程的残留目录
@@ -695,7 +768,7 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=Non
     os.makedirs(gateway_home, exist_ok=True)
 
     # 清理 stale sessions（PID 已不存在的目录）
-    _cleanup_stale_sessions(sessions_dir)
+    _cleanup_stale_sessions(sessions_dir, stale_callback=_finalize_claude_slot)
 
     # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
     # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
@@ -745,22 +818,16 @@ def _claude_gateway_env(runtime, base_url=None, auth_token=None, heavy_model=Non
     if os.path.isdir(real_library) and not os.path.exists(gw_library) and not os.path.islink(gw_library):
         os.symlink(real_library, gw_library)
 
-    # ── ~/.claude 目录：创建真实目录，分项 symlink 子目录，单独写 settings.json ──
+    # ── ~/.claude 目录：持久化历史项指向 project store，其余沿用真实 ~/.claude ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
     real_claude_dir = os.path.expanduser("~/.claude")
-    # 如果 gw_claude_dir 是整目录 symlink（旧版遗留），删掉重建为真实目录
-    if os.path.islink(gw_claude_dir):
-        os.unlink(gw_claude_dir)
-    os.makedirs(gw_claude_dir, exist_ok=True)
-    # symlink all real subdirs/files except settings.json
-    if os.path.isdir(real_claude_dir):
-        for entry in os.listdir(real_claude_dir):
-            if entry == "settings.json":
-                continue
-            src = os.path.join(real_claude_dir, entry)
-            dst = os.path.join(gw_claude_dir, entry)
-            if not os.path.exists(dst) and not os.path.islink(dst):
-                os.symlink(src, dst)
+    _prepare_claude_session_tree(
+        gateway_home,
+        gw_claude_dir,
+        account_id=str(runtime.get("id", "")),
+        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+        skip_real_entries={"settings.json"},
+    )
 
     # ── settings.json：继承用户配置 + 覆盖 gateway 必要字段 ──
     effective_token = auth_token or runtime["api_key"]
@@ -1284,7 +1351,16 @@ def _write_runtime_config(prefix, content):
     return path
 
 
-def _exec_or_run(cmd, env, once, cleanup_path=None, state_home=None, cleanup_context=None):
+def _exec_or_run(
+    cmd,
+    env,
+    once,
+    cleanup_path=None,
+    state_home=None,
+    cleanup_context=None,
+    exit_callback=None,
+    force_subprocess=False,
+):
     """默认用 execvp；需要清理临时文件时回退到 subprocess。"""
     from shutil import which
     exe = which(cmd[0])
@@ -1292,17 +1368,25 @@ def _exec_or_run(cmd, env, once, cleanup_path=None, state_home=None, cleanup_con
         console.print(f"[red]{cmd[0]} 未找到，请先安装[/red]")
         sys.exit(1)
 
-    if once or cleanup_path or state_home or cleanup_context:
+    if once or cleanup_path or state_home or cleanup_context or exit_callback or force_subprocess:
+        exit_code = None
         try:
             if state_home:
                 with activated_claude_account_state(state_home):
                     result = subprocess.run(cmd, env=env)
             else:
                 result = subprocess.run(cmd, env=env)
+            exit_code = result.returncode
             sys.exit(result.returncode)
         except KeyboardInterrupt:
+            exit_code = 130
             sys.exit(0)
         finally:
+            if exit_callback is not None:
+                try:
+                    exit_callback(exit_code)
+                except Exception:
+                    pass
             if cleanup_path and os.path.exists(cleanup_path):
                 os.remove(cleanup_path)
             if cleanup_context is not None:
