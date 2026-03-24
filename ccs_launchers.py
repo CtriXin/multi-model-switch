@@ -41,6 +41,17 @@ _AGENT_IM_DIR = os.path.expanduser("~/auto-skills/CtriXin-repo/agent-im")
 _AGENT_IM_SOCK = os.path.expanduser("~/.agent-im/agent-im.sock")
 
 
+def _claude_gateway_home():
+    gateway_base = os.path.expanduser("~/.config/mms/claude-gateway")
+    sessions_dir = os.path.join(gateway_base, "s")
+    return os.path.join(sessions_dir, str(os.getpid()))
+
+
+def _claude_route_status_paths():
+    gateway_home = _claude_gateway_home()
+    return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
+
+
 def _anthropic_cache_key(provider_id, configured_url):
     return f"{provider_id}::{configured_url.rstrip('/')}"
 
@@ -342,6 +353,8 @@ def _anthropic_base_url(provider):
     explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
     if explicit:
         return explicit
+    if "anthropic_messages" not in _provider_protocols(provider):
+        return ""
     return str(provider.get("base_url", "")).strip().rstrip("/")
 
 
@@ -425,6 +438,7 @@ def launch_claude(model_info, runtime, once=False):
     else:
         gateway_health_check(runtime)
         speed_scope = build_provider_speed_scope(runtime)
+        route_status_paths = _claude_route_status_paths()
         try:
             advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
         except Exception:
@@ -461,7 +475,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     medium_model=lb_medium or None,
                                                     light_model=lb_light or None,
                                                     advertised_models=advertised_models,
-                                                    speed_scope=speed_scope)
+                                                    speed_scope=speed_scope,
+                                                    route_status_paths=route_status_paths)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -486,6 +501,7 @@ def launch_claude(model_info, runtime, once=False):
                     heavy_model=probe_model,
                     advertised_models=advertised_models,
                     speed_scope=speed_scope,
+                    route_status_paths=route_status_paths,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
@@ -532,7 +548,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None,
                                                 advertised_models=advertised_models,
-                                                speed_scope=speed_scope)
+                                                speed_scope=speed_scope,
+                                                route_status_paths=route_status_paths)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _claude_gateway_env(
                 runtime,
@@ -564,7 +581,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     medium_model=lb_medium,
                                                     light_model=lb_light,
                                                     advertised_models=advertised_models,
-                                                    speed_scope=speed_scope)
+                                                    speed_scope=speed_scope,
+                                                    route_status_paths=route_status_paths)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -847,7 +865,8 @@ def _claude_gateway_env(
     import json as _json
     gateway_base = os.path.expanduser("~/.config/mms/claude-gateway")
     sessions_dir = os.path.join(gateway_base, "s")
-    gateway_home = os.path.join(sessions_dir, str(os.getpid()))
+    gateway_home = _claude_gateway_home()
+    route_status_path = _claude_route_status_paths()[0]
     os.makedirs(gateway_home, exist_ok=True)
 
     # 清理 stale sessions（PID 已不存在的目录）
@@ -931,6 +950,7 @@ def _claude_gateway_env(
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+        "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
     if best_model:
         for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
@@ -961,6 +981,7 @@ def _claude_gateway_env(
     env["HOME"] = gateway_home
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
+    env["MMS_ROUTE_STATUS_PATH"] = route_status_path
     if best_model:
         for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
@@ -976,7 +997,7 @@ def _claude_gateway_env(
     status_tier = "heavy" if auth_token else "-"
     status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
     try:
-        _write_route_status(status_tier, status_model, status_reason)
+        _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
     except Exception:
         pass
 
