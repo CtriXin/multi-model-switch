@@ -250,6 +250,7 @@ def _account_env(account):
         session_library = os.path.join(session_home, "Library")
         if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
             os.symlink(real_library, session_library)
+        _link_shared_dotfiles(session_home)
         # .claude/ 目录：创建真实目录，分项 symlink
         session_claude_dir = os.path.join(session_home, ".claude")
         _prepare_claude_session_tree(session_home, session_claude_dir, account_id=account.get("id", ""), runtime_kind="oauth")
@@ -276,6 +277,7 @@ def _account_env(account):
         session_library = os.path.join(session_home, "Library")
         if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
             os.symlink(real_library, session_library)
+        _link_shared_dotfiles(session_home)
         if cli_name == "codex":
             _overlay_codex_shared_resume(home_dir, session_home)
         xdg_config_home = os.path.join(session_home, ".config")
@@ -318,6 +320,16 @@ def _overlay_codex_shared_resume(home_dir, session_home):
         if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
             continue
         os.symlink(src, dst)
+
+
+def _link_shared_dotfiles(session_home):
+    """Expose user-level Git/SSH config inside isolated HOME sessions."""
+    real_home = os.path.expanduser("~")
+    for dot_name in (".ssh", ".gitconfig", ".gitignore_global"):
+        src = os.path.join(real_home, dot_name)
+        dst = os.path.join(session_home, dot_name)
+        if os.path.exists(src) and not os.path.exists(dst) and not os.path.islink(dst):
+            os.symlink(src, dst)
 
 
 def validate_account_for_cli(cli, account):
@@ -920,6 +932,8 @@ def _claude_gateway_env(
     if os.path.isdir(real_library) and not os.path.exists(gw_library) and not os.path.islink(gw_library):
         os.symlink(real_library, gw_library)
 
+    _link_shared_dotfiles(gateway_home)
+
     # ── ~/.claude 目录：持久化历史项指向 project store，其余沿用真实 ~/.claude ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
     real_claude_dir = os.path.expanduser("~/.claude")
@@ -1067,6 +1081,8 @@ def _codex_gateway_env(runtime, base_url):
     session_library = os.path.join(session_home, "Library")
     if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
         os.symlink(real_library, session_library)
+
+    _link_shared_dotfiles(session_home)
 
     # --- .codex 目录：auth + config 写入 session，其余从真实 ~/.codex symlink ---
     codex_dir = os.path.join(session_home, ".codex")
