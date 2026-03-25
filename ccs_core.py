@@ -2409,10 +2409,20 @@ def _save_probe_file_cache(provider_id, result):
         pass
 
 
+def _derived_model_aliases(base_models):
+    aliases = []
+    if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
+        aliases.append("claude-sonnet-4-6")
+    if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
+        aliases.append("claude-opus-4-6")
+    return aliases
+
+
 def _apply_provider_model_patch(provider, base_result):
     result = dict(base_result)
     base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
     extra_models = _normalize_model_id_list(provider.get("extra_models", []))
+    derived_aliases = _derived_model_aliases(base_models)
     hidden_requested = set(_normalize_model_id_list(provider.get("hidden_models", [])))
     base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
 
@@ -2430,6 +2440,12 @@ def _apply_provider_model_patch(provider, base_result):
         model_sources[model_id] = "extra"
         effective_models.append(model_id)
 
+    for model_id in derived_aliases:
+        if model_id in model_sources:
+            continue
+        model_sources[model_id] = "derived_alias"
+        effective_models.append(model_id)
+
     hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
     if hidden_requested:
         effective_models = [model_id for model_id in effective_models if model_id not in hidden_requested]
@@ -2438,7 +2454,7 @@ def _apply_provider_model_patch(provider, base_result):
     result["raw_models"] = base_models
     result["models"] = effective_models
     result["model_sources"] = visible_sources
-    result["extra_models"] = extra_models
+    result["extra_models"] = extra_models + [model_id for model_id in derived_aliases if model_id not in extra_models]
     result["hidden_models"] = hidden_applied
     result["base_source"] = base_source
     return result

@@ -160,6 +160,25 @@
 
 这一类映射能生效。
 
+### 4. `Claude metadata.user_id` 必须保持“字符串”格式
+
+这次 live 排障确认，真实 `Claude CLI` 发的是：
+
+- `metadata.user_id = "{\"device_id\":\"...\",\"account_uuid\":\"...\",\"session_id\":\"...\"}"`
+
+不是：
+
+- `metadata.user_id = { ... }`
+
+如果中间层把它改成对象：
+
+- 上游会直接报 `metadata.user_id: Input should be a valid string`
+- `channel_affinity` 即使仍能取到值，语义也已经偏离真实 `Claude CLI`
+
+因此 `Claude -> newapi -> CRS` 的稳定要求里，要额外加一条：
+
+- 不要把 `metadata.user_id` 从 string 改写成 object
+
 ## Sticky 的真实边界
 
 `newapi channel_affinity` 粘的是：
@@ -220,6 +239,7 @@
 - `newapi` 命中同一条 channel
 - `CRS` 日志看到同一把 API key
 - `CRS` 日志看到同一个绑定账号
+- `Claude` 场景下，确认 `metadata.user_id` 在日志里仍是字符串，不是对象
 
 ### 验证切流
 
@@ -236,6 +256,20 @@
 - 之前 header 透传失败的真正原因是 `pass_through_body_enabled=true`
 - 修正为 `false` 后，下游 private `CRS` 已重新识别为 `codex_cli_rs/...`
 - 当前 `new-api-relay` 已先临时绑到单账号 `charlotte`
+
+同日额外 live 结论：
+
+- `Claude -> newapi(4001) -> CRS` 已确认 sticky 生效
+- 固定 `session_id = sess-sticky-claude-001` 连续 3 次请求，CRS 都落到同一个账号 `claude-official`
+- 但最小 `hi` 请求的 `usage` 为：
+  - `input_tokens = 22`
+  - `cache_creation_input_tokens = 0`
+  - `cache_read_input_tokens = 0`
+
+这说明：
+
+- sticky 生效不等于一定会看到 `cache read`
+- `Claude` 的 prompt cache 是否命中，还取决于上游是否认为这批请求满足缓存条件
 
 这是短期兜底，不是长期最优结构。
 
