@@ -642,7 +642,7 @@ onMounted(() => {
           <div class="space-y-3 text-xs">
             <div class="w-full flex items-center justify-between">
               <span class="text-text-tertiary font-black uppercase tracking-widest">版本 Version</span>
-              <span class="text-text-primary font-black">v0.3.5</span>
+              <span class="text-text-primary font-black">v0.5.5</span>
             </div>
             <div class="flex items-center justify-between"><span
                 class="text-text-tertiary font-black uppercase tracking-widest">内核 Core</span><span
