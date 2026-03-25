@@ -258,6 +258,108 @@ A：以 2026-03-25 的 live 实验和 `82.156.121.141` 机器实查结果看，`
 如果问题是“Codex 过 newapi 时应该按哪条协议理解”，当前答案是：
 
 - 从 `Codex` 视角，应优先按 `Responses` 理解
+
+---
+
+### Q7：`Claude -> newapi -> CRS` 现在 sticky 到底有没有生效？
+
+A：有，而且已经做了 live 验证。
+
+2026-03-25 我用固定 `metadata.user_id` 连续 3 次请求：
+
+- 入口：`http://82.156.121.141:4001/v1/messages?beta=true`
+- `User-Agent: claude-cli/2.1.81 (external, sdk-cli)`
+- `x-app: cli`
+- `model: claude-sonnet-4-20250514`
+- `metadata.user_id = "{\"device_id\":\"dev-codex-test\",\"account_uuid\":\"acct-coding-1\",\"session_id\":\"sess-sticky-claude-001\"}"`
+
+CRS 日志确认三次都命中同一个 sticky 账号：
+
+- `Created new sticky session mapping in group: fish ... for session sess-sticky-claude-001`
+- `Using sticky session account from group: ... (claude-official) for session sess-sticky-claude-001`
+
+同 3 次请求的 `usage` 也稳定一致：
+
+- `input_tokens = 22`
+- `cache_creation_input_tokens = 0`
+- `cache_read_input_tokens = 0`
+
+结论：
+
+- `newapi -> CRS` 这段 `Claude sticky` 已经正常
+- 但最小 `hi` 请求并不会天然出现 `prompt cache read`
+- 所以“是否有 cache read”不能单独拿来判断 sticky 是否失效
+
+---
+
+### Q8：为什么我自己构造 `metadata.user_id` 时一开始总是 400？
+
+A：因为 `Claude` 这里要求的是“字符串”，不是对象。
+
+这次 live 排障踩到的真实坑是：
+
+- 错误写法：
+  - `"metadata": { "user_id": { "device_id": "...", "session_id": "..." } }`
+- 正确写法：
+  - `"metadata": { "user_id": "{\"device_id\":\"...\",\"session_id\":\"...\"}" }`
+
+CRS 日志里的上游报错非常明确：
+
+- `metadata.user_id: Input should be a valid string`
+
+这点很关键，因为：
+
+- `newapi channel_affinity` 默认也正是从 `gjson:metadata.user_id` 取 sticky key
+- 如果格式被中间层改成 object，轻则上游 400，重则 sticky key 语义和真实 Claude CLI 不一致
+
+---
+
+### Q9：为什么直连 `CRS /claude` 时，有些 key 会报 `Invalid API key format`？
+
+A：因为 `/claude` 入口先过的是 CRS 自己的 API key 校验，它要求 key 必须带本机配置的固定前缀。
+
+本次远端实查到：
+
+- 代码：`/app/src/services/apiKeyService.js`
+- 校验逻辑：`apiKey.startsWith(this.prefix)`
+- 当前 prefix：`cr_`
+
+也就是说：
+
+- 能否被 `newapi` 当 channel key 用
+- 能否被客户端直接拿去打 `CRS /claude`
+
+不是一回事。
+
+当前现网 `channel 12` 的 key：
+
+- `cr_bb46fe98ed6a160e9b233aca6a38a5195aeb510ecd5ce4bec370ebec9a08212c`
+
+它格式上符合 `cr_` 前缀，因此可以作为 CRS 自己的 relay key。
+
+但如果你手上拿的是：
+
+- OAuth access token
+- 其他平台生成的 bearer token
+- 不带 `cr_` 前缀的中间层 key
+
+那直接打 `/claude` 就会在 CRS 认证中间件里先被拒掉，根本还没到账号选择阶段。
+
+---
+
+### Q10：`Claude` 这条链除了 sticky，还有什么额外兼容点最容易出问题？
+
+A：至少还有 4 个：
+
+1. `User-Agent` 必须保留 `claude-cli/x.y.z` 形态。CRS 里有专门的 `ClaudeCodeValidator` 检查它。
+2. `x-app`、`anthropic-beta`、`anthropic-version` 不能丢。缺任一项，都可能不再被识别为真实 `Claude Code`。
+3. `metadata.user_id` 必须存在且格式合法。它既影响客户端识别，也影响 sticky key。
+4. `pass_through_body_enabled` 不能开成 `true`。否则 `newapi` 的 `pass_headers` / `sync_fields` / `channel_affinity` param override 可能全部失效。
+
+本轮修复后，`Claude -> newapi -> CRS` 的关键识别头已经能透传；当前剩余风险不在“头丢了”，而在：
+
+- 是否用了错误格式的 `metadata.user_id`
+- 是否把并不属于 CRS 的 token 拿去直连 `/claude`
 - `new-api` 只是同时保留了 `Chat Completions` 兼容入口
 
 ---
@@ -743,6 +845,16 @@ A：是，而且这轮已经用本机 `Claude Code 2.1.81` 直接抓包确认。
 - `companycrs`：`504`
 - `companycrsopenai`：`504`
 - `privateopenai`：`404 /openai/v1/messages`
+
+补充观察（2026-03-25 23:20）：
+
+- `private(/claude)` 的 `/v1/models` 实际返回的是 Anthropic 的 dated model id，例如：
+  - `claude-sonnet-4-20250514`
+  - `claude-sonnet-4-5-20250929`
+  - `claude-opus-4-20250514`
+  - `claude-opus-4-5-20251101`
+- 它不会直接广告 `claude-sonnet-4-6` / `claude-opus-4-6`
+- MMS 已在本地 probe patch 层补出这两个 alias，避免 provider 列表里只看到 dated id、不方便直接选择
 
 ### Codex
 
