@@ -267,6 +267,7 @@ export const useAppStore = defineStore('app', () => {
   const error = ref<string | null>(null)
   const preferFree = ref(localStorage.getItem('mms-prefer-free') !== 'false')
   const showHomeEntry = ref(localStorage.getItem('mms-show-home') !== 'false')
+  const sidebarCollapsed = ref(localStorage.getItem('mms-sidebar-collapsed') === 'true')
   const showFriendsMode = ref(localStorage.getItem('mms-show-friends') === 'true')
   const sparkringSpeedMap = ref<Record<string, ModelSpeedMeta>>(buildSpeedMap(initialSpeedCache))
   const sparkringSpeedTestedAt = ref<string | null>(initialSpeedCache?.testedAt ?? null)
@@ -281,6 +282,14 @@ export const useAppStore = defineStore('app', () => {
   watch(showHomeEntry, (val) => {
     localStorage.setItem('mms-show-home', String(val))
   })
+
+  watch(sidebarCollapsed, (val) => {
+    localStorage.setItem('mms-sidebar-collapsed', String(val))
+  })
+
+  function toggleSidebar() {
+    sidebarCollapsed.value = !sidebarCollapsed.value
+  }
 
   watch(showFriendsMode, async (val) => {
     localStorage.setItem('mms-show-friends', String(val))
@@ -593,9 +602,12 @@ export const useAppStore = defineStore('app', () => {
       providerStore.addProvider(SPARKRING_PROVIDER)
       provider = providerStore.getProvider('sparkring')
     }
-    if (provider && result.baseUrl && result.baseUrl !== provider.baseUrl) {
-      providerStore.updateProvider('sparkring', { baseUrl: result.baseUrl })
+    // Ensure sparkring is enabled and has the correct baseUrl after provision
+    const updates: Partial<import('@/stores/provider').ProviderConfig> = { enabled: true }
+    if (result.baseUrl && result.baseUrl !== provider?.baseUrl) {
+      updates.baseUrl = result.baseUrl
     }
+    providerStore.updateProvider('sparkring', updates)
     await providerStore.setApiKey('sparkring', result.apiKey)
   }
 
@@ -933,7 +945,7 @@ export const useAppStore = defineStore('app', () => {
     selectedModels,
     committeeSelectedModelIds,
     committeeSelectedModels,
-    modelsByCategory, initialized, loading, error, preferFree, showHomeEntry,
+    modelsByCategory, initialized, loading, error, preferFree, showHomeEntry, sidebarCollapsed, toggleSidebar,
     initialize,
     refreshModels,
     ensureModelsLoaded,

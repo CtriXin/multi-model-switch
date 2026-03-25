@@ -190,13 +190,13 @@ const BUILTIN_PROVIDERS: ProviderConfig[] = [
   { id: 'demo', name: 'Demo (模拟数据)', type: 'mock', baseUrl: '', enabled: true, builtIn: true },
 ]
 
-// SparkRing provider config (hidden by default, shown after provision)
+// SparkRing provider config — default visible, auto-provisioned on first launch
 export const SPARKRING_PROVIDER: ProviderConfig = {
   id: 'sparkring',
   name: 'SparkRing 体验通道',
   type: 'openai-compatible',
-  baseUrl: 'http://82.156.121.141:4001/v1',
-  enabled: false,
+  baseUrl: 'https://apple.clawopen.online/v1',
+  enabled: true,
   builtIn: true,
 }
 
