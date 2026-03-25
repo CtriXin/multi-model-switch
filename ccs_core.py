@@ -282,6 +282,16 @@ def normalize_user_role(role):
     return MODE_ALL
 
 
+ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
+VALID_ROLES = set(ROLE_WEIGHTS.keys())
+
+
+def _normalize_role(value):
+    """Normalize provider role to one of: primary, auto, fallback."""
+    role = str(value or "auto").strip().lower()
+    return role if role in VALID_ROLES else "auto"
+
+
 def _default_provider():
     return {
         "id": DEFAULT_PROVIDER_ID,
@@ -289,6 +299,7 @@ def _default_provider():
         "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
         "supported_clis": list(CLI_NAMES),
         "enabled": True,
+        "role": "auto",
     }
 
 
@@ -3294,6 +3305,119 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
     return aggregated
 
 
+def _resolve_best_provider(cfg, model_name, default_provider, default_models,
+                           cli_name=None, protocol=None):
+    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority desc。
+
+    如果指定了 protocol（如 "anthropic_messages"），只考虑支持该协议的 provider。
+    如果指定了 cli_name，只考虑支持该 CLI 的 provider。
+    返回 None 表示没有可用 provider。
+    """
+    model_lower = str(model_name or "").strip().lower()
+    if not model_lower:
+        return None, None
+
+    scored = []  # [(role_weight, -priority, provider_ctx, provider_name)]
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if cli_name and not _provider_supports_cli_name(provider, cli_name):
+            continue
+        if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+            continue
+        if not provider.get("api_key"):
+            continue
+        if protocol:
+            protocols = provider.get("protocols", [])
+            if protocol not in protocols:
+                continue
+
+        models = list(cached_models or [])
+        if cached_models is None:
+            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+
+        # Check if this provider has the model
+        model_names_lower = [str(m or "").strip().lower() for m in models]
+        if model_lower not in model_names_lower:
+            continue
+
+        role = _normalize_role(provider.get("role", "auto"))
+        priority = _normalize_priority(provider.get("priority", DEFAULT_PRIORITY))
+        pname = _provider_label(provider)
+        scored.append((ROLE_WEIGHTS.get(role, 1), -priority, provider, pname))
+
+    if not scored:
+        return None, None
+
+    scored.sort(key=lambda x: (x[0], x[1]))
+    return scored[0][2], scored[0][3]
+
+
+def _build_model_families_for_cli(cfg, cli_name, default_provider, default_models):
+    """聚合所有 provider 的模型，按 MODEL_FAMILIES 分组，每个模型附带最优 provider。
+
+    Returns:
+        List[dict]: [{
+            "family": str,       # e.g. "Claude"
+            "models": [{
+                "model": str,
+                "provider_id": str,
+                "provider_name": str,
+                "provider_ctx": dict,  # 完整 runtime context
+            }],
+        }]
+    """
+    # 聚合所有模型（去重，取最优 provider）
+    model_best = {}  # model_name -> (provider_ctx, provider_name, provider_id)
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not _provider_supports_cli_name(provider, cli_name):
+            continue
+        if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+            continue
+        if not provider.get("api_key"):
+            continue
+
+        models = list(cached_models or [])
+        if cached_models is None:
+            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        if not models:
+            continue
+
+        role = _normalize_role(provider.get("role", "auto"))
+        priority = _normalize_priority(provider.get("priority", DEFAULT_PRIORITY))
+        score = (ROLE_WEIGHTS.get(role, 1), -priority)
+        pid = provider.get("id", DEFAULT_PROVIDER_ID)
+        pname = _provider_label(provider)
+
+        for m in models:
+            normalized = str(m or "").strip()
+            if not normalized:
+                continue
+            existing = model_best.get(normalized)
+            if existing is None or score < existing[0]:
+                model_best[normalized] = (score, provider, pname, pid)
+
+    # 按 family 分组
+    family_map = {}  # family_name -> [model_entry]
+    family_order = []
+
+    for model_name, (_, provider_ctx, pname, pid) in model_best.items():
+        family, _ = _infer_model_family(model_name)
+        if family not in family_map:
+            family_map[family] = []
+            family_order.append(family)
+        family_map[family].append({
+            "model": model_name,
+            "provider_id": pid,
+            "provider_name": pname,
+            "provider_ctx": provider_ctx,
+        })
+
+    return [{"family": f, "models": family_map[f]} for f in family_order]
+
+
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
     _probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
@@ -3846,117 +3970,274 @@ def _use_tui():
         return False
 
 
+def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
+    """为一组模型名构建 provider 替代选项映射（供 P 键使用）。
+
+    Returns:
+        dict[str, list[dict]] — model_name -> [{"provider_name", "provider_id", "provider_ctx"}]
+    """
+    result = {}
+    for model_name in model_names:
+        options = []
+        for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+            if not provider.get("enabled", True):
+                continue
+            if not _provider_supports_cli_name(provider, cli_name):
+                continue
+            if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+                continue
+            if not provider.get("api_key"):
+                continue
+            models = list(cached_models or [])
+            if cached_models is None:
+                models = list(_probe_models(provider, emit_output=False).get("models") or [])
+            model_lower = [str(m or "").strip().lower() for m in models]
+            if model_name.strip().lower() not in model_lower:
+                continue
+            options.append({
+                "provider_name": _provider_label(provider),
+                "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
+                "provider_ctx": provider,
+            })
+        if len(options) > 1:
+            result[model_name] = options
+    return result
+
+
 def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
-    """TUI 交互选择场景，返回 True 表示已处理（launch 或退出），False 表示 fallback"""
-    from ccs_tui import select_scene_tui, select_model_tui, confirm_tui
+    """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
+    from ccs_tui import select_family_tui, select_submodel_tui, confirm_tui
+    from ccs_tui import select_load_balance_tui, save_lb_history
     from ccs_launchers import launch_cli, get_export_env
     current_cfg = cfg
     current_provider = provider
     current_cli_names = cli_names
-    current_scenes = scenes
+    default_models = _probe_models(current_provider, emit_output=False).get("models")
+
+    # 预构建品类数据（仅在配置变更时重建）
+    def _rebuild_families():
+        fbc = {}
+        fd = {}
+        for cli_name in current_cli_names:
+            raw = _build_model_families_for_cli(
+                current_cfg, cli_name, current_provider, default_models
+            )
+            fbc[cli_name] = [
+                {"family": f["family"], "count": len(f["models"])} for f in raw
+            ]
+            fd[cli_name] = {f["family"]: f["models"] for f in raw}
+        return fbc, fd
+
+    families_by_cli, families_detail = _rebuild_families()
+    _families_dirty = False
 
     while True:
-        source_choices = _source_choices_for_tui(
-            current_cfg,
-            current_scenes,
-            current_cli_names,
-            current_provider,
-            _probe_models(current_provider, emit_output=False).get("models"),
-        )
-        last_info, scene_counts = _get_scene_usage()
-        result = select_scene_tui(current_scenes, current_cli_names, source_choices=source_choices,
-                                  last_used=last_info, scene_counts=scene_counts)
+        if _families_dirty:
+            families_by_cli, families_detail = _rebuild_families()
+            _families_dirty = False
 
-        # curses 失败，fallback
+        # 获取上次使用信息
+        last_info, _ = _get_scene_usage()
+        last_used = None
+        if last_info and last_info.get("model"):
+            last_used = {
+                "model": last_info["model"],
+                "cli": last_info.get("cli", ""),
+                "provider": "",
+            }
+
+        result = select_family_tui(families_by_cli, current_cli_names, last_used=last_used)
+
         if result == "fallback":
             return False
-
-        if result == "__connect__":
-            current_cfg, changed = run_connect_wizard(current_cfg)
-            if changed:
-                _PROBE_CACHE.clear()  # 配置变更后清除探测缓存
-                # 同时清除文件缓存
-                import shutil as _shutil
-                _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
-                current_provider = ensure_provider_credentials(current_cfg)
-                current_models = ensure_models_ready(current_cfg, current_provider)[1]
-                current_cli_names = _resolve_visible_clis(current_cfg, current_provider, current_models)
-                current_scenes = _filter_scenes_by_visible_clis(current_cli_names)
-            continue
-
-        # 用户取消
         if result is None:
             return True
 
-        scene_name, cli, model_info, selected_source = result
-        runtime_runtime = None
-        family_models = []
+        action_type, cli, action_data = result
 
-        # ── 智能路由：拦截，弹出 heavy+medium+light 选择 TUI ──
-        if scene_name and scenes.get(scene_name, {}).get("load_balance"):
-            from ccs_tui import select_load_balance_tui, save_lb_history
-            probe_result = _probe_models(current_provider, emit_output=False).get("models")
-            lb_result = select_load_balance_tui(available_models=probe_result)
+        # ── 接入通道 ──
+        if action_type == "connect":
+            current_cfg, changed = run_connect_wizard(current_cfg)
+            if changed:
+                _PROBE_CACHE.clear()
+                import shutil as _shutil
+                _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
+                current_provider = ensure_provider_credentials(current_cfg)
+                default_models = _probe_models(current_provider, emit_output=False).get("models")
+                current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
+                _families_dirty = True
+            continue
+
+        # ── 负载模式 ──
+        if action_type == "load_balance":
+            all_models = []
+            cli_families = families_detail.get(cli, {})
+            for fam_models in cli_families.values():
+                all_models.extend(m["model"] for m in fam_models)
+            lb_prov_opts = _build_provider_options_map(
+                current_cfg, cli, current_provider, default_models, all_models
+            ) if all_models else None
+            lb_result = select_load_balance_tui(
+                available_models=all_models or None,
+                families_detail=cli_families,
+                provider_options_map=lb_prov_opts,
+            )
             if lb_result is None:
                 continue
-            model_info = lb_result
+            model_info = dict(lb_result)
             save_lb_history(lb_result["model"], lb_result.get("lb_medium", ""), lb_result.get("lb_light", ""))
-
-        if scene_name is None:
-            aggregated = _aggregate_provider_models(
-                current_cfg, cli, current_provider, _probe_models(current_provider, emit_output=False).get("models")
-            )
-            if not _ensure_models_cache_available(aggregated):
-                return True
-            model, custom_provider_id = _select_custom_model(
-                aggregated,
-                cli,
-                role=current_cfg.get("user", {}).get("role", MODE_ALL),
-                recommend=current_cfg.get("recommend", {}).get("models"),
-                use_tui=True,
-            )
-            if model is None:
-                continue
-            model_info = {"model": model}
-            runtime_runtime, family_models, cli = _choose_runtime_source(
-                current_cfg,
-                cli,
-                current_provider,
-                _probe_models(current_provider, emit_output=False).get("models"),
-                account_id=account_id,
-                provider_id=custom_provider_id or provider_id,
-                model_info=model_info,
-                allow_selected_model_accounts=True,
+            # 用 heavy model 的 best provider 作为 runtime
+            runtime_runtime, _ = _resolve_best_provider(
+                current_cfg, lb_result["model"], current_provider, default_models, cli_name=cli
             )
             if runtime_runtime is None:
-                console.print(f"[yellow]{cli} 当前没有可承载模型 {model} 的使用入口[/yellow]")
+                runtime_runtime, _, cli = _choose_runtime_source(
+                    current_cfg, cli, current_provider, default_models,
+                    account_id=account_id, provider_id=provider_id,
+                    model_info=model_info, allow_selected_model_accounts=True,
+                )
+            if runtime_runtime is None:
+                console.print(f"[yellow]{cli} 没有可用 provider 承载负载模式[/yellow]")
                 continue
-        elif isinstance(selected_source, dict):
-            runtime_runtime = selected_source.get("runtime")
-            family_models = list(selected_source.get("models") or [])
-            cli = selected_source.get("launch_cli", cli)
-        if runtime_runtime is None:
-            runtime_runtime, family_models, cli = _choose_runtime_source(
-                current_cfg,
-                cli,
-                current_provider,
-                _probe_models(current_provider, emit_output=False).get("models"),
-                account_id=account_id,
-                provider_id=provider_id,
-                model_info=model_info,
-                allow_selected_model_accounts=True,
-            )
-        if runtime_runtime is None:
-            console.print(f"[yellow]{cli} 当前没有可用运行来源[/yellow]")
-            return True
 
-        if scene_name == "__direct_qwen__":
-            model = select_model_tui(family_models, title="选择 Qwen 模型")
-            if model is None:
-                return True
-            model_info = {"model": model}
-        elif scene_name == "__direct_kimi__":
-            model_info = {"model": DEFAULT_KIMI_MODEL}
+            # 构建跨 provider slot_configs：为 medium/light 找各自的最优 provider
+            slot_configs = {}
+            for slot_name, slot_model in [("medium", lb_result.get("lb_medium")),
+                                          ("light", lb_result.get("lb_light"))]:
+                if not slot_model or not slot_model.strip():
+                    continue
+                slot_prov, _ = _resolve_best_provider(
+                    current_cfg, slot_model, current_provider, default_models, cli_name=cli
+                )
+                if slot_prov and slot_prov.get("id") != runtime_runtime.get("id"):
+                    # 不同 provider：记录独立 url/key
+                    slot_url = (slot_prov.get("anthropic_base_url") or
+                                slot_prov.get("base_url") or
+                                slot_prov.get("openai_base_url") or "")
+                    if slot_url:
+                        slot_url = slot_url.rstrip("/")
+                        if not slot_url.endswith("/v1"):
+                            slot_url += "/v1"
+                        slot_configs[slot_name] = {
+                            "url": slot_url,
+                            "key": slot_prov.get("api_key", ""),
+                        }
+            if slot_configs:
+                model_info["lb_slot_configs"] = slot_configs
+            # fall through to confirm below
+
+        # ── 设置 ──
+        elif action_type == "settings":
+            from ccs_tui import select_settings_tui, select_provider_mgmt_tui
+            settings_action = select_settings_tui()
+            if settings_action is None:
+                continue
+            if settings_action == "provider_mgmt":
+                providers_raw = current_cfg.get("providers", [])
+                result_providers = select_provider_mgmt_tui(providers_raw)
+                if result_providers is not None:
+                    # 回写 role/priority 到 config
+                    for rp in result_providers:
+                        pid = rp.get("id")
+                        for orig in current_cfg.get("providers", []):
+                            if orig.get("id") == pid:
+                                orig["role"] = rp.get("role", "auto")
+                                orig["priority"] = rp.get("priority", 100)
+                                break
+                    save_config(current_cfg)
+                    _PROBE_CACHE.clear()
+                    current_provider = ensure_provider_credentials(current_cfg)
+                    default_models = _probe_models(current_provider, emit_output=False).get("models")
+                    _families_dirty = True
+                    # 自动重新生成 routes
+                    try:
+                        from ccs_router import export_model_routes
+                        export_model_routes(current_cfg, force=True)
+                    except Exception:
+                        pass
+            elif settings_action == "routes_export":
+                try:
+                    from ccs_router import export_model_routes
+                    path = export_model_routes(current_cfg, force=True)
+                    if path:
+                        console.print(f"[green]✓ 已导出 {path}[/green]")
+                except Exception as e:
+                    console.print(f"[red]导出失败: {e}[/red]")
+            elif settings_action == "about":
+                console.print(f"[cyan]{display_title()}[/cyan]")
+                console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
+            elif settings_action == "account_mgmt":
+                console.print("[dim]账号管理尚未完全实现[/dim]")
+            elif settings_action == "recommend":
+                console.print("[dim]推荐模型管理尚未完全实现[/dim]")
+            continue
+
+        # ── 上次使用 ──
+        elif action_type == "last":
+            model_info = {"model": action_data["model"]}
+            runtime_runtime, _ = _resolve_best_provider(
+                current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+            )
+            if runtime_runtime is None:
+                runtime_runtime, _, cli = _choose_runtime_source(
+                    current_cfg, cli, current_provider, default_models,
+                    account_id=account_id, provider_id=provider_id,
+                    model_info=model_info, allow_selected_model_accounts=True,
+                )
+            if runtime_runtime is None:
+                console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
+                continue
+            # fall through to confirm
+
+        # ── 品类选择 → 子模型 ──
+        elif action_type == "family":
+            family_name = action_data
+            models = families_detail.get(cli, {}).get(family_name, [])
+            if not models:
+                console.print(f"[yellow]{family_name} 下没有可用模型[/yellow]")
+                continue
+
+            # 构建 P 键 provider 替代选项
+            model_names = [m["model"] for m in models]
+            provider_options = _build_provider_options_map(
+                current_cfg, cli, current_provider, default_models, model_names
+            )
+
+            selected = select_submodel_tui(family_name, models, provider_options=provider_options)
+            if selected is None:
+                continue  # Esc 返回品类列表
+
+            # 持久化 priority 变更
+            pri_changes = selected.pop("priority_changes", None)
+            if pri_changes:
+                for pid, new_pri in pri_changes.items():
+                    for pdef in current_cfg.get("providers", []):
+                        if pdef.get("id") == pid:
+                            pdef["priority"] = new_pri
+                            break
+                save_config(current_cfg)
+                _families_dirty = True
+                # 静默重新生成 routes
+                try:
+                    from ccs_router import export_model_routes
+                    export_model_routes(current_cfg, force=True)
+                except Exception:
+                    pass
+
+            model_info = {"model": selected["model"]}
+            runtime_runtime = selected.get("provider_ctx")
+            if runtime_runtime is None:
+                runtime_runtime, _ = _resolve_best_provider(
+                    current_cfg, selected["model"], current_provider, default_models, cli_name=cli
+                )
+            if runtime_runtime is None:
+                console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
+                continue
+            # fall through to confirm
+        else:
+            continue
+
+        # ── 公共：确认页 + 启动 ──
         if not check_cli_installed(cli):
             from ccs_installer import check_and_offer_install
             if not check_and_offer_install(cli):
@@ -3972,7 +4253,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             continue
         if bypass:
             runtime_runtime["bypass"] = True
-        _record_scene_usage(scene_name, cli, clean_model_info)
+        _record_scene_usage("__family__", cli, clean_model_info)
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
@@ -5115,6 +5396,10 @@ def main():
             return
         if command == "session":
             handle_session_command(sys.argv[2:])
+        if command == "routes":
+            from ccs_router import routes_main
+
+            routes_main(_load_command_config(), sys.argv[2:])
             return
 
     if len(sys.argv) >= 2 and sys.argv[1] == "discuss":

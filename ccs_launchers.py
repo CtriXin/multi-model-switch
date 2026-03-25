@@ -498,6 +498,8 @@ def launch_claude(model_info, runtime, once=False):
         # 过滤空字符串（用户可能只选了 heavy+light，medium 为空字符串）
         lb_light = lb_light if lb_light and lb_light.strip() else None
         lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
+        # 跨 provider 负载配置：per-slot upstream url/key
+        lb_slot_configs = model_info.get("lb_slot_configs") if isinstance(model_info, dict) else None
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -511,7 +513,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     light_model=lb_light or None,
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
-                                                    route_status_paths=route_status_paths)
+                                                    route_status_paths=route_status_paths,
+                                                    slot_configs=lb_slot_configs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -527,6 +530,8 @@ def launch_claude(model_info, runtime, once=False):
                     parts.append(f"medium: {lb_medium}")
                 if lb_light:
                     parts.append(f"light: {lb_light}")
+                if lb_slot_configs:
+                    parts.append("跨provider")
                 console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
                 # 直连 Anthropic provider 也统一过本地 bridge，补齐测速与 patched /v1/models。
@@ -584,7 +589,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 light_model=lb_light or None,
                                                 advertised_models=advertised_models,
                                                 speed_scope=speed_scope,
-                                                route_status_paths=route_status_paths)
+                                                route_status_paths=route_status_paths,
+                                                slot_configs=lb_slot_configs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _claude_gateway_env(
                 runtime,
@@ -617,7 +623,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     light_model=lb_light,
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
-                                                    route_status_paths=route_status_paths)
+                                                    route_status_paths=route_status_paths,
+                                                    slot_configs=lb_slot_configs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _claude_gateway_env(
                     runtime,
@@ -1009,6 +1016,8 @@ def _claude_gateway_env(
     settings_data["env"] = settings_env
     settings_data["includeCoAuthoredBy"] = False
     settings_data["attribution"] = {"commit": "", "pr": ""}
+    # 禁用 prompt suggestions — 每轮自动补全会发送完整 context，浪费大量 token
+    settings_data["promptSuggestionEnabled"] = False
     gw_settings = os.path.join(gw_claude_dir, "settings.json")
     with open(gw_settings, "w", encoding="utf-8") as f:
         _json.dump(settings_data, f, ensure_ascii=False, indent=2)
