@@ -41,6 +41,85 @@ def _session_state_path(cwd: str, session_id: str) -> Path:
     return claude_state_sessions_root(cwd) / f"{session_id}.json"
 
 
+def _payload_started_at_ms(payload: dict) -> int | None:
+    raw = payload.get("started_at_ms")
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    started_at = str(payload.get("started_at") or "").strip()
+    if not started_at:
+        return None
+    try:
+        return int(datetime.fromisoformat(started_at).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
+    sessions_root = claude_raw_entry_path("sessions", cwd)
+    if not sessions_root.is_dir():
+        return None
+
+    expected_cwd = os.path.realpath(str(payload.get("cwd") or cwd))
+    expected_started_at_ms = _payload_started_at_ms(payload)
+    candidates: list[tuple[int, int, dict]] = []
+
+    for path in sessions_root.glob("*.json"):
+        data = _read_json(path)
+        if not data:
+            continue
+        session_id = str(data.get("sessionId") or "").strip()
+        started_at_ms = data.get("startedAt")
+        if not session_id or not isinstance(started_at_ms, (int, float)):
+            continue
+        session_cwd = os.path.realpath(str(data.get("cwd") or cwd))
+        if expected_cwd and session_cwd and expected_cwd != session_cwd:
+            continue
+        score = abs(int(started_at_ms) - expected_started_at_ms) if expected_started_at_ms is not None else 0
+        candidates.append((score, -int(started_at_ms), data))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    best_score, _neg_started_at, best = candidates[0]
+    if expected_started_at_ms is not None and best_score > 10 * 60 * 1000:
+        return None
+    return best
+
+
+def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
+    session_id = str(payload.get("session_id") or "").strip()
+    if session_id and session_id != "None" and not session_id.startswith("pid-"):
+        return payload, path
+
+    cwd = str(payload.get("cwd") or payload.get("project_path") or "").strip()
+    if not cwd:
+        return payload, path
+
+    session_data = _load_matching_raw_session(cwd, payload)
+    if not session_data:
+        return payload, path
+
+    resolved_session_id = str(session_data.get("sessionId") or "").strip()
+    if not resolved_session_id:
+        return payload, path
+
+    updated = dict(payload)
+    updated["session_id"] = resolved_session_id
+    updated["cwd"] = session_data.get("cwd") or updated.get("cwd")
+    updated["started_at_ms"] = session_data.get("startedAt") or updated.get("started_at_ms")
+    updated["session_pid"] = session_data.get("pid")
+
+    target = _session_state_path(cwd, resolved_session_id)
+    _write_json(target, updated)
+    if path != target:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    return updated, target
+
+
 def record_claude_session_start(*, cwd: str, account_id: str, pid: int, runtime_kind: str, slot_home: str) -> dict:
     store = ensure_claude_project_store(cwd)
     payload = {
@@ -68,19 +147,14 @@ def finalize_claude_session(*, cwd: str, pid: int, exit_code: int | None, stale_
     if payload is None:
         return None
 
-    session_file = claude_raw_entry_path("sessions", cwd) / f"{pid}.json"
-    session_data = _read_json(session_file) or {}
-    session_id = str(session_data.get("sessionId") or "").strip() or payload.get("session_id") or f"pid-{pid}"
-    payload["session_id"] = session_id
-    payload["cwd"] = session_data.get("cwd") or payload.get("cwd")
     payload["last_active_at"] = _utc_now()
     payload["exit_code"] = exit_code
     payload["stale_cleanup"] = bool(stale_cleanup)
-    if session_data.get("startedAt"):
-        payload["started_at_ms"] = session_data["startedAt"]
-
-    target = _session_state_path(cwd, session_id)
-    _write_json(target, payload)
+    payload, target = _reconcile_session_state(slot_state, payload)
+    if target == slot_state:
+        session_id = str(payload.get("session_id") or "").strip() or f"pid-{pid}"
+        target = _session_state_path(cwd, session_id)
+        _write_json(target, payload)
     try:
         slot_state.unlink()
     except OSError:
@@ -96,6 +170,7 @@ def list_indexed_sessions(cli_name: str = "claude") -> list[dict]:
         return []
 
     sessions: list[dict] = []
+    seen_keys: set[str] = set()
     for state_dir in root.glob("*/claude/state/sessions"):
         if not state_dir.is_dir():
             continue
@@ -103,7 +178,12 @@ def list_indexed_sessions(cli_name: str = "claude") -> list[dict]:
             data = _read_json(path)
             if not data or data.get("cli") != "claude":
                 continue
-            data["_path"] = str(path)
+            data, resolved_path = _reconcile_session_state(path, data)
+            dedupe_key = str(data.get("session_id") or resolved_path)
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            data["_path"] = str(resolved_path)
             sessions.append(data)
     sessions.sort(key=lambda item: item.get("last_active_at") or item.get("started_at") or "", reverse=True)
     return sessions
