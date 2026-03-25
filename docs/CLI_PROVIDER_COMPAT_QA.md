@@ -185,6 +185,92 @@ A：先按这个顺序：
 
 ---
 
+### Q6：`crs -> newapi` 这条链，最终暴露给 `Codex` 的是 `Responses` 还是 `Chat Completions`？
+
+A：以 2026-03-25 的 live 实验和 `82.156.121.141` 机器实查结果看，`xin(4001)` 背后确实是一个定制过的 `new-api`，而且它对 `Codex` 这类 GPT 模型已经显式暴露了 `Responses` 路由。
+
+本次确认到的事实：
+
+- `82.156.121.141:4001` 对应容器：`new-api-custom`
+- 机器上同时还跑着原版 `new-api-original`，端口是 `4000`
+- 源码里明确存在 `/responses` 路由：
+  - `/opt/new-api/src/newapi-src/router/relay-router.go`
+  - `/opt/new-api/src/newapi-src/relay/responses_handler.go`
+- 源码里还存在 `chat completions via responses` 的转换逻辑：
+  - `/opt/new-api/src/newapi-src/relay/chat_completions_via_responses.go`
+
+因此这条链路的结论不是“二选一”，而是：
+
+- `Responses`：原生支持，`Codex` 可以直接打
+- `Chat Completions`：也支持，但服务端内部可以再转成 `Responses`
+
+这和当前 live probe 结果一致：
+
+- `xin`（`http://82.156.121.141:4001`）：
+  - `POST /responses`：`200`
+  - `POST /chat/completions`：`200`
+- `newapi`（`https://chat.adsconflux.xyz/openapi/v1`）：
+  - `POST /responses`：能进路由，但本次返回 `402 upstream_error`
+  - `POST /chat/completions`：同样能进路由，也返回 `402 upstream_error`
+  - `POST /v1/...`：`404`，因为 base URL 本身已经自带 `/v1`
+
+如果问题是“Codex 过 newapi 时应该按哪条协议理解”，当前答案是：
+
+- 从 `Codex` 视角，应优先按 `Responses` 理解
+- `new-api` 只是同时保留了 `Chat Completions` 兼容入口
+
+---
+
+### Q7：为什么同样只发一个 `hi`，后台看到的 `input` 还是很大？能不能删？
+
+A：`hi` 本身几乎不占 token，大头来自 `Codex` 启动时自动拼进去的上下文。
+
+当前会进入请求的主要部分：
+
+1. `Codex CLI` 自带 `base_instructions`
+   - 历史 session 样本里约 `7563` chars
+2. harness / permissions / tools schema
+   - 包括 shell 工具、approval 规则、输出格式要求等
+3. 全局 `AGENTS.md`
+   - `~/.codex/AGENTS.md`
+4. 当前项目 `AGENTS.md`
+   - 本仓库 `AGENTS.md`
+5. 当前会话 developer 注入的 skills 列表
+   - 你本机安装了大量 skills，当前环境里会把“可用技能清单 + 触发规则”一并注入
+6. 当前会话已有历史消息、图片、任务上下文
+
+这也解释了为什么你后台会看到：
+
+- `input` 很大
+- 但重复问同样的话时，`cache read` 也会很大
+
+因为真正可缓存的，恰恰是这些固定前缀。
+
+可以安全裁剪的部分：
+
+- `~/.codex/AGENTS.md`
+  - 会全局生效；能精简，但别删掉你真正在乎的约束
+- 仓库里的 `AGENTS.md`
+  - 会随项目注入；可以缩短 bootstrap 描述，减少重复规则
+- 未使用的 skills
+  - 当前本机 skills 很多，而且有跨目录重复项；删掉不用的 skill，session 里的技能列表会变短
+
+不建议动的部分：
+
+- `Codex CLI` 自带 `base_instructions`
+  - 这是 CLI/harness 自带，不是 MMS 自己额外塞的
+- tools schema / approval 规则
+  - 少了这些，agent 基本就没法正常工作
+
+结论上：
+
+- “一个 `hi` 为什么这么大”主要是 `Codex` 自带上下文，不是 `MMS` 单独放大
+- 真正最值得先减的是两类：
+  - 过长的 `AGENTS.md`
+  - 没在用但还挂着的 skills
+
+---
+
 ## 本地 smoke 结果（2026-03-25）
 
 > 说明：
@@ -225,6 +311,21 @@ A：先按这个顺序：
 - `private`：`404 /claude/v1/chat/completions`
 - `companycrs`：`504`
 - `companycrsopenai`：`504`
+
+补充观察（2026-03-25 15:00-15:20）：
+
+- `privateopenai`
+  - 原生 `POST /responses` 已确认 `200`
+  - 清掉 `~/.config/ccs/cache/bridge_mode_cache.json` 的旧 fallback 后，重复请求已重新出现 `cache read`
+  - 说明此前“不读缓存”大概率是被旧的 `chatcompletions` fallback 污染
+- `companycrsopenai`
+  - 本次直接 probe：
+    - `/responses` 返回 `429`
+    - `/v1/chat/completions` 返回 `200`
+  - 这更像是上游 CRS 当前限流 / 配额状态，而不是本地 bridge 协议不兼容
+- `xin`
+  - `4001` 背后是 `new-api-custom`
+  - 明确支持 `/responses`
 
 ### Qwen
 
