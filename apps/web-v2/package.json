@@ -1,7 +1,7 @@
 {
   "name": "@mms/web-v2",
   "private": true,
-  "version": "0.3.5",
+  "version": "0.5.5",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5188",
