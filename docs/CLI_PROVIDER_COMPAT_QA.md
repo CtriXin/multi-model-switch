@@ -398,6 +398,37 @@ A：如果第一跳 `MMS` 就没透传，那后面的 `newapi` / `CRS` 自然也
 
 但前提仍然是：它得先收到这些 header。第一跳没了，后面无法“凭空恢复原始 Codex 身份”。
 
+补充一个 2026-03-25 的 live 结论：
+
+- `MMS -> privateopenai(/openai) -> CRS`
+  - 这条链已经确认修好
+  - private CRS 日志能看到 `User-Agent: codex_cli_rs/...`
+  - `cache read` 也已经重新出现
+- `MMS -> xin(newapi 4001) -> CRS`
+  - 这条链的第一跳 `MMS` 已修好
+  - 一开始 `newapi-custom` 运行中的实际转发仍然让 CRS 看到 `User-Agent: Go-http-client/1.1`
+  - 继续排查后确认，真正卡点不是 `param_override` JSON，而是：
+    - channel `8/11` 都配置了 `pass_through_body_enabled = true`
+    - 这会在 `responses_handler.go` 里跳过 `ApplyParamOverrideWithRelayInfo(...)`
+    - 导致 `pass_headers/sync_fields` 根本不会执行
+  - 把 `8/11` 的 `pass_through_body_enabled` 改成 `false` 后，live 验证已恢复：
+    - `Authenticated request from key: new-api-relay`
+    - `User-Agent: "codex_cli_rs/0.116.0"`
+    - `✅ Codex CLI request detected, forwarding as-is`
+    - `Using bound dedicated openai account: charlotte (...) for API key new-api-relay`
+
+所以当前更精确的结论是：
+
+- `privateopenai` 的问题，这轮主要是 `MMS` 问题，已经修复
+- `xin/newapi` 这条链最终也修通了，但中间真实根因是：
+  - `newapi` channel 开了 `pass_through_body_enabled`
+  - 导致 `param_override` 根本没执行
+  - 所以头透传失效
+- 到这一刻为止，这轮**没有修改 CRS 源码**，只改了：
+  - 本地 `MMS`
+  - 远端 `newapi` channel 配置
+  - 远端 `CRS` 里 `new-api-relay` 这把 key 的账号绑定
+
 ---
 
 ### Q12：CRS 里 `codex app` / `codex cli` 是怎么识别的？能不能直接“识别成 app”？
@@ -420,6 +451,131 @@ A：按这轮查到的 private CRS 代码看，目前**没有单独的 `codex_ap
 - 就会被归到对应 validator / adaptation 逻辑里
 
 换句话说，现在最应该先修的不是“伪装成 app”，而是确保上游先看到原始 `Codex` 特征头。
+
+---
+
+### Q13：为什么 `newapi` 明明已经配了 `param_override.pass_headers`，private CRS 还是只看到 `Go-http-client/1.1`？
+
+A：因为这次真正的拦路点不是 `param_override` JSON 本身，而是 channel setting：
+
+- `channels.id in (8,11)` 当时都带着：
+  - `setting.pass_through_body_enabled = true`
+- 在 `newapi` 源码里：
+  - `relay/responses_handler.go`
+  - 只要全局 `PassThroughRequestEnabled` 或 channel `PassThroughBodyEnabled` 为真
+  - 就会直接透传原 body
+  - 并跳过 `ApplyParamOverrideWithRelayInfo(...)`
+
+这意味着：
+
+- `pass_headers`
+- `sync_fields`
+- `header:session_id -> json:prompt_cache_key`
+
+这些规则虽然“配上了”，但实际上完全没有运行。
+
+本次真正修复 `xin(4001)` 的动作是：
+
+1. 保留 `8/11` 上的合法 `param_override`
+2. 把 `8/11` 的 `pass_through_body_enabled` 改成 `false`
+3. 保留 `new-api-relay -> charlotte` 的单账号绑定
+
+改完后，private CRS 日志已确认：
+
+- `Authenticated request from key: new-api-relay`
+- `User-Agent: "codex_cli_rs/0.116.0"`
+- `✅ Codex CLI request detected, forwarding as-is`
+
+也就是说，`newapi -> CRS` 这一跳现在已经不再丢失原始 Codex 身份。
+
+### Q14：如果想要“动态绑定多个 OpenAI 账户，但同一 session 粘在一个账户上”，应该怎么做？
+
+A：当前最短、最稳、最可控的路径，不是让单把 CRS key 自己在 group 里乱调度，而是：
+
+1. 在 CRS 里准备多把 API key
+   - 每把 key 直接绑定一个明确的 `openaiAccountId`
+   - 不要再绑 `group:...`
+2. 在 newapi 里建多条同模型 channel
+   - `base_url` 都指向同一个 CRS `/openai`
+   - 但每条 channel 使用不同的 CRS API key
+3. 让这些 channel 进入同一个 `group`
+   - 用 `weight/priority` 控制初次分配概率
+4. 利用 `newapi` 自带的 `channel_affinity`
+   - 它会按请求特征把同一类请求粘到第一次成功的 channel
+
+这套方案的好处是：
+
+- **同一 session**：会继续命中同一个 newapi channel
+- **同一个 newapi channel**：背后就是同一把 CRS key
+- **同一把 CRS key**：再固定到同一个 OpenAI OAuth 账户
+
+这样就能得到你要的效果：
+
+- 当前会话期间稳定指向一个 OpenAI 账户
+- 不会在多账户之间乱跳，导致上下文和 cache 失真
+- 新 session 才有机会重新分到别的账户
+- 某个账户快满时，可以通过调低权重、禁用对应 channel、或切新 CRS key 来迁移新 session
+
+注意一个关键前提：
+
+- `channel_affinity` 粘的是 **channel**
+- 不是直接粘 `CRS` 里的 `openaiAccountId`
+
+所以如果你未来想做“动态但会话粘连”的分流，**多 channel + 多 CRS key + 单账号绑定** 是当前最简单可落地的架构。
+
+### Q15：`Claude` 也有类似“头没透传”的风险吗？
+
+A：有，但和 `Codex/OpenAI` 不是同一段代码、也不是同一组头。
+
+这轮本地确认到：
+
+- `Codex/OpenAI responses bridge`
+  - 已补传：
+    - `User-Agent`
+    - `originator`
+    - `session_id`
+    - `x-session-id`
+    - `openai-beta`
+- `Claude/Anthropic bridge`
+  - 当前只显式补传：
+    - `anthropic-beta`
+  - 还没有像 `newapi` 默认 `claude cli trace` 模板那样继续透传：
+    - `User-Agent`
+    - `X-App`
+    - `Anthropic-Version`
+    - `X-Stainless-*`
+    - `Anthropic-Dangerous-Direct-Browser-Access`
+
+所以结论不能说“CRS 一点问题没有”，更准确的说法是：
+
+- **对 Codex -> MMS -> CRS(/openai)**：
+  - 这轮主要问题已经修好
+- **对 Claude -> MMS -> CRS(/claude or /messages)**：
+  - 还不能说已经达到“官方 Claude CLI 原样透传”的程度
+  - 如果你担心 client fingerprint、风控、封号、或 cache 识别，这条链仍值得单独补透传和验证
+
+### Q16：现在 `MMS` 直连 `CRS`，能不能理解成“约等于官方 Codex CLI + OAuth 登录”的效果？
+
+A：对 **Codex 直连 OpenAI 型 CRS**，可以理解成“已经接近”，但还不能说“完全等价”。
+
+已经接近的部分：
+
+- 上游能重新看到原始 `Codex CLI` 特征头
+- CRS 已会按 `Codex CLI request` 逻辑处理
+- `privateopenai(/openai)` 和现在修好的 `xin(newapi 4001)` 都能重新命中这条识别链
+
+还不完全等价的部分：
+
+- CRS 仍可能对 body 做自己的改写
+  - 例如某些路由会把 `store=false`
+- 是否支持真正的 `previous_response_id` continuation
+  - 仍取决于 CRS 路由、账号池类型、以及 response storage 设计
+- `Claude` 路由当前还没有补齐类似等级的 header 透传
+
+所以更准确的表述是：
+
+- `Codex -> MMS -> CRS(/openai)`：已经接近官方 `Codex CLI + OAuth` 的客户端识别效果
+- 但还不是“所有 server-side 行为都与官方直连完全一致”
 
 ---
 
@@ -478,6 +634,26 @@ A：按这轮查到的 private CRS 代码看，目前**没有单独的 `codex_ap
 - `xin`
   - `4001` 背后是 `new-api-custom`
   - 明确支持 `/responses`
+  - 初始阶段现网虽然 `POST /v1/responses` 能通，但 private CRS 日志仍显示：
+    - `Authenticated request from key: new-api-relay`
+    - `User-Agent: "Go-http-client/1.1"`
+  - 继续排查后确认真实根因：
+    - `channel 8/11` 的 `pass_through_body_enabled=true`
+    - 让 `param_override` 完全失效
+  - 把 `pass_through_body_enabled` 改成 `false` 后，private CRS 已恢复看到：
+    - `User-Agent: "codex_cli_rs/0.116.0"`
+    - `✅ Codex CLI request detected, forwarding as-is`
+  - 说明这条链当前已经恢复到“按原始 Codex CLI 身份被 CRS 识别”的状态
+
+- `xin -> private CRS` 的 stickiness
+  - 已将 `new-api-relay` 从 `openaiAccountId = group:088b...` 改为直接绑定：
+    - `ba317690-ee89-4d22-8d7d-ef9f65209283`
+    - `charlotte`
+  - 变更前备份：
+    - `/tmp/new-api-relay-apikey-before-stickiness-20260325-210703.txt`
+  - 改后 CRS 日志已出现：
+    - `Using bound dedicated openai account: charlotte (...) for API key new-api-relay`
+  - 这一步已经解决“newapi 过去后每次动态换 OpenAI OAuth 账户”的问题
 
 ### Qwen
 
