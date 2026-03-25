@@ -18,50 +18,32 @@ const sessionStore = useSessionStore()
 const providerStore = useProviderStore()
 const { theme, toggle: toggleTheme } = useTheme()
 
+const isDarkMode = computed(() => theme.value === 'dark')
+const logoSrc = computed(() => isDarkMode.value ? '/logos/logo-v5-light.png' : '/logos/logo-v5-dark.png')
+const logoBg = computed(() => isDarkMode.value ? 'bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.15)]' : 'bg-black shadow-xl')
+
 const props = defineProps<{ collapsed?: boolean }>()
 const emit = defineEmits<{ collapse: []; expand: []; togglePlatform: [] }>()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
 
-onMounted(() => {
-  sessionStore.loadSessions()
-})
-
-function newChat() {
-  sessionStore.createSession('chat')
-  router.push('/chat')
-}
-
-function newDiscuss() {
-  sessionStore.createSession('discuss')
-  router.push('/discuss')
-}
-
-function newAdvisors() {
-  router.push('/advisors')
-}
-
-function goLab() {
-  router.push('/lab')
+function isSessionActive(session: { id: string }) {
+  return sessionStore.currentSessionId === session.id
 }
 
 function switchTo(session: { id: string; type: string }) {
   sessionStore.switchSession(session.id)
-  if (session.type === 'chat') router.push('/chat')
-  else if (session.type === 'discuss') router.push('/discuss')
-  else router.push('/advisors')
-}
-
-function isSessionActive(session: { id: string; type: string }) {
-  if (route.path === '/chat') return session.type === 'chat' && sessionStore.currentSessionId === session.id
-  if (route.path === '/discuss') return session.type === 'discuss' && sessionStore.currentSessionId === session.id
-  return false
+  router.push(session.type === 'discuss' ? '/discuss' : '/chat')
 }
 
 function deleteSession(id: string, e: Event) {
   e.stopPropagation()
   sessionStore.deleteSession(id)
 }
+
+onMounted(() => {
+  sessionStore.loadSessions()
+})
 </script>
 
 <template>
@@ -73,11 +55,13 @@ function deleteSession(id: string, e: Event) {
       <div
         class="relative group/logo flex items-center justify-center w-10 h-10 shrink-0 cursor-pointer mb-2"
         @click="router.push('/')">
-        <img
-          src="/logos/logo-v36-transparent.svg"
-          alt="SparkRing"
-          class="w-9 h-9 object-contain transition-transform duration-300 group-hover/logo:scale-110 drop-shadow-[0_0_12px_rgba(99,102,241,0.2)]"
-        />
+        <div :class="[logoBg, 'w-10 h-10 rounded-[10px] flex items-center justify-center transition-all duration-300 group-hover/logo:scale-110 overflow-hidden border border-white/5']">
+          <img
+            :src="logoSrc"
+            alt="SparkRing"
+            class="w-10 h-10 object-contain"
+          />
+        </div>
       </div>
 
       <button @click="emit('expand')"
@@ -133,14 +117,16 @@ function deleteSession(id: string, e: Event) {
       <div class="h-20 flex items-center pl-5 pr-2">
         <div class="flex items-center gap-2 group/logo cursor-pointer select-none"
           @click="router.push('/')">
-          <img
-            src="/logos/logo-v36-transparent.svg"
-            alt="SparkRing"
-            class="w-12 h-12 object-contain shrink-0 transition-transform duration-300 group-hover/logo:scale-105 drop-shadow-[0_8px_16px_rgba(79,70,229,0.12)]"
-          />
+          <div :class="[logoBg, 'w-12 h-12 rounded-[12px] flex items-center justify-center transition-all duration-300 group-hover/logo:scale-105 shrink-0 overflow-hidden border border-white/10']">
+            <img
+              :src="logoSrc"
+              alt="SparkRing"
+              class="w-12 h-12 object-contain"
+            />
+          </div>
           <div class="flex flex-col ml-1">
             <div class="flex items-center text-[14px] font-black uppercase leading-tight tracking-[0.15em] select-none">
-              <span class="bg-gradient-to-r from-indigo-950 via-indigo-800 to-purple-700 bg-clip-text text-transparent">Spark</span>
+              <span :class="[isDarkMode ? 'from-indigo-300 via-blue-400 to-purple-400' : 'from-indigo-950 via-indigo-800 to-purple-700', 'bg-gradient-to-r bg-clip-text text-transparent']">Spark</span>
               <span class="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Ring</span>
             </div>
             <div class="flex w-full justify-between pr-1.5 -mt-0.5 text-[10px] font-bold uppercase text-text-tertiary opacity-70">
