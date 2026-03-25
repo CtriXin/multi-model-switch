@@ -54,6 +54,25 @@ def _build_gateway_url(base_url, endpoint):
     return base + endpoint
 
 
+_CODEX_HEADER_PASSTHROUGH = (
+    "User-Agent",
+    "originator",
+    "session_id",
+    "x-session-id",
+    "openai-beta",
+)
+
+
+def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH):
+    """复制需要保留给上游的请求头，避免丢失 Codex 客户端标识。"""
+    copied = {}
+    for name in names:
+        value = headers.get(name, "")
+        if value:
+            copied[name] = value
+    return copied
+
+
 # ---------------------------------------------------------------------------
 # Bridge mode 缓存：记录 (provider, model) 是否需要 chatcompletions fallback
 # ---------------------------------------------------------------------------
@@ -1720,6 +1739,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         started_ms = _now_ms()
         first_byte_ms = None
@@ -1854,6 +1874,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
         first_byte_ms = None
@@ -2006,6 +2027,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
         started_ms = _now_ms()
