@@ -91,6 +91,10 @@ _BUILTIN_LIGHT = [
     (r"删[掉除]?注释", "删注释"),
     (r"整理[一下]?import", "整理import"),
     (r"加[个一]?todo", "加todo"),
+    (r"^你好[啊呀吗]?$", "greeting"),
+    (r"^hi[! ]?$", "greeting"),
+    (r"^hello[! ]?$", "greeting"),
+    (r"^hey[! ]?$", "greeting"),
 ]
 
 
@@ -274,21 +278,29 @@ Reply with LIGHT or HEAVY, followed by HIGH or LOW confidence. Example: "LIGHT H
 
 
 def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[str, str] | None:
-    """用 light 模型做二分类 + 置信度。返回 (tier, confidence) 或 None。"""
+    """用 light 模型做二分类 + 置信度。返回 (tier, confidence) 或 None。
+
+    优化：max_tokens=16（只需 2 个词），禁用 thinking/reasoning 避免 token 浪费。
+    """
     if _httpx is None:
         return None
+    import time as _time
+    t0 = _time.time()
     try:
         url = api_url.rstrip("/")
         if url.endswith("/v1"):
             base_v1 = url
         else:
             base_v1 = f"{url}/v1"
+        classify_content = _CLASSIFY_USER.format(task=text[:300])
+        # Anthropic 协议：不发 thinking 参数（发 thinking+temperature:0 会 400）
         body = {
             "model": model,
-            "max_tokens": 1024,
-            "temperature": 0.01,
+            "max_tokens": 16,
+            "temperature": 0,
+            "system": "Reply with exactly two words. No explanation.",
             "messages": [
-                {"role": "user", "content": _CLASSIFY_USER.format(task=text[:300])},
+                {"role": "user", "content": classify_content},
             ],
         }
         headers = {
@@ -298,25 +310,41 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             "Content-Type": "application/json",
         }
         # 尝试 Anthropic messages → fallback OpenAI chat/completions
-        r = _httpx.post(f"{base_v1}/messages", headers=headers, json=body, timeout=8)
-        if r.status_code in (404, 405):
+        r = _httpx.post(f"{base_v1}/messages", headers=headers, json=body, timeout=5)
+        protocol = "anthropic"
+        if r.status_code in (404, 405, 400):
+            # 400 可能是不支持 thinking 参数，去掉重试
             oai_body = {
                 "model": model,
-                "max_tokens": 1024,
-                "temperature": 0.01,
+                "max_tokens": 16,
+                "temperature": 0,
                 "messages": [
-                    {"role": "user", "content": _CLASSIFY_USER.format(task=text[:300])},
+                    {"role": "system", "content": "Reply with exactly two words. No explanation."},
+                    {"role": "user", "content": classify_content},
                 ],
+                # 各家禁用 thinking 的通用兼容参数：
+                "enable_thinking": False,       # Qwen 系列
+                "reasoning_effort": "low",      # OpenAI 兼容（"none" 非标准值）
+                "use_thinking": False,          # Kimi 系列
             }
-            r = _httpx.post(f"{base_v1}/chat/completions", headers=headers, json=oai_body, timeout=8)
+            r = _httpx.post(f"{base_v1}/chat/completions", headers=headers, json=oai_body, timeout=5)
+            protocol = "openai"
+        elapsed_ms = int((_time.time() - t0) * 1000)
         if r.status_code != 200:
-            _log_llm_error(f"status={r.status_code} url={r.url} body={r.text[:200]}")
+            _log_llm_error(f"status={r.status_code} model={model} url={r.url} "
+                           f"elapsed={elapsed_ms}ms body={r.text[:200]}")
             return None
         try:
             data = r.json()
         except Exception:
-            _log_llm_error(f"invalid JSON from {r.url}: {r.text[:200]}")
+            _log_llm_error(f"invalid JSON model={model} url={r.url} elapsed={elapsed_ms}ms: {r.text[:200]}")
             return None
+        # 解析 token 用量（诊断）
+        usage = data.get("usage", {})
+        in_tok = usage.get("input_tokens") or usage.get("prompt_tokens", "?")
+        out_tok = usage.get("output_tokens") or usage.get("completion_tokens", "?")
+        cache_tok = usage.get("cache_read_input_tokens") or usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+
         reply = ""
         thinking_text = ""
         content = data.get("content", [])
@@ -334,7 +362,7 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             if choices and isinstance(choices, list):
                 msg = choices[0].get("message", {})
                 reply = msg.get("content", "") if isinstance(msg, dict) else ""
-        # 优先用 text reply；fallback 到 thinking 最后 80 字符（避免中间推理干扰）
+        # 优先用 text reply；fallback 到 thinking 最后 80 字符
         if reply:
             check_text = reply.strip().upper()
         elif thinking_text:
@@ -343,18 +371,26 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             check_text = ""
         tier = None
         confidence = "high"
-        if "LIGHT" in check_text or "轻" in check_text or "简单" in check_text:
+        if "LIGHT" in check_text or "轻量" in check_text or "简单" in check_text:
             tier = "light"
-        elif "HEAVY" in check_text or "重" in check_text or "复杂" in check_text:
+        elif "HEAVY" in check_text or "复杂" in check_text or "重度" in check_text:
             tier = "heavy"
         if tier is None:
-            _log_llm_error(f"unexpected reply: {check_text[:100]} | raw={str(data)[:500]}")
+            _log_llm_error(f"unexpected reply model={model} elapsed={elapsed_ms}ms "
+                           f"tokens(in={in_tok},cache={cache_tok},out={out_tok}): "
+                           f"{check_text[:100]} | raw={str(data)[:300]}")
             return None
         if "LOW" in check_text:
             confidence = "low"
+        # 记录 token 异常（input > 500 说明有 thinking 浪费）
+        if isinstance(in_tok, int) and in_tok > 500:
+            _log_llm_error(f"token_waste model={model} protocol={protocol} "
+                           f"tokens(in={in_tok},cache={cache_tok},out={out_tok}) "
+                           f"elapsed={elapsed_ms}ms — consider disabling thinking for this model")
         return (tier, confidence)
     except Exception as exc:
-        _log_llm_error(f"exception: {exc}")
+        elapsed_ms = int((_time.time() - t0) * 1000)
+        _log_llm_error(f"exception: {exc} model={model} url={api_url} elapsed={elapsed_ms}ms")
         return None
 
 
@@ -370,21 +406,26 @@ def _log_llm_error(msg: str):
 
 def classify_task(text: str, api_url: str = None, api_key: str = None,
                   light_model: str = None) -> tuple[str, str]:
-    """四层分类：guardrail → 关键词 fast-path → LLM 分类(+置信度+自学习) → 默认 medium。
+    """四层分类：guardrail → 关键词 fast-path → LLM 异步分类 → 默认 medium。
 
     返回 (tier, reason)，tier 为 "light" / "medium" / "heavy"。
+    LLM 分类改为非阻塞：关键词无法决定时，用上次 LLM 结果做 hint，后台发起新分类。
     """
     if not text:
         return "heavy", "empty input"
+
+    # 0. 系统自动请求 fast-path（Claude Code suggestion 等内部 prompt）
+    if text.startswith("[SUGGESTION MODE") or text.startswith("[SYSTEM"):
+        return "light", "system_prompt"
 
     # 热重载：配置文件变化时自动刷新关键词
     _maybe_reload_keywords()
 
     text_lower = text.lower()
 
-    # 1. Guardrail：提到关键文件名 → heavy
+    # 1. Guardrail：提到关键文件名 → heavy（用 \b 避免 "auth" 误匹配 "authentication"）
     for fname in _GUARDRAIL_FILES:
-        if fname in text_lower:
+        if re.search(r'\b' + re.escape(fname) + r'\b', text_lower):
             return "heavy", f"guardrail: {fname}"
 
     # 2. Heavy 关键词 fast-path
@@ -397,18 +438,73 @@ def classify_task(text: str, api_url: str = None, api_key: str = None,
     if light_hits:
         return "light", f"keyword: {','.join(light_hits)}"
 
-    # 4. LLM 分类 + 置信度 → 低置信归 medium + 高置信自动学习
+    # 4. LLM 异步分类：非阻塞，不等结果
+    #    - 如果上次 LLM 结果可用且未过期 → 用作 hint
+    #    - 后台启动新分类（下次请求生效）
+    #    - 无 hint 时 fallback 到 medium
     if api_url and api_key and light_model and len(text) < 2000:
-        result = _llm_classify(text, api_url, api_key, light_model)
-        if result:
-            tier, confidence = result
+        # 检查异步分类结果（只匹配相同文本的缓存）
+        cached = _get_async_llm_result(text)
+        # 启动后台分类（不阻塞当前请求）
+        _submit_async_llm_classify(text, api_url, api_key, light_model)
+        if cached:
+            tier, confidence = cached
             if confidence == "high":
                 _record_llm_result(text, tier)
-                return tier, f"llm:{tier}+high_confidence"
-            return "medium", f"llm:{tier}+low_confidence"
+                return tier, f"llm_async:{tier}+high_confidence"
+            return "medium", f"llm_async:{tier}+low_confidence"
 
-    # 5. 默认 medium（安全中间档，不浪费也不冒险）
-    return "medium", "default"
+    # 5. 无关键词命中 + 无异步结果 → 安全中间档
+    return "medium", "no_match→medium"
+
+
+# ── LLM 异步分类 ──
+import threading as _threading
+
+_async_llm_result = None  # (text_key, tier, confidence, timestamp)
+_async_llm_lock = _threading.Lock()  # 模块级初始化，避免 TOCTOU 竞争
+
+
+def _text_cache_key(text: str) -> str:
+    """取前 100 字符作为缓存 key（足够区分不同请求）。"""
+    return text[:100].strip().lower()
+
+
+def _get_async_llm_result(text: str):
+    """获取异步 LLM 分类结果（5 分钟内有效，且必须与当前文本匹配）。"""
+    global _async_llm_result
+    if _async_llm_result is None:
+        return None
+    cached_key, tier, confidence, ts = _async_llm_result
+    # 只返回与当前请求文本匹配的缓存（避免上次请求的结果错误应用到不同文本）
+    if cached_key != _text_cache_key(text):
+        return None
+    import time
+    if time.time() - ts > 300:  # 5 分钟过期
+        _async_llm_result = None
+        return None
+    return (tier, confidence)
+
+
+def _submit_async_llm_classify(text, api_url, api_key, light_model):
+    """在后台线程中执行 LLM 分类，结果存入 _async_llm_result。"""
+    # 避免并发提交多个分类请求
+    if not _async_llm_lock.acquire(blocking=False):
+        return
+    text_key = _text_cache_key(text)
+    def _run():
+        global _async_llm_result
+        try:
+            result = _llm_classify(text, api_url, api_key, light_model)
+            if result:
+                import time
+                _async_llm_result = (text_key, tier, confidence, ts) = (
+                    text_key, result[0], result[1], time.time()
+                )
+        finally:
+            _async_llm_lock.release()
+    t = _threading.Thread(target=_run, daemon=True)
+    t.start()
 
 
 def log_route(level: str, reason: str, model_used: str, text_preview: str):
@@ -437,3 +533,192 @@ def route_model(user_message: str, heavy_model: str, light_model: str,
     if level == "medium" and medium_model:
         return medium_model
     return heavy_model
+
+
+# ── Model Routes Export（供 Hive MCP / 外部消费） ──────────────────
+
+import stat
+import time as _time
+
+MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
+_MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
+
+# role 权重复用 ccs_core 的定义
+_EXPORT_ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
+
+
+def export_model_routes(cfg=None, force=False):
+    """遍历 role=primary/auto/fallback 的 provider，按优先级生成 model→endpoint 映射。
+
+    只收录支持 anthropic_messages 协议且有 anthropic_base_url 的 provider。
+    写入 ~/.config/mms/model-routes.json（权限 0o600）。
+
+    Returns:
+        dict: {model_name: {anthropic_base_url, api_key, provider_id, priority, role}}
+    """
+    from ccs_core import (
+        load_config, apply_local_overrides, resolve_provider_context,
+        _provider_label, _probe_models, _normalize_priority, _normalize_role,
+        ROLE_WEIGHTS, DEFAULT_PRIORITY,
+    )
+
+    if cfg is None:
+        cfg = load_config()
+        if cfg is None:
+            return {}
+        cfg = apply_local_overrides(cfg)
+
+    # mtime 检查：config 未变且 routes 已存在 → 直接返回缓存
+    if not force and os.path.exists(MODEL_ROUTES_PATH) and os.path.exists(_MMS_CONFIG_PATH):
+        try:
+            config_mtime = os.path.getmtime(_MMS_CONFIG_PATH)
+            routes_mtime = os.path.getmtime(MODEL_ROUTES_PATH)
+            if routes_mtime >= config_mtime:
+                with open(MODEL_ROUTES_PATH, "r", encoding="utf-8") as f:
+                    return json.load(f).get("routes", {})
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # 收集所有 enabled providers（只看 anthropic_messages 协议）
+    providers_info = []
+    seen_ids = set()
+
+    for provider_def in cfg.get("providers", []):
+        pid = provider_def.get("id")
+        if not pid or pid in seen_ids:
+            continue
+        if not provider_def.get("enabled", True):
+            continue
+
+        protocols = provider_def.get("protocols", [])
+        if "anthropic_messages" not in protocols:
+            continue
+
+        try:
+            ctx = resolve_provider_context(cfg, pid)
+        except (SystemExit, Exception):
+            continue
+
+        anthropic_url = (ctx.get("anthropic_base_url") or "").strip()
+        if not anthropic_url:
+            continue
+        if not ctx.get("api_key"):
+            continue
+
+        role = _normalize_role(provider_def.get("role", "auto"))
+        priority = _normalize_priority(provider_def.get("priority", DEFAULT_PRIORITY))
+
+        # 获取模型列表（先用缓存，再 fallback_models）
+        models = list(_probe_models(ctx, emit_output=False).get("models") or [])
+        if not models:
+            models = list(provider_def.get("fallback_models") or [])
+
+        pname = _provider_label(ctx)
+        providers_info.append({
+            "provider_id": pid,
+            "provider_name": pname,
+            "anthropic_base_url": anthropic_url,
+            "api_key": ctx["api_key"],
+            "role": role,
+            "priority": priority,
+            "models": models,
+            "sort_key": (ROLE_WEIGHTS.get(role, 1), -priority),
+        })
+        seen_ids.add(pid)
+
+    # 排序：primary > auto > fallback，同 role 按 priority 降序
+    providers_info.sort(key=lambda p: p["sort_key"])
+
+    # 模型 claim：高优先级 provider 先 claim
+    routes = {}
+    for pinfo in providers_info:
+        for model_name in pinfo["models"]:
+            normalized = str(model_name or "").strip()
+            if not normalized or normalized in routes:
+                continue
+            routes[normalized] = {
+                "anthropic_base_url": pinfo["anthropic_base_url"],
+                "api_key": pinfo["api_key"],
+                "provider_id": pinfo["provider_id"],
+                "priority": pinfo["priority"],
+                "role": pinfo["role"],
+            }
+
+    # 写入文件
+    output = {
+        "_meta": {
+            "generated_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+            "generator": "mms",
+        },
+        "routes": routes,
+    }
+
+    os.makedirs(os.path.dirname(MODEL_ROUTES_PATH), exist_ok=True)
+    with open(MODEL_ROUTES_PATH, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+    os.chmod(MODEL_ROUTES_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+
+    return routes
+
+
+def routes_main(cfg, args):
+    """CLI 入口: mms routes [export|show]"""
+    try:
+        from rich.console import Console as _RC
+        from rich.table import Table as _RT
+        _console = _RC()
+    except ImportError:
+        _console = None
+        _RT = None
+
+    sub = args[0] if args else "show"
+
+    if sub in ("export", "generate"):
+        routes = export_model_routes(cfg, force=True)
+        msg = f"✓ 已生成 {MODEL_ROUTES_PATH}（{len(routes)} 条路由）"
+        if _console:
+            _console.print(f"[green]{msg}[/green]")
+        else:
+            print(msg)
+        return
+
+    if sub in ("show", "list", "ls"):
+        routes = export_model_routes(cfg, force=False)
+        if not routes:
+            if _console:
+                _console.print("[yellow]没有路由。请先配置 provider 并运行 mms routes export[/yellow]")
+            return
+
+        if _console and _RT:
+            table = _RT(title=f"Model Routes ({len(routes)} models)")
+            table.add_column("Model", style="cyan")
+            table.add_column("Provider", style="green")
+            table.add_column("Role", style="magenta")
+            table.add_column("Priority", style="yellow", justify="right")
+            table.add_column("Anthropic Base URL", style="dim")
+
+            for model_name, info in sorted(routes.items()):
+                table.add_row(
+                    model_name,
+                    info.get("provider_id", ""),
+                    info.get("role", "auto"),
+                    str(info.get("priority", "")),
+                    (info.get("anthropic_base_url") or "")[:50],
+                )
+            _console.print(table)
+            _console.print(f"\n[dim]文件: {MODEL_ROUTES_PATH}[/dim]")
+        else:
+            print(json.dumps(routes, indent=2, ensure_ascii=False))
+        return
+
+    if sub in ("-h", "--help", "help"):
+        msg = "用法: mms routes [show|export]\n  show   — 显示当前路由表（默认）\n  export — 强制重新生成 model-routes.json"
+        if _console:
+            _console.print(msg)
+        else:
+            print(msg)
+        return
+
+    if _console:
+        _console.print(f"[red]未知子命令: {sub}[/red]")
+        _console.print("用法: mms routes [show|export]")
