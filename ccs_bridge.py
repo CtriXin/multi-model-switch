@@ -63,13 +63,35 @@ _CODEX_HEADER_PASSTHROUGH = (
 )
 
 
-def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH):
-    """复制需要保留给上游的请求头，避免丢失 Codex 客户端标识。"""
+_CLAUDE_HEADER_PASSTHROUGH = (
+    "User-Agent",
+    "x-app",
+    "anthropic-version",
+    "anthropic-beta",
+    "anthropic-dangerous-direct-browser-access",
+)
+
+
+_CLAUDE_HEADER_PREFIX_PASSTHROUGH = (
+    "x-stainless-",
+)
+
+
+def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH, prefixes=()):
+    """复制需要保留给上游的请求头，避免丢失上游对原始客户端的识别信息。"""
     copied = {}
-    for name in names:
-        value = headers.get(name, "")
-        if value:
-            copied[name] = value
+    normalized_names = {name.lower(): name for name in names}
+    normalized_prefixes = tuple(prefix.lower() for prefix in prefixes)
+    for header_name, value in headers.items():
+        if not value:
+            continue
+        lower_name = header_name.lower()
+        canonical_name = normalized_names.get(lower_name)
+        if canonical_name:
+            copied[canonical_name] = value
+            continue
+        if normalized_prefixes and any(lower_name.startswith(prefix) for prefix in normalized_prefixes):
+            copied[header_name] = value
     return copied
 
 
@@ -897,6 +919,17 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
         return expected and expected in {key, bearer}
 
+    def do_GET(self):
+        if not self._authorized():
+            self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid bridge token"}})
+            return
+        if self.path == "/v1/models":
+            model = getattr(self.server, "model_name", "")
+            data = [{"id": model, "object": "model"}] if model else []
+            self._json(200, {"object": "list", "data": data})
+            return
+        self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
+
     def do_POST(self):
         if not self._authorized():
             self._json(401, {"type": "error", "error": {"type": "authentication_error", "message": "invalid bridge token"}})
@@ -910,11 +943,13 @@ class _BridgeHandler(BaseHTTPRequestHandler):
             self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "invalid json"}})
             return
 
-        if self.path == "/v1/messages/count_tokens":
+        path_bare = self.path.split("?")[0]
+
+        if path_bare == "/v1/messages/count_tokens":
             self._json(200, {"input_tokens": _count_tokens_approx(payload)})
             return
 
-        if self.path != "/v1/messages":
+        if path_bare != "/v1/messages":
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
@@ -1101,9 +1136,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
 
         path = self.path
+        path_bare = path.split("?")[0]
         # Translate /v1/responses → /v1/messages so gateway only sees Messages API
-        if path == "/v1/responses":
-            path = "/v1/messages"
+        if path_bare == "/v1/responses":
+            path = "/v1/messages" + path[len("/v1/responses"):]
 
         # ── debug: 记录每次 bridge 收到的请求 ──
         _lb_debug_paths = [os.path.expanduser("~/.config/mms/lb_debug.log")]
@@ -1257,12 +1293,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "x-api-key": gateway_key,
             "Authorization": f"Bearer {gateway_key}",
-            "anthropic-version": "2023-06-01",
         }
-        # Forward anthropic-beta if present
-        beta = self.headers.get("anthropic-beta", "")
-        if beta:
-            fwd_headers["anthropic-beta"] = beta
+        fwd_headers.update(
+            _copy_passthrough_headers(
+                self.headers,
+                names=_CLAUDE_HEADER_PASSTHROUGH,
+                prefixes=_CLAUDE_HEADER_PREFIX_PASSTHROUGH,
+            )
+        )
+        # Anthropic API 需要 version；若客户端没显式带，保守回退到官方默认值。
+        if "anthropic-version" not in {name.lower() for name in fwd_headers}:
+            fwd_headers["anthropic-version"] = "2023-06-01"
 
         stream = bool(payload.get("stream"))
         # 智能路由模式下强制非流式（避免 OpenAI/Anthropic SSE 格式不匹配导致无法结束）

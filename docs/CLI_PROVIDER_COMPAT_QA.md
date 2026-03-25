@@ -525,34 +525,49 @@ A：当前最短、最稳、最可控的路径，不是让单把 CRS key 自己�
 
 ### Q15：`Claude` 也有类似“头没透传”的风险吗？
 
-A：有，但和 `Codex/OpenAI` 不是同一段代码、也不是同一组头。
+A：有，但这轮已经先补了第一层最关键的 `MMS -> 上游 gateway/CRS` 透传。
 
-这轮本地确认到：
+当前 `Claude bridge` 已补传：
 
-- `Codex/OpenAI responses bridge`
-  - 已补传：
-    - `User-Agent`
-    - `originator`
-    - `session_id`
-    - `x-session-id`
-    - `openai-beta`
-- `Claude/Anthropic bridge`
-  - 当前只显式补传：
-    - `anthropic-beta`
-  - 还没有像 `newapi` 默认 `claude cli trace` 模板那样继续透传：
-    - `User-Agent`
-    - `X-App`
-    - `Anthropic-Version`
-    - `X-Stainless-*`
-    - `Anthropic-Dangerous-Direct-Browser-Access`
+- `User-Agent`
+- `x-app`
+- `anthropic-version`
+- `anthropic-beta`
+- `anthropic-dangerous-direct-browser-access`
+- `X-Stainless-*`
 
-所以结论不能说“CRS 一点问题没有”，更准确的说法是：
+补丁位置：
 
-- **对 Codex -> MMS -> CRS(/openai)**：
-  - 这轮主要问题已经修好
+- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L51)
+
+这组头不是凭空猜的，而是结合两类信息定的：
+
+- 当前本机安装的 `Claude Code 2.1.81` 二进制里能直接搜到：
+  - `x-app`
+  - `anthropic-dangerous-direct-browser-access`
+  - `X-Stainless-Arch`
+  - `X-Stainless-Lang`
+  - `X-Stainless-OS`
+  - `X-Stainless-Package-Version`
+  - `X-Stainless-Runtime`
+  - `X-Stainless-Runtime-Version`
+  - `X-Stainless-Retry-Count`
+  - `X-Stainless-Timeout`
+  - `X-Stainless-Helper-Method`
+- 官方 Anthropic API 文档能确认：
+  - `anthropic-version`
+  - `anthropic-beta`
+
+但这里仍要分清边界：
+
 - **对 Claude -> MMS -> CRS(/claude or /messages)**：
-  - 还不能说已经达到“官方 Claude CLI 原样透传”的程度
-  - 如果你担心 client fingerprint、风控、封号、或 cache 识别，这条链仍值得单独补透传和验证
+  - `MMS` 这一跳已经不再把请求降格成单纯的 `python-httpx` 指纹
+  - 但还不能直接宣称“与官方 Claude Code 完全等价”
+- **要不要继续怀疑 CRS / newapi 本身**
+  - 仍要看它们是否继续保留这些头
+  - 尤其是中间层如果再次改写 header/body，client fingerprint 还是会失真
+
+如果你关心风控、封号、或 cache 识别，这轮补丁是必要条件，但不是全部条件。
 
 ### Q16：现在 `MMS` 直连 `CRS`，能不能理解成“约等于官方 Codex CLI + OAuth 登录”的效果？
 
@@ -576,6 +591,132 @@ A：对 **Codex 直连 OpenAI 型 CRS**，可以理解成“已经接近”，�
 
 - `Codex -> MMS -> CRS(/openai)`：已经接近官方 `Codex CLI + OAuth` 的客户端识别效果
 - 但还不是“所有 server-side 行为都与官方直连完全一致”
+
+### Q17：`newapi` 的 `channel_affinity` 到底在哪里配置？
+
+A：有两层入口。
+
+**1. 运行时配置入口**
+
+- Web 管理页组件：
+  - `/opt/new-api/src/newapi-src/web/src/pages/Setting/Operation/SettingsChannelAffinity.jsx`
+- 对应 option key：
+  - `channel_affinity_setting.enabled`
+  - `channel_affinity_setting.switch_on_success`
+  - `channel_affinity_setting.max_entries`
+  - `channel_affinity_setting.default_ttl_seconds`
+  - `channel_affinity_setting.rules`
+
+**2. 默认值源码**
+
+- `/opt/new-api/src/newapi-src/setting/operation_setting/channel_affinity_setting.go`
+
+当前默认规则里：
+
+- `codex cli trace`
+  - `path_regex = /v1/responses`
+  - `key_sources = gjson:prompt_cache_key`
+- `claude cli trace`
+  - `path_regex = /v1/messages`
+  - `key_sources = gjson:metadata.user_id`
+
+本轮远端实查 `82.156.121.141` 的 `options` 表后确认：
+
+- 当前没有任何 `channel_affinity_setting%` 的数据库覆写项
+- 所以 `new-api-custom(4001)` 现在实际跑的是**源码默认规则**
+
+### Q18：`Claude` 这边除了 header 透传，还有什么真实会出问题的点？
+
+A：这轮继续实测后，确认过 3 个具体坑，其中 2 个已经能确定会命中官方 `Claude Code`。
+
+**问题 1：`oauth_bridge` 原来不接受 `?beta=true`**
+
+真实 `Claude Code 2.1.81` 发出的路径是：
+
+- `POST /v1/messages?beta=true`
+
+但原来的 `_BridgeHandler` 只接受精确：
+
+- `/v1/messages`
+
+结果就是：
+
+- `codex_claude_bridge`
+- `gemini_claude_bridge`
+
+这两条 `oauth_bridge` 分支会直接 `404 not found`。
+
+这轮已修复：
+
+- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L893)
+- 现在会先剥离 query string 再匹配路径
+
+**问题 2：`oauth_bridge` 原来没有 `/v1/models`**
+
+原来的 `_BridgeHandler` 没有实现：
+
+- `GET /v1/models`
+
+本地实测返回的是：
+
+- `501 Unsupported method`
+
+这会在某些 `Claude Code` 模型校验场景下留下隐患。
+
+这轮已修复：
+
+- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L883)
+- 现在会返回当前 bridge 暴露的模型列表
+
+**问题 3：`gateway_claude_bridge` 对 `/v1/responses?beta=true` 的翻译不完整**
+
+原来的翻译只处理精确：
+
+- `/v1/responses`
+
+如果带 query：
+
+- `/v1/responses?beta=true`
+
+会在本地 bridge 直接 `404`。
+
+虽然当前抓到的官方 `Claude Code 2.1.81` 主路径还是：
+
+- `/v1/messages?beta=true`
+
+但这个点依然属于兼容性缺口。
+
+这轮已修复：
+
+- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L1138)
+- 现在会在保留 query string 的前提下，把 `/v1/responses` 正确翻译成 `/v1/messages`
+
+### Q19：`newapi` 默认给 `Claude` 做 sticky 的 `metadata.user_id` 真的是官方请求里会带的吗？
+
+A：是，而且这轮已经用本机 `Claude Code 2.1.81` 直接抓包确认。
+
+本地真实请求表现为：
+
+- 路径：
+  - `POST /v1/messages?beta=true`
+- body 顶层包含：
+  - `metadata`
+- 其中：
+  - `metadata.user_id`
+
+实际是一个 JSON 字符串，里面带：
+
+- `device_id`
+- `account_uuid`
+- `session_id`
+
+而且在同一个显式 `--session-id` 下重复请求时，抓到的 `metadata.user_id` 保持一致。
+
+这说明 `newapi` 默认规则里的：
+
+- `gjson:metadata.user_id`
+
+并不是拍脑袋写的，它确实能作为 `Claude` session sticky 的 key source 使用。
 
 ---
 
