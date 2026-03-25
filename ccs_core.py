@@ -378,6 +378,8 @@ def _normalize_models_endpoint(value):
     endpoint = str(value or "").strip()
     if not endpoint:
         return "/models"
+    if endpoint.lower() in {"manual", "none", "off"}:
+        return "manual"
     if not endpoint.startswith("/"):
         endpoint = "/" + endpoint
     return endpoint
@@ -387,7 +389,9 @@ def _model_source_label(source):
     mapping = {
         "remote": "远端列表",
         "fallback": "内置回退",
+        "manual": "手工列表",
         "extra": "手工补充",
+        "derived_alias": "本地别名",
     }
     return mapping.get(str(source or "").strip(), str(source or "-").strip() or "-")
 
@@ -1268,7 +1272,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     models_endpoint = "/models"
     if use_custom_models_endpoint:
         models_endpoint = _normalize_models_endpoint(
-            Prompt.ask("模型列表接口路径", default=current.get("models_endpoint", "/models"))
+            Prompt.ask("模型列表接口路径（输入 manual 表示仅用手工模型）", default=current.get("models_endpoint", "/models"))
         )
     priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
@@ -1867,7 +1871,7 @@ def _manage_provider_models(cfg, provider_id):
             continue
         if choice == "7":
             new_endpoint = _normalize_models_endpoint(
-                Prompt.ask("模型列表接口路径", default=provider.get("models_endpoint", "/models"))
+                Prompt.ask("模型列表接口路径（输入 manual 表示仅用手工模型）", default=provider.get("models_endpoint", "/models"))
             )
             current_cfg = _update_provider_model_overrides(
                 current_cfg,
@@ -2529,54 +2533,65 @@ def _probe_models(provider, emit_output=True, force_refresh=False):
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
         last_exc = None
         models_endpoint = provider.get("models_endpoint", "/models")
-        if not models_endpoint.startswith("/"):
-            models_endpoint = "/" + models_endpoint
-        for try_url in [base_url, alt_url]:
-            try:
-                if "{key}" in models_endpoint:
-                    endpoint_url = models_endpoint.replace("{key}", api_key)
-                elif "?" in models_endpoint:
-                    endpoint_url = f"{models_endpoint}&key={api_key}"
+        if models_endpoint == "manual":
+            fallback = provider.get("fallback_models") or []
+            result["raw_models"] = list(fallback)
+            result["models"] = list(fallback)
+            result["working_url"] = base_url
+            result["error"] = None
+            result["error_kind"] = None
+            result["base_source"] = "manual"
+            if emit_output:
+                console.print("[dim]已跳过远端 /models 探测，直接使用手工模型列表[/dim]")
+        else:
+            if not models_endpoint.startswith("/"):
+                models_endpoint = "/" + models_endpoint
+            for try_url in [base_url, alt_url]:
+                try:
+                    if "{key}" in models_endpoint:
+                        endpoint_url = models_endpoint.replace("{key}", api_key)
+                    elif "?" in models_endpoint:
+                        endpoint_url = f"{models_endpoint}&key={api_key}"
+                    else:
+                        endpoint_url = models_endpoint
+                    full_url = f"{try_url}{endpoint_url}"
+                    headers = {}
+                    if "/api/models/info" not in models_endpoint:
+                        headers["Authorization"] = f"Bearer {api_key}"
+                    response = httpx.get(full_url, headers=headers, timeout=15)
+                    response.raise_for_status()
+                    data = response.json()
+                    models = [m["id"] for m in data.get("data", [])]
+                    models.sort()
+                    result["raw_models"] = models
+                    result["models"] = models
+                    result["working_url"] = try_url
+                    if try_url != base_url and emit_output:
+                        console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
+                    if not models:
+                        # 模型列表为空，继续尝试 alt URL 再判断
+                        continue
+                    break
+                except Exception as exc:
+                    last_exc = exc
+            if result["models"] is not None and not result["models"]:
+                result["error_kind"] = "empty_models"
+                result["error"] = "接口返回成功，但模型列表为空"
+            elif result["models"] is None and last_exc is not None:
+                # 网络请求失败，尝试 fallback 到内置模型列表
+                fallback = provider.get("fallback_models")
+                if fallback:
+                    result["raw_models"] = list(fallback)
+                    result["models"] = list(fallback)
+                    result["working_url"] = base_url
+                    result["error"] = None
+                    result["error_kind"] = None
+                    result["base_source"] = "fallback"
+                    if emit_output:
+                        console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
                 else:
-                    endpoint_url = models_endpoint
-                full_url = f"{try_url}{endpoint_url}"
-                headers = {}
-                if "/api/models/info" not in models_endpoint:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                response = httpx.get(full_url, headers=headers, timeout=15)
-                response.raise_for_status()
-                data = response.json()
-                models = [m["id"] for m in data.get("data", [])]
-                models.sort()
-                result["raw_models"] = models
-                result["models"] = models
-                result["working_url"] = try_url
-                if try_url != base_url and emit_output:
-                    console.print(f"[yellow]⚠ 地址 {base_url} 不通，已自动用 {try_url} 连接成功[/yellow]")
-                if not models:
-                    # 模型列表为空，继续尝试 alt URL 再判断
-                    continue
-                break
-            except Exception as exc:
-                last_exc = exc
-        if result["models"] is not None and not result["models"]:
-            result["error_kind"] = "empty_models"
-            result["error"] = "接口返回成功，但模型列表为空"
-        elif result["models"] is None and last_exc is not None:
-            # 网络请求失败，尝试 fallback 到内置模型列表
-            fallback = provider.get("fallback_models")
-            if fallback:
-                result["raw_models"] = list(fallback)
-                result["models"] = list(fallback)
-                result["working_url"] = base_url
-                result["error"] = None
-                result["error_kind"] = None
-                result["base_source"] = "fallback"
-                if emit_output:
-                    console.print(f"[dim]该来源不支持 /models 端点，使用内置模型列表 ({len(fallback)} 个模型)[/dim]")
-            else:
-                result["error_kind"] = "request_failed"
-                result["error"] = f"拉取模型列表失败: {last_exc}"
+                    result["error_kind"] = "request_failed"
+                    result["error"] = f"拉取模型列表失败: {last_exc}"
 
     details = [
         f"provider: {_provider_label(provider)} ({provider_id})",
