@@ -645,7 +645,15 @@ def save_lb_history(heavy, medium, light):
 
 
 def select_load_balance_tui(available_models=None, families_detail=None, provider_options_map=None):
-    """负载模式 TUI：最近 3 条 + 自定义（slot 编辑）。"""
+    """负载模式 TUI：最近 3 条 + 自定义（slot 编辑）。
+
+    Args:
+        available_models: list[str] — 可用模型名列表（flat）
+        families_detail: dict — {family_name: [model_entry, ...]} 用于自定义 M 弹窗
+        provider_options_map: dict — {model_name: [provider_option, ...]} 用于 +/- 切 provider
+
+    返回 {"model": heavy, "lb_medium": medium, "lb_light": light, "priority_changes": {...}} 或 None。
+    """
     history = _load_lb_history()
     recent = history.get("recent", [])
 
@@ -702,7 +710,7 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
                     attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(2)
                 _safe_addstr(stdscr, y, sx + 4, line, attr, max_w=w - 8)
 
-            footer = " ↑↓ 选择   Enter 确认   Q 取消 "
+            footer = " ↑↓ 选择   Enter 确认   Esc 取消 "
             _center_text(stdscr, sy + h - 1, cx, footer,
                          curses.color_pair(1) | curses.A_BOLD)
 
@@ -727,24 +735,254 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
         return None
 
     if result == "custom":
-        models = available_models or []
-        if not models:
-            models = [
-                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
-                "gpt-5.4", "gpt-4.1", "gpt-4.1-mini", "kimi-k2.5",
-            ]
-        heavy = select_model_tui(models, title="选择 Heavy 模型（复杂任务）")
-        if heavy is None:
-            return None
-        medium = select_model_tui(models, title="选择 Medium 模型（常规任务）")
-        if medium is None:
-            return None
-        light = select_model_tui(models, title="选择 Light 模型（简单任务）")
-        if light is None:
-            return None
-        return {"model": heavy, "lb_medium": medium, "lb_light": light}
+        return _select_lb_custom_tui(families_detail, provider_options_map)
 
     return result
+
+
+def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
+    """负载自定义 TUI：3 个 slot + 启动。Enter 进入 slot 编辑（品类→子模型），+/- 切 provider。
+
+    流程：
+      主视图：heavy / medium / light / ▶ 启动
+        ↑↓ 选 slot，Enter 进入编辑或启动
+        +/- 在当前 slot 切换 provider
+      编辑 slot（Enter）：
+        全屏品类列表 → Enter → 全屏子模型列表 → Enter 选中 → 回主视图
+    """
+    SLOT_NAMES = ["heavy", "medium", "light"]
+    SLOT_LABELS = {"heavy": "Heavy  (复杂)", "medium": "Medium (常规)", "light": "Light  (简单)"}
+    slots = {s: {"model": "(未选)", "provider_name": "", "provider_id": "", "provider_ctx": {}} for s in SLOT_NAMES}
+    family_names = list((families_detail or {}).keys())
+
+    def _pick_model_for_slot(stdscr):
+        """全屏两步选模型：品类 → 子模型。返回 model entry dict 或 None。"""
+        fam_idx = 0
+        fam_scroll = 0
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+            w = max(40, min(max_w - 2, int(max_w * 0.75)))
+            visible = min(len(family_names), max_y - 6)
+            h = visible + 4
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+
+            _draw_box(stdscr, sy, sx, h, w, "选择品类")
+
+            if fam_idx < fam_scroll:
+                fam_scroll = fam_idx
+            elif fam_idx >= fam_scroll + visible:
+                fam_scroll = fam_idx - visible + 1
+
+            for fi in range(fam_scroll, min(fam_scroll + visible, len(family_names))):
+                fy = sy + 2 + (fi - fam_scroll)
+                fm = "▸ " if fi == fam_idx else "  "
+                cnt = len((families_detail or {}).get(family_names[fi], []))
+                fattr = curses.color_pair(3) | curses.A_BOLD if fi == fam_idx else curses.color_pair(2)
+                _safe_addstr(stdscr, fy, sx + 4, f"{fm}{family_names[fi]} ({cnt})", fattr, max_w=w - 8)
+
+            _center_text(stdscr, sy + h - 1, cx, " ↑↓ 选择  Enter 展开  Esc 返回 ",
+                         curses.color_pair(1) | curses.A_BOLD)
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            if key == curses.KEY_UP:
+                fam_idx = (fam_idx - 1) % len(family_names)
+            elif key == curses.KEY_DOWN:
+                fam_idx = (fam_idx + 1) % len(family_names)
+            elif key in (10, 13, curses.KEY_ENTER):
+                chosen_fam = family_names[fam_idx]
+                model_list = (families_detail or {}).get(chosen_fam, [])
+                if not model_list:
+                    continue
+                result = _pick_submodel(stdscr, chosen_fam, model_list)
+                if result is not None:
+                    return result
+            elif key == 27:
+                return None
+
+    def _pick_submodel(stdscr, fam_name, model_list):
+        """全屏子模型选择。返回 model entry dict 或 None (Esc)。"""
+        m_idx = 0
+        m_scroll = 0
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+            w = max(50, min(max_w - 2, int(max_w * 0.85)))
+            inner_w = w - 8
+            visible = min(len(model_list), max_y - 6)
+            h = visible + 4
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+
+            tag_samples = [m.get("provider_name", "") + " P:" + str(m.get("provider_ctx", {}).get("priority", ""))
+                           for m in model_list]
+            max_tag_w = max((_display_width(t) for t in tag_samples), default=10)
+
+            _draw_box(stdscr, sy, sx, h, w, fam_name)
+
+            if m_idx < m_scroll:
+                m_scroll = m_idx
+            elif m_idx >= m_scroll + visible:
+                m_scroll = m_idx - visible + 1
+
+            tag_x = sx + w - 4 - max_tag_w
+            for mi in range(m_scroll, min(m_scroll + visible, len(model_list))):
+                my = sy + 2 + (mi - m_scroll)
+                me = model_list[mi]
+                is_sel = (mi == m_idx)
+                mm = "▸ " if is_sel else "  "
+                mname = me.get("model", "")
+                mprov = me.get("provider_name", "")
+                mpri = me.get("provider_ctx", {}).get("priority", "")
+                mtag = f"{mprov} P:{mpri}" if mprov else ""
+
+                mattr = curses.color_pair(3) | curses.A_BOLD if is_sel else curses.color_pair(2)
+                _safe_addstr(stdscr, my, sx + 4, f"{mm}{mname}", mattr, max_w=inner_w - max_tag_w - 2)
+                if mtag:
+                    tattr = curses.color_pair(4) | curses.A_BOLD if is_sel else curses.color_pair(4) | curses.A_DIM
+                    _safe_addstr(stdscr, my, tag_x, mtag, tattr)
+
+            _center_text(stdscr, sy + h - 1, cx, " ↑↓ 选择  Enter 选中  Esc 返回 ",
+                         curses.color_pair(1) | curses.A_BOLD)
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            if key == curses.KEY_UP:
+                m_idx = (m_idx - 1) % len(model_list)
+            elif key == curses.KEY_DOWN:
+                m_idx = (m_idx + 1) % len(model_list)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return model_list[m_idx]
+            elif key == 27:
+                return None
+
+    def _lb_cycle_provider(slot, direction):
+        """在可用 provider 间循环切换 slot 的 provider。"""
+        model_name = slot.get("model", "")
+        if not model_name or model_name == "(未选)" or not provider_options_map:
+            return
+        opts = provider_options_map.get(model_name, [])
+        if len(opts) <= 1:
+            return
+        cur_id = slot.get("provider_id", "")
+        cur_idx = 0
+        for i, opt in enumerate(opts):
+            if opt.get("provider_id") == cur_id:
+                cur_idx = i
+                break
+        new_idx = (cur_idx + direction) % len(opts)
+        chosen = opts[new_idx]
+        slot["provider_name"] = chosen.get("provider_name", "")
+        slot["provider_id"] = chosen.get("provider_id", "")
+        slot["provider_ctx"] = chosen.get("provider_ctx", {})
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        items = 4
+        idx = 0
+
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+
+            w = max(58, min(max_w - 2, int(max_w * 0.85)))
+            inner_w = w - 8
+            h = items + 6
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+
+            _draw_box(stdscr, sy, sx, h, w, "⚖ 自定义负载")
+
+            for si, sname in enumerate(SLOT_NAMES):
+                y = sy + 2 + si
+                is_sel = (si == idx)
+                marker = "▸ " if is_sel else "  "
+                slot = slots[sname]
+                label = SLOT_LABELS[sname]
+                model = slot["model"]
+                prov = slot["provider_name"]
+                pri = slot["provider_ctx"].get("priority", "")
+                tag = f"{prov} P:{pri}" if prov else ""
+
+                left = f"{marker}{label}  {model}"
+                attr = curses.color_pair(3) | curses.A_BOLD if is_sel else curses.color_pair(2)
+                max_left = inner_w - _display_width(tag) - 2 if tag else inner_w
+                _safe_addstr(stdscr, y, sx + 4, left, attr, max_w=max_left)
+
+                if tag:
+                    tag_attr = curses.color_pair(4) | curses.A_BOLD if is_sel else curses.color_pair(4) | curses.A_DIM
+                    tag_x = sx + w - 4 - _display_width(tag)
+                    _safe_addstr(stdscr, y, tag_x, tag, tag_attr)
+
+            _draw_separator(stdscr, sy + 5, sx, w)
+
+            launch_y = sy + 6
+            is_launch = (idx == 3)
+            can_launch = slots["heavy"]["model"] != "(未选)"
+            launch_marker = "▸ " if is_launch else "  "
+            if can_launch:
+                launch_attr = curses.color_pair(5) | curses.A_BOLD if is_launch else curses.color_pair(5)
+                launch_text = f"{launch_marker}▶ 启动"
+            else:
+                launch_attr = curses.A_DIM
+                launch_text = f"{launch_marker}▶ 启动  (请先选择 Heavy 模型)"
+            _safe_addstr(stdscr, launch_y, sx + 4, launch_text, launch_attr, max_w=inner_w)
+
+            footer = "Enter 编辑/启动  +/- 切Provider  ↑↓ 选择  Esc 返回"
+            _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
+                         curses.color_pair(1) | curses.A_BOLD)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % items
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % items
+            elif key in (10, 13, curses.KEY_ENTER):
+                if idx < 3:
+                    if not family_names:
+                        continue
+                    chosen = _pick_model_for_slot(stdscr)
+                    if chosen is not None:
+                        sname = SLOT_NAMES[idx]
+                        slots[sname] = {
+                            "model": chosen.get("model", ""),
+                            "provider_name": chosen.get("provider_name", ""),
+                            "provider_id": chosen.get("provider_id", ""),
+                            "provider_ctx": chosen.get("provider_ctx", {}),
+                        }
+                elif can_launch:
+                    return {
+                        "model": slots["heavy"]["model"],
+                        "lb_medium": slots["medium"]["model"] if slots["medium"]["model"] != "(未选)" else "",
+                        "lb_light": slots["light"]["model"] if slots["light"]["model"] != "(未选)" else "",
+                    }
+            elif key in (ord('+'), ord('=')):
+                if idx < 3:
+                    _lb_cycle_provider(slots[SLOT_NAMES[idx]], +1)
+            elif key in (ord('-'), ord('_')):
+                if idx < 3:
+                    _lb_cycle_provider(slots[SLOT_NAMES[idx]], -1)
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
 
 
 # ── 统一设置面板 TUI ──────────────────────────────────────
