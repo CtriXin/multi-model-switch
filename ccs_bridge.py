@@ -1049,6 +1049,62 @@ def gemini_claude_bridge(account, model_name):
 _SYSTEM_TAG_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
 
 
+def _json_resp_to_sse(body: bytes) -> bytes:
+    """将 upstream 非流式 JSON 响应转换为 Anthropic SSE 事件流。
+
+    支持 Anthropic Messages 格式和 OpenAI Chat Completions 格式。
+    Claude Code 期望 SSE 流，但路由模式下 upstream 返回 JSON，需要在此转换。
+    """
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+
+    events: list[str] = []
+
+    # ── Anthropic Messages 格式 ──
+    if data.get("type") == "message":
+        content = data.get("content", [])
+        usage = data.get("usage", {})
+        start = {**data, "content": [], "stop_reason": None, "stop_sequence": None,
+                 "usage": {"input_tokens": usage.get("input_tokens", 0), "output_tokens": 0}}
+        events.append(f'event: message_start\ndata: {json.dumps({"type": "message_start", "message": start})}\n\n')
+        for i, blk in enumerate(content):
+            bt = blk.get("type", "text")
+            cb_start = {"type": bt, "text": ""} if bt == "text" else {"type": bt, "thinking": ""}
+            events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": i, "content_block": cb_start})}\n\n')
+            if bt == "text":
+                events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": i, "delta": {"type": "text_delta", "text": blk.get("text", "")}})}\n\n')
+            elif bt == "thinking":
+                events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": i, "delta": {"type": "thinking_delta", "thinking": blk.get("thinking", "")}})}\n\n')
+            events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": i})}\n\n')
+        events.append(f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": data.get("stop_reason", "end_turn"), "stop_sequence": None}, "usage": {"output_tokens": usage.get("output_tokens", 0)}})}\n\n')
+        events.append(f'event: message_stop\ndata: {json.dumps({"type": "message_stop"})}\n\n')
+        return "".join(events).encode()
+
+    # ── OpenAI Chat Completions 格式 ──
+    if "choices" in data:
+        choice = data["choices"][0] if data.get("choices") else {}
+        msg = choice.get("message", {})
+        text = msg.get("content", "") or ""
+        usage = data.get("usage", {})
+        msg_id = data.get("id", f"msg_{id(data)}")
+        model = data.get("model", "")
+        anthro = {"id": msg_id, "type": "message", "role": "assistant", "content": [],
+                  "model": model, "stop_reason": None, "stop_sequence": None,
+                  "usage": {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": 0}}
+        events.append(f'event: message_start\ndata: {json.dumps({"type": "message_start", "message": anthro})}\n\n')
+        events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})}\n\n')
+        events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}})}\n\n')
+        events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": 0})}\n\n')
+        events.append(f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": usage.get("completion_tokens", 0)}})}\n\n')
+        events.append(f'event: message_stop\ndata: {json.dumps({"type": "message_stop"})}\n\n')
+        return "".join(events).encode()
+
+    # ── 未知格式，原样返回 ──
+    return body
+
+
 def _extract_user_text(content):
     """从 Anthropic messages content 中提取纯用户文本（剥离 system-reminder 注入）。"""
     if isinstance(content, str):
@@ -1175,6 +1231,52 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+        # ── SUGGESTION MODE 拦截（最优先，在路由之前）──
+        # 扫描所有 user messages，任何一条包含 SUGGESTION MODE → 直接返回空回复
+        path_bare_check = path.split("?")[0]
+        if "/messages" in path_bare_check:
+            for _msg in payload.get("messages", []):
+                if _msg.get("role") != "user":
+                    continue
+                _raw_content = _msg.get("content", "")
+                # content 可能是 str 或 list
+                _check_texts = []
+                if isinstance(_raw_content, str):
+                    _check_texts.append(_raw_content)
+                elif isinstance(_raw_content, list):
+                    for _item in _raw_content:
+                        if isinstance(_item, str):
+                            _check_texts.append(_item)
+                        elif isinstance(_item, dict) and _item.get("type") == "text":
+                            _check_texts.append(_item.get("text", ""))
+                for _ct in _check_texts:
+                    if _ct.startswith("[SUGGESTION MODE") or _ct.startswith("[SYSTEM"):
+                        try:
+                            from ccs_router import log_route
+                            log_route("light", "blocked:suggestion", "(blocked)", _ct[:60])
+                        except Exception:
+                            pass
+                        _block_resp = {
+                            "id": "msg_blocked_suggestion",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": ""}],
+                            "model": payload.get("model", ""),
+                            "stop_reason": "end_turn",
+                            "usage": {"input_tokens": 0, "output_tokens": 0},
+                        }
+                        if payload.get("stream"):
+                            # 客户端期望 SSE 流，返回 SSE 格式
+                            _sse_out = _json_resp_to_sse(json.dumps(_block_resp).encode())
+                            self.send_response(200)
+                            self.send_header("Content-Type", "text/event-stream")
+                            self.send_header("Cache-Control", "no-cache")
+                            self.end_headers()
+                            self.wfile.write(_sse_out)
+                        else:
+                            self._json(200, _block_resp)
+                        return
+
         # ── 模型名映射：将 Claude Code 发来的 claude-* 替换为真实模型名 ──
         heavy_model = getattr(self.server, "heavy_model", None)
         if heavy_model and "model" in payload:
@@ -1190,77 +1292,100 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         has_routing = light_model or medium_model
         if has_routing and "/messages" in path_no_qs and path_no_qs != "/v1/messages/count_tokens":
             user_msgs = [m for m in payload.get("messages", []) if m.get("role") == "user"]
-            if user_msgs:
-                last_content = user_msgs[-1].get("content", "")
-                last_text = _extract_user_text(last_content)
-                if last_text:
-                    from ccs_router import classify_task, log_route, STICKY_DECAY_TURNS
+            # 回退查找：从最后一条 user message 往前找有文本的（跳过 tool_result-only）
+            last_text = ""
+            for _um in reversed(user_msgs):
+                _t = _extract_user_text(_um.get("content", ""))
+                if _t:
+                    last_text = _t
+                    break
+
+            if last_text:
+                from ccs_router import classify_task, log_route, STICKY_DECAY_TURNS
+                import time as _time_mod
+
+                # 短时去重：同一文本 3 秒内不重复分类
+                _prev = getattr(self.server, "_last_classify", None)
+                _now = _time_mod.time()
+                if (_prev and _prev[0] == last_text
+                        and _now - _prev[2] < 3):
+                    level, reason = _prev[1], f"dedup({_prev[3]})"
+                else:
                     gw_url = getattr(self.server, "gateway_url", None)
                     gw_key = getattr(self.server, "gateway_key", None)
                     level, reason = classify_task(
                         last_text, api_url=gw_url, api_key=gw_key,
                         light_model=light_model or medium_model,
                     )
-                    # sticky escalation：heavy 后保持，但高置信 LIGHT 可 override
-                    sticky_floor = getattr(self.server, "_sticky_floor", None)
-                    sticky_remaining = getattr(self.server, "_sticky_remaining", 0)
-                    # 高置信 LIGHT 信号：关键词命中或 LLM 高置信
-                    _is_confident_light = (level == "light" and
-                        (reason.startswith("keyword:") or "high_confidence" in reason))
-                    if sticky_floor == "heavy" and sticky_remaining > 0:
-                        if _is_confident_light:
-                            # 高置信 LIGHT override sticky，允许降级
-                            self.server._sticky_floor = None
-                            self.server._sticky_remaining = 0
-                            reason = f"sticky_override({reason})"
-                        elif level != "heavy":
-                            level = "heavy"
-                            reason = f"sticky({sticky_remaining})"
-                            self.server._sticky_remaining = sticky_remaining - 1
-                            if self.server._sticky_remaining <= 0:
-                                self.server._sticky_floor = None
-                        else:
-                            self.server._sticky_remaining = sticky_remaining - 1
-                            if self.server._sticky_remaining <= 0:
-                                self.server._sticky_floor = None
-                    elif level == "heavy":
-                        self.server._sticky_floor = "heavy"
-                        self.server._sticky_remaining = STICKY_DECAY_TURNS
+                    self.server._last_classify = (last_text, level, _now, reason)
 
-                    # 按 tier 选模型
-                    if level == "light" and light_model:
-                        payload["model"] = light_model
-                    elif level == "medium" and medium_model:
-                        payload["model"] = medium_model
-                    # heavy 保持 payload["model"]（已设为 heavy_model）
-                    log_route(level, reason, payload.get("model", "?"), last_text)
-                    # 写状态文件供 statusline 读取
-                    _write_route_status(
-                        level,
-                        payload.get("model", ""),
-                        reason,
-                        status_paths=getattr(self.server, "route_status_paths", None),
-                    )
-                    # 保存 level 供后续使用
-                    self.server._last_level = level
-                else:
-                    # 智能路由开启但无法提取文本，默认用 heavy
-                    _write_route_status(
-                        "heavy",
-                        payload.get("model", ""),
-                        "no_text",
-                        status_paths=getattr(self.server, "route_status_paths", None),
-                    )
-                    self.server._last_level = "heavy"
-            else:
-                # 智能路由开启但没有用户消息，默认用 heavy
+                # sticky escalation：heavy 后保持，但高置信 LIGHT 可 override
+                sticky_floor = getattr(self.server, "_sticky_floor", None)
+                sticky_remaining = getattr(self.server, "_sticky_remaining", 0)
+                # 高置信 LIGHT 信号：关键词命中或 LLM 高置信
+                _is_confident_light = (level == "light" and
+                    (reason.startswith("keyword:") or "high_confidence" in reason))
+                if sticky_floor == "heavy" and sticky_remaining > 0:
+                    if _is_confident_light:
+                        # 高置信 LIGHT override sticky，允许降级
+                        self.server._sticky_floor = None
+                        self.server._sticky_remaining = 0
+                        reason = f"sticky_override({reason})"
+                    elif level != "heavy":
+                        level = "heavy"
+                        reason = f"sticky({sticky_remaining})"
+                        self.server._sticky_remaining = sticky_remaining - 1
+                        if self.server._sticky_remaining <= 0:
+                            self.server._sticky_floor = None
+                    else:
+                        self.server._sticky_remaining = sticky_remaining - 1
+                        if self.server._sticky_remaining <= 0:
+                            self.server._sticky_floor = None
+                elif level == "heavy":
+                    self.server._sticky_floor = "heavy"
+                    self.server._sticky_remaining = STICKY_DECAY_TURNS
+
+                # 按 tier 选模型
+                if level == "light" and light_model:
+                    payload["model"] = light_model
+                elif level == "medium" and medium_model:
+                    payload["model"] = medium_model
+                # heavy 保持 payload["model"]（已设为 heavy_model）
+                log_route(level, reason, payload.get("model", "?"), last_text)
+                # 写状态文件供 statusline 读取
                 _write_route_status(
-                    "heavy",
+                    level,
+                    payload.get("model", ""),
+                    reason,
+                    status_paths=getattr(self.server, "route_status_paths", None),
+                )
+                # 保存 level 供后续使用
+                self.server._last_level = level
+            elif user_msgs:
+                # tool_result 续接：沿用上次 tier（不默认 HEAVY）
+                prev_level = getattr(self.server, "_last_level", "medium")
+                if prev_level == "light" and light_model:
+                    payload["model"] = light_model
+                elif prev_level == "medium" and medium_model:
+                    payload["model"] = medium_model
+                _write_route_status(
+                    prev_level,
+                    payload.get("model", ""),
+                    "tool_continue",
+                    status_paths=getattr(self.server, "route_status_paths", None),
+                )
+                from ccs_router import log_route
+                log_route(prev_level, "tool_continue", payload.get("model", "?"), "(tool_result)")
+            else:
+                # 智能路由开启但没有用户消息，沿用上次 tier
+                prev_level = getattr(self.server, "_last_level", "medium")
+                _write_route_status(
+                    prev_level,
                     payload.get("model", ""),
                     "no_user_msg",
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
-                self.server._last_level = "heavy"
+                self.server._last_level = prev_level
 
         # 无论是否路由，都写 status 供 statusline 显示真实 model
         if not has_routing and "/messages" in path.split("?")[0]:
@@ -1286,8 +1411,24 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # gateway_url already ends with /v1; strip /v1 prefix from path to avoid double /v1
         gateway_url = getattr(self.server, "gateway_url")
         gateway_key = getattr(self.server, "gateway_key")
-        path_suffix = path[3:]  # /v1/messages → /messages
-        target_url = gateway_url.rstrip("/") + path_suffix
+
+        # 跨 provider 负载：根据当前 tier 选用对应 slot 的 url/key
+        slot_configs = getattr(self.server, "slot_configs", {})
+        current_level = getattr(self.server, "_last_level", "heavy")
+        if current_level in slot_configs:
+            slot = slot_configs[current_level]
+            if slot.get("url"):
+                gateway_url = slot["url"]
+            if slot.get("key"):
+                gateway_key = slot["key"]
+
+        # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容
+        _gw = gateway_url.rstrip("/")
+        if _gw.endswith("/v1"):
+            path_suffix = path[3:]  # strip /v1 prefix to avoid double /v1
+        else:
+            path_suffix = path      # keep full path including /v1
+        target_url = _gw + path_suffix
 
         fwd_headers = {
             "Content-Type": "application/json",
@@ -1305,18 +1446,20 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if "anthropic-version" not in {name.lower() for name in fwd_headers}:
             fwd_headers["anthropic-version"] = "2023-06-01"
 
-        stream = bool(payload.get("stream"))
-        # 智能路由模式下强制非流式（避免 OpenAI/Anthropic SSE 格式不匹配导致无法结束）
+        client_wants_stream = bool(payload.get("stream"))
+        stream = client_wants_stream
+        # 智能路由模式下强制非流式（避免各 provider SSE 格式 / 连接行为不一致）
         if has_routing:
             stream = False
+            payload["stream"] = False  # 确保 upstream 也返回 JSON 而非 SSE
         metrics_model = str(payload.get("model") or "")
         started_ms = _now_ms()
         first_byte_ms = None
         output_tokens = None
 
         try:
-            with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
-                if stream:
+            if stream:
+                with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
                     self.send_header("Cache-Control", "no-cache")
@@ -1340,20 +1483,26 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         if raw_line == "":
                             self.wfile.flush()
                     self.close_connection = True
+            else:
+                response = httpx.post(target_url, headers=fwd_headers, json=payload, timeout=300)
+                first_byte_ms = _now_ms()
+                body_out = response.content
+                if body_out:
+                    try:
+                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                    except Exception:
+                        output_tokens = None
+                # 路由模式：upstream 返回 JSON，但 Claude Code 期望 SSE → 转换
+                if has_routing and client_wants_stream and response.status_code == 200:
+                    body_out = _json_resp_to_sse(body_out)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(body_out)
                 else:
-                    body_chunks = []
-                    for chunk in response.iter_bytes():
-                        if first_byte_ms is None and chunk:
-                            first_byte_ms = _now_ms()
-                        body_chunks.append(chunk)
-                    body_out = b"".join(body_chunks)
-                    if body_out:
-                        try:
-                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
-                        except Exception:
-                            output_tokens = None
                     self.send_response(response.status_code)
-                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Type", response.headers.get("content-type", "application/json"))
                     self.send_header("Content-Length", str(len(body_out)))
                     self.end_headers()
                     self.wfile.write(body_out)
@@ -2205,6 +2354,7 @@ def gateway_claude_bridge(
     advertised_models=None,
     speed_scope=None,
     route_status_paths=None,
+    slot_configs=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -2212,6 +2362,10 @@ def gateway_claude_bridge(
     heavy_model: 所有请求默认使用的模型名（替换 Claude Code 发来的 claude-* 模型名）。
     medium_model: 智能路由下的中档模型（LLM 分类低置信度时使用）。
     light_model: 智能路由下的轻量模型（明确简单任务时使用）。
+    slot_configs: 跨 provider 负载配置。
+        {"medium": {"url": str, "key": str}, "light": {"url": str, "key": str}}
+        当某个 tier 命中时，使用对应 slot 的 url/key 代替默认 gateway_url/gateway_key。
+        未配置的 slot 仍使用默认 gateway。
     """
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 gateway bridge")
@@ -2227,6 +2381,7 @@ def gateway_claude_bridge(
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
+    server.slot_configs = slot_configs or {}
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
