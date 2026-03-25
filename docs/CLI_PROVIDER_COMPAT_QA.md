@@ -106,6 +106,47 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 - 文件：[ccs_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_core.py#L3299)
 - 做法：`_provider_options_for_model()` 在 `option_models` 为空时直接跳过该 provider
 
+### 5. `Codex -> MMS -> CRS/newapi` 会丢失 Codex 标识头，导致上游把请求当成普通 `httpx` 客户端
+
+**表象**
+
+- 同样连续问三次 `hi`，同事后台 `input` 只有十几到几百，而本地链路经常每次都很大
+- private CRS 日志里出现：
+  - `ua = python-httpx/0.28.1`
+  - `Non-Codex CLI request detected, applying Codex CLI adaptation`
+- `cache read` / prompt cache 命中行为与同事链路明显不一致
+
+**真实根因**
+
+`_ResponsesProxyHandler` 以及它内部的 `chat/completions fallback` 之前只往上游转发：
+
+- `Content-Type`
+- `Authorization`
+
+原始请求里的这些关键头全丢了：
+
+- `User-Agent`
+- `originator`
+- `session_id`
+- `x-session-id`
+- `openai-beta`
+
+这样一来，CRS / newapi 上游只能看到本地 bridge 发出的 `python-httpx` 请求，无法继续把它识别成原始 `Codex CLI` 客户端。
+
+**修复**
+
+- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L51)
+- 做法：
+  - 为 `responses proxy` 增加白名单式 header 透传
+  - 同时覆盖内部 `chat/completions fallback`
+  - 只补传客户端标识头，不改现有 gateway 鉴权逻辑
+
+**如何确认**
+
+- private / company / newapi 的上游日志里，`ua` 应从 `python-httpx/...` 变成 `codex_*`
+- `Non-Codex CLI request detected` 这类日志应消失或明显减少
+- 如果上游本身支持 prompt cache / response storage，后续请求的缓存命中机会会提升
+
 ---
 
 ## Q&A
@@ -228,7 +269,7 @@ A：`hi` 本身几乎不占 token，大头来自 `Codex` 启动时自动拼进�
 当前会进入请求的主要部分：
 
 1. `Codex CLI` 自带 `base_instructions`
-   - 历史 session 样本里约 `7563` chars
+   - 当前抽样 session 里约 `14101` chars
 2. harness / permissions / tools schema
    - 包括 shell 工具、approval 规则、输出格式要求等
 3. 全局 `AGENTS.md`
@@ -238,6 +279,11 @@ A：`hi` 本身几乎不占 token，大头来自 `Codex` 启动时自动拼进�
 5. 当前会话 developer 注入的 skills 列表
    - 你本机安装了大量 skills，当前环境里会把“可用技能清单 + 触发规则”一并注入
 6. 当前会话已有历史消息、图片、任务上下文
+
+同一份抽样里，另外还能量化到：
+
+- developer 注入约 `10754` chars
+- 当前项目 `AGENTS.md` 包装消息约 `3895` chars
 
 这也解释了为什么你后台会看到：
 
@@ -268,6 +314,112 @@ A：`hi` 本身几乎不占 token，大头来自 `Codex` 启动时自动拼进�
 - 真正最值得先减的是两类：
   - 过长的 `AGENTS.md`
   - 没在用但还挂着的 skills
+
+---
+
+### Q8：为什么同样三次 `hi`，同事 `input` 只有十几到几百，而我这边每次都还是很大？
+
+A：目前看，不是单一原因，但关键差异已经明确有两层：
+
+1. 你本地 `Codex` 仍然关闭了 response storage
+   - `~/.codex/config.toml`
+   - `~/.config/mms/codex-gateway/.../.codex/config.toml`
+   - 两边当前都是 `disable_response_storage = true`
+2. 你的 `privateopenai` / `xin` 上游链路都不接受 `previous_response_id`
+   - 这意味着它们虽然暴露了 `/responses`
+   - 但并不支持真正的 server-side conversation continuation
+
+所以对你这条链来说，后续轮次大概率仍要把那一大段固定前缀重新发上去，自然就会继续看到“大 input”。
+
+同事那种“后续只发很小 delta”的表现，通常意味着上游链路真的支持：
+
+- `previous_response_id`
+- 或者等价的 server-side continuation / response storage
+
+---
+
+### Q9：为什么 `company` 会命中 `cache read`，而 `private` 不会？
+
+A：这件事不能只看“是不是同样问了三次 `hi`”，还要看上游把请求当成什么类型。
+
+当前已经确认的 private 问题有两层：
+
+1. **MMS 本地 bridge 之前会丢客户端标识头**
+   - 上游看到的是 `python-httpx/0.28.1`
+   - 不是原始 `Codex CLI`
+2. **private CRS 当前命中的账户链路不是 `openai-responses`，而是普通 `openai`**
+   - private CRS 代码里普通 `openai` 链路会把 `store = false`
+   - 这条路本来就不是“真正的 response storage relay”
+
+因此 private 当前“不读缓存 / 不像同事那样极小 input”是符合现状的。
+
+`company` 那边之所以能看到 `cache read`，更可能是它的 CRS / 上游账户配置本来就支持 prompt cache 或 response storage，而不是因为你这边 `Codex` 文本更小。
+
+---
+
+### Q10：如果目标是像同事那样让后续 `input` 很小，是不是还要改 CRS？
+
+A：是，**只改 MMS 不够**。
+
+这轮 MMS 修复解决的是第一层问题：
+
+- 把 `User-Agent` / `originator` / `session_id` 这些头透传上去
+- 让上游至少能看见“这原本是个 `Codex` 请求”
+
+但如果你要的是更强的效果：
+
+- 真正使用 `previous_response_id`
+- 后续轮次只传很小 delta
+- 稳定的 server-side continuation
+
+那还需要 CRS / newapi 侧满足至少一项：
+
+1. 账户链路走 `openai-responses` 或等价的 storage-capable relay
+2. 上游明确支持 `previous_response_id`
+3. 服务端没有把 `store` 强制改成 `false`
+
+所以答案是：
+
+- **第一步修 MMS：要做，而且已经做**
+- **第二步改 CRS / 账户路由：如果要达到同事那种效果，也要做**
+
+---
+
+### Q11：`MMS -> newapi -> CRS` 这条链，也会丢失那些 header 吗？
+
+A：如果第一跳 `MMS` 就没透传，那后面的 `newapi` / `CRS` 自然也拿不到。
+
+这也是为什么这轮先修 `MMS bridge`。
+
+额外确认到的一点是：`newapi` 自定义版源码里，确实已经有这类 override / 映射能力，例如：
+
+- `header:session_id -> json:prompt_cache_key`
+- `originator = codex_cli_rs`
+
+但前提仍然是：它得先收到这些 header。第一跳没了，后面无法“凭空恢复原始 Codex 身份”。
+
+---
+
+### Q12：CRS 里 `codex app` / `codex cli` 是怎么识别的？能不能直接“识别成 app”？
+
+A：按这轮查到的 private CRS 代码看，目前**没有单独的 `codex_app` client type**。
+
+它识别的核心仍然是 `Codex CLI family`，主要依赖：
+
+- `User-Agent`
+  - 例如 `codex_vscode/...`
+  - `codex_cli_rs/...`
+  - `codex_exec/...`
+- `originator`
+- `session_id`
+- body 里的 `instructions` 特征
+
+所以“识别成 app”在这套 CRS 代码里并不是单独一条新类型，更像是：
+
+- 只要请求特征像 `Codex family`
+- 就会被归到对应 validator / adaptation 逻辑里
+
+换句话说，现在最应该先修的不是“伪装成 app”，而是确保上游先看到原始 `Codex` 特征头。
 
 ---
 
