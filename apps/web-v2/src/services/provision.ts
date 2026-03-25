@@ -12,15 +12,16 @@
 
 import { Capacitor } from '@capacitor/core'
 
-const PROVISION_BASE = 'http://82.156.121.141:4001'
+const PROVISION_BASE = 'https://apple.clawopen.online'
 const LEGACY_PROVISION_BASE = 'http://82.156.121.141:4000'
+const LEGACY_IP_BASE = 'http://82.156.121.141:4001'
 const PROVISION_URL = `${PROVISION_BASE}/api/provision`
 const API_BASE_URL = `${PROVISION_BASE}/v1`
 const LEGACY_API_BASE_URL = `${LEGACY_PROVISION_BASE}/v1`
 
 const INSTALL_ID_KEY = 'mms-install-id'
 const PROVISION_STATE_KEY = 'mms-provision-state'
-const APP_VERSION = '0.3.5'
+const APP_VERSION = '0.5.5'
 const BUNDLE_ID = 'com.xin.lab'
 
 export type ProvisionTier = 'default' | 'max'
@@ -73,7 +74,13 @@ export function getInstallId(): string {
 export function normalizeSparkringBaseUrl(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/$/, '')
   if (!normalized) return API_BASE_URL
-  if (normalized === LEGACY_PROVISION_BASE || normalized === LEGACY_API_BASE_URL) {
+  // Migrate all legacy IP-based URLs to HTTPS domain
+  if (
+    normalized === LEGACY_PROVISION_BASE ||
+    normalized === LEGACY_API_BASE_URL ||
+    normalized === LEGACY_IP_BASE ||
+    normalized === `${LEGACY_IP_BASE}/v1`
+  ) {
     return API_BASE_URL
   }
   return normalized

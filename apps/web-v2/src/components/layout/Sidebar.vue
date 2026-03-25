@@ -27,6 +27,24 @@ const emit = defineEmits<{ collapse: []; expand: []; togglePlatform: [] }>()
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
 
+function newChat() {
+  sessionStore.createSession('chat')
+  router.push('/chat')
+}
+
+function newDiscuss() {
+  sessionStore.createSession('discuss')
+  router.push('/discuss')
+}
+
+function newAdvisors() {
+  router.push('/advisors-v2')
+}
+
+function goLab() {
+  router.push('/lab')
+}
+
 function isSessionActive(session: { id: string }) {
   return sessionStore.currentSessionId === session.id
 }
