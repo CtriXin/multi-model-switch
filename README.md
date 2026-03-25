@@ -268,6 +268,7 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
 - 每个账号档案都绑定一个独立 `home_dir`
 - `codex` 会通过隔离 `HOME` / `XDG_CONFIG_HOME` 实现登录态分离
 - `codex` 账号模式下会继续隔离 `auth.json` / `config.toml`，但共享全局 `resume/history` 相关目录，避免切账号后本地会话列表消失
+- `claude` / `codex` 的隔离 session 会额外链接真实 `~/.ssh`、`~/.gitconfig`、`~/.gitignore_global`，避免独立 `HOME` 下 Git/SSH 配置“像丢了一样”
 - `claude` / `gemini` 会保留真实系统用户上下文，只切换各自应用的本地状态目录，避免 macOS Keychain 和首次引导异常
 
 当前优先级是先把“多绑、多选、不互相污染”做稳，所以首轮支持两种方式：

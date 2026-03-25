@@ -64,11 +64,16 @@
 - `codex` 启动时会为当前进程注入：
   - `HOME=<home_dir>`
   - `XDG_CONFIG_HOME=<home_dir>/.config`
+- `codex` / `claude` 的隔离 session 会额外 symlink 真实用户的：
+  - `~/.ssh`
+  - `~/.gitconfig`
+  - `~/.gitignore_global`
+  这样在独立 `HOME` 里跑 Git / SSH 时，不会因为找不到用户级配置而异常
 - `gemini` 启动时会注入：
   - `GEMINI_CLI_HOME=<home_dir>`
   - 保留真实系统 `HOME`，让 macOS Keychain 和 Gemini 自己的重启流程保持正常
-- `claude` 启动时会保留真实系统 `HOME`，并在启动前后切换 `.claude.json`
-- 这样可以把不同 Plan / 不同官方登录态分开，不互相覆盖，同时避免官方 CLI 对系统环境的强依赖被破坏
+- `claude` 启动时会使用 per-session 隔离 `HOME`，并把账号态与项目级 session 历史拆开托管
+- 这样可以把不同 Plan / 不同官方登录态分开，不互相覆盖，同时保留 Git/SSH 与 macOS Keychain 等系统级依赖
 - 官方通道的 `文件夹名` 也可以在“管理现有通道”里直接重命名，不必记 `config account.rename`
 
 ## 最小试验
