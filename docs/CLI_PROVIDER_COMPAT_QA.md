@@ -879,6 +879,8 @@ A：是，而且这轮已经用本机 `Claude Code 2.1.81` 直接抓包确认。
   - 原生 `POST /responses` 已确认 `200`
   - 清掉 `~/.config/ccs/cache/bridge_mode_cache.json` 的旧 fallback 后，重复请求已重新出现 `cache read`
   - 说明此前“不读缓存”大概率是被旧的 `chatcompletions` fallback 污染
+  - 如果本身就不提供 `/openai/v1/models`，推荐把该 provider 的 `models_endpoint` 设为 `manual`
+  - 这样 MMS 会直接使用手工补充模型，跳过远端 `/models` 探测，减少进入模型选择时的空等
 - `companycrsopenai`
   - 本次直接 probe：
     - `/responses` 返回 `429`
