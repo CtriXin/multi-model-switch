@@ -226,6 +226,49 @@ A：先按这个顺序：
 
 ---
 
+### Q5.1：现在这条 `private / privateopenai / newapi / CRS` 链路有没有“保险窗口”？
+
+A：有，已经正式写进仓库规则。
+
+入口文档：
+
+- [AGENTS.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/AGENTS.md)
+- [docs/AGENT_GUARDRAILS.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/AGENT_GUARDRAILS.md)
+
+当前被放进保险窗口的链路：
+
+- `MMS -> private(/claude) -> CRS`
+- `MMS -> privateopenai(/openai) -> CRS`
+- `MMS -> xin/newapi(4001) -> CRS`
+
+只要改动会碰到下面任一项，就必须先确认是否会影响这条链路：
+
+- `models_endpoint`
+- `extra_models` / `hidden_models`
+- probe / cache / fallback
+- `channel_affinity`
+- `Codex` / `Claude` header 透传
+- `/claude`、`/openai`、`/responses`、`/models` 协议假设
+
+---
+
+### Q5.2：以后我要自己在服务器追溯、复现 smoke test，看哪份文档？
+
+A：直接看这份 runbook：
+
+- [docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md)
+
+它已经包含：
+
+- `private(/claude)` 的最小 `models` / `messages` smoke
+- `privateopenai(/openai)` 的 `manual` 模式验证
+- `xin/newapi(4001)` 的 sticky / header 验证
+- CRS / newapi 的日志与数据库追溯命令
+
+如果有人改了这条链路，却没有更新这份 runbook，默认就视为验证闭环不完整。
+
+---
+
 ### Q6：`crs -> newapi` 这条链，最终暴露给 `Codex` 的是 `Responses` 还是 `Chat Completions`？
 
 A：以 2026-03-25 的 live 实验和 `82.156.121.141` 机器实查结果看，`xin(4001)` 背后确实是一个定制过的 `new-api`，而且它对 `Codex` 这类 GPT 模型已经显式暴露了 `Responses` 路由。
@@ -1013,3 +1056,55 @@ A：是，而且这轮已经用本机 `Claude Code 2.1.81` 直接抓包确认。
 - `claude` 仍可能继续落到 `/v1/messages` 链路，出现 `404 /openai/v1/messages` 或 `504`
 
 这部分当前已记录为后续单独修复项，不包含在本轮 commit 内。
+
+---
+
+### Q20：`MMS` 隔离环境里，`ssh` / `gitconfig` / `skills` 现在会带进来吗？skill 里还能再起一个 `mms` 吗？
+
+A：会，而且这轮又补了一层“防套娃”。
+
+当前 `MMS` 的隔离 session 里：
+
+- `.ssh`
+- `.gitconfig`
+- `.gitignore_global`
+- `~/.codex/skills`
+
+都会继续从真实用户目录映射进去，所以：
+
+- 隔离 session 里的 `git` / `ssh` 可用
+- `Codex` 还能继续看到全局安装的 skills
+- skill 里技术上可以再调用一次 `mms`
+
+但之前有一个隐患：
+
+- 第一层 `MMS` 会把 `HOME` 切到 `~/.config/mms/.../s/<pid>`
+- 如果第二层 `mms` 再从这个 `HOME` 推导“真实家目录”
+- 就会继续在 session 里面套 session，路径越来越深
+
+这轮已经在 launcher 里补了：
+
+- `MMS_REAL_HOME`
+
+现在的规则是：
+
+- 第一层 `MMS` 启动时显式把真实 home 传下去
+- 后续不管是子 skill、还是第二层 `mms`
+- 共享资源都优先从 `MMS_REAL_HOME` 回源，而不是再从当前隔离 `HOME` 继续推导
+
+补丁位置：
+
+- 文件：[ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py)
+
+因此当前的结论是：
+
+- “隔离环境里 ssh / git / skills 带不过来”这个问题，已经不是现状
+- “skill 里再起一个 mms 会不会继续套娃”这个问题，这轮也已经在 `MMS` 侧收住了
+
+但仍建议把“skill 里再起 `mms`”主要用于：
+
+- one-shot 命令
+- 辅助 smoke
+- 短链路调试
+
+不要默认把它当成长期、深层嵌套的主工作流。

@@ -21,9 +21,31 @@ except ImportError:
     pass
 
 console = Console()
-RUNTIME_DIR = os.path.expanduser("~/.config/mms/runtime")
-HEALTH_CHECK_PATH = os.path.expanduser("~/.config/mms/health_check.json")
-ANTHROPIC_URL_CACHE_PATH = os.path.expanduser("~/.config/mms/cache/anthropic_base_urls.json")
+
+
+def _real_user_home():
+    explicit = str(os.environ.get("MMS_REAL_HOME", "")).strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+
+    home = os.path.abspath(os.environ.get("HOME") or os.path.expanduser("~"))
+    markers = (
+        f"{os.sep}.config{os.sep}mms{os.sep}codex-gateway{os.sep}",
+        f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}",
+    )
+    for marker in markers:
+        if marker in home:
+            return home.split(marker, 1)[0]
+    return home
+
+
+def _real_user_path(*parts):
+    return os.path.join(_real_user_home(), *parts)
+
+
+RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
+HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
+ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
 
 # Anthropic URL 探测结果缓存（内存，TTL 1h）
 # key: provider_id → {"url": str, "ts": datetime}
@@ -37,12 +59,12 @@ CLI_PROTOCOL_REQUIREMENTS = {
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 
 # agent-im daemon 路径（auto-start on mms launch）
-_AGENT_IM_DIR = os.path.expanduser("~/auto-skills/CtriXin-repo/agent-im")
-_AGENT_IM_SOCK = os.path.expanduser("~/.agent-im/agent-im.sock")
+_AGENT_IM_DIR = _real_user_path("auto-skills", "CtriXin-repo", "agent-im")
+_AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 
 
 def _claude_gateway_home():
-    gateway_base = os.path.expanduser("~/.config/mms/claude-gateway")
+    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
     sessions_dir = os.path.join(gateway_base, "s")
     return os.path.join(sessions_dir, str(os.getpid()))
 
@@ -219,6 +241,7 @@ def validate_provider_for_cli(cli, provider):
 
 def _account_env(account):
     env = os.environ.copy()
+    env["MMS_REAL_HOME"] = _real_user_home()
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     if not home_dir:
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
@@ -241,12 +264,12 @@ def _account_env(account):
             except Exception:
                 pass
         # symlink .local
-        real_local = os.path.expanduser("~/.local")
+        real_local = _real_user_path(".local")
         gw_local = os.path.join(session_home, ".local")
         if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
             os.symlink(real_local, gw_local)
         # symlink Library（macOS Keychain 需要 ~/Library/Keychains）
-        real_library = os.path.expanduser("~/Library")
+        real_library = _real_user_path("Library")
         session_library = os.path.join(session_home, "Library")
         if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
             os.symlink(real_library, session_library)
@@ -273,7 +296,7 @@ def _account_env(account):
             if not os.path.exists(dst) and not os.path.islink(dst):
                 os.symlink(src, dst)
         # symlink Library（macOS Keychain）
-        real_library = os.path.expanduser("~/Library")
+        real_library = _real_user_path("Library")
         session_library = os.path.join(session_home, "Library")
         if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
             os.symlink(real_library, session_library)
@@ -312,7 +335,7 @@ def _overlay_codex_shared_resume(home_dir, session_home):
         if not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
 
-    real_codex_dir = os.path.expanduser("~/.codex")
+    real_codex_dir = _real_user_path(".codex")
     for entry in shared_entries:
         source_root = real_codex_dir if os.path.isdir(real_codex_dir) else account_codex_dir
         src = os.path.join(source_root, entry)
@@ -324,7 +347,7 @@ def _overlay_codex_shared_resume(home_dir, session_home):
 
 def _link_shared_dotfiles(session_home):
     """Expose user-level Git/SSH config inside isolated HOME sessions."""
-    real_home = os.path.expanduser("~")
+    real_home = _real_user_home()
     for dot_name in (".ssh", ".gitconfig", ".gitignore_global"):
         src = os.path.join(real_home, dot_name)
         dst = os.path.join(session_home, dot_name)
@@ -801,7 +824,7 @@ def _prepare_claude_session_tree(session_home, session_claude_dir, *, account_id
     current_cwd = os.path.realpath(os.getcwd())
     store = ensure_claude_project_store(current_cwd)
     skip_real_entries = set(skip_real_entries or ())
-    real_claude_dir = os.path.expanduser("~/.claude")
+    real_claude_dir = _real_user_path(".claude")
     if os.path.islink(session_claude_dir):
         os.unlink(session_claude_dir)
     os.makedirs(session_claude_dir, exist_ok=True)
@@ -875,7 +898,7 @@ def _claude_gateway_env(
     light_model: bridge 模式下可选 light model（仅用于展示）。
     """
     import json as _json
-    gateway_base = os.path.expanduser("~/.config/mms/claude-gateway")
+    gateway_base = _real_user_path(".config", "mms", "claude-gateway")
     sessions_dir = os.path.join(gateway_base, "s")
     gateway_home = _claude_gateway_home()
     route_status_path = _claude_route_status_paths()[0]
@@ -893,7 +916,7 @@ def _claude_gateway_env(
 
     # ── .claude.json：剥离 migration flags + 写入 thinking/attribution ──
     # 合并策略：真实 ~/.claude.json 为基础，保留 per-session 已有的用户确认状态
-    real_json = os.path.expanduser("~/.claude.json")
+    real_json = _real_user_path(".claude.json")
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
     if os.path.exists(real_json):
@@ -921,13 +944,13 @@ def _claude_gateway_env(
         f.write("\n")
 
     # ── .local symlink：Claude Code 检测 $HOME/.local/bin/claude（installMethod=native）──
-    real_local = os.path.expanduser("~/.local")
+    real_local = _real_user_path(".local")
     gw_local = os.path.join(gateway_home, ".local")
     if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
         os.symlink(real_local, gw_local)
 
     # ── Library symlink：macOS Keychain 需要 ~/Library/Keychains ──
-    real_library = os.path.expanduser("~/Library")
+    real_library = _real_user_path("Library")
     gw_library = os.path.join(gateway_home, "Library")
     if os.path.isdir(real_library) and not os.path.exists(gw_library) and not os.path.islink(gw_library):
         os.symlink(real_library, gw_library)
@@ -936,7 +959,7 @@ def _claude_gateway_env(
 
     # ── ~/.claude 目录：持久化历史项指向 project store，其余沿用真实 ~/.claude ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
-    real_claude_dir = os.path.expanduser("~/.claude")
+    real_claude_dir = _real_user_path(".claude")
     _prepare_claude_session_tree(
         gateway_home,
         gw_claude_dir,
@@ -992,6 +1015,7 @@ def _claude_gateway_env(
         f.write("\n")
 
     env = os.environ.copy()
+    env["MMS_REAL_HOME"] = _real_user_home()
     env["HOME"] = gateway_home
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
@@ -1059,7 +1083,7 @@ def _codex_gateway_env(runtime, base_url):
     """为 gateway api_key 模式创建独立 HOME，per-PID session 隔离。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
-    gateway_base = os.path.expanduser("~/.config/mms/codex-gateway")
+    gateway_base = _real_user_path(".config", "mms", "codex-gateway")
     os.makedirs(gateway_base, exist_ok=True)
 
     # --- per-PID session 隔离（与 Claude gateway 对齐） ---
@@ -1077,7 +1101,7 @@ def _codex_gateway_env(runtime, base_url):
         if not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
     # symlink Library（macOS Keychain）
-    real_library = os.path.expanduser("~/Library")
+    real_library = _real_user_path("Library")
     session_library = os.path.join(session_home, "Library")
     if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
         os.symlink(real_library, session_library)
@@ -1168,7 +1192,7 @@ def _codex_gateway_env(runtime, base_url):
 
     # 复制用户 config.toml，但把顶层和当前项目的 base_url 都替换成隔离地址
     # Codex CLI 会读取 project-scoped config，单改顶层 base_url 不够。
-    real_config = os.path.expanduser("~/.codex/config.toml")
+    real_config = _real_user_path(".codex", "config.toml")
     gateway_config = os.path.join(codex_dir, "config.toml")
     if os.path.exists(real_config):
         try:
@@ -1193,7 +1217,7 @@ def _codex_gateway_env(runtime, base_url):
             f.write(f'base_url = "{base_url}"\n')
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
-    real_codex_dir = os.path.expanduser("~/.codex")
+    real_codex_dir = _real_user_path(".codex")
     if os.path.isdir(real_codex_dir):
         skip = {"auth.json", "config.toml"}
         for entry in os.listdir(real_codex_dir):
@@ -1205,6 +1229,7 @@ def _codex_gateway_env(runtime, base_url):
                 os.symlink(src, dst)
 
     env = os.environ.copy()
+    env["MMS_REAL_HOME"] = _real_user_home()
     env["HOME"] = session_home
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
@@ -1422,9 +1447,9 @@ def _show_launch_info(cli, runtime, auth_mode):
 
     # ── 本地用量统计 ──
     try:
-        usage_path = os.path.expanduser("~/.config/mms/usage.json")
+        usage_path = _real_user_path(".config", "mms", "usage.json")
         if not os.path.exists(usage_path):
-            usage_path = os.path.expanduser("~/.config/ccs/usage.json")
+            usage_path = _real_user_path(".config", "ccs", "usage.json")
         if os.path.exists(usage_path):
             with open(usage_path, "r", encoding="utf-8") as f:
                 stats = json.load(f)
