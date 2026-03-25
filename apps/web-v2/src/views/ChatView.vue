@@ -729,7 +729,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
             <!-- Before selection: layout depends on viewMode -->
 
             <!-- Grid mode — whole card clickable to select -->
-            <div v-else-if="viewMode === 'grid'" class="grid gap-3" :class="gridClass">
+            <div v-else-if="viewMode === 'grid'" class="grid gap-3 items-start" :class="gridClass">
               <div v-for="[modelId, msg] of round.responses" :key="modelId"
                 class="max-h-[clamp(360px,58vh,600px)] flex flex-col min-h-0"
                 @click="chatStore.setActiveModel(round.id, modelId)">
