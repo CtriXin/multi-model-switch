@@ -90,18 +90,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ModelsView.vue'),
     meta: { title: '模型管理', icon: 'cpu' },
   },
-  {
-    path: '/design',
-    name: 'design',
-    component: () => import('@/views/DesignSystem.vue'),
-    meta: { title: '设计系统', icon: 'palette' },
-  },
-  {
-    path: '/v3/design',
-    name: 'design-v3',
-    component: () => import('@/views/DesignSystemV2.vue'),
-    meta: { title: 'V3 电影级设计系统', icon: 'sparkles' },
-  },
 ]
 
 const router = createRouter({
