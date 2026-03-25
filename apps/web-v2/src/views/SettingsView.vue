@@ -7,9 +7,8 @@ import { useToastStore } from '@/stores/toast'
 import { useTheme } from '@/composables/useTheme'
 import ProviderAccountItem from '@/components/settings/ProviderAccountItem.vue'
 import {
-  ChevronLeft, Menu, Sun, Moon, SunMoon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Rocket, Home, Users, Copy
+  ChevronLeft, Menu, Sun, Moon, SunMoon, Sidebar, DollarSign, Sparkles, Key, Package, Plus, Globe, Trash2, Cpu, X, Check, Upload, Shield, Download, Info, Zap, ShieldOff, ToggleLeft, ToggleRight, Settings, Home, Copy
 } from 'lucide-vue-next'
-import { getCurrentTier } from '@/services/provision'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -36,49 +35,10 @@ const exportCopied = ref(false)
 const showAddProvider = ref(false)
 const newProvider = ref({ id: '', name: '', baseUrl: '' })
 
-const showShareExport = ref(false)
-const sharePassword = ref('')
-const shareExpiryDays = ref(7)
-const shareSelectedAccountIds = ref<string[]>([])
-const shareGenerating = ref(false)
-const shareBundleOutput = ref('')
-const shareCopied = ref(false)
-
-const showShareImport = ref(false)
-const shareImportText = ref('')
-const shareImportPassword = ref('')
-const shareImporting = ref(false)
 
 const addingModelProvider = ref<string | null>(null)
 const newModelId = ref('')
 
-// Easter egg: tap version 10 times → reveal Max mode
-const versionTapCount = ref(0)
-const showMaxMode = ref(false)
-const maxActivating = ref(false)
-const maxMessage = ref('')
-let versionTapTimer: ReturnType<typeof setTimeout> | null = null
-
-function onVersionTap() {
-  versionTapCount.value += 1
-  if (versionTapTimer) clearTimeout(versionTapTimer)
-  versionTapTimer = setTimeout(() => { versionTapCount.value = 0 }, 2000)
-
-  if (versionTapCount.value >= 10 && !showMaxMode.value) {
-    showMaxMode.value = true
-    maxMessage.value = '被你发现了！给你开个后门吧。'
-    versionTapCount.value = 0
-  }
-}
-
-async function doActivateMax() {
-  maxActivating.value = true
-  const ok = await appStore.activateMaxChannel()
-  maxActivating.value = false
-  if (ok) {
-    maxMessage.value = '已解锁，尽情享用 🍜'
-  }
-}
 
 const platform = inject<import('vue').Ref<string>>('platform', ref('macos'))
 const isMobile = computed(() => platform.value === 'ios')
@@ -94,29 +54,11 @@ const recommendedConfiguredCount = computed(() =>
   providerStore.providers.filter(p => p.builtIn && providerStore.keyStatus[p.id]).length
 )
 
-const shareableAccounts = computed(() =>
-  providerStore.accounts.filter(a => providerStore.accountKeyStatus[a.id])
-)
 
 function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
 }
 
-// 好友模式开启时，自动关闭优先免费模型和模拟数据，并显示 SparkRing 体验通道
-watch(() => appStore.showFriendsMode, async (val) => {
-  if (val) {
-    // 关闭优先免费模型
-    appStore.preferFree = false
-    // 关闭模拟数据（demo provider）
-    const demoProvider = providerStore.getProvider('demo')
-    if (demoProvider?.enabled) {
-      providerStore.updateProvider('demo', { enabled: false })
-    }
-    useToastStore().info('好友模式已开启，已自动关闭优先免费模型和模拟数据，解锁 SparkRing 体验通道')
-  } else {
-    useToastStore().info('好友模式已关闭，SparkRing 体验通道已隐藏')
-  }
-})
 
 async function handleExport() {
   const json = providerStore.exportConfig()
@@ -249,33 +191,9 @@ async function handleImport() {
   }
 }
 
-function resetShareSelection() {
-  shareSelectedAccountIds.value = shareableAccounts.value.map(a => a.id)
-}
-
-async function handleShareImport() {
-  const text = shareImportText.value.trim()
-  if (!text) return
-  shareImporting.value = true
-  try {
-    const ok = await providerStore.importShareBundle(text, shareImportPassword.value)
-    if (ok) {
-      shareImportText.value = ''
-      shareImportPassword.value = ''
-      showShareImport.value = false
-      await providerStore.refreshKeyStatus()
-      resetShareSelection()
-      // 不自动刷新模型列表，用户切换到模型页面时再按需拉取
-    }
-  } finally {
-    shareImporting.value = false
-  }
-}
 
 async function clearAllKeys() {
   await providerStore.clearAllCredentials()
-  shareBundleOutput.value = ''
-  resetShareSelection()
   // 不自动刷新模型列表，用户切换到模型页面时再按需拉取
 }
 
@@ -418,18 +336,7 @@ onMounted(() => {
               </button>
             </div>
 
-            <!-- Friends Mode Switch -->
-            <div class="flex items-center justify-between p-4 rounded-2xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 transition-all hover:bg-black/[0.04] dark:hover:bg-white/10">
-              <div>
-                <p class="text-[10px] font-black text-text-primary uppercase tracking-widest">好友模式</p>
-                <p class="text-[9px] text-text-tertiary font-medium">解锁邀请奖励和专属功能</p>
-              </div>
-              <button @click="appStore.showFriendsMode = !appStore.showFriendsMode" class="relative w-12 h-6 rounded-full transition-colors duration-300" :class="appStore.showFriendsMode ? 'bg-purple-500' : 'bg-black/10 dark:bg-white/10'">
-                <span class="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-xl transition-transform duration-300 flex items-center justify-center" :class="appStore.showFriendsMode ? 'translate-x-6' : 'translate-x-0.5'">
-                  <Users :size="10" :class="appStore.showFriendsMode ? 'text-purple-500' : 'text-text-tertiary'" stroke-width="4" />
-                </span>
-              </button>
-            </div>
+            <!-- Friends Mode Switch: 送审期间隐藏 -->
             </div>
 
           <!-- Engine Controls -->
@@ -642,7 +549,7 @@ onMounted(() => {
             { icon: Upload, label: '导入配置', click: () => showImport = true, color: 'accent' },
             { icon: Copy, label: '导出配置', click: () => { showExport = true; handleExport() }, color: 'blue-500' },
             { icon: Plus, label: '添加通道', click: () => showAddProvider = true, color: 'purple-500' },
-            { icon: Shield, label: '私密导出', click: () => showShareExport = true, color: 'amber-500' }
+            { icon: Shield, label: '安全信息', click: () => router.push('/models'), color: 'amber-500' }
           ]" :key="action.label" @click="action.click"
             class="flex flex-col items-center justify-center gap-3 p-5 rounded-[32px] glass-v3 border border-black/5 dark:border-white/10 hover:border-accent/50 group transition-all duration-500 active:scale-95 shadow-xl">
             <div
@@ -665,10 +572,10 @@ onMounted(() => {
         </section>
 
         <!-- Modals -->
-        <div v-if="showImport || showAddProvider || showShareExport || showShareImport || showExport"
+        <div v-if="showImport || showAddProvider || showExport"
           class="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           <div class="absolute inset-0 bg-black/60 backdrop-blur-md"
-            @click="showImport = showAddProvider = showShareExport = showShareImport = showExport = false" />
+            @click="showImport = showAddProvider = showExport = false" />
           <div
             class="relative w-full max-w-lg glass-v3 rounded-[32px] border border-white/10 p-8 shadow-2xl animate-scale-in">
             <div v-if="showImport" class="space-y-6">
@@ -722,53 +629,10 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Friend Program (Conditional) -->
-        
-          <div v-if="appStore.showFriendsMode" class="glass-v3 rounded-[32px] p-6 space-y-6 border border-purple-500/20 shadow-2xl animate-fade-in">
-            <div class="flex items-center gap-3 px-1">
-              <div class="p-2 bg-purple-500 rounded-xl shadow-lg">
-                <Users :size="18" class="text-white" stroke-width="3" />
-              </div>
-              <div>
-                <h2 class="text-lg font-black text-text-primary tracking-tighter uppercase">好友计划</h2>
-                <p class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50">Rewards & Referral</p>
-              </div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="p-6 rounded-[24px] bg-purple-500/5 border border-purple-500/10 space-y-4">
-                <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-black text-purple-500 uppercase tracking-widest">你的邀请码</span>
-                  <Rocket :size="16" class="text-purple-500/50" />
-                </div>
-                <div class="flex items-center justify-between gap-4">
-                  <span class="text-2xl font-black text-text-primary tracking-widest font-mono">SPARK-888</span>
-                  <button class="px-4 py-2 rounded-xl bg-purple-500 text-white text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all">复制链接</button>
-                </div>
-              </div>
-              <div class="p-6 rounded-[24px] bg-black/[0.02] dark:bg-white/5 border border-white/5 flex flex-col justify-center">
-                <p class="text-xs text-text-secondary leading-relaxed font-medium">
-                  每邀请一位新朋友加入 SparkRing，你们双方都将获得 <span class="text-purple-500 font-black">100万 Tokens</span> 的额外额度奖励。
-                </p>
-              </div>
-            </div>
-
-            <div class="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20">
-              <div class="flex items-start gap-3">
-                <div class="p-2 bg-purple-500 rounded-lg">
-                  <Key :size="14" class="text-white" stroke-width="3" />
-                </div>
-                <div>
-                  <p class="text-xs font-bold text-text-primary uppercase tracking-widest">已解锁权益</p>
-                  <p class="text-[10px] text-text-secondary mt-1">
-                    <span class="text-purple-400 font-semibold">SparkRing 体验通道</span> 已在 API 通道管理中显示。无需配置 API Key，开箱即用，适合新用户快速体验。
-                  </p>
-                </div>
-              </div>
-            </div>          </div>
+        <!-- Friend Program: 送审期间隐藏 -->
         
 
-        <!-- About (Easter Egg: tap version 10x → Max mode) -->
+        <!-- About -->
         <div class="glass-v3 rounded-[32px] p-6 space-y-4 border border-white/10 shadow-2xl">
           <h2
             class="text-sm font-black text-text-primary uppercase tracking-widest flex items-center gap-2">
@@ -776,42 +640,15 @@ onMounted(() => {
             关于 SparkRing
           </h2>
           <div class="space-y-3 text-xs">
-            <button @click="onVersionTap"
-              class="w-full flex items-center justify-between select-none active:scale-[0.99] transition-transform">
+            <div class="w-full flex items-center justify-between">
               <span class="text-text-tertiary font-black uppercase tracking-widest">版本 Version</span>
-              <span class="text-text-primary font-black">v0.5.1</span>
-            </button>
+              <span class="text-text-primary font-black">v0.3.5</span>
+            </div>
             <div class="flex items-center justify-between"><span
                 class="text-text-tertiary font-black uppercase tracking-widest">内核 Core</span><span
                 class="text-text-primary font-medium italic">Multi-Model Cinematic Switcher</span>
             </div>
           </div>
-
-          <!-- Max Mode Easter Egg -->
-          
-            <div v-if="showMaxMode" class="pt-4 border-t border-white/5 space-y-4 animate-scale-in">
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg text-white">
-                  <Rocket :size="20" stroke-width="3" />
-                </div>
-                <div class="min-w-0">
-                  <p class="text-sm font-black text-text-primary uppercase tracking-tight">Max 模式</p>
-                  <p class="text-[10px] text-text-tertiary font-medium">{{ maxMessage }}</p>
-                </div>
-              </div>
-              <button v-if="getCurrentTier() !== 'max'" @click="doActivateMax" :disabled="maxActivating"
-                class="w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95 shadow-xl"
-                :class="maxActivating
-                  ? 'bg-amber-500/50 text-white/60 cursor-wait'
-                  : 'bg-gradient-to-r from-amber-400 to-orange-500 text-white hover:shadow-amber-500/30'">
-                {{ maxActivating ? '正在激活...' : '谢谢，我要大份的' }}
-              </button>
-              <div v-else class="flex items-center gap-2 px-4 py-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
-                <Check :size="14" class="text-amber-500" stroke-width="4" />
-                <span class="text-[10px] font-black uppercase tracking-widest text-amber-500">Max 模式已激活</span>
-              </div>
-            </div>
-          
         </div>
       </div>
     </div>
