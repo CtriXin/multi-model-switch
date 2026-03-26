@@ -334,7 +334,7 @@ def select_submodel_tui(family_name, models, provider_options=None):
     if not models:
         return None
 
-    sorted_models = list(models)
+    sorted_models = sorted(models, key=lambda m: m.get("use_count", 0), reverse=True)
 
     # 当前每个模型的 provider 覆盖 (model_name -> provider info)
     provider_overrides = {}

@@ -2370,8 +2370,12 @@ def _invalidate_probe_cache(provider_id):
             pass
 
 
-def _load_probe_file_cache(provider_id):
-    """从文件读取 probe 缓存，TTL 内有效则返回 result dict，否则 None。"""
+def _load_probe_file_cache(provider_id, allow_stale=False):
+    """从文件读取 probe 缓存。
+
+    默认仅在 TTL 内返回；allow_stale=True 时，允许读取过期缓存，
+    适合启动/TUI 首屏阶段先快速展示，再由后台预热异步刷新。
+    """
     path = _probe_file_cache_path(provider_id)
     try:
         import time as _time
@@ -2383,7 +2387,7 @@ def _load_probe_file_cache(provider_id):
         error_kind = data.get("error_kind")
         ttl = _PROBE_FILE_CACHE_NEGATIVE_TTL if error_kind or not raw_models else _PROBE_FILE_CACHE_TTL
         age = _time.time() - os.path.getmtime(path)
-        if age > ttl:
+        if age > ttl and not allow_stale:
             return None
         normalized = dict(data)
         normalized["raw_models"] = raw_models
@@ -2401,10 +2405,11 @@ def _load_probe_file_cache(provider_id):
 def _save_probe_file_cache(provider_id, result):
     """将 probe 结果写入文件缓存。
 
-    remote 成功结果、fallback 模型结果、负缓存都应落盘，避免模型选择页反复慢探测。
+    remote 成功结果、fallback/manual 模型结果、负缓存都应落盘，
+    避免模型选择页反复慢探测。
     """
     base_source = result.get("base_source")
-    if base_source not in {"remote", "fallback"}:
+    if base_source not in {"remote", "fallback", "manual"}:
         return
     try:
         os.makedirs(_PROBE_FILE_CACHE_DIR, exist_ok=True)
@@ -3231,8 +3236,8 @@ def _provider_candidates(cfg, default_provider, default_models):
         provider_id = provider_def.get("id")
         if not provider_id or provider_id in seen_ids:
             continue
-        # 优先从文件缓存加载模型列表，避免网络请求
-        file_cached = _load_probe_file_cache(provider_id)
+        # 首屏/启动阶段允许使用 stale 文件缓存，避免单个慢 provider 卡住 TUI。
+        file_cached = _load_probe_file_cache(provider_id, allow_stale=True)
         cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
         candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
         seen_ids.add(provider_id)
@@ -3399,6 +3404,13 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             if existing is None or score < existing[0]:
                 model_best[normalized] = (score, provider, pname, pid)
 
+    # 注入 use_count（用于 TUI 排序）
+    use_counts = {}
+    stats = _load_usage_stats()
+    for src in stats.get("sources", {}).values():
+        for mname, cnt in src.get("models", {}).items():
+            use_counts[mname] = use_counts.get(mname, 0) + cnt
+
     # 按 family 分组
     family_map = {}  # family_name -> [model_entry]
     family_order = []
@@ -3413,6 +3425,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             "provider_id": pid,
             "provider_name": pname,
             "provider_ctx": provider_ctx,
+            "use_count": use_counts.get(model_name, 0),
         })
 
     return [{"family": f, "models": family_map[f]} for f in family_order]
