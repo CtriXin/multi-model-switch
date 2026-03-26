@@ -8,6 +8,7 @@ import subprocess
 import json
 import shutil
 import logging
+import threading
 from datetime import datetime, timezone
 
 try:
@@ -2354,6 +2355,12 @@ _PROBE_CACHE_TTL = 300  # 5 分钟内复用（内存）
 _PROBE_FILE_CACHE_DIR = os.path.join(PRIMARY_CONFIG_DIR, "cache")
 _PROBE_FILE_CACHE_TTL = 86400  # 文件缓存 24 小时
 _PROBE_FILE_CACHE_NEGATIVE_TTL = 600  # 失败/空模型列表缓存 10 分钟，避免频繁慢探测
+_PROBE_ASYNC_REFRESH_AFTER = 1800  # 30 分钟后启动时触发后台刷新
+_PROBE_ASYNC_MIN_INTERVAL = 300  # 5 分钟内同一 provider 最多异步刷新一次
+_PROBE_ASYNC_EXECUTOR = None
+_PROBE_ASYNC_LOCK = threading.Lock()
+_PROBE_ASYNC_INFLIGHT = set()
+_PROBE_ASYNC_LAST = {}
 
 
 def _probe_file_cache_path(provider_id):
@@ -2368,6 +2375,17 @@ def _invalidate_probe_cache(provider_id):
             os.remove(path)
         except OSError:
             pass
+
+
+def _probe_cache_age(provider_id):
+    path = _probe_file_cache_path(provider_id)
+    if not os.path.exists(path):
+        return None
+    try:
+        import time as _time
+        return max(0.0, _time.time() - os.path.getmtime(path))
+    except OSError:
+        return None
 
 
 def _load_probe_file_cache(provider_id, allow_stale=False):
@@ -2429,6 +2447,81 @@ def _save_probe_file_cache(provider_id, result):
         pass
 
 
+def _base_probe_result_from_cache(provider_id, file_cached):
+    return {
+        "provider_id": provider_id,
+        "raw_models": list(file_cached["raw_models"]),
+        "models": list(file_cached["raw_models"]),
+        "error": None,
+        "error_kind": None,
+        "working_url": file_cached.get("working_url"),
+        "details": [],
+        "base_source": file_cached.get("base_source", "remote"),
+    }
+
+
+def _ensure_probe_async_executor():
+    global _PROBE_ASYNC_EXECUTOR
+    if _PROBE_ASYNC_EXECUTOR is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _PROBE_ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+    return _PROBE_ASYNC_EXECUTOR
+
+
+def _schedule_probe_refresh(provider, *, reason="stale"):
+    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+    import time as _time
+
+    with _PROBE_ASYNC_LOCK:
+        if provider_id in _PROBE_ASYNC_INFLIGHT:
+            return False
+        last_at = _PROBE_ASYNC_LAST.get(provider_id, 0)
+        if _time.time() - last_at < _PROBE_ASYNC_MIN_INTERVAL:
+            return False
+        _PROBE_ASYNC_INFLIGHT.add(provider_id)
+        _PROBE_ASYNC_LAST[provider_id] = _time.time()
+
+    def _runner():
+        try:
+            _probe_models(provider, emit_output=False, skip_cache=True)
+        except Exception:
+            pass
+        finally:
+            with _PROBE_ASYNC_LOCK:
+                _PROBE_ASYNC_INFLIGHT.discard(provider_id)
+
+    _ensure_probe_async_executor().submit(_runner)
+    return True
+
+
+def _probe_models_for_startup(provider, emit_output=True):
+    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+    import time as _time
+
+    cached = _PROBE_CACHE.get(provider_id)
+    if cached:
+        cached_at, cached_result = cached
+        if _time.time() - cached_at < _PROBE_CACHE_TTL:
+            return _apply_provider_model_patch(provider, cached_result)
+
+    fresh_file_cached = _load_probe_file_cache(provider_id)
+    if fresh_file_cached:
+        base_result = _base_probe_result_from_cache(provider_id, fresh_file_cached)
+        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
+        return _apply_provider_model_patch(provider, base_result)
+
+    stale_file_cached = _load_probe_file_cache(provider_id, allow_stale=True)
+    if stale_file_cached:
+        base_result = _base_probe_result_from_cache(provider_id, stale_file_cached)
+        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
+        _schedule_probe_refresh(provider, reason="startup_stale")
+        if emit_output:
+            console.print("[dim]已使用本地模型缓存快速启动，后台正在刷新 provider 模型列表[/dim]")
+        return _apply_provider_model_patch(provider, base_result)
+
+    return _probe_models(provider, emit_output=emit_output)
+
+
 def _derived_model_aliases(base_models):
     aliases = []
     if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
@@ -2480,38 +2573,30 @@ def _apply_provider_model_patch(provider, base_result):
     return result
 
 
-def _probe_models(provider, emit_output=True, force_refresh=False):
+def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=False):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
     if force_refresh:
         _invalidate_probe_cache(provider_id)
 
-    # 1. 内存缓存命中
     import time as _time
-    cached = _PROBE_CACHE.get(provider_id)
-    if cached:
-        cached_at, cached_result = cached
-        if _time.time() - cached_at < _PROBE_CACHE_TTL:
-            patched_cached = _apply_provider_model_patch(provider, cached_result)
-            if emit_output and cached_result.get("error"):
-                style = "yellow" if cached_result.get("error_kind") == "protocol_unsupported" else "red"
-                console.print(f"[{style}]{cached_result['error']}[/{style}]")
-            return patched_cached
+    if not skip_cache:
+        # 1. 内存缓存命中
+        cached = _PROBE_CACHE.get(provider_id)
+        if cached:
+            cached_at, cached_result = cached
+            if _time.time() - cached_at < _PROBE_CACHE_TTL:
+                patched_cached = _apply_provider_model_patch(provider, cached_result)
+                if emit_output and cached_result.get("error"):
+                    style = "yellow" if cached_result.get("error_kind") == "protocol_unsupported" else "red"
+                    console.print(f"[{style}]{cached_result['error']}[/{style}]")
+                return patched_cached
 
-    # 2. 文件缓存命中（24h TTL）
-    file_cached = _load_probe_file_cache(provider_id)
-    if file_cached:
-        base_result = {
-            "provider_id": provider_id,
-            "raw_models": list(file_cached["raw_models"]),
-            "models": list(file_cached["raw_models"]),
-            "error": None,
-            "error_kind": None,
-            "working_url": file_cached.get("working_url"),
-            "details": [],
-            "base_source": file_cached.get("base_source", "remote"),
-        }
-        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
-        return _apply_provider_model_patch(provider, base_result)
+        # 2. 文件缓存命中（24h TTL）
+        file_cached = _load_probe_file_cache(provider_id)
+        if file_cached:
+            base_result = _base_probe_result_from_cache(provider_id, file_cached)
+            _PROBE_CACHE[provider_id] = (_time.time(), base_result)
+            return _apply_provider_model_patch(provider, base_result)
 
     protocols = provider.get("protocols", [])
     base_url = _provider_openai_base_url(provider)
@@ -2629,28 +2714,19 @@ def _probe_models(provider, emit_output=True, force_refresh=False):
 
 
 def _warm_probe_cache_async(cfg, default_provider):
-    """后台并行预热所有 provider 的 probe 文件缓存（无缓存的才 probe）。"""
-    providers_to_probe = []
+    """后台异步刷新 provider probe 文件缓存。
+
+    无缓存或缓存过旧的 provider 会被刷新，但不会阻塞当前启动。
+    """
     default_id = default_provider.get("id")
     for provider_def in cfg.get("providers", []):
         pid = provider_def.get("id")
         if not pid or pid == default_id:
             continue
-        if _load_probe_file_cache(pid) is not None:
+        age = _probe_cache_age(pid)
+        if age is not None and age < _PROBE_ASYNC_REFRESH_AFTER:
             continue
-        providers_to_probe.append(resolve_provider_context(cfg, pid))
-    if not providers_to_probe:
-        return
-    from concurrent.futures import ThreadPoolExecutor
-    def _probe_one(p):
-        try:
-            _probe_models(p, emit_output=False)
-        except Exception:
-            pass
-    _executor = ThreadPoolExecutor(max_workers=min(4, len(providers_to_probe)))
-    for p in providers_to_probe:
-        _executor.submit(_probe_one, p)
-    # 不等待完成，后台运行；TUI 交互期间大概率已完成
+        _schedule_probe_refresh(resolve_provider_context(cfg, pid), reason="startup_warm")
 
 
 def fetch_models(provider):
@@ -2929,7 +3005,7 @@ def setup_wizard():
 # ── Model Fetching ──────────────────────────────────────
 
 def ensure_models_ready(cfg, provider):
-    probe = _probe_models(provider, emit_output=True)
+    probe = _probe_models_for_startup(provider, emit_output=True)
     models = probe.get("models")
     if models:
         return provider, models
