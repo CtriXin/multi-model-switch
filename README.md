@@ -20,10 +20,10 @@ Multi-Model Switch（MMS）是一个面向本地开发者的多模型 CLI launch
 
 > 如果你的核心诉求是“所有 provider 里的模型都能挂到 Claude 上使用”，优先跑这个诊断，不要只看 `/models`。
 
-仓库内提供了一个独立诊断脚本：
+仓库内提供了一个独立诊断入口：
 
 ```bash
-scripts/doctor_claude_models.py
+mms doctor --help
 ```
 
 它不会改正常启动逻辑，专门用来回归这 3 件事：
@@ -36,16 +36,16 @@ scripts/doctor_claude_models.py
 
 ```bash
 # 抽样测一个 provider，跳过真实 Claude CLI
-HOME=/Users/xin python3 scripts/doctor_claude_models.py --provider anti --skip-claude-cli --max-models 5
+HOME=/Users/xin mms doctor --provider anti --skip-claude-cli --max-models 5
 
 # 全量测所有 provider 的协议层和模型 chat
-HOME=/Users/xin python3 scripts/doctor_claude_models.py --skip-claude-cli
+HOME=/Users/xin mms doctor --skip-claude-cli
 
 # 把 OAuth 账号状态也带上
-HOME=/Users/xin python3 scripts/doctor_claude_models.py --include-oauth --skip-claude-cli
+HOME=/Users/xin mms doctor --include-oauth --skip-claude-cli
 
 # 全量跑，包括真实 Claude CLI 冒烟
-HOME=/Users/xin python3 scripts/doctor_claude_models.py
+HOME=/Users/xin mms doctor
 ```
 
 输出会分成 3 张表：
@@ -68,10 +68,37 @@ HOME=/Users/xin python3 scripts/doctor_claude_models.py
 建议日常先跑：
 
 ```bash
-HOME=/Users/xin python3 scripts/doctor_claude_models.py --skip-claude-cli
+HOME=/Users/xin mms doctor --skip-claude-cli
 ```
 
 只有在要验真实 CLI 链路时，再去掉 `--skip-claude-cli`。
+
+### 最小闭环 Smoke
+
+如果你的目标不是“大范围诊断”，而是想快速确认某个 channel 的 `URL + key + bridge` 现在还能不能给对应 CLI 用，优先跑：
+
+```bash
+HOME=/Users/xin mms test --provider private --cli claude
+HOME=/Users/xin mms test --provider privateopenai --cli codex
+HOME=/Users/xin mms test --provider xin --cli codex
+```
+
+这套 smoke 会直接按 MMS 当前真实链路发最小请求：
+
+- `claude`：直连 `Messages` 或走本地 `gateway_claude_bridge`
+- `codex`：走本地 `responses/chat-completions bridge`
+
+也可以直接看命令帮助：
+
+```bash
+mms --help
+mms doctor --help
+mms test --help
+```
+
+更完整的巡检步骤见：
+
+- `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
 
 ### Lessons Learned
 
