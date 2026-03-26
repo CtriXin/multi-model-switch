@@ -166,6 +166,8 @@ def _health_check_due(provider_id):
 
 def gateway_health_check(provider):
     """Daily first-use connectivity check for gateway providers."""
+    if provider.get("skip_gateway_health_check"):
+        return
     provider_id = provider.get("id", "default")
     if not _health_check_due(provider_id):
         return
@@ -743,6 +745,11 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     if url.endswith("/v1"):
         _remember_anthropic_url(provider_id, url, normalized_url)
         return normalized_url, "normalized"
+
+    if provider_id and runtime.get("skip_anthropic_probe"):
+        console.print("[dim]已跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
+        _remember_anthropic_url(provider_id, url, url)
+        return url, "config_bypass"
 
     # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
     if provider_id == "bailian-codingplan":
