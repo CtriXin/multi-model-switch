@@ -293,6 +293,14 @@ def _normalize_role(value):
     return role if role in VALID_ROLES else "auto"
 
 
+def _normalize_positive_seconds(value, default, minimum=1):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
 def _default_provider():
     return {
         "id": DEFAULT_PROVIDER_ID,
@@ -559,6 +567,30 @@ def _normalize_user_config(cfg):
     return new_cfg, True
 
 
+def _normalize_cache_config(cfg):
+    cache_cfg = cfg.get("cache", {})
+    if not isinstance(cache_cfg, dict):
+        cache_cfg = {}
+
+    normalized = {
+        "probe_async_refresh_after_sec": _normalize_positive_seconds(
+            cache_cfg.get("probe_async_refresh_after_sec", _PROBE_ASYNC_REFRESH_AFTER),
+            _PROBE_ASYNC_REFRESH_AFTER,
+        ),
+        "probe_async_min_interval_sec": _normalize_positive_seconds(
+            cache_cfg.get("probe_async_min_interval_sec", _PROBE_ASYNC_MIN_INTERVAL),
+            _PROBE_ASYNC_MIN_INTERVAL,
+        ),
+    }
+
+    if cache_cfg == normalized:
+        return cfg, False
+
+    new_cfg = dict(cfg)
+    new_cfg["cache"] = normalized
+    return new_cfg, True
+
+
 def _provider_map(cfg):
     providers = cfg.get("providers", [])
     return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
@@ -634,7 +666,8 @@ def load_config():
     cfg, changed = _ensure_provider_config(cfg)
     cfg, account_changed = _ensure_account_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
-    changed = changed or account_changed or role_changed
+    cfg, cache_changed = _normalize_cache_config(cfg)
+    changed = changed or account_changed or role_changed or cache_changed
     if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
@@ -991,6 +1024,10 @@ def resolve_account_context(cfg, account_id=None, cli_name=None):
 def _default_config(role=MODE_ALL):
     return {
         "user": {"role": normalize_user_role(role)},
+        "cache": {
+            "probe_async_refresh_after_sec": _PROBE_ASYNC_REFRESH_AFTER,
+            "probe_async_min_interval_sec": _PROBE_ASYNC_MIN_INTERVAL,
+        },
         "provider": {"default": DEFAULT_PROVIDER_ID},
         "providers": [_default_provider()],
         "account": {"defaults": {}},
@@ -2363,6 +2400,28 @@ _PROBE_ASYNC_INFLIGHT = set()
 _PROBE_ASYNC_LAST = {}
 
 
+def _probe_async_refresh_after(cfg=None):
+    if isinstance(cfg, dict):
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            return _normalize_positive_seconds(
+                cache_cfg.get("probe_async_refresh_after_sec", _PROBE_ASYNC_REFRESH_AFTER),
+                _PROBE_ASYNC_REFRESH_AFTER,
+            )
+    return _PROBE_ASYNC_REFRESH_AFTER
+
+
+def _probe_async_min_interval(cfg=None):
+    if isinstance(cfg, dict):
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            return _normalize_positive_seconds(
+                cache_cfg.get("probe_async_min_interval_sec", _PROBE_ASYNC_MIN_INTERVAL),
+                _PROBE_ASYNC_MIN_INTERVAL,
+            )
+    return _PROBE_ASYNC_MIN_INTERVAL
+
+
 def _probe_file_cache_path(provider_id):
     return os.path.join(_PROBE_FILE_CACHE_DIR, f"models_{provider_id}.json")
 
@@ -2468,15 +2527,16 @@ def _ensure_probe_async_executor():
     return _PROBE_ASYNC_EXECUTOR
 
 
-def _schedule_probe_refresh(provider, *, reason="stale"):
+def _schedule_probe_refresh(provider, cfg=None, *, reason="stale"):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
     import time as _time
+    min_interval = _probe_async_min_interval(cfg)
 
     with _PROBE_ASYNC_LOCK:
         if provider_id in _PROBE_ASYNC_INFLIGHT:
             return False
         last_at = _PROBE_ASYNC_LAST.get(provider_id, 0)
-        if _time.time() - last_at < _PROBE_ASYNC_MIN_INTERVAL:
+        if _time.time() - last_at < min_interval:
             return False
         _PROBE_ASYNC_INFLIGHT.add(provider_id)
         _PROBE_ASYNC_LAST[provider_id] = _time.time()
@@ -2494,7 +2554,7 @@ def _schedule_probe_refresh(provider, *, reason="stale"):
     return True
 
 
-def _probe_models_for_startup(provider, emit_output=True):
+def _probe_models_for_startup(cfg, provider, emit_output=True):
     provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
     import time as _time
 
@@ -2514,7 +2574,7 @@ def _probe_models_for_startup(provider, emit_output=True):
     if stale_file_cached:
         base_result = _base_probe_result_from_cache(provider_id, stale_file_cached)
         _PROBE_CACHE[provider_id] = (_time.time(), base_result)
-        _schedule_probe_refresh(provider, reason="startup_stale")
+        _schedule_probe_refresh(provider, cfg, reason="startup_stale")
         if emit_output:
             console.print("[dim]已使用本地模型缓存快速启动，后台正在刷新 provider 模型列表[/dim]")
         return _apply_provider_model_patch(provider, base_result)
@@ -2719,14 +2779,15 @@ def _warm_probe_cache_async(cfg, default_provider):
     无缓存或缓存过旧的 provider 会被刷新，但不会阻塞当前启动。
     """
     default_id = default_provider.get("id")
+    refresh_after = _probe_async_refresh_after(cfg)
     for provider_def in cfg.get("providers", []):
         pid = provider_def.get("id")
         if not pid or pid == default_id:
             continue
         age = _probe_cache_age(pid)
-        if age is not None and age < _PROBE_ASYNC_REFRESH_AFTER:
+        if age is not None and age < refresh_after:
             continue
-        _schedule_probe_refresh(resolve_provider_context(cfg, pid), reason="startup_warm")
+        _schedule_probe_refresh(resolve_provider_context(cfg, pid), cfg, reason="startup_warm")
 
 
 def fetch_models(provider):
@@ -3005,7 +3066,7 @@ def setup_wizard():
 # ── Model Fetching ──────────────────────────────────────
 
 def ensure_models_ready(cfg, provider):
-    probe = _probe_models_for_startup(provider, emit_output=True)
+    probe = _probe_models_for_startup(cfg, provider, emit_output=True)
     models = probe.get("models")
     if models:
         return provider, models
@@ -5047,6 +5108,7 @@ def _display_config_help():
     console.print(f"  {command} config set <dot.path> <value>")
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
+    console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
     console.print("\n[bold]Provider:[/bold]")
     console.print(f"  {command} config provider.list")
     console.print(f"  {command} config provider.default [id]")
@@ -5084,6 +5146,11 @@ def _display_config(cfg, prefix="", depth=0):
         _display_accounts(cfg)
         console.print(f"  [cyan]usage_file[/cyan] = {_active_usage_path()}")
         console.print("  [dim]usage 只记录本地启动统计，不代表真实余额或官方剩余额度。[/dim]")
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            console.print(f"  [cyan]probe_async_refresh_after_sec[/cyan] = {cache_cfg.get('probe_async_refresh_after_sec', _PROBE_ASYNC_REFRESH_AFTER)}")
+            console.print(f"  [cyan]probe_async_min_interval_sec[/cyan] = {cache_cfg.get('probe_async_min_interval_sec', _PROBE_ASYNC_MIN_INTERVAL)}")
+            console.print("  [dim]以上窗口控制模型列表异步刷新：首屏先读 cache，后台再 refresh。[/dim]")
         active_overrides = _existing_override_paths()
         if active_overrides:
             console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
@@ -5209,6 +5276,8 @@ def _coerce_config_value(key_path, raw_value):
         return _validate_user_role(raw_value)
     if key_path == "provider.default":
         return str(raw_value).strip()
+    if key_path in {"cache.probe_async_refresh_after_sec", "cache.probe_async_min_interval_sec"}:
+        return _normalize_positive_seconds(raw_value, 1)
     if key_path.startswith("provider.") and key_path.endswith(".enabled"):
         return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
     return raw_value
@@ -5216,6 +5285,19 @@ def _coerce_config_value(key_path, raw_value):
 
 def _validate_config(cfg):
     errors = []
+    cache_cfg = cfg.get("cache", {})
+    if cache_cfg and not isinstance(cache_cfg, dict):
+        errors.append("cache 必须是对象")
+    elif isinstance(cache_cfg, dict):
+        for key in ("probe_async_refresh_after_sec", "probe_async_min_interval_sec"):
+            value = cache_cfg.get(key)
+            if value is None:
+                continue
+            try:
+                if int(value) <= 0:
+                    errors.append(f"{key} 必须是正整数")
+            except (TypeError, ValueError):
+                errors.append(f"{key} 必须是正整数")
     providers = cfg.get("providers", [])
     if not isinstance(providers, list) or not providers:
         errors.append("providers 不能为空")
@@ -5472,6 +5554,81 @@ def handle_session_command(argv):
     parser.print_help()
 
 
+def _save_cache_config_value(cfg, key, value):
+    updated_cfg = dict(cfg)
+    cache_cfg = dict(updated_cfg.get("cache", {}) if isinstance(updated_cfg.get("cache"), dict) else {})
+    cache_cfg[key] = _normalize_positive_seconds(value, 1)
+    updated_cfg["cache"] = cache_cfg
+    updated_cfg, _ = _ensure_provider_config(updated_cfg)
+    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    updated_cfg, _ = _normalize_user_config(updated_cfg)
+    updated_cfg, _ = _normalize_cache_config(updated_cfg)
+    save_config(updated_cfg)
+    return updated_cfg
+
+
+def _display_cache_settings(cfg):
+    cache_cfg = cfg.get("cache", {}) if isinstance(cfg.get("cache"), dict) else {}
+    refresh_after = cache_cfg.get("probe_async_refresh_after_sec", _PROBE_ASYNC_REFRESH_AFTER)
+    min_interval = cache_cfg.get("probe_async_min_interval_sec", _PROBE_ASYNC_MIN_INTERVAL)
+    table = Table(title="MMS Cache Settings")
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_column("Meaning", style="white")
+    table.add_row("probe_async_refresh_after_sec", str(refresh_after), "cache 超过多久后，启动时后台刷新")
+    table.add_row("probe_async_min_interval_sec", str(min_interval), "同一 provider 两次异步刷新最小间隔")
+    console.print(table)
+    console.print(f"[dim]命令示例: {current_command()} cache refresh-after 1800[/dim]")
+    console.print(f"[dim]命令示例: {current_command()} cache min-interval 300[/dim]")
+    console.print(f"[dim]命令示例: {current_command()} cache reset[/dim]")
+
+
+def handle_cache_command(argv):
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} cache",
+        description="查看或调整启动期 provider model cache 的异步刷新窗口",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    subparsers.add_parser("show", help="显示当前 cache 异步刷新参数")
+
+    refresh_parser = subparsers.add_parser("refresh-after", help="设置 cache 多久后触发后台刷新")
+    refresh_parser.add_argument("seconds", type=int, help="正整数秒数")
+
+    interval_parser = subparsers.add_parser("min-interval", help="设置同一 provider 最小异步刷新间隔")
+    interval_parser.add_argument("seconds", type=int, help="正整数秒数")
+
+    subparsers.add_parser("reset", help="恢复默认异步刷新参数")
+
+    args = parser.parse_args(argv)
+    cfg = _load_command_config()
+
+    if args.subcommand in {None, "show"}:
+        _display_cache_settings(cfg)
+        return
+    if args.subcommand == "refresh-after":
+        _save_cache_config_value(cfg, "probe_async_refresh_after_sec", args.seconds)
+        console.print(f"[green]✓ cache.probe_async_refresh_after_sec = {int(args.seconds)}[/green]")
+        return
+    if args.subcommand == "min-interval":
+        _save_cache_config_value(cfg, "probe_async_min_interval_sec", args.seconds)
+        console.print(f"[green]✓ cache.probe_async_min_interval_sec = {int(args.seconds)}[/green]")
+        return
+    if args.subcommand == "reset":
+        updated_cfg = dict(cfg)
+        updated_cfg["cache"] = {
+            "probe_async_refresh_after_sec": _PROBE_ASYNC_REFRESH_AFTER,
+            "probe_async_min_interval_sec": _PROBE_ASYNC_MIN_INTERVAL,
+        }
+        updated_cfg, _ = _normalize_cache_config(updated_cfg)
+        save_config(updated_cfg)
+        console.print("[green]✓ 已恢复默认 cache 异步刷新参数[/green]")
+        _display_cache_settings(updated_cfg)
+        return
+
+    parser.print_help()
+
+
 def _run_script_subcommand(script_name, argv, subcommand_name):
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", script_name)
     if not os.path.exists(script_path):
@@ -5528,6 +5685,9 @@ def main():
         if command == "session":
             handle_session_command(sys.argv[2:])
             return
+        if command == "cache":
+            handle_cache_command(sys.argv[2:])
+            return
         if command == "routes":
             from ccs_router import routes_main
 
@@ -5557,6 +5717,7 @@ def main():
             f"  {current_command()} config ...      配置 provider / account / adapter\n"
             f"  {current_command()} models [id]     查看模型列表\n"
             f"  {current_command()} warm [id]       预热模型缓存\n"
+            f"  {current_command()} cache ...       查看或调整模型 cache 异步刷新窗口\n"
             f"  {current_command()} session ...     查看托管 session\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
