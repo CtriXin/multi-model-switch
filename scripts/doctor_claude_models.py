@@ -65,6 +65,7 @@ class ClaudeRoute:
     anthropic_url: str = ""
     openai_url: str = ""
     api_key: str = ""
+    resolved_by: str = ""
 
 
 @dataclass
@@ -189,6 +190,127 @@ def _fetch_openai_model_catalog(provider: dict[str, Any]) -> list[dict[str, Any]
         return [{"id": model_id} for model_id in (probe.get("models") or [])]
 
 
+def _dedupe_model_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    ordered: list[dict[str, Any]] = []
+    for item in entries:
+        model_id = str(item.get("id", "")).strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        ordered.append(item)
+    return ordered
+
+
+def _augment_catalog_for_checks(provider: dict[str, Any], catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items = [dict(entry) for entry in catalog if isinstance(entry, dict)]
+    model_ids = [str(entry.get("id", "")).strip() for entry in items]
+
+    def _best_source(prefix: str) -> dict[str, Any] | None:
+        matches = [entry for entry in items if str(entry.get("id", "")).strip().startswith(prefix)]
+        if not matches:
+            return None
+        return sorted(
+            matches,
+            key=lambda item: (
+                _extract_created_fields(item)[1] is None,
+                -(_extract_created_fields(item)[1] or 0),
+                str(item.get("id", "")),
+            ),
+        )[0]
+
+    def _append_alias(alias: str, prefix: str) -> None:
+        if alias in model_ids:
+            return
+        entry = {"id": alias}
+        source = _best_source(prefix)
+        if source is not None:
+            created, created_ts = _extract_created_fields(source)
+            if created:
+                entry["created_at"] = created
+            if created_ts is not None:
+                entry["created"] = created_ts
+        items.append(entry)
+        model_ids.append(alias)
+
+    if "anthropic_messages" in provider.get("protocols", []):
+        _append_alias("claude-sonnet-4-6", "claude-sonnet-4-")
+        _append_alias("claude-opus-4-6", "claude-opus-4-")
+
+    def _priority(model_id: str) -> tuple[int, int, str]:
+        lower = model_id.lower()
+        created_ts = 0
+        for item in items:
+            if str(item.get("id", "")).strip() == model_id:
+                created_ts = _extract_created_fields(item)[1] or 0
+                break
+
+        rank = 100
+        if "anthropic_messages" in provider.get("protocols", []):
+            if lower == "claude-sonnet-4-6":
+                rank = 0
+            elif lower == "claude-opus-4-6":
+                rank = 1
+            elif lower.startswith("claude-sonnet-4-"):
+                rank = 2
+            elif lower.startswith("claude-opus-4-"):
+                rank = 3
+            elif lower.startswith("claude-haiku-4-5"):
+                rank = 4
+            elif lower.startswith("claude-"):
+                rank = 10
+            elif "claude" in lower:
+                rank = 11
+        if rank == 100 and "openai_chat_completions" in provider.get("protocols", []):
+            if lower == "gpt-5.4":
+                rank = 20
+            elif lower.startswith("gpt-5"):
+                rank = 21
+            elif lower.startswith("gpt-4.1"):
+                rank = 22
+            elif lower.startswith(("o1", "o3", "o4")):
+                rank = 23
+            elif lower.startswith("gpt-"):
+                rank = 24
+        return rank, -created_ts, model_id
+
+    return sorted(_dedupe_model_entries(items), key=lambda item: _priority(str(item.get("id", "")).strip()))
+
+
+def _ordered_claude_probe_models(sample_models: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def _push(model_id: str) -> None:
+        value = str(model_id or "").strip()
+        if not value or value in seen:
+            return
+        seen.add(value)
+        ordered.append(value)
+
+    for preferred in (
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+    ):
+        _push(preferred)
+
+    for model_id in sample_models:
+        if str(model_id).startswith("claude-sonnet-4-"):
+            _push(model_id)
+    for model_id in sample_models:
+        if str(model_id).startswith("claude-opus-4-"):
+            _push(model_id)
+    for model_id in sample_models:
+        if str(model_id).startswith("claude-haiku-4-5"):
+            _push(model_id)
+    for model_id in sample_models:
+        if "claude" in str(model_id).lower():
+            _push(model_id)
+    for model_id in sample_models:
+        _push(model_id)
+    return ordered
+
+
 def _check_openai_models(provider: dict[str, Any]) -> CheckResult:
     probe = _probe_models(provider, emit_output=False)
     if probe.get("models") is not None:
@@ -291,15 +413,17 @@ def _resolve_anthropic_route(provider: dict[str, Any], probe_model: str, timeout
 
 
 def _resolve_claude_route(provider: dict[str, Any], sample_models: list[str], timeout: int) -> ClaudeRoute:
-    for model in sample_models:
+    ordered_models = _ordered_claude_probe_models(sample_models)
+    for model in ordered_models:
         anthropic_url, _ = _resolve_anthropic_route(provider, model, timeout)
         if anthropic_url:
-            return ClaudeRoute(mode="direct", anthropic_url=anthropic_url)
+            return ClaudeRoute(mode="direct", anthropic_url=anthropic_url, resolved_by=model)
 
     openai_url = _openai_base_url(provider)
     api_key = provider.get("openai_api_key") or provider.get("api_key", "")
     if openai_url and api_key:
-        return ClaudeRoute(mode="bridge", openai_url=openai_url, api_key=api_key)
+        resolved_by = ordered_models[0] if ordered_models else ""
+        return ClaudeRoute(mode="bridge", openai_url=openai_url, api_key=api_key, resolved_by=resolved_by)
     return ClaudeRoute(mode="unavailable")
 
 
@@ -498,8 +622,7 @@ def _run_provider_checks(cfg: dict[str, Any], provider_id: str, max_models: int,
     if "openai_chat_completions" in provider.get("protocols", []):
         provider_results.append(_check_openai_models(provider))
 
-    catalog = _fetch_openai_model_catalog(provider)
-    catalog.sort(key=lambda item: (_extract_created_fields(item)[1] is None, -(_extract_created_fields(item)[1] or 0), str(item.get("id", ""))))
+    catalog = _augment_catalog_for_checks(provider, _fetch_openai_model_catalog(provider))
     if max_models and max_models > 0:
         catalog = catalog[:max_models]
     probe_candidates = []
@@ -517,7 +640,8 @@ def _run_provider_checks(cfg: dict[str, Any], provider_id: str, max_models: int,
 
     if "anthropic_messages" in provider.get("protocols", []):
         if route_info.mode == "direct":
-            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "ok", f"resolved={route_info.anthropic_url} method=probed", True))
+            detail = f"resolved={route_info.anthropic_url} via={route_info.resolved_by or '(none)'}"
+            provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "ok", detail, True))
         else:
             provider_results.append(CheckResult("provider", provider["id"], "anthropic:/v1/messages", "probe_failed", f"configured={_anthropic_base_url(provider) or '(none)'}", False))
 
@@ -540,7 +664,22 @@ def _run_provider_checks(cfg: dict[str, Any], provider_id: str, max_models: int,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Diagnose provider/account/model/Claude compatibility.")
+    parser = argparse.ArgumentParser(
+        prog=os.environ.get("MMS_SUBCOMMAND_PROG") or None,
+        description="Diagnose provider/account/model/Claude compatibility.",
+        epilog=(
+            "Modes:\n"
+            "  default(report)  只输出兼容性结果，不改本地配置\n"
+            "  --apply-hide     预留安全开关，计划把不兼容模型写入 hidden_models\n"
+            "                   当前未实现，因为现有 hidden_models 是 provider 级，不是 per-CLI 级\n"
+            "\n"
+            "Examples:\n"
+            "  mms doctor --provider private --skip-claude-cli --max-models 5\n"
+            "  mms doctor --include-oauth --skip-claude-cli\n"
+            "  mms doctor --apply-hide   # 当前会明确提示未实现原因"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--provider", action="append", help="Only check specific provider id (repeatable).")
     parser.add_argument("--account", action="append", help="Only check specific account id (repeatable).")
     parser.add_argument("--skip-claude-cli", action="store_true", help="Skip real Claude CLI smoke tests.")
@@ -548,8 +687,22 @@ def main() -> int:
     parser.add_argument("--max-models", type=int, default=0, help="Limit models checked per provider (0 = all).")
     parser.add_argument("--parallelism", type=int, default=DEFAULT_PARALLELISM, help="How many providers to probe in parallel.")
     parser.add_argument("--route-probe-timeout", type=int, default=ROUTE_PROBE_TIMEOUT, help="Seconds per provider route probe.")
+    parser.add_argument(
+        "--apply-hide",
+        action="store_true",
+        help="Reserved safety valve. Planned to write incompatible models into hidden_models after review; currently blocked because hidden_models is provider-wide, not per-CLI.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON instead of rich tables.")
     args = parser.parse_args()
+
+    if args.apply_hide:
+        console.print(
+            "[yellow]--apply-hide 当前未实现。原因：现有 hidden_models 是 provider 级，会影响所有 CLI，不适合直接按本次诊断结果自动落配置。[/yellow]"
+        )
+        console.print(
+            "[dim]现阶段建议：先用 mms doctor 看清单，再通过 provider 模型管理或 config 手动维护 hidden_models。[/dim]"
+        )
+        return 3
 
     cfg = load_config()
     if cfg is None:
