@@ -10,6 +10,9 @@ name = "Default Gateway"
 protocols = ["anthropic_messages", "openai_chat_completions"]
 supported_clis = ["claude", "codex", "qwen", "kimi"]
 enabled = true
+# 对“慢但实际可用”的 Claude-compatible gateway，可显式跳过首启探测：
+# skip_gateway_health_check = true
+# skip_anthropic_probe = true
 
 [user]
 role = "全部模型"  # 可选: 全部模型 / 推荐模型
