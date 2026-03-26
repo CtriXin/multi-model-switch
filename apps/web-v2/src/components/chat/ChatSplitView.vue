@@ -58,7 +58,7 @@ function getPreviewText(content: string): string {
             :tier="appStore.getModel(mainResponse[0])?.tier"
             :error="mainResponse[1].error"
             :streaming="mainResponse[1].streaming"
-            :active="true"
+            :active="true" :fill-height="true"
             :selected="round.selectedModelId === mainResponse[0]"
             @select="chatStore.selectModel(round.id, mainResponse[0])"
           />
