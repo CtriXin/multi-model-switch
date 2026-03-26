@@ -96,6 +96,15 @@ mms doctor --help
 mms test --help
 ```
 
+如果你想调启动期后台刷新模型列表的频率，可直接改：
+
+```bash
+mms cache
+mms cache refresh-after 1800
+mms cache min-interval 300
+mms cache reset
+```
+
 更完整的巡检步骤见：
 
 - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
