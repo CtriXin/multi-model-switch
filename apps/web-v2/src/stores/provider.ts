@@ -833,10 +833,14 @@ export const useProviderStore = defineStore('provider', () => {
   }
 
   function exportConfig() {
+    // 过滤掉内置体验通道和模拟数据，只导出用户自己的配置
+    const exportable = providers.value.filter(
+      (p) => p.type !== 'mock' && p.id !== 'sparkring',
+    )
     return JSON.stringify(
       {
         version: 1,
-        providers: providers.value.map((provider) => ({
+        providers: exportable.map((provider) => ({
           id: provider.id,
           name: provider.name,
           type: provider.type,

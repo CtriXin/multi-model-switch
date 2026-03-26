@@ -8,11 +8,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '首页', icon: 'house' },
   },
   {
-    path: '/setup',
-    name: 'setup',
-    redirect: () => '/',
-  },
-  {
     path: '/chat',
     name: 'chat',
     component: () => import('@/views/ChatView.vue'),

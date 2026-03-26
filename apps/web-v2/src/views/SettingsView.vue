@@ -50,10 +50,6 @@ const visibleProviders = computed(() => {
   return filtered.filter(p => p.enabled || providerStore.keyStatus[p.id])
 })
 
-const recommendedConfiguredCount = computed(() =>
-  providerStore.providers.filter(p => p.builtIn && providerStore.keyStatus[p.id]).length
-)
-
 
 function openDrawer() {
   window.dispatchEvent(new CustomEvent('open-drawer'))
@@ -248,25 +244,6 @@ onMounted(() => {
 
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 space-y-6 sm:space-y-10">
-        <!-- Quick Start Card -->
-        <div
-          class="glass-v3 rounded-[32px] p-6 flex flex-col sm:flex-row items-center justify-between gap-6 border border-white/10 shadow-2xl transition-all hover:bg-white/5 group/setup">
-          <div class="flex items-center gap-4 w-full sm:w-auto">
-            <div
-              class="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover/setup:scale-110 transition-transform text-xl shrink-0">
-              🚀</div>
-            <div class="min-w-0">
-              <p class="text-sm font-black text-text-primary uppercase tracking-tight">快速配置导引
-                (Setup)</p>
-              <p
-                class="text-[10px] text-text-tertiary font-bold uppercase tracking-widest opacity-50 truncate">
-                已接入 {{ recommendedConfiguredCount }} 个推荐通道</p>
-            </div>
-          </div>
-          <button @click="router.push('/setup')"
-            class="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-accent text-white text-[10px] font-black uppercase tracking-widest shadow-xl shadow-accent/30 hover:scale-105 active:scale-95 transition-all whitespace-nowrap">开始配置</button>
-        </div>
-
         <!-- Appearance & Global Defaults -->
         <div class="glass-v3 rounded-[32px] p-6 space-y-6 border border-white/10 shadow-2xl">
           <div class="flex items-center gap-3 px-1">
@@ -551,7 +528,7 @@ onMounted(() => {
             { icon: Upload, label: '导入配置', click: () => showImport = true, color: 'accent' },
             { icon: Copy, label: '导出配置', click: () => { showExport = true; handleExport() }, color: 'blue-500' },
             { icon: Plus, label: '添加通道', click: () => showAddProvider = true, color: 'purple-500' },
-            { icon: Shield, label: '安全信息', click: () => router.push('/models'), color: 'amber-500' }
+            { icon: Shield, label: '模型库', click: () => router.push('/models'), color: 'amber-500' }
           ]" :key="action.label" @click="action.click"
             class="flex flex-col items-center justify-center gap-3 p-5 rounded-[32px] glass-v3 border border-black/5 dark:border-white/10 hover:border-accent/50 group transition-all duration-500 active:scale-95 shadow-xl">
             <div
@@ -596,7 +573,7 @@ onMounted(() => {
 
             <div v-if="showExport" class="space-y-6">
               <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导出配置 (Export JSON)</h3>
-              <p class="text-xs text-text-tertiary">导出所有通道配置（不含 API Key），可用于备份或分享到其他设备。</p>
+              <p class="text-xs text-text-tertiary">导出自定义通道配置（不含 API Key 和内置通道），可用于备份或迁移到其他设备。</p>
               <textarea v-model="exportOutput" rows="10" readonly
                 class="w-full text-xs bg-black/20 border border-white/10 rounded-2xl p-4 text-text-primary font-mono focus:outline-none resize-none" />
               <div class="flex gap-3">
