@@ -4009,6 +4009,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     from ccs_tui import select_family_tui, select_submodel_tui, confirm_tui
     from ccs_tui import select_load_balance_tui, save_lb_history
     from ccs_launchers import launch_cli, get_export_env
+
+    def _safe_tui_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except KeyboardInterrupt:
+            return "__interrupt__"
+
     current_cfg = cfg
     current_provider = provider
     current_cli_names = cli_names
@@ -4046,10 +4053,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 "provider": "",
             }
 
-        result = select_family_tui(families_by_cli, current_cli_names, last_used=last_used)
+        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_used)
 
         if result == "fallback":
             return False
+        if result == "__interrupt__":
+            return True
         if result is None:
             return True
 
@@ -4077,11 +4086,14 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             lb_prov_opts = _build_provider_options_map(
                 current_cfg, cli, current_provider, default_models, all_models
             ) if all_models else None
-            lb_result = select_load_balance_tui(
+            lb_result = _safe_tui_call(
+                select_load_balance_tui,
                 available_models=all_models or None,
                 families_detail=cli_families,
                 provider_options_map=lb_prov_opts,
             )
+            if lb_result == "__interrupt__":
+                return True
             if lb_result is None:
                 continue
             model_info = dict(lb_result)
@@ -4129,12 +4141,16 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         # ── 设置 ──
         elif action_type == "settings":
             from ccs_tui import select_settings_tui, select_provider_mgmt_tui
-            settings_action = select_settings_tui()
+            settings_action = _safe_tui_call(select_settings_tui)
+            if settings_action == "__interrupt__":
+                return True
             if settings_action is None:
                 continue
             if settings_action == "provider_mgmt":
                 providers_raw = current_cfg.get("providers", [])
-                result_providers = select_provider_mgmt_tui(providers_raw)
+                result_providers = _safe_tui_call(select_provider_mgmt_tui, providers_raw)
+                if result_providers == "__interrupt__":
+                    return True
                 if result_providers is not None:
                     # 回写 role/priority 到 config
                     for rp in result_providers:
@@ -4203,7 +4219,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 current_cfg, cli, current_provider, default_models, model_names
             )
 
-            selected = select_submodel_tui(family_name, models, provider_options=provider_options)
+            selected = _safe_tui_call(select_submodel_tui, family_name, models, provider_options=provider_options)
+            if selected == "__interrupt__":
+                return True
             if selected is None:
                 continue  # Esc 返回品类列表
 
@@ -4245,7 +4263,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
-        result = confirm_tui(cli, clean_model_info, env_vars=env_vars, once=once)
+        result = _safe_tui_call(confirm_tui, cli, clean_model_info, env_vars=env_vars, once=once)
+        if result == "__interrupt__":
+            return True
         action, bypass = result if isinstance(result, tuple) else (result, False)
         if action == "q":
             return True
@@ -5363,6 +5383,28 @@ def handle_session_command(argv):
     parser.print_help()
 
 
+def _run_script_subcommand(script_name, argv, subcommand_name):
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", script_name)
+    if not os.path.exists(script_path):
+        console.print(f"[red]找不到脚本: {script_path}[/red]")
+        return 1
+    env = os.environ.copy()
+    env["MMS_SUBCOMMAND_PROG"] = f"{current_command()} {subcommand_name}"
+    try:
+        completed = subprocess.run([sys.executable, script_path, *argv], env=env)
+        return int(completed.returncode or 0)
+    except KeyboardInterrupt:
+        return 130
+
+
+def handle_doctor_command(argv):
+    return _run_script_subcommand("doctor_claude_models.py", argv, "doctor")
+
+
+def handle_test_command(argv, subcommand_name="test"):
+    return _run_script_subcommand("smoke_cli_channels.py", argv, subcommand_name)
+
+
 def main():
     if len(sys.argv) >= 2:
         command = sys.argv[1]
@@ -5396,11 +5438,16 @@ def main():
             return
         if command == "session":
             handle_session_command(sys.argv[2:])
+            return
         if command == "routes":
             from ccs_router import routes_main
 
             routes_main(_load_command_config(), sys.argv[2:])
             return
+        if command == "doctor":
+            raise SystemExit(handle_doctor_command(sys.argv[2:]))
+        if command in {"test", "smoke"}:
+            raise SystemExit(handle_test_command(sys.argv[2:], subcommand_name=command))
 
     if len(sys.argv) >= 2 and sys.argv[1] == "discuss":
         from ccs_discuss import discuss_main
@@ -5416,6 +5463,21 @@ def main():
     parser = argparse.ArgumentParser(
         prog=current_command(),
         description=f"{display_title()} — AI Coding CLI 统一启动器",
+        epilog=(
+            "非 TUI 常用命令:\n"
+            f"  {current_command()} config ...      配置 provider / account / adapter\n"
+            f"  {current_command()} models [id]     查看模型列表\n"
+            f"  {current_command()} warm [id]       预热模型缓存\n"
+            f"  {current_command()} session ...     查看托管 session\n"
+            f"  {current_command()} routes ...      查看路由配置\n"
+            f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
+            f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
+            f"  {current_command()} smoke ...       等同于 test\n"
+            f"  {current_command()} chat ...        进入 chat 子命令\n"
+            f"  {current_command()} discuss ...     进入 discuss 子命令\n"
+            f"  {current_command()} usage ...       查看 usage 统计"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
                         help="场景编号(1-6) 或 CLI 名称(claude/codex/qwen/kimi/gemini)")
