@@ -82,6 +82,8 @@ async function toggleProviderEnabled(id: string) {
       useToastStore().info(`${p.name} 尚未配置 API Key，请在下方账户池中添加`)
     }
     providerStore.updateProvider(id, { enabled: nextEnabled })
+    // 同步刷新可用模型列表，确保选中的模型与 provider 状态一致
+    await appStore.refreshModels()
   }
 }
 

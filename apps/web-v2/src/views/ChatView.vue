@@ -736,7 +736,7 @@ function hasModelError(round: typeof chatStore.rounds[0], modelId: string): bool
                 <ModelResponseCard :model-id="modelId" :model-name="getModelName(modelId)"
                   :provider="getProvider(modelId)" :tier="getTier(modelId)" :content="msg.content"
                   :elapsed="msg.elapsed" :error="msg.error" :error-code="msg.errorCode" :brief="msg.brief"
-                  :streaming="!!msg.streaming"
+                  :streaming="!!msg.streaming" :fill-height="true"
                   :selected="round.activeModelId === modelId"
                   @select="chatStore.setActiveModel(round.id, modelId)"
                   @discuss="startInlineDiscuss(round.id)"
