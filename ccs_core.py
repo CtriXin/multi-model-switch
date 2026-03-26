@@ -3387,13 +3387,22 @@ def _provider_models_for_cli(cli_name, models):
     return list(models or [])
 
 
-def _provider_effective_models(provider, cached_models):
+def _provider_effective_models(provider, cached_models, cfg=None):
     if cached_models is None:
-        return list(_probe_models(provider, emit_output=False).get("models") or [])
-    base_models = list(cached_models or [])
+        if provider.get("models_endpoint") == "manual":
+            base_models = list(provider.get("fallback_models") or [])
+            base_source = "manual"
+        else:
+            _schedule_probe_refresh(provider, cfg, reason="cache_miss")
+            base_models = []
+            base_source = "remote"
+    else:
+        base_models = list(cached_models or [])
+        base_source = "remote"
+
     patched = _apply_provider_model_patch(
         provider,
-        {"raw_models": base_models, "models": base_models, "base_source": "remote"},
+        {"raw_models": base_models, "models": base_models, "base_source": base_source},
     )
     return list(patched.get("models") or [])
 
@@ -3408,7 +3417,7 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
-        models = _provider_effective_models(provider, cached_models)
+        models = _provider_effective_models(provider, cached_models, cfg)
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized or normalized in seen:
@@ -3432,7 +3441,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
             continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
-        models = _provider_effective_models(provider, cached_models)
+        models = _provider_effective_models(provider, cached_models, cfg)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
         pname = _provider_label(provider)
         for model_name in models:
@@ -3474,9 +3483,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
             if protocol not in protocols:
                 continue
 
-        models = list(cached_models or [])
-        if cached_models is None:
-            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        models = _provider_effective_models(provider, cached_models, cfg)
 
         # Check if this provider has the model
         model_names_lower = [str(m or "").strip().lower() for m in models]
@@ -3521,9 +3528,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
         if not provider.get("api_key"):
             continue
 
-        models = list(cached_models or [])
-        if cached_models is None:
-            models = list(_probe_models(provider, emit_output=False).get("models") or [])
+        models = _provider_effective_models(provider, cached_models, cfg)
         if not models:
             continue
 
@@ -3586,11 +3591,11 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
 
         models = cached_models
         if models is None:
-            _probe_debug_logger.debug("  %s: cached_models=None, probing...", pid)
-            models = _provider_effective_models(provider, None)
+            _probe_debug_logger.debug("  %s: cached_models=None, schedule async refresh", pid)
+            models = _provider_effective_models(provider, None, cfg)
         else:
             _probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
-        models = _provider_effective_models(provider, models)
+        models = _provider_effective_models(provider, models, cfg)
         cli_models = _provider_models_for_cli(cli_name, models)
 
         if selected_model:
@@ -4138,9 +4143,7 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
                 continue
             if not provider.get("api_key"):
                 continue
-            models = list(cached_models or [])
-            if cached_models is None:
-                models = list(_probe_models(provider, emit_output=False).get("models") or [])
+            models = _provider_effective_models(provider, cached_models, cfg)
             model_lower = [str(m or "").strip().lower() for m in models]
             if model_name.strip().lower() not in model_lower:
                 continue
