@@ -144,7 +144,7 @@ async function handleShare() {
     </div>
 
     <!-- Content area (scrollable) -->
-    <div class="px-4 py-3" :class="props.fillHeight ? 'flex-1 min-h-0 overflow-y-auto' : (carousel ? 'overflow-visible' : '')"
+    <div class="px-4 py-3" :class="props.fillHeight ? 'flex-1 min-h-0 overflow-y-auto' : (carousel ? 'overflow-visible' : '')">
       <!-- Error state -->
       <div v-if="error" class="relative py-4">
         <div class="rounded-2xl border border-red-500/20 bg-surface-2/60 px-4 py-3 pr-5">
