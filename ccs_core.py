@@ -843,11 +843,19 @@ def _record_usage(runtime, cli_name, model_info):
     entry["last_model"] = model_name
     models = entry.setdefault("models", {})
     models[model_name] = int(models.get(model_name, 0)) + 1
+    # 全局最后一次使用（按 CLI 分桶，供 TUI "上次使用" 展示）
+    last_by_cli = stats.setdefault("last_by_cli", {})
+    last_by_cli[cli_name] = {
+        "cli": cli_name,
+        "model": model_name,
+        "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
+        "last_used_at": _iso_now(),
+    }
     _save_usage_stats(stats)
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
-    """记录场景级启动统计（用于 TUI 上次使用 + 启动次数排名）"""
+    """记录场景级启动统计（用于 TUI 启动次数排名）"""
     if not scene_name or scene_name.startswith("__"):
         return
     stats = _load_usage_stats()
@@ -863,31 +871,17 @@ def _record_scene_usage(scene_name, cli_name, model_info):
     entry["last_used_at"] = _iso_now()
     entry["last_cli"] = cli_name
     entry["last_model"] = model_name
-    # 同时记录全局最后一次使用
-    stats["last_scene"] = scene_name
-    stats["last_cli"] = cli_name
-    stats["last_model"] = model_name
-    stats["last_model_info"] = model_info if isinstance(model_info, dict) else {"model": str(model_info)}
-    stats["last_used_at"] = _iso_now()
+    # 全局 last_* 已由 _record_usage 写入，此处不再重复
     _save_usage_stats(stats)
 
 
 def _get_scene_usage():
-    """获取场景使用统计，返回 (last_info, scene_counts)"""
+    """获取上次使用信息（按 CLI 分桶）+ 场景启动次数，返回 (last_by_cli, scene_counts)"""
     stats = _load_usage_stats()
-    last_info = None
-    if stats.get("last_scene"):
-        last_info = {
-            "scene": stats["last_scene"],
-            "cli": stats.get("last_cli", ""),
-            "model": stats.get("last_model", ""),
-            "model_info": stats.get("last_model_info"),
-            "last_used_at": stats.get("last_used_at", ""),
-        }
     scene_counts = {}
     for name, entry in stats.get("scenes", {}).items():
         scene_counts[name] = entry.get("launches", 0)
-    return last_info, scene_counts
+    return stats.get("last_by_cli", {}), scene_counts
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False):
@@ -4196,17 +4190,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             families_by_cli, families_detail = _rebuild_families()
             _families_dirty = False
 
-        # 获取上次使用信息
-        last_info, _ = _get_scene_usage()
-        last_used = None
-        if last_info and last_info.get("model"):
-            last_used = {
-                "model": last_info["model"],
-                "cli": last_info.get("cli", ""),
-                "provider": "",
-            }
+        # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
+        last_by_cli, _ = _get_scene_usage()
 
-        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_used)
+        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_by_cli)
 
         if result == "fallback":
             return False
@@ -4426,7 +4413,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             continue
         if bypass:
             runtime_runtime["bypass"] = True
-        _record_scene_usage("__family__", cli, clean_model_info)
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
