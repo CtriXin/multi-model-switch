@@ -377,10 +377,12 @@ def _tool_result_text(content):
     return "\n".join(parts)
 
 
-def _content_block_to_responses(block):
+def _content_block_to_responses(block, role="user"):
     block_type = block.get("type")
     if block_type == "text":
-        return {"type": "input_text", "text": str(block.get("text", ""))}
+        # Responses API: user → input_text, assistant → output_text
+        text_type = "output_text" if role == "assistant" else "input_text"
+        return {"type": text_type, "text": str(block.get("text", ""))}
     if block_type == "image":
         source = block.get("source", {})
         if source.get("type") == "base64":
@@ -396,15 +398,15 @@ def _anthropic_messages_to_responses_input(messages):
         role = str(message.get("role", "user"))
         text_parts = []
 
-        def flush_text_parts():
+        def flush_text_parts(r=role):
             if text_parts:
-                items.append({"role": role, "content": list(text_parts)})
+                items.append({"role": r, "content": list(text_parts)})
                 text_parts.clear()
 
         for block in _normalize_message_content(message.get("content")):
             block_type = block.get("type")
             if block_type in {"text", "image"}:
-                converted = _content_block_to_responses(block)
+                converted = _content_block_to_responses(block, role=role)
                 if converted is not None:
                     text_parts.append(converted)
                 continue
