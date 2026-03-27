@@ -575,6 +575,9 @@ def launch_claude(model_info, runtime, once=False):
         # 跨 provider 负载配置：per-slot upstream url/key
         lb_slot_configs = model_info.get("lb_slot_configs") if isinstance(model_info, dict) else None
 
+        # GPT-on-Claude: 获取 OpenAI URL 供 bridge 转发 GPT 模型
+        _gpt_openai_url = _openai_base_url(runtime) or None
+
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
             if not bridge_gw_url.endswith("/v1"):
@@ -588,7 +591,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
-                                                    slot_configs=lb_slot_configs)
+                                                    slot_configs=lb_slot_configs,
+                                                    openai_url=_gpt_openai_url)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -616,6 +620,7 @@ def launch_claude(model_info, runtime, once=False):
                     advertised_models=advertised_models,
                     speed_scope=speed_scope,
                     route_status_paths=route_status_paths,
+                    openai_url=_gpt_openai_url,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -664,7 +669,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 advertised_models=advertised_models,
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
-                                                slot_configs=lb_slot_configs)
+                                                slot_configs=lb_slot_configs,
+                                                openai_url=openai_url)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -698,7 +704,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     advertised_models=advertised_models,
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
-                                                    slot_configs=lb_slot_configs)
+                                                    slot_configs=lb_slot_configs,
+                                                    openai_url=openai_url)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
