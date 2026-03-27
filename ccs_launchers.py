@@ -1,5 +1,6 @@
 """MMS/CCS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
+from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -7,6 +8,7 @@ import sys
 import subprocess
 import tempfile
 from datetime import datetime
+from time import perf_counter
 
 from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
 from ccs_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
@@ -21,6 +23,39 @@ except ImportError:
     pass
 
 console = Console()
+
+
+@contextmanager
+def _launch_status(message, *, spinner="dots"):
+    """为启动慢步骤提供可见 spinner，避免用户干等。"""
+    status_cm = None
+    try:
+        status_cm = console.status(f"[cyan]{message}[/cyan]", spinner=spinner)
+        status_cm.__enter__()
+    except Exception:
+        console.print(f"[dim]⏳ {message}[/dim]")
+    start = perf_counter()
+    try:
+        yield start
+    finally:
+        if status_cm is not None:
+            exc_type, exc, tb = sys.exc_info()
+            status_cm.__exit__(exc_type, exc, tb)
+
+
+def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
+    elapsed = perf_counter() - started_at
+    suffix = f" · {detail}" if detail else ""
+    console.print(f"[{style}]· {label} 完成 ({elapsed:.1f}s){suffix}[/{style}]")
+
+
+def _prepare_claude_env_with_status(runtime, **kwargs):
+    with _launch_status("准备 Claude 会话环境中...", spinner="dots") as step_start:
+        env = _claude_gateway_env(runtime, **kwargs)
+    selected = kwargs.get("selected_model") or kwargs.get("heavy_model")
+    detail = selected if selected else runtime.get("id", "provider")
+    _print_launch_step_done("Claude 会话环境准备", step_start, detail)
+    return env
 
 
 def _real_user_home():
@@ -464,7 +499,7 @@ def launch_claude(model_info, runtime, once=False):
         else:
             cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
         bridge_cfg = cleanup_ctx.__enter__()
-        env = _claude_gateway_env(
+        env = _prepare_claude_env_with_status(
             runtime,
             base_url=bridge_cfg["base_url"],
             auth_token=bridge_cfg["api_key"],
@@ -473,13 +508,43 @@ def launch_claude(model_info, runtime, once=False):
         )
         state_home = None
     else:
-        gateway_health_check(runtime)
+        provider_id = runtime.get("id", "default")
+        if runtime.get("skip_gateway_health_check"):
+            console.print("[dim]· 跳过 gateway 健康检查（provider 配置）[/dim]")
+        elif not _health_check_due(provider_id):
+            console.print("[dim]· 跳过 gateway 健康检查（24h 缓存有效）[/dim]")
+        else:
+            with _launch_status("健康检查中...", spinner="dots") as step_start:
+                gateway_health_check(runtime)
+            _print_launch_step_done("gateway 健康检查", step_start)
+
         speed_scope = build_provider_speed_scope(runtime)
         route_status_paths = _claude_route_status_paths()
-        try:
-            advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
-        except Exception:
-            advertised_models = []
+        probe_result = runtime.get("_launch_prefetched_probe")
+        if probe_result is None:
+            try:
+                with _launch_status("读取模型列表中...", spinner="dots") as step_start:
+                    probe_result = _probe_models(runtime, emit_output=False)
+                    advertised_models = list(probe_result.get("models") or [])
+            except Exception:
+                advertised_models = []
+            if probe_result is None:
+                console.print("[yellow]· 模型列表准备失败，继续使用空列表[/yellow]")
+            else:
+                base_source = probe_result.get("base_source")
+                detail = f"{len(advertised_models)} 个模型"
+                if base_source:
+                    detail += f" · {base_source}"
+                _print_launch_step_done("模型列表准备", step_start, detail)
+        else:
+            advertised_models = list(probe_result.get("models") or [])
+            base_source = probe_result.get("base_source")
+            detail = f"{len(advertised_models)} 个模型"
+            if base_source:
+                detail += f" · {base_source} · 复用预读取"
+            else:
+                detail += " · 复用预读取"
+            console.print(f"[dim]· 模型列表准备跳过远端请求 ({detail})[/dim]")
 
         # ---- 三级兼容策略 ----
         # 1. 自动探测正确的 ANTHROPIC_BASE_URL（缓存 1h，避免重复请求）
@@ -492,7 +557,14 @@ def launch_claude(model_info, runtime, once=False):
             probe_model = "qwen3.5-plus"
             console.print(f"[dim]百炼 CodingPlan 不支持 Claude 模型，自动切换为: {probe_model}[/dim]")
 
-        anthropic_url, detect_method = _resolve_anthropic_base_url(runtime, probe_model=probe_model)
+        with _launch_status("解析 Anthropic endpoint 中...", spinner="dots") as step_start:
+            anthropic_url, detect_method = _resolve_anthropic_base_url(runtime, probe_model=probe_model)
+        resolve_detail = detect_method
+        if anthropic_url:
+            resolve_detail = f"{detect_method} · {anthropic_url}"
+            _print_launch_step_done("Anthropic endpoint 解析", step_start, resolve_detail)
+        else:
+            _print_launch_step_done("Anthropic endpoint 解析", step_start, resolve_detail, style="yellow")
 
         # 智能路由：提取 lb_light / lb_medium，需要通过 bridge 拦截请求
         lb_light = model_info.get("lb_light") if isinstance(model_info, dict) else None
@@ -518,7 +590,7 @@ def launch_claude(model_info, runtime, once=False):
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs)
                 bridge_cfg = cleanup_ctx.__enter__()
-                env = _claude_gateway_env(
+                env = _prepare_claude_env_with_status(
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
@@ -546,7 +618,7 @@ def launch_claude(model_info, runtime, once=False):
                     route_status_paths=route_status_paths,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
-                env = _claude_gateway_env(
+                env = _prepare_claude_env_with_status(
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
@@ -567,7 +639,7 @@ def launch_claude(model_info, runtime, once=False):
             else:
                 cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
             bridge_cfg = cleanup_ctx.__enter__()
-            env = _claude_gateway_env(
+            env = _prepare_claude_env_with_status(
                 runtime,
                 base_url=bridge_cfg["base_url"],
                 auth_token=bridge_cfg["api_key"],
@@ -594,7 +666,7 @@ def launch_claude(model_info, runtime, once=False):
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs)
             bridge_cfg = cleanup_ctx.__enter__()
-            env = _claude_gateway_env(
+            env = _prepare_claude_env_with_status(
                 runtime,
                 base_url=bridge_cfg["base_url"],
                 auth_token=bridge_cfg["api_key"],
@@ -628,7 +700,7 @@ def launch_claude(model_info, runtime, once=False):
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs)
                 bridge_cfg = cleanup_ctx.__enter__()
-                env = _claude_gateway_env(
+                env = _prepare_claude_env_with_status(
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
@@ -646,14 +718,14 @@ def launch_claude(model_info, runtime, once=False):
                 state_home = None
             else:
                 console.print("[red]✗ 无 OpenAI 端点，无法启用智能路由[/red]")
-                env = _claude_gateway_env(runtime, base_url=None, selected_model=probe_model)
+                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=probe_model)
                 state_home = None
                 cleanup_ctx = None
 
         else:
             # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
             console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
-            env = _claude_gateway_env(runtime, base_url=None, selected_model=probe_model)
+            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=probe_model)
             state_home = None
             cleanup_ctx = None
 
@@ -678,6 +750,7 @@ def launch_claude(model_info, runtime, once=False):
     cmd = ["claude"]
     if runtime.get("bypass"):
         cmd.append("--dangerously-skip-permissions")
+    console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
     session_home = env.get("HOME")
     exit_callback = None
     if session_home:
@@ -769,7 +842,6 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
-    console.print("[dim]正在探测 Anthropic 端点...[/dim]")
     candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5)
 
     if candidate is not None:
@@ -1454,7 +1526,10 @@ def _show_launch_info(cli, runtime, auth_mode):
     # ── gateway 可用模型列表 ──
     if auth_mode == "api_key":
         try:
-            models = list(_probe_models(runtime, emit_output=False).get("models") or [])
+            probe_result = runtime.get("_launch_prefetched_probe")
+            if probe_result is None:
+                probe_result = _probe_models(runtime, emit_output=False)
+            models = list(probe_result.get("models") or [])
             if models:
                 console.print(f"[dim]可用模型 ({len(models)}): {', '.join(models[:8])}"
                               f"{'…' if len(models) > 8 else ''}[/dim]")
@@ -1488,6 +1563,7 @@ def _show_launch_info(cli, runtime, auth_mode):
 def launch_cli(cli, model_info, runtime, once=False):
     """统一启动入口"""
     _ensure_agent_im()
+    runtime = dict(runtime)
     launcher = LAUNCHERS.get(cli)
     if not launcher:
         console.print(f"[red]不支持的 CLI: {cli}[/red]")
@@ -1507,6 +1583,21 @@ def launch_cli(cli, model_info, runtime, once=False):
 
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))
+
+    if cli == "claude" and auth_mode == "api_key":
+        prefetched_probe = None
+        try:
+            with _launch_status("预读取模型列表中...", spinner="dots") as step_start:
+                prefetched_probe = _probe_models(runtime, emit_output=False)
+            models = list((prefetched_probe or {}).get("models") or [])
+            detail = f"{len(models)} 个模型"
+            base_source = (prefetched_probe or {}).get("base_source")
+            if base_source:
+                detail += f" · {base_source}"
+            _print_launch_step_done("启动前模型预读取", step_start, detail)
+        except Exception:
+            console.print("[yellow]· 启动前模型预读取失败，后续继续按默认流程处理[/yellow]")
+        runtime["_launch_prefetched_probe"] = prefetched_probe
 
     console.print(f"\n[bold green]🚀 启动 {cli}[/bold green] — {model_display}")
     console.print(f"[dim]{source_kind}: {source_label} ({runtime.get('id', 'default')})[/dim]")

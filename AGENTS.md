@@ -57,3 +57,27 @@ This file applies to both `Codex` and `Claude`.
 - Treat `ccs_core.py`, `ccs_launchers.py`, `ccs_tui.py`, `ccs_bridge.py`, `ccs_account_state.py`, `ccs_session.py`, `ccs_adapter_registry.py`, `mms`, and `ccs` as protected surfaces.
 - Do not silently change default launch behavior, model/source resolution order, config schema, account isolation semantics, or bridge fallback rules without an explicit note in the task and targeted validation.
 - If a task would alter a protected surface beyond the user's stated scope, stop and narrow the change or ask for confirmation.
+
+## Stability Window
+
+- The following chain is now under a stability window and must be treated as a protected integration surface:
+  - `MMS -> private(/claude) -> CRS`
+  - `MMS -> privateopenai(/openai) -> CRS`
+  - `MMS -> xin/newapi(4001) -> CRS`
+- Any person or agent touching any of the following must explicitly confirm whether the change can affect the above chain before proceeding:
+  - provider `models_endpoint`
+  - `extra_models` / `hidden_models`
+  - model probe logic / cache logic
+  - `channel_affinity`
+  - `Codex` / `Claude` header passthrough
+  - CRS-facing `/claude` or `/openai` route assumptions
+- Minimum pre-change checklist for that chain:
+  - Does this change alter model visibility, aliasing, or fallback behavior?
+  - Does this change alter whether `/models` is probed, skipped, or cached?
+  - Does this change alter client identity headers or sticky-session key sources?
+  - Can this break `private`, `privateopenai`, or `xin/newapi` even if the local unit test still passes?
+- Any change on that chain must update:
+  - `docs/CLI_PROVIDER_COMPAT_QA.md`
+  - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
+- Any change on that chain must run at least one matching smoke test from:
+  - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
