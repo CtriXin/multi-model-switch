@@ -4217,6 +4217,53 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 _families_dirty = True
             continue
 
+        # ── Provider 浏览 ──
+        if action_type == "provider_browse":
+            from ccs_tui import select_provider_browse_tui, select_provider_models_tui
+            # 构建可用 provider 列表（当前 CLI 支持的、有 api_key 的）
+            browse_providers = []
+            seen_ids = set()
+            for prov, _cached in _provider_candidates(current_cfg, current_provider, default_models):
+                pid = prov.get("id", DEFAULT_PROVIDER_ID)
+                if pid in seen_ids:
+                    continue
+                if not prov.get("enabled", True):
+                    continue
+                if not _provider_supports_cli_name(prov, cli):
+                    continue
+                if not prov.get("api_key"):
+                    continue
+                seen_ids.add(pid)
+                browse_providers.append({
+                    "id": pid,
+                    "name": _provider_label(prov),
+                    "role": prov.get("role", "auto"),
+                    "priority": prov.get("priority", 100),
+                })
+            if not browse_providers:
+                console.print("[yellow]没有可用的 Provider[/yellow]")
+                continue
+            prov_result = _safe_tui_call(select_provider_browse_tui, browse_providers)
+            if prov_result is None or prov_result == "__interrupt__":
+                continue
+            selected_pid, selected_pname = prov_result
+            # 获取该 provider 的完整上下文和模型列表
+            selected_prov = resolve_provider_context(current_cfg, selected_pid)
+            file_cached = _load_probe_file_cache(selected_pid, allow_stale=True)
+            cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
+            prov_models = _provider_effective_models(selected_prov, cached_models, current_cfg)
+            if not prov_models:
+                console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
+                continue
+            model_result = _safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
+            if model_result is None:
+                continue  # B 返回 provider 列表
+            if model_result == "__exit__":
+                return True  # Esc 完全退出
+            model_info = model_result
+            runtime_runtime = selected_prov
+            # fall through to confirm
+
         # ── 负载模式 ──
         if action_type == "load_balance":
             all_models = []
@@ -4392,7 +4439,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
                 continue
             # fall through to confirm
-        else:
+        elif action_type not in ("provider_browse", "load_balance", "last", "family"):
             continue
 
         # ── 公共：确认页 + 启动 ──
