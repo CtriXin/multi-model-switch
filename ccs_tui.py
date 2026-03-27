@@ -153,7 +153,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
     Args:
         families_by_cli: dict[str, list[dict]] — cli_name -> [{family, count}]
         cli_names: list[str] — ["claude", "codex"]
-        last_used: dict or None — {"model": str, "cli": str, "provider": str}
+        last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
 
     Returns:
         ("family", cli_name, family_name) — 选了某个品类
@@ -189,11 +189,10 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
 
             # 构建虚拟列表
             items = []  # (type, data, label)
-            has_last = (last_used and last_used.get("cli") == cli
-                        and last_used.get("model"))
+            cli_last = (last_used or {}).get(cli)
+            has_last = cli_last and cli_last.get("model")
             if has_last:
-                prov_tag = f"  via {last_used.get('provider', '')}" if last_used.get('provider') else ""
-                items.append(("last", last_used, f"⏱ 上次  {last_used['model']}{prov_tag}"))
+                items.append(("last", cli_last, f"⏱ 上次  {cli_last['model']}"))
                 items.append(("sep", None, ""))
 
             for fam in families:
