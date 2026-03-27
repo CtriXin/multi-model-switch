@@ -602,6 +602,7 @@ class _AnthropicTranslator:
         self.item_to_index = {}
         self.text_item_to_index = {}
         self.seen_tool_use = False
+        self.response_id = None  # 从 response.completed 提取，用于 previous_response_id
 
     def _message_start(self):
         return ("message_start", {
@@ -705,6 +706,10 @@ class _AnthropicTranslator:
                         "index": index,
                     }))
         elif event_type == "response.completed":
+            # 提取 response_id 用于 previous_response_id 续接
+            resp_obj = payload.get("response") if isinstance(payload, dict) else None
+            if isinstance(resp_obj, dict) and resp_obj.get("id"):
+                self.response_id = resp_obj["id"]
             stop_reason = "tool_use" if self.seen_tool_use else "end_turn"
             outgoing.append(("message_delta", {
                 "type": "message_delta",
@@ -1549,16 +1554,44 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         """GPT-on-Claude: 将 Anthropic Messages 转为 Responses 格式发到 OpenAI 端点。
 
         流程:
-        1. Anthropic Messages payload → Responses payload（复用 _build_codex_payload）
-        2. 伪装 Codex CLI 头通过 CRS 验证
-        3. 发到 openai_url/v1/responses（强制 stream=true）
-        4. 收到 Responses SSE → _AnthropicTranslator 转回 Anthropic SSE → 返回 Claude Code
+        1. 检查 server._gpt_last_response_id → 有则用 previous_response_id + 增量 input
+        2. Anthropic Messages payload → Responses payload
+        3. 伪装 Codex CLI 头通过 CRS 验证
+        4. 发到 openai_url/v1/responses（强制 stream=true）
+        5. 收到 Responses SSE → _AnthropicTranslator 转回 Anthropic SSE → 返回 Claude Code
+        6. 从 response.completed 提取 response_id → 存入 server._gpt_last_response_id
         """
-        responses_payload = _build_codex_payload(anthropic_payload, model_name)
-        # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
-        orig_instructions = responses_payload.get("instructions", "")
-        if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
-            responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
+        messages = anthropic_payload.get("messages") or []
+        prev_resp_id = getattr(self.server, "_gpt_last_response_id", None)
+        prev_msg_count = getattr(self.server, "_gpt_last_msg_count", 0)
+
+        if prev_resp_id and len(messages) > prev_msg_count:
+            # 续接模式：只发增量消息（跳过已在服务端缓存的历史）
+            delta_messages = messages[prev_msg_count:]
+            delta_input = _anthropic_messages_to_responses_input(delta_messages)
+            # instructions 必须发（CRS codexCliValidator 强制要求）
+            instructions = _system_to_instructions(anthropic_payload.get("system")) or "You are a helpful assistant."
+            if not instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
+                instructions = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + instructions
+            responses_payload = {
+                "model": model_name,
+                "previous_response_id": prev_resp_id,
+                "instructions": instructions,
+                "input": delta_input,
+                "store": True,
+                "stream": True,
+            }
+            tools = _anthropic_tools_to_responses(anthropic_payload.get("tools"))
+            if tools:
+                responses_payload["tools"] = tools
+        else:
+            # 首次请求或无法续接：发完整 payload
+            responses_payload = _build_codex_payload(anthropic_payload, model_name)
+            orig_instructions = responses_payload.get("instructions", "")
+            if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
+                responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
+            responses_payload["store"] = True  # 必须 store 才能被后续 previous_response_id 引用
+
         responses_payload["stream"] = True
         # CRS 上游不支持 max_output_tokens
         responses_payload.pop("max_output_tokens", None)
@@ -1594,6 +1627,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             with httpx.stream("POST", target_url, headers=fwd_headers, json=responses_payload, timeout=300) as response:
                 if response.status_code >= 400:
                     body = response.read().decode("utf-8", errors="replace")
+                    # 续接失败（response 过期等）→ 清除状态，下次走全量
+                    if prev_resp_id:
+                        self.server._gpt_last_response_id = None
+                        self.server._gpt_last_msg_count = 0
                     try:
                         err = json.loads(body)
                     except (json.JSONDecodeError, ValueError):
@@ -1629,6 +1666,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     self.send_header("Content-Length", str(len(body_out)))
                     self.end_headers()
                     self.wfile.write(body_out)
+
+            # 保存 response_id 供下次续接
+            if translator.response_id:
+                self.server._gpt_last_response_id = translator.response_id
+                self.server._gpt_last_msg_count = len(messages)
 
             if should_record_speed and first_byte_ms:
                 _record_bridge_speed(
@@ -2511,6 +2553,8 @@ def gateway_claude_bridge(
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
+    server._gpt_last_response_id = None  # GPT-on-Claude: previous_response_id 续接
+    server._gpt_last_msg_count = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
