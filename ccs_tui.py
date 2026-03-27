@@ -1259,7 +1259,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
         curses.init_pair(7, curses.COLOR_RED, -1)
 
-        bypass_mode = False
+        bypass_mode = True  # 默认 bypass，Tab 切换回正常
 
         while True:
             stdscr.clear()
