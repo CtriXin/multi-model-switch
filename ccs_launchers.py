@@ -658,6 +658,33 @@ def launch_claude(model_info, runtime, once=False):
             )
             state_home = None
 
+        elif _gpt_openai_url and _is_gpt_model(probe_model):
+            # 2a-gpt. GPT-on-Claude: Anthropic 探测失败但有 OpenAI URL 且是 GPT 模型
+            #   → 用 OpenAI URL 起 bridge，bridge 内部走 Responses API 转发
+            openai_url = _gpt_openai_url
+            api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
+            console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API[/dim]")
+            cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
+                                                heavy_model=probe_model,
+                                                medium_model=lb_medium or None,
+                                                light_model=lb_light or None,
+                                                advertised_models=advertised_models,
+                                                speed_scope=speed_scope,
+                                                route_status_paths=route_status_paths,
+                                                slot_configs=lb_slot_configs,
+                                                openai_url=openai_url)
+            bridge_cfg = cleanup_ctx.__enter__()
+            env = _prepare_claude_env_with_status(
+                runtime,
+                base_url=bridge_cfg["base_url"],
+                auth_token=bridge_cfg["api_key"],
+                heavy_model=_env_model,
+                medium_model=lb_medium or None,
+                light_model=lb_light or None,
+                selected_model=_env_model,
+            )
+            state_home = None
+
         elif _openai_base_url(runtime) and not _anthropic_base_url(runtime):
             # 2b. 纯 OpenAI provider（无 Anthropic 端点配置）→ 自动用 gateway bridge
             openai_url = _openai_base_url(runtime)
