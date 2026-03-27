@@ -6,10 +6,10 @@ const FAULT_INJECTION_DEMO_MODEL_IDS = new Set([
 ])
 
 const SHOWCASE_DEMO_MODEL_IDS = [
-  'demo/claude-sonnet-4',
-  'demo/gpt-4.1',
-  'demo/gemini-2.5-pro',
-  'demo/claude-haiku-3.5',
+  'demo/model-beta',
+  'demo/model-alpha',
+  'demo/model-gamma',
+  'demo/model-theta',
   'demo/mistral-large',
   'demo/deepseek-r1',
   'demo/qwen-max',

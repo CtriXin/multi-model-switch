@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useSessionStore } from '@/stores/session'
 import { useTheme } from '@/composables/useTheme'
+import { useE2eSpeedTest } from '@/composables/useE2eSpeedTest'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import IOSModelSheet from '@/components/shared/IOSModelSheet.vue'
 import ToastContainer from '@/components/shared/ToastContainer.vue'
@@ -15,7 +16,12 @@ const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const sessionStore = useSessionStore()
-useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
+const { theme } = useTheme() // 必须在 App.vue 调用，保证 watchEffect 全生命周期持久，不随子页面卸载而销毁
+const { setupListeners: setupE2eSpeed, teardownListeners: teardownE2eSpeed } = useE2eSpeedTest()
+
+const isDarkMode = computed(() => theme.value === 'dark')
+const logoSrc = computed(() => isDarkMode.value ? '/logos/logo-v5-light.png' : '/logos/logo-v5-dark.png')
+const logoBg = computed(() => isDarkMode.value ? 'bg-white/90 shadow-lg' : 'bg-black shadow-lg')
 
 // --- Robust Dual-End Logic ---
 const detectedPlatform = ref(Capacitor.getPlatform())
@@ -167,6 +173,7 @@ function isDrawerSessionActive(session: { id: string; type: string }) {
 onMounted(async () => {
   await appStore.initialize()
   sessionStore.loadSessions()
+  setupE2eSpeed()
 
   window.addEventListener('resize', handleResize)
   window.addEventListener('open-drawer', handleOpenDrawer)
@@ -174,6 +181,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  teardownE2eSpeed()
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('open-drawer', handleOpenDrawer)
   window.removeEventListener('open-models', handleOpenModels)
@@ -214,14 +222,16 @@ const isLabActive = computed(() => {
         @touchcancel.passive="onDrawerTouchEnd">
         <div class="flex items-center justify-between px-6 py-4 border-b border-black/5 dark:border-white/5">
           <div class="flex items-center gap-2.5">
-            <img
-              src="/logos/logo-v36-transparent.svg"
-              alt="SparkRing"
-              class="w-10 h-10 object-contain shrink-0 drop-shadow-[0_4px_12px_rgba(79,70,229,0.1)]"
-            />
+            <div :class="[logoBg, 'w-10 h-10 rounded-[10px] flex items-center justify-center border border-white/10 shrink-0 overflow-hidden shadow-lg']">
+              <img
+                :src="logoSrc"
+                alt="SparkRing"
+                class="w-10 h-10 object-contain"
+              />
+            </div>
             <div class="flex flex-col">
               <div class="flex items-center text-[13px] font-black uppercase leading-tight tracking-[0.15em] select-none">
-                <span class="bg-gradient-to-r from-indigo-950 via-indigo-800 to-purple-700 bg-clip-text text-transparent">Spark</span>
+                <span :class="[isDarkMode ? 'from-indigo-300 via-blue-400 to-purple-400' : 'from-indigo-950 via-indigo-800 to-purple-700', 'bg-gradient-to-r bg-clip-text text-transparent']">Spark</span>
                 <span class="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Ring</span>
               </div>
               <div class="flex w-full justify-between pr-1 -mt-0.5 text-[9px] font-bold uppercase text-text-tertiary opacity-60">

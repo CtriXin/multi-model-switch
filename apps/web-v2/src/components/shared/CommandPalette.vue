@@ -103,7 +103,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKey))
             <input
               v-model="query"
               @keydown="handleKeydown"
-              placeholder="搜索模型基因、功能命令..."
+              placeholder="搜索模型、功能命令..."
               class="flex-1 bg-transparent text-lg font-bold text-text-primary placeholder:text-text-tertiary/30 outline-none"
               autofocus
             />
@@ -168,7 +168,7 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKey))
             <!-- Empty State -->
             <div v-if="!totalResultsCount" class="py-12 flex flex-col items-center justify-center text-center">
               <div class="p-4 bg-white/5 rounded-full mb-4 opacity-20"><Bot :size="40" stroke-width="1" /></div>
-              <p class="text-sm font-black text-text-tertiary uppercase tracking-[0.2em]">没有发现匹配的指令或基因</p>
+              <p class="text-sm font-black text-text-tertiary uppercase tracking-[0.2em]">没有发现匹配的指令或模型</p>
             </div>
           </div>
         </div>

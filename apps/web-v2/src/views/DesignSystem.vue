@@ -34,8 +34,8 @@ const semanticColors = [
 ]
 
 const modelColors = [
-  { name: 'Claude', key: 'claude', color: '#f59e0b' },
-  { name: 'OpenAI', key: 'openai', color: '#22c55e' },
+  { name: 'Model Beta', key: 'model-beta', color: '#f59e0b' },
+  { name: 'SparkRing', key: 'sparkring', color: '#22c55e' },
   { name: 'Google', key: 'google', color: '#3b82f6' },
   { name: 'DeepSeek', key: 'deepseek', color: '#8b5cf6' },
   { name: 'Moonshot', key: 'moonshot', color: '#ec4899' },
@@ -519,16 +519,16 @@ const contrastIssues = ref([
             <h2 class="text-lg font-bold text-text-primary mb-4">模型标签</h2>
             <div class="flex flex-wrap gap-2 p-6 rounded-2xl border border-border-default bg-surface-1">
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-2 border border-border-default text-text-primary">
-                <span class="w-2 h-2 rounded-full bg-model-claude"></span>
-                Claude 3.5
+                <span class="w-2 h-2 rounded-full bg-model-beta"></span>
+                Model Beta
               </span>
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-2 border border-border-default text-text-primary">
-                <span class="w-2 h-2 rounded-full bg-model-openai"></span>
-                GPT-4
+                <span class="w-2 h-2 rounded-full bg-model-sparkring"></span>
+                Model Alpha
               </span>
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-2 border border-border-default text-text-primary">
-                <span class="w-2 h-2 rounded-full bg-model-google"></span>
-                Gemini
+                <span class="w-2 h-2 rounded-full bg-model-gamma"></span>
+                Model Gamma
               </span>
               <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-2 border border-border-default text-text-primary">
                 <span class="w-2 h-2 rounded-full bg-model-deepseek"></span>

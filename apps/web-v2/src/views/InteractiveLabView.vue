@@ -142,7 +142,7 @@ function goHome() {
             <div class="mt-4 sm:mt-10 flex items-center justify-between relative z-10">
               <div class="flex items-center gap-1.5">
                 <div class="w-1 h-1 sm:w-1.5 sm:h-1.5 rounded-full bg-accent animate-pulse shadow-[0_0_10px_rgba(var(--color-accent-rgb),0.6)]"></div>
-                <span class="text-[7px] sm:text-[9px] font-black uppercase tracking-widest text-text-quaternary opacity-40 group-hover:opacity-100 transition-opacity">Ready</span>
+                <span class="text-[7px] sm:text-[9px] font-black uppercase tracking-widest text-text-quaternary opacity-40 group-hover:opacity-100 transition-opacity">就绪</span>
               </div>
               <div class="w-6 h-6 sm:w-9 sm:h-9 rounded-full bg-black/5 dark:bg-white/5 flex items-center justify-center group-hover:bg-accent group-hover:text-white transition-all shadow-inner">
                 <ChevronRight :size="14" stroke-width="4" class="sm:hidden" />

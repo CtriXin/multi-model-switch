@@ -56,6 +56,7 @@ export interface ModelSpeedMeta {
   latencyMs: number | null
   status: string
   testedAt: string
+  e2eLatencyMs?: number | null
 }
 
 type SparkringSpeedSource = 'none' | 'live' | 'cache'
@@ -107,7 +108,7 @@ const LAB_PICK_LOG_STORAGE_KEY = 'mms-lab-pick-logs'
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#f59e0b',
-  openai: '#10b981',
+  sparkring: '#10b981',
   google: '#3b82f6',
   deepseek: '#ef4444',
   moonshot: '#0ea5e9',
@@ -249,11 +250,11 @@ function getDailyCounter(
 }
 
 const MOCK_PRESETS: Preset[] = [
-  { id: 'preset-full-demo', name: '全流程演示', models: ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro', 'demo/deepseek-r1'], builtin: true, icon: '🎬' },
-  { id: 'preset-reasoning', name: '深度推理', models: ['demo/claude-sonnet-4', 'demo/deepseek-r1', 'demo/qwen-max'], builtin: true, icon: '🧠' },
-  { id: 'preset-fast', name: '快速响应', models: ['demo/claude-haiku-3.5', 'demo/glm-4.5', 'demo/mistral-large'], builtin: true, icon: '⚡' },
-  { id: 'preset-balanced', name: '均衡搭配', models: ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro', 'demo/qwen-max'], builtin: true, icon: '🎯' },
-  { id: 'preset-resilience', name: '故障演练', models: ['demo/offline-strategy-agent', 'demo/throttled-risk-agent', 'demo/claude-sonnet-4'], builtin: true, icon: '🛠️' },
+  { id: 'preset-full-demo', name: '全流程演示', models: ['demo/model-beta', 'demo/model-alpha', 'demo/model-gamma', 'demo/deepseek-r1'], builtin: true, icon: '🎬' },
+  { id: 'preset-reasoning', name: '深度推理', models: ['demo/model-beta', 'demo/deepseek-r1', 'demo/qwen-max'], builtin: true, icon: '🧠' },
+  { id: 'preset-fast', name: '快速响应', models: ['demo/model-theta', 'demo/glm-4.5', 'demo/mistral-large'], builtin: true, icon: '⚡' },
+  { id: 'preset-balanced', name: '均衡搭配', models: ['demo/model-beta', 'demo/model-alpha', 'demo/model-gamma', 'demo/qwen-max'], builtin: true, icon: '🎯' },
+  { id: 'preset-resilience', name: '故障演练', models: ['demo/offline-strategy-agent', 'demo/throttled-risk-agent', 'demo/model-beta'], builtin: true, icon: '🛠️' },
 ]
 
 export const useAppStore = defineStore('app', () => {
@@ -414,11 +415,16 @@ export const useAppStore = defineStore('app', () => {
     const rightOk = rightSpeed ? isSpeedOk(rightSpeed.status) : false
 
     if (leftOk !== rightOk) return leftOk ? -1 : 1
-    if (leftSpeed?.latencyMs != null && rightSpeed?.latencyMs != null && leftSpeed.latencyMs !== rightSpeed.latencyMs) {
-      return leftSpeed.latencyMs - rightSpeed.latencyMs
+
+    // Prefer e2e latency when available, fall back to server-side latency
+    const leftMs = leftSpeed?.e2eLatencyMs ?? leftSpeed?.latencyMs ?? null
+    const rightMs = rightSpeed?.e2eLatencyMs ?? rightSpeed?.latencyMs ?? null
+
+    if (leftMs != null && rightMs != null && leftMs !== rightMs) {
+      return leftMs - rightMs
     }
-    if (leftSpeed?.latencyMs != null) return -1
-    if (rightSpeed?.latencyMs != null) return 1
+    if (leftMs != null) return -1
+    if (rightMs != null) return 1
     return left.name.localeCompare(right.name)
   }
 
@@ -548,6 +554,27 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function applyE2eSpeedOverrides(overrides: Record<string, number>) {
+    const map = { ...sparkringSpeedMap.value }
+    for (const [modelId, e2eMs] of Object.entries(overrides)) {
+      const key = normalizeSparkringModelId(modelId)
+      if (map[key]) {
+        map[key] = { ...map[key], e2eLatencyMs: e2eMs }
+      }
+    }
+    sparkringSpeedMap.value = map
+  }
+
+  function clearE2eSpeedOverrides() {
+    const map = { ...sparkringSpeedMap.value }
+    for (const key of Object.keys(map)) {
+      if (map[key].e2eLatencyMs != null) {
+        map[key] = { ...map[key], e2eLatencyMs: undefined }
+      }
+    }
+    sparkringSpeedMap.value = map
+  }
+
   async function initialize() {
     if (initialized.value) return
     initialized.value = true
@@ -617,6 +644,15 @@ export const useAppStore = defineStore('app', () => {
     return true
   }
 
+  const MODEL_CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
+  let lastModelsFetchAt = 0
+
+  /** Refresh only if cache is stale (>10min) or no data. For navigation-triggered refreshes. */
+  async function refreshModelsIfStale() {
+    if (models.value.length > 0 && Date.now() - lastModelsFetchAt < MODEL_CACHE_TTL_MS) return
+    await refreshModels()
+  }
+
   async function refreshModels() {
     void refreshRegionHintForToday()
     const providerStore = useProviderStore()
@@ -651,6 +687,7 @@ export const useAppStore = defineStore('app', () => {
     const suppressed = loadSuppressedModelIds()
     models.value = allModels.filter((model) => !suppressed.has(model.id))
     loading.value = false
+    lastModelsFetchAt = Date.now()
 
     if (errors.length) {
       error.value = errors.join('; ')
@@ -854,6 +891,21 @@ export const useAppStore = defineStore('app', () => {
   // Track pending suppressions so we don't show multiple toasts for the same model
   const pendingSuppressions = new Set<string>()
 
+  /** Silently suppress a model until a specific timestamp (no toast). Used by e2e speed jail. */
+  function suppressModelUntil(modelId: string, expiresAt: number) {
+    let data: Record<string, number> = {}
+    try {
+      data = JSON.parse(localStorage.getItem(MODEL_SUPPRESSION_KEY) || '{}')
+    } catch { data = {} }
+    data[modelId] = expiresAt
+    persistSuppressedModelIds(data)
+
+    models.value = models.value.filter((item) => item.id !== modelId)
+    selectedModelIds.value = selectedModelIds.value.filter((id) => id !== modelId)
+    committeeSelectedModelIds.value = committeeSelectedModelIds.value.filter((id) => id !== modelId)
+    ensureCommitteeSelection()
+  }
+
   function suppressModelForToday(modelId: string) {
     const model = models.value.find((item) => item.id === modelId)
     if (!model || pendingSuppressions.has(modelId)) return
@@ -948,6 +1000,7 @@ export const useAppStore = defineStore('app', () => {
     modelsByCategory, initialized, loading, error, preferFree, showHomeEntry, sidebarCollapsed, toggleSidebar,
     initialize,
     refreshModels,
+    refreshModelsIfStale,
     ensureModelsLoaded,
     toggleModel,
     applyPreset,
@@ -958,6 +1011,7 @@ export const useAppStore = defineStore('app', () => {
     pickReplacementModel,
     copySelection,
     ensureCommitteeSelection,
+    suppressModelUntil,
     suppressModelForToday,
     recordFailure,
     recordSlowResponse,
@@ -977,5 +1031,10 @@ export const useAppStore = defineStore('app', () => {
     pickLabModelIds,
     pickLabModelId,
     getLabAutoPool,
+    sparkringSpeedMap,
+    hasVisibleSparkringProvider,
+    ensureSparkringSpeedTestForToday,
+    applyE2eSpeedOverrides,
+    clearE2eSpeedOverrides,
   }
 })

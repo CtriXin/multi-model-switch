@@ -322,7 +322,7 @@ onMounted(() => {
           <div class="space-y-4 pt-2 border-t border-white/5">
             <div class="px-1">
               <p class="text-[10px] font-black text-accent uppercase tracking-[0.2em] mb-1">
-                SparkRing V3 Cinematic Fluid</p>
+                界面视觉效果</p>
               <p class="text-[10px] text-text-tertiary">调整界面磨砂玻璃效果和视觉深度</p>
             </div>
             <div
@@ -370,7 +370,7 @@ onMounted(() => {
             </div>
             <div class="flex items-center gap-2">
               <button @click="providerListCollapsed = !providerListCollapsed"
-                class="text-[10px] font-black uppercase tracking-widest text-text-secondary px-4 py-2 rounded-xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/10 transition-all shadow-sm active:scale-95">{{ providerListCollapsed ? '展开全部' : '收起视图' }}</button>
+                class="text-[10px] font-black uppercase tracking-widest text-text-secondary px-4 py-2 rounded-xl bg-black/[0.02] dark:bg-white/5 border border-black/5 dark:border-white/5 hover:bg-black/[0.05] dark:hover:bg-white/10 transition-all shadow-sm active:scale-95">{{ providerListCollapsed ? '展开全部' : '收起全部' }}</button>
               <div class="h-4 w-px bg-white/10 mx-1"></div>
               <button @click="enableAllProviders"
                 class="p-2 text-text-tertiary hover:text-emerald-400 transition-all active:scale-90"
@@ -461,9 +461,9 @@ onMounted(() => {
                     class="bg-black/[0.03] dark:bg-black/20 rounded-2xl p-4 border border-black/5 dark:border-white/5 space-y-3">
                     <div class="flex items-center justify-between px-1"><span
                         class="text-[9px] font-black uppercase tracking-widest text-text-tertiary opacity-60">账户池
-                        Pool</span><button @click="addAccount(provider.id)"
+                        </span><button @click="addAccount(provider.id)"
                         class="px-3 py-1 rounded-lg bg-text-primary dark:bg-white text-surface-1 dark:text-black text-[9px] font-black uppercase tracking-widest hover:bg-accent hover:text-white transition-all active:scale-95 shadow-lg shadow-black/20">新增
-                        Key</button></div>
+                        密钥</button></div>
                     <div class="space-y-1.5">
                       <ProviderAccountItem v-for="account in getProviderAccounts(provider.id)"
                         :key="account.id" :provider="provider" :account="account"
@@ -473,8 +473,8 @@ onMounted(() => {
                   <div class="px-1 space-y-3">
                     <div class="flex items-center gap-2">
                       <div class="w-1 h-2 bg-purple-500 rounded-full"></div><span
-                        class="text-[9px] font-black uppercase tracking-widest text-text-tertiary opacity-60">可用模型基因
-                        Registry</span>
+                        class="text-[9px] font-black uppercase tracking-widest text-text-tertiary opacity-60">可用模型
+                        库</span>
                     </div>
                     <div class="flex flex-wrap gap-1.5">
                       <div v-for="m in provider.customModels" :key="m"
@@ -488,7 +488,7 @@ onMounted(() => {
                       </div>
                       <div v-if="addingModelProvider === provider.id"
                         class="flex gap-1.5 items-center bg-black/5 dark:bg-white/5 p-0.5 rounded-lg border border-accent/30 animate-scale-in">
-                        <input v-model="newModelId" placeholder="ID..."
+                        <input v-model="newModelId" placeholder="模型 ID..."
                           class="w-20 text-[10px] bg-transparent border-none px-1.5 py-0.5 text-text-primary font-mono focus:outline-none"
                           @keydown.enter="addCustomModel" />
                         <button @click="addCustomModel" :disabled="!newModelId.trim()"
@@ -558,10 +558,9 @@ onMounted(() => {
           <div
             class="relative w-full max-w-lg glass-v3 rounded-[32px] border border-white/10 p-8 shadow-2xl animate-scale-in">
             <div v-if="showImport" class="space-y-6">
-              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导入配置 (Import
-                JSON)</h3>
+              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导入配置</h3>
               <textarea v-model="importText" rows="8"
-                placeholder='{"version":1, "providers": [...]}'
+                placeholder='在此粘贴配置 JSON...'
                 class="w-full text-xs bg-black/20 border border-white/10 rounded-2xl p-4 text-text-primary font-mono focus:outline-none focus:border-accent resize-none" />
               <div class="flex gap-3">
                 <button @click="handleImport" :disabled="!importText.trim()"
@@ -572,7 +571,7 @@ onMounted(() => {
             </div>
 
             <div v-if="showExport" class="space-y-6">
-              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导出配置 (Export JSON)</h3>
+              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">导出配置</h3>
               <p class="text-xs text-text-tertiary">导出自定义通道配置（不含 API Key 和内置通道），可用于备份或迁移到其他设备。</p>
               <textarea v-model="exportOutput" rows="10" readonly
                 class="w-full text-xs bg-black/20 border border-white/10 rounded-2xl p-4 text-text-primary font-mono focus:outline-none resize-none" />
@@ -587,14 +586,14 @@ onMounted(() => {
             </div>
 
             <div v-if="showAddProvider" class="space-y-6">
-              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">添加自定义通道</h3>
+              <h3 class="text-xl font-black text-text-primary uppercase tracking-tight">添加自定义模型通道</h3>
               <div class="grid grid-cols-1 gap-4">
-                <input v-model="newProvider.id" placeholder="唯一标识 (e.g., my-api)"
+                <input v-model="newProvider.id" placeholder="唯一标识 (如: my-api)"
                   class="w-full text-sm bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-text-primary font-mono" />
-                <input v-model="newProvider.name" placeholder="显示名称 (e.g., 我的转发站)"
+                <input v-model="newProvider.name" placeholder="显示名称 (如: 我的转发站)"
                   class="w-full text-sm bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-text-primary" />
                 <input v-model="newProvider.baseUrl"
-                  placeholder="Base URL (e.g., https://api.proxy.com/v1)"
+                  placeholder="API 地址 (如: https://api.proxy.com/v1)"
                   class="w-full text-sm bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-text-primary font-mono" />
               </div>
               <div class="flex gap-3">
@@ -620,12 +619,12 @@ onMounted(() => {
           </h2>
           <div class="space-y-3 text-xs">
             <div class="w-full flex items-center justify-between">
-              <span class="text-text-tertiary font-black uppercase tracking-widest">版本 Version</span>
+              <span class="text-text-tertiary font-black uppercase tracking-widest">版本</span>
               <span class="text-text-primary font-black">v0.5.5</span>
             </div>
             <div class="flex items-center justify-between"><span
-                class="text-text-tertiary font-black uppercase tracking-widest">内核 Core</span><span
-                class="text-text-primary font-medium italic">Multi-Model Cinematic Switcher</span>
+                class="text-text-tertiary font-black uppercase tracking-widest">内核</span><span
+                class="text-text-primary font-medium italic">多模型智能切换引擎</span>
             </div>
           </div>
         </div>

@@ -59,7 +59,7 @@ const modelsByProvider = computed(() => {
 const providers = computed(() => Object.keys(modelsByProvider.value))
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? 'Premium' : tier === 1 ? 'Standard' : 'Basic'
+  return tier === 2 ? '旗舰' : tier === 1 ? '标准' : '基础'
 }
 
 function tierClass(tier: number, isActive: boolean): string {
@@ -109,6 +109,10 @@ function clearFilters() {
   filterVision.value = false
 }
 
+async function restoreAllModels() {
+  await appStore.restoreSuppressedModels()
+}
+
 function scrollToProvider(provider: string) {
   const el = document.getElementById(`provider-section-${provider}`)
   if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
@@ -150,7 +154,7 @@ function formatSpeedTestedAt(value: string | null) {
 }
 
 onMounted(() => {
-  appStore.refreshModels()
+  appStore.refreshModelsIfStale()
 })
 </script>
 
@@ -168,8 +172,8 @@ onMounted(() => {
               <Cpu :size="16" stroke-width="3" />
             </div>
             <div class="min-w-0">
-              <h1 class="text-sm font-black text-text-primary truncate tracking-tight uppercase">模型基因库</h1>
-              <p class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">Model Registry & Connectivity</p>
+              <h1 class="text-sm font-black text-text-primary truncate tracking-tight uppercase">模型库</h1>
+              <p class="text-[9px] text-text-tertiary font-black uppercase tracking-widest opacity-50 hidden sm:block">模型管理与接入</p>
             </div>
           </div>
         </div>
@@ -201,26 +205,27 @@ onMounted(() => {
           <!-- Filter Controls (Refined V3 Panel) -->
           <div v-if="appStore.models.length" class="flex flex-wrap items-center justify-between gap-6 px-2">
             <div class="flex items-center gap-4">
-              <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-50">{{ filteredModels.length }} / {{ appStore.models.length }} Models Matching</p>
-              <button @click="clearFilters" class="text-[9px] font-black text-accent uppercase tracking-widest hover:underline underline-offset-4">Reset Registry</button>
+              <p class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-50">{{ filteredModels.length }} / {{ appStore.models.length }} 个模型匹配</p>
+              <button @click="clearFilters" class="text-[9px] font-black text-accent uppercase tracking-widest hover:underline underline-offset-4">重置筛选</button>
+              <button v-if="suppressedCount > 0" @click="restoreAllModels" class="text-[9px] font-black text-amber-500 uppercase tracking-widest hover:underline underline-offset-4">恢复 {{ suppressedCount }} 个隐藏模型</button>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 bg-black/[0.03] dark:bg-white/5 p-2 rounded-[20px] border border-black/5 dark:border-white/5">
               <button @click="filterFree = !filterFree" class="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border"
                       :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-white dark:bg-black/20 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5'">
-                <DollarSign :size="12" stroke-width="4" /> 免费基因 
+                <DollarSign :size="12" stroke-width="4" /> 免费 
                 <component :is="filterFree ? ToggleRight : ToggleLeft" :size="14" stroke-width="3" />
               </button>
               <div class="w-px h-4 bg-black/5 dark:bg-white/10 mx-1"></div>
               <button v-for="tag in (['basic', 'std', 'pro'] as const)" :key="tag" @click="toggleTierFilter(tag)"
                       class="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border"
                       :class="hasTierFilter(tag) ? 'bg-accent text-white border-accent shadow-lg shadow-accent/20' : 'bg-white dark:bg-black/20 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5'">
-                {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '主力' : '基础' }}
+                {{ tag === 'pro' ? '旗舰' : tag === 'std' ? '标准' : '基础' }}
               </button>
               <div class="w-px h-4 bg-black/5 dark:bg-white/10 mx-1"></div>
               <button @click="filterVision = !filterVision" class="flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border"
                       :class="filterVision ? 'bg-purple-500 text-white border-purple-500 shadow-lg shadow-purple-500/20' : 'bg-white dark:bg-black/20 text-text-tertiary border-black/5 dark:border-white/5 hover:bg-black/5 dark:hover:bg-white/5'">
-                <Image :size="12" stroke-width="3" /> 视觉支持
+                <Image :size="12" stroke-width="3" /> 视觉
               </button>
             </div>
           </div>
@@ -236,9 +241,9 @@ onMounted(() => {
                 <div class="min-w-0">
                   <h2 class="text-xl font-black text-text-primary uppercase tracking-tight truncate">{{ provider }}</h2>
                   <div class="flex items-center gap-2 mt-1">
-                    <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-60">{{ modelsByProvider[provider].length }} 基因已就绪</span>
+                    <span class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-60">{{ modelsByProvider[provider].length }} 个模型可用</span>
                     <span v-if="provider === 'sparkring' && appStore.sparkringSpeedTestedAt" class="text-[10px] font-black text-text-tertiary uppercase tracking-widest opacity-50">
-                      延迟样本 {{ formatSpeedTestedAt(appStore.sparkringSpeedTestedAt) }}
+                      测速于 {{ formatSpeedTestedAt(appStore.sparkringSpeedTestedAt) }}
                     </span>
                   </div>
                 </div>
@@ -265,8 +270,8 @@ onMounted(() => {
                     <div class="flex flex-wrap gap-1.5">
                       <span class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors"
                             :class="tierClass(model.tier, appStore.selectedModelIds.includes(model.id))">{{ tierLabel(model.tier) }}</span>
-                      <span v-if="model.free" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">Free</span>
-                      <span v-if="model.supportsVision" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">Vision</span>
+                      <span v-if="model.free" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">免费</span>
+                      <span v-if="model.supportsVision" class="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">视觉</span>
                       <span v-if="model.provider === 'sparkring' && getModelSpeedMeta(model)" class="inline-flex items-center gap-1.5 pl-1">
                         <span class="h-1.5 w-1.5 rounded-full" :class="speedDotClass(model)" />
                         <span class="text-[9px] font-black uppercase tracking-wider"
@@ -281,7 +286,7 @@ onMounted(() => {
                   </div>
 
                   <div class="grid grid-cols-3 gap-2 p-4 rounded-2xl bg-black/[0.03] dark:bg-black/20 border border-black/5 dark:border-white/5 mb-6 transition-colors group-hover:bg-black/[0.06] dark:group-hover:bg-black/30">
-                    <div class="text-center space-y-1"><p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">Context</p><div class="flex items-center justify-center gap-1"><Gauge :size="10" class="text-accent opacity-40" /><span class="text-[11px] font-mono font-bold text-text-primary">{{ formatContext(model.contextWindow) }}</span></div></div>
+                    <div class="text-center space-y-1"><p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">上下文</p><div class="flex items-center justify-center gap-1"><Gauge :size="10" class="text-accent opacity-40" /><span class="text-[11px] font-mono font-bold text-text-primary">{{ formatContext(model.contextWindow) }}</span></div></div>
                     <div class="text-center space-y-1 border-x border-black/5 dark:border-white/5"><p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">In (1M)</p><span class="text-[11px] font-mono font-bold text-text-primary">{{ formatPrice(model.priceInput) }}</span></div>
                     <div class="text-center space-y-1"><p class="text-[8px] font-black text-text-tertiary uppercase tracking-widest opacity-70">Out (1M)</p><span class="text-[11px] font-mono font-bold text-text-primary">{{ formatPrice(model.priceOutput) }}</span></div>
                   </div>

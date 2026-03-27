@@ -67,9 +67,13 @@ function closeRoleDetail() {
 }
 
 // 长按事件处理
+let pendingRoleId: string | null = null
+
 function onRoleTouchStart(role: PersonaDefinition, event: TouchEvent | MouseEvent) {
   if (longPressTimer) clearTimeout(longPressTimer)
+  pendingRoleId = role.id
   longPressTimer = setTimeout(() => {
+    pendingRoleId = null
     showRoleDetailModal(role)
     longPressTimer = null
   }, LONG_PRESS_DURATION)
@@ -79,15 +83,21 @@ function onRoleTouchEnd() {
   if (longPressTimer) {
     clearTimeout(longPressTimer)
     longPressTimer = null
+    // 短按 → 切换角色选择
+    if (pendingRoleId) {
+      toggleRole(pendingRoleId)
+      pendingRoleId = null
+    }
   }
 }
 
 function onRoleTouchMove() {
-  // 移动手指时取消长按
+  // 移动手指时取消长按和短按
   if (longPressTimer) {
     clearTimeout(longPressTimer)
     longPressTimer = null
   }
+  pendingRoleId = null
 }
 
 const selectedPackId = ref<string | null>(null)
