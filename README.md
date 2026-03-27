@@ -340,6 +340,57 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
   - [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)
   - 后续新增 `official OAuth` 来源时，默认应同时评估并补上 `claude bridge`
 
+## TUI 操作指南
+
+### 首页（模型族群选择）
+
+启动 `mms`（或 `mms claude` / `mms codex`）后进入首页：
+
+- `←` / `→`：切换 CLI Tab（claude / codex）
+- `↑` / `↓`：选择项目
+- `Enter`：进入子模型列表
+- `P`：从 Provider 角度浏览（选择 Provider → 查看该 Provider 下所有模型）
+- `O`：接入新通道
+- `Q` / `Esc`：退出
+
+首页顶部会显示 `⏱ 上次使用的模型`（按 CLI 分别记录），按 Enter 可直接复用上次配置。
+
+### 子模型选择
+
+进入模型族群后：
+
+- `↑` / `↓`：选择模型
+- `Enter`：确认选择
+- `+` / `-`：切换当前模型的 Provider
+- `P`：弹出当前模型可用的 Provider 列表
+- `Esc`：返回上一级
+
+### Provider 浏览（P 键入口）
+
+从首页按 `P` 进入：
+
+- `↑` / `↓`：选择 Provider
+- `Enter`：查看该 Provider 下的所有模型
+- `Esc`：返回首页
+
+选中 Provider 后进入模型列表：
+
+- `↑` / `↓`：选择模型
+- `Enter`：确认，进入启动确认页
+- `B`：返回 Provider 列表
+- `Esc` / `Q`：退出
+
+### 启动确认页
+
+- `Enter`：启动
+- `Tab`：切换 bypass 模式（claude/codex 默认开启 bypass，按 Tab 关闭）
+- `B`：返回上一级
+- `Q`：取消退出
+
+### Bypass 模式
+
+`claude` 和 `codex` 启动时默认开启 bypass 模式（跳过审批沙箱），确认页标题会显示 `⚠ BYPASS 确认`。按 `Tab` 可切换回正常模式。
+
 ## 本地统计
 
 MMS 会把本地启动统计写到：
