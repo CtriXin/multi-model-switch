@@ -157,6 +157,19 @@ def _record_bridge_fallback(provider_id, model_name):
         _save_bridge_mode_cache(cache)
 
 
+_OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
+
+_CODEX_CLI_INSTRUCTIONS_PREFIX = (
+    "You are Codex, based on GPT-5. You are running as a coding agent"
+    " in the Codex CLI on a user's computer."
+)
+
+
+def _is_openai_model(model_name):
+    """检测模型是否为 OpenAI 系列（GPT/o1/o3/o4）。"""
+    return isinstance(model_name, str) and model_name.lower().startswith(_OPENAI_MODEL_PREFIXES)
+
+
 def _needs_chatcompletions_bridge(provider_id, model_name):
     """检查 (provider, model) 是否已知需要 chatcompletions bridge。"""
     cache = _load_bridge_mode_cache()
@@ -1422,6 +1435,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             if slot.get("key"):
                 gateway_key = slot["key"]
 
+        # ── GPT-on-Claude 桥接：检测 OpenAI 模型 → Responses 格式转发 ──
+        resolved_model = str(payload.get("model") or "")
+        openai_url = getattr(self.server, "openai_url", None)
+        if _is_openai_model(resolved_model) and openai_url and path_bare == "/v1/messages":
+            self._forward_as_responses(payload, resolved_model, openai_url, gateway_key, should_record_speed)
+            return
+
         # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容
         _gw = gateway_url.rstrip("/")
         if _gw.endswith("/v1"):
@@ -1519,6 +1539,108 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             try:
                 self._json(502, {"type": "error", "error": {"type": "api_error", "message": str(exc)}})
+            except BrokenPipeError:
+                return
+
+
+    def _forward_as_responses(self, anthropic_payload, model_name, openai_url, api_key, should_record_speed):
+        """GPT-on-Claude: 将 Anthropic Messages 转为 Responses 格式发到 OpenAI 端点。
+
+        流程:
+        1. Anthropic Messages payload → Responses payload（复用 _build_codex_payload）
+        2. 伪装 Codex CLI 头通过 CRS 验证
+        3. 发到 openai_url/v1/responses（强制 stream=true）
+        4. 收到 Responses SSE → _AnthropicTranslator 转回 Anthropic SSE → 返回 Claude Code
+        """
+        responses_payload = _build_codex_payload(anthropic_payload, model_name)
+        # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
+        orig_instructions = responses_payload.get("instructions", "")
+        if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
+            responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
+        responses_payload["stream"] = True
+        # CRS 上游不支持 max_output_tokens
+        responses_payload.pop("max_output_tokens", None)
+
+        # 构造 target URL
+        _oai = openai_url.rstrip("/")
+        if _oai.endswith("/v1"):
+            target_url = _oai + "/responses"
+        else:
+            target_url = _oai + "/v1/responses"
+
+        # 稳定 session_id 用于 prompt_cache_key 命中缓存
+        bridge_token = getattr(self.server, "bridge_token", "")
+        session_id = f"mms-gpt-bridge-{bridge_token[-16:]}" if len(bridge_token) > 16 else f"mms-gpt-bridge-{uuid.uuid4().hex}"
+
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "codex_cli_rs/0.38.0 (Mac OS 26.2.0; arm64) xterm-256color",
+            "originator": "codex_cli_rs",
+            "session_id": session_id,
+        }
+
+        client_wants_stream = bool(anthropic_payload.get("stream"))
+        metrics_model = model_name
+        started_ms = _now_ms()
+        first_byte_ms = None
+        output_tokens = None
+        translator = _AnthropicTranslator(model_name)
+
+        try:
+            with httpx.stream("POST", target_url, headers=fwd_headers, json=responses_payload, timeout=300) as response:
+                if response.status_code >= 400:
+                    body = response.read().decode("utf-8", errors="replace")
+                    try:
+                        err = json.loads(body)
+                    except (json.JSONDecodeError, ValueError):
+                        err = {"type": "error", "error": {"type": "api_error", "message": body or f"GPT bridge upstream: {response.status_code}"}}
+                    self._json(response.status_code, err)
+                    return
+
+                if client_wants_stream:
+                    # 流式：Responses SSE → Anthropic SSE → Claude Code
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    for event_type, event_data in _iter_sse_lines(response):
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        for ant_event_name, ant_event_payload in translator.process(event_type, event_data):
+                            line = f"event: {ant_event_name}\ndata: {json.dumps(ant_event_payload, ensure_ascii=False)}\n\n"
+                            self.wfile.write(line.encode("utf-8"))
+                            self.wfile.flush()
+                    self.close_connection = True
+                else:
+                    # 非流式：收集完整 Responses SSE → 合成 Anthropic JSON
+                    for event_type, event_data in _iter_sse_lines(response):
+                        if first_byte_ms is None:
+                            first_byte_ms = _now_ms()
+                        translator.process(event_type, event_data)
+                    final = translator.final_message()
+                    body_out = json.dumps(final, ensure_ascii=False).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body_out)))
+                    self.end_headers()
+                    self.wfile.write(body_out)
+
+            if should_record_speed and first_byte_ms:
+                _record_bridge_speed(
+                    metrics_model,
+                    started_ms=started_ms,
+                    first_byte_ms=first_byte_ms,
+                    output_tokens=output_tokens,
+                    provider_scope=getattr(self.server, "speed_scope", None),
+                )
+        except BrokenPipeError:
+            return
+        except Exception as exc:
+            try:
+                self._json(502, {"type": "error", "error": {"type": "api_error", "message": f"GPT bridge error: {exc}"}})
             except BrokenPipeError:
                 return
 
@@ -2355,6 +2477,7 @@ def gateway_claude_bridge(
     speed_scope=None,
     route_status_paths=None,
     slot_configs=None,
+    openai_url=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -2382,6 +2505,7 @@ def gateway_claude_bridge(
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
     server.slot_configs = slot_configs or {}
+    server.openai_url = openai_url
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

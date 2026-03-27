@@ -613,11 +613,13 @@ def export_model_routes(cfg=None, force=False):
         if not models:
             models = list(provider_def.get("fallback_models") or [])
 
+        openai_url = (ctx.get("openai_base_url") or "").strip()
         pname = _provider_label(ctx)
         providers_info.append({
             "provider_id": pid,
             "provider_name": pname,
             "anthropic_base_url": anthropic_url,
+            "openai_base_url": openai_url,
             "api_key": ctx["api_key"],
             "role": role,
             "priority": priority,
@@ -636,13 +638,16 @@ def export_model_routes(cfg=None, force=False):
             normalized = str(model_name or "").strip()
             if not normalized or normalized in routes:
                 continue
-            routes[normalized] = {
+            route_entry = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
                 "api_key": pinfo["api_key"],
                 "provider_id": pinfo["provider_id"],
                 "priority": pinfo["priority"],
                 "role": pinfo["role"],
             }
+            if pinfo.get("openai_base_url"):
+                route_entry["openai_base_url"] = pinfo["openai_base_url"]
+            routes[normalized] = route_entry
 
     # 写入文件
     output = {
