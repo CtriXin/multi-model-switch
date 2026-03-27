@@ -577,6 +577,9 @@ def launch_claude(model_info, runtime, once=False):
 
         # GPT-on-Claude: 获取 OpenAI URL 供 bridge 转发 GPT 模型
         _gpt_openai_url = _openai_base_url(runtime) or None
+        # Claude Code 拒绝非 claude-* 模型名，GPT 场景下用合法壳名给 env，
+        # bridge 的 heavy_model 仍是真实 GPT 模型名（由 bridge 层替换后转发）。
+        _env_model = "claude-sonnet-4-6" if (_gpt_openai_url and _is_gpt_model(probe_model)) else probe_model
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -598,10 +601,10 @@ def launch_claude(model_info, runtime, once=False):
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
-                    heavy_model=probe_model,
+                    heavy_model=_env_model,
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
-                    selected_model=probe_model,
+                    selected_model=_env_model,
                 )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
@@ -627,8 +630,8 @@ def launch_claude(model_info, runtime, once=False):
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
-                    heavy_model=probe_model,
-                    selected_model=probe_model,
+                    heavy_model=_env_model,
+                    selected_model=_env_model,
                 )
             state_home = None
 
@@ -676,10 +679,10 @@ def launch_claude(model_info, runtime, once=False):
                 runtime,
                 base_url=bridge_cfg["base_url"],
                 auth_token=bridge_cfg["api_key"],
-                heavy_model=probe_model,
+                heavy_model=_env_model,
                 medium_model=lb_medium or None,
                 light_model=lb_light or None,
-                selected_model=probe_model,
+                selected_model=_env_model,
             )
             parts = [f"heavy: {probe_model}"]
             if lb_medium:
@@ -711,10 +714,10 @@ def launch_claude(model_info, runtime, once=False):
                     runtime,
                     base_url=bridge_cfg["base_url"],
                     auth_token=bridge_cfg["api_key"],
-                    heavy_model=probe_model,
+                    heavy_model=_env_model,
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
-                    selected_model=probe_model,
+                    selected_model=_env_model,
                 )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
@@ -725,14 +728,14 @@ def launch_claude(model_info, runtime, once=False):
                 state_home = None
             else:
                 console.print("[red]✗ 无 OpenAI 端点，无法启用智能路由[/red]")
-                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=probe_model)
+                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model)
                 state_home = None
                 cleanup_ctx = None
 
         else:
             # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
             console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
-            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=probe_model)
+            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model)
             state_home = None
             cleanup_ctx = None
 
