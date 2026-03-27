@@ -286,7 +286,7 @@ function scrollToProviderSection(provider: string) {
           <!-- Header -->
           <div class="flex items-center justify-between px-8 pb-6 shrink-0">
             <div>
-              <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型基因' : '选择模型基因' }}</h2>
+              <h2 class="text-2xl font-black tracking-tight text-text-primary uppercase">{{ replacementMode ? '替换当前模型' : '选择模型' }}</h2>
               <p class="text-[10px] font-black text-text-tertiary mt-1 uppercase tracking-[0.2em]">
                 {{ replacementMode
                   ? `正在替换 ${appStore.getModel(props.request?.oldModelId || '')?.name ?? ''}`
@@ -311,7 +311,7 @@ function scrollToProviderSection(provider: string) {
           <div class="flex items-center gap-3 px-8 pb-4 shrink-0 overflow-x-auto no-scrollbar scroll-smooth">
             <button @click="toggleFilterFree" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
                     :class="filterFree ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20' : 'text-text-tertiary border-white/5 hover:bg-white/5'">
-              <DollarSign :size="12" /> 免费基因
+              <DollarSign :size="12" /> 免费
               <component :is="filterFree ? ToggleRight : ToggleLeft" :size="12" />
             </button>
             <button @click="toggleTierFilter('basic')" class="shrink-0 flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border whitespace-nowrap"
@@ -340,7 +340,7 @@ function scrollToProviderSection(provider: string) {
           <div class="px-8 pb-4 shrink-0">
             <div class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-black/5 dark:bg-white/5 border border-white/5 focus-within:border-accent/30 transition-all">
               <Search :size="18" class="text-text-tertiary" />
-              <input v-model="search" placeholder="搜索模型基因 ID..." class="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary/40 outline-none font-medium" />
+              <input v-model="search" placeholder="搜索模型 ID..." class="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary/40 outline-none font-medium" />
             </div>
           </div>
 
@@ -399,7 +399,7 @@ function scrollToProviderSection(provider: string) {
                   </button>
                 </div>
               </template>
-              <p v-if="!filtered.length" class="text-xs font-bold text-text-tertiary text-center py-12 uppercase tracking-[0.2em]">没有匹配的模型基因</p>
+              <p v-if="!filtered.length" class="text-xs font-bold text-text-tertiary text-center py-12 uppercase tracking-[0.2em]">没有匹配的模型</p>
             </div>
           </div>
         </div>

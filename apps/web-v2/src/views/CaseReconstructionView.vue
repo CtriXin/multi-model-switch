@@ -23,7 +23,7 @@ const culpritId = ref<string | null>(null)
 const motiveId = ref<string | null>(null)
 const explanation = ref('')
 const timelineFactIds = ref<string[]>([])
-const selectedEvidenceId = ref('')
+const selected证据Id = ref('')
 const selectedFactId = ref('')
 const evidencePairs = ref<Array<{ evidenceId: string; factId: string }>>([])
 
@@ -91,7 +91,7 @@ const evidencePairFactPool = computed(() =>
   store.unlockedFacts.filter((fact) => fact.category !== 'context'),
 )
 
-const selectedTimelineFacts = computed(() =>
+const selected时间线Facts = computed(() =>
   timelineFactIds.value
     .map((factId) => store.factMap.get(factId))
     .filter((f): f is NonNullable<typeof f> => Boolean(f)),
@@ -127,7 +127,7 @@ const canSubmit = computed(() =>
 )
 
 const gradeLabel = computed(() => {
-  const grade = store.latestVerdict?.grade
+  const grade = store.latest裁决?.grade
   if (grade === 'optimal') return 'Optimal'
   if (grade === 'hidden') return 'Hidden'
   if (grade === 'normal') return 'Cleared'
@@ -461,7 +461,7 @@ function categoryTone(category: string) {
                 <div class="text-[9px] font-black uppercase tracking-[0.24em] text-text-tertiary">Case Notes</div>
               </div>
               <p class="mt-2 text-xs leading-relaxed text-text-secondary">
-                这里不再单独做大块 `Fact Registry`，而是只保留最近解锁的关键笔记。
+                这里不再单独做大块 `事实记录`，而是只保留最近解锁的关键笔记。
               </p>
 
               <div class="mt-4 space-y-3">
@@ -631,7 +631,7 @@ function categoryTone(category: string) {
                   <div class="min-w-0 flex-1 text-sm font-black text-text-primary">
                     {{ evidenceLabelMap.get(pair.evidenceId) }}
                   </div>
-                  <div class="text-[11px] font-bold text-text-tertiary">supports</div>
+                  <div class="text-[11px] font-bold text-text-tertiary">支持</div>
                   <div class="min-w-0 flex-1 text-sm font-black text-text-primary">
                     {{ factLabelMap.get(pair.factId) }}
                   </div>
@@ -718,7 +718,7 @@ function categoryTone(category: string) {
             <div class="rounded-3xl border border-white/10 bg-[#132136] p-5 text-white">
               <div class="flex items-center justify-between gap-3">
                 <div>
-                  <div class="text-[9px] font-black uppercase tracking-[0.24em] text-[#f7d27a]">Verdict</div>
+                  <div class="text-[9px] font-black uppercase tracking-[0.24em] text-[#f7d27a]">裁决</div>
                   <div class="mt-2 text-2xl font-black tracking-tight">
                     {{ store.latestVerdict.success ? '交卷成立' : '交卷未通过' }}
                   </div>
@@ -734,22 +734,22 @@ function categoryTone(category: string) {
 
             <div class="grid gap-3 lg:grid-cols-4">
               <div class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Culprit</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">凶手</div>
                 <div class="mt-2 text-xl font-black text-text-primary">{{ store.latestVerdict.score.culprit }}</div>
                 <div class="mt-1 text-xs text-text-secondary">{{ store.latestVerdict.culpritCorrect ? '指认正确' : '指认错误' }}</div>
               </div>
               <div class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Timeline</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">时间线</div>
                 <div class="mt-2 text-xl font-black text-text-primary">{{ store.latestVerdict.score.timeline }}</div>
-                <div class="mt-1 text-xs text-text-secondary">accuracy {{ Math.round(store.latestVerdict.timelineAccuracy * 100) }}%</div>
+                <div class="mt-1 text-xs text-text-secondary">准确率 {{ Math.round(store.latestVerdict.timelineAccuracy * 100) }}%</div>
               </div>
               <div class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Evidence</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">证据</div>
                 <div class="mt-2 text-xl font-black text-text-primary">{{ store.latestVerdict.score.evidence }}</div>
-                <div class="mt-1 text-xs text-text-secondary">accuracy {{ Math.round(store.latestVerdict.evidenceAccuracy * 100) }}%</div>
+                <div class="mt-1 text-xs text-text-secondary">准确率 {{ Math.round(store.latestVerdict.evidenceAccuracy * 100) }}%</div>
               </div>
               <div class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Motive</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">动机</div>
                 <div class="mt-2 text-xl font-black text-text-primary">{{ store.latestVerdict.score.motive }}</div>
                 <div class="mt-1 text-xs text-text-secondary">{{ store.latestVerdict.motiveCorrect ? '动机正确' : '动机错误' }}</div>
               </div>
@@ -757,7 +757,7 @@ function categoryTone(category: string) {
 
             <div class="grid gap-3 lg:grid-cols-2">
               <article class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Missing Core Facts</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">缺失核心事实</div>
                 <div class="mt-3 flex flex-wrap gap-2">
                   <span
                     v-for="factId in store.latestVerdict.missingCoreFactIds"
@@ -774,30 +774,30 @@ function categoryTone(category: string) {
                   </span>
                 </div>
                 <div
-                  v-if="store.latestVerdict.contradictions.length"
+                  v-if="store.latestVerdict.矛盾点.length"
                   class="mt-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-3 text-xs leading-relaxed text-red-500"
                 >
                   <div class="flex items-center gap-2 font-black uppercase tracking-[0.18em]">
                     <AlertCircle :size="12" :stroke-width="3.5" />
-                    contradictions
+                    矛盾点
                   </div>
-                  <div class="mt-2">{{ store.latestVerdict.contradictions.join(' ') }}</div>
+                  <div class="mt-2">{{ store.latestVerdict.矛盾点.join(' ') }}</div>
                 </div>
               </article>
 
               <article class="rounded-3xl border border-white/10 bg-white/60 p-4 dark:bg-white/[0.03]">
-                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">Ground Truth</div>
+                <div class="text-[9px] font-black uppercase tracking-[0.22em] text-text-tertiary">真相</div>
                 <div class="mt-3 space-y-2 text-sm leading-relaxed text-text-secondary">
                   <div>
-                    <span class="font-black text-text-primary">Culprit:</span>
+                    <span class="font-black text-text-primary">凶手：</span>
                     {{ store.witnessMap.get(store.latestVerdict.revealedTruth.culpritId)?.name }}
                   </div>
                   <div>
-                    <span class="font-black text-text-primary">Motive:</span>
+                    <span class="font-black text-text-primary">动机：</span>
                     {{ store.motiveMap.get(store.latestVerdict.revealedTruth.motiveId)?.label }}
                   </div>
                   <div>
-                    <span class="font-black text-text-primary">Timeline:</span>
+                    <span class="font-black text-text-primary">时间线：</span>
                   </div>
                   <ol class="space-y-1">
                     <li

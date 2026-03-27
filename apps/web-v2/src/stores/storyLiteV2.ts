@@ -23,7 +23,7 @@ import {
 } from '@/features/play-modes/story-lite-v2'
 
 const ROLE_ORDER: StoryLiteV2Role[] = ['guide', 'partner', 'variable']
-const DEMO_MODEL_IDS = ['demo/claude-sonnet-4', 'demo/gpt-4.1', 'demo/gemini-2.5-pro']
+const DEMO_MODEL_IDS = ['demo/model-beta', 'demo/model-alpha', 'demo/model-gamma']
 const STORAGE_KEY = 'mms-story-lite-v2-session'
 
 interface SavedSession {
@@ -156,7 +156,7 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
       const raw = modelId.split('/')[1] || modelId
       return raw
         .split('-')
-        .map((part) => part.toUpperCase() === 'GPT' ? 'GPT' : part.charAt(0).toUpperCase() + part.slice(1))
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ')
     }
     return appStore.getModel(modelId)?.name || modelId
@@ -642,6 +642,9 @@ export const useStoryLiteV2Store = defineStore('storyLiteV2', () => {
         round.value += 1
         resetResponseState('done')
         await streamPremise(scene.premise, 25)
+      } else if (!currentScene.value) {
+        // Restore previous scene so user doesn't see blank screen
+        currentScene.value = sceneBeforeChoice
       }
     } finally {
       processing.value = false

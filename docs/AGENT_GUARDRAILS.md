@@ -36,6 +36,60 @@
 
 如果任务涉及这些文件，agent 必须先说明改动边界，再动手。
 
+## 保险窗口：private / privateopenai / newapi / CRS
+
+以下链路现在进入“保险窗口”，默认按受保护集成面处理：
+
+- `MMS -> private(/claude) -> CRS`
+- `MMS -> privateopenai(/openai) -> CRS`
+- `MMS -> xin/newapi(4001) -> CRS`
+
+只要改动会碰到下面任一项，就不能只看“本地代码改得小不小”，必须先回答“会不会影响这条链路”：
+
+- provider 的 `models_endpoint`
+- `extra_models` / `hidden_models`
+- model probe / probe cache / fallback model logic
+- `Codex` / `Claude` header 透传
+- `channel_affinity` / sticky key source
+- `/claude`、`/openai`、`/responses`、`/models` 的协议假设
+
+## 这条链路的额外禁止事项
+
+没有用户明确要求时，不要做下面这些事：
+
+- 把 `privateopenai` 从 manual model-list 模式改回默认 `/models` 探测
+- 改动 `private(/claude)` 的 alias 补丁行为，却不验证 `claude-sonnet-4-6` / `claude-opus-4-6`
+- 改动 `Codex` / `Claude` 上游识别头，却不验证 CRS 侧 `ua` / sticky 行为
+- 改动 `newapi channel_affinity` 规则或 body/header 映射，却不验证 `metadata.user_id` / `prompt_cache_key`
+
+## 这条链路的最小确认问题
+
+任何人或 agent 在动手前，至少要先确认这 4 个问题：
+
+1. 这次会不会改变模型列表的来源：`remote` / `fallback` / `manual` / alias patch？
+2. 这次会不会改变 `private`、`privateopenai`、`xin/newapi` 任一条链的 `/models`、`/responses`、`/messages` 行为？
+3. 这次会不会改变 sticky-session 的 key source、header 透传，或 CRS 对客户端类型的识别？
+4. 如果线上坏了，能不能立刻用现有 smoke 文档复现并回溯？
+
+## 这条链路的最低验证
+
+除了通用验证外，这条链路至少补一条对应 smoke：
+
+- `private(/claude)`：
+  - `/claude/v1/models`
+  - `/claude/v1/messages?beta=true`
+- `privateopenai(/openai)`：
+  - manual model-list 场景下确认不再请求 `/openai/v1/models`
+  - 手工补充模型仍然可见
+- `xin/newapi(4001)`：
+  - sticky-session 与 CRS 账号命中
+  - `User-Agent` / `x-app` / `anthropic-*` 或 `Codex` 相关头仍被识别
+
+统一追溯入口：
+
+- `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
+- `docs/CLI_PROVIDER_COMPAT_QA.md`
+
 ## Claude 额外限制
 
 `Claude` 在本仓库内默认采用更保守模式：

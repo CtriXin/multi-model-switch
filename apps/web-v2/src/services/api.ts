@@ -22,6 +22,7 @@ export interface StreamChatOptions {
   model: string
   messages: ChatMessage[]
   signal?: AbortSignal
+  max_tokens?: number
 }
 
 export class ApiError extends Error {
@@ -187,6 +188,7 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
       model: apiModel,
       messages,
       stream: true,
+      ...(options.max_tokens != null ? { max_tokens: options.max_tokens } : {}),
     }),
     signal,
   })
@@ -225,6 +227,44 @@ export async function* streamChat(options: StreamChatOptions): AsyncGenerator<st
       }
     }
   }
+}
+
+/**
+ * Non-streaming ping to measure end-to-end latency (phone→server→provider→server→phone).
+ * Sends a minimal request (max_tokens=1) and returns wall-clock elapsed ms.
+ */
+export async function pingModelLatency(options: {
+  provider: ProviderConfig
+  apiKey: string
+  model: string
+  signal?: AbortSignal
+}): Promise<number> {
+  const apiModel = resolveApiModelId(options.provider, options.model)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${options.apiKey}`,
+  }
+
+  const start = performance.now()
+  const res = await fetch(`${options.provider.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: apiModel,
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 1,
+      stream: false,
+    }),
+    signal: options.signal,
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw buildApiError(res.status, body)
+  }
+
+  await res.json()
+  return performance.now() - start
 }
 
 /** Raw model entry from the API */
@@ -278,8 +318,8 @@ const ALWAYS_FREE_PROVIDER_IDS = new Set([
 const TIER_PREMIUM_KEYWORDS = [
   'opus',
   'sonnet',
-  'gpt-4',
-  'gpt-5',
+  'frontier-alpha',
+  'frontier-beta',
   'o1',
   'o3',
   'o4',
@@ -667,16 +707,16 @@ function deriveTags(raw: ApiModel): string[] {
 // ─── Mock Provider ───────────────────────────────────────────────
 
 const MOCK_MODELS: ModelMeta[] = [
-  { id: 'demo/claude-sonnet-4', name: 'Claude Sonnet 4 (Demo)', provider: 'anthropic', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 200000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
-  { id: 'demo/gpt-4.1', name: 'GPT-4.1 (Demo)', provider: 'openai', category: 'frontier', tier: 2, priceInput: 2, priceOutput: 8, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 128000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
-  { id: 'demo/gemini-2.5-pro', name: 'Gemini 2.5 Pro (Demo)', provider: 'google', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 5, tags: ['reasoning', 'vision', 'recommended'], contextWindow: 1000000, free: true, supportsVision: true, supportsNativeWebSearch: true, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/model-beta', name: 'Model Beta (Demo)', provider: 'demo', category: 'frontier', tier: 2, priceInput: 3, priceOutput: 15, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 200000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/model-alpha', name: 'Model Alpha (Demo)', provider: 'demo', category: 'frontier', tier: 2, priceInput: 2, priceOutput: 8, tags: ['reasoning', 'coding', 'vision', 'recommended'], contextWindow: 128000, free: false, supportsVision: true, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/model-gamma', name: 'Model Gamma (Demo)', provider: 'demo', category: 'frontier', tier: 2, priceInput: 1.25, priceOutput: 5, tags: ['reasoning', 'vision', 'recommended'], contextWindow: 1000000, free: true, supportsVision: true, supportsNativeWebSearch: true, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
   { id: 'demo/deepseek-r1', name: 'DeepSeek R1 (Demo)', provider: 'deepseek', category: 'reasoning', tier: 1, priceInput: 0.55, priceOutput: 2.2, tags: ['reasoning', 'coding'], contextWindow: 64000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
   { id: 'demo/qwen-max', name: 'Qwen Max (Demo)', provider: 'qwen', category: 'frontier', tier: 1, priceInput: 0.9, priceOutput: 3.8, tags: ['reasoning', 'coding'], contextWindow: 131072, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
   { id: 'demo/mistral-large', name: 'Mistral Large (Demo)', provider: 'mistral', category: 'reasoning', tier: 1, priceInput: 0.8, priceOutput: 2.8, tags: ['reasoning', 'coding', 'fast'], contextWindow: 32000, free: false, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
   { id: 'demo/glm-4.5', name: 'GLM-4.5 (Demo)', provider: 'zhipu', category: 'frontier', tier: 1, priceInput: 0.75, priceOutput: 2.6, tags: ['reasoning', 'fast'], contextWindow: 128000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
-  { id: 'demo/claude-haiku-3.5', name: 'Claude Haiku 3.5 (Demo)', provider: 'anthropic', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.2, tags: ['fast', 'coding'], contextWindow: 200000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
-  { id: 'demo/offline-strategy-agent', name: 'Strategy Agent (Offline Demo)', provider: 'openai', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
-  { id: 'demo/throttled-risk-agent', name: 'Risk Agent (Rate Limited Demo)', provider: 'anthropic', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/model-theta', name: 'Model Theta (Demo)', provider: 'demo', category: 'fast', tier: 0, priceInput: 0.25, priceOutput: 1.2, tags: ['fast', 'coding'], contextWindow: 200000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: true, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/offline-strategy-agent', name: 'Strategy Agent (Offline Demo)', provider: 'demo', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
+  { id: 'demo/throttled-risk-agent', name: 'Risk Agent (Rate Limited Demo)', provider: 'demo', category: 'reasoning', tier: 1, priceInput: 0.6, priceOutput: 2.2, tags: ['reasoning'], contextWindow: 64000, free: true, supportsVision: false, supportsNativeWebSearch: false, supportsTools: false, capabilitySource: 'manual', capabilityVerifiedAt: '2026-03-17' },
 ]
 
 const MOCK_UNAVAILABLE_MODEL_IDS = new Set(['demo/offline-strategy-agent'])
@@ -728,21 +768,21 @@ function resolveMockProvider(modelId: string): string {
   if (modelId.includes('qwen')) return 'qwen'
   if (modelId.includes('mistral')) return 'mistral'
   if (modelId.includes('glm')) return 'zhipu'
-  return 'openai'
+  return 'other'
 }
 
 function buildGeneralMockResponse(provider: string, prompt: string): string {
   const topic = extractTopic(prompt)
   const providerAngles: Record<string, string[]> = {
     anthropic: ['先收边界。', '先验关键假设。'],
-    openai: ['先拿短反馈。', '先定 owner+时限。'],
+    other: ['先拿短反馈。', '先定 owner+时限。'],
     google: ['先对齐指标。', '先小流量验证。'],
     deepseek: ['先做假设树。', '先定失败信号。'],
     qwen: ['先可交付。', '先拆成两步。'],
     mistral: ['先并行准备。', '先跑低成本实验。'],
     zhipu: ['先曝露依赖。', '先写约束条件。'],
   }
-  const anglePool = providerAngles[provider] ?? providerAngles.openai
+  const anglePool = providerAngles[provider] ?? providerAngles.other
   const angle = anglePool[stableIndex(topic + provider, anglePool.length)]
 
   return [

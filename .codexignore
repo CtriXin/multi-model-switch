@@ -1,0 +1,43 @@
+# ── Build artifacts & binaries ──
+*.a
+*.rlib
+*.rmeta
+*.dylib
+*.so
+*.o
+*.wasm
+*.app
+**/target/
+**/build/
+**/dist/
+**/node_modules/
+
+# ── Sparkring test runtime (每个 83 万行 binary) ──
+sparkring-tests/
+.sparkring/
+
+# ── 旧 worktree 副本（重复的完整代码） ──
+.worktrees/
+apps/worktree-app-store-launch/
+apps/web-v2/uichange-worktree/
+apps/web-v2/*-worktree/
+
+# ── iOS/Xcode build ──
+apps/web-v2/ios/build/
+apps/web-v2/src-tauri/src-tauri/
+apps/web-v2/src-tauri/gen/schemas/
+
+# ── Lock files (大且无用) ──
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+Cargo.lock
+
+# ── AI/cache/config ──
+.claude/
+.ai/
+*.provisionprofile
+
+# ── Docs not needed for coding ──
+docs/archive/
+DESIGN_V3_SPEC.md
