@@ -741,9 +741,12 @@ def launch_claude(model_info, runtime, once=False):
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
     # bridge 在转发时替换成真实模型名（heavy_model / medium_model / light_model）。
+    # GPT-on-Claude: OpenAI 模型名会被 Claude Code 拒绝，必须 skip，
+    # bridge 层的 heavy_model 替换 + _forward_as_responses 会处理实际模型名。
+    _resolved = _resolve_model(model_info) if model_info else ""
     _skip_model = auth_mode == "oauth_bridge" or (
         isinstance(model_info, dict) and (model_info.get("lb_light") or model_info.get("lb_medium"))
-    )
+    ) or (_resolved and _is_gpt_model(_resolved))
 
     if isinstance(model_info, dict):
         if not _skip_model:
