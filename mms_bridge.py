@@ -157,7 +157,7 @@ def _record_bridge_fallback(provider_id, model_name):
         _save_bridge_mode_cache(cache)
 
 
-_OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-")
+_OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -1097,12 +1097,22 @@ def _json_resp_to_sse(body: bytes) -> bytes:
         events.append(f'event: message_start\ndata: {json.dumps({"type": "message_start", "message": start})}\n\n')
         for i, blk in enumerate(content):
             bt = blk.get("type", "text")
-            cb_start = {"type": bt, "text": ""} if bt == "text" else {"type": bt, "thinking": ""}
+            if bt == "text":
+                cb_start = {"type": "text", "text": ""}
+            elif bt == "thinking":
+                cb_start = {"type": "thinking", "thinking": ""}
+            elif bt == "tool_use":
+                cb_start = {"type": "tool_use", "id": blk.get("id", ""), "name": blk.get("name", ""), "input": {}}
+            else:
+                cb_start = {"type": bt}
             events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": i, "content_block": cb_start})}\n\n')
             if bt == "text":
                 events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": i, "delta": {"type": "text_delta", "text": blk.get("text", "")}})}\n\n')
             elif bt == "thinking":
                 events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": i, "delta": {"type": "thinking_delta", "thinking": blk.get("thinking", "")}})}\n\n')
+            elif bt == "tool_use":
+                input_json = json.dumps(blk.get("input", {}))
+                events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": i, "delta": {"type": "input_json_delta", "partial_json": input_json}})}\n\n')
             events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": i})}\n\n')
         events.append(f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": data.get("stop_reason", "end_turn"), "stop_sequence": None}, "usage": {"output_tokens": usage.get("output_tokens", 0)}})}\n\n')
         events.append(f'event: message_stop\ndata: {json.dumps({"type": "message_stop"})}\n\n')
@@ -1120,10 +1130,34 @@ def _json_resp_to_sse(body: bytes) -> bytes:
                   "model": model, "stop_reason": None, "stop_sequence": None,
                   "usage": {"input_tokens": usage.get("prompt_tokens", 0), "output_tokens": 0}}
         events.append(f'event: message_start\ndata: {json.dumps({"type": "message_start", "message": anthro})}\n\n')
-        events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})}\n\n')
-        events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}})}\n\n')
-        events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": 0})}\n\n')
-        events.append(f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": usage.get("completion_tokens", 0)}})}\n\n')
+        idx = 0
+        # 文本内容
+        if text:
+            events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": idx, "content_block": {"type": "text", "text": ""}})}\n\n')
+            events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": idx, "delta": {"type": "text_delta", "text": text}})}\n\n')
+            events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": idx})}\n\n')
+            idx += 1
+        # tool_calls → Anthropic tool_use 块
+        for tc in msg.get("tool_calls", []):
+            fn = tc.get("function", {})
+            tool_id = tc.get("id", f"toolu_{idx}")
+            tool_name = fn.get("name", "")
+            try:
+                tool_input = json.loads(fn.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                tool_input = {}
+            cb = {"type": "tool_use", "id": tool_id, "name": tool_name, "input": {}}
+            events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": idx, "content_block": cb})}\n\n')
+            events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": idx, "delta": {"type": "input_json_delta", "partial_json": json.dumps(tool_input)}})}\n\n')
+            events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": idx})}\n\n')
+            idx += 1
+        # 如果既没有文本也没有 tool_calls，仍然输出空文本块
+        if idx == 0:
+            events.append(f'event: content_block_start\ndata: {json.dumps({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})}\n\n')
+            events.append(f'event: content_block_delta\ndata: {json.dumps({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": ""}})}\n\n')
+            events.append(f'event: content_block_stop\ndata: {json.dumps({"type": "content_block_stop", "index": 0})}\n\n')
+        stop_reason = "tool_use" if msg.get("tool_calls") else "end_turn"
+        events.append(f'event: message_delta\ndata: {json.dumps({"type": "message_delta", "delta": {"stop_reason": stop_reason, "stop_sequence": None}, "usage": {"output_tokens": usage.get("completion_tokens", 0)}})}\n\n')
         events.append(f'event: message_stop\ndata: {json.dumps({"type": "message_stop"})}\n\n')
         return "".join(events).encode()
 
@@ -1448,10 +1482,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             if slot.get("key"):
                 gateway_key = slot["key"]
 
-        # ── GPT-on-Claude 桥接：检测 OpenAI 模型 → Responses 格式转发 ──
+        # ── GPT/非Claude 模型桥接：OpenAI Responses 格式转发 ──
         resolved_model = str(payload.get("model") or "")
         openai_url = getattr(self.server, "openai_url", None)
-        if _is_openai_model(resolved_model) and openai_url and path_bare == "/v1/messages":
+        _is_claude = any(k in resolved_model.lower() for k in ("claude", "opus", "sonnet", "haiku"))
+        if openai_url and path_bare == "/v1/messages" and (_is_openai_model(resolved_model) or not _is_claude):
             self._forward_as_responses(payload, resolved_model, openai_url, gateway_key, should_record_speed)
             return
 
