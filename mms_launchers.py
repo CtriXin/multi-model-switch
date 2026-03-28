@@ -48,6 +48,20 @@ _MODEL_CONTEXT_WINDOWS = {
     # MiniMax — M2.5 为 196K，M2.7 为 200K
     "MiniMax-M2.5": 196_608,
     "MiniMax-M2.7": 200_000,
+    # GPT-5 系列 — 大部分 1M，nano 256K
+    "gpt-5": 1_000_000,
+    "gpt-5-mini": 1_000_000,
+    "gpt-5-nano": 256_000,
+    "gpt-5-codex": 1_000_000,
+    "gpt-5.1-codex": 1_000_000,
+    "gpt-5.1-codex-max": 1_000_000,
+    "gpt-5.1-codex-mini": 1_000_000,
+    "gpt-5.2": 1_000_000,
+    "gpt-5.2-codex": 1_000_000,
+    "gpt-5.3-codex": 1_000_000,
+    "gpt-5.3-codex-spark": 1_000_000,
+    "gpt-5.4": 1_000_000,
+    "gpt-5.4-pro": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 
@@ -1610,11 +1624,11 @@ def _codex_gateway_env(runtime, base_url):
 
 
 def _is_gpt_model(model_name):
-    """Check if a model name is a GPT model (supports Responses API natively)."""
+    """Check if a model name is a GPT/OpenAI model (supports Responses API natively)."""
     if not model_name:
-        return True  # Default to GPT behavior if no model specified
+        return False
     lower = model_name.lower()
-    return any(kw in lower for kw in ("gpt-", "gpt4", "gpt5", "o1", "o3", "o4"))
+    return any(kw in lower for kw in ("gpt-", "gpt4", "gpt5", "o1", "o3", "o4", "codex-"))
 
 
 def _codex_provider_base_url(base_url):
