@@ -37,7 +37,7 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 
 **修复**
 
-- 文件：[ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py#L1269)
+- 文件：[mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py#L1269)
 - 做法：Codex 走 `responses bridge` 时强制 `force_subprocess=True`，保持父 Python 进程活着托管 bridge
 
 **如何确认**
@@ -62,7 +62,7 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 
 **修复**
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L67)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L67)
 - 做法：
   - fallback cache 改为带时间戳的结构
   - 不再信任历史字符串缓存
@@ -86,7 +86,7 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 
 **修复**
 
-- 文件：[ccs_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_core.py#L2358)
+- 文件：[mms_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_core.py#L2358)
 - 做法：
   - 增加负缓存 TTL
   - 失败/空模型结果写盘
@@ -103,7 +103,7 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 
 **修复**
 
-- 文件：[ccs_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_core.py#L3299)
+- 文件：[mms_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_core.py#L3299)
 - 做法：`_provider_options_for_model()` 在 `option_models` 为空时直接跳过该 provider
 
 ### 5. `Codex -> MMS -> CRS/newapi` 会丢失 Codex 标识头，导致上游把请求当成普通 `httpx` 客户端
@@ -135,7 +135,7 @@ bridge 线程挂在原 Python 进程里，父进程一旦被 `exec` 覆盖，bri
 
 **修复**
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L51)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L51)
 - 做法：
   - 为 `responses proxy` 增加白名单式 header 透传
   - 同时覆盖内部 `chat/completions fallback`
@@ -683,7 +683,7 @@ A：有，但这轮已经先补了第一层最关键的 `MMS -> 上游 gateway/C
 
 补丁位置：
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L51)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L51)
 
 这组头不是凭空猜的，而是结合两类信息定的：
 
@@ -793,7 +793,7 @@ A：这轮继续实测后，确认过 3 个具体坑，其中 2 个已经能确�
 
 这轮已修复：
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L893)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L893)
 - 现在会先剥离 query string 再匹配路径
 
 **问题 2：`oauth_bridge` 原来没有 `/v1/models`**
@@ -810,7 +810,7 @@ A：这轮继续实测后，确认过 3 个具体坑，其中 2 个已经能确�
 
 这轮已修复：
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L883)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L883)
 - 现在会返回当前 bridge 暴露的模型列表
 
 **问题 3：`gateway_claude_bridge` 对 `/v1/responses?beta=true` 的翻译不完整**
@@ -833,7 +833,7 @@ A：这轮继续实测后，确认过 3 个具体坑，其中 2 个已经能确�
 
 这轮已修复：
 
-- 文件：[ccs_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_bridge.py#L1138)
+- 文件：[mms_bridge.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_bridge.py#L1138)
 - 现在会在保留 query string 的前提下，把 `/v1/responses` 正确翻译成 `/v1/messages`
 
 ### Q19：`newapi` 默认给 `Claude` 做 sticky 的 `metadata.user_id` 真的是官方请求里会带的吗？
@@ -1085,16 +1085,21 @@ A：会，而且这轮又补了一层“防套娃”。
 这轮已经在 launcher 里补了：
 
 - `MMS_REAL_HOME`
+- `ORIGINAL_HOME`
+- `REAL_HOME`
+- `GH_CONFIG_DIR`
+- gateway 路径下回源真实 `XDG_CONFIG_HOME`
 
 现在的规则是：
 
 - 第一层 `MMS` 启动时显式把真实 home 传下去
 - 后续不管是子 skill、还是第二层 `mms`
 - 共享资源都优先从 `MMS_REAL_HOME` 回源，而不是再从当前隔离 `HOME` 继续推导
+- 像 `gh` 这类依赖 `~/.config` 的工具，会通过回源提示读到真实用户配置
 
 补丁位置：
 
-- 文件：[ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py)
+- 文件：[mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py)
 
 因此当前的结论是：
 

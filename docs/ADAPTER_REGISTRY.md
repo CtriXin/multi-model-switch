@@ -9,7 +9,7 @@
 
 对应代码常量见：
 
-- [ccs_adapter_registry.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_adapter_registry.py)
+- [mms_adapter_registry.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_adapter_registry.py)
 
 直接在 CLI 查看：
 

@@ -411,7 +411,7 @@ All play modes share a common `PlayModeSessionEnvelope` persistence shape and `P
 - After each independently deliverable iteration, ask if user wants to commit
 - Never change default model, default provider, default bridge, or fallback behavior without authorization
 - Never overlap changes across unconfirmed iterations
-- Protected files (ccs_core.py, ccs_launchers.py, etc.) require explicit authorization
+- Protected files (mms_core.py, mms_launchers.py, etc.) require explicit authorization
 
 ### Common pitfalls to avoid
 - Do NOT use `bg-[#0a0a0f]` or any hardcoded dark hex on view roots

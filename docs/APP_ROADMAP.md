@@ -24,7 +24,7 @@
 ## 关键技术决策（待定）
 
 merge 完成后，先做：
-1. 从 `ccs_core.py` 提取 `mms_api.py`（portable layer，约 150 行）
+1. 从 `mms_core.py` 提取 `mms_api.py`（portable layer，约 150 行）
 2. 在此基础上起 FastAPI server，兼顾手机 bridge
 
 App 技术方案暂定：**FastAPI + Web UI → 后续 Tauri wrap**。

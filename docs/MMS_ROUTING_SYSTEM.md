@@ -16,7 +16,7 @@ Claude CLI / Codex CLI
   │  POST /v1/messages
   ▼
 ┌──────────────────────────────────┐
-│         ccs_bridge.py            │
+│         mms_bridge.py            │
 │  (本地 HTTP 代理，拦截所有请求)    │
 │                                  │
 │  1. 提取用户文本                  │
@@ -36,10 +36,10 @@ Provider A   Provider B     （跨 provider 负载）
 
 | 文件 | 职责 |
 |------|------|
-| `ccs_router.py` | 分类引擎：关键词 → LLM → 默认值；model-routes.json 导出 |
-| `ccs_bridge.py` | 本地代理：请求拦截、tier→模型映射、跨 provider 转发 |
-| `ccs_core.py` | Provider role/priority 体系、`_resolve_best_provider()` |
-| `ccs_tui.py` | 负载模式 TUI：slot 编辑、provider 切换 |
+| `mms_router.py` | 分类引擎：关键词 → LLM → 默认值；model-routes.json 导出 |
+| `mms_bridge.py` | 本地代理：请求拦截、tier→模型映射、跨 provider 转发 |
+| `mms_core.py` | Provider role/priority 体系、`_resolve_best_provider()` |
+| `mms_tui.py` | 负载模式 TUI：slot 编辑、provider 切换 |
 
 ---
 
@@ -86,7 +86,7 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 
 ---
 
-## 3. 智能路由分类引擎 (`ccs_router.py`)
+## 3. 智能路由分类引擎 (`mms_router.py`)
 
 ### 3.1 四层分类流程
 
@@ -155,7 +155,7 @@ LLM 连续 N 次（_LEARN_THRESHOLD = 3）对相似 pattern 给出相同高置�
 
 ---
 
-## 4. Bridge 路由集成 (`ccs_bridge.py`)
+## 4. Bridge 路由集成 (`mms_bridge.py`)
 
 ### 4.1 请求处理流程
 
@@ -208,7 +208,7 @@ TUI 选完 3 个 slot 的模型后，`_resolve_best_provider()` 自动为每个 
 
 ---
 
-## 5. 负载模式 TUI (`ccs_tui.py`)
+## 5. 负载模式 TUI (`mms_tui.py`)
 
 ### 5.1 入口
 

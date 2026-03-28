@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ccs_project_store import (
+from mms_project_store import (
     PRIMARY_CONFIG_DIR,
     claude_raw_entry_path,
     claude_state_sessions_root,

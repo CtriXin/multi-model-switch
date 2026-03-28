@@ -1,4 +1,4 @@
-"""MMS/CCS 核心逻辑：交互选择、模型拉取、分类、预设管理"""
+"""MMS 核心逻辑：交互选择、模型拉取、分类、预设管理"""
 
 import sys
 import os
@@ -36,14 +36,14 @@ except ImportError:
     print("缺少依赖，请执行: pip install rich httpx tomli-w")
     sys.exit(1)
 
-from ccs_account_state import seed_claude_state, seed_gemini_state
-from ccs_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
+from mms_account_state import seed_claude_state, seed_gemini_state
+from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 
 console = Console()
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
-    os.environ.get("CCS_CONFIG_DIR", os.path.expanduser("~/.config/ccs")),
+    os.environ.get("MMS_CONFIG_DIR") or os.environ.get("CCS_CONFIG_DIR") or os.path.expanduser("~/.config/mms"),
     "cache",
 )
 _probe_debug_logger = logging.getLogger("probe_debug")
@@ -78,8 +78,11 @@ OVERRIDE_PATHS = [
     os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
 DEFAULT_BASE_URL = "https://your-api.example.com"
-API_URL_ENV_NAME = "CCS_API_BASE_URL"
-API_KEY_ENV_NAME = "CCS_API_KEY"
+API_URL_ENV_NAME = "MMS_API_BASE_URL"
+API_KEY_ENV_NAME = "MMS_API_KEY"
+# Legacy fallback: 旧环境变量仍然生效
+_LEGACY_API_URL_ENV = "CCS_API_BASE_URL"
+_LEGACY_API_KEY_ENV = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
@@ -105,7 +108,6 @@ MODEL_FAMILIES = [
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
-    {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
@@ -441,7 +443,14 @@ def _tps_label(tps_value):
 
 
 def _provider_env_name(provider_id, field):
-    return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
+    return f"MMS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
+
+
+def _provider_env_value(provider_id, field):
+    """读取 provider 环境变量，MMS_PROVIDER_* 优先，fallback 到 CCS_PROVIDER_*。"""
+    sanitized = _sanitize_provider_id(provider_id)
+    return (os.environ.get(f"MMS_PROVIDER_{sanitized}_{field}", "").strip()
+            or os.environ.get(f"CCS_PROVIDER_{sanitized}_{field}", "").strip())
 
 
 def _normalize_provider(provider):
@@ -843,11 +852,19 @@ def _record_usage(runtime, cli_name, model_info):
     entry["last_model"] = model_name
     models = entry.setdefault("models", {})
     models[model_name] = int(models.get(model_name, 0)) + 1
+    # 全局最后一次使用（按 CLI 分桶，供 TUI "上次使用" 展示）
+    last_by_cli = stats.setdefault("last_by_cli", {})
+    last_by_cli[cli_name] = {
+        "cli": cli_name,
+        "model": model_name,
+        "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
+        "last_used_at": _iso_now(),
+    }
     _save_usage_stats(stats)
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
-    """记录场景级启动统计（用于 TUI 上次使用 + 启动次数排名）"""
+    """记录场景级启动统计（用于 TUI 启动次数排名）"""
     if not scene_name or scene_name.startswith("__"):
         return
     stats = _load_usage_stats()
@@ -863,37 +880,28 @@ def _record_scene_usage(scene_name, cli_name, model_info):
     entry["last_used_at"] = _iso_now()
     entry["last_cli"] = cli_name
     entry["last_model"] = model_name
-    # 同时记录全局最后一次使用
-    stats["last_scene"] = scene_name
-    stats["last_cli"] = cli_name
-    stats["last_model"] = model_name
-    stats["last_model_info"] = model_info if isinstance(model_info, dict) else {"model": str(model_info)}
-    stats["last_used_at"] = _iso_now()
+    # 全局 last_* 已由 _record_usage 写入，此处不再重复
     _save_usage_stats(stats)
 
 
 def _get_scene_usage():
-    """获取场景使用统计，返回 (last_info, scene_counts)"""
+    """获取上次使用信息（按 CLI 分桶）+ 场景启动次数，返回 (last_by_cli, scene_counts)"""
     stats = _load_usage_stats()
-    last_info = None
-    if stats.get("last_scene"):
-        last_info = {
-            "scene": stats["last_scene"],
-            "cli": stats.get("last_cli", ""),
-            "model": stats.get("last_model", ""),
-            "model_info": stats.get("last_model_info"),
-            "last_used_at": stats.get("last_used_at", ""),
-        }
     scene_counts = {}
     for name, entry in stats.get("scenes", {}).items():
         scene_counts[name] = entry.get("launches", 0)
-    return last_info, scene_counts
+    return stats.get("last_by_cli", {}), scene_counts
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False):
     _record_usage(runtime, cli_name, model_info)
-    from ccs_launchers import launch_cli
+    from mms_launchers import launch_cli
     launch_cli(cli_name, model_info, runtime, once=once)
+
+
+def _legacy_provider_env_name(provider_id, field):
+    """旧版 CCS_PROVIDER_* 环境变量名，用于 credentials.sh fallback。"""
+    return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
 
 
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
@@ -902,28 +910,36 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     anthropic_base_key = _provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
     api_key_name = _provider_env_name(provider_id, "API_KEY")
     openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
-    base_url = os.environ.get(base_key, "").strip()
-    openai_base_url = os.environ.get(openai_base_key, "").strip()
-    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip()
-    api_key = os.environ.get(api_key_name, "").strip()
-    openai_api_key = os.environ.get(openai_api_key_name, "").strip()
+    # Legacy CCS_PROVIDER_* fallback keys
+    legacy_base_key = _legacy_provider_env_name(provider_id, "BASE_URL")
+    legacy_openai_base_key = _legacy_provider_env_name(provider_id, "OPENAI_BASE_URL")
+    legacy_anthropic_base_key = _legacy_provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
+    legacy_api_key_name = _legacy_provider_env_name(provider_id, "API_KEY")
+    legacy_openai_api_key_name = _legacy_provider_env_name(provider_id, "OPENAI_API_KEY")
+
+    base_url = os.environ.get(base_key, "").strip() or os.environ.get(legacy_base_key, "").strip()
+    openai_base_url = os.environ.get(openai_base_key, "").strip() or os.environ.get(legacy_openai_base_key, "").strip()
+    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip() or os.environ.get(legacy_anthropic_base_key, "").strip()
+    api_key = os.environ.get(api_key_name, "").strip() or os.environ.get(legacy_api_key_name, "").strip()
+    openai_api_key = os.environ.get(openai_api_key_name, "").strip() or os.environ.get(legacy_openai_api_key_name, "").strip()
 
     if provider_id == DEFAULT_PROVIDER_ID:
-        base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip()
-        api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip()
+        base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip() or os.environ.get(_LEGACY_API_URL_ENV, "").strip()
+        api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip() or os.environ.get(_LEGACY_API_KEY_ENV, "").strip()
 
     for credentials_path in (CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
         if not os.path.exists(credentials_path):
             continue
         file_values = _load_env_file(credentials_path)
-        base_url = base_url or file_values.get(base_key, "").strip()
-        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip()
-        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip()
-        api_key = api_key or file_values.get(api_key_name, "").strip()
-        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip()
+        # 先查 MMS_PROVIDER_* 再 fallback 到 CCS_PROVIDER_*
+        base_url = base_url or file_values.get(base_key, "").strip() or file_values.get(legacy_base_key, "").strip()
+        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip() or file_values.get(legacy_openai_base_key, "").strip()
+        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip() or file_values.get(legacy_anthropic_base_key, "").strip()
+        api_key = api_key or file_values.get(api_key_name, "").strip() or file_values.get(legacy_api_key_name, "").strip()
+        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip() or file_values.get(legacy_openai_api_key_name, "").strip()
         if provider_id == DEFAULT_PROVIDER_ID:
-            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
-            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
+            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_URL_ENV, "").strip()
+            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_KEY_ENV, "").strip()
 
     config_path = _active_config_path()
     if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(config_path):
@@ -1779,7 +1795,7 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
 
 
 def _display_provider_model_table(provider, probe):
-    from ccs_speed_stats import get_speed_entry
+    from mms_speed_stats import get_speed_entry
 
     table = Table(title=f"{provider.get('name', provider.get('id'))} · 模型列表", show_lines=True)
     table.add_column("模型", style="cyan")
@@ -2030,7 +2046,7 @@ def _warm_model_request(provider, model_name):
     use_anthropic = "anthropic_messages" in protocols and "claude" in model_name.lower()
     try:
         if use_anthropic:
-            from ccs_launchers import _resolve_anthropic_base_url
+            from mms_launchers import _resolve_anthropic_base_url
 
             base_url, _method = _resolve_anthropic_base_url(provider, probe_model=model_name)
             if not base_url:
@@ -2316,7 +2332,7 @@ def run_connect_wizard(cfg):
     action_id = None
     if _use_tui():
         try:
-            from ccs_tui import select_connect_tui
+            from mms_tui import select_connect_tui
         except ImportError:
             select_connect_tui = None
         if select_connect_tui is not None:
@@ -2618,6 +2634,19 @@ def _apply_provider_model_patch(provider, base_result):
             continue
         model_sources[model_id] = "derived_alias"
         effective_models.append(model_id)
+
+    # 过滤 claude- 前缀国产别名和旧版 Claude 模型
+    _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
+    _CLAUDE_KEEP = {
+        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    }
+    effective_models = [
+        m for m in effective_models
+        if not (m.startswith("claude-") and any(kw in m.lower() for kw in _DOMESTIC_KW))
+        and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
+    ]
 
     hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
     if hidden_requested:
@@ -2930,7 +2959,7 @@ def _select_provider_interactive(cfg, current_provider_id):
 def _pick_recovery_actions(findings, actions):
     if _use_tui():
         try:
-            from ccs_tui import select_actions_tui
+            from mms_tui import select_actions_tui
         except ImportError:
             select_actions_tui = None
         if select_actions_tui is not None:
@@ -3231,7 +3260,7 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
             total_per_family.append(count)
         family_labels = [f"{family} ({total_per_family[i]})" for i, (family, _) in enumerate(groups)]
         if use_tui:
-            from ccs_tui import select_model_tui
+            from mms_tui import select_model_tui
             selected_label = select_model_tui(family_labels, title=f"为 {cli_name} 选择模型品牌")
             if selected_label is None:
                 return (None, None) if is_aggregated else None
@@ -3267,7 +3296,7 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
             count = len(provider_map[key])
             provider_labels.append(f"{label} ({count})")
         if use_tui:
-            from ccs_tui import select_model_tui
+            from mms_tui import select_model_tui
             selected_label = select_model_tui(provider_labels, title=f"{selected_family} · 选择 Provider")
             if selected_label is None:
                 return (None, None) if is_aggregated else None
@@ -3297,7 +3326,7 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
 
     # --- Step 3: 选 Model ---
     if use_tui:
-        from ccs_tui import select_model_tui
+        from mms_tui import select_model_tui
         model = select_model_tui(family_models, title=f"{selected_family} · 选择子模型")
     else:
         model = None
@@ -3975,7 +4004,7 @@ def _select_scene_model_info(scene_name, scene, use_tui=False):
 
     option_lines = [_variant_line(variant) for variant in variants]
     if use_tui:
-        from ccs_tui import select_model_tui
+        from mms_tui import select_model_tui
         selected = select_model_tui(option_lines, title=f"{scene_name}：选择档位")
         if selected is None:
             return None
@@ -4083,7 +4112,7 @@ def check_cli_installed(cli_name):
 
 
 def select_cli(cli_names=None):
-    from ccs_installer import check_and_offer_install
+    from mms_installer import check_and_offer_install
     cli_names = cli_names or CLI_NAMES
     if not cli_names:
         console.print("[red]当前没有可用的 CLI。请先检查 provider 配置和模型探测结果。[/red]")
@@ -4159,9 +4188,9 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
 
 def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
-    from ccs_tui import select_family_tui, select_submodel_tui, confirm_tui
-    from ccs_tui import select_load_balance_tui, save_lb_history
-    from ccs_launchers import launch_cli, get_export_env
+    from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
+    from mms_tui import select_load_balance_tui, save_lb_history
+    from mms_launchers import launch_cli, get_export_env
 
     def _safe_tui_call(fn, *args, **kwargs):
         try:
@@ -4196,17 +4225,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             families_by_cli, families_detail = _rebuild_families()
             _families_dirty = False
 
-        # 获取上次使用信息
-        last_info, _ = _get_scene_usage()
-        last_used = None
-        if last_info and last_info.get("model"):
-            last_used = {
-                "model": last_info["model"],
-                "cli": last_info.get("cli", ""),
-                "provider": "",
-            }
+        # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
+        last_by_cli, _ = _get_scene_usage()
 
-        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_used)
+        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_by_cli)
 
         if result == "fallback":
             return False
@@ -4229,6 +4251,53 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
                 _families_dirty = True
             continue
+
+        # ── Provider 浏览 ──
+        if action_type == "provider_browse":
+            from mms_tui import select_provider_browse_tui, select_provider_models_tui
+            # 构建可用 provider 列表（当前 CLI 支持的、有 api_key 的）
+            browse_providers = []
+            seen_ids = set()
+            for prov, _cached in _provider_candidates(current_cfg, current_provider, default_models):
+                pid = prov.get("id", DEFAULT_PROVIDER_ID)
+                if pid in seen_ids:
+                    continue
+                if not prov.get("enabled", True):
+                    continue
+                if not _provider_supports_cli_name(prov, cli):
+                    continue
+                if not prov.get("api_key"):
+                    continue
+                seen_ids.add(pid)
+                browse_providers.append({
+                    "id": pid,
+                    "name": _provider_label(prov),
+                    "role": prov.get("role", "auto"),
+                    "priority": prov.get("priority", 100),
+                })
+            if not browse_providers:
+                console.print("[yellow]没有可用的 Provider[/yellow]")
+                continue
+            prov_result = _safe_tui_call(select_provider_browse_tui, browse_providers)
+            if prov_result is None or prov_result == "__interrupt__":
+                continue
+            selected_pid, selected_pname = prov_result
+            # 获取该 provider 的完整上下文和模型列表
+            selected_prov = resolve_provider_context(current_cfg, selected_pid)
+            file_cached = _load_probe_file_cache(selected_pid, allow_stale=True)
+            cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
+            prov_models = _provider_effective_models(selected_prov, cached_models, current_cfg)
+            if not prov_models:
+                console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
+                continue
+            model_result = _safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
+            if model_result is None:
+                continue  # B 返回 provider 列表
+            if model_result == "__exit__":
+                return True  # Esc 完全退出
+            model_info = model_result
+            runtime_runtime = selected_prov
+            # fall through to confirm
 
         # ── 负载模式 ──
         if action_type == "load_balance":
@@ -4293,7 +4362,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         # ── 设置 ──
         elif action_type == "settings":
-            from ccs_tui import select_settings_tui, select_provider_mgmt_tui
+            from mms_tui import select_settings_tui, select_provider_mgmt_tui
             settings_action = _safe_tui_call(select_settings_tui)
             if settings_action == "__interrupt__":
                 return True
@@ -4320,13 +4389,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     _families_dirty = True
                     # 自动重新生成 routes
                     try:
-                        from ccs_router import export_model_routes
+                        from mms_router import export_model_routes
                         export_model_routes(current_cfg, force=True)
                     except Exception:
                         pass
             elif settings_action == "routes_export":
                 try:
-                    from ccs_router import export_model_routes
+                    from mms_router import export_model_routes
                     path = export_model_routes(current_cfg, force=True)
                     if path:
                         console.print(f"[green]✓ 已导出 {path}[/green]")
@@ -4390,7 +4459,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 _families_dirty = True
                 # 静默重新生成 routes
                 try:
-                    from ccs_router import export_model_routes
+                    from mms_router import export_model_routes
                     export_model_routes(current_cfg, force=True)
                 except Exception:
                     pass
@@ -4405,12 +4474,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
                 continue
             # fall through to confirm
-        else:
+        elif action_type not in ("provider_browse", "load_balance", "last", "family"):
             continue
 
         # ── 公共：确认页 + 启动 ──
         if not check_cli_installed(cli):
-            from ccs_installer import check_and_offer_install
+            from mms_installer import check_and_offer_install
             if not check_and_offer_install(cli):
                 return True
 
@@ -4426,7 +4495,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             continue
         if bypass:
             runtime_runtime["bypass"] = True
-        _record_scene_usage("__family__", cli, clean_model_info)
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
@@ -4435,7 +4503,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
 def handle_export(cli_name, provider, apply=False):
     """输出指定 CLI 的 export 命令，或写入独立 env 文件。"""
-    from ccs_launchers import get_export_env
+    from mms_launchers import get_export_env
 
     if cli_name not in CLI_NAMES:
         console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
@@ -5468,7 +5536,7 @@ def _session_display_id(item):
 
 
 def _handle_session_ls(cli_name):
-    from ccs_session_index import list_indexed_sessions
+    from mms_session_index import list_indexed_sessions
 
     rows = list_indexed_sessions(cli_name=cli_name)
     if not rows:
@@ -5496,7 +5564,7 @@ def _handle_session_ls(cli_name):
 
 
 def _handle_session_info(session_id, cli_name):
-    from ccs_session_index import get_indexed_session
+    from mms_session_index import get_indexed_session
 
     item = get_indexed_session(session_id, cli_name=cli_name)
     if item is None:
@@ -5665,17 +5733,17 @@ def main():
             handle_config(cfg, sys.argv[2:])
             return
         if command == "chat":
-            from ccs_chat import chat_main
+            from mms_chat import chat_main
 
             chat_main(_load_command_config(), sys.argv[2:])
             return
         if command == "discuss":
-            from ccs_discuss import discuss_main
+            from mms_discuss import discuss_main
 
             discuss_main(_load_command_config(), sys.argv[2:])
             return
         if command == "usage":
-            from ccs_usage import usage_main
+            from mms_usage import usage_main
 
             usage_main(_load_command_config(), sys.argv[2:])
             return
@@ -5692,7 +5760,7 @@ def main():
             handle_cache_command(sys.argv[2:])
             return
         if command == "routes":
-            from ccs_router import routes_main
+            from mms_router import routes_main
 
             routes_main(_load_command_config(), sys.argv[2:])
             return
@@ -5702,7 +5770,7 @@ def main():
             raise SystemExit(handle_test_command(sys.argv[2:], subcommand_name=command))
 
     if len(sys.argv) >= 2 and sys.argv[1] == "discuss":
-        from ccs_discuss import discuss_main
+        from mms_discuss import discuss_main
 
         cfg = load_config()
         if cfg is None:
@@ -5756,7 +5824,7 @@ def main():
 
     # --install
     if args.install:
-        from ccs_installer import install_cli
+        from mms_installer import install_cli
         install_cli(args.install)
         return
 
@@ -5771,7 +5839,7 @@ def main():
     role = normalize_user_role(cfg.get("user", {}).get("role", MODE_ALL))
     recommend = cfg.get("recommend", {}).get("models", [])
 
-    from ccs_launchers import launch_cli
+    from mms_launchers import launch_cli
 
     # --presets
     if args.presets:
@@ -5866,7 +5934,7 @@ def main():
                     console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                     return
                 if not check_cli_installed(cli):
-                    from ccs_installer import check_and_offer_install
+                    from mms_installer import check_and_offer_install
                     if not check_and_offer_install(cli):
                         return
                 console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
@@ -5890,7 +5958,7 @@ def main():
                 console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                 return
             if not check_cli_installed(cli):
-                from ccs_installer import check_and_offer_install
+                from mms_installer import check_and_offer_install
                 check_and_offer_install(cli)
             if _uses_native_account_entry(runtime, cli):
                 console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
@@ -5920,7 +5988,7 @@ def main():
                 console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
                 return
             if not check_cli_installed(cli):
-                from ccs_installer import check_and_offer_install
+                from mms_installer import check_and_offer_install
                 if not check_and_offer_install(cli):
                     return
             if _uses_native_account_entry(runtime, cli):
@@ -6057,7 +6125,7 @@ def main():
         return
 
     if not check_cli_installed(cli):
-        from ccs_installer import check_and_offer_install
+        from mms_installer import check_and_offer_install
         if not check_and_offer_install(cli):
             return
 
