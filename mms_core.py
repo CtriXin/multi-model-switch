@@ -2604,14 +2604,6 @@ def _derived_model_aliases(base_models):
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
         aliases.append("claude-opus-4-6")
-    # Hive agent aliases: give domestic models a claude- prefix so Claude Code SDK
-    # routes them through the full agent loop (tool use, file I/O, multi-turn).
-    for model_id in base_models:
-        if model_id.startswith("claude-") or model_id.startswith("gpt-") or model_id.startswith("gemini-"):
-            continue
-        alias = f"claude-{model_id}"
-        if alias not in base_models and alias not in aliases:
-            aliases.append(alias)
     return aliases
 
 
@@ -2642,6 +2634,19 @@ def _apply_provider_model_patch(provider, base_result):
             continue
         model_sources[model_id] = "derived_alias"
         effective_models.append(model_id)
+
+    # 过滤 claude- 前缀国产别名和旧版 Claude 模型
+    _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
+    _CLAUDE_KEEP = {
+        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    }
+    effective_models = [
+        m for m in effective_models
+        if not (m.startswith("claude-") and any(kw in m.lower() for kw in _DOMESTIC_KW))
+        and not (m.startswith("claude-") and m not in _CLAUDE_KEEP)
+    ]
 
     hidden_applied = [model_id for model_id in effective_models if model_id in hidden_requested]
     if hidden_requested:
