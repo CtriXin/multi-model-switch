@@ -179,6 +179,39 @@
   - 只要原生路径稳定，再默认评估并补上 `claude bridge`
   - 如果没有稳定 CLI / SDK / backend，就继续按 `provider_api` 落地
 
+## Q&A
+
+### Q: GPT-on-Claude (Claude 里用 GPT-5) 为什么每次对话都发送全量历史，不能增量？
+
+**A:** 这是上游 CRS (Claude Relay Service) 的限制，不是 MMS 的问题。
+
+**背景**
+- MMS 的 `privateopenai` provider 指向 CRS (`crs.adsconflux.xyz/openai`)
+- CRS 的 OpenAI 账户是 **ChatGPT OAuth** 类型，走 `chatgpt.com/backend-api/codex/responses`
+- 不是标准 OpenAI API (`api.openai.com/v1/responses`)
+
+**关键差异**
+
+| 特性 | ChatGPT OAuth (CRS) | 标准 OpenAI API |
+|------|---------------------|-----------------|
+| 上游 URL | `chatgpt.com/backend-api/codex/responses` | `api.openai.com/v1/responses` |
+| `previous_response_id` | ❌ 不支持 | ✅ 支持 |
+| 存储 Response | ❌ 不存储 | ✅ 存储 |
+| Prompt Cache 可见性 | ❌ `cached_tokens: 0` | ✅ 正常统计 |
+| Stream | ✅ 支持 | ✅ 支持 |
+| `/responses/compact` | ✅ 支持但不存 | N/A |
+
+**结论**
+- 使用 CRS 的 OpenAI 账户时，GPT-on-Claude 只能以全量 history 模式工作
+- 如需增量优化（`previous_response_id`），需要标准 OpenAI API key
+- MMS 代码已移除 `previous_response_id` 参数（commit `fb30485`），避免发送到不支持的 endpoint
+
+**参考**
+- MindKeeper Recipe: `crs-openai-oauth-limitation`
+- 恢复口令: `dst-20260327-u0crvi`
+
+---
+
 更完整的来源公司/adapter 基线见：
 
 - [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)

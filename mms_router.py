@@ -40,8 +40,8 @@ _LEARN_THRESHOLD = 3
 # ── 内置默认关键词 ──
 
 _BUILTIN_GUARDRAIL_FILES = {
-    "ccs_core", "ccs_launchers", "ccs_bridge", "ccs_router", "ccs_tui",
-    "ccs_adapter_registry", "ccs_account_state",
+    "mms_core", "mms_launchers", "mms_bridge", "mms_router", "mms_tui",
+    "mms_adapter_registry", "mms_account_state",
     "auth", "schema", "migration", "security", "config.toml",
 }
 
@@ -543,7 +543,7 @@ import time as _time
 MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
 _MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
 
-# role 权重复用 ccs_core 的定义
+# role 权重复用 mms_core 的定义
 _EXPORT_ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 
 
@@ -556,7 +556,7 @@ def export_model_routes(cfg=None, force=False):
     Returns:
         dict: {model_name: {anthropic_base_url, api_key, provider_id, priority, role}}
     """
-    from ccs_core import (
+    from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
         ROLE_WEIGHTS, DEFAULT_PRIORITY,
@@ -632,11 +632,25 @@ def export_model_routes(cfg=None, force=False):
     providers_info.sort(key=lambda p: p["sort_key"])
 
     # 模型 claim：高优先级 provider 先 claim
+    # 过滤上游 gateway 吐出的 claude- 前缀国产模型别名（如 claude-glm-5、claude-kimi-k2.5）
+    _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
+    # 只保留最新一代 Claude 模型，过滤旧版（3.x、4-1、4-20250514 等）
+    _CLAUDE_KEEP = {
+        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    }
     routes = {}
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
             normalized = str(model_name or "").strip()
             if not normalized or normalized in routes:
+                continue
+            # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
+            if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
+                continue
+            # 旧版 Claude 模型 → 跳过，只保留白名单
+            if normalized.startswith("claude-") and normalized not in _CLAUDE_KEEP:
                 continue
             route_entry = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],

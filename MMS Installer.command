@@ -10,7 +10,7 @@ if [ ! -f "$INSTALL_SCRIPT" ]; then
 fi
 
 echo "===================================="
-echo "  MMS 安装器（兼容 ccs）"
+echo "  MMS 安装器"
 echo "===================================="
 echo ""
 echo "将执行："
@@ -25,7 +25,7 @@ set -e
 echo ""
 if [ "$status" -eq 0 ]; then
     echo "安装完成。以后可直接输入：mms"
-    echo "兼容旧习惯时，也可以继续输入：ccs"
+    echo "兼容命令：ccs 仍可使用"
 else
     echo "安装失败，退出码：$status"
 fi

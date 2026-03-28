@@ -1,4 +1,4 @@
-"""CCS curses TUI：箭头键交互选择器 — v2 品类模式"""
+"""MMS curses TUI：箭头键交互选择器 — v2 品类模式"""
 
 import curses
 import json
@@ -153,7 +153,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
     Args:
         families_by_cli: dict[str, list[dict]] — cli_name -> [{family, count}]
         cli_names: list[str] — ["claude", "codex"]
-        last_used: dict or None — {"model": str, "cli": str, "provider": str}
+        last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
 
     Returns:
         ("family", cli_name, family_name) — 选了某个品类
@@ -189,11 +189,10 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
 
             # 构建虚拟列表
             items = []  # (type, data, label)
-            has_last = (last_used and last_used.get("cli") == cli
-                        and last_used.get("model"))
+            cli_last = (last_used or {}).get(cli)
+            has_last = cli_last and cli_last.get("model")
             if has_last:
-                prov_tag = f"  via {last_used.get('provider', '')}" if last_used.get('provider') else ""
-                items.append(("last", last_used, f"⏱ 上次  {last_used['model']}{prov_tag}"))
+                items.append(("last", cli_last, f"⏱ 上次  {cli_last['model']}"))
                 items.append(("sep", None, ""))
 
             for fam in families:
@@ -278,7 +277,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
                 _safe_addstr(stdscr, y, content_pad, line, attr, max_w=inner_w)
 
             # Footer
-            footer = "←→ 切CLI  ↑↓ 选择  Enter 展开  O 接入  Q 退出"
+            footer = "←→ 切CLI  ↑↓ 选择  Enter 展开  P Provider  O 接入  Q 退出"
             _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
                          curses.color_pair(1) | curses.A_BOLD)
 
@@ -308,6 +307,8 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
                     return ("settings", cli, None)
             elif key in (ord('o'), ord('O')):
                 return ("connect", cli, None)
+            elif key in (ord('p'), ord('P')):
+                return ("provider_browse", cli, None)
             elif key in (ord('q'), ord('Q'), 27):
                 return None
 
@@ -1053,6 +1054,172 @@ def select_settings_tui():
         return None
 
 
+# ── Provider 浏览 TUI（首页 P 键入口） ──────────────────────
+
+def select_provider_browse_tui(providers):
+    """Provider 列表选择。
+
+    Args:
+        providers: list[dict] — [{"id", "name", "role", "priority"}, ...]
+
+    Returns:
+        (provider_id, provider_name) — 选中的 provider
+        None — 取消
+    """
+    if not providers:
+        return None
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        scroll = 0
+
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+
+            w = max(48, min(max_w - 2, int(max_w * 0.75)))
+            visible = max_y - 6
+            h = min(len(providers) + 4, max_y - 2)
+            if h < 6:
+                h = 6
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+            pad = sx + 3
+
+            _draw_box(stdscr, sy, sx, h, w, "选择 Provider")
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            for i in range(scroll, min(scroll + visible, len(providers))):
+                y = sy + 2 + i - scroll
+                p = providers[i]
+                prefix = " ▸ " if i == idx else "   "
+                name = p.get("name", p.get("id", "?"))
+                role = p.get("role", "auto")
+                pri = p.get("priority", 100)
+
+                if i == idx:
+                    attr = curses.color_pair(3) | curses.A_BOLD
+                elif role == "primary":
+                    attr = curses.color_pair(5)
+                elif role == "fallback":
+                    attr = curses.color_pair(4)
+                else:
+                    attr = 0
+
+                label = f"{prefix}{name}{' ' * max(1, 24 - _display_width(name))}{role:<10} P:{pri}"
+                _safe_addstr(stdscr, y, pad, label, attr, max_w=w - 6)
+
+            footer = f" {len(providers)} providers  ↑↓ 选择  Enter 确认  Esc 返回 "
+            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(providers)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(providers)
+            elif key in (10, 13, curses.KEY_ENTER):
+                p = providers[idx]
+                return (p.get("id"), p.get("name", p.get("id")))
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
+def select_provider_models_tui(provider_name, models):
+    """选中 provider 后展示其全部模型列表。
+
+    Args:
+        provider_name: str
+        models: list[str] — 模型名列表
+
+    Returns:
+        {"model": str} — 选中的模型
+        None — 取消
+    """
+    if not models:
+        return None
+
+    sorted_models = sorted(models)
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        scroll = 0
+
+        while True:
+            stdscr.clear()
+            max_y, max_w = stdscr.getmaxyx()
+
+            w = max(52, min(max_w - 2, int(max_w * 0.75)))
+            visible = max_y - 6
+            h = min(len(sorted_models) + 4, max_y - 2)
+            if h < 6:
+                h = 6
+            sx = (max_w - w) // 2
+            sy = max(0, (max_y - h) // 2)
+            cx = sx + w // 2
+            pad = sx + 3
+
+            _draw_box(stdscr, sy, sx, h, w, f"{provider_name} — 模型列表")
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            for i in range(scroll, min(scroll + visible, len(sorted_models))):
+                y = sy + 2 + i - scroll
+                prefix = " ▸ " if i == idx else "   "
+                attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(2)
+                label = f"{prefix}{sorted_models[i]}"
+                _safe_addstr(stdscr, y, pad, label, attr, max_w=w - 6)
+
+            footer = f" {len(sorted_models)} models  ↑↓ 选择  Enter 确认  B 返回  Esc 退出 "
+            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(sorted_models)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(sorted_models)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return {"model": sorted_models[idx]}
+            elif key in (ord('b'), ord('B')):
+                return None  # 返回 provider 列表
+            elif key in (27, ord('q'), ord('Q')):
+                return "__exit__"  # 完全退出
+
+    try:
+        result = curses.wrapper(_inner)
+        return result
+    except curses.error:
+        return None
+
+
 def select_provider_mgmt_tui(providers):
     """Provider 管理 TUI。
 
@@ -1260,7 +1427,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
         curses.init_pair(7, curses.COLOR_RED, -1)
 
-        bypass_mode = False
+        bypass_mode = True  # 默认 bypass，Tab 切换回正常
 
         while True:
             stdscr.clear()

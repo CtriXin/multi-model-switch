@@ -27,7 +27,7 @@ except ImportError:
     print("缺少依赖，请执行: pip install rich httpx")
     sys.exit(1)
 
-from ccs_core import (
+from mms_core import (
     categorize_models,
     console,
     current_command,
@@ -387,7 +387,7 @@ async def stream_model(client, base_url, api_key, model, messages, max_tokens=12
 
 
 async def _stream_compare_model(client, queue, base_url, api_key, model, prompt, with_footer=False):
-    from ccs_session import FOOTER_INSTRUCTION
+    from mms_session import FOOTER_INSTRUCTION
     full_prompt = prompt + FOOTER_INSTRUCTION if with_footer else prompt
     _display, messages = build_messages(full_prompt)
     try:
@@ -592,7 +592,7 @@ def chat_main(cfg, argv):
     args = parse_chat_args(argv)
 
     if args.list_sessions:
-        from ccs_session import list_sessions
+        from mms_session import list_sessions
         sessions = list_sessions(limit=10)
         if not sessions:
             console.print("[dim]暂无保存的 session[/dim]")
@@ -614,7 +614,7 @@ def chat_main(cfg, argv):
 
     resumed_session = None
     if args.resume:
-        from ccs_session import load_session
+        from mms_session import load_session
         resumed_session = load_session(args.resume)
         if resumed_session is None:
             console.print(f"[red]找不到 session: {args.resume}[/red]")
@@ -646,7 +646,7 @@ def chat_main(cfg, argv):
     else:
         task_text = " ".join(args.prompt).strip()
         if not task_text:
-            from ccs_action_bar import _readline
+            from mms_action_bar import _readline
             task_text = _readline("You", "@/path/img.png 可附图")
         if not task_text:
             console.print("[red]聊天任务不能为空[/red]")
@@ -656,7 +656,7 @@ def chat_main(cfg, argv):
     console.print(f"[dim]模型: {', '.join(selected_models)}[/dim]")
 
     try:
-        from ccs_action_bar import run_chat_loop
+        from mms_action_bar import run_chat_loop
         run_chat_loop(cfg, provider_ctx, selected_models, task_text, session=resumed_session)
     except KeyboardInterrupt:
         console.print("\n[yellow]已取消 chat[/yellow]")

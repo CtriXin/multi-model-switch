@@ -78,7 +78,7 @@
 
 - 先保证接口形状稳定
 - 真实底层逻辑可以阶段性 mock
-- 不要一开始就重构 `ccs_core.py`
+- 不要一开始就重构 `mms_core.py`
 
 ### Step 3: web shell
 
@@ -113,13 +113,13 @@
 
 开始实现前必须意识到这几块不是当前首选改动面：
 
-- `ccs_core.py`
-- `ccs_launchers.py`
-- `ccs_tui.py`
-- `ccs_bridge.py`
-- `ccs_account_state.py`
-- `ccs_session.py`
-- `ccs_adapter_registry.py`
+- `mms_core.py`
+- `mms_launchers.py`
+- `mms_tui.py`
+- `mms_bridge.py`
+- `mms_account_state.py`
+- `mms_session.py`
+- `mms_adapter_registry.py`
 - `mms`
 - `ccs`
 

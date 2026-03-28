@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from ccs_speed_stats import record_model_speed
+from mms_speed_stats import record_model_speed
 
 
 class _SilentHTTPServer(ThreadingHTTPServer):
@@ -100,7 +100,7 @@ def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH, prefixes
 # ---------------------------------------------------------------------------
 
 _BRIDGE_MODE_CACHE_DIR = os.path.join(
-    os.environ.get("CCS_CONFIG_DIR", os.path.expanduser("~/.config/ccs")),
+    os.environ.get("MMS_CONFIG_DIR") or os.environ.get("CCS_CONFIG_DIR") or os.path.expanduser("~/.config/mms"),
     "cache",
 )
 _BRIDGE_MODE_CACHE_FILE = os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_mode_cache.json")
@@ -1039,9 +1039,12 @@ def codex_claude_bridge(account, model_name):
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -1061,9 +1064,12 @@ def gemini_claude_bridge(account, model_name):
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 _SYSTEM_TAG_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
@@ -1272,7 +1278,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 for _ct in _check_texts:
                     if _ct.startswith("[SUGGESTION MODE") or _ct.startswith("[SYSTEM"):
                         try:
-                            from ccs_router import log_route
+                            from mms_router import log_route
                             log_route("light", "blocked:suggestion", "(blocked)", _ct[:60])
                         except Exception:
                             pass
@@ -1321,7 +1327,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     break
 
             if last_text:
-                from ccs_router import classify_task, log_route, STICKY_DECAY_TURNS
+                from mms_router import classify_task, log_route, STICKY_DECAY_TURNS
                 import time as _time_mod
 
                 # 短时去重：同一文本 3 秒内不重复分类
@@ -1394,7 +1400,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     "tool_continue",
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
-                from ccs_router import log_route
+                from mms_router import log_route
                 log_route(prev_level, "tool_continue", payload.get("model", "?"), "(tool_result)")
             else:
                 # 智能路由开启但没有用户消息，沿用上次 tier
@@ -2434,9 +2440,12 @@ def codex_chatcompletions_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -2470,9 +2479,12 @@ def codex_responses_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -2527,6 +2539,9 @@ def gateway_claude_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass

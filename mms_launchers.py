@@ -1,4 +1,4 @@
-"""MMS/CCS 启动器：按 provider 或账号档案启动四个 CLI。"""
+"""MMS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
 from contextlib import contextmanager
 import json
@@ -10,12 +10,12 @@ import tempfile
 from datetime import datetime
 from time import perf_counter
 
-from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from ccs_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
-from ccs_core import _probe_models, detect_working_base_url
-from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from ccs_session_index import finalize_claude_session, record_claude_session_start
-from ccs_speed_stats import build_provider_speed_scope
+from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
+from mms_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
+from mms_core import _probe_models, detect_working_base_url
+from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_session_index import finalize_claude_session, record_claude_session_start
+from mms_speed_stats import build_provider_speed_scope
 
 try:
     from rich.console import Console
@@ -23,6 +23,55 @@ except ImportError:
     pass
 
 console = Console()
+
+# ── 已知模型的 context window（tokens）──
+# 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
+# 来源：各厂商官方 API 文档 / OpenRouter / HuggingFace，2026-03 更新。
+_MODEL_CONTEXT_WINDOWS = {
+    # Claude — 标准 200k，[1m] 变体由 Claude Code 内部处理
+    "claude-opus-4-6": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,
+    "claude-haiku-4-5-20251001": 200_000,
+    "claude-haiku-4-5": 200_000,
+    # Kimi — kimi-k2.5 系列均为 256K (262144)
+    "kimi-for-coding": 262_144,
+    "kimi-k2.5": 262_144,
+    # Qwen — hosted 版本支持 1M；qwen3-max 为 262K
+    "qwen3.5-plus": 1_000_000,
+    "qwen3-coder-plus": 1_000_000,
+    "qwen3-max": 262_144,
+    # GLM — 全系 200K
+    "glm-5": 200_000,
+    "glm-5-turbo": 200_000,
+    "glm-5.1": 200_000,
+    "glm-4.7": 200_000,
+    # MiniMax — M2.5 为 196K，M2.7 为 200K
+    "MiniMax-M2.5": 196_608,
+    "MiniMax-M2.7": 200_000,
+}
+_DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
+
+
+def _effective_context_window(*models):
+    """取所有活跃模型中最小的 context window。
+    智能路由场景下 heavy/medium/light 可能是不同模型，
+    conversation context 必须 fit 最小的那个。
+    """
+    windows = []
+    for m in models:
+        if not m:
+            continue
+        clean = m.replace("[1m]", "").strip()
+        w = _MODEL_CONTEXT_WINDOWS.get(clean)
+        if w is None:
+            # 大小写不敏感匹配
+            lower = clean.lower()
+            for k, v in _MODEL_CONTEXT_WINDOWS.items():
+                if k.lower() == lower:
+                    w = v
+                    break
+        windows.append(w or _DEFAULT_CONTEXT_WINDOW)
+    return min(windows) if windows else _DEFAULT_CONTEXT_WINDOW
 
 
 @contextmanager
@@ -76,6 +125,17 @@ def _real_user_home():
 
 def _real_user_path(*parts):
     return os.path.join(_real_user_home(), *parts)
+
+
+def _inject_real_home_hints(env, *, include_xdg=False):
+    real_home = _real_user_home()
+    env["MMS_REAL_HOME"] = real_home
+    env["ORIGINAL_HOME"] = real_home
+    env["REAL_HOME"] = real_home
+    env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
+    if include_xdg:
+        env["XDG_CONFIG_HOME"] = _real_user_path(".config")
+    return env
 
 
 RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
@@ -278,7 +338,7 @@ def validate_provider_for_cli(cli, provider):
 
 def _account_env(account):
     env = os.environ.copy()
-    env["MMS_REAL_HOME"] = _real_user_home()
+    _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     if not home_dir:
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
@@ -339,6 +399,7 @@ def _account_env(account):
             os.symlink(real_library, session_library)
         _link_shared_dotfiles(session_home)
         if cli_name == "codex":
+            _sync_codex_session_claude_json(session_home)
             _overlay_codex_shared_resume(home_dir, session_home)
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
@@ -390,6 +451,135 @@ def _link_shared_dotfiles(session_home):
         dst = os.path.join(session_home, dot_name)
         if os.path.exists(src) and not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
+
+
+def _sync_codex_session_claude_json(session_home):
+    """Seed isolated Codex HOME with the real user's MCP-capable .claude.json."""
+    import json as _json
+
+    real_json = _real_user_path(".claude.json")
+    if not os.path.exists(real_json):
+        return
+
+    session_json = os.path.join(session_home, ".claude.json")
+    if os.path.islink(session_json):
+        return
+
+    try:
+        with open(real_json, "r", encoding="utf-8") as f:
+            loaded = _json.load(f)
+        if not isinstance(loaded, dict):
+            return
+        data = loaded
+    except Exception:
+        return
+
+    if os.path.exists(session_json):
+        try:
+            with open(session_json, "r", encoding="utf-8") as f:
+                existing = _json.load(f)
+            if isinstance(existing, dict):
+                # Keep per-session metadata stable while inheriting global MCP servers.
+                if "firstStartTime" in existing:
+                    data["firstStartTime"] = existing["firstStartTime"]
+                if "bypassPermissionsModeAccepted" in existing:
+                    data["bypassPermissionsModeAccepted"] = existing["bypassPermissionsModeAccepted"]
+        except Exception:
+            pass
+
+    with open(session_json, "w", encoding="utf-8") as f:
+        _json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def _toml_quote(value):
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _toml_literal(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return _toml_quote(value)
+
+
+def _toml_bare_key(key):
+    import re
+    if re.fullmatch(r"[A-Za-z0-9_-]+", str(key)):
+        return str(key)
+    escaped = str(key).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _append_codex_mcp_servers_from_claude_json(config_text):
+    """Translate Claude-style mcpServers into Codex [mcp_servers.*] sections."""
+    import json as _json
+    import re
+
+    real_json = _real_user_path(".claude.json")
+    if not os.path.exists(real_json):
+        return config_text
+
+    try:
+        with open(real_json, "r", encoding="utf-8") as f:
+            loaded = _json.load(f)
+        servers = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
+    except Exception:
+        return config_text
+
+    if not isinstance(servers, dict) or not servers:
+        return config_text
+
+    existing = set()
+    pattern = re.compile(r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\]\s*$', flags=re.MULTILINE)
+    for match in pattern.finditer(config_text):
+        existing.add(match.group(1) or match.group(2))
+
+    blocks = []
+    for name, spec in servers.items():
+        if name in existing or not isinstance(spec, dict):
+            continue
+
+        section_name = _toml_bare_key(name)
+        lines = [f"[mcp_servers.{section_name}]"]
+
+        url = spec.get("url")
+        command = spec.get("command")
+        if isinstance(url, str) and url.strip():
+            lines.append(f"url = {_toml_quote(url)}")
+            bearer_token_env_var = spec.get("bearer_token_env_var")
+            if isinstance(bearer_token_env_var, str) and bearer_token_env_var.strip():
+                lines.append(f"bearer_token_env_var = {_toml_quote(bearer_token_env_var)}")
+        elif isinstance(command, str) and command.strip():
+            lines.append(f"command = {_toml_quote(command)}")
+            args = spec.get("args")
+            if isinstance(args, list):
+                rendered_args = ", ".join(_toml_quote(arg) for arg in args)
+                lines.append(f"args = [{rendered_args}]")
+            env = spec.get("env")
+            if isinstance(env, dict):
+                env_lines = []
+                for env_key in sorted(env):
+                    env_value = env[env_key]
+                    if isinstance(env_value, (str, int, float, bool)):
+                        env_lines.append(f"{_toml_bare_key(env_key)} = {_toml_quote(env_value)}")
+                if env_lines:
+                    lines.append("")
+                    lines.append(f"[mcp_servers.{section_name}.env]")
+                    lines.extend(env_lines)
+        else:
+            continue
+
+        blocks.append("\n".join(lines))
+
+    if not blocks:
+        return config_text
+
+    config_text = config_text.rstrip()
+    if config_text:
+        config_text += "\n\n"
+    return config_text + "\n\n".join(blocks) + "\n"
 
 
 def validate_account_for_cli(cli, account):
@@ -453,6 +643,20 @@ def _primary_claude_model(model_info):
     return _normalized_model_name(model_info)
 
 
+def _with_1m_suffix(model_name):
+    """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
+    Haiku 不支持 1M。非 Claude 模型原样返回。
+    Claude Code 会在 API 请求前自动剥离 [1m]，不影响 bridge/proxy。
+    """
+    if not model_name or "[1m]" in model_name:
+        return model_name
+    lower = model_name.lower()
+    # opus 和 sonnet 支持 1M context
+    if any(k in lower for k in ("opus", "sonnet")) and "haiku" not in lower:
+        return model_name + "[1m]"
+    return model_name
+
+
 def _apply_claude_model_overrides(target, model_info):
     primary_model = _primary_claude_model(model_info)
     if not primary_model:
@@ -462,24 +666,25 @@ def _apply_claude_model_overrides(target, model_info):
         opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
         sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
         haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
-        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = opus_model
-        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = sonnet_model
-        target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model
-        target["ANTHROPIC_MODEL"] = primary_model
-        target["ANTHROPIC_REASONING_MODEL"] = sonnet_model or primary_model
+        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model)
+        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model)
+        target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model  # haiku 不支持 1M
+        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model)
+        target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(sonnet_model or primary_model)
         subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
-        target["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
+        target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(subagent_model)
         return primary_model
 
+    primary_1m = _with_1m_suffix(primary_model)
     for key in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_DEFAULT_SONNET_MODEL",
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "ANTHROPIC_REASONING_MODEL",
         "CLAUDE_CODE_SUBAGENT_MODEL",
     ):
-        target[key] = primary_model
+        target[key] = primary_1m
+    target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = primary_model  # haiku slot 不加 [1m]
     return primary_model
 
 
@@ -577,9 +782,17 @@ def launch_claude(model_info, runtime, once=False):
 
         # GPT-on-Claude: 获取 OpenAI URL 供 bridge 转发 GPT 模型
         _gpt_openai_url = _openai_base_url(runtime) or None
-        # Claude Code 拒绝非 claude-* 模型名，GPT 场景下用合法壳名给 env，
-        # bridge 的 heavy_model 仍是真实 GPT 模型名（由 bridge 层替换后转发）。
-        _env_model = "claude-sonnet-4-6" if (_gpt_openai_url and _is_gpt_model(probe_model)) else probe_model
+        # Claude Code 内部 NM() 只认识 Claude 模型的 context window。
+        # 非 Claude 模型走 bridge 替换，env slot 用 Claude 壳名让 NM() 返回 1M，
+        # 然后 CLAUDE_CODE_AUTO_COMPACT_WINDOW 按实际模型 context 往下 cap。
+        # 路由状态栏仍显示真实模型名。
+        _is_claude = any(k in probe_model.lower() for k in ("claude", "opus", "sonnet", "haiku"))
+        if _gpt_openai_url and _is_gpt_model(probe_model):
+            _env_model = "claude-sonnet-4-6"
+        elif not _is_claude:
+            _env_model = "claude-sonnet-4-6"
+        else:
+            _env_model = probe_model
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -774,9 +987,12 @@ def launch_claude(model_info, runtime, once=False):
     # GPT-on-Claude: OpenAI 模型名会被 Claude Code 拒绝，必须 skip，
     # bridge 层的 heavy_model 替换 + _forward_as_responses 会处理实际模型名。
     _resolved = _resolve_model(model_info) if model_info else ""
+    _resolved_is_claude = any(k in (_resolved or "").lower() for k in ("claude", "opus", "sonnet", "haiku"))
     _skip_model = auth_mode == "oauth_bridge" or (
         isinstance(model_info, dict) and (model_info.get("lb_light") or model_info.get("lb_medium"))
-    ) or (_resolved and _is_gpt_model(_resolved))
+    ) or (_resolved and _is_gpt_model(_resolved)) or (
+        _resolved and not _resolved_is_claude  # 非 Claude 模型用壳名，跳过 slot 覆盖
+    )
 
     if isinstance(model_info, dict):
         if not _skip_model:
@@ -786,6 +1002,14 @@ def launch_claude(model_info, runtime, once=False):
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
     elif not _skip_model:
         _apply_claude_model_overrides(env, model_info)
+
+    # ── Context window: 用真实模型名（probe_model）计算，非壳名 ──
+    _real_models = [m for m in (probe_model, lb_medium, lb_light) if m]
+    if not _real_models:
+        _real_models = [_resolved or "claude-sonnet-4-6"]
+    ctx_window = _effective_context_window(*_real_models)
+    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
+    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
 
     cmd = ["claude"]
     if runtime.get("bypass"):
@@ -870,7 +1094,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         _remember_anthropic_url(provider_id, url, url)
         return url, "bypass_for_bailian"
 
-    # ---- 使用公共工具探测（复用 ccs_core.detect_working_base_url）----
+    # ---- 使用公共工具探测（复用 mms_core.detect_working_base_url）----
     # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
     body = json.dumps({
         "model": probe_model,
@@ -1113,6 +1337,7 @@ def _claude_gateway_env(
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
     if best_model:
@@ -1149,13 +1374,16 @@ def _claude_gateway_env(
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
     env["MMS_ROUTE_STATUS_PATH"] = route_status_path
     if best_model:
-        for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
-                    "ANTHROPIC_REASONING_MODEL"):
-            env[key] = best_model
+        best_1m = _with_1m_suffix(best_model)
+        for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
+            env[key] = best_1m
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
     if selected_model:
         _apply_claude_model_overrides(env, selected_model)
     env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+
+    # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
 
     # ── 写入 route_status.json 供 statusline 读取 ──
     # bridge 模式下用 heavy_model，直连模式下用 best_model
@@ -1184,6 +1412,8 @@ def _claude_gateway_env(
                     f.write(f'echo "  Medium: {medium_model}"\n')
                 if light_model:
                     f.write(f'echo "  Light: {light_model}"\n')
+                f.write('ctx_k=$((${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-200000} / 1000))\n')
+                f.write('echo "  Context: ${ctx_k}K"\n')
                 f.write(f'echo ""\n')
             os.chmod(hook_script, 0o755)
 
@@ -1235,6 +1465,7 @@ def _codex_gateway_env(runtime, base_url):
         os.symlink(real_library, session_library)
 
     _link_shared_dotfiles(session_home)
+    _sync_codex_session_claude_json(session_home)
 
     # --- .codex 目录：auth + config 写入 session，其余从真实 ~/.codex symlink ---
     codex_dir = os.path.join(session_home, ".codex")
@@ -1253,8 +1484,8 @@ def _codex_gateway_env(runtime, base_url):
         preamble_end = section_match.start() if section_match else len(text)
         preamble = text[:preamble_end]
         rest = text[preamble_end:]
-        pattern = rf'^{re.escape(key)}\s*=\s*"[^"]*"\s*$'
-        replacement = f'{key} = "{value}"'
+        pattern = rf'^{re.escape(key)}\s*=\s*.+$'
+        replacement = f'{key} = {_toml_literal(value)}'
         if re.search(pattern, preamble, flags=re.MULTILINE):
             preamble = re.sub(pattern, replacement, preamble, count=1, flags=re.MULTILINE)
         else:
@@ -1303,11 +1534,11 @@ def _codex_gateway_env(runtime, base_url):
         next_header = re.search(r'^\[', text[block_start:], flags=re.MULTILINE)
         block_end = block_start + next_header.start() if next_header else len(text)
         block = text[block_start:block_end]
-        key_pattern = rf'^\s*{re.escape(key)}\s*=\s*"[^"]*"\s*$'
+        key_pattern = rf'^\s*{re.escape(key)}\s*=\s*.+$'
         if re.search(key_pattern, block, flags=re.MULTILINE):
             block = re.sub(
                 key_pattern,
-                f'{key} = "{value}"',
+                f'{key} = {_toml_literal(value)}',
                 block,
                 count=1,
                 flags=re.MULTILINE,
@@ -1315,24 +1546,30 @@ def _codex_gateway_env(runtime, base_url):
         else:
             if block and not block.endswith("\n"):
                 block += "\n"
-            block += f'{key} = "{value}"\n'
+            block += f'{key} = {_toml_literal(value)}\n'
         return text[:block_start] + block + text[block_end:]
 
     # 复制用户 config.toml，但把顶层和当前项目的 base_url 都替换成隔离地址
     # Codex CLI 会读取 project-scoped config，单改顶层 base_url 不够。
+    gateway_config_template = os.path.join(gateway_base, ".codex", "config.toml")
     real_config = _real_user_path(".codex", "config.toml")
+    source_config = gateway_config_template if os.path.exists(gateway_config_template) else real_config
     gateway_config = os.path.join(codex_dir, "config.toml")
-    if os.path.exists(real_config):
+    if os.path.exists(source_config):
         try:
-            with open(real_config, "r", encoding="utf-8") as f:
+            with open(source_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
             config_text = _set_project_base_url(config_text, os.getcwd(), base_url)
+            config_text = _set_table_scalar(config_text, "model_providers.custom", "name", "custom")
+            config_text = _set_table_scalar(config_text, "model_providers.custom", "wire_api", "responses")
+            config_text = _set_table_scalar(config_text, "model_providers.custom", "requires_openai_auth", True)
             config_text = _set_table_scalar(config_text, "model_providers.custom", "base_url", base_url)
+            config_text = _append_codex_mcp_servers_from_claude_json(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
-            shutil.copy2(real_config, gateway_config)
+            shutil.copy2(source_config, gateway_config)
     else:
         with open(gateway_config, "w", encoding="utf-8") as f:
             f.write(f'base_url = "{base_url}"\n')
@@ -1343,6 +1580,14 @@ def _codex_gateway_env(runtime, base_url):
             f.write(f'base_url = "{base_url}"\n')
             f.write(f'\n[projects."{os.getcwd()}"]\n')
             f.write(f'base_url = "{base_url}"\n')
+        try:
+            with open(gateway_config, "r", encoding="utf-8") as f:
+                config_text = f.read()
+            config_text = _append_codex_mcp_servers_from_claude_json(config_text)
+            with open(gateway_config, "w", encoding="utf-8") as f:
+                f.write(config_text)
+        except Exception:
+            pass
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
     real_codex_dir = _real_user_path(".codex")
@@ -1357,7 +1602,7 @@ def _codex_gateway_env(runtime, base_url):
                 os.symlink(src, dst)
 
     env = os.environ.copy()
-    env["MMS_REAL_HOME"] = _real_user_home()
+    _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = session_home
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
@@ -1683,10 +1928,8 @@ def _exec_or_run(
             else:
                 result = subprocess.run(cmd, env=env)
             exit_code = result.returncode
-            sys.exit(result.returncode)
         except KeyboardInterrupt:
             exit_code = 130
-            sys.exit(0)
         finally:
             if exit_callback is not None:
                 try:
@@ -1694,8 +1937,15 @@ def _exec_or_run(
                 except Exception:
                     pass
             if cleanup_path and os.path.exists(cleanup_path):
-                os.remove(cleanup_path)
+                try:
+                    os.remove(cleanup_path)
+                except OSError:
+                    pass
             if cleanup_context is not None:
-                cleanup_context.__exit__(None, None, None)
+                try:
+                    cleanup_context.__exit__(None, None, None)
+                except (KeyboardInterrupt, Exception):
+                    pass
+        sys.exit(exit_code or 0)
     else:
         os.execvpe(exe, cmd, env)

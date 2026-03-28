@@ -62,6 +62,17 @@ HOME=/Users/xin mms test --provider privateopenai --cli codex
 HOME=/Users/xin mms test --provider xin --cli codex
 ```
 
+注意：
+
+- 如果你是在 `MMS` 隔离 session 里二次启动工具，表面看到的 `HOME` 可能是 `~/.config/mms/.../s/<pid>`
+- 当前 launcher 已补真实 home 回源提示：
+  - `MMS_REAL_HOME`
+  - `ORIGINAL_HOME`
+  - `REAL_HOME`
+  - `GH_CONFIG_DIR`
+  - gateway 路径下的真实 `XDG_CONFIG_HOME`
+- 但做 smoke 时，仍建议显式用 `HOME=/Users/xin` 运行，避免把问题混到隔离 session 语义里
+
 一次扫当前启用 provider 的 `claude + codex`：
 
 ```bash
@@ -156,7 +167,7 @@ curl -sS -D - \
 
 ```bash
 HOME=/Users/xin python3 - <<'PY'
-from ccs_core import load_config
+from mms_core import load_config
 cfg = load_config()
 for p in cfg.get('providers', []):
     if p.get('id') == 'privateopenai':
@@ -175,7 +186,7 @@ PY
 
 ```bash
 HOME=/Users/xin python3 - <<'PY'
-from ccs_core import load_config, resolve_provider_context, _probe_models
+from mms_core import load_config, resolve_provider_context, _probe_models
 cfg = load_config()
 provider = resolve_provider_context(cfg, 'privateopenai')
 res = _probe_models(provider, emit_output=False, force_refresh=True)
