@@ -1039,9 +1039,12 @@ def codex_claude_bridge(account, model_name):
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -1061,9 +1064,12 @@ def gemini_claude_bridge(account, model_name):
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 _SYSTEM_TAG_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
@@ -2434,9 +2440,12 @@ def codex_chatcompletions_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -2470,9 +2479,12 @@ def codex_responses_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
 
 
 @contextmanager
@@ -2527,6 +2539,9 @@ def gateway_claude_bridge(
             "api_key": bridge_token,
         }
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        try:
+            server._BaseServer__shutdown_request = True
+            server.server_close()
+            thread.join(timeout=2)
+        except (KeyboardInterrupt, Exception):
+            pass
