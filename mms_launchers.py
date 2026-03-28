@@ -1,4 +1,4 @@
-"""MMS/CCS 启动器：按 provider 或账号档案启动四个 CLI。"""
+"""MMS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
 from contextlib import contextmanager
 import json
@@ -10,12 +10,12 @@ import tempfile
 from datetime import datetime
 from time import perf_counter
 
-from ccs_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from ccs_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
-from ccs_core import _probe_models, detect_working_base_url
-from ccs_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from ccs_session_index import finalize_claude_session, record_claude_session_start
-from ccs_speed_stats import build_provider_speed_scope
+from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
+from mms_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
+from mms_core import _probe_models, detect_working_base_url
+from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_session_index import finalize_claude_session, record_claude_session_start
+from mms_speed_stats import build_provider_speed_scope
 
 try:
     from rich.console import Console
@@ -1094,7 +1094,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         _remember_anthropic_url(provider_id, url, url)
         return url, "bypass_for_bailian"
 
-    # ---- 使用公共工具探测（复用 ccs_core.detect_working_base_url）----
+    # ---- 使用公共工具探测（复用 mms_core.detect_working_base_url）----
     # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
     body = json.dumps({
         "model": probe_model,

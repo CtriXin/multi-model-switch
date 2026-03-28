@@ -74,7 +74,7 @@ hidden_models = ["gpt-4o-mini-2024-07-18"]
 
 #### 3. "在通道管理 TUI 中增加模型管理入口"
 
-`ccs_tui.py` 已经很重了。建议 **不要** 在现有 `select_connect_tui()` 里继续膨胀，而是：
+`mms_tui.py` 已经很重了。建议 **不要** 在现有 `select_connect_tui()` 里继续膨胀，而是：
 
 ```
 select_connect_tui() 菜单：
@@ -97,7 +97,7 @@ select_connect_tui() 菜单：
   > 恢复默认
 ```
 
-**重点：** 模型管理的 TUI 应该放在 **新函数** 里，不要塞进现有函数。`ccs_tui.py` 已经 800+ 行，按照代码红线（单文件 ≤ 800 行），可能需要考虑拆文件了。
+**重点：** 模型管理的 TUI 应该放在 **新函数** 里，不要塞进现有函数。`mms_tui.py` 已经 800+ 行，按照代码红线（单文件 ≤ 800 行），可能需要考虑拆文件了。
 
 #### 4. "model_list_mode 设计评估（remote / hybrid / manual）"
 
@@ -185,13 +185,13 @@ TODO 里只提了模型的增删改，但通道本身的 **删除** 流程也需
 
 现有 `connect_gateway` 流程是：TUI 引导输入 URL + Key → 写入 config.toml。但缺少：
 
-- **模板选择**：`ccs_adapter_registry.py` 里有 `PROVIDER_TEMPLATES`，TUI 应该让用户从模板开始，而不是每次从空白填起
+- **模板选择**：`mms_adapter_registry.py` 里有 `PROVIDER_TEMPLATES`，TUI 应该让用户从模板开始，而不是每次从空白填起
 - **连接测试**：添加后自动 `GET /models` 验证 URL 和 Key 是否有效
 - **协议探测**：自动判断是 OpenAI 兼容还是 Anthropic 兼容（通过试探 `/v1/models` vs `/v1/messages`）
 
 ### 3.6 bridge 对模型列表的影响
 
-`ccs_bridge.py` 自己会暴露一个 `/v1/models` endpoint 给 Codex 等 CLI。bridge 返回的模型列表来自上游 provider 的 probe 结果。
+`mms_bridge.py` 自己会暴露一个 `/v1/models` endpoint 给 Codex 等 CLI。bridge 返回的模型列表来自上游 provider 的 probe 结果。
 
 如果用户在 provider 上配了 `extra_models`，bridge 的 `/v1/models` 是否也应该返回这些模型？**应该。** 否则 Codex 侧看不到手工补充的模型。
 
@@ -234,10 +234,10 @@ Step 1 → 2 → 3 是严格依赖链。Step 4 可以随时穿插。
 | 文件 | 改动 | 是否受保护 |
 |------|------|-----------|
 | `config.toml` schema | 加 `extra_models` / `hidden_models` 字段 | — (配置) |
-| `ccs_core.py` | `_probe_models()` 出口加 patch 逻辑 | ✅ 受保护 |
-| `ccs_tui.py` | 新增模型管理 TUI 函数 | ✅ 受保护 |
-| `ccs_bridge.py` | 验证 `/v1/models` 已继承 patch | ✅ 受保护 |
-| `ccs_adapter_registry.py` | PROVIDER_TEMPLATES 加新字段 | ✅ 受保护 |
+| `mms_core.py` | `_probe_models()` 出口加 patch 逻辑 | ✅ 受保护 |
+| `mms_tui.py` | 新增模型管理 TUI 函数 | ✅ 受保护 |
+| `mms_bridge.py` | 验证 `/v1/models` 已继承 patch | ✅ 受保护 |
+| `mms_adapter_registry.py` | PROVIDER_TEMPLATES 加新字段 | ✅ 受保护 |
 | 新文件（可选） | `ccs_model_management.py` — TUI 拆分 | 无 |
 
 四个受保护文件都要改，意味着 **每一步都需要用户明确授权**。建议分 PR 提交，不要一把做完。

@@ -13,8 +13,8 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.prompt import Prompt
 from rich.table import Table
 
-from ccs_chat import StreamError, select_models_tui, stream_model
-from ccs_core import (
+from mms_chat import StreamError, select_models_tui, stream_model
+from mms_core import (
     Prompt as CorePrompt,
     console,
     current_command,
@@ -501,7 +501,7 @@ async def _run_phase3_with_fallback(provider_ctx, client, candidates, phase1_mod
 
 def _phase_review_bar(display_texts: dict, hint: str) -> None:
     """Read-only curses tab viewer for phase results. Any key exits."""
-    from ccs_action_bar import post_action_bar
+    from mms_action_bar import post_action_bar
     tabs = list(display_texts.keys())
     if not tabs:
         return
@@ -612,8 +612,8 @@ def _build_discuss_followup_prompt(original_task, final_text, new_question):
 
 def _do_discuss_converge(provider_ctx, selected_models, original_task, final_text, cross):
     """E: refine synthesis into a stronger conclusion, then re-enter post-action."""
-    from ccs_action_bar import _handle_converge
-    from ccs_session import create_session, advance_round
+    from mms_action_bar import _handle_converge
+    from mms_session import create_session, advance_round
     import traceback
 
     session = create_session(original_task, selected_models, mode="discuss")
@@ -673,7 +673,7 @@ def _discuss_post_action(provider_ctx, selected_models, original_task, final_tex
                           summaries=None, reviews=None, synthesizer=None):
     """Post-discuss: tab viewer (all phases) → action routing."""
     import traceback
-    from ccs_action_bar import post_action_bar, _readline, _print_all_columns
+    from mms_action_bar import post_action_bar, _readline, _print_all_columns
 
     tabs = _build_phase_tabs(
         summaries or {}, reviews or {}, final_text, synthesizer, selected_models

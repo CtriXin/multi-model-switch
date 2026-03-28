@@ -55,7 +55,7 @@ Phase 1 明确不做：
 
 ### 当前架构
 
-当前 `mms claude` 的核心启动结构在 [ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py)：
+当前 `mms claude` 的核心启动结构在 [mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py)：
 
 - `_claude_gateway_env()` 负责创建 `~/.config/mms/claude-gateway/s/<pid>/`
 - 该 slot 目录里：
@@ -304,29 +304,29 @@ Phase 1 只建议触碰这些位置：
 
 ### 必改
 
-- [ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py)
+- [mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py)
   - `_claude_gateway_env()`
   - `_cleanup_stale_sessions()`
   - 以及 `launch_claude()` 周边用于补生命周期回调的最小接线
 
 ### 新增
 
-- `ccs_project_store.py`
+- `mms_project_store.py`
   - `project_key()`
   - project metadata 路径计算
   - Claude raw store 目录确保逻辑
 
-- `ccs_session_index.py`
+- `mms_session_index.py`
   - session metadata 读写
   - `mms session ls/info` 所需的读层
 
 ### 本轮不改
 
-- `ccs_session.py`
+- `mms_session.py`
   - 它仍然只管 `mms chat/discuss`
-- `ccs_bridge.py`
+- `mms_bridge.py`
   - Phase 1 无需动 bridge 协议层
-- `ccs_tui.py`
+- `mms_tui.py`
   - 最多后面接一个简单入口，不作为第一刀阻塞项
 
 ---
@@ -434,7 +434,7 @@ Phase 1 记为已知限制，不做阻塞项。
 - `_claude_gateway_env()` 作为主接入点
 - Phase 1 带 passive metadata
 - Phase 1 带 `mms session ls/info`
-- 新增 `ccs_project_store.py` / `ccs_session_index.py`
+- 新增 `mms_project_store.py` / `mms_session_index.py`
 
 ## 暂缓到后续阶段
 

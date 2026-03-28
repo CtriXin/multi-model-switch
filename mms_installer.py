@@ -1,4 +1,4 @@
-"""CCS CLI 自动安装"""
+"""MMS CLI 自动安装"""
 
 import subprocess
 import sys

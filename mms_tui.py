@@ -1,4 +1,4 @@
-"""CCS curses TUI：箭头键交互选择器 — v2 品类模式"""
+"""MMS curses TUI：箭头键交互选择器 — v2 品类模式"""
 
 import curses
 import json

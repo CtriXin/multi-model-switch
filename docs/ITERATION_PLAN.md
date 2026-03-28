@@ -25,7 +25,7 @@
 相关文件：
 
 - `README.md`
-- `ccs_core.py`
+- `mms_core.py`
 
 ### 2. 命名兼容
 
@@ -58,8 +58,8 @@
 
 相关文件：
 
-- `ccs_core.py`
-- `ccs_launchers.py`
+- `mms_core.py`
+- `mms_launchers.py`
 - `config.example.toml`
 
 ### 4. 凭据分离
@@ -67,8 +67,8 @@
 - provider 元数据继续放在 `config.toml`
 - 真实凭据继续放在 `credentials.sh`
 - 默认 provider 仍兼容旧环境变量：
-  - `CCS_API_BASE_URL`
-  - `CCS_API_KEY`
+  - `MMS_API_BASE_URL`
+  - `MMS_API_KEY`
 - 凭据读写已升级成 per-provider 形式
 
 ### 5. 中文模式
@@ -118,7 +118,7 @@ Claude Code 的 auto-compact 和 blocking limit 由内部 `NM()` 函数决定 co
 
 相关文件：
 
-- `ccs_launchers.py` — `_MODEL_CONTEXT_WINDOWS` 映射表、`_effective_context_window()`、`_with_1m_suffix()`
+- `mms_launchers.py` — `_MODEL_CONTEXT_WINDOWS` 映射表、`_effective_context_window()`、`_with_1m_suffix()`
 - `~/.claude/statusline-command.sh` — 读取 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 显示真实 context
 
 ## 已验证

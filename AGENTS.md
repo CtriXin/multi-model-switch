@@ -54,7 +54,7 @@ This file applies to both `Codex` and `Claude`.
 
 - Before changing launcher, routing, bridge, config, account, or TUI selection logic, read `docs/AGENT_GUARDRAILS.md`.
 - `Claude` must also read `CLAUDE.md` before making any repo changes; when `CLAUDE.md` and a task conflict, Claude should stop and ask the user to confirm scope.
-- Treat `ccs_core.py`, `ccs_launchers.py`, `ccs_tui.py`, `ccs_bridge.py`, `ccs_account_state.py`, `ccs_session.py`, `ccs_adapter_registry.py`, `mms`, and `ccs` as protected surfaces.
+- Treat `mms_core.py`, `mms_launchers.py`, `mms_tui.py`, `mms_bridge.py`, `mms_account_state.py`, `mms_session.py`, `mms_adapter_registry.py`, `mms`, and `ccs` as protected surfaces.
 - Do not silently change default launch behavior, model/source resolution order, config schema, account isolation semantics, or bridge fallback rules without an explicit note in the task and targeted validation.
 - If a task would alter a protected surface beyond the user's stated scope, stop and narrow the change or ask for confirmation.
 

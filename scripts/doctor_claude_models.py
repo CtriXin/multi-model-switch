@@ -26,8 +26,8 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from ccs_bridge import gateway_claude_bridge
-from ccs_core import (
+from mms_bridge import gateway_claude_bridge
+from mms_core import (
     _account_map,
     _probe_account_status,
     _probe_models,
@@ -37,7 +37,7 @@ from ccs_core import (
     load_config,
     resolve_provider_context,
 )
-from ccs_launchers import _anthropic_base_url, _claude_gateway_env, _openai_base_url
+from mms_launchers import _anthropic_base_url, _claude_gateway_env, _openai_base_url
 
 console = Console()
 PROMPT = "Reply with OK only."

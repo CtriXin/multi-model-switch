@@ -1,6 +1,6 @@
 # Gateway 修复记录（2026-03-14）
 
-> 合并 worktree 时：涉及 `ccs_core.py` / `ccs_launchers.py` 的改动需对照本文件，避免把已修复的代码覆盖回旧版本。
+> 合并 worktree 时：涉及 `mms_core.py` / `mms_launchers.py` 的改动需对照本文件，避免把已修复的代码覆盖回旧版本。
 
 ---
 
@@ -11,7 +11,7 @@
 导致请求打到 `https://xxx/v1/v1/models` → 404。
 
 ### 修复位置
-- `ccs_core.py` → `_probe_models()` 函数
+- `mms_core.py` → `_probe_models()` 函数
 
 ### 修复方式
 ```python
@@ -28,23 +28,23 @@ for try_url in [base_url, alt_url]:
 ```
 
 ### 影响文件
-- `ccs_core.py`（主分支 + 所有 worktree 合并时都需要应用）
-- `ccs_launchers.py` → `_gateway_ping()` 同样用了 `url_with_v1`，已正确（先检查再加 `/v1`）
+- `mms_core.py`（主分支 + 所有 worktree 合并时都需要应用）
+- `mms_launchers.py` → `_gateway_ping()` 同样用了 `url_with_v1`，已正确（先检查再加 `/v1`）
 
 ---
 
 ## 问题 2：安装路径与 dev 路径不同步
 
 ### 根因
-`mms` 脚本通过 `sys.path.insert(0, 脚本所在目录)` 决定加载哪个 `ccs_core.py`。
+`mms` 脚本通过 `sys.path.insert(0, 脚本所在目录)` 决定加载哪个 `mms_core.py`。
 运行路径不同，加载的文件不同：
 
 | 命令 | 加载路径 |
 |------|---------|
-| `~/ccs/multi-model-switch/mms` | `~/ccs/multi-model-switch/ccs_core.py` |
-| `~/auto-skills/.../mms` | `~/auto-skills/.../ccs_core.py` |
+| `~/ccs/multi-model-switch/mms` | `~/ccs/multi-model-switch/mms_core.py` |
+| `~/auto-skills/.../mms` | `~/auto-skills/.../mms_core.py` |
 
-每次修复 `ccs_core.py` 必须同时修复两处，或确认用的是哪个路径。
+每次修复 `mms_core.py` 必须同时修复两处，或确认用的是哪个路径。
 
 ---
 
@@ -55,7 +55,7 @@ for try_url in [base_url, alt_url]:
 直接用 OpenAI OAuth token 打网关 → gateway 不认 OAuth token → 401。
 
 ### 修复位置
-- `ccs_launchers.py` → 新增 `_codex_gateway_env()` 函数，替换原来的 `launch_codex` api_key 分支
+- `mms_launchers.py` → 新增 `_codex_gateway_env()` 函数，替换原来的 `launch_codex` api_key 分支
 
 ### 修复方式
 ```python
@@ -93,19 +93,19 @@ def _codex_gateway_env(runtime, base_url):
 某些网关对 Claude（Anthropic format）和 GPT（OpenAI format）使用不同的渠道 token。
 
 ### 修复位置
-- `ccs_core.py` → `load_provider_credentials()` 新增 `openai_api_key` 字段
-- `ccs_core.py` → `resolve_provider_context()` 传递 `openai_api_key`
-- `~/.config/mms/credentials.sh` → 新增 `CCS_PROVIDER_<ID>_OPENAI_API_KEY`
+- `mms_core.py` → `load_provider_credentials()` 新增 `openai_api_key` 字段
+- `mms_core.py` → `resolve_provider_context()` 传递 `openai_api_key`
+- `~/.config/mms/credentials.sh` → 新增 `MMS_PROVIDER_<ID>_OPENAI_API_KEY`
 
 ### credentials.sh 格式
 ```bash
 # Anthropic/Claude 渠道 key
-export CCS_PROVIDER_NEWAPI_API_KEY='sk-xxx'
+export MMS_PROVIDER_NEWAPI_API_KEY='sk-xxx'
 # OpenAI/GPT 渠道 key（可选，不配置则 fallback 到 API_KEY）
-export CCS_PROVIDER_NEWAPI_OPENAI_API_KEY='sk-yyy'
+export MMS_PROVIDER_NEWAPI_OPENAI_API_KEY='sk-yyy'
 ```
 
-### ccs_core.py 变更摘要
+### mms_core.py 变更摘要
 ```python
 # load_provider_credentials 新增：
 openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
@@ -118,7 +118,7 @@ provider["openai_api_key"] = credentials.get("openai_api_key", "")
 
 ### 后续收口
 `save_provider_credentials()` 现在会在通过 MMS 的 provider 编辑流程保存凭据时，同步刷新
-`CCS_PROVIDER_<ID>_OPENAI_API_KEY`。当前交互式 UI 只输入一把 key，因此保存时默认让
+`MMS_PROVIDER_<ID>_OPENAI_API_KEY`。当前交互式 UI 只输入一把 key，因此保存时默认让
 OpenAI 路径与通用 `API_KEY` 保持一致，避免旧的 `OPENAI_API_KEY` 残留导致 `codex`
 继续命中过期 token。
 
@@ -134,7 +134,7 @@ gateway 只有 `claude-sonnet-4-6`，没有 `[1m]` 变体 → 模型 not found�
 OAuth 模式不受影响（Anthropic 官方后端有 `[1m]`）。
 
 ### 修复位置
-- `ccs_launchers.py` → 新增 `_claude_gateway_env()` 函数，替换 `launch_claude` api_key 分支
+- `mms_launchers.py` → 新增 `_claude_gateway_env()` 函数，替换 `launch_claude` api_key 分支
 
 ### 修复方式
 ```python
@@ -182,7 +182,7 @@ Claude Code 的 Anthropic TypeScript SDK 使用路径 `/v1/messages`（已含 `/
 Claude Code 报 "There's an issue with the selected model"。
 
 ### 修复位置
-- `ccs_launchers.py` → `_claude_gateway_env()` 函数尾部
+- `mms_launchers.py` → `_claude_gateway_env()` 函数尾部
 
 ### 修复方式
 ```python
