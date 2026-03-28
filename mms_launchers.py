@@ -1077,7 +1077,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         if age < 3600:
             return cached["url"], "cached"
 
-    # ---- 文件缓存（跨进程，TTL 7d）----
+    # ---- 文件缓存（跨进程，TTL 24h）----
     cache_key = _anthropic_cache_key(provider_id, url)
     file_cached = _load_anthropic_url_file_cache().get(cache_key)
     if isinstance(file_cached, dict):
@@ -1088,7 +1088,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
                 age = (datetime.now() - datetime.fromisoformat(cached_ts)).total_seconds()
             except ValueError:
                 age = 999999
-            if age < 7 * 24 * 3600:
+            if age < 24 * 3600:
                 _ANTHROPIC_URL_CACHE[provider_id] = {"url": cached_url, "ts": datetime.now()}
                 return cached_url, "file_cached"
 
