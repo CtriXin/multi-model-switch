@@ -78,6 +78,17 @@ def _real_user_path(*parts):
     return os.path.join(_real_user_home(), *parts)
 
 
+def _inject_real_home_hints(env, *, include_xdg=False):
+    real_home = _real_user_home()
+    env["MMS_REAL_HOME"] = real_home
+    env["ORIGINAL_HOME"] = real_home
+    env["REAL_HOME"] = real_home
+    env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
+    if include_xdg:
+        env["XDG_CONFIG_HOME"] = _real_user_path(".config")
+    return env
+
+
 RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
 HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
 ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
@@ -278,7 +289,7 @@ def validate_provider_for_cli(cli, provider):
 
 def _account_env(account):
     env = os.environ.copy()
-    env["MMS_REAL_HOME"] = _real_user_home()
+    _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     if not home_dir:
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
@@ -1357,7 +1368,7 @@ def _codex_gateway_env(runtime, base_url):
                 os.symlink(src, dst)
 
     env = os.environ.copy()
-    env["MMS_REAL_HOME"] = _real_user_home()
+    _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = session_home
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
