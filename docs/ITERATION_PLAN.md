@@ -88,6 +88,39 @@
 - `mms config provider.default <id>`
 - `mms config api.edit`
 
+### 7. 按模型 Context Window 自动配置 Claude Code（2026-03-28）
+
+Claude Code 的 auto-compact 和 blocking limit 由内部 `NM()` 函数决定 context window，
+但 NM() 只认识 Claude 模型——对国产模型一律返回 200k 默认值，导致频繁触发 compact。
+
+**解决方案**：三层联动——
+
+1. **壳名机制**：非 Claude 模型的 env slot 统一用 `claude-sonnet-4-6[1m]`（NM() 返回 1M 上限），
+   bridge 层在 API 请求时替换成真实模型名。
+2. **`CLAUDE_CODE_AUTO_COMPACT_WINDOW`**：按真实模型的 context window 往下 cap。
+   Claude Code 内部 `Math.min(NM(), env)` 生效为实际值。
+3. **`CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE`**：同步设为 `context_window - 3000`。
+
+**各模型 context window**（来源：各厂商官方 API 文档，2026-03 更新）：
+
+| 模型 | Context |
+|------|---------|
+| Claude Opus/Sonnet 4.6 (`[1m]`) | 1,000,000 |
+| Claude Haiku 4.5 | 200,000 |
+| kimi-for-coding / kimi-k2.5 | 262,144 |
+| qwen3.5-plus / qwen3-coder-plus | 1,000,000 |
+| qwen3-max | 262,144 |
+| glm-5 / glm-5-turbo / glm-5.1 / glm-4.7 | 200,000 |
+| MiniMax-M2.5 | 196,608 |
+| MiniMax-M2.7 | 200,000 |
+
+**智能路由场景**：取所有活跃模型（heavy/medium/light）中最小的 context window。
+
+相关文件：
+
+- `ccs_launchers.py` — `_MODEL_CONTEXT_WINDOWS` 映射表、`_effective_context_window()`、`_with_1m_suffix()`
+- `~/.claude/statusline-command.sh` — 读取 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 显示真实 context
+
 ## 已验证
 
 - `./mms --help` 正常

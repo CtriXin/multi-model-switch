@@ -105,7 +105,6 @@ MODEL_FAMILIES = [
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
-    {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
@@ -2582,6 +2581,14 @@ def _derived_model_aliases(base_models):
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
         aliases.append("claude-opus-4-6")
+    # Hive agent aliases: give domestic models a claude- prefix so Claude Code SDK
+    # routes them through the full agent loop (tool use, file I/O, multi-turn).
+    for model_id in base_models:
+        if model_id.startswith("claude-") or model_id.startswith("gpt-") or model_id.startswith("gemini-"):
+            continue
+        alias = f"claude-{model_id}"
+        if alias not in base_models and alias not in aliases:
+            aliases.append(alias)
     return aliases
 
 
