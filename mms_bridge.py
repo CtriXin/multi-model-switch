@@ -1221,13 +1221,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             seen = set()
             models = []
             advertised_models = list(getattr(self.server, "advertised_models", []) or [])
+            # 兜底只用实际配置的模型，不硬编码可能不存在的模型
             fallback_models = [
                 getattr(self.server, "heavy_model", None),
                 getattr(self.server, "medium_model", None),
                 getattr(self.server, "light_model", None),
-                "claude-sonnet-4-6",
-                "claude-opus-4-6",
-                "claude-haiku-4-5-20251001",
             ]
             for m in advertised_models + fallback_models:
                 if m and m not in seen:
