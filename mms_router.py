@@ -634,6 +634,12 @@ def export_model_routes(cfg=None, force=False):
     # 模型 claim：高优先级 provider 先 claim
     # 过滤上游 gateway 吐出的 claude- 前缀国产模型别名（如 claude-glm-5、claude-kimi-k2.5）
     _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
+    # 只保留最新一代 Claude 模型，过滤旧版（3.x、4-1、4-20250514 等）
+    _CLAUDE_KEEP = {
+        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+    }
     routes = {}
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
@@ -642,6 +648,9 @@ def export_model_routes(cfg=None, force=False):
                 continue
             # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
             if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
+                continue
+            # 旧版 Claude 模型 → 跳过，只保留白名单
+            if normalized.startswith("claude-") and normalized not in _CLAUDE_KEEP:
                 continue
             route_entry = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
