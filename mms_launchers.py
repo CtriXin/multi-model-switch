@@ -1928,10 +1928,8 @@ def _exec_or_run(
             else:
                 result = subprocess.run(cmd, env=env)
             exit_code = result.returncode
-            sys.exit(result.returncode)
         except KeyboardInterrupt:
             exit_code = 130
-            sys.exit(0)
         finally:
             if exit_callback is not None:
                 try:
@@ -1939,8 +1937,15 @@ def _exec_or_run(
                 except Exception:
                     pass
             if cleanup_path and os.path.exists(cleanup_path):
-                os.remove(cleanup_path)
+                try:
+                    os.remove(cleanup_path)
+                except OSError:
+                    pass
             if cleanup_context is not None:
-                cleanup_context.__exit__(None, None, None)
+                try:
+                    cleanup_context.__exit__(None, None, None)
+                except (KeyboardInterrupt, Exception):
+                    pass
+        sys.exit(exit_code or 0)
     else:
         os.execvpe(exe, cmd, env)
