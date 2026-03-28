@@ -40,8 +40,8 @@ _LEARN_THRESHOLD = 3
 # ── 内置默认关键词 ──
 
 _BUILTIN_GUARDRAIL_FILES = {
-    "ccs_core", "ccs_launchers", "ccs_bridge", "ccs_router", "ccs_tui",
-    "ccs_adapter_registry", "ccs_account_state",
+    "mms_core", "mms_launchers", "mms_bridge", "mms_router", "mms_tui",
+    "mms_adapter_registry", "mms_account_state",
     "auth", "schema", "migration", "security", "config.toml",
 }
 
@@ -543,7 +543,7 @@ import time as _time
 MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
 _MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
 
-# role 权重复用 ccs_core 的定义
+# role 权重复用 mms_core 的定义
 _EXPORT_ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 
 
@@ -556,7 +556,7 @@ def export_model_routes(cfg=None, force=False):
     Returns:
         dict: {model_name: {anthropic_base_url, api_key, provider_id, priority, role}}
     """
-    from ccs_core import (
+    from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
         ROLE_WEIGHTS, DEFAULT_PRIORITY,

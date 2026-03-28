@@ -1,13 +1,13 @@
 #!/bin/bash
-# MMS 一键安装脚本（兼容 ccs）
+# MMS 一键安装脚本
 # 用法: curl -fsSL <url>/install.sh | bash
 #   或: bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]
 
 set -e
 
-CCS_HOME="$HOME/.mms"
+MMS_HOME="$HOME/.mms"
 BIN_DIR="$HOME/.local/bin"
-VENV_DIR="$CCS_HOME/.venv"
+VENV_DIR="$MMS_HOME/.venv"
 CREDENTIALS_PATH="$HOME/.config/mms/credentials.sh"
 CONFIG_PATH="$HOME/.config/mms/config.toml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
@@ -85,7 +85,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "===================================="
-echo "  MMS 一键安装（兼容 ccs）"
+echo "  MMS 一键安装"
 echo "===================================="
 echo ""
 
@@ -113,7 +113,7 @@ fi
 # ── 2. 创建隔离的 Python 环境 ──
 echo ""
 echo "正在创建隔离环境..."
-mkdir -p "$CCS_HOME"
+mkdir -p "$MMS_HOME"
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
 "$VENV_DIR/bin/pip" install --quiet rich httpx tomli-w
@@ -123,37 +123,41 @@ echo "✓ 依赖已安装到 $VENV_DIR"
 echo ""
 
 # 判断来源：本地目录 or 远程
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/ccs_core.py" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
     # 从本地安装
-    cp "$SCRIPT_DIR"/ccs "$CCS_HOME/ccs"
-    cp "$SCRIPT_DIR"/mms "$CCS_HOME/mms"
-    cp "$SCRIPT_DIR"/ccs_core.py "$CCS_HOME/"
-    cp "$SCRIPT_DIR"/ccs_tui.py "$CCS_HOME/"
-    cp "$SCRIPT_DIR"/ccs_launchers.py "$CCS_HOME/"
-    cp "$SCRIPT_DIR"/ccs_installer.py "$CCS_HOME/"
-    [ -f "$SCRIPT_DIR/config.example.toml" ] && cp "$SCRIPT_DIR/config.example.toml" "$CCS_HOME/"
-    echo "✓ 文件已复制到 $CCS_HOME"
+    cp "$SCRIPT_DIR"/ccs "$MMS_HOME/ccs"
+    cp "$SCRIPT_DIR"/mms "$MMS_HOME/mms"
+    cp "$SCRIPT_DIR"/mms_core.py "$MMS_HOME/"
+    cp "$SCRIPT_DIR"/mms_tui.py "$MMS_HOME/"
+    cp "$SCRIPT_DIR"/mms_launchers.py "$MMS_HOME/"
+    cp "$SCRIPT_DIR"/mms_installer.py "$MMS_HOME/"
+    # 复制所有 mms_*.py 确保完整
+    for f in "$SCRIPT_DIR"/mms_*.py; do
+        [ -f "$f" ] && cp "$f" "$MMS_HOME/"
+    done
+    [ -f "$SCRIPT_DIR/config.example.toml" ] && cp "$SCRIPT_DIR/config.example.toml" "$MMS_HOME/"
+    echo "✓ 文件已复制到 $MMS_HOME"
 else
-    echo "❌ 找不到 MMS/CCS 源文件，请在仓库目录下运行此脚本"
+    echo "❌ 找不到 MMS 源文件，请在仓库目录下运行此脚本"
     exit 1
 fi
 
-chmod +x "$CCS_HOME/ccs"
-chmod +x "$CCS_HOME/mms"
+chmod +x "$MMS_HOME/ccs"
+chmod +x "$MMS_HOME/mms"
 
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
-sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$CCS_HOME/ccs" && rm -f "$CCS_HOME/ccs.bak"
-sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$CCS_HOME/mms" && rm -f "$CCS_HOME/mms.bak"
+sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$MMS_HOME/ccs" && rm -f "$MMS_HOME/ccs.bak"
+sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$MMS_HOME/mms" && rm -f "$MMS_HOME/mms.bak"
 
 # ── 5. 建立命令入口 ──
 echo ""
 mkdir -p "$BIN_DIR"
 
 # 创建 symlink
-ln -sf "$CCS_HOME/ccs" "$BIN_DIR/ccs"
-ln -sf "$CCS_HOME/mms" "$BIN_DIR/mms"
+ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
+ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
 echo "✓ 命令已链接到 $BIN_DIR/mms 和 $BIN_DIR/ccs"
 
 # 检查 PATH 是否包含 ~/.local/bin
@@ -193,14 +197,13 @@ fi
 
 # ── 6. 验证 ──
 echo ""
-if [ -x "$BIN_DIR/mms" ] && [ -x "$BIN_DIR/ccs" ]; then
+if [ -x "$BIN_DIR/mms" ]; then
     DID_LAUNCH=0
     echo "===================================="
-    echo "  ✅ MMS 安装完成（兼容 ccs）"
+    echo "  ✅ MMS 安装完成"
     echo "===================================="
     echo ""
     echo "  运行 $BIN_DIR/mms 开始使用"
-    echo "  如需兼容旧习惯，也可以继续用 $BIN_DIR/ccs"
     echo ""
     echo "  常用命令:"
     echo "    mms              交互选择场景"
@@ -208,7 +211,6 @@ if [ -x "$BIN_DIR/mms" ] && [ -x "$BIN_DIR/ccs" ]; then
     echo "    mms --preset coding  使用预设"
     echo "    mms config       查看/修改配置"
     echo "    mms --export claude  导出环境变量"
-    echo "    ccs ...          旧命令仍可继续使用"
     echo ""
 
     if [ "$RUN_SETUP" -eq 1 ] && { [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; }; then
@@ -217,9 +219,8 @@ if [ -x "$BIN_DIR/mms" ] && [ -x "$BIN_DIR/ccs" ]; then
         "$BIN_DIR/mms" || true
         DID_LAUNCH=1
     elif [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
-        echo "  首次配置请手动运行:"
-        echo "    $BIN_DIR/ccs"
-        echo "    或 $BIN_DIR/mms"
+        echo "  首次配置请运行:"
+        echo "    $BIN_DIR/mms"
         echo ""
         echo "  如需安装完成后立即进入配置向导，可执行:"
         echo "    bash install.sh --run-setup"

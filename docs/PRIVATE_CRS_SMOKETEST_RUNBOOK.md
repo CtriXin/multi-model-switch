@@ -167,7 +167,7 @@ curl -sS -D - \
 
 ```bash
 HOME=/Users/xin python3 - <<'PY'
-from ccs_core import load_config
+from mms_core import load_config
 cfg = load_config()
 for p in cfg.get('providers', []):
     if p.get('id') == 'privateopenai':
@@ -186,7 +186,7 @@ PY
 
 ```bash
 HOME=/Users/xin python3 - <<'PY'
-from ccs_core import load_config, resolve_provider_context, _probe_models
+from mms_core import load_config, resolve_provider_context, _probe_models
 cfg = load_config()
 provider = resolve_provider_context(cfg, 'privateopenai')
 res = _probe_models(provider, emit_output=False, force_refresh=True)

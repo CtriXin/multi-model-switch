@@ -142,7 +142,7 @@ Phase 2 再叠加 AI 生成的 `title` / `task_summary` / `next_step`。
 
 ### 2.5 与 OAuth 账号的 `home_dir` 的关系
 
-`ccs_account_state.py` 的 `activated_claude_account_state()` 会临时把 `~/.claude.json` 替换成对应账号的版本。这和 gateway slot 的 HOME 隔离是 **两套独立机制**。
+`mms_account_state.py` 的 `activated_claude_account_state()` 会临时把 `~/.claude.json` 替换成对应账号的版本。这和 gateway slot 的 HOME 隔离是 **两套独立机制**。
 
 新方案需要明确：当 `mms claude --account pro-2` 启动时——
 
@@ -152,9 +152,9 @@ Phase 2 再叠加 AI 生成的 `title` / `task_summary` / `next_step`。
 
 如果不理清这个，最终会出现三层叠加（account home + gateway slot + project scope），调试时没人能说清某个 session 文件到底从哪来。
 
-### 2.6 `ccs_session.py` 的定位
+### 2.6 `mms_session.py` 的定位
 
-当前 `ccs_session.py` 管理的是 mms 自己的 `chat/discuss` session（存在 `~/.mms/sessions/`），和 Claude CLI 的 session 是 **完全不同的东西**。
+当前 `mms_session.py` 管理的是 mms 自己的 `chat/discuss` session（存在 `~/.mms/sessions/`），和 Claude CLI 的 session 是 **完全不同的东西**。
 
 新方案应该明确：project-scoped 历史仓只管 Claude CLI 的原始 session，不要和 mms 的 chat/discuss session 混在一起。两者未来可以在 Phase 4 做统一视图，但存储层必须隔离。
 
@@ -303,11 +303,11 @@ Archive 和 Summary 层应该考虑：
 
 | 文件 | 改动范围 | 风险 |
 |------|----------|------|
-| `ccs_launchers.py` | `_claude_gateway_env()` 的 symlink 逻辑 | 中 — 这是启动核心链路 |
-| `ccs_launchers.py` | `_cleanup_stale_sessions()` 增加 on_exit 回调 | 低 — 只是增加逻辑 |
-| `ccs_session.py` | 可能不需要改，新逻辑放新文件 | — |
-| 新文件：`ccs_project_store.py` | project_key / metadata / 目录管理 | 无 — 新文件 |
-| 新文件：`ccs_session_index.py` | session metadata 读写 / ls 命令 | 无 — 新文件 |
+| `mms_launchers.py` | `_claude_gateway_env()` 的 symlink 逻辑 | 中 — 这是启动核心链路 |
+| `mms_launchers.py` | `_cleanup_stale_sessions()` 增加 on_exit 回调 | 低 — 只是增加逻辑 |
+| `mms_session.py` | 可能不需要改，新逻辑放新文件 | — |
+| 新文件：`mms_project_store.py` | project_key / metadata / 目录管理 | 无 — 新文件 |
+| 新文件：`mms_session_index.py` | session metadata 读写 / ls 命令 | 无 — 新文件 |
 
 ---
 

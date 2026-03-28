@@ -124,8 +124,8 @@ mms cache reset
 
 - `mms`
 - `ccs`
-- `ccs_core.py`
-- `ccs_launchers.py`
+- `mms_core.py`
+- `mms_launchers.py`
 - `MMS Installer.command`
 - `CCS Installer.command`
 
@@ -158,7 +158,7 @@ mms cache reset
 
 - `config.toml` 保存模型源元数据，例如 `id`、`name`、`protocols`、`supported_clis`
 - `credentials.sh` 继续保存真实 `base_url` 和 `api_key`
-- 默认模型源仍兼容旧的 `CCS_API_BASE_URL` / `CCS_API_KEY`
+- 默认模型源仍兼容旧的 `MMS_API_BASE_URL` / `MMS_API_KEY`
 - 一个模型源可以同时声明多种协议，例如：
   - `anthropic_messages`
   - `openai_chat_completions`
@@ -570,8 +570,8 @@ mms discuss --provider foo "为这个 CLI 设计配置结构"
 
 - [README.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/README.md)
 - [install.sh](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/install.sh)
-- [ccs_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_core.py)
-- [ccs_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/ccs_launchers.py)
+- [mms_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_core.py)
+- [mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py)
 
 如果你要继续在这个仓库上开发，建议把它当成：
 

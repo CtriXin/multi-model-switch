@@ -1,5 +1,5 @@
 # MMS 配置文件
-# 复制到 ~/.config/ccs/config.toml 后修改
+# 复制到 ~/.config/mms/config.toml 后修改
 
 [provider]
 default = "default"

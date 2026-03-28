@@ -303,7 +303,7 @@ async def _section_claude(accounts: list[dict]) -> None:
     table.add_column("状态", style="dim")
 
     # Build token pool: keychain (current active) + all cached tokens
-    from ccs_account_state import load_cached_claude_tokens
+    from mms_account_state import load_cached_claude_tokens
     kc_token, kc_email = _keychain_claude_token()
     cached_tokens: list[dict] = load_cached_claude_tokens()
     # Deduplicate: keyed by accessToken prefix
@@ -683,7 +683,7 @@ def usage_main(cfg: dict, argv: list[str] | None = None) -> None:
 
     # Always cache the currently-active keychain token on each run,
     # so it's available for future runs even after account switching.
-    from ccs_account_state import cache_current_claude_token
+    from mms_account_state import cache_current_claude_token
     cache_current_claude_token()
 
     accounts = cfg.get("accounts", [])

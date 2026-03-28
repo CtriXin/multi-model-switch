@@ -24,13 +24,13 @@
 
 对下列文件的改动默认视为高风险改动：
 
-- `ccs_core.py`
-- `ccs_launchers.py`
-- `ccs_tui.py`
-- `ccs_bridge.py`
-- `ccs_account_state.py`
-- `ccs_session.py`
-- `ccs_adapter_registry.py`
+- `mms_core.py`
+- `mms_launchers.py`
+- `mms_tui.py`
+- `mms_bridge.py`
+- `mms_account_state.py`
+- `mms_session.py`
+- `mms_adapter_registry.py`
 - `mms`
 - `ccs`
 

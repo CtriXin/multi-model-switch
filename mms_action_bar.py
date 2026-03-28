@@ -9,9 +9,9 @@ import traceback
 from rich.columns import Columns
 from rich.panel import Panel
 
-from ccs_chat import run_compare, select_models_tui, strip_markdown, _current_view_state as _chat_view_state
-from ccs_core import console, fetch_models
-from ccs_session import (
+from mms_chat import run_compare, select_models_tui, strip_markdown, _current_view_state as _chat_view_state
+from mms_core import console, fetch_models
+from mms_session import (
     advance_round,
     build_continuation_prompt,
     create_session,
@@ -629,8 +629,8 @@ def _fallback_brief(display_text):
 
 
 async def _run_refine(provider_ctx, session):
-    from ccs_chat import stream_model
-    from ccs_discuss import REFINE_SYSTEM_PROMPT
+    from mms_chat import stream_model
+    from mms_discuss import REFINE_SYSTEM_PROMPT
     import httpx
     import json as _json
     from rich.live import Live
@@ -671,7 +671,7 @@ async def _run_refine(provider_ctx, session):
 
 async def _run_synthesize(provider_ctx, session, selected_model, summaries):
     import httpx
-    from ccs_discuss import phase3_synthesize
+    from mms_discuss import phase3_synthesize
 
     timeout = httpx.Timeout(connect=10, write=10, read=60, pool=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -768,7 +768,7 @@ def _on_handoff(session, models, selected, briefs, display_texts, task_text, cfg
     advance_round(session, selected, brief, display_texts.get(selected, ""), round_models=list(models))
     _handle_handoff(session, selected, display_texts)
     if cfg is not None:
-        from ccs_discuss import discuss_main
+        from mms_discuss import discuss_main
         console.print("[cyan]→ 自动进入 mms discuss...[/cyan]\n")
         discuss_main(cfg, [task_text])
     return None
@@ -797,7 +797,7 @@ def _on_converge(provider_ctx, session, models, selected, briefs, display_texts,
 
 def run_chat_loop(cfg, provider_ctx, models, task_text, session=None):
     """Main interactive chat loop with session state machine."""
-    import ccs_chat as _ccs_chat_mod
+    import mms_chat as _mms_chat_mod
 
     if session is None:
         session = create_session(task_text, models)
@@ -807,7 +807,7 @@ def run_chat_loop(cfg, provider_ctx, models, task_text, session=None):
         try:
             buffers = asyncio.run(run_compare(provider_ctx, models, prompt, with_footer=True))
         except (KeyboardInterrupt, asyncio.CancelledError):
-            buffers = dict(_ccs_chat_mod._last_buffers)
+            buffers = dict(_mms_chat_mod._last_buffers)
             if not any(v for v in buffers.values()):
                 console.print("\n[yellow]中断时尚无内容，退出[/yellow]")
                 break
