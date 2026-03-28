@@ -1085,12 +1085,17 @@ A：会，而且这轮又补了一层“防套娃”。
 这轮已经在 launcher 里补了：
 
 - `MMS_REAL_HOME`
+- `ORIGINAL_HOME`
+- `REAL_HOME`
+- `GH_CONFIG_DIR`
+- gateway 路径下回源真实 `XDG_CONFIG_HOME`
 
 现在的规则是：
 
 - 第一层 `MMS` 启动时显式把真实 home 传下去
 - 后续不管是子 skill、还是第二层 `mms`
 - 共享资源都优先从 `MMS_REAL_HOME` 回源，而不是再从当前隔离 `HOME` 继续推导
+- 像 `gh` 这类依赖 `~/.config` 的工具，会通过回源提示读到真实用户配置
 
 补丁位置：
 
