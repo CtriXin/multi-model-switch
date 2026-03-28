@@ -51,7 +51,6 @@ def _infer_upstream_provider(model_name: str | None) -> str:
         ("openai", ("gpt-", "gpt4", "gpt5", "o1", "o3", "o4", "codex")),
         ("google", ("gemini",)),
         ("qwen", ("qwen",)),
-        ("deepseek", ("deepseek",)),
         ("kimi", ("kimi",)),
         ("minimax", ("minimax",)),
         ("glm", ("glm",)),
