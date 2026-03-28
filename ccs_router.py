@@ -632,11 +632,16 @@ def export_model_routes(cfg=None, force=False):
     providers_info.sort(key=lambda p: p["sort_key"])
 
     # 模型 claim：高优先级 provider 先 claim
+    # 过滤上游 gateway 吐出的 claude- 前缀国产模型别名（如 claude-glm-5、claude-kimi-k2.5）
+    _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
     routes = {}
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
             normalized = str(model_name or "").strip()
             if not normalized or normalized in routes:
+                continue
+            # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
+            if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
                 continue
             route_entry = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
