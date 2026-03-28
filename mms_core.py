@@ -899,17 +899,29 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
     launch_cli(cli_name, model_info, runtime, once=once)
 
 
+def _legacy_provider_env_name(provider_id, field):
+    """旧版 CCS_PROVIDER_* 环境变量名，用于 credentials.sh fallback。"""
+    return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
+
+
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     base_key = _provider_env_name(provider_id, "BASE_URL")
     openai_base_key = _provider_env_name(provider_id, "OPENAI_BASE_URL")
     anthropic_base_key = _provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
     api_key_name = _provider_env_name(provider_id, "API_KEY")
     openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
-    base_url = os.environ.get(base_key, "").strip()
-    openai_base_url = os.environ.get(openai_base_key, "").strip()
-    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip()
-    api_key = os.environ.get(api_key_name, "").strip()
-    openai_api_key = os.environ.get(openai_api_key_name, "").strip()
+    # Legacy CCS_PROVIDER_* fallback keys
+    legacy_base_key = _legacy_provider_env_name(provider_id, "BASE_URL")
+    legacy_openai_base_key = _legacy_provider_env_name(provider_id, "OPENAI_BASE_URL")
+    legacy_anthropic_base_key = _legacy_provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
+    legacy_api_key_name = _legacy_provider_env_name(provider_id, "API_KEY")
+    legacy_openai_api_key_name = _legacy_provider_env_name(provider_id, "OPENAI_API_KEY")
+
+    base_url = os.environ.get(base_key, "").strip() or os.environ.get(legacy_base_key, "").strip()
+    openai_base_url = os.environ.get(openai_base_key, "").strip() or os.environ.get(legacy_openai_base_key, "").strip()
+    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip() or os.environ.get(legacy_anthropic_base_key, "").strip()
+    api_key = os.environ.get(api_key_name, "").strip() or os.environ.get(legacy_api_key_name, "").strip()
+    openai_api_key = os.environ.get(openai_api_key_name, "").strip() or os.environ.get(legacy_openai_api_key_name, "").strip()
 
     if provider_id == DEFAULT_PROVIDER_ID:
         base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip() or os.environ.get(_LEGACY_API_URL_ENV, "").strip()
@@ -919,14 +931,15 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
         if not os.path.exists(credentials_path):
             continue
         file_values = _load_env_file(credentials_path)
-        base_url = base_url or file_values.get(base_key, "").strip()
-        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip()
-        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip()
-        api_key = api_key or file_values.get(api_key_name, "").strip()
-        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip()
+        # 先查 MMS_PROVIDER_* 再 fallback 到 CCS_PROVIDER_*
+        base_url = base_url or file_values.get(base_key, "").strip() or file_values.get(legacy_base_key, "").strip()
+        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip() or file_values.get(legacy_openai_base_key, "").strip()
+        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip() or file_values.get(legacy_anthropic_base_key, "").strip()
+        api_key = api_key or file_values.get(api_key_name, "").strip() or file_values.get(legacy_api_key_name, "").strip()
+        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip() or file_values.get(legacy_openai_api_key_name, "").strip()
         if provider_id == DEFAULT_PROVIDER_ID:
-            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
-            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
+            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_URL_ENV, "").strip()
+            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_KEY_ENV, "").strip()
 
     config_path = _active_config_path()
     if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(config_path):
