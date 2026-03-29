@@ -501,6 +501,9 @@ MMS 启动时会先读取已配置模型源，并用可拉取到的模型列表�
 mms chat
 mms chat "解释 Python GIL"
 mms chat --provider foo "为这个 CLI 设计配置结构"
+mms chat --list-sessions
+mms chat --resume 1
+mms session resume 1
 ```
 
 **流式阶段**：模型数 ≤3 时横向并排，>3 时纵向堆叠。流式过程中：
@@ -530,7 +533,12 @@ mms chat --provider foo "为这个 CLI 设计配置结构"
 - `Cmd+V`（iTerm2 bracketed paste）：图片优先；长文本（>60 字符）显示为 `[Pasted N chars]`，Backspace 整块删除
 - `@/path/to/image.png`：手动引用图片路径
 
-**session 机制**：续聊时携带已选方案的 brief + 最近 3 条决策记录，不携带完整历史 transcript，token 成本可控。
+**session 机制**：
+
+- 保存路径优先写到当前项目目录的 `.mms/sessions/`，避免切账号后因为隔离 `HOME` 看起来像“历史丢了”
+- `mms chat --list-sessions` 会优先显示当前项目 session，并兼容回退旧的全局 `~/.mms/sessions/`
+- `mms chat --resume <id|前缀|序号>` 可直接恢复，`mms session resume <id|前缀|序号>` 提供等价快捷入口
+- 续聊时只携带已选方案的 brief + 最近 3 条决策记录，不携带完整历史 transcript，token 成本可控
 
 ## `mms discuss`
 

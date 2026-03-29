@@ -5801,7 +5801,7 @@ def _handle_session_info(session_id, cli_name):
 def handle_session_command(argv):
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} session",
-        description="查看 MMS 托管的 CLI session 元数据",
+        description="查看 MMS 托管 session，或恢复已保存的 chat session",
     )
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -5812,12 +5812,30 @@ def handle_session_command(argv):
     info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
     info_parser.add_argument("--cli", default="claude", choices=["claude"])
 
+    resume_parser = subparsers.add_parser("resume", help="恢复已保存的 chat session")
+    resume_parser.add_argument("session_ref", help="session id / 前缀 / 最近列表序号")
+    resume_parser.add_argument("--provider", help="临时指定 provider")
+
     args = parser.parse_args(argv)
     if args.subcommand == "ls":
         _handle_session_ls(args.cli)
         return
     if args.subcommand == "info":
         _handle_session_info(args.session_id, args.cli)
+        return
+    if args.subcommand == "resume":
+        from mms_chat import chat_main
+        from mms_session import resolve_session_ref
+
+        resolved_id, error = resolve_session_ref(args.session_ref, cwd=os.getcwd())
+        if not resolved_id:
+            console.print(f"[red]{error or f'找不到 session: {args.session_ref}'}[/red]")
+            return
+
+        chat_argv = ["--resume", resolved_id]
+        if args.provider:
+            chat_argv.extend(["--provider", args.provider])
+        chat_main(_load_command_config(), chat_argv)
         return
 
     parser.print_help()

@@ -699,7 +699,7 @@ def _handle_handoff(session, selected, display_texts) -> str:
     brief = session["branch"].get("brief") or {}
 
     # Auto-save so the user can resume later
-    path = save_session(session)
+    path = save_session(session, cwd=os.getcwd())
     sid = session["id"]
 
     console.print("\n[bold cyan]── 执行交付简报 ──[/bold cyan]")
@@ -738,7 +738,7 @@ def _pick_event(models, display_texts, initial_focus, session=None):
             event = "__init__"
         elif event == "SAVE_SESSION":
             if session is not None:
-                path = save_session(session)
+                path = save_session(session, cwd=os.getcwd())
                 console.print(f"\n[green]Session 已保存: {path}[/green]  [dim]id={session['id']}[/dim]")
             event = "__init__"
     return event, selected
