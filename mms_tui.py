@@ -825,15 +825,7 @@ def save_lb_history(heavy, medium, light):
 
 
 def select_load_balance_tui(available_models=None, families_detail=None, provider_options_map=None):
-    """负载模式 TUI：最近 3 条 + 自定义（slot 编辑）。
-
-    Args:
-        available_models: list[str] — 可用模型名列表（flat）
-        families_detail: dict — {family_name: [model_entry, ...]} 用于自定义 M 弹窗
-        provider_options_map: dict — {model_name: [provider_option, ...]} 用于 +/- 切 provider
-
-    返回 {"model": heavy, "lb_medium": medium, "lb_light": light, "priority_changes": {...}} 或 None。
-    """
+    """负载模式 TUI — H6 风格：最近 3 条 + 自定义。"""
     history = _load_lb_history()
     recent = history.get("recent", [])
 
@@ -846,7 +838,7 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
                 seen.add(key)
                 opts.append({"label": f"{r['heavy']} / {r.get('medium','')} / {r['light']}",
                              "heavy": r["heavy"], "medium": r.get("medium", ""), "light": r["light"], "type": "recent"})
-        opts.append({"label": "✏  自定义...", "type": "custom"})
+        opts.append({"label": "自定义...", "type": "custom"})
         return opts
 
     def _inner(stdscr):
@@ -854,49 +846,57 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
-        curses.init_pair(7, curses.COLOR_MAGENTA, -1)
 
         options = _build_options()
         idx = 0
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(5)
 
-            w = max(54, min(max_w - 2, int(max_w * 0.85)))
-            h = len(options) + 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
+            total_w = min(60, max_w - 4)
+            ph = len(options) + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
 
-            _draw_box(stdscr, sy, sx, h, w, "⚖ 负载模式")
-
-            _safe_addstr(stdscr, sy + 2, sx + 4,
-                         "heavy / medium / light",
-                         curses.A_DIM)
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "负载均衡", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll + 11, "heavy / medium / light", curses.A_DIM)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
 
             for i, opt in enumerate(options):
-                y = sy + 4 + i
-                if y >= sy + h - 1:
-                    break
-                prefix = "▸ " if i == idx else "  "
-                line = f"{prefix}{opt['label']}"
-                if opt.get("type") == "recent":
-                    attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(4)
+                y = row + i
+                is_sel = (i == idx)
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 6)
+                elif opt.get("type") == "recent":
+                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(4), max_w=total_w - 6)
                 else:
-                    attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(2)
-                _safe_addstr(stdscr, y, sx + 4, line, attr, max_w=w - 8)
+                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(2), max_w=total_w - 6)
 
-            footer = " ↑↓ 选择   Enter 确认   Esc 取消 "
-            _center_text(stdscr, sy + h - 1, cx, footer,
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = row + len(options)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "确认", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "取消", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
                 idx = (idx - 1) % len(options)
             elif key == curses.KEY_DOWN:
@@ -913,61 +913,75 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
         result = curses.wrapper(_inner)
     except curses.error:
         return None
-
     if result == "custom":
         return _select_lb_custom_tui(families_detail, provider_options_map)
-
     return result
 
 
 def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
-    """负载自定义 TUI：3 个 slot + 启动。Enter 进入 slot 编辑（品类→子模型），+/- 切 provider。
-
-    流程：
-      主视图：heavy / medium / light / ▶ 启动
-        ↑↓ 选 slot，Enter 进入编辑或启动
-        +/- 在当前 slot 切换 provider
-      编辑 slot（Enter）：
-        全屏品类列表 → Enter → 全屏子模型列表 → Enter 选中 → 回主视图
-    """
+    """负载自定义 TUI — H6 风格：3 slot + 启动。"""
     SLOT_NAMES = ["heavy", "medium", "light"]
-    SLOT_LABELS = {"heavy": "Heavy  (复杂)", "medium": "Medium (常规)", "light": "Light  (简单)"}
+    SLOT_COLORS = {"heavy": 3, "medium": 4, "light": 5}  # red, yellow, green
     slots = {s: {"model": "(未选)", "provider_name": "", "provider_id": "", "provider_ctx": {}} for s in SLOT_NAMES}
     family_names = list((families_detail or {}).keys())
 
     def _pick_model_for_slot(stdscr):
-        """全屏两步选模型：品类 → 子模型。返回 model entry dict 或 None。"""
+        """品类 → 子模型，H6 风格。"""
         fam_idx = 0
         fam_scroll = 0
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
-            w = max(40, min(max_w - 2, int(max_w * 0.75)))
-            visible = min(len(family_names), max_y - 6)
-            h = visible + 4
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
+            ac = curses.color_pair(1)
+            total_w = min(50, max_w - 4)
+            visible = min(len(family_names), max_y - 7)
+            ph = visible + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
 
-            _draw_box(stdscr, sy, sx, h, w, "选择品类")
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "选择品类", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
 
             if fam_idx < fam_scroll:
                 fam_scroll = fam_idx
             elif fam_idx >= fam_scroll + visible:
                 fam_scroll = fam_idx - visible + 1
 
+            content_y = row
             for fi in range(fam_scroll, min(fam_scroll + visible, len(family_names))):
-                fy = sy + 2 + (fi - fam_scroll)
-                fm = "▸ " if fi == fam_idx else "  "
+                fy = content_y + (fi - fam_scroll)
+                is_sel = (fi == fam_idx)
                 cnt = len((families_detail or {}).get(family_names[fi], []))
-                fattr = curses.color_pair(3) | curses.A_BOLD if fi == fam_idx else curses.color_pair(2)
-                _safe_addstr(stdscr, fy, sx + 4, f"{fm}{family_names[fi]} ({cnt})", fattr, max_w=w - 8)
+                fc = curses.color_pair(_FAMILY_COLORS.get(family_names[fi], 2))
+                if is_sel:
+                    _safe_addstr(stdscr, fy, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, fy, ll + 1, family_names[fi], curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, fy, rr - len(str(cnt)), str(cnt), curses.color_pair(1))
+                else:
+                    _safe_addstr(stdscr, fy, ll, ".", fc | curses.A_DIM)
+                    _safe_addstr(stdscr, fy, ll + 2, family_names[fi], curses.color_pair(2))
+                    _safe_addstr(stdscr, fy, rr - len(str(cnt)), str(cnt), curses.A_DIM)
 
-            _center_text(stdscr, sy + h - 1, cx, " ↑↓ 选择  Enter 展开  Esc 返回 ",
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "展开", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
                 fam_idx = (fam_idx - 1) % len(family_names)
             elif key == curses.KEY_DOWN:
@@ -984,53 +998,72 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
                 return None
 
     def _pick_submodel(stdscr, fam_name, model_list):
-        """全屏子模型选择。返回 model entry dict 或 None (Esc)。"""
+        """子模型选择，H6 双栏风格。"""
         m_idx = 0
         m_scroll = 0
+        fc = curses.color_pair(_FAMILY_COLORS.get(fam_name, 1))
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
-            w = max(50, min(max_w - 2, int(max_w * 0.85)))
-            inner_w = w - 8
-            visible = min(len(model_list), max_y - 6)
-            h = visible + 4
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
+            total_w = min(56, max_w - 4)
+            left_w = 26
+            right_w = total_w - left_w
+            visible = min(len(model_list), max_y - 7)
+            ph = visible + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
 
-            tag_samples = [m.get("provider_name", "") + " P:" + str(m.get("provider_ctx", {}).get("priority", ""))
-                           for m in model_list]
-            max_tag_w = max((_display_width(t) for t in tag_samples), default=10)
-
-            _draw_box(stdscr, sy, sx, h, w, fam_name)
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, fc)
+            row += 1
+            _safe_addstr(stdscr, row, ll, fam_name, fc | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
 
             if m_idx < m_scroll:
                 m_scroll = m_idx
             elif m_idx >= m_scroll + visible:
                 m_scroll = m_idx - visible + 1
 
-            tag_x = sx + w - 4 - max_tag_w
+            content_y = row
             for mi in range(m_scroll, min(m_scroll + visible, len(model_list))):
-                my = sy + 2 + (mi - m_scroll)
+                my = content_y + (mi - m_scroll)
                 me = model_list[mi]
                 is_sel = (mi == m_idx)
-                mm = "▸ " if is_sel else "  "
-                mname = me.get("model", "")
-                mprov = me.get("provider_name", "")
-                mpri = me.get("provider_ctx", {}).get("priority", "")
-                mtag = f"{mprov} P:{mpri}" if mprov else ""
+                mname = me.get("model", "") if isinstance(me, dict) else str(me)
+                mprov = me.get("provider_name", "") if isinstance(me, dict) else ""
+                mpri = me.get("provider_ctx", {}).get("priority", "") if isinstance(me, dict) else ""
+                tag = f"{mprov} P:{mpri}" if mprov else ""
 
-                mattr = curses.color_pair(3) | curses.A_BOLD if is_sel else curses.color_pair(2)
-                _safe_addstr(stdscr, my, sx + 4, f"{mm}{mname}", mattr, max_w=inner_w - max_tag_w - 2)
-                if mtag:
-                    tattr = curses.color_pair(4) | curses.A_BOLD if is_sel else curses.color_pair(4) | curses.A_DIM
-                    _safe_addstr(stdscr, my, tag_x, mtag, tattr)
+                _safe_addstr(stdscr, my, px + left_w, "|", curses.A_DIM)
+                if is_sel:
+                    _safe_addstr(stdscr, my, ll - 1, "|", fc | curses.A_BOLD)
+                    _safe_addstr(stdscr, my, ll + 1, mname, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    if tag:
+                        _safe_addstr(stdscr, my, rl, tag, curses.color_pair(4) | curses.A_BOLD, max_w=right_w - 3)
+                else:
+                    _safe_addstr(stdscr, my, ll + 1, mname, curses.color_pair(2), max_w=left_w - 4)
+                    if tag:
+                        _safe_addstr(stdscr, my, rl, tag, curses.A_DIM, max_w=right_w - 3)
 
-            _center_text(stdscr, sy + h - 1, cx, " ↑↓ 选择  Enter 选中  Esc 返回 ",
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "选择", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
+
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
                 m_idx = (m_idx - 1) % len(model_list)
             elif key == curses.KEY_DOWN:
@@ -1041,7 +1074,6 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
                 return None
 
     def _lb_cycle_provider(slot, direction):
-        """在可用 provider 间循环切换 slot 的 provider。"""
         model_name = slot.get("model", "")
         if not model_name or model_name == "(未选)" or not provider_options_map:
             return
@@ -1065,72 +1097,86 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
 
-        items = 4
+        n_items = 4  # 3 slots + launch
         idx = 0
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(5)
 
-            w = max(58, min(max_w - 2, int(max_w * 0.85)))
-            inner_w = w - 8
-            h = items + 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
+            total_w = min(56, max_w - 4)
+            ph = 12
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
 
-            _draw_box(stdscr, sy, sx, h, w, "⚖ 自定义负载")
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "自定义负载", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
 
             for si, sname in enumerate(SLOT_NAMES):
-                y = sy + 2 + si
+                y = row + si * 2
                 is_sel = (si == idx)
-                marker = "▸ " if is_sel else "  "
                 slot = slots[sname]
-                label = SLOT_LABELS[sname]
                 model = slot["model"]
                 prov = slot["provider_name"]
                 pri = slot["provider_ctx"].get("priority", "")
-                tag = f"{prov} P:{pri}" if prov else ""
+                sc = curses.color_pair(SLOT_COLORS[sname])
 
-                left = f"{marker}{label}  {model}"
-                attr = curses.color_pair(3) | curses.A_BOLD if is_sel else curses.color_pair(2)
-                max_left = inner_w - _display_width(tag) - 2 if tag else inner_w
-                _safe_addstr(stdscr, y, sx + 4, left, attr, max_w=max_left)
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, sname.capitalize(), sc | curses.A_BOLD)
+                    _safe_addstr(stdscr, y + 1, ll + 3, model, curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 10)
+                    if prov:
+                        tag = f"{prov} P:{pri}"
+                        _safe_addstr(stdscr, y, rr - len(tag), tag, curses.color_pair(4))
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, sname.capitalize(), sc | curses.A_DIM)
+                    _safe_addstr(stdscr, y + 1, ll + 3, model, curses.color_pair(2))
 
-                if tag:
-                    tag_attr = curses.color_pair(4) | curses.A_BOLD if is_sel else curses.color_pair(4) | curses.A_DIM
-                    tag_x = sx + w - 4 - _display_width(tag)
-                    _safe_addstr(stdscr, y, tag_x, tag, tag_attr)
-
-            _draw_separator(stdscr, sy + 5, sx, w)
-
-            launch_y = sy + 6
+            # 启动按钮
+            launch_y = row + 6
             is_launch = (idx == 3)
             can_launch = slots["heavy"]["model"] != "(未选)"
-            launch_marker = "▸ " if is_launch else "  "
+            _safe_addstr(stdscr, launch_y, px, "-" * total_w, curses.A_DIM)
+            launch_y += 1
+            if is_launch:
+                _safe_addstr(stdscr, launch_y, ll - 1, "|", ac | curses.A_BOLD)
             if can_launch:
-                launch_attr = curses.color_pair(5) | curses.A_BOLD if is_launch else curses.color_pair(5)
-                launch_text = f"{launch_marker}▶ 启动"
+                la = curses.color_pair(5) | curses.A_BOLD if is_launch else curses.color_pair(5)
+                _safe_addstr(stdscr, launch_y, ll + 1, "启动", la)
             else:
-                launch_attr = curses.A_DIM
-                launch_text = f"{launch_marker}▶ 启动  (请先选择 Heavy 模型)"
-            _safe_addstr(stdscr, launch_y, sx + 4, launch_text, launch_attr, max_w=inner_w)
+                _safe_addstr(stdscr, launch_y, ll + 1, "启动 (请先选 Heavy)", curses.A_DIM)
 
-            footer = "Enter 编辑/启动  +/- 切Provider  ↑↓ 选择  Esc 返回"
-            _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = launch_y + 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "编辑/启动", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 18, "+/-", curses.color_pair(5) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 22, "切通道", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 31, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 35, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
-                idx = (idx - 1) % items
+                idx = (idx - 1) % n_items
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % items
+                idx = (idx + 1) % n_items
             elif key in (10, 13, curses.KEY_ENTER):
                 if idx < 3:
                     if not family_names:
@@ -1138,12 +1184,15 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
                     chosen = _pick_model_for_slot(stdscr)
                     if chosen is not None:
                         sname = SLOT_NAMES[idx]
-                        slots[sname] = {
-                            "model": chosen.get("model", ""),
-                            "provider_name": chosen.get("provider_name", ""),
-                            "provider_id": chosen.get("provider_id", ""),
-                            "provider_ctx": chosen.get("provider_ctx", {}),
-                        }
+                        if isinstance(chosen, dict):
+                            slots[sname] = {
+                                "model": chosen.get("model", ""),
+                                "provider_name": chosen.get("provider_name", ""),
+                                "provider_id": chosen.get("provider_id", ""),
+                                "provider_ctx": chosen.get("provider_ctx", {}),
+                            }
+                        else:
+                            slots[sname] = {"model": str(chosen), "provider_name": "", "provider_id": "", "provider_ctx": {}}
                 elif can_launch:
                     return {
                         "model": slots["heavy"]["model"],
