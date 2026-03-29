@@ -463,23 +463,26 @@ def select_submodel_tui(family_name, models, provider_options=None):
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
-
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
-        curses.init_pair(7, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(7, curses.COLOR_BLUE, -1)
 
         idx = 0
         scroll = 0
         in_provider_popup = False
         popup_idx = 0
         popup_options = []
-        search_query = ""  # 搜索过滤
+        search_query = ""
+
+        fam_color = _FAMILY_COLORS.get(family_name, 1)
+        fc = curses.color_pair(fam_color)
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
 
             # 搜索过滤
@@ -489,100 +492,125 @@ def select_submodel_tui(family_name, models, provider_options=None):
             else:
                 filtered = sorted_models
             if not filtered:
-                filtered = sorted_models  # 无匹配时显示全部
+                filtered = sorted_models
 
-            # 计算列宽：model | provider P:nnn
-            tag_samples = []
-            for m in filtered:
-                pname, _, ppri = _get_provider_info(m)
-                tag_samples.append(f"{pname} P:{ppri}")
-            max_tag_w = max((_display_width(t) for t in tag_samples), default=10)
-
-            w = max(54, min(max_w - 2, int(max_w * 0.85)))
-            inner_w = w - 8
-            max_model_w = min(
-                max((_display_width(m["model"]) for m in filtered), default=20),
-                inner_w - max_tag_w - 4
-            )
-            visible = min(len(filtered), max_y - 8)
-            h = visible + 6 + (1 if search_query else 0)
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            content_pad = sx + 4
-
-            # idx 边界保护
             if idx >= len(filtered):
                 idx = max(0, len(filtered) - 1)
 
-            has_changes = bool(provider_overrides)
-            title = f"{family_name} 系列" + (" *" if has_changes else "")
-            _draw_box(stdscr, sy, sx, h, w, title)
-            tag_x = sx + w - 4 - max_tag_w
+            # 尺寸
+            total_w = min(60, max_w - 4)
+            left_w = 28
+            right_w = total_w - left_w
+            visible = min(len(filtered), max_y - 8)
+            ph = visible + 6 + (1 if search_query else 0)
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
 
-            # 搜索栏
-            list_y = sy + 2
+            row = py
+
+            # -- 顶线（品类色）--
+            _safe_addstr(stdscr, row, px, "-" * total_w, fc)
+            row += 1
+
+            # -- 标题 --
+            has_changes = bool(provider_overrides)
+            title = f"{family_name}" + (" *" if has_changes else "")
+            _safe_addstr(stdscr, row, ll, title, fc | curses.A_BOLD)
+            cnt_info = f"{len(filtered)}/{len(sorted_models)}" if search_query else str(len(sorted_models))
+            _safe_addstr(stdscr, row, rr - len(cnt_info) - 6, cnt_info, curses.A_DIM)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            # -- 搜索栏 --
             if search_query:
-                search_display = f"🔍 {search_query}_"
-                _safe_addstr(stdscr, list_y, content_pad, search_display,
-                             curses.color_pair(4) | curses.A_BOLD)
-                list_y += 1
+                _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+
+            # 双栏分隔
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
 
             # 滚动
+            content_y = row
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
             for i in range(scroll, min(scroll + visible, len(filtered))):
-                y = list_y + (i - scroll)
+                y = content_y + (i - scroll)
                 m = filtered[i]
                 is_sel = (i == idx)
-                marker = "▸ " if is_sel else "  "
                 model_name = m["model"]
                 prov_name, prov_id, prov_pri = _get_provider_info(m)
                 tag_text = f"{prov_name} P:{prov_pri}"
 
-                # 模型名（左，截断以保证 tag 可见）
-                if is_sel:
-                    model_attr = curses.color_pair(3) | curses.A_BOLD
-                else:
-                    model_attr = curses.color_pair(2)
-                _safe_addstr(stdscr, y, content_pad, f"{marker}{model_name}", model_attr,
-                             max_w=inner_w - max_tag_w - 2)
+                # 竖分割
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
 
-                # Provider 标签 + priority（右对齐）
+                # 左栏：模型名
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", fc | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(2), max_w=left_w - 4)
+
+                # 右栏：provider + priority
                 is_overridden = m["model"] in provider_overrides
                 if is_sel:
                     tag_attr = curses.color_pair(4) | curses.A_BOLD
                 elif is_overridden:
                     tag_attr = curses.color_pair(5)
                 else:
-                    tag_attr = curses.color_pair(4) | curses.A_DIM
-                _safe_addstr(stdscr, y, tag_x, tag_text, tag_attr)
+                    tag_attr = curses.A_DIM
+                _safe_addstr(stdscr, y, rl, tag_text, tag_attr, max_w=right_w - 3)
 
-            # Footer
+            # -- 底栏 --
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
             if search_query:
-                footer = f"输入过滤 ({len(filtered)}/{len(sorted_models)})  Esc 清除  Enter 确认  Backspace 删字符"
+                _safe_addstr(stdscr, bot_y, ll, "Esc 清除", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
             else:
-                footer = "输入搜索  P Provider  +/- 切Provider  ↑↓ 选择  Enter 确认  Esc 返回"
-            _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
-                         curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll, "P", curses.color_pair(6) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 2, "通道", curses.color_pair(6) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 8, "+/-", curses.color_pair(5) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 12, "切通道", curses.color_pair(5) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 21, "Enter", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 27, "确认", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 33, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 37, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
 
-            # Provider popup overlay
+            # -- Provider popup --
             if in_provider_popup and popup_options:
                 popup_h = len(popup_options) + 4
                 popup_w = max(30, max((_display_width(o.get("provider_name", "")) for o in popup_options), default=10) + 12)
-                popup_sx = cx - popup_w // 2
+                popup_sx = (max_w - popup_w) // 2
                 popup_sy = max(0, (max_y - popup_h) // 2)
-
-                _draw_box(stdscr, popup_sy, popup_sx, popup_h, popup_w, "选择 Provider")
+                # 画弹窗
+                _safe_addstr(stdscr, popup_sy, popup_sx, "-" * popup_w, fc)
+                for pi_y in range(1, popup_h - 1):
+                    _safe_addstr(stdscr, popup_sy + pi_y, popup_sx, " " * popup_w, 0)
+                _safe_addstr(stdscr, popup_sy + 1, popup_sx + 2, "选择通道", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, popup_sy + popup_h - 1, popup_sx, "-" * popup_w, fc)
                 for pi, opt in enumerate(popup_options):
-                    py = popup_sy + 2 + pi
-                    pm = "▸ " if pi == popup_idx else "  "
-                    pline = f"{pm}{opt.get('provider_name', '')}"
-                    pattr = curses.color_pair(3) | curses.A_BOLD if pi == popup_idx else curses.color_pair(2)
-                    _safe_addstr(stdscr, py, popup_sx + 2, pline, pattr, max_w=popup_w - 4)
+                    p_y = popup_sy + 3 + pi
+                    if pi == popup_idx:
+                        _safe_addstr(stdscr, p_y, popup_sx + 2, "|", fc | curses.A_BOLD)
+                        _safe_addstr(stdscr, p_y, popup_sx + 4, opt.get("provider_name", ""), curses.color_pair(1) | curses.A_BOLD)
+                    else:
+                        _safe_addstr(stdscr, p_y, popup_sx + 4, opt.get("provider_name", ""), curses.color_pair(2))
 
             stdscr.refresh()
             key = stdscr.getch()
