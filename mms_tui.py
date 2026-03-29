@@ -188,20 +188,24 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
             families = families_by_cli.get(cli, [])
 
             # 构建虚拟列表
-            items = []  # (type, data, label)
+            items = []  # (type, data, label, right_label)
             cli_last = (last_used or {}).get(cli)
             has_last = cli_last and cli_last.get("model")
             if has_last:
-                items.append(("last", cli_last, f"⏱ 上次  {cli_last['model']}"))
-                items.append(("sep", None, ""))
+                items.append(("last", cli_last, f"  {cli_last['model']}", "上次"))
+                items.append(("sep", None, "", ""))
 
+            # 计算最大 family 名宽度用于对齐
+            max_fam_w = max((_display_width(f["family"]) for f in families), default=6) if families else 6
             for fam in families:
                 count = fam.get("count", 0)
-                items.append(("family", fam["family"], f"{fam['family']} 系列{' ' * 4}({count})"))
+                name = fam["family"]
+                pad = " " * (max_fam_w - _display_width(name) + 2)
+                items.append(("family", fam["family"], f"  {name}{pad}", str(count)))
 
-            items.append(("sep", None, ""))
-            items.append(("load_balance", None, "⚖  负载模式"))
-            items.append(("settings", None, "⚙  设置"))
+            items.append(("sep", None, "", ""))
+            items.append(("load_balance", None, "  负载模式", ""))
+            items.append(("settings", None, "  设置", ""))
 
             selectable = [(i, item) for i, item in enumerate(items) if item[0] != "sep"]
             sel_count = len(selectable)
@@ -249,37 +253,50 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
             sep_attr = curses.color_pair(5) | curses.A_DIM
             inner_w = w - 8  # 两侧各 4 padding
 
-            for item_i, (itype, idata, ilabel) in enumerate(items):
+            right_x = sx + w - 4  # 右侧标签的右端
+
+            for item_i, (itype, idata, ilabel, iright) in enumerate(items):
                 y = list_y + item_i
                 if y >= sy + h - 1:
                     break
 
                 if itype == "sep":
-                    _draw_separator(stdscr, y, cx, inner_w, sep_attr)
+                    # 更精致的分隔：短横线居中
+                    sep_w = min(inner_w, 20)
+                    _draw_separator(stdscr, y, cx, sep_w, curses.A_DIM)
                     continue
 
                 # 找到这个 item 在 selectable 中的 index
                 sel_pos = next((si for si, (vi, _) in enumerate(selectable) if vi == item_i), -1)
                 is_sel = (sel_pos == sel_idx)
 
-                marker = "▸ " if is_sel else "  "
-                line = f"{marker}{ilabel}"
+                marker = " ▸" if is_sel else "  "
 
                 if is_sel:
-                    attr = curses.color_pair(3) | curses.A_BOLD
+                    label_attr = curses.color_pair(1) | curses.A_BOLD
+                    right_attr = curses.color_pair(1) | curses.A_DIM
                 elif itype == "last":
-                    attr = curses.color_pair(4)
+                    label_attr = curses.color_pair(4)
+                    right_attr = curses.color_pair(4) | curses.A_DIM
                 elif itype in ("load_balance", "settings"):
-                    attr = curses.color_pair(5)
+                    label_attr = curses.color_pair(5)
+                    right_attr = curses.color_pair(5) | curses.A_DIM
                 else:
-                    attr = curses.color_pair(2)
+                    label_attr = curses.color_pair(2)
+                    right_attr = curses.A_DIM
 
-                _safe_addstr(stdscr, y, content_pad, line, attr, max_w=inner_w)
+                # 左侧：marker + label
+                _safe_addstr(stdscr, y, content_pad, marker, label_attr)
+                _safe_addstr(stdscr, y, content_pad + _display_width(marker), ilabel, label_attr, max_w=inner_w - 8)
 
-            # Footer
-            footer = "←→ 切CLI  ↑↓ 选择  Enter 展开  P Provider  O 接入  Q 退出"
-            _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
-                         curses.color_pair(1) | curses.A_BOLD)
+                # 右侧：计数或标签（右对齐）
+                if iright:
+                    rw = _display_width(iright)
+                    _safe_addstr(stdscr, y, right_x - rw, iright, right_attr)
+
+            # Footer — 更简洁
+            footer = "←→ CLI  ↑↓ 选择  Enter 展开  P Provider  O 接入  Q 退出"
+            _center_text(stdscr, sy + h - 1, cx, f" {footer} ", curses.A_DIM)
 
             stdscr.refresh()
             key = stdscr.getch()
@@ -295,8 +312,8 @@ def select_family_tui(families_by_cli, cli_names, last_used=None):
             elif key == curses.KEY_DOWN:
                 sel_idx = (sel_idx + 1) % sel_count
             elif key in (10, 13, curses.KEY_ENTER):
-                _, (_, item) = list(enumerate(selectable))[sel_idx] if sel_idx < sel_count else (0, (0, ("", None, "")))
-                itype, idata, _ = item
+                _, (_, item) = list(enumerate(selectable))[sel_idx] if sel_idx < sel_count else (0, (0, ("", None, "", "")))
+                itype, idata = item[0], item[1]
                 if itype == "family":
                     return ("family", cli, idata)
                 elif itype == "last":
