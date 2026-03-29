@@ -64,6 +64,7 @@ This file applies to both `Codex` and `Claude`.
   - `MMS -> private(/claude) -> CRS`
   - `MMS -> privateopenai(/openai) -> CRS`
   - `MMS -> xin/newapi(4001) -> CRS`
+  - `MMS -> fishcrs(/claude) -> CRS`
 - Any person or agent touching any of the following must explicitly confirm whether the change can affect the above chain before proceeding:
   - provider `models_endpoint`
   - `extra_models` / `hidden_models`
@@ -81,3 +82,16 @@ This file applies to both `Codex` and `Claude`.
   - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
 - Any change on that chain must run at least one matching smoke test from:
   - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
+
+## Claude Provider Safety Notes
+
+- `xin` / `fishcrs` / `trcrs`（若恢复）属于 Claude 敏感 provider：
+  - 默认不要启用 `1M context`
+  - 默认不要做额外 `Anthropic endpoint probe`
+  - 只有在真实 smoke 证明可用时才允许继续放开
+- 对 Claude 账号绑定类改动，至少检查 3 件事：
+  - 请求日志里是否出现 `Using proxy for Claude request: <expected_proxy>`
+  - `metadata.user_id` 是否仍然是 string，不是 object
+  - 新建 API Key 后是否补进前台索引，否则 Admin UI 看不见
+- 删除 Claude 账号前，先确认所有专属 key 已重新绑定或不再使用；
+  - 尤其不要在 `private/独享` 仍指向该账号时直接删账号

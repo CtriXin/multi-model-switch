@@ -1,6 +1,6 @@
 # private / privateopenai / newapi / CRS Smoke Test Runbook
 
-> 更新时间：2026-03-25
+> 更新时间：2026-03-29
 > 目标：为 `MMS -> private(/claude) -> CRS`、`MMS -> privateopenai(/openai) -> CRS`、`MMS -> xin/newapi(4001) -> CRS` 提供一套可追溯、可复现的最小验证步骤
 
 ## 适用场景
@@ -99,6 +99,13 @@ HOME=/Users/xin mms test --json
 - 这个 provider 的 `URL + key` 是否还活着
 - MMS 当前 `launcher -> bridge` 主链路是否还活着
 - 本地 `models` advertisement 是否还在
+
+额外注意：
+
+- 对 `fishcrs` / `trcrs` 这类 direct CRS key，smoke 后必须去 `CRS` 日志核对：
+  - `Using proxy for Claude request: <expected_proxy>`
+- 如果看不到这行日志，不算验证通过
+- 对 `xin` / `fishcrs` 这类敏感 provider，默认不要用 `1M context` 做第一条验证
 
 ## 一、验证 `private(/claude)` 正常
 
