@@ -4261,7 +4261,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
         last_by_cli, _ = _get_scene_usage()
 
-        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_by_cli)
+        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_by_cli, families_detail=families_detail)
 
         if result == "fallback":
             return False
