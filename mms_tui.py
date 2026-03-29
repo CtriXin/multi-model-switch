@@ -1726,6 +1726,98 @@ def select_manage_target_tui(targets):
         return None
 
 
+def select_channel_action_tui(title, info_lines, actions):
+    """通道详情+操作选择 — H6 风格。
+
+    Args:
+        title: str — 页面标题
+        info_lines: list[(label, value)] — 信息行
+        actions: list[(id, label)] — 操作列表
+
+    Returns:
+        action_id (str) — 选中的操作
+        None — 取消
+    """
+    if not actions:
+        return None
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+
+            total_w = min(60, max_w - 4)
+            ph = len(info_lines) + len(actions) + 6
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, title, curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            # 信息区
+            for label, value in info_lines:
+                _safe_addstr(stdscr, row, ll + 1, label, curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 12, str(value), curses.color_pair(2), max_w=total_w - 16)
+                row += 1
+
+            # 分隔
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            # 操作列表
+            for i, (aid, alabel) in enumerate(actions):
+                y = row + i
+                is_sel = (i == idx)
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, alabel, curses.color_pair(1) | curses.A_BOLD)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, alabel, curses.color_pair(2))
+
+            bot_y = row + len(actions)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "执行", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(actions)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(actions)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return actions[idx][0]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
 def select_connect_tui():
     """接入通道选择 — H6 风格。"""
     def _inner(stdscr):

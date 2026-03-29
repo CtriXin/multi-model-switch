@@ -2233,27 +2233,45 @@ def _manage_provider_target(cfg, provider_id):
         default_tag = "是" if cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID) == provider_id else "否"
         extra_count = len(provider.get("extra_models", []) or [])
         hidden_count = len(provider.get("hidden_models", []) or [])
-        console.print(Panel(
-            f"[bold]网关通道[/bold]  {provider.get('name', provider_id)}\n"
-            f"[bold]内部标识:[/bold]  {provider_id}\n"
-            f"[bold]默认通道:[/bold]  {default_tag}\n"
-            f"[bold]OpenAI 地址:[/bold]      {_provider_openai_base_url(provider) or '(未设置)'}\n"
-            f"[bold]Anthropic 地址:[/bold]   {_provider_anthropic_base_url(provider) or '(未设置)'}\n"
-            f"[bold]模型列表接口:[/bold] {provider.get('models_endpoint', '/models')}\n"
-            f"[bold]模型补丁:[/bold]   补充 {extra_count} 个 / 隐藏 {hidden_count} 个\n"
-            f"[bold]协议:[/bold]      {', '.join(provider.get('protocols', []))}\n"
-            f"[bold]CLI:[/bold]       {', '.join(provider.get('supported_clis', []))}",
-            title="通道详情",
-            border_style="cyan",
-        ))
-        console.print("  1. 查看本地统计")
-        console.print("  2. 模型管理")
-        console.print("  3. 设为默认网关")
-        console.print("  4. 重命名这个通道")
-        console.print("  5. 编辑地址和 Key")
-        console.print("  6. 删除这个通道")
-        console.print("  7. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7"], default="7")
+
+        info_lines = [
+            ("名称", provider.get("name", provider_id)),
+            ("标识", provider_id),
+            ("默认", default_tag),
+            ("OpenAI", _provider_openai_base_url(provider) or "(未设置)"),
+            ("Anthropic", _provider_anthropic_base_url(provider) or "(未设置)"),
+            ("模型接口", provider.get("models_endpoint", "/models")),
+            ("模型补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
+            ("协议", ", ".join(provider.get("protocols", []))),
+        ]
+        actions = [
+            ("1", "查看本地统计"),
+            ("2", "模型管理"),
+            ("3", "设为默认网关"),
+            ("4", "重命名"),
+            ("5", "编辑地址和 Key"),
+            ("6", "删除通道"),
+            ("7", "返回"),
+        ]
+
+        choice = None
+        if _use_tui():
+            try:
+                from mms_tui import select_channel_action_tui
+                choice = select_channel_action_tui(f"网关 · {provider.get('name', provider_id)}", info_lines, actions)
+            except (ImportError, Exception):
+                pass
+        if choice is None and not _use_tui():
+            _ensure_rich()
+            console.print(Panel(
+                "\n".join(f"[bold]{l}:[/bold]  {v}" for l, v in info_lines),
+                title="通道详情", border_style="cyan",
+            ))
+            for aid, alabel in actions:
+                console.print(f"  {aid}. {alabel}")
+            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="7")
+        if choice is None:
+            return cfg, False
         if choice == "1":
             _display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
             continue
@@ -2302,25 +2320,42 @@ def _manage_account_target(cfg, account_id):
     while True:
         login_state = _probe_account_status(account)
         default_tag = "是" if cfg.get("account", {}).get("defaults", {}).get(account.get("cli")) == account_id else "否"
-        console.print(Panel(
-            f"[bold]官方通道[/bold]  {account.get('name', account_id)}\n"
-            f"[bold]文件夹名:[/bold]  {account_id}\n"
-            f"[bold]对应 CLI:[/bold]  {account.get('cli', '').upper()}\n"
-            f"[bold]默认入口:[/bold]  {default_tag}（{account.get('cli', '').upper()}）\n"
-            f"[bold]登录状态:[/bold]  {login_state.get('summary') or login_state.get('state', '')}\n"
-            f"[bold]文件夹目录:[/bold]  {account.get('home_dir', '')}\n"
-            f"[dim]官方真实用量暂不支持统一查询；这里只能查看本地统计。[/dim]",
-            title="通道详情",
-            border_style="cyan",
-        ))
-        console.print("  1. 查看本地统计")
-        console.print("  2. 重新登录")
-        console.print("  3. 设为默认官方通道")
-        console.print("  4. 重命名这个通道")
-        console.print("  5. 编辑这个通道")
-        console.print("  6. 删除这个通道")
-        console.print("  7. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7"], default="7")
+
+        info_lines = [
+            ("名称", account.get("name", account_id)),
+            ("文件夹", account_id),
+            ("CLI", account.get("cli", "").upper()),
+            ("默认", f"{default_tag}（{account.get('cli', '').upper()}）"),
+            ("登录", login_state.get("summary") or login_state.get("state", "")),
+        ]
+        actions = [
+            ("1", "查看本地统计"),
+            ("2", "重新登录"),
+            ("3", "设为默认官方通道"),
+            ("4", "重命名"),
+            ("5", "编辑通道"),
+            ("6", "删除通道"),
+            ("7", "返回"),
+        ]
+
+        choice = None
+        if _use_tui():
+            try:
+                from mms_tui import select_channel_action_tui
+                choice = select_channel_action_tui(f"官方 · {account.get('name', account_id)}", info_lines, actions)
+            except (ImportError, Exception):
+                pass
+        if choice is None and not _use_tui():
+            _ensure_rich()
+            console.print(Panel(
+                "\n".join(f"[bold]{l}:[/bold]  {v}" for l, v in info_lines),
+                title="通道详情", border_style="cyan",
+            ))
+            for aid, alabel in actions:
+                console.print(f"  {aid}. {alabel}")
+            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="7")
+        if choice is None:
+            return cfg, False
         if choice == "1":
             _display_runtime_usage("account", account_id, account.get("name", account_id))
             continue
