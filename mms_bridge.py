@@ -1152,7 +1152,11 @@ def _json_resp_to_sse(body: bytes) -> bytes:
             if bt == "text":
                 cb_start = {"type": "text", "text": ""}
             elif bt == "thinking":
+                # 保留 signature 字段，Anthropic API 校验需要
                 cb_start = {"type": "thinking", "thinking": ""}
+                for _tk in ("signature",):
+                    if blk.get(_tk):
+                        cb_start[_tk] = blk[_tk]
             elif bt == "tool_use":
                 cb_start = {"type": "tool_use", "id": blk.get("id", ""), "name": blk.get("name", ""), "input": {}}
             else:
@@ -1575,6 +1579,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         started_ms = _now_ms()
         first_byte_ms = None
         output_tokens = None
+        input_tokens = None
 
         try:
             if stream:
@@ -1595,13 +1600,28 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                     event_payload = json.loads(data_str)
                                 except json.JSONDecodeError:
                                     event_payload = None
-                                extracted = _extract_output_tokens(event_payload)
-                                if extracted is not None:
-                                    output_tokens = extracted
+                                if event_payload:
+                                    extracted = _extract_output_tokens(event_payload)
+                                    if extracted is not None:
+                                        output_tokens = extracted
+                                    # 提取 input_tokens（在 message_start 或 message_delta 事件中）
+                                    inp, _ = _extract_usage(event_payload)
+                                    if inp > 0:
+                                        input_tokens = inp
                         self.wfile.write(raw_line.encode("utf-8") + b"\n")
                         if raw_line == "":
                             self.wfile.flush()
                     self.close_connection = True
+                if should_record_speed and response.status_code < 400:
+                    _record_bridge_speed(
+                        metrics_model,
+                        started_ms=started_ms,
+                        first_byte_ms=first_byte_ms,
+                        output_tokens=output_tokens,
+                        input_tokens=input_tokens,
+                        provider_scope=getattr(self.server, "speed_scope", None),
+                        server=self.server,
+                    )
             else:
                 response = httpx.post(target_url, headers=fwd_headers, json=payload, timeout=300)
                 first_byte_ms = _now_ms()
@@ -1737,6 +1757,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     first_byte_ms=first_byte_ms,
                     output_tokens=output_tokens,
                     provider_scope=getattr(self.server, "speed_scope", None),
+                    server=self.server,
                 )
         except BrokenPipeError:
             return
@@ -2491,6 +2512,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
                     first_byte_ms=first_byte_ms,
                     output_tokens=output_tokens,
                     provider_scope=getattr(self.server, "speed_scope", None),
+                    server=self.server,
                 )
 
         except Exception as exc:
