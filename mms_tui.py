@@ -397,14 +397,24 @@ def select_submodel_tui(family_name, models, provider_options=None):
         in_provider_popup = False
         popup_idx = 0
         popup_options = []
+        search_query = ""  # 搜索过滤
 
         while True:
             stdscr.clear()
             max_y, max_w = stdscr.getmaxyx()
 
+            # 搜索过滤
+            if search_query:
+                q = search_query.lower()
+                filtered = [m for m in sorted_models if q in m["model"].lower()]
+            else:
+                filtered = sorted_models
+            if not filtered:
+                filtered = sorted_models  # 无匹配时显示全部
+
             # 计算列宽：model | provider P:nnn
             tag_samples = []
-            for m in sorted_models:
+            for m in filtered:
                 pname, _, ppri = _get_provider_info(m)
                 tag_samples.append(f"{pname} P:{ppri}")
             max_tag_w = max((_display_width(t) for t in tag_samples), default=10)
@@ -412,20 +422,32 @@ def select_submodel_tui(family_name, models, provider_options=None):
             w = max(54, min(max_w - 2, int(max_w * 0.85)))
             inner_w = w - 8
             max_model_w = min(
-                max((_display_width(m["model"]) for m in sorted_models), default=20),
+                max((_display_width(m["model"]) for m in filtered), default=20),
                 inner_w - max_tag_w - 4
             )
-            visible = min(len(sorted_models), max_y - 8)
-            h = visible + 6
+            visible = min(len(filtered), max_y - 8)
+            h = visible + 6 + (1 if search_query else 0)
             sx = (max_w - w) // 2
             sy = max(0, (max_y - h) // 2)
             cx = sx + w // 2
             content_pad = sx + 4
 
+            # idx 边界保护
+            if idx >= len(filtered):
+                idx = max(0, len(filtered) - 1)
+
             has_changes = bool(provider_overrides)
             title = f"{family_name} 系列" + (" *" if has_changes else "")
             _draw_box(stdscr, sy, sx, h, w, title)
             tag_x = sx + w - 4 - max_tag_w
+
+            # 搜索栏
+            list_y = sy + 2
+            if search_query:
+                search_display = f"🔍 {search_query}_"
+                _safe_addstr(stdscr, list_y, content_pad, search_display,
+                             curses.color_pair(4) | curses.A_BOLD)
+                list_y += 1
 
             # 滚动
             if idx < scroll:
@@ -433,11 +455,9 @@ def select_submodel_tui(family_name, models, provider_options=None):
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
-            list_y = sy + 2
-
-            for i in range(scroll, min(scroll + visible, len(sorted_models))):
+            for i in range(scroll, min(scroll + visible, len(filtered))):
                 y = list_y + (i - scroll)
-                m = sorted_models[i]
+                m = filtered[i]
                 is_sel = (i == idx)
                 marker = "▸ " if is_sel else "  "
                 model_name = m["model"]
@@ -463,7 +483,10 @@ def select_submodel_tui(family_name, models, provider_options=None):
                 _safe_addstr(stdscr, y, tag_x, tag_text, tag_attr)
 
             # Footer
-            footer = "P Provider列表  +/- 切Provider  ↑↓ 选择  Enter 确认  Esc 返回"
+            if search_query:
+                footer = f"输入过滤 ({len(filtered)}/{len(sorted_models)})  Esc 清除  Enter 确认  Backspace 删字符"
+            else:
+                footer = "输入搜索  P Provider  +/- 切Provider  ↑↓ 选择  Enter 确认  Esc 返回"
             _center_text(stdscr, sy + h - 1, cx, f" {footer} ",
                          curses.color_pair(1) | curses.A_BOLD)
 
@@ -500,36 +523,55 @@ def select_submodel_tui(family_name, models, provider_options=None):
                 continue
 
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(sorted_models)
+                idx = (idx - 1) % len(filtered)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(sorted_models)
+                idx = (idx + 1) % len(filtered)
             elif key in (10, 13, curses.KEY_ENTER):
-                m = sorted_models[idx]
-                override = provider_overrides.get(m["model"])
-                if override:
-                    new_pid = override.get("provider_id", "")
-                    orig_pid = m.get("provider_id", "")
-                    if new_pid != orig_pid:
-                        orig_pri = m.get("provider_ctx", {}).get("priority", 100)
-                        new_base = override.get("provider_ctx", {}).get("priority", 100)
-                        priority_changes[new_pid] = max(new_base, orig_pri + 5)
-                        priority_changes[orig_pid] = max(0, orig_pri - 5)
-                return _get_result(m)
-            elif key in (ord('p'), ord('P')):
-                model_name = sorted_models[idx]["model"]
-                if provider_options and model_name in provider_options:
-                    popup_options = provider_options[model_name]
-                    if len(popup_options) > 1:
-                        popup_idx = 0
-                        in_provider_popup = True
-            elif key in (ord('+'), ord('=')):
-                _cycle_provider(sorted_models[idx], +1)
-            elif key in (ord('-'), ord('_')):
-                _cycle_provider(sorted_models[idx], -1)
+                if filtered:
+                    m = filtered[idx]
+                    override = provider_overrides.get(m["model"])
+                    if override:
+                        new_pid = override.get("provider_id", "")
+                        orig_pid = m.get("provider_id", "")
+                        if new_pid != orig_pid:
+                            orig_pri = m.get("provider_ctx", {}).get("priority", 100)
+                            new_base = override.get("provider_ctx", {}).get("priority", 100)
+                            priority_changes[new_pid] = max(new_base, orig_pri + 5)
+                            priority_changes[orig_pid] = max(0, orig_pri - 5)
+                    return _get_result(m)
+            elif key in (ord('p'), ord('P')) and not search_query:
+                if filtered:
+                    model_name = filtered[idx]["model"]
+                    if provider_options and model_name in provider_options:
+                        popup_options = provider_options[model_name]
+                        if len(popup_options) > 1:
+                            popup_idx = 0
+                            in_provider_popup = True
+            elif key in (ord('+'), ord('=')) and not search_query:
+                if filtered:
+                    _cycle_provider(filtered[idx], +1)
+            elif key in (ord('-'), ord('_')) and not search_query:
+                if filtered:
+                    _cycle_provider(filtered[idx], -1)
             elif key == 27:
+                if search_query:
+                    search_query = ""
+                    idx = 0
+                    scroll = 0
+                else:
+                    return None
+            elif key in (ord('q'), ord('Q')) and not search_query:
                 return None
-            elif key in (ord('q'), ord('Q')):
-                return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search_query:
+                    search_query = search_query[:-1]
+                    idx = 0
+                    scroll = 0
+            elif 32 <= key <= 126 and not in_provider_popup:
+                # 可打印 ASCII 字符 → 搜索
+                search_query += chr(key)
+                idx = 0
+                scroll = 0
 
     try:
         return curses.wrapper(_inner)
@@ -555,27 +597,48 @@ def select_model_tui(models, title="选择模型"):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
 
         idx = 0
         scroll = 0
+        search_query = ""
 
         while True:
             stdscr.clear()
             max_y, max_w = stdscr.getmaxyx()
-            visible = max_y - 4
+
+            # 搜索过滤
+            if search_query:
+                q = search_query.lower()
+                filtered = [m for m in models if q in m.lower()]
+            else:
+                filtered = models
+            if not filtered:
+                filtered = models
+
+            if idx >= len(filtered):
+                idx = max(0, len(filtered) - 1)
+
+            visible = max_y - 5
 
             stdscr.addstr(0, 2, title, curses.color_pair(1) | curses.A_BOLD)
-            stdscr.addstr(1, 2, f"{len(models)} models  ↑↓  Enter  Q", curses.A_DIM)
+            header_y = 1
+            if search_query:
+                stdscr.addstr(1, 2, f"🔍 {search_query}_ ({len(filtered)}/{len(models)})", curses.color_pair(4) | curses.A_BOLD)
+                header_y = 2
+            else:
+                stdscr.addstr(1, 2, f"{len(models)} models  ↑↓  Enter  输入搜索  Q", curses.A_DIM)
+                header_y = 2
 
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
-            for i in range(scroll, min(scroll + visible, len(models))):
-                y = 3 + i - scroll
+            for i in range(scroll, min(scroll + visible, len(filtered))):
+                y = header_y + 1 + i - scroll
                 prefix = " ▸ " if i == idx else "   "
-                line = f"{prefix}{i + 1:3d}. {models[i]}"
+                line = f"{prefix}{i + 1:3d}. {filtered[i]}"
                 attr = curses.color_pair(3) | curses.A_BOLD if i == idx else 0
                 try:
                     stdscr.addstr(y, 1, line[:max_w - 2], attr)
@@ -586,13 +649,30 @@ def select_model_tui(models, title="选择模型"):
             key = stdscr.getch()
 
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(models)
+                idx = (idx - 1) % len(filtered)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(models)
+                idx = (idx + 1) % len(filtered)
             elif key in (10, 13, curses.KEY_ENTER):
-                return models[idx]
-            elif key in (ord('q'), ord('Q'), 27):
+                if filtered:
+                    return filtered[idx]
+            elif key == 27:
+                if search_query:
+                    search_query = ""
+                    idx = 0
+                    scroll = 0
+                else:
+                    return None
+            elif key in (ord('q'), ord('Q')) and not search_query:
                 return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search_query:
+                    search_query = search_query[:-1]
+                    idx = 0
+                    scroll = 0
+            elif 32 <= key <= 126:
+                search_query += chr(key)
+                idx = 0
+                scroll = 0
 
     try:
         return curses.wrapper(_inner)
