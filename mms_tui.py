@@ -1185,47 +1185,60 @@ SETTINGS_MENU = [
 
 
 def select_settings_tui():
-    """设置主菜单。返回选中项的 id 或 None。"""
+    """设置菜单 — H6 风格。"""
 
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
-        curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
 
         idx = 0
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
-            w = max(54, min(max_w - 2, int(max_w * 0.78)))
-            h = len(SETTINGS_MENU) + 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
+            ac = curses.color_pair(1)
 
-            _draw_box(stdscr, sy, sx, h, w, "⚙ 设置")
+            total_w = min(56, max_w - 4)
+            ph = len(SETTINGS_MENU) + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "设置", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
 
             for i, item in enumerate(SETTINGS_MENU):
-                y = sy + 2 + i
-                marker = "▸ " if i == idx else "  "
-                # 左：label，右：desc
-                label = f"{marker}{item['label']}"
-                desc = item["desc"]
-                attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(2)
-                _safe_addstr(stdscr, y, sx + 4, label, attr)
-                desc_attr = curses.A_DIM if i != idx else curses.color_pair(3)
-                desc_x = sx + w - 4 - _display_width(desc)
-                _safe_addstr(stdscr, y, max(sx + 24, desc_x), desc, desc_attr)
+                y = row + i
+                is_sel = (i == idx)
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.color_pair(1) | curses.A_DIM)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
+                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.A_DIM)
 
-            footer = " ↑↓ 选择  Enter 进入  Esc 返回 "
-            _center_text(stdscr, sy + h - 1, cx, footer,
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = row + len(SETTINGS_MENU)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "进入", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
                 idx = (idx - 1) % len(SETTINGS_MENU)
             elif key == curses.KEY_DOWN:
@@ -1610,39 +1623,65 @@ def select_provider_mgmt_tui(providers):
 
 
 def select_connect_tui():
+    """接入通道选择 — H6 风格。"""
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
 
         idx = 0
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
-            w = max(54, min(max_w - 2, int(max_w * 0.78)))
-            h = len(CONNECT_ACTIONS) + 8
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            _draw_box(stdscr, sy, sx, h, w, "接入新通道")
-            _center_text(stdscr, sy + 2, cx, "你想接入哪一类通道？", curses.color_pair(5) | curses.A_BOLD)
+            ac = curses.color_pair(5)
 
-            for action_idx, action in enumerate(CONNECT_ACTIONS):
-                y = sy + 4 + action_idx
-                line = f"{'▸ ' if action_idx == idx else '  '}{action['title']}  {action['summary']}"
-                attr = curses.color_pair(3) | curses.A_BOLD if action_idx == idx else curses.color_pair(2)
-                try:
-                    stdscr.addstr(y, sx + 2, line[:w - 4], attr)
-                except curses.error:
-                    pass
+            total_w = min(56, max_w - 4)
+            left_w = 18
+            right_w = total_w - left_w
+            ph = len(CONNECT_ACTIONS) + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rl = px + left_w + 2
+            rr = px + total_w - 2
 
-            footer = " ↑ ↓ 选择    Enter 进入    Esc/Q 返回 "
-            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "接入通道", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
+
+            content_y = row
+            for i, action in enumerate(CONNECT_ACTIONS):
+                y = content_y + i
+                is_sel = (i == idx)
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
+
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, action["title"], curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    _safe_addstr(stdscr, y, rl, action["summary"], curses.color_pair(1) | curses.A_DIM, max_w=right_w - 3)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, action["title"], curses.color_pair(2), max_w=left_w - 4)
+                    _safe_addstr(stdscr, y, rl, action["summary"], curses.A_DIM, max_w=right_w - 3)
+
+            bot_y = content_y + len(CONNECT_ACTIONS)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "进入", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
             stdscr.refresh()
-
             key = stdscr.getch()
             if key == curses.KEY_UP:
                 idx = (idx - 1) % len(CONNECT_ACTIONS)
@@ -1684,76 +1723,67 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_CYAN, -1)
-        curses.init_pair(3, curses.COLOR_YELLOW, -1)
-        curses.init_pair(4, curses.COLOR_WHITE, -1)
-        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(7, curses.COLOR_RED, -1)
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_RED, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
 
-        bypass_mode = True  # 默认 bypass，Tab 切换回正常
+        bypass_mode = True
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(3) if bypass_mode else curses.color_pair(5)
 
-            w = max(54, min(max_w - 2, int(max_w * 0.85)))
-            bypass_h = 1 if has_bypass else 0
-            env_h = len(env_lines) + 1 if env_lines else 0
-            h = 7 + env_h + bypass_h
-            sx = (max_w - w) // 2
-            sy = (max_y - h) // 2
-            cx = sx + w // 2
-            pad = sx + 4
-
-            box_color = curses.color_pair(7) if bypass_mode else None
-            title = "⚠ BYPASS 确认" if bypass_mode else "确认启动"
-            _draw_box(stdscr, sy, sx, h, w, title, color=box_color)
-
-            row = sy + 2
-            try:
-                stdscr.addstr(row, pad, f"CLI   {cli}", curses.color_pair(2) | curses.A_BOLD)
-                row += 1
-                mdl = model_display[:w - 12]
-                stdscr.addstr(row, pad, f"模型  {mdl}", curses.color_pair(2))
-                row += 1
-                scope = "一次性命令" if once else "交互会话"
-                stdscr.addstr(row, pad, f"启动  {scope}", curses.color_pair(2))
-                row += 1
-                if has_bypass:
-                    if bypass_mode:
-                        mode_text = "模式  [Tab] ⚠ BYPASS（跳过审批）"
-                        stdscr.addstr(row, pad, mode_text,
-                                      curses.color_pair(7) | curses.A_BOLD)
-                    else:
-                        mode_text = "模式  [Tab] 正常"
-                        stdscr.addstr(row, pad, mode_text, curses.color_pair(2))
-                    row += 1
-                if env_lines:
-                    stdscr.addstr(row, pad, "环境  临时注入，仅当前 CLI 进程可见",
-                                  curses.color_pair(3) | curses.A_DIM)
-                    row += 1
-                    stdscr.addstr(row, pad, "ENV", curses.color_pair(3) | curses.A_BOLD)
-                    row += 1
-                    for line in env_lines:
-                        stdscr.addstr(row, pad + 2, line[:w - 10],
-                                      curses.color_pair(4) | curses.A_DIM)
-                        row += 1
-                else:
-                    stdscr.addstr(row, pad, "环境  无需额外注入",
-                                  curses.color_pair(3) | curses.A_DIM)
-                    row += 1
-            except curses.error:
-                pass
-
-            footer_color = curses.color_pair(7) if bypass_mode else curses.color_pair(1)
+            total_w = min(56, max_w - 4)
+            info_lines = []
+            info_lines.append(("CLI", cli))
+            info_lines.append(("模型", model_display[:total_w - 14]))
+            info_lines.append(("启动", "一次性命令" if once else "交互会话"))
             if has_bypass:
-                footer = " Enter 启动  Tab 切换模式  B 返回  Q 取消 "
-            else:
-                footer = " Enter 启动  B 返回  Q 取消 "
-            _center_text(stdscr, sy + h - 1, cx, footer, footer_color)
-            stdscr.refresh()
+                mode_text = "BYPASS（跳过审批）" if bypass_mode else "正常"
+                info_lines.append(("模式", f"[Tab] {mode_text}"))
 
+            ph = len(info_lines) + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            title = "BYPASS 确认" if bypass_mode else "确认启动"
+            _safe_addstr(stdscr, row, ll, title, ac | curses.A_BOLD)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            for label, value in info_lines:
+                if label == "模式":
+                    val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
+                else:
+                    val_attr = curses.color_pair(1)
+                _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 7, value, val_attr, max_w=total_w - 12)
+                row += 1
+
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "Enter", curses.color_pair(5) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll + 6, "启动", curses.color_pair(5) | curses.A_DIM)
+            if has_bypass:
+                _safe_addstr(stdscr, row, ll + 13, "Tab", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 17, "切模式", curses.color_pair(4) | curses.A_DIM)
+            _safe_addstr(stdscr, row, ll + 27, "B", curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll + 29, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, row, ll + 36, "Q", curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll + 38, "取消", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+
+            stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
                 return ("", bypass_mode)
@@ -1761,7 +1791,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                 return ("b", False)
             elif key in (ord('q'), ord('Q'), 27):
                 return ("q", False)
-            elif key == 9 and has_bypass:  # Tab
+            elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
 
     try:
