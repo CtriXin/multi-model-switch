@@ -67,9 +67,20 @@ _MODEL_CONTEXT_WINDOWS = {
     "gpt-5.4-pro": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
+_CLAUDE_DISABLE_1M_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
+_CLAUDE_SENSITIVE_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
+
+def _runtime_supports_claude_1m(runtime):
+    provider_id = str((runtime or {}).get("id", "")).strip().lower()
+    return provider_id not in _CLAUDE_DISABLE_1M_PROVIDER_IDS
 
 
-def _effective_context_window(*models):
+def _runtime_is_sensitive_claude_provider(runtime):
+    provider_id = str((runtime or {}).get("id", "")).strip().lower()
+    return provider_id in _CLAUDE_SENSITIVE_PROVIDER_IDS
+
+
+def _effective_context_window(*models, enable_claude_1m=True):
     """取所有活跃模型中最小的 context window。
     智能路由场景下 heavy/medium/light 可能是不同模型，
     conversation context 必须 fit 最小的那个。
@@ -87,6 +98,10 @@ def _effective_context_window(*models):
                 if k.lower() == lower:
                     w = v
                     break
+        if not enable_claude_1m:
+            lower = clean.lower()
+            if lower.startswith("claude-") and "haiku" not in lower:
+                w = 200_000
         windows.append(w or _DEFAULT_CONTEXT_WINDOW)
     return min(windows) if windows else _DEFAULT_CONTEXT_WINDOW
 
@@ -660,11 +675,13 @@ def _primary_claude_model(model_info):
     return _normalized_model_name(model_info)
 
 
-def _with_1m_suffix(model_name):
+def _with_1m_suffix(model_name, *, enable_1m=True):
     """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
     Haiku 不支持 1M。非 Claude 模型原样返回。
     Claude Code 会在 API 请求前自动剥离 [1m]，不影响 bridge/proxy。
     """
+    if not enable_1m:
+        return model_name
     if not model_name or "[1m]" in model_name:
         return model_name
     lower = model_name.lower()
@@ -674,7 +691,7 @@ def _with_1m_suffix(model_name):
     return model_name
 
 
-def _apply_claude_model_overrides(target, model_info):
+def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
     primary_model = _primary_claude_model(model_info)
     if not primary_model:
         return ""
@@ -683,16 +700,22 @@ def _apply_claude_model_overrides(target, model_info):
         opus_model = _normalized_model_name(model_info.get("opus")) or primary_model
         sonnet_model = _normalized_model_name(model_info.get("sonnet")) or primary_model
         haiku_model = _normalized_model_name(model_info.get("haiku")) or primary_model
-        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model)
-        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model)
+        target["ANTHROPIC_DEFAULT_OPUS_MODEL"] = _with_1m_suffix(opus_model, enable_1m=enable_1m)
+        target["ANTHROPIC_DEFAULT_SONNET_MODEL"] = _with_1m_suffix(sonnet_model, enable_1m=enable_1m)
         target["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = haiku_model  # haiku 不支持 1M
-        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model)
-        target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(sonnet_model or primary_model)
+        target["ANTHROPIC_MODEL"] = _with_1m_suffix(primary_model, enable_1m=enable_1m)
+        target["ANTHROPIC_REASONING_MODEL"] = _with_1m_suffix(
+            sonnet_model or primary_model,
+            enable_1m=enable_1m,
+        )
         subagent_model = _normalized_model_name(model_info.get("subagent")) or sonnet_model or primary_model
-        target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(subagent_model)
+        target["CLAUDE_CODE_SUBAGENT_MODEL"] = _with_1m_suffix(
+            subagent_model,
+            enable_1m=enable_1m,
+        )
         return primary_model
 
-    primary_1m = _with_1m_suffix(primary_model)
+    primary_1m = _with_1m_suffix(primary_model, enable_1m=enable_1m)
     for key in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -708,6 +731,7 @@ def _apply_claude_model_overrides(target, model_info):
 def launch_claude(model_info, runtime, once=False):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
     auth_mode = runtime.get("auth_mode", "api_key")
+    enable_claude_1m = _runtime_supports_claude_1m(runtime)
     advertised_models = []
     bridge_cfg = None  # 由 gateway_claude_bridge 赋值，用于退出摘要
     if auth_mode == "oauth":
@@ -811,6 +835,8 @@ def launch_claude(model_info, runtime, once=False):
             _env_model = "claude-sonnet-4-6"
         else:
             _env_model = probe_model
+        # 当使用 Claude 壳名时，保留真实模型名供 status line 显示
+        _display_model = probe_model if _env_model != probe_model else None
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -836,6 +862,7 @@ def launch_claude(model_info, runtime, once=False):
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
                     selected_model=_env_model,
+                    display_model=_display_model,
                 )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
@@ -863,6 +890,7 @@ def launch_claude(model_info, runtime, once=False):
                     auth_token=bridge_cfg["api_key"],
                     heavy_model=_env_model,
                     selected_model=_env_model,
+                    display_model=_display_model,
                 )
             state_home = None
 
@@ -913,6 +941,7 @@ def launch_claude(model_info, runtime, once=False):
                 medium_model=lb_medium or None,
                 light_model=lb_light or None,
                 selected_model=_env_model,
+                display_model=_display_model,
             )
             state_home = None
 
@@ -941,6 +970,7 @@ def launch_claude(model_info, runtime, once=False):
                 medium_model=lb_medium or None,
                 light_model=lb_light or None,
                 selected_model=_env_model,
+                display_model=_display_model,
             )
             parts = [f"heavy: {probe_model}"]
             if lb_medium:
@@ -976,6 +1006,7 @@ def launch_claude(model_info, runtime, once=False):
                     medium_model=lb_medium or None,
                     light_model=lb_light or None,
                     selected_model=_env_model,
+                    display_model=_display_model,
                 )
                 parts = [f"heavy: {probe_model}"]
                 if lb_medium:
@@ -986,14 +1017,14 @@ def launch_claude(model_info, runtime, once=False):
                 state_home = None
             else:
                 console.print("[red]✗ 无 OpenAI 端点，无法启用智能路由[/red]")
-                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model)
+                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model, display_model=_display_model)
                 state_home = None
                 cleanup_ctx = None
 
         else:
             # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
             console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
-            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model)
+            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model, display_model=_display_model)
             state_home = None
             cleanup_ctx = None
 
@@ -1014,18 +1045,18 @@ def launch_claude(model_info, runtime, once=False):
 
     if isinstance(model_info, dict):
         if not _skip_model:
-            _apply_claude_model_overrides(env, model_info)
+            _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
 
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
         env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
     elif not _skip_model:
-        _apply_claude_model_overrides(env, model_info)
+        _apply_claude_model_overrides(env, model_info, enable_1m=enable_claude_1m)
 
     # ── Context window: 用真实模型名（probe_model）计算，非壳名 ──
     _real_models = [m for m in (probe_model, lb_medium, lb_light) if m]
     if not _real_models:
         _real_models = [_resolved or "claude-sonnet-4-6"]
-    ctx_window = _effective_context_window(*_real_models)
+    ctx_window = _effective_context_window(*_real_models, enable_claude_1m=enable_claude_1m)
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
 
@@ -1107,6 +1138,11 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         _remember_anthropic_url(provider_id, url, url)
         return url, "config_bypass"
 
+    if _runtime_is_sensitive_claude_provider(runtime):
+        console.print("[dim]敏感 Claude provider：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
+        _remember_anthropic_url(provider_id, url, url)
+        return url, "sensitive_bypass"
+
     # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
     if provider_id == "bailian-codingplan":
         console.print(f"[dim]百炼 CodingPlan：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
@@ -1119,6 +1155,13 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         "model": probe_model,
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "hi"}],
+        "metadata": {
+            "user_id": json.dumps({
+                "device_id": f"mms-probe-{provider_id}",
+                "account_uuid": str(runtime.get("id", "")),
+                "session_id": f"mms-probe-{provider_id}",
+            }, ensure_ascii=False),
+        },
     }).encode()
     headers = {
         "x-api-key": api_key,
@@ -1252,6 +1295,7 @@ def _claude_gateway_env(
     light_model=None,
     selected_model=None,
     runtime_kind=None,
+    display_model=None,
 ):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
     - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
@@ -1305,6 +1349,10 @@ def _claude_gateway_env(
                     data[k] = gw_existing[k]
         except Exception:
             pass
+    # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
+    # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
+    if not runtime.get("bypass"):
+        data.pop("bypassPermissionsModeAccepted", None)
     data.pop("sonnet1m45MigrationComplete", None)
     data.pop("opusProMigrationComplete", None)
     data["alwaysThinkingEnabled"] = True
@@ -1340,6 +1388,8 @@ def _claude_gateway_env(
     # ── settings.json：继承用户配置 + 覆盖 gateway 必要字段 ──
     effective_token = auth_token or runtime["api_key"]
     provider_id = runtime.get("id", "")
+    enable_claude_1m = _runtime_supports_claude_1m(runtime)
+    sensitive_provider = _runtime_is_sensitive_claude_provider(runtime)
     # 启动首帧优先写本次选中的真实模型名，避免 statusline / 初始 active model
     # 先落到 slot 占位名；bridge 仍负责把请求路由到实际目标模型。
     if auth_token:
@@ -1355,17 +1405,28 @@ def _claude_gateway_env(
     settings_env: dict = {
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
-        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
+    if sensitive_provider:
+        settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
+    else:
+        settings_env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
     if best_model:
         for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_REASONING_MODEL"):
             settings_env[key] = best_model
     if selected_model:
-        _apply_claude_model_overrides(settings_env, selected_model)
+        _apply_claude_model_overrides(
+            settings_env,
+            selected_model,
+            enable_1m=enable_claude_1m,
+        )
+    # 非 Claude 模型：ANTHROPIC_MODEL 用真实模型名让 status line 显示正确
+    # 其余 DEFAULT_*_MODEL slot 保持 Claude 壳名供 Claude Code 内部 slot 匹配
+    if display_model:
+        settings_env["ANTHROPIC_MODEL"] = display_model
     # 读取用户真实 settings.json 作为基础
     real_settings_path = os.path.join(real_claude_dir, "settings.json")
     settings_data: dict = {}
@@ -1392,21 +1453,26 @@ def _claude_gateway_env(
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
     env["MMS_ROUTE_STATUS_PATH"] = route_status_path
+    if sensitive_provider:
+        env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
     if best_model:
-        best_1m = _with_1m_suffix(best_model)
+        best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m)
         for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
                     "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
             env[key] = best_1m
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
     if selected_model:
-        _apply_claude_model_overrides(env, selected_model)
-    env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+        _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
+    if display_model:
+        env["ANTHROPIC_MODEL"] = display_model
+    if not sensitive_provider:
+        env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
 
     # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
 
     # ── 写入 route_status.json 供 statusline 读取 ──
     # bridge 模式下用 heavy_model，直连模式下用 best_model
-    status_model = selected_model or heavy_model or best_model or "unknown"
+    status_model = display_model or selected_model or heavy_model or best_model or "unknown"
     status_tier = "heavy" if auth_token else "-"
     status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
     try:
