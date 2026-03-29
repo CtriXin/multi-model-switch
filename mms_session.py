@@ -8,47 +8,144 @@ from uuid import uuid4
 _SESSIONS_DIR = Path.home() / ".mms" / "sessions"
 
 
-def _sessions_dir() -> Path:
-    _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    return _SESSIONS_DIR
+def _normalize_cwd(cwd: str | os.PathLike | None) -> Path | None:
+    if not cwd:
+        return None
+    try:
+        return Path(cwd).expanduser().resolve()
+    except OSError:
+        return Path(cwd).expanduser().absolute()
 
 
-def save_session(session: dict) -> Path:
-    """Persist session to ~/.mms/sessions/<id>.json. Returns the file path."""
-    path = _sessions_dir() / f"{session['id']}.json"
+def _project_sessions_dir(cwd: str | os.PathLike | None) -> Path | None:
+    root = _normalize_cwd(cwd)
+    if root is None:
+        return None
+    return root / ".mms" / "sessions"
+
+
+def _candidate_session_dirs(cwd: str | os.PathLike | None = None) -> list[tuple[str, Path]]:
+    dirs: list[tuple[str, Path]] = []
+    project_dir = _project_sessions_dir(cwd)
+    if project_dir is not None:
+        dirs.append(("project", project_dir))
+    if project_dir != _SESSIONS_DIR:
+        dirs.append(("global", _SESSIONS_DIR))
+    return dirs
+
+
+def _ensure_session_dir(cwd: str | os.PathLike | None = None) -> Path:
+    project_dir = _project_sessions_dir(cwd)
+    target = project_dir or _SESSIONS_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def save_session(session: dict, cwd: str | os.PathLike | None = None) -> Path:
+    """Persist session to <cwd>/.mms/sessions or ~/.mms/sessions/<id>.json."""
+    path = _ensure_session_dir(cwd) / f"{session['id']}.json"
     path.write_text(json.dumps(session, ensure_ascii=False, indent=2))
     return path
 
 
-def load_session(session_id: str) -> dict | None:
-    """Load a session by id. Returns None if not found."""
-    path = _sessions_dir() / f"{session_id}.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def list_sessions(limit: int = 10) -> list[dict]:
-    """Return the most recently modified sessions (summary only)."""
-    d = _sessions_dir()
-    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    results = []
-    for f in files[:limit]:
+def load_session(session_id: str, cwd: str | os.PathLike | None = None) -> dict | None:
+    """Load a session by id. Checks project-local first, then legacy global."""
+    for scope, session_dir in _candidate_session_dirs(cwd):
+        path = session_dir / f"{session_id}.json"
+        if not path.exists():
+            continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                data.setdefault("_session_scope", scope)
+                data.setdefault("_session_path", str(path))
+                return data
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
+
+
+def list_sessions(limit: int = 10, cwd: str | os.PathLike | None = None) -> list[dict]:
+    """Return recent sessions, preferring project-local entries then global fallback."""
+    files: list[tuple[str, Path, float]] = []
+    seen_ids: set[str] = set()
+    for scope, session_dir in _candidate_session_dirs(cwd):
+        if not session_dir.exists():
+            continue
+        for path in session_dir.glob("*.json"):
+            session_id = path.stem
+            if session_id in seen_ids:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            files.append((scope, path, mtime))
+            seen_ids.add(session_id)
+
+    files.sort(key=lambda item: item[2], reverse=True)
+    results = []
+    for scope, path, mtime in files[:limit]:
+        try:
+            data = json.loads(path.read_text())
             results.append({
-                "id": data.get("id", f.stem),
+                "id": data.get("id", path.stem),
                 "mode": data.get("mode", "?"),
                 "goal": data.get("task", {}).get("goal", "")[:60],
                 "round": data.get("round", 0),
-                "mtime": f.stat().st_mtime,
+                "mtime": mtime,
+                "scope": scope,
+                "path": str(path),
             })
         except (json.JSONDecodeError, OSError):
             pass
     return results
+
+
+def resolve_session_ref(
+    session_ref: str,
+    cwd: str | os.PathLike | None = None,
+    limit: int = 50,
+) -> tuple[str | None, str | None]:
+    """Resolve exact id / unique prefix / 1-based index to a concrete session id."""
+    normalized = str(session_ref or "").strip()
+    if not normalized:
+        return None, "session 标识不能为空"
+
+    direct = load_session(normalized, cwd=cwd)
+    if direct is not None:
+        return normalized, None
+
+    sessions = list_sessions(limit=max(limit, 50), cwd=cwd)
+    if normalized.isdigit():
+        index = int(normalized)
+        if 1 <= index <= len(sessions):
+            return sessions[index - 1]["id"], None
+        return None, f"找不到序号 {index}，当前仅有 {len(sessions)} 个 session"
+
+    matches = [item for item in sessions if item["id"].startswith(normalized)]
+    if len(matches) == 1:
+        return matches[0]["id"], None
+    if len(matches) > 1:
+        ids = ", ".join(item["id"] for item in matches[:5])
+        more = " ..." if len(matches) > 5 else ""
+        return None, f"前缀 {normalized} 匹配多个 session: {ids}{more}"
+    return None, f"找不到 session: {normalized}"
+
+
+def load_session_ref(
+    session_ref: str,
+    cwd: str | os.PathLike | None = None,
+    limit: int = 50,
+) -> tuple[dict | None, str | None, str | None]:
+    """Resolve then load a session. Returns (session, resolved_id, error)."""
+    resolved_id, error = resolve_session_ref(session_ref, cwd=cwd, limit=limit)
+    if not resolved_id:
+        return None, None, error
+    session = load_session(resolved_id, cwd=cwd)
+    if session is None:
+        return None, resolved_id, f"session 已解析为 {resolved_id}，但读取失败"
+    return session, resolved_id, None
 
 
 def create_session(task_text, models, mode="chat"):

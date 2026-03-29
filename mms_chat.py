@@ -549,8 +549,8 @@ def parse_chat_args(argv):
         description=f"{display_title()} chat — 多模型并发对比",
     )
     parser.add_argument("--provider", help="临时使用指定模型源")
-    parser.add_argument("--resume", metavar="SESSION_ID", help="恢复已保存的 session")
-    parser.add_argument("--list-sessions", action="store_true", help="列出最近保存的 sessions")
+    parser.add_argument("--resume", metavar="SESSION_REF", help="恢复已保存的 session（支持 id / 前缀 / 序号）")
+    parser.add_argument("--list-sessions", action="store_true", help="列出当前项目最近保存的 sessions")
     parser.add_argument("prompt", nargs="*", help="聊天任务")
     return parser.parse_args(argv)
 
@@ -590,36 +590,43 @@ def chat_main(cfg, argv):
         sys.exit(1)
 
     args = parse_chat_args(argv)
+    session_cwd = os.getcwd()
 
     if args.list_sessions:
         from mms_session import list_sessions
-        sessions = list_sessions(limit=10)
+        sessions = list_sessions(limit=10, cwd=session_cwd)
         if not sessions:
             console.print("[dim]暂无保存的 session[/dim]")
             return
         from rich.table import Table
         t = Table(title="最近保存的 Sessions")
+        t.add_column("#", style="cyan", width=4)
         t.add_column("ID", style="cyan", width=14)
+        t.add_column("范围", width=8)
         t.add_column("模式", width=6)
         t.add_column("轮次", width=4)
         t.add_column("目标", style="green")
         import datetime
-        for s in sessions:
+        for index, s in enumerate(sessions, 1):
             ts = datetime.datetime.fromtimestamp(s["mtime"]).strftime("%m-%d %H:%M")
-            t.add_row(s["id"], s["mode"], str(s["round"]), f"{s['goal']}  [dim]{ts}[/dim]")
+            scope_label = "项目" if s.get("scope") == "project" else "全局"
+            t.add_row(str(index), s["id"], scope_label, s["mode"], str(s["round"]), f"{s['goal']}  [dim]{ts}[/dim]")
         console.print(t)
         return
 
     provider_ctx = ensure_provider_credentials(cfg, args.provider)
 
     resumed_session = None
+    resolved_session_id = None
     if args.resume:
-        from mms_session import load_session
-        resumed_session = load_session(args.resume)
+        from mms_session import load_session_ref
+        resumed_session, resolved_session_id, error = load_session_ref(args.resume, cwd=session_cwd)
         if resumed_session is None:
-            console.print(f"[red]找不到 session: {args.resume}[/red]")
+            console.print(f"[red]{error or f'找不到 session: {args.resume}'}[/red]")
             return
-        console.print(f"[cyan]恢复 session {args.resume}[/cyan]  "
+        scope_label = "项目" if resumed_session.get("_session_scope") == "project" else "全局"
+        console.print(f"[cyan]恢复 session {resolved_session_id}[/cyan]  "
+                      f"[dim]来源: {scope_label}[/dim]  "
                       f"[dim]轮次 {resumed_session['round']}，目标: {resumed_session['task']['goal'][:60]}[/dim]")
 
     models = fetch_models(provider_ctx)
