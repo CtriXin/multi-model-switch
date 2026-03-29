@@ -1533,13 +1533,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             if slot.get("key"):
                 gateway_key = slot["key"]
 
-        # ── GPT/非Claude 模型桥接：OpenAI Responses 格式转发 ──
+        # ── GPT-on-Claude 桥接：仅 OpenAI 系列模型走 Responses API ──
         resolved_model = str(payload.get("model") or "")
         openai_url = getattr(self.server, "openai_url", None)
-        _is_claude = any(k in resolved_model.lower() for k in ("claude", "opus", "sonnet", "haiku"))
-        if openai_url and path_bare == "/v1/messages" and (_is_openai_model(resolved_model) or not _is_claude):
+        if openai_url and path_bare == "/v1/messages" and _is_openai_model(resolved_model):
             self._forward_as_responses(payload, resolved_model, openai_url, gateway_key, should_record_speed)
             return
+        # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
         # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容
         _gw = gateway_url.rstrip("/")
