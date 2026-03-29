@@ -1244,74 +1244,87 @@ def select_settings_tui():
 # ── Provider 浏览 TUI（首页 P 键入口） ──────────────────────
 
 def select_provider_browse_tui(providers):
-    """Provider 列表选择。
-
-    Args:
-        providers: list[dict] — [{"id", "name", "role", "priority"}, ...]
-
-    Returns:
-        (provider_id, provider_name) — 选中的 provider
-        None — 取消
-    """
+    """Provider 列表 — H6 风格。"""
     if not providers:
         return None
+
+    _ROLE_COLORS = {"primary": 3, "auto": 4, "fallback": 5}
 
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
         idx = 0
         scroll = 0
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
 
-            w = max(48, min(max_w - 2, int(max_w * 0.75)))
-            visible = max_y - 6
-            h = min(len(providers) + 4, max_y - 2)
-            if h < 6:
-                h = 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            pad = sx + 3
+            total_w = min(60, max_w - 4)
+            left_w = 24
+            right_w = total_w - left_w
+            visible = min(len(providers), max_y - 7)
+            ph = visible + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
 
-            _draw_box(stdscr, sy, sx, h, w, "选择 Provider")
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "通道浏览", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
 
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
+            content_y = row
             for i in range(scroll, min(scroll + visible, len(providers))):
-                y = sy + 2 + i - scroll
+                y = content_y + (i - scroll)
                 p = providers[i]
-                prefix = " ▸ " if i == idx else "   "
+                is_sel = (i == idx)
                 name = p.get("name", p.get("id", "?"))
                 role = p.get("role", "auto")
                 pri = p.get("priority", 100)
+                rc = curses.color_pair(_ROLE_COLORS.get(role, 2))
 
-                if i == idx:
-                    attr = curses.color_pair(3) | curses.A_BOLD
-                elif role == "primary":
-                    attr = curses.color_pair(5)
-                elif role == "fallback":
-                    attr = curses.color_pair(4)
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
+
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    _safe_addstr(stdscr, y, rl, f"{role} P:{pri}", rc | curses.A_BOLD)
                 else:
-                    attr = 0
+                    _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(2), max_w=left_w - 4)
+                    _safe_addstr(stdscr, y, rl, f"{role} P:{pri}", rc | curses.A_DIM)
 
-                label = f"{prefix}{name}{' ' * max(1, 24 - _display_width(name))}{role:<10} P:{pri}"
-                _safe_addstr(stdscr, y, pad, label, attr, max_w=w - 6)
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "查看模型", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 17, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 21, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
-            footer = f" {len(providers)} providers  ↑↓ 选择  Enter 确认  Esc 返回 "
-            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
             stdscr.refresh()
-
             key = stdscr.getch()
             if key == curses.KEY_UP:
                 idx = (idx - 1) % len(providers)
@@ -1330,19 +1343,9 @@ def select_provider_browse_tui(providers):
 
 
 def select_provider_models_tui(provider_name, models):
-    """选中 provider 后展示其全部模型列表。
-
-    Args:
-        provider_name: str
-        models: list[str] — 模型名列表
-
-    Returns:
-        {"model": str} — 选中的模型
-        None — 取消
-    """
+    """Provider 模型列表 — H6 风格。"""
     if not models:
         return None
-
     sorted_models = sorted(models)
 
     def _inner(stdscr):
@@ -1350,80 +1353,117 @@ def select_provider_models_tui(provider_name, models):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
-        curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
 
         idx = 0
         scroll = 0
+        search = ""
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
 
-            w = max(52, min(max_w - 2, int(max_w * 0.75)))
-            visible = max_y - 6
-            h = min(len(sorted_models) + 4, max_y - 2)
-            if h < 6:
-                h = 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            pad = sx + 3
+            if search:
+                filtered = [m for m in sorted_models if search.lower() in m.lower()]
+                if not filtered:
+                    filtered = sorted_models
+            else:
+                filtered = sorted_models
+            if idx >= len(filtered):
+                idx = max(0, len(filtered) - 1)
 
-            _draw_box(stdscr, sy, sx, h, w, f"{provider_name} — 模型列表")
+            total_w = min(50, max_w - 4)
+            visible = min(len(filtered), max_y - 7)
+            ph = visible + 5 + (1 if search else 0)
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, provider_name, curses.color_pair(1) | curses.A_BOLD)
+            cnt = str(len(filtered))
+            _safe_addstr(stdscr, row, rr - len(cnt) - 6, cnt, curses.A_DIM)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            if search:
+                _safe_addstr(stdscr, row, ll, f"/ {search}_", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
 
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
-            for i in range(scroll, min(scroll + visible, len(sorted_models))):
-                y = sy + 2 + i - scroll
-                prefix = " ▸ " if i == idx else "   "
-                attr = curses.color_pair(3) | curses.A_BOLD if i == idx else curses.color_pair(2)
-                label = f"{prefix}{sorted_models[i]}"
-                _safe_addstr(stdscr, y, pad, label, attr, max_w=w - 6)
+            content_y = row
+            for i in range(scroll, min(scroll + visible, len(filtered))):
+                y = content_y + (i - scroll)
+                is_sel = (i == idx)
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, filtered[i], curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 6)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, filtered[i], curses.color_pair(2), max_w=total_w - 6)
 
-            footer = f" {len(sorted_models)} models  ↑↓ 选择  Enter 确认  B 返回  Esc 退出 "
-            _center_text(stdscr, sy + h - 1, cx, footer, curses.color_pair(1) | curses.A_BOLD)
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "选择", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "B", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 15, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 22, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 26, "退出", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
             stdscr.refresh()
-
             key = stdscr.getch()
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(sorted_models)
+                idx = (idx - 1) % len(filtered)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(sorted_models)
+                idx = (idx + 1) % len(filtered)
             elif key in (10, 13, curses.KEY_ENTER):
-                return {"model": sorted_models[idx]}
-            elif key in (ord('b'), ord('B')):
-                return None  # 返回 provider 列表
-            elif key in (27, ord('q'), ord('Q')):
-                return "__exit__"  # 完全退出
+                if filtered:
+                    return {"model": filtered[idx]}
+            elif key in (ord('b'), ord('B')) and not search:
+                return None
+            elif key == 27:
+                if search:
+                    search = ""
+                    idx = 0
+                else:
+                    return "__exit__"
+            elif key in (ord('q'), ord('Q')) and not search:
+                return "__exit__"
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search:
+                    search = search[:-1]
+                    idx = 0
+            elif 32 <= key <= 126:
+                search += chr(key)
+                idx = 0
 
     try:
-        result = curses.wrapper(_inner)
-        return result
+        return curses.wrapper(_inner)
     except curses.error:
         return None
 
 
 def select_provider_mgmt_tui(providers):
-    """Provider 管理 TUI。
-
-    Args:
-        providers: list[dict] — [{"id", "name", "role", "priority", "enabled", "protocols", ...}]
-
-    Returns:
-        list[dict] — 修改后的 providers 列表（含 role/priority 变更）
-        None — 取消（无变更）
-    """
+    """Provider 管理 — H6 风格。"""
     if not providers:
         return None
 
     ROLE_CYCLE = ["auto", "primary", "fallback"]
-    ROLE_BADGES = {"primary": "primary", "auto": "auto", "fallback": "fallback"}
+    _ROLE_COLORS = {"primary": 3, "auto": 4, "fallback": 5}
 
-    # 深拷贝以便修改
     import copy
     items = copy.deepcopy(providers)
     changed = False
@@ -1434,72 +1474,89 @@ def select_provider_mgmt_tui(providers):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
-        curses.init_pair(7, curses.COLOR_RED, -1)
 
         idx = 0
         scroll = 0
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
-            w = max(60, min(max_w - 2, int(max_w * 0.85)))
-            visible = min(len(items), max_y - 7)
-            h = visible + 6
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            inner_w = w - 8
+            ac = curses.color_pair(1)
 
-            title = "Provider 管理" + (" *" if changed else "")
-            _draw_box(stdscr, sy, sx, h, w, title)
+            total_w = min(60, max_w - 4)
+            left_w = 24
+            right_w = total_w - left_w
+            visible = min(len(items), max_y - 7)
+            ph = visible + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            title = "通道管理" + (" *" if changed else "")
+            _safe_addstr(stdscr, row, ll, title, curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
 
             if idx < scroll:
                 scroll = idx
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
-            list_y = sy + 2
+            content_y = row
             for i in range(scroll, min(scroll + visible, len(items))):
-                y = list_y + (i - scroll)
+                y = content_y + (i - scroll)
                 p = items[i]
                 is_sel = (i == idx)
-                marker = "▸ " if is_sel else "  "
                 name = p.get("name") or p.get("id", "?")
                 role = p.get("role", "auto")
-                priority = p.get("priority", 100)
-                enabled = "✓" if p.get("enabled", True) else "✗"
+                pri = p.get("priority", 100)
+                enabled = p.get("enabled", True)
+                rc = curses.color_pair(_ROLE_COLORS.get(role, 2))
 
-                # 格式：marker name   role  P:priority  enabled
-                role_badge = ROLE_BADGES.get(role, role)
-                line_left = f"{marker}{name}"
-                line_right = f"{role_badge:<10} P:{priority:<4} {enabled}"
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
 
                 if is_sel:
-                    attr_l = curses.color_pair(3) | curses.A_BOLD
-                    attr_r = curses.color_pair(3)
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    info = f"{role} P:{pri}"
+                    if not enabled:
+                        info += " [off]"
+                    _safe_addstr(stdscr, y, rl, info, rc | curses.A_BOLD)
                 else:
-                    attr_l = curses.color_pair(2)
-                    if role == "primary":
-                        attr_r = curses.color_pair(5)
-                    elif role == "fallback":
-                        attr_r = curses.color_pair(4) | curses.A_DIM
-                    else:
-                        attr_r = curses.color_pair(2) | curses.A_DIM
+                    name_attr = curses.color_pair(2) if enabled else curses.A_DIM
+                    _safe_addstr(stdscr, y, ll + 1, name, name_attr, max_w=left_w - 4)
+                    info = f"{role} P:{pri}"
+                    if not enabled:
+                        info += " [off]"
+                    _safe_addstr(stdscr, y, rl, info, rc | curses.A_DIM)
 
-                _safe_addstr(stdscr, y, sx + 4, line_left, attr_l, max_w=inner_w - 24)
-                right_x = sx + w - 4 - _display_width(line_right)
-                _safe_addstr(stdscr, y, max(sx + 30, right_x), line_right, attr_r)
-
-            footer = " R 改Role  +/- 改Priority  Enter 保存  Esc 取消 "
-            _center_text(stdscr, sy + h - 1, cx, footer,
-                         curses.color_pair(1) | curses.A_BOLD)
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "R", curses.color_pair(4) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 2, "角色", curses.color_pair(4) | curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 8, "+/-", curses.color_pair(5) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 12, "优先级", curses.color_pair(5) | curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 21, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 27, "保存", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 34, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 38, "取消", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
-
             if key == curses.KEY_UP:
                 idx = (idx - 1) % len(items)
             elif key == curses.KEY_DOWN:
