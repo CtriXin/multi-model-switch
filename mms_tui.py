@@ -51,11 +51,6 @@ CONNECT_ACTIONS = [
         "title": "管理现有通道",
         "summary": "查看状态、设默认、删除通道、查看本地统计",
     },
-    {
-        "id": "migrate_config",
-        "title": "迁移配置到 mms",
-        "summary": "把旧 ccs 配置、账号目录和统计统一迁到 mms 路径",
-    },
 ]
 
 
