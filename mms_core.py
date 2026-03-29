@@ -4244,9 +4244,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             raw = _build_model_families_for_cli(
                 current_cfg, cli_name, current_provider, default_models
             )
-            fbc[cli_name] = [
-                {"family": f["family"], "count": len(f["models"])} for f in raw
-            ]
+            fam_list = []
+            for f in raw:
+                total_use = sum(m.get("use_count", 0) for m in f["models"] if isinstance(m, dict))
+                fam_list.append({"family": f["family"], "count": len(f["models"]), "use_count": total_use})
+            # 按使用量降序排列（用的多的在前）
+            fam_list.sort(key=lambda x: x.get("use_count", 0), reverse=True)
+            fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
         return fbc, fd
 

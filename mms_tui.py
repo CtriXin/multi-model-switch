@@ -1317,10 +1317,14 @@ def select_provider_browse_tui(providers):
             bot_y = content_y + visible
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
-            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 6, "查看模型", curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 17, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 21, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll, "R", curses.color_pair(4) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 2, "角色", curses.color_pair(4) | curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 8, "+/-", curses.color_pair(5) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 12, "优先级", curses.color_pair(5) | curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 21, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 27, "模型", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 34, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 38, "返回", curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
@@ -1333,6 +1337,22 @@ def select_provider_browse_tui(providers):
             elif key in (10, 13, curses.KEY_ENTER):
                 p = providers[idx]
                 return (p.get("id"), p.get("name", p.get("id")))
+            elif key in (ord('r'), ord('R')):
+                _ROLE_CYCLE = ["auto", "primary", "fallback"]
+                p = providers[idx]
+                cur = p.get("role", "auto")
+                try:
+                    ni = (_ROLE_CYCLE.index(cur) + 1) % len(_ROLE_CYCLE)
+                except ValueError:
+                    ni = 0
+                p["role"] = _ROLE_CYCLE[ni]
+                p["_changed"] = True
+            elif key in (ord('+'), ord('=')):
+                providers[idx]["priority"] = min(200, providers[idx].get("priority", 100) + 5)
+                providers[idx]["_changed"] = True
+            elif key in (ord('-'), ord('_')):
+                providers[idx]["priority"] = max(0, providers[idx].get("priority", 100) - 5)
+                providers[idx]["_changed"] = True
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
