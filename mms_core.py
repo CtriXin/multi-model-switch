@@ -1880,24 +1880,47 @@ def _manage_provider_models(cfg, provider_id):
     current_cfg = cfg
     while True:
         provider = resolve_provider_context(current_cfg, provider_id)
-        probe = _probe_models(provider, emit_output=True)
-        console.print(Panel(
-            f"[bold]Provider:[/bold] {provider.get('name', provider_id)}\n"
-            f"[bold]模型列表接口:[/bold] {provider.get('models_endpoint', '/models')}\n"
-            f"[bold]基础来源:[/bold] {_model_source_label(probe.get('base_source', 'remote'))}\n"
-            f"[bold]最终展示模型数:[/bold] {len(probe.get('models') or [])}",
-            title="模型管理",
-            border_style="cyan",
-        ))
-        console.print("  1. 查看当前模型列表")
-        console.print("  2. 刷新远端模型列表")
-        console.print("  3. 添加补充模型")
-        console.print("  4. 隐藏模型")
-        console.print("  5. 移除补充/取消隐藏")
-        console.print("  6. 恢复默认模型补丁")
-        console.print("  7. 编辑模型列表接口")
-        console.print("  8. 返回")
-        choice = Prompt.ask("选择操作", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="8")
+        probe = _probe_models(provider, emit_output=False)
+        model_count = len(probe.get("models") or [])
+        extra_count = len(provider.get("extra_models", []) or [])
+        hidden_count = len(provider.get("hidden_models", []) or [])
+
+        info_lines = [
+            ("通道", provider.get("name", provider_id)),
+            ("模型接口", provider.get("models_endpoint", "/models")),
+            ("来源", _model_source_label(probe.get("base_source", "remote"))),
+            ("模型数", str(model_count)),
+            ("补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
+        ]
+        actions = [
+            ("1", "查看当前模型列表"),
+            ("2", "刷新远端模型列表"),
+            ("3", "添加补充模型"),
+            ("4", "隐藏模型"),
+            ("5", "移除补充/取消隐藏"),
+            ("6", "恢复默认模型补丁"),
+            ("7", "编辑模型列表接口"),
+            ("8", "返回"),
+        ]
+
+        choice = None
+        if _use_tui():
+            try:
+                from mms_tui import select_channel_action_tui
+                choice = select_channel_action_tui(f"模型管理 · {provider.get('name', provider_id)}", info_lines, actions)
+            except (ImportError, Exception):
+                pass
+        if choice is None and not _use_tui():
+            _ensure_rich()
+            console.print(Panel(
+                "\n".join(f"[bold]{l}:[/bold]  {v}" for l, v in info_lines),
+                title="模型管理", border_style="cyan",
+            ))
+            for aid, alabel in actions:
+                console.print(f"  {aid}. {alabel}")
+            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="8")
+        if choice is None:
+            return current_cfg, changed
         if choice == "1":
             _display_provider_model_table(provider, probe)
             continue
