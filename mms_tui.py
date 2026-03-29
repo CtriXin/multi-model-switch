@@ -200,11 +200,12 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             else:
                 fams = families
 
-            # 构建列表项：(type, data)
-            items = []
+            # 上次使用（独立显示，不在列表里）
             cli_last = (last_used or {}).get(cli)
-            if cli_last and cli_last.get("model") and not search_query:
-                items.append(("last", cli_last))
+            has_last = cli_last and cli_last.get("model") and not search_query
+
+            # 构建列表项：只有品类
+            items = []
             for f in fams:
                 items.append(("family", f))
 
@@ -215,7 +216,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             total_w = min(60, max_w - 4)
             left_w = 22
             right_w = total_w - left_w
-            ph = len(items) + 6 + (1 if search_query else 0)
+            ph = len(items) + 6 + (1 if search_query else 0) + (1 if has_last else 0)
             px = (max_w - total_w) // 2
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
@@ -247,6 +248,14 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
 
+            # -- 上次使用（独立区域）--
+            if has_last:
+                last_model = cli_last.get("model", "?")
+                _safe_addstr(stdscr, row, ll, "<-", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 3, last_model, curses.color_pair(4), max_w=total_w - 20)
+                _safe_addstr(stdscr, row, rr - 8, "R 继续 <-", curses.color_pair(4) | curses.A_DIM)
+                row += 1
+
             # -- 搜索栏 --
             if search_query:
                 _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
@@ -269,17 +278,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 # 竖分割
                 _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
 
-                if itype == "last":
-                    model = idata.get("model", "?")
-                    if is_sel:
-                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                        _safe_addstr(stdscr, y, ll + 1, model, curses.color_pair(4) | curses.A_BOLD, max_w=left_w - 8)
-                        _safe_addstr(stdscr, y, lr - 2, "<-", curses.color_pair(4))
-                    else:
-                        _safe_addstr(stdscr, y, ll, "<-", curses.color_pair(4) | curses.A_DIM)
-                        _safe_addstr(stdscr, y, ll + 3, model, curses.color_pair(4), max_w=left_w - 8)
-
-                elif itype == "family":
+                if itype == "family":
                     name = idata["family"]
                     count = idata["count"]
                     fc = curses.color_pair(_FAMILY_COLORS.get(name, 2))
@@ -314,8 +313,6 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 if len(model_names) > max_p:
                     _safe_addstr(stdscr, content_y + max_p, rl,
                                  f"... +{len(model_names) - max_p}", curses.A_DIM)
-            elif items and items[sel_idx][0] == "last":
-                _safe_addstr(stdscr, content_y, rl, "继续上次", curses.color_pair(1) | curses.A_DIM)
 
             # -- 底栏 --
             bot_y = content_y + len(items)
@@ -360,8 +357,8 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 itype, idata = items[sel_idx]
                 if itype == "family":
                     return ("family", cli, idata["family"])
-                elif itype == "last":
-                    return ("last", cli, idata)
+            elif key in (ord('r'), ord('R')) and not search_query and has_last:
+                return ("last", cli, cli_last)
             elif key in (ord('l'), ord('L')) and not search_query:
                 return ("load_balance", cli, None)
             elif key in (ord('s'), ord('S')) and not search_query:
