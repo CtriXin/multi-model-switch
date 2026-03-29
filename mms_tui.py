@@ -302,16 +302,23 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
 
             # -- 右栏预览 --
             if sel_fam_name and detail.get(sel_fam_name):
-                models = detail[sel_fam_name]
+                raw_models = detail[sel_fam_name]
+                # raw_models 可能是 str 列表或 dict 列表（含 model/provider_id 等）
+                model_names = []
+                for m in raw_models:
+                    if isinstance(m, dict):
+                        model_names.append(m.get("model", str(m)))
+                    else:
+                        model_names.append(str(m))
                 fc = curses.color_pair(_FAMILY_COLORS.get(sel_fam_name, 2))
                 max_p = len(items)
-                for mi, model in enumerate(models[:max_p]):
+                for mi, model in enumerate(model_names[:max_p]):
                     my = content_y + mi
                     attr = fc | curses.A_BOLD if mi == 0 else curses.color_pair(2)
                     _safe_addstr(stdscr, my, rl, model, attr, max_w=right_w - 3)
-                if len(models) > max_p:
+                if len(model_names) > max_p:
                     _safe_addstr(stdscr, content_y + max_p, rl,
-                                 f"... +{len(models) - max_p}", curses.A_DIM)
+                                 f"... +{len(model_names) - max_p}", curses.A_DIM)
             elif items and items[sel_idx][0] == "last":
                 _safe_addstr(stdscr, content_y, rl, "继续上次", curses.color_pair(1) | curses.A_DIM)
 
