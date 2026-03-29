@@ -1614,6 +1614,118 @@ def select_provider_mgmt_tui(providers):
         return None
 
 
+def select_manage_target_tui(targets):
+    """通道管理列表 — H6 风格。
+
+    Args:
+        targets: list[dict] — [{kind, id, title, summary, default_label, status, launches, last_used_at}]
+
+    Returns:
+        dict — 选中的 target
+        None — 取消
+    """
+    if not targets:
+        return None
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(3, curses.COLOR_RED, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
+
+        idx = 0
+        scroll = 0
+
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+
+            total_w = min(64, max_w - 4)
+            left_w = 24
+            right_w = total_w - left_w
+            visible = min(len(targets), max_y - 7)
+            ph = visible + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "管理通道", curses.color_pair(1) | curses.A_BOLD)
+            cnt = f"{len(targets)}"
+            _safe_addstr(stdscr, row, rr - len(cnt) - 6, cnt, curses.A_DIM)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
+
+            if idx < scroll:
+                scroll = idx
+            elif idx >= scroll + visible:
+                scroll = idx - visible + 1
+
+            content_y = row
+            for i in range(scroll, min(scroll + visible, len(targets))):
+                y = content_y + (i - scroll)
+                t = targets[i]
+                is_sel = (i == idx)
+                title = t.get("title", t.get("id", "?"))
+                kind = t.get("kind", "")
+                status = t.get("status", "")
+                default_label = t.get("default_label", "")
+                launches = t.get("launches", 0)
+
+                kind_label = "官方" if kind == "account" else "网关"
+                kind_color = curses.color_pair(6) if kind == "account" else curses.color_pair(4)
+
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
+
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, title, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    info = f"{kind_label}  {default_label}  {status}  {launches}次"
+                    _safe_addstr(stdscr, y, rl, info, curses.color_pair(1) | curses.A_DIM, max_w=right_w - 3)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, title, curses.color_pair(2), max_w=left_w - 4)
+                    info = f"{kind_label}  {default_label}  {launches}次"
+                    _safe_addstr(stdscr, y, rl, info, kind_color | curses.A_DIM, max_w=right_w - 3)
+
+            bot_y = content_y + visible
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, "管理", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(targets)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(targets)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return targets[idx]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
 def select_connect_tui():
     """接入通道选择 — H6 风格。"""
     def _inner(stdscr):

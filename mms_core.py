@@ -1761,12 +1761,20 @@ def _select_manage_target(cfg):
         console.print("[yellow]当前还没有可管理的通道[/yellow]")
         return None
 
-    provider_count = sum(1 for item in targets if item.get("kind") == "provider")
-    account_count = sum(1 for item in targets if item.get("kind") == "account")
+    if _use_tui():
+        try:
+            from mms_tui import select_manage_target_tui
+            result = select_manage_target_tui(targets)
+            if result is not None:
+                return result
+            return None
+        except (ImportError, Exception):
+            pass
+
+    # fallback: rich 表格
+    _ensure_rich()
     console.print(Panel(
-        f"[bold]网关通道:[/bold] {provider_count} 个    "
-        f"[bold]官方通道:[/bold] {account_count} 个\n"
-        f"[dim]这里展示的是概览；本地统计可直接帮助你判断最近常用通道。[/dim]",
+        f"[bold]通道总数:[/bold] {len(targets)} 个",
         title="管理现有通道",
         border_style="cyan",
     ))
@@ -1777,22 +1785,17 @@ def _select_manage_target(cfg):
     table.add_column("默认入口", style="white", width=10)
     table.add_column("状态", style="magenta")
     table.add_column("启动", style="cyan", width=6)
-    table.add_column("最近使用", style="white")
     for index, target in enumerate(targets, 1):
         target_type = "官方" if target.get("kind") == "account" else "网关"
         table.add_row(
-            str(index),
-            target_type,
-            target.get("title", ""),
-            target.get("default_label", ""),
-            target.get("status", ""),
+            str(index), target_type, target.get("title", ""),
+            target.get("default_label", ""), target.get("status", ""),
             str(target.get("launches", 0)),
-            target.get("last_used_at", "") or "未使用",
         )
     console.print(table)
-    console.print("[dim]进入后可继续查看本地统计、设默认、重命名、重新登录或删除。官方真实用量暂不支持统一查询。[/dim]")
 
     while True:
+        _ensure_rich()
         raw = Prompt.ask("选择要管理的通道，直接回车返回", default="")
         if not raw:
             return None
