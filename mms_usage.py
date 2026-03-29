@@ -28,14 +28,27 @@ try:
 except ImportError:
     _httpx = None
 
-try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.text import Text
-except ImportError:
-    raise SystemExit("缺少 rich，请执行: pip install rich")
+Table = Text = None
 
-console = Console()
+
+def _ensure_rich():
+    global Table, Text
+    if Table is None:
+        from rich.table import Table as _T
+        from rich.text import Text as _Tx
+        Table, Text = _T, _Tx
+
+
+class _LazyConsole:
+    _instance = None
+    def __getattr__(self, name):
+        if _LazyConsole._instance is None:
+            from rich.console import Console
+            _LazyConsole._instance = Console()
+            _ensure_rich()
+        return getattr(_LazyConsole._instance, name)
+
+console = _LazyConsole()
 
 _CONFIG_DIRS = [
     os.path.expanduser("~/.config/mms"),

@@ -24,10 +24,18 @@ class _SilentHTTPServer(ThreadingHTTPServer):
             return  # 客户端断开（Ctrl+C / Escape），静默忽略
         super().handle_error(request, client_address)
 
-try:
-    import httpx
-except ImportError:
-    httpx = None
+httpx = None
+
+
+def _ensure_httpx():
+    global httpx
+    if httpx is None:
+        try:
+            import httpx as _httpx
+            httpx = _httpx
+        except ImportError:
+            pass
+    return httpx
 
 
 # ---------------------------------------------------------------------------
@@ -859,6 +867,7 @@ def _iter_sse_lines(response):
 
 
 def _bridge_request_to_codex(account, model_name, request_payload, stream_response):
+    _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex bridge")
     auth = _load_codex_auth(account)
@@ -1462,6 +1471,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
+        _ensure_httpx()
         if httpx is None:
             self._json(502, {"type": "error", "error": {"type": "api_error", "message": "缺少 httpx，无法代理请求"}})
             return
@@ -2086,6 +2096,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": {"message": f"unsupported path: {self.path}"}})
             return
 
+        _ensure_httpx()
         if httpx is None:
             self._json(502, {"error": {"message": "缺少 httpx"}})
             return
@@ -2359,6 +2370,7 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             self._json(404, {"error": {"message": f"unsupported path: {self.path}"}})
             return
 
+        _ensure_httpx()
         if httpx is None:
             self._json(502, {"error": {"message": "缺少 httpx"}})
             return
@@ -2453,6 +2465,7 @@ def codex_chatcompletions_bridge(
     Use this when the gateway only supports Chat Completions for non-GPT models
     but Codex requires Responses API.
     """
+    _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex Chat Completions bridge")
     port = _find_free_port()
@@ -2491,6 +2504,7 @@ def codex_responses_bridge(
     route_status_paths=None,
     provider_id="",
 ):
+    _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
     port = _find_free_port()
@@ -2544,6 +2558,7 @@ def gateway_claude_bridge(
         当某个 tier 命中时，使用对应 slot 的 url/key 代替默认 gateway_url/gateway_key。
         未配置的 slot 仍使用默认 gateway。
     """
+    _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 gateway bridge")
     port = _find_free_port()

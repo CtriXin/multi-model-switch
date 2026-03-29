@@ -17,12 +17,15 @@ from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, 
 from mms_session_index import finalize_claude_session, record_claude_session_start
 from mms_speed_stats import build_provider_speed_scope
 
-try:
-    from rich.console import Console
-except ImportError:
-    pass
+class _LazyConsole:
+    _instance = None
+    def __getattr__(self, name):
+        if _LazyConsole._instance is None:
+            from rich.console import Console
+            _LazyConsole._instance = Console()
+        return getattr(_LazyConsole._instance, name)
 
-console = Console()
+console = _LazyConsole()
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
