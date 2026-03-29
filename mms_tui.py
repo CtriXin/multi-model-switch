@@ -147,187 +147,242 @@ def _draw_separator(stdscr, y, cx, width, attr=0):
 
 # ── 第 1 步：品类选择 TUI ──────────────────────────────────
 
-def select_family_tui(families_by_cli, cli_names, last_used=None):
-    """主 TUI 第 1 步：左右切 CLI Tab，上下选品类，Enter 展开子模型。
+_FAMILY_COLORS = {
+    "Claude": 3, "GPT": 5, "GLM": 7, "Kimi": 6,
+    "Qwen": 4, "MiniMax": 2, "Gemini": 1,
+}
+_CLI_COLORS = {"claude": 3, "codex": 5}
+
+
+def select_family_tui(families_by_cli, cli_names, last_used=None, families_detail=None):
+    """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
 
     Args:
         families_by_cli: dict[str, list[dict]] — cli_name -> [{family, count}]
         cli_names: list[str] — ["claude", "codex"]
         last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
+        families_detail: dict[str, dict] or None — {cli_name: {family: [model_list]}}
 
     Returns:
-        ("family", cli_name, family_name) — 选了某个品类
-        ("last", cli_name, last_used_dict) — 选了上次使用
-        ("load_balance", cli_name, None) — 选了负载模式
-        ("settings", cli_name, None) — 选了设置
-        ("connect", cli_name, None) — 按 O 接入
-        None — 退出
+        ("family", cli_name, family_name) | ("last", cli_name, dict) |
+        ("load_balance", cli_name, None) | ("settings", cli_name, None) |
+        ("connect", cli_name, None) | ("provider_browse", cli_name, None) | None
     """
-    logo_pairs = {"claude": 10, "codex": 11}
+    families_detail = families_detail or {}
 
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
-
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
-        curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_CYAN)
+        curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(10, curses.COLOR_RED, -1)      # claude
-        curses.init_pair(11, curses.COLOR_WHITE, -1)     # codex
+        curses.init_pair(7, curses.COLOR_BLUE, -1)
+        curses.init_pair(10, curses.COLOR_RED, -1)
+        curses.init_pair(11, curses.COLOR_WHITE, -1)
 
         cli_idx = 0
         sel_idx = 0
+        search_query = ""
 
         while True:
-            stdscr.clear()
+            stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
             cli = cli_names[cli_idx]
+            accent = _CLI_COLORS.get(cli, 1)
+            ac = curses.color_pair(accent)
             families = families_by_cli.get(cli, [])
+            detail = families_detail.get(cli, {})
 
-            # 构建虚拟列表
-            items = []  # (type, data, label, right_label)
+            # 搜索过滤
+            if search_query:
+                q = search_query.lower()
+                fams = [f for f in families if q in f["family"].lower()]
+                if not fams:
+                    fams = families
+            else:
+                fams = families
+
+            # 构建列表项：(type, data)
+            items = []
             cli_last = (last_used or {}).get(cli)
-            has_last = cli_last and cli_last.get("model")
-            if has_last:
-                items.append(("last", cli_last, f"  {cli_last['model']}", "上次"))
-                items.append(("sep", None, "", ""))
+            if cli_last and cli_last.get("model") and not search_query:
+                items.append(("last", cli_last))
+            for f in fams:
+                items.append(("family", f))
 
-            # 计算最大 family 名宽度用于对齐
-            max_fam_w = max((_display_width(f["family"]) for f in families), default=6) if families else 6
-            for fam in families:
-                count = fam.get("count", 0)
-                name = fam["family"]
-                pad = " " * (max_fam_w - _display_width(name) + 2)
-                items.append(("family", fam["family"], f"  {name}{pad}", str(count)))
+            if sel_idx >= len(items):
+                sel_idx = max(0, len(items) - 1)
 
-            items.append(("sep", None, "", ""))
-            items.append(("load_balance", None, "  负载模式", ""))
-            items.append(("settings", None, "  设置", ""))
+            # 尺寸
+            total_w = min(60, max_w - 4)
+            left_w = 22
+            right_w = total_w - left_w
+            ph = len(items) + 6 + (1 if search_query else 0)
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            lr = px + left_w - 1
+            rl = px + left_w + 2
+            rr = px + total_w - 2
 
-            selectable = [(i, item) for i, item in enumerate(items) if item[0] != "sep"]
-            sel_count = len(selectable)
-            if sel_idx >= sel_count:
-                sel_idx = 0
+            row = py
 
-            # 布局计算
-            w = max(54, min(max_w - 2, int(max_w * 0.85)))
-            logo_h = _MAX_LOGO_H
-            list_h = len(items)
-            h = logo_h + list_h + 7
-            sx = (max_w - w) // 2
-            sy = max(0, (max_y - h) // 2)
-            cx = sx + w // 2
-            content_pad = sx + 4
+            # -- 顶线（CLI 色）--
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
 
-            _draw_box(stdscr, sy, sx, h, w, "MMS")
-
-            # Logo
-            logo = CLI_LOGOS.get(cli, [])
-            logo_color = curses.color_pair(logo_pairs.get(cli, 2)) | curses.A_BOLD
-            _draw_centered_block(stdscr, sy + 2, cx, logo, logo_color)
-
-            # CLI Tabs
-            tab_y = sy + 2 + logo_h + 1
-            tab_parts = []
-            for i, name in enumerate(cli_names):
+            # -- MMS + CLI tabs --
+            _safe_addstr(stdscr, row, ll, "MMS", curses.color_pair(1) | curses.A_BOLD)
+            tab_x = rr
+            for i in range(len(cli_names) - 1, -1, -1):
+                name = cli_names[i]
+                label = name.upper() if i == cli_idx else name.lower()
+                tab_x -= len(label)
                 if i == cli_idx:
-                    tab_parts.append((f" {name.upper()} ", True))
+                    _safe_addstr(stdscr, row, tab_x, label, ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, row + 1, tab_x, "-" * len(label), ac)
                 else:
-                    tab_parts.append((f" {name.capitalize()} ", False))
-            total_tab_w = sum(_display_width(p[0]) for p in tab_parts) + (len(tab_parts) - 1) * 2
-            tab_x = cx - total_tab_w // 2
+                    _safe_addstr(stdscr, row, tab_x, label, curses.A_DIM)
+                tab_x -= 4
+            row += 2
 
-            for label, is_active in tab_parts:
-                if is_active:
-                    attr = curses.color_pair(logo_pairs.get(cli, 1)) | curses.A_BOLD
-                else:
-                    attr = curses.color_pair(2) | curses.A_DIM
-                _safe_addstr(stdscr, tab_y, tab_x, label, attr)
-                tab_x += _display_width(label) + 2
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
 
-            # 列表区
-            list_y = tab_y + 2
-            sep_attr = curses.color_pair(5) | curses.A_DIM
-            inner_w = w - 8  # 两侧各 4 padding
+            # -- 搜索栏 --
+            if search_query:
+                _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
+                info = f"{len(fams)}/{len(families)}"
+                _safe_addstr(stdscr, row, lr - len(info), info, curses.A_DIM)
+                row += 1
 
-            right_x = sx + w - 4  # 右侧标签的右端
+            # 双栏分隔
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+            row += 1
 
-            for item_i, (itype, idata, ilabel, iright) in enumerate(items):
-                y = list_y + item_i
-                if y >= sy + h - 1:
-                    break
+            # -- 双栏内容 --
+            content_y = row
+            sel_fam_name = None
 
-                if itype == "sep":
-                    # 更精致的分隔：短横线居中
-                    sep_w = min(inner_w, 20)
-                    _draw_separator(stdscr, y, cx, sep_w, curses.A_DIM)
-                    continue
+            for i, (itype, idata) in enumerate(items):
+                y = content_y + i
+                is_sel = (i == sel_idx)
 
-                # 找到这个 item 在 selectable 中的 index
-                sel_pos = next((si for si, (vi, _) in enumerate(selectable) if vi == item_i), -1)
-                is_sel = (sel_pos == sel_idx)
+                # 竖分割
+                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
 
-                marker = " ▸" if is_sel else "  "
+                if itype == "last":
+                    model = idata.get("model", "?")
+                    if is_sel:
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, model, curses.color_pair(4) | curses.A_BOLD, max_w=left_w - 8)
+                        _safe_addstr(stdscr, y, lr - 2, "<-", curses.color_pair(4))
+                    else:
+                        _safe_addstr(stdscr, y, ll, "<-", curses.color_pair(4) | curses.A_DIM)
+                        _safe_addstr(stdscr, y, ll + 3, model, curses.color_pair(4), max_w=left_w - 8)
 
-                if is_sel:
-                    label_attr = curses.color_pair(1) | curses.A_BOLD
-                    right_attr = curses.color_pair(1) | curses.A_DIM
-                elif itype == "last":
-                    label_attr = curses.color_pair(4)
-                    right_attr = curses.color_pair(4) | curses.A_DIM
-                elif itype in ("load_balance", "settings"):
-                    label_attr = curses.color_pair(5)
-                    right_attr = curses.color_pair(5) | curses.A_DIM
-                else:
-                    label_attr = curses.color_pair(2)
-                    right_attr = curses.A_DIM
+                elif itype == "family":
+                    name = idata["family"]
+                    count = idata["count"]
+                    fc = curses.color_pair(_FAMILY_COLORS.get(name, 2))
+                    if is_sel:
+                        sel_fam_name = name
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD)
+                        cnt = str(count)
+                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.color_pair(1))
+                    else:
+                        _safe_addstr(stdscr, y, ll, ".", fc | curses.A_DIM)
+                        _safe_addstr(stdscr, y, ll + 2, name, curses.color_pair(2))
+                        cnt = str(count)
+                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.A_DIM)
 
-                # 左侧：marker + label
-                _safe_addstr(stdscr, y, content_pad, marker, label_attr)
-                _safe_addstr(stdscr, y, content_pad + _display_width(marker), ilabel, label_attr, max_w=inner_w - 8)
+            # -- 右栏预览 --
+            if sel_fam_name and detail.get(sel_fam_name):
+                models = detail[sel_fam_name]
+                fc = curses.color_pair(_FAMILY_COLORS.get(sel_fam_name, 2))
+                max_p = len(items)
+                for mi, model in enumerate(models[:max_p]):
+                    my = content_y + mi
+                    attr = fc | curses.A_BOLD if mi == 0 else curses.color_pair(2)
+                    _safe_addstr(stdscr, my, rl, model, attr, max_w=right_w - 3)
+                if len(models) > max_p:
+                    _safe_addstr(stdscr, content_y + max_p, rl,
+                                 f"... +{len(models) - max_p}", curses.A_DIM)
+            elif items and items[sel_idx][0] == "last":
+                _safe_addstr(stdscr, content_y, rl, "继续上次", curses.color_pair(1) | curses.A_DIM)
 
-                # 右侧：计数或标签（右对齐）
-                if iright:
-                    rw = _display_width(iright)
-                    _safe_addstr(stdscr, y, right_x - rw, iright, right_attr)
-
-            # Footer — 更简洁
-            footer = "←→ CLI  ↑↓ 选择  Enter 展开  P Provider  O 接入  Q 退出"
-            _center_text(stdscr, sy + h - 1, cx, f" {footer} ", curses.A_DIM)
+            # -- 底栏 --
+            bot_y = content_y + len(items)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            if search_query:
+                _safe_addstr(stdscr, bot_y, ll, "Esc 清除", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
+            else:
+                _safe_addstr(stdscr, bot_y, ll, "L", curses.color_pair(5) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 2, "负载", curses.color_pair(5) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 8, "S", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 10, "设置", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 16, "P", curses.color_pair(6) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 18, "通道", curses.color_pair(6) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 24, "O", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 26, "接入", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 32, "Q", curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 34, "退出", curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
 
-            if key == curses.KEY_LEFT:
+            if key == curses.KEY_UP:
+                sel_idx = (sel_idx - 1) % len(items) if items else 0
+            elif key == curses.KEY_DOWN:
+                sel_idx = (sel_idx + 1) % len(items) if items else 0
+            elif key == curses.KEY_LEFT:
                 cli_idx = (cli_idx - 1) % len(cli_names)
                 sel_idx = 0
+                search_query = ""
             elif key == curses.KEY_RIGHT:
                 cli_idx = (cli_idx + 1) % len(cli_names)
                 sel_idx = 0
-            elif key == curses.KEY_UP:
-                sel_idx = (sel_idx - 1) % sel_count
-            elif key == curses.KEY_DOWN:
-                sel_idx = (sel_idx + 1) % sel_count
+                search_query = ""
             elif key in (10, 13, curses.KEY_ENTER):
-                _, (_, item) = list(enumerate(selectable))[sel_idx] if sel_idx < sel_count else (0, (0, ("", None, "", "")))
-                itype, idata = item[0], item[1]
+                if not items:
+                    continue
+                itype, idata = items[sel_idx]
                 if itype == "family":
-                    return ("family", cli, idata)
+                    return ("family", cli, idata["family"])
                 elif itype == "last":
                     return ("last", cli, idata)
-                elif itype == "load_balance":
-                    return ("load_balance", cli, None)
-                elif itype == "settings":
-                    return ("settings", cli, None)
-            elif key in (ord('o'), ord('O')):
-                return ("connect", cli, None)
-            elif key in (ord('p'), ord('P')):
+            elif key in (ord('l'), ord('L')) and not search_query:
+                return ("load_balance", cli, None)
+            elif key in (ord('s'), ord('S')) and not search_query:
+                return ("settings", cli, None)
+            elif key in (ord('p'), ord('P')) and not search_query:
                 return ("provider_browse", cli, None)
-            elif key in (ord('q'), ord('Q'), 27):
+            elif key in (ord('o'), ord('O')) and not search_query:
+                return ("connect", cli, None)
+            elif key == 27:
+                if search_query:
+                    search_query = ""
+                    sel_idx = 0
+                else:
+                    return None
+            elif key in (ord('q'), ord('Q')) and not search_query:
                 return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if search_query:
+                    search_query = search_query[:-1]
+                    sel_idx = 0
+            elif 32 <= key <= 126:
+                search_query += chr(key)
+                sel_idx = 0
 
     try:
         return curses.wrapper(_inner)
