@@ -2404,6 +2404,105 @@ def _manage_account_target(cfg, account_id):
         return cfg, False
 
 
+def _run_account_mgmt_tui(cfg):
+    """账号管理：列表选择 + 详情操作。"""
+    accounts = cfg.get("accounts", [])
+    if not accounts:
+        console.print("[yellow]当前没有配置任何 OAuth 账号[/yellow]")
+        return
+
+    account_defaults = cfg.get("account", {}).get("defaults", {})
+    targets = []
+    for acct in accounts:
+        acct_id = str(acct.get("id", "")).strip()
+        if not acct_id:
+            continue
+        cli_name = str(acct.get("cli", "")).strip()
+        is_default = account_defaults.get(cli_name) == acct_id
+        launches, last_used_at = _usage_summary_for_runtime("account", acct_id)
+        targets.append({
+            "kind": "account",
+            "id": acct_id,
+            "title": acct.get("name", acct_id),
+            "summary": f"官方 · {cli_name.upper()}" + (" · 默认" if is_default else ""),
+            "default_label": cli_name.upper() if is_default else "备选",
+            "status": "",
+            "launches": launches,
+            "last_used_at": last_used_at,
+        })
+
+    if not targets:
+        console.print("[yellow]当前没有可管理的账号[/yellow]")
+        return
+
+    if _use_tui():
+        try:
+            from mms_tui import select_manage_target_tui
+            target = select_manage_target_tui(targets)
+            if target:
+                _manage_account_target(cfg, target["id"])
+        except (ImportError, Exception):
+            pass
+
+
+def _run_recommend_mgmt_tui(cfg):
+    """推荐模型管理：查看/添加/移除。"""
+    current_list = list(cfg.get("recommend", {}).get("models", []))
+
+    if _use_tui():
+        try:
+            from mms_tui import select_channel_action_tui
+        except ImportError:
+            return cfg
+
+        while True:
+            info_lines = []
+            for i, m in enumerate(current_list):
+                info_lines.append((str(i + 1), m))
+            if not info_lines:
+                info_lines.append(("-", "(空)"))
+
+            actions = [
+                ("add", "添加模型"),
+                ("remove", "移除模型"),
+                ("clear", "清空列表"),
+                ("back", "返回"),
+            ]
+            choice = select_channel_action_tui("推荐模型", info_lines, actions)
+
+            if choice == "add":
+                _ensure_rich()
+                raw = Prompt.ask("输入模型名（逗号分隔）", default="")
+                additions = [m.strip() for m in raw.split(",") if m.strip()]
+                if additions:
+                    for m in additions:
+                        if m not in current_list:
+                            current_list.append(m)
+                    cfg.setdefault("recommend", {})["models"] = current_list
+                    save_config(cfg)
+                    console.print(f"[green]已添加: {', '.join(additions)}[/green]")
+            elif choice == "remove":
+                if not current_list:
+                    continue
+                _ensure_rich()
+                raw = Prompt.ask("输入要移除的模型名（逗号分隔）", default="")
+                removals = [m.strip() for m in raw.split(",") if m.strip()]
+                if removals:
+                    current_list = [m for m in current_list if m not in removals]
+                    cfg.setdefault("recommend", {})["models"] = current_list
+                    save_config(cfg)
+                    console.print(f"[green]已移除: {', '.join(removals)}[/green]")
+            elif choice == "clear":
+                current_list = []
+                cfg.setdefault("recommend", {})["models"] = []
+                save_config(cfg)
+                console.print("[green]已清空推荐列表[/green]")
+            else:
+                break
+
+    return cfg
+
+
 def run_manage_channels(cfg):
     _ensure_interactive_terminal("通道管理")
     changed = False
@@ -4503,9 +4602,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 console.print(f"[cyan]{display_title()}[/cyan]")
                 console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
             elif settings_action == "account_mgmt":
-                console.print("[dim]账号管理尚未完全实现[/dim]")
+                _run_account_mgmt_tui(current_cfg)
             elif settings_action == "recommend":
-                console.print("[dim]推荐模型管理尚未完全实现[/dim]")
+                current_cfg = _run_recommend_mgmt_tui(current_cfg)
+                _families_dirty = True
             continue
 
         # ── 上次使用 ──
