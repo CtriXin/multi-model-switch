@@ -4,13 +4,21 @@ import subprocess
 import sys
 from shutil import which
 
-try:
-    from rich.console import Console
-    from rich.prompt import Confirm
-except ImportError:
-    pass
+Confirm = None
 
-console = Console()
+
+class _LazyConsole:
+    _instance = None
+    def __getattr__(self, name):
+        if _LazyConsole._instance is None:
+            from rich.console import Console
+            _LazyConsole._instance = Console()
+            global Confirm
+            from rich.prompt import Confirm as _C
+            Confirm = _C
+        return getattr(_LazyConsole._instance, name)
+
+console = _LazyConsole()
 
 INSTALL_COMMANDS = {
     "claude": "curl -fsSL https://claude.ai/install.sh | sh",

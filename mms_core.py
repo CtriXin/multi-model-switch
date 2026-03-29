@@ -21,25 +21,55 @@ try:
 except ImportError:
     tomli_w = None
 
-try:
-    import httpx
-except ImportError:
-    httpx = None
+# ── 延迟导入：httpx 和 rich 按需加载以加速启动 ──
+httpx = None  # 首次使用时由 _ensure_httpx() 加载
 
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.prompt import Prompt, IntPrompt, Confirm
-    from rich.text import Text
-except ImportError:
-    print("缺少依赖，请执行: pip install rich httpx tomli-w")
-    sys.exit(1)
+
+def _ensure_httpx():
+    global httpx
+    if httpx is None:
+        try:
+            import httpx as _httpx
+            httpx = _httpx
+        except ImportError:
+            pass
+    return httpx
+
+
+class _LazyConsole:
+    """Rich Console 代理：首次访问时才 import rich，节省 ~90ms 启动时间。"""
+    _instance = None
+
+    def __getattr__(self, name):
+        if _LazyConsole._instance is None:
+            try:
+                from rich.console import Console
+                _LazyConsole._instance = Console()
+            except ImportError:
+                print("缺少依赖，请执行: pip install rich httpx tomli-w")
+                sys.exit(1)
+            _ensure_rich()
+        return getattr(_LazyConsole._instance, name)
+
+
+console = _LazyConsole()
+
+# rich 组件：首次使用时加载（通过模块级 __getattr__）
+Panel = Table = Prompt = IntPrompt = Confirm = Text = None
+
+
+def _ensure_rich():
+    global Panel, Table, Prompt, IntPrompt, Confirm, Text
+    if Panel is not None:
+        return
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    from rich.prompt import Prompt as _Pr, IntPrompt as _IP, Confirm as _C
+    from rich.text import Text as _Tx
+    Panel, Table, Prompt, IntPrompt, Confirm, Text = _P, _T, _Pr, _IP, _C, _Tx
 
 from mms_account_state import seed_claude_state, seed_gemini_state
 from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
-
-console = Console()
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
@@ -2033,6 +2063,7 @@ def _warm_model_request(provider, model_name):
     model_name = str(model_name or "").strip()
     if not model_name:
         return False, "empty model"
+    _ensure_httpx()
     if httpx is None:
         return False, "缺少 httpx"
 
@@ -2386,6 +2417,7 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5)
 
     返回：working_base_url (str) | None
     """
+    _ensure_httpx()
     if httpx is None:
         return None
     url = configured_url.rstrip("/")
@@ -2702,6 +2734,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
         "base_source": "remote",
     }
 
+    _ensure_httpx()
     if "openai_chat_completions" not in protocols:
         result["error_kind"] = "protocol_unsupported"
         models_endpoint = provider.get("models_endpoint", "/models")
