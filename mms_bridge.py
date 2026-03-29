@@ -239,6 +239,44 @@ def _now_ms():
     return time.monotonic() * 1000.0
 
 
+def _extract_usage(payload):
+    """提取 input_tokens 和 output_tokens（兼容 Anthropic 和 OpenAI 格式）。"""
+    if not isinstance(payload, dict):
+        return 0, 0
+    usage_candidates = []
+    for container in (payload, payload.get("response", {}), payload.get("message", {})):
+        if isinstance(container, dict):
+            u = container.get("usage")
+            if isinstance(u, dict):
+                usage_candidates.append(u)
+    inp = out = 0
+    for u in usage_candidates:
+        for k in ("input_tokens", "prompt_tokens"):
+            v = u.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                inp = max(inp, int(v))
+        for k in ("output_tokens", "completion_tokens"):
+            v = u.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                out = max(out, int(v))
+    # cache_read/creation 也算 input
+    for u in usage_candidates:
+        for k in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+            v = u.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                inp = max(inp, inp)  # cache tokens 已包含在 input_tokens 中
+    return inp, out
+
+
+def _accumulate_usage(server, payload):
+    """累加到 server 级 session 统计。"""
+    inp, out = _extract_usage(payload)
+    if hasattr(server, "session_input_tokens"):
+        server.session_input_tokens += inp
+        server.session_output_tokens += out
+        server.session_request_count += 1
+
+
 def _extract_output_tokens(payload):
     if not isinstance(payload, dict):
         return None
@@ -267,7 +305,12 @@ def _extract_output_tokens(payload):
     return None
 
 
-def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens=None, provider_scope=None):
+def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens=None, provider_scope=None, server=None, input_tokens=None):
+    # ── Session 累加 ──
+    if server and hasattr(server, "session_request_count"):
+        server.session_request_count += 1
+        server.session_output_tokens += (output_tokens or 0)
+        server.session_input_tokens += (input_tokens or 0)
     if first_byte_ms is None:
         return
     total_ms = max(0.0, _now_ms() - started_ms)
@@ -1589,6 +1632,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         first_byte_ms=first_byte_ms,
                         output_tokens=output_tokens,
                         provider_scope=getattr(self.server, "speed_scope", None),
+                        server=self.server,
                     )
         except BrokenPipeError:
             return  # 客户端已断开（Ctrl+C），静默忽略
@@ -2221,6 +2265,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         first_byte_ms=first_byte_ms,
                         output_tokens=output_tokens,
                         provider_scope=getattr(self.server, "speed_scope", None),
+                        server=self.server,
                     )
         except Exception as exc:
             _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
@@ -2295,6 +2340,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         first_byte_ms=first_byte_ms,
                         output_tokens=output_tokens,
                         provider_scope=getattr(self.server, "speed_scope", None),
+                        server=self.server,
                     )
                     return
             self._json(404, {"error": {"message": last_body or "chat completions fallback failed"}})
@@ -2478,6 +2524,10 @@ def codex_chatcompletions_bridge(
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
+    server.session_input_tokens = 0
+    server.session_output_tokens = 0
+    server.session_request_count = 0
+    server.session_start_time = time.time()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -2578,13 +2628,18 @@ def gateway_claude_bridge(
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
-    # NOTE: CRS 暂不支持 previous_response_id，暂用 session_id 做指令缓存
+    # ── Session 统计 ──
+    server.session_input_tokens = 0
+    server.session_output_tokens = 0
+    server.session_request_count = 0
+    server.session_start_time = time.time()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
+            "_server": server,  # launcher 退出时读取 session 统计
         }
     finally:
         try:

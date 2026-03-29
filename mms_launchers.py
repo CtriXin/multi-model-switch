@@ -709,6 +709,7 @@ def launch_claude(model_info, runtime, once=False):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
     auth_mode = runtime.get("auth_mode", "api_key")
     advertised_models = []
+    bridge_cfg = None  # 由 gateway_claude_bridge 赋值，用于退出摘要
     if auth_mode == "oauth":
         env = _account_env(runtime)
         state_home = None  # per-PID HOME 已隔离，不需要 swap .claude.json
@@ -1044,6 +1045,7 @@ def launch_claude(model_info, runtime, once=False):
         cleanup_context=cleanup_ctx,
         exit_callback=exit_callback,
         force_subprocess=bool(exit_callback),
+        bridge_info=bridge_cfg,
     )
 
 
@@ -1919,6 +1921,45 @@ def _write_runtime_config(prefix, content):
     return path
 
 
+def _print_session_summary(bridge_info):
+    """退出时打印 session 摘要：时长、请求数、token 用量。"""
+    if not bridge_info or not isinstance(bridge_info, dict):
+        return
+    server = bridge_info.get("_server")
+    if not server or not hasattr(server, "session_request_count"):
+        return
+    reqs = getattr(server, "session_request_count", 0)
+    if reqs == 0:
+        return
+    inp = getattr(server, "session_input_tokens", 0)
+    out = getattr(server, "session_output_tokens", 0)
+    start = getattr(server, "session_start_time", 0)
+    import time
+    elapsed = time.time() - start if start else 0
+    # 格式化时长
+    if elapsed >= 3600:
+        dur = f"{int(elapsed // 3600)}h {int((elapsed % 3600) // 60)}m"
+    elif elapsed >= 60:
+        dur = f"{int(elapsed // 60)}m {int(elapsed % 60)}s"
+    else:
+        dur = f"{int(elapsed)}s"
+    # 格式化 token
+    def _fmt_tokens(n):
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(n)
+    model = getattr(server, "heavy_model", None) or getattr(server, "model_name", "?")
+    parts = [dur, model, f"{reqs} reqs"]
+    if inp or out:
+        parts.append(f"{_fmt_tokens(inp)} in + {_fmt_tokens(out)} out")
+    try:
+        print(f"\n\033[2m[MMS] {' · '.join(parts)}\033[0m")
+    except Exception:
+        pass
+
+
 def _exec_or_run(
     cmd,
     env,
@@ -1928,6 +1969,7 @@ def _exec_or_run(
     cleanup_context=None,
     exit_callback=None,
     force_subprocess=False,
+    bridge_info=None,
 ):
     """默认用 execvp；需要清理临时文件时回退到 subprocess。"""
     from shutil import which
@@ -1963,6 +2005,7 @@ def _exec_or_run(
                     cleanup_context.__exit__(None, None, None)
                 except (KeyboardInterrupt, Exception):
                     pass
+            _print_session_summary(bridge_info)
         sys.exit(exit_code or 0)
     else:
         os.execvpe(exe, cmd, env)
