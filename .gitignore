@@ -5,11 +5,7 @@ dist/
 node_modules/
 package-lock.json
 test-results/
-.ai/agent-release-notes.md
-.ai/plan/
-.ai/summaries/
-.ai/discuss/
-.ai/discuss-assets/
+.ai/
 docs/archive/todo-archive-*.md
 docs/archive/todo-snapshot-*.md
 .claude/

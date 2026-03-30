@@ -36,16 +36,16 @@ mms doctor --help
 
 ```bash
 # 抽样测一个 provider，跳过真实 Claude CLI
-HOME=/Users/xin mms doctor --provider anti --skip-claude-cli --max-models 5
+mms doctor --provider anti --skip-claude-cli --max-models 5
 
 # 全量测所有 provider 的协议层和模型 chat
-HOME=/Users/xin mms doctor --skip-claude-cli
+mms doctor --skip-claude-cli
 
 # 把 OAuth 账号状态也带上
-HOME=/Users/xin mms doctor --include-oauth --skip-claude-cli
+mms doctor --include-oauth --skip-claude-cli
 
 # 全量跑，包括真实 Claude CLI 冒烟
-HOME=/Users/xin mms doctor
+mms doctor
 ```
 
 输出会分成 3 张表：
@@ -68,7 +68,7 @@ HOME=/Users/xin mms doctor
 建议日常先跑：
 
 ```bash
-HOME=/Users/xin mms doctor --skip-claude-cli
+mms doctor --skip-claude-cli
 ```
 
 只有在要验真实 CLI 链路时，再去掉 `--skip-claude-cli`。
@@ -78,9 +78,9 @@ HOME=/Users/xin mms doctor --skip-claude-cli
 如果你的目标不是“大范围诊断”，而是想快速确认某个 channel 的 `URL + key + bridge` 现在还能不能给对应 CLI 用，优先跑：
 
 ```bash
-HOME=/Users/xin mms test --provider private --cli claude
-HOME=/Users/xin mms test --provider privateopenai --cli codex
-HOME=/Users/xin mms test --provider xin --cli codex
+mms test --provider private --cli claude
+mms test --provider privateopenai --cli codex
+mms test --provider xin --cli codex
 ```
 
 这套 smoke 会直接按 MMS 当前真实链路发最小请求：
@@ -104,10 +104,6 @@ mms cache refresh-after 1800
 mms cache min-interval 300
 mms cache reset
 ```
-
-更完整的巡检步骤见：
-
-- `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
 
 ### Lessons Learned
 
@@ -337,7 +333,7 @@ MMS 现在开始支持 `claude` / `codex` / `gemini` 的多账号档案。
   - 作为 `gemini-*` 模型的官方入口出现在来源列表
   - 直接使用 `mms gemini --account <id>` 启动
 - 当前默认维护的来源公司/品牌和 adapter 策略见：
-  - [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)
+  - [docs/ADAPTER_REGISTRY.md](docs/ADAPTER_REGISTRY.md)
   - 后续新增 `official OAuth` 来源时，默认应同时评估并补上 `claude bridge`
 
 ## TUI 操作指南
@@ -407,10 +403,6 @@ MMS 会把本地启动统计写到：
 
 它们适合做排序和推荐参考，但**不等于真实余额或官方剩余额度**。
 
-更完整的后续计划见：
-
-- [docs/USAGE_AND_QUOTA_PLAN.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/USAGE_AND_QUOTA_PLAN.md)
-
 最小试验：
 
 ```bash
@@ -420,12 +412,6 @@ MMS 会把本地启动统计写到：
 ./mms config account.default claude <id>
 ./mms claude --account <id>
 ```
-
-更完整的落地说明和四象限 todo 见：
-
-- [docs/OAUTH_ACCOUNTS.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/OAUTH_ACCOUNTS.md)
-- [docs/MIGRATION_AND_WORKTREE.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/MIGRATION_AND_WORKTREE.md)
-- [docs/ADAPTER_REGISTRY.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/docs/ADAPTER_REGISTRY.md)
 
 ## 失败恢复交互
 
@@ -576,10 +562,10 @@ mms discuss --provider foo "为这个 CLI 设计配置结构"
 
 ## 现在能做什么
 
-- [README.md](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/README.md)
-- [install.sh](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/install.sh)
-- [mms_core.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_core.py)
-- [mms_launchers.py](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/mms_launchers.py)
+- [README.md](README.md)
+- [install.sh](install.sh)
+- [mms_core.py](mms_core.py)
+- [mms_launchers.py](mms_launchers.py)
 
 如果你要继续在这个仓库上开发，建议把它当成：
 
@@ -589,4 +575,4 @@ mms discuss --provider foo "为这个 CLI 设计配置结构"
 
 ## License
 
-本仓库使用根目录中的 [LICENSE](/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/LICENSE)。
+本仓库使用根目录中的 [LICENSE](LICENSE)。
