@@ -220,6 +220,11 @@ TUI 选完 3 个 slot 的模型后，`_resolve_best_provider()` 自动为每个 
 ┌─────────────────────────────┐
 │  ⚖ 负载模式                 │
 │                             │
+│  命名 profiles              │
+│  ▸ 常规降本 / 默认          │
+│    全力 Claude              │
+│    GPT 全栈                 │
+│                             │
 │  最近 3 条历史记录           │
 │  ▸ MiniMax-M2.7 / M2.5 / k2│
 │    kimi-for-coding / glm / M│
@@ -246,7 +251,37 @@ TUI 选完 3 个 slot 的模型后，`_resolve_best_provider()` 自动为每个 
     全屏品类选择 → 子模型选择 → 回到 slot 编辑
 ```
 
-### 5.3 历史持久化
+### 5.3 命名 Profile 配置
+
+`config.toml` 现在支持命名的 load balance profile。当前执行链仍以 `heavy / medium / light` 三档为主，但每个 slot 可以显式指定固定 provider：
+
+```toml
+[load_balance]
+default = "balanced"
+
+[load_balance.profiles.balanced]
+label = "常规降本"
+slots = ["heavy", "medium", "light"]
+heavy = { model = "claude-sonnet-4-6", provider = "default" }
+medium = { model = "kimi-k2.5" }
+light = { model = "claude-haiku-4-5" }
+
+[load_balance.profiles.gpt_stack]
+label = "GPT 全栈"
+slots = ["heavy", "medium", "light"]
+heavy = { model = "gpt-5.4", provider = "default" }
+medium = { model = "gpt-4.1" }
+light = { model = "gpt-4.1-mini" }
+```
+
+规则：
+
+- `default` profile 会排在负载模式页最前面
+- 若 slot 写了 `provider`，启动时会严格按该 provider 解析；不再 silently 回退到 best provider
+- 若固定 provider 不支持该模型，MMS 会直接报错，提示该 profile 配置无效
+- `custom` 模式手动切的 provider 也会写入最近历史，后续可直接复用
+
+### 5.4 历史持久化
 
 `~/.config/mms/lb_history.json`:
 
@@ -254,7 +289,8 @@ TUI 选完 3 个 slot 的模型后，`_resolve_best_provider()` 自动为每个 
 {
   "recent": [
     {"heavy": "MiniMax-M2.7", "medium": "MiniMax-M2.5", "light": "kimi-k2.5",
-     "label": "MiniMax-M2.7 / MiniMax-M2.5 / kimi-k2.5"},
+     "label": "MiniMax-M2.7 / MiniMax-M2.5 / kimi-k2.5",
+     "slot_providers": {"heavy": "default", "light": "kimi"}},
     ...
   ]
 }

@@ -285,6 +285,7 @@ CLI_MODEL_FAMILY_HINTS = {
     "kimi": ("kimi",),
 }
 SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
+LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
@@ -659,6 +660,104 @@ def _normalize_presets_config(cfg):
     return updated, True
 
 
+def _normalize_load_balance_slot(slot):
+    if isinstance(slot, str):
+        model = slot.strip()
+        return {"model": model} if model else {}
+    if not isinstance(slot, dict):
+        return {}
+
+    normalized = {}
+    model = str(slot.get("model") or "").strip()
+    if model:
+        normalized["model"] = model
+    provider = str(slot.get("provider") or "").strip()
+    if provider:
+        normalized["provider"] = provider
+    for key, value in slot.items():
+        if key in {"model", "provider"}:
+            continue
+        normalized[key] = value
+    return normalized
+
+
+def _normalize_load_balance_profile(name, profile):
+    if not isinstance(profile, dict):
+        profile = {}
+
+    normalized = {}
+    label = str(profile.get("label") or name).strip()
+    if label:
+        normalized["label"] = label
+
+    raw_slots = profile.get("slots")
+    if isinstance(raw_slots, list):
+        slots = [str(item).strip() for item in raw_slots if str(item).strip()]
+        normalized["slots"] = slots or list(LB_SLOT_NAMES)
+    else:
+        normalized["slots"] = list(LB_SLOT_NAMES)
+
+    for slot_name in LB_SLOT_NAMES:
+        slot_value = _normalize_load_balance_slot(profile.get(slot_name))
+        if slot_value:
+            normalized[slot_name] = slot_value
+
+    for key, value in profile.items():
+        if key in {"label", "slots", *LB_SLOT_NAMES}:
+            continue
+        normalized[key] = value
+    return normalized
+
+
+def _normalize_load_balance_config(cfg):
+    raw = cfg.get("load_balance")
+    if raw is None:
+        return cfg, False
+    if not isinstance(raw, dict):
+        updated = dict(cfg)
+        updated["load_balance"] = {}
+        return updated, True
+
+    normalized_profiles = {}
+    raw_profiles = raw.get("profiles")
+    if isinstance(raw_profiles, dict):
+        for name, profile in raw_profiles.items():
+            normalized_name = str(name).strip()
+            if not normalized_name:
+                continue
+            normalized_profiles[normalized_name] = _normalize_load_balance_profile(normalized_name, profile)
+
+    default_name = str(raw.get("default") or "").strip()
+    if default_name not in normalized_profiles:
+        default_name = next(iter(normalized_profiles), "")
+
+    normalized = {k: v for k, v in raw.items() if k not in {"default", "profiles"}}
+    normalized["default"] = default_name
+    normalized["profiles"] = normalized_profiles
+
+    if normalized == raw:
+        return cfg, False
+
+    updated = dict(cfg)
+    updated["load_balance"] = normalized
+    return updated, True
+
+
+def _load_balance_profiles(cfg):
+    section = cfg.get("load_balance", {})
+    if not isinstance(section, dict):
+        return {}
+    profiles = section.get("profiles")
+    return profiles if isinstance(profiles, dict) else {}
+
+
+def _default_load_balance_profile_name(cfg):
+    section = cfg.get("load_balance", {})
+    if not isinstance(section, dict):
+        return ""
+    return str(section.get("default") or "").strip()
+
+
 def _normalize_user_config(cfg):
     user_cfg = cfg.get("user", {})
     if not isinstance(user_cfg, dict):
@@ -778,7 +877,8 @@ def load_config():
     cfg, preset_changed = _normalize_presets_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
     cfg, cache_changed = _normalize_cache_config(cfg)
-    changed = changed or account_changed or preset_changed or role_changed or cache_changed
+    cfg, lb_changed = _normalize_load_balance_config(cfg)
+    changed = changed or account_changed or preset_changed or role_changed or cache_changed or lb_changed
     if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
@@ -3912,6 +4012,30 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
     return scored[0][2], scored[0][3]
 
 
+def _resolve_lb_slot_provider(cfg, cli_name, model_name, provider_id):
+    provider_def = _provider_map(cfg).get(provider_id)
+    if not provider_def:
+        return None, f"负载模式指定的 provider 不存在: {provider_id}"
+    if not provider_def.get("enabled", True):
+        return None, f"负载模式指定的 provider 已禁用: {provider_id}"
+
+    provider = resolve_provider_context(cfg, provider_id)
+    if not _provider_supports_cli_name(provider, cli_name):
+        return None, f"provider {provider_id} 不支持 {cli_name}"
+    if not provider.get("api_key"):
+        return None, f"provider {provider_id} 缺少 API key"
+    if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+        return None, f"provider {provider_id} 缺少可用 base_url"
+
+    models = _probe_models(provider, emit_output=False).get("models")
+    models = _provider_effective_models(provider, models, cfg)
+    model_lower = str(model_name or "").strip().lower()
+    if model_lower not in {str(item or "").strip().lower() for item in models}:
+        return None, f"provider {provider_id} 不支持负载模式模型 {model_name}"
+
+    return provider, None
+
+
 def _build_model_families_for_cli(cfg, cli_name, default_provider, default_models):
     """聚合所有 provider 的模型，按 MODEL_FAMILIES 分组，每个模型附带最优 provider。
 
@@ -4758,6 +4882,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             cli_families = families_detail.get(cli, {})
             for fam_models in cli_families.values():
                 all_models.extend(m["model"] for m in fam_models)
+            lb_profiles = _load_balance_profiles(current_cfg)
+            lb_default_profile = _default_load_balance_profile_name(current_cfg)
             lb_prov_opts = _build_provider_options_map(
                 current_cfg, cli, current_provider, default_models, all_models
             ) if all_models else None
@@ -4766,11 +4892,18 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 available_models=all_models or None,
                 families_detail=cli_families,
                 provider_options_map=lb_prov_opts,
+                profiles=lb_profiles,
+                default_profile=lb_default_profile,
             )
             if lb_result == "__interrupt__":
                 return True
             if lb_result is None:
                 continue
+            slot_provider_ids = {
+                slot: provider_id
+                for slot, provider_id in (lb_result.get("lb_slot_providers") or {}).items()
+                if provider_id
+            }
             model_info = dict(lb_result)
             _trace_record(
                 "load balance",
@@ -4778,13 +4911,32 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 model=lb_result.get("model"),
                 lb_medium=lb_result.get("lb_medium"),
                 lb_light=lb_result.get("lb_light"),
+                profile=lb_result.get("lb_profile"),
             )
-            save_lb_history(lb_result["model"], lb_result.get("lb_medium", ""), lb_result.get("lb_light", ""))
+            save_lb_history(
+                lb_result["model"],
+                lb_result.get("lb_medium", ""),
+                lb_result.get("lb_light", ""),
+                slot_providers=slot_provider_ids,
+                label=lb_result.get("lb_label"),
+            )
             # 用 heavy model 的 best provider 作为 runtime
-            runtime_runtime, _ = _resolve_best_provider(
-                current_cfg, lb_result["model"], current_provider, default_models, cli_name=cli
-            )
-            runtime_from_best_provider = runtime_runtime is not None
+            runtime_runtime = None
+            runtime_from_best_provider = False
+            heavy_provider_id = slot_provider_ids.get("heavy")
+            if heavy_provider_id:
+                runtime_runtime, slot_error = _resolve_lb_slot_provider(
+                    current_cfg, cli, lb_result["model"], heavy_provider_id
+                )
+                if slot_error:
+                    console.print(f"[yellow]{slot_error}[/yellow]")
+                    continue
+                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=f"profile provider:{heavy_provider_id}")
+            else:
+                runtime_runtime, _ = _resolve_best_provider(
+                    current_cfg, lb_result["model"], current_provider, default_models, cli_name=cli
+                )
+                runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 runtime_runtime, _, cli = _choose_runtime_source(
                     current_cfg, cli, current_provider, default_models,
@@ -4799,13 +4951,22 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
             # 构建跨 provider slot_configs：为 medium/light 找各自的最优 provider
             slot_configs = {}
+            slot_error = ""
             for slot_name, slot_model in [("medium", lb_result.get("lb_medium")),
                                           ("light", lb_result.get("lb_light"))]:
                 if not slot_model or not slot_model.strip():
                     continue
-                slot_prov, _ = _resolve_best_provider(
-                    current_cfg, slot_model, current_provider, default_models, cli_name=cli
-                )
+                fixed_provider_id = slot_provider_ids.get(slot_name)
+                if fixed_provider_id:
+                    slot_prov, slot_error = _resolve_lb_slot_provider(
+                        current_cfg, cli, slot_model, fixed_provider_id
+                    )
+                    if slot_error:
+                        break
+                else:
+                    slot_prov, _ = _resolve_best_provider(
+                        current_cfg, slot_model, current_provider, default_models, cli_name=cli
+                    )
                 if slot_prov and slot_prov.get("id") != runtime_runtime.get("id"):
                     # 不同 provider：记录独立 url/key
                     slot_url = (slot_prov.get("anthropic_base_url") or
@@ -4819,6 +4980,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                             "url": slot_url,
                             "key": slot_prov.get("api_key", ""),
                         }
+            if slot_error:
+                console.print(f"[yellow]{slot_error}[/yellow]")
+                continue
             if slot_configs:
                 model_info["lb_slot_configs"] = slot_configs
             # fall through to confirm below
@@ -6032,6 +6196,24 @@ def _validate_config(cfg):
     role = cfg.get("user", {}).get("role", MODE_ALL)
     if normalize_user_role(role) not in {MODE_ALL, MODE_RECOMMENDED}:
         errors.append(f"不支持的模型模式: {role}")
+
+    load_balance = cfg.get("load_balance")
+    if load_balance is not None:
+        if not isinstance(load_balance, dict):
+            errors.append("load_balance 必须是对象")
+        else:
+            profiles = load_balance.get("profiles")
+            if profiles is not None and not isinstance(profiles, dict):
+                errors.append("load_balance.profiles 必须是对象")
+            elif isinstance(profiles, dict):
+                for profile_name, profile in profiles.items():
+                    if not isinstance(profile, dict):
+                        errors.append(f"load_balance profile {profile_name} 必须是对象")
+                        continue
+                    for slot_name in LB_SLOT_NAMES:
+                        slot = profile.get(slot_name)
+                        if slot is not None and not isinstance(slot, (dict, str)):
+                            errors.append(f"load_balance profile {profile_name}.{slot_name} 必须是对象或字符串")
 
     return errors
 

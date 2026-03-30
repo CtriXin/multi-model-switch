@@ -782,18 +782,69 @@ def select_model_tui(models, title="选择模型"):
 # ── 负载模式 TUI ──────────────────────────────────────────────
 
 _LB_HISTORY_PATH = os.path.expanduser("~/.config/mms/lb_history.json")
-
-# 默认预设（3-slot: heavy / medium / light）
-_LB_PRESETS = [
-    {"label": "常规降本",   "heavy": "claude-sonnet-4-6", "medium": "kimi-k2.5",       "light": "claude-haiku-4-5"},
-    {"label": "全力 Claude", "heavy": "claude-opus-4-6",   "medium": "claude-sonnet-4-6", "light": "claude-haiku-4-5"},
-    {"label": "GPT 全栈",   "heavy": "gpt-5.4",           "medium": "gpt-4.1",           "light": "gpt-4.1-mini"},
-]
+_LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
-def _load_lb_history():
+def _lb_slot_model(slot_value):
+    if isinstance(slot_value, dict):
+        return str(slot_value.get("model", "")).strip()
+    if isinstance(slot_value, str):
+        return slot_value.strip()
+    return ""
+
+
+def _lb_slot_provider(slot_value):
+    if not isinstance(slot_value, dict):
+        return ""
+    return str(slot_value.get("provider", "")).strip()
+
+
+def _lb_choice_payload(heavy, medium, light, *, label="", slot_providers=None, profile_name=""):
+    slot_providers = {k: v for k, v in (slot_providers or {}).items() if v}
+    payload = {
+        "model": heavy,
+        "lb_medium": medium,
+        "lb_light": light,
+    }
+    if label:
+        payload["lb_label"] = label
+    if slot_providers:
+        payload["lb_slot_providers"] = slot_providers
+    if profile_name:
+        payload["lb_profile"] = profile_name
+    return payload
+
+
+def _lb_profile_option(profile_name, profile, default_profile=""):
+    if not isinstance(profile, dict):
+        return None
+    heavy = _lb_slot_model(profile.get("heavy"))
+    medium = _lb_slot_model(profile.get("medium"))
+    light = _lb_slot_model(profile.get("light"))
+    if not heavy:
+        return None
+    label = str(profile.get("label") or profile_name).strip() or profile_name
+    if profile_name == default_profile:
+        label = f"{label} / 默认"
+    slot_providers = {
+        slot: _lb_slot_provider(profile.get(slot))
+        for slot in _LB_SLOT_NAMES
+        if _lb_slot_provider(profile.get(slot))
+    }
+    return {
+        "label": label,
+        "heavy": heavy,
+        "medium": medium,
+        "light": light,
+        "slot_providers": slot_providers,
+        "profile_name": profile_name,
+        "type": "profile",
+    }
+
+
+def _load_lb_history(default_entry=None):
     """读取负载模式历史。返回 {"default": {...}, "recent": [{...}, ...]}"""
-    fallback = {"default": _LB_PRESETS[0], "recent": []}
+    fallback = {"default": default_entry or {}, "recent": []}
     if not os.path.exists(_LB_HISTORY_PATH):
         return fallback
     try:
@@ -806,14 +857,29 @@ def _load_lb_history():
         return fallback
 
 
-def save_lb_history(heavy, medium, light):
+def save_lb_history(heavy, medium, light, slot_providers=None, label=None):
     """保存一条负载模式选择到历史。保留最近 3 条。"""
-    entry = {"heavy": heavy, "medium": medium, "light": light,
-             "label": f"{heavy} / {medium} / {light}"}
+    slot_providers = {k: v for k, v in (slot_providers or {}).items() if v}
+    entry = {
+        "heavy": heavy,
+        "medium": medium,
+        "light": light,
+        "label": label or f"{heavy} / {medium} / {light}",
+    }
+    if slot_providers:
+        entry["slot_providers"] = slot_providers
     history = _load_lb_history()
     recent = history.get("recent", [])
     # 去重
-    recent = [r for r in recent if not (r.get("heavy") == heavy and r.get("medium") == medium and r.get("light") == light)]
+    recent = [
+        r for r in recent
+        if not (
+            r.get("heavy") == heavy
+            and r.get("medium") == medium
+            and r.get("light") == light
+            and (r.get("slot_providers") or {}) == slot_providers
+        )
+    ]
     recent.insert(0, entry)
     history["recent"] = recent[:3]
     try:
@@ -824,20 +890,34 @@ def save_lb_history(heavy, medium, light):
         pass
 
 
-def select_load_balance_tui(available_models=None, families_detail=None, provider_options_map=None):
-    """负载模式 TUI — H6 风格：最近 3 条 + 自定义。"""
-    history = _load_lb_history()
+def select_load_balance_tui(available_models=None, families_detail=None, provider_options_map=None, profiles=None, default_profile=""):
+    """负载模式 TUI — H6 风格：profiles + 最近 3 条 + 自定义。"""
+    profile_options = []
+    for profile_name, profile in (profiles or {}).items():
+        option = _lb_profile_option(profile_name, profile, default_profile=default_profile)
+        if option is not None:
+            profile_options.append(option)
+    profile_options.sort(key=lambda item: (0 if item.get("profile_name") == default_profile else 1, item.get("label", "")))
+
+    history = _load_lb_history(default_entry=profile_options[0] if profile_options else {})
     recent = history.get("recent", [])
 
     def _build_options():
         opts = []
+        opts.extend(profile_options)
         seen = set()
         for r in recent[:3]:
-            key = (r["heavy"], r.get("medium", ""), r["light"])
+            key = (r["heavy"], r.get("medium", ""), r["light"], json.dumps(r.get("slot_providers", {}), sort_keys=True, ensure_ascii=False))
             if key not in seen:
                 seen.add(key)
-                opts.append({"label": f"{r['heavy']} / {r.get('medium','')} / {r['light']}",
-                             "heavy": r["heavy"], "medium": r.get("medium", ""), "light": r["light"], "type": "recent"})
+                opts.append({
+                    "label": r.get("label") or f"{r['heavy']} / {r.get('medium','')} / {r['light']}",
+                    "heavy": r["heavy"],
+                    "medium": r.get("medium", ""),
+                    "light": r["light"],
+                    "slot_providers": r.get("slot_providers", {}),
+                    "type": "recent",
+                })
         opts.append({"label": "自定义...", "type": "custom"})
         return opts
 
@@ -905,7 +985,14 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
                 chosen = options[idx]
                 if chosen["type"] == "custom":
                     return "custom"
-                return {"model": chosen["heavy"], "lb_medium": chosen.get("medium", ""), "lb_light": chosen["light"]}
+                return _lb_choice_payload(
+                    chosen["heavy"],
+                    chosen.get("medium", ""),
+                    chosen["light"],
+                    label=chosen.get("label", ""),
+                    slot_providers=chosen.get("slot_providers", {}),
+                    profile_name=chosen.get("profile_name", ""),
+                )
             elif key in (ord('q'), ord('Q'), 27):
                 return None
 
@@ -1194,11 +1281,18 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
                         else:
                             slots[sname] = {"model": str(chosen), "provider_name": "", "provider_id": "", "provider_ctx": {}}
                 elif can_launch:
-                    return {
-                        "model": slots["heavy"]["model"],
-                        "lb_medium": slots["medium"]["model"] if slots["medium"]["model"] != "(未选)" else "",
-                        "lb_light": slots["light"]["model"] if slots["light"]["model"] != "(未选)" else "",
+                    slot_providers = {
+                        slot_name: slot.get("provider_id", "")
+                        for slot_name, slot in slots.items()
+                        if slot.get("provider_id")
                     }
+                    return _lb_choice_payload(
+                        slots["heavy"]["model"],
+                        slots["medium"]["model"] if slots["medium"]["model"] != "(未选)" else "",
+                        slots["light"]["model"] if slots["light"]["model"] != "(未选)" else "",
+                        label="自定义负载",
+                        slot_providers=slot_providers,
+                    )
             elif key in (ord('+'), ord('=')):
                 if idx < 3:
                     _lb_cycle_provider(slots[SLOT_NAMES[idx]], +1)
