@@ -588,6 +588,77 @@ def _ensure_account_config(cfg):
     return new_cfg, changed
 
 
+def _normalize_preset_entry(name, preset):
+    if isinstance(preset, str):
+        preset = {"cli": "claude", "model": preset}
+    elif not isinstance(preset, dict):
+        preset = {"cli": "claude"}
+
+    normalized = {"cli": str(preset.get("cli") or "claude").strip().lower() or "claude"}
+
+    description = str(preset.get("description") or "").strip()
+    if description:
+        normalized["description"] = description
+
+    provider = str(preset.get("provider") or "").strip()
+    if provider:
+        normalized["provider"] = provider
+
+    account = str(preset.get("account") or "").strip()
+    if account:
+        normalized["account"] = _normalize_account_id(account)
+
+    bridge = str(preset.get("bridge") or "").strip()
+    if bridge:
+        normalized["bridge"] = bridge
+
+    model = str(preset.get("model") or "").strip()
+    if not model:
+        for legacy_key in ("sonnet", "opus", "haiku"):
+            value = str(preset.get(legacy_key) or "").strip()
+            if value:
+                model = value
+                break
+    if model:
+        normalized["model"] = model
+
+    for key, value in preset.items():
+        if key in {"cli", "description", "provider", "account", "bridge", "model", "sonnet", "opus", "haiku"}:
+            continue
+        normalized[key] = value
+
+    return normalized
+
+
+def _normalize_presets_config(cfg):
+    raw_presets = cfg.get("presets")
+    if raw_presets is None:
+        return cfg, False
+    if not isinstance(raw_presets, dict):
+        updated = dict(cfg)
+        updated["presets"] = {}
+        return updated, True
+
+    normalized = {}
+    changed = False
+    for name, preset in raw_presets.items():
+        normalized_name = str(name).strip()
+        if not normalized_name:
+            changed = True
+            continue
+        normalized_preset = _normalize_preset_entry(normalized_name, preset)
+        normalized[normalized_name] = normalized_preset
+        if normalized_name != name or normalized_preset != preset:
+            changed = True
+
+    if not changed:
+        return cfg, False
+
+    updated = dict(cfg)
+    updated["presets"] = normalized
+    return updated, True
+
+
 def _normalize_user_config(cfg):
     user_cfg = cfg.get("user", {})
     if not isinstance(user_cfg, dict):
@@ -704,9 +775,10 @@ def load_config():
     cfg = _migrate_legacy_api_config(cfg)
     cfg, changed = _ensure_provider_config(cfg)
     cfg, account_changed = _ensure_account_config(cfg)
+    cfg, preset_changed = _normalize_presets_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
     cfg, cache_changed = _normalize_cache_config(cfg)
-    changed = changed or account_changed or role_changed or cache_changed
+    changed = changed or account_changed or preset_changed or role_changed or cache_changed
     if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
@@ -4282,6 +4354,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
 
 def save_preset_interactive(cfg, cli, model_info):
     name = Prompt.ask("预设名称")
+    description = Prompt.ask("预设描述（可留空）", default="").strip()
     preset = {"cli": cli}
     if isinstance(model_info, dict):
         preset.update(model_info)
@@ -4289,13 +4362,47 @@ def save_preset_interactive(cfg, cli, model_info):
         preset["model"] = model_info
     if "presets" not in cfg:
         cfg["presets"] = {}
-    cfg["presets"][name] = preset
+    if description:
+        preset["description"] = description
+    cfg["presets"][name] = _normalize_preset_entry(name, preset)
     save_config(cfg)
     console.print(f"[green]✓ 预设 '{name}' 已保存[/green]")
 
 
 def _uses_native_account_entry(runtime, cli):
     return bool(runtime and runtime.get("auth_mode") == "oauth" and cli in OAUTH_CAPABLE_CLIS)
+
+
+def _preset_model_info(preset):
+    if not isinstance(preset, dict):
+        return {}
+    return {
+        key: value for key, value in preset.items()
+        if key not in {"cli", "provider", "account", "description", "bridge"}
+    }
+
+
+def _resolve_named_preset(cfg, preset_name):
+    presets = cfg.get("presets", {})
+    if preset_name not in presets:
+        console.print(f"[red]预设 '{preset_name}' 不存在[/red]")
+        if presets:
+            console.print(f"可用预设: {', '.join(presets.keys())}")
+        return None
+    return _normalize_preset_entry(preset_name, presets[preset_name])
+
+
+def _infer_preset_auth_mode(preset):
+    """临时推断 preset 的 auth_mode，仅用于展示和 env/activate 解析，不落盘。"""
+    if not isinstance(preset, dict):
+        return None
+    if preset.get("bridge"):
+        return "oauth_bridge"
+    if preset.get("account"):
+        return "oauth"
+    if preset.get("provider"):
+        return "api_key"
+    return None
 
 
 # ── CLI Selection (fallback) ───────────────────────────
@@ -4734,6 +4841,117 @@ def handle_export(cli_name, provider, apply=False):
         console.print(
             f"\n[dim]复制上面的命令临时使用，或执行 {export_command_hint(cli_name)} 生成独立 env 文件[/dim]"
         )
+
+
+# ── Preset env/activate ───────────────────────────────
+
+
+def _resolve_preset_export_runtime(cfg, preset, provider_override=None):
+    """解析 preset 的 export 环境变量。只支持 provider runtime (api_key 模式)。
+
+    返回 (cli, exports_dict, runtime) 或 None（如果不可导出）。
+    """
+    from mms_launchers import get_export_env, validate_provider_for_cli
+
+    cli = preset.get("cli", "claude")
+    auth_mode = _infer_preset_auth_mode(preset)
+
+    if auth_mode in ("oauth", "oauth_bridge"):
+        console.print(f"[yellow]此预设使用 {auth_mode} 模式，不支持 env export[/yellow]")
+        return None
+
+    provider_id = provider_override or preset.get("provider") or None
+
+    runtime = ensure_provider_credentials(cfg, provider_id)
+    if runtime is None:
+        console.print(f"[red]无法解析 provider: {provider_id or 'default'}[/red]")
+        return None
+
+    if not provider_id and sys.stderr.isatty():
+        default_name = runtime.get("id", "default") if isinstance(runtime, dict) else "default"
+        print(f"预设未指定 provider，使用默认: {default_name}", file=sys.stderr)
+
+    try:
+        validate_provider_for_cli(cli, runtime)
+    except Exception as exc:
+        console.print(f"[red]{exc}[/red]")
+        return None
+
+    exports = get_export_env(cli, runtime)
+    if not exports:
+        console.print(f"[yellow]{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
+        return None
+
+    return cli, exports, runtime
+
+
+def handle_env_command(cfg, argv):
+    """处理 mms env <preset> [--apply] [--provider OVERRIDE]"""
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} env",
+        description="输出预设对应的 export 环境变量",
+    )
+    parser.add_argument("preset_name", help="预设名称")
+    parser.add_argument("--apply", action="store_true",
+                        help="写入 ~/.config/mms/env/<preset>.sh")
+    parser.add_argument("--provider", help="临时覆盖预设中的 provider")
+    args = parser.parse_args(argv)
+
+    preset = _resolve_named_preset(cfg, args.preset_name)
+    if preset is None:
+        return
+
+    result = _resolve_preset_export_runtime(cfg, preset, provider_override=args.provider)
+    if result is None:
+        return
+
+    cli, exports, _runtime = result
+    lines = [f'export {k}="{v}"' for k, v in exports.items()]
+    export_block = "\n".join(lines)
+
+    console.print(f"\n[bold cyan]{args.preset_name} ({cli}) 环境变量:[/bold cyan]\n")
+    console.print(export_block)
+
+    if args.apply:
+        os.makedirs(ENV_DIR, exist_ok=True)
+        env_path = os.path.join(ENV_DIR, f"{args.preset_name}.sh")
+        with open(env_path, "w") as f:
+            f.write(f"# Generated by {display_title()} — preset: {args.preset_name}\n")
+            f.write(export_block + "\n")
+        console.print(f"\n[green]✓ 已写入 {env_path}[/green]")
+        console.print(f"[dim]需要时手动执行: source {env_path}[/dim]")
+    else:
+        console.print(
+            f"\n[dim]复制上面的命令临时使用，或执行 {current_command()} env {args.preset_name} --apply 生成独立 env 文件[/dim]"
+        )
+
+
+def handle_activate_command(cfg, argv):
+    """处理 mms activate <preset> [--provider OVERRIDE]
+    输出纯 export 行到 stdout，适合 eval $(mms activate foo)。
+    """
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} activate",
+        description="输出可 eval 的 export 语句",
+    )
+    parser.add_argument("preset_name", help="预设名称")
+    parser.add_argument("--provider", help="临时覆盖预设中的 provider")
+    args = parser.parse_args(argv)
+
+    preset = _resolve_named_preset(cfg, args.preset_name)
+    if preset is None:
+        sys.exit(1)
+
+    result = _resolve_preset_export_runtime(cfg, preset, provider_override=args.provider)
+    if result is None:
+        sys.exit(1)
+
+    _cli, exports, _runtime = result
+    for k, v in exports.items():
+        print(f'export {k}="{v}"')
+
+    if sys.stderr.isatty():
+        print(f"# ✓ preset '{args.preset_name}' activated", file=sys.stderr)
 
 
 # ── Config command ─────────────────────────────────────
@@ -5985,6 +6203,12 @@ def main():
             raise SystemExit(handle_doctor_command(sys.argv[2:]))
         if command in {"test", "smoke"}:
             raise SystemExit(handle_test_command(sys.argv[2:], subcommand_name=command))
+        if command == "env":
+            handle_env_command(_load_command_config(), sys.argv[2:])
+            return
+        if command == "activate":
+            handle_activate_command(_load_command_config(), sys.argv[2:])
+            return
 
     if len(sys.argv) >= 2 and sys.argv[1] == "discuss":
         from mms_discuss import discuss_main
@@ -6013,6 +6237,8 @@ def main():
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} chat ...        进入 chat 子命令\n"
             f"  {current_command()} discuss ...     进入 discuss 子命令\n"
+            f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
+            f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
             f"  {current_command()} usage ...       查看 usage 统计"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -6060,6 +6286,7 @@ def main():
 
     # --presets
     if args.presets:
+        _ensure_rich()
         presets = cfg.get("presets", {})
         if presets:
             table = Table(title="已保存预设")
@@ -6067,9 +6294,13 @@ def main():
             table.add_column("CLI", style="green")
             table.add_column("Provider", style="magenta")
             table.add_column("模型", style="yellow")
+            table.add_column("描述", style="dim")
+            table.add_column("模式", style="blue")
             for name, p in presets.items():
                 model_str = p.get("model", f"opus={p.get('opus','')}, sonnet={p.get('sonnet','')}")
-                table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str))
+                desc = p.get("description", "")
+                auth = _infer_preset_auth_mode(p) or "—"
+                table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str), desc, auth)
             console.print(table)
         console.print("\n[bold]内置场景:[/bold]")
         for i, (name, s) in enumerate(_builtin_scene_catalog().items(), 1):
@@ -6095,14 +6326,11 @@ def main():
 
     # --preset
     if args.preset:
-        presets = cfg.get("presets", {})
-        if args.preset not in presets:
-            console.print(f"[red]预设 '{args.preset}' 不存在[/red]")
-            console.print(f"可用预设: {', '.join(presets.keys())}")
+        p = _resolve_named_preset(cfg, args.preset)
+        if p is None:
             return
-        p = presets[args.preset]
         cli = p["cli"]
-        model_info = {k: v for k, v in p.items() if k not in {"cli", "provider"}}
+        model_info = _preset_model_info(p)
         runtime, _, cli = _choose_runtime_source(
             cfg,
             cli,
