@@ -1830,6 +1830,7 @@ def _update_provider_model_overrides(cfg, provider_id, *, extra_models=None, hid
 def _display_provider_model_table(provider, probe):
     from mms_speed_stats import get_speed_entry
 
+    _ensure_rich()
     table = Table(title=f"{provider.get('name', provider.get('id'))} · 模型列表", show_lines=True)
     table.add_column("模型", style="cyan")
     table.add_column("来源", style="green")
