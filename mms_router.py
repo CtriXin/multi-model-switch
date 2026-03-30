@@ -559,7 +559,8 @@ def export_model_routes(cfg=None, force=False):
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
-        ROLE_WEIGHTS, DEFAULT_PRIORITY,
+        ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
+        _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
     )
 
     if cfg is None:
@@ -658,6 +659,10 @@ def export_model_routes(cfg=None, force=False):
                 "provider_id": pinfo["provider_id"],
                 "priority": pinfo["priority"],
                 "role": pinfo["role"],
+                "capabilities": _model_capability_tags(normalized),
+                "native_clis": _native_clis_for_model(normalized),
+                "bridge_clis": _bridge_clis_for_model(normalized),
+                "cli_modes": _model_cli_modes(normalized),
             }
             if pinfo.get("openai_base_url"):
                 route_entry["openai_base_url"] = pinfo["openai_base_url"]
@@ -714,14 +719,24 @@ def routes_main(cfg, args):
             table.add_column("Provider", style="green")
             table.add_column("Role", style="magenta")
             table.add_column("Priority", style="yellow", justify="right")
+            table.add_column("Capabilities", style="white")
+            table.add_column("CLI", style="dim")
             table.add_column("Anthropic Base URL", style="dim")
 
             for model_name, info in sorted(routes.items()):
+                cli_modes = info.get("cli_modes", {})
+                cli_summary = ", ".join(
+                    f"{cli}:{mode}"
+                    for cli, mode in cli_modes.items()
+                    if mode in {"native", "bridge"}
+                ) or "-"
                 table.add_row(
                     model_name,
                     info.get("provider_id", ""),
                     info.get("role", "auto"),
                     str(info.get("priority", "")),
+                    ", ".join(info.get("capabilities", [])) or "-",
+                    cli_summary,
                     (info.get("anthropic_base_url") or "")[:50],
                 )
             _console.print(table)
