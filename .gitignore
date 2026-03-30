@@ -85,3 +85,5 @@ apps/*/task_plan.md
 # macOS
 .DS_Store
 */.DS_Store
+
+docs/CRS_MMS_BINDING_RUNBOOK.md
