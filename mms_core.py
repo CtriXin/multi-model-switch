@@ -1008,6 +1008,67 @@ def _trace_record(source, **kv):
     _trace_overrides.append((source, {k: v for k, v in kv.items() if v is not None}))
 
 
+def _trace_runtime_provider_id(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("runtime_kind") == "provider" or runtime.get("auth_mode") == "api_key":
+        return str(runtime.get("id", "")).strip()
+    return ""
+
+
+def _trace_runtime_account_id(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("auth_mode") == "oauth_bridge":
+        return str(runtime.get("bridge_account_id") or runtime.get("id") or "").strip()
+    if runtime.get("auth_mode") == "oauth":
+        return str(runtime.get("id") or runtime.get("account_id") or "").strip()
+    return str(runtime.get("account_id") or "").strip()
+
+
+def _trace_runtime_bridge(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("auth_mode") != "oauth_bridge":
+        return ""
+    return str(runtime.get("bridge_url") or runtime.get("base_url") or "").strip()
+
+
+def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
+    if not _trace_enabled:
+        return
+    payload = {
+        "cli": launch_cli,
+        "provider": _trace_runtime_provider_id(runtime),
+        "account": _trace_runtime_account_id(runtime),
+        "bridge": _trace_runtime_bridge(runtime),
+        "runtime": runtime.get("auth_mode") if isinstance(runtime, dict) else None,
+        "choice": choice,
+    }
+    _trace_record(source, **payload)
+
+
+def _trace_source_for(field, value):
+    expected = str(value or "").strip()
+    if not expected:
+        return "(not set)"
+    fallback_source = ""
+    generic_match = ""
+    prefer_explicit = field in {"cli", "provider", "account", "model"}
+    for source, kv in reversed(_trace_overrides):
+        if field not in kv:
+            continue
+        candidate = str(kv.get(field) or "").strip()
+        if candidate == expected:
+            if prefer_explicit and source == "runtime resolve":
+                generic_match = source
+                continue
+            return source
+        if not fallback_source:
+            fallback_source = source
+    return fallback_source or generic_match or "runtime result"
+
+
 def _print_trace(cli_name, model_info, runtime):
     """打印 [MMS Trace] 到 stderr。"""
     model = ""
@@ -1016,22 +1077,20 @@ def _print_trace(cli_name, model_info, runtime):
     elif isinstance(model_info, str):
         model = model_info
 
-    provider_id = runtime.get("id", "") if isinstance(runtime, dict) else ""
-    account_id = runtime.get("account_id", "") if isinstance(runtime, dict) else ""
+    provider_id = _trace_runtime_provider_id(runtime)
+    account_id = _trace_runtime_account_id(runtime)
     auth_mode = runtime.get("auth_mode", "") if isinstance(runtime, dict) else ""
-    bridge = ""
-    if isinstance(runtime, dict):
-        bridge = runtime.get("bridge_url", "") or runtime.get("base_url", "") if auth_mode == "oauth_bridge" else ""
+    bridge = _trace_runtime_bridge(runtime)
 
     lines = [
         "",
         "[MMS Trace]",
-        f"  cli:      {cli_name}",
-        f"  provider: {provider_id or '-'}",
-        f"  account:  {account_id or '-'}",
-        f"  model:    {model or '-'}",
-        f"  bridge:   {bridge or '-'}",
-        f"  runtime:  {auth_mode or '-'}",
+        f"  cli:      {cli_name or '-'} <- {_trace_source_for('cli', cli_name)}",
+        f"  provider: {provider_id or '-'} <- {_trace_source_for('provider', provider_id)}",
+        f"  account:  {account_id or '-'} <- {_trace_source_for('account', account_id)}",
+        f"  model:    {model or '-'} <- {_trace_source_for('model', model)}",
+        f"  bridge:   {bridge or '-'} <- {_trace_source_for('bridge', bridge)}",
+        f"  runtime:  {auth_mode or '-'} <- {_trace_source_for('runtime', auth_mode)}",
         "",
         "Override chain:",
     ]
@@ -4122,6 +4181,12 @@ def _choose_runtime_source(
         runtime, models = _resolve_launch_runtime(
             cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
         )
+        choice = "single runtime path"
+        if provider_id:
+            choice = "provider override"
+        elif account_id:
+            choice = "account override"
+        _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice=choice)
         return runtime, models, cli_name
 
     options, default_choice = _list_runtime_sources(
@@ -4136,11 +4201,16 @@ def _choose_runtime_source(
     if not options:
         return None, [], cli_name
     if len(options) == 1:
-        return options[0]["runtime"], options[0]["models"], options[0].get("launch_cli", cli_name)
+        chosen = options[0]
+        launch_cli = chosen.get("launch_cli", cli_name)
+        _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice="single option")
+        return chosen["runtime"], chosen["models"], launch_cli
 
     if not sys.stdin.isatty():
         chosen = options[default_choice or 0]
-        return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
+        launch_cli = chosen.get("launch_cli", cli_name)
+        _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice="default(no-tty)")
+        return chosen["runtime"], chosen["models"], launch_cli
 
     table = Table(title=f"{cli_name} 使用入口", show_lines=True)
     table.add_column("#", style="cyan", width=4)
@@ -4170,7 +4240,9 @@ def _choose_runtime_source(
             selected = int(raw)
             if 1 <= selected <= len(options):
                 chosen = options[selected - 1]
-                return chosen["runtime"], chosen["models"], chosen.get("launch_cli", cli_name)
+                launch_cli = chosen.get("launch_cli", cli_name)
+                _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice=chosen.get("title"))
+                return chosen["runtime"], chosen["models"], launch_cli
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
@@ -4575,6 +4647,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     current_provider = provider
     current_cli_names = cli_names
     default_models = _probe_models(current_provider, emit_output=False).get("models")
+    if account_id or provider_id:
+        _trace_record("CLI flags", account=account_id, provider=provider_id)
 
     # 预构建品类数据（仅在配置变更时重建）
     def _rebuild_families():
@@ -4674,6 +4748,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 return True  # Esc 完全退出
             model_info = model_result
             runtime_runtime = selected_prov
+            _trace_record("provider browse", cli=cli, provider=selected_pid, model=model_info.get("model"))
+            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="provider browse")
             # fall through to confirm
 
         # ── 负载模式 ──
@@ -4696,11 +4772,19 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if lb_result is None:
                 continue
             model_info = dict(lb_result)
+            _trace_record(
+                "load balance",
+                cli=cli,
+                model=lb_result.get("model"),
+                lb_medium=lb_result.get("lb_medium"),
+                lb_light=lb_result.get("lb_light"),
+            )
             save_lb_history(lb_result["model"], lb_result.get("lb_medium", ""), lb_result.get("lb_light", ""))
             # 用 heavy model 的 best provider 作为 runtime
             runtime_runtime, _ = _resolve_best_provider(
                 current_cfg, lb_result["model"], current_provider, default_models, cli_name=cli
             )
+            runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 runtime_runtime, _, cli = _choose_runtime_source(
                     current_cfg, cli, current_provider, default_models,
@@ -4710,6 +4794,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if runtime_runtime is None:
                 console.print(f"[yellow]{cli} 没有可用 provider 承载负载模式[/yellow]")
                 continue
+            if runtime_from_best_provider:
+                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
 
             # 构建跨 provider slot_configs：为 medium/light 找各自的最优 provider
             slot_configs = {}
@@ -4791,9 +4877,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         # ── 上次使用 ──
         elif action_type == "last":
             model_info = {"model": action_data["model"]}
+            _trace_record("last used", cli=cli, model=action_data.get("model"))
             runtime_runtime, _ = _resolve_best_provider(
                 current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
             )
+            runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 runtime_runtime, _, cli = _choose_runtime_source(
                     current_cfg, cli, current_provider, default_models,
@@ -4803,6 +4891,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if runtime_runtime is None:
                 console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
                 continue
+            if runtime_from_best_provider:
+                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
 
         # ── 品类选择 → 子模型 ──
@@ -4844,13 +4934,23 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
             model_info = {"model": selected["model"]}
             runtime_runtime = selected.get("provider_ctx")
+            runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 runtime_runtime, _ = _resolve_best_provider(
                     current_cfg, selected["model"], current_provider, default_models, cli_name=cli
                 )
+                runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
                 continue
+            _trace_record(
+                f'family "{family_name}"',
+                cli=cli,
+                model=selected.get("model"),
+                provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
+            )
+            if runtime_from_best_provider:
+                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
         elif action_type not in ("provider_browse", "load_balance", "last", "family"):
             continue
@@ -6560,6 +6660,9 @@ def main():
     # --custom: manual CLI + model selection
     if args.custom:
         cli = select_cli(visible_clis)
+        _trace_record("custom mode", cli=cli)
+        if args.account or args.provider:
+            _trace_record("CLI flags", account=args.account, provider=args.provider)
         if cli == "kimi":
             runtime, cli_models, cli = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
@@ -6588,6 +6691,7 @@ def main():
             if runtime is None:
                 console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
                 return
+            _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
@@ -6612,6 +6716,9 @@ def main():
     if scene_name is None:
         # Custom mode
         cli = select_cli(visible_clis)
+        _trace_record("custom mode", cli=cli)
+        if args.account or args.provider:
+            _trace_record("CLI flags", account=args.account, provider=args.provider)
         if cli == "kimi":
             runtime, cli_models, cli = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
@@ -6640,6 +6747,7 @@ def main():
             if runtime is None:
                 console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
                 return
+            _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
