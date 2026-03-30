@@ -73,6 +73,10 @@ mms codex --account work               # 临时切换账号
 ### Codex Tab
 ![Codex Tab](assets/mms-tui-codex.png)
 
+### 启动确认页
+![Launch Confirm](assets/mms-launch-confirm.png)
+*启动前确认配置：模型、Provider、模式一目了然*
+
 **操作说明**：
 - `←/→`：切换 CLI Tab（claude / codex / qwen / kimi）
 - `↑/↓`：选择模型族群 / 模型
