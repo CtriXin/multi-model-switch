@@ -318,6 +318,13 @@ def normalize_user_role(role):
 
 ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 VALID_ROLES = set(ROLE_WEIGHTS.keys())
+_REASONING_MODEL_HINTS = (
+    "claude-opus", "claude-sonnet", "gpt-5", "o1-", "o3-", "o4-",
+    "gemini-2.5-pro", "gemini-3", "qwen3-max", "qwen3-coder",
+    "kimi-k2.5", "kimi-for-coding", "glm-5", "glm-4.7",
+    "minimax-m2", "deepseek-reasoner", "doubao-thinking",
+)
+_TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
 
 
 def _normalize_role(value):
@@ -967,6 +974,102 @@ def _normalize_cache_config(cfg):
 def _provider_map(cfg):
     providers = cfg.get("providers", [])
     return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
+
+
+def _model_context_window(model_name):
+    clean = str(model_name or "").replace("[1m]", "").strip()
+    if not clean:
+        return None
+    try:
+        from mms_launchers import _MODEL_CONTEXT_WINDOWS
+    except Exception:
+        return None
+    window = _MODEL_CONTEXT_WINDOWS.get(clean)
+    if window is not None:
+        return window
+    lower = clean.lower()
+    for key, value in _MODEL_CONTEXT_WINDOWS.items():
+        if key.lower() == lower:
+            return value
+    return None
+
+
+def _native_clis_for_model(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return []
+    if normalized.startswith("claude-"):
+        return ["claude"]
+    if normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-")):
+        return ["codex"]
+    if normalized.startswith("gemini-"):
+        return ["gemini"]
+    if normalized.startswith("qwen"):
+        return ["qwen"]
+    if normalized.startswith("kimi"):
+        return ["kimi"]
+    return []
+
+
+def _bridge_clis_for_model(model_name):
+    family, _ = _infer_model_family(model_name)
+    if family == "Unknown":
+        return []
+    native = set(_native_clis_for_model(model_name))
+    bridge = []
+    for cli_name in ("claude", "codex"):
+        if cli_name not in native:
+            bridge.append(cli_name)
+    return bridge
+
+
+def _model_capability_tags(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return []
+    family, _ = _infer_model_family(model_name)
+    tags = []
+    if family in _TOOL_USE_FAMILIES:
+        tags.append("tool_use")
+    if any(hint in normalized for hint in _REASONING_MODEL_HINTS):
+        tags.append("reasoning")
+    context_window = _model_context_window(model_name)
+    if context_window and context_window >= 200_000:
+        tags.append("long_context")
+    if "claude" in _bridge_clis_for_model(model_name):
+        tags.append("bridge_required")
+    return tags
+
+
+def _model_cli_modes(model_name):
+    native = set(_native_clis_for_model(model_name))
+    bridge = set(_bridge_clis_for_model(model_name))
+    modes = {}
+    for cli_name in ("claude", "codex", "gemini", "qwen", "kimi"):
+        if cli_name in native:
+            modes[cli_name] = "native"
+        elif cli_name in bridge:
+            modes[cli_name] = "bridge"
+        else:
+            modes[cli_name] = "unsupported"
+    return modes
+
+
+def _model_cli_summary(model_name):
+    modes = _model_cli_modes(model_name)
+    parts = []
+    for cli_name in ("claude", "codex", "gemini", "qwen", "kimi"):
+        mode = modes.get(cli_name)
+        if mode == "native":
+            parts.append(f"{cli_name}:native")
+        elif mode == "bridge":
+            parts.append(f"{cli_name}:bridge")
+    return ", ".join(parts) if parts else "-"
+
+
+def _model_capability_summary(model_name):
+    tags = _model_capability_tags(model_name)
+    return ", ".join(tags) if tags else "-"
 
 
 def _account_map(cfg):
@@ -3786,6 +3889,8 @@ def display_models(models, role=MODE_ALL, recommend=None):
     table.add_column("#", style="cyan", width=4)
     table.add_column("模型", style="green")
     table.add_column("分类", style="yellow")
+    table.add_column("能力", style="magenta")
+    table.add_column("CLI", style="dim")
 
     flat = []
     for cat, cat_models in categorized.items():
@@ -3797,7 +3902,13 @@ def display_models(models, role=MODE_ALL, recommend=None):
 
     for i, (m, c) in enumerate(flat, 1):
         tag = " ⭐" if recommend and m in recommend else ""
-        table.add_row(str(i), m + tag, c)
+        table.add_row(
+            str(i),
+            m + tag,
+            c,
+            _model_capability_summary(m),
+            _model_cli_summary(m),
+        )
 
     console.print(table)
     return [m for m, _ in flat]

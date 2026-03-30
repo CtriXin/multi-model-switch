@@ -335,14 +335,34 @@ mms routes export   # 强制重新生成
       "api_key": "sk-kimi-xxx",
       "provider_id": "kimi-codingplan",
       "priority": 75,
-      "role": "auto"
+      "role": "auto",
+      "capabilities": ["tool_use", "reasoning", "long_context", "bridge_required"],
+      "native_clis": ["kimi"],
+      "bridge_clis": ["claude", "codex"],
+      "cli_modes": {
+        "claude": "bridge",
+        "codex": "bridge",
+        "gemini": "unsupported",
+        "qwen": "unsupported",
+        "kimi": "native"
+      }
     },
     "claude-sonnet-4-6": {
       "anthropic_base_url": "https://...",
       "api_key": "sk-xxx",
       "provider_id": "bailian-codingplan",
       "priority": 75,
-      "role": "primary"
+      "role": "primary",
+      "capabilities": ["tool_use", "reasoning", "long_context"],
+      "native_clis": ["claude"],
+      "bridge_clis": ["codex"],
+      "cli_modes": {
+        "claude": "native",
+        "codex": "bridge",
+        "gemini": "unsupported",
+        "qwen": "unsupported",
+        "kimi": "unsupported"
+      }
     }
   }
 }
@@ -354,6 +374,7 @@ mms routes export   # 强制重新生成
 2. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority desc）
 3. 同一模型不重复，先 claim 先得
 4. mtime 缓存：config.toml 未变时直接读缓存
+5. `capabilities / native_clis / bridge_clis / cli_modes` 是 MMS 的启发式元数据，用于展示层和 Hive 消费，不改变实际启动决策
 
 ### 6.4 Hive MCP 消费方式
 
