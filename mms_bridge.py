@@ -178,6 +178,29 @@ def _is_openai_model(model_name):
     return isinstance(model_name, str) and model_name.lower().startswith(_OPENAI_MODEL_PREFIXES)
 
 
+def _strip_cache_control(payload):
+    """非 Claude 模型不支持 prompt caching，剥离 payload 中所有 cache_control 字段。"""
+    # 顶层 cache_control
+    payload.pop("cache_control", None)
+    # system 可能是字符串或 content block 列表
+    system = payload.get("system")
+    if isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict):
+                block.pop("cache_control", None)
+    # messages 中的 content blocks
+    for msg in payload.get("messages", []):
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    block.pop("cache_control", None)
+    # tools
+    for tool in payload.get("tools", []):
+        if isinstance(tool, dict):
+            tool.pop("cache_control", None)
+
+
 def _needs_chatcompletions_bridge(provider_id, model_name):
     """检查 (provider, model) 是否已知需要 chatcompletions bridge。"""
     cache = _load_bridge_mode_cache()
@@ -1544,6 +1567,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._forward_as_responses(payload, resolved_model, openai_url, gateway_key, should_record_speed)
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
+
+        # 非 Claude 模型：剥离 cache_control 字段（国产模型网关不支持）
+        if not resolved_model.startswith("claude-"):
+            _strip_cache_control(payload)
 
         # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容
         _gw = gateway_url.rstrip("/")

@@ -58,6 +58,12 @@ This file applies to both `Codex` and `Claude`.
 - Do not silently change default launch behavior, model/source resolution order, config schema, account isolation semantics, or bridge fallback rules without an explicit note in the task and targeted validation.
 - If a task would alter a protected surface beyond the user's stated scope, stop and narrow the change or ask for confirmation.
 
+## Local Slash Triggers
+
+- In this repo, if the user sends `/distill`, `distill`, `蒸馏`, or `checkpoint`, treat it as an explicit request to run the global `distill` skill.
+- For `/distill`, `Codex` must resolve `repo` with `git rev-parse --show-toplevel` first and only fall back to current `cwd` when git root is unavailable.
+- If `mindkeeper.brain_checkpoint` fails, report the exact absolute `repo` path that was attempted instead of saying only "repo not found".
+
 ## Stability Window
 
 - The following chain is now under a stability window and must be treated as a protected integration surface:
