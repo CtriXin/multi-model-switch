@@ -83,3 +83,8 @@ apps/*/task_plan.md
 */.DS_Store
 
 docs/CRS_MMS_BINDING_RUNBOOK.md
+
+# marketing assets (local only, not for git)
+docs/marketing/
+docs/landing/
+docs/assets/
