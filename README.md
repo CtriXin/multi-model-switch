@@ -2,6 +2,9 @@
 
 > 一个让 `claude`、`codex`、`qwen`、`kimi` 等 AI 编程 CLI 统一接入的本地 launcher。
 
+![MMS TUI - Claude Tab](assets/mms-tui.png)
+*MMS TUI 界面：方向键选择模型，回车启动*
+
 ---
 
 ## 一句话
@@ -57,6 +60,9 @@ mms --trace --preset coding  # 启动前看选择链路
 | `qwen` | 通义千问 |
 | `kimi` | Kimi |
 | `gemini` | Gemini CLI |
+
+![MMS TUI - Codex Tab](assets/mms-tui-codex.png)
+*按 `←/→` 切换 CLI Tab，同一套 TUI 管理所有模型*
 
 ## 相关命令
 
