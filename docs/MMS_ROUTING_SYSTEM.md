@@ -281,6 +281,16 @@ light = { model = "gpt-4.1-mini" }
 - 若固定 provider 不支持该模型，MMS 会直接报错，提示该 profile 配置无效
 - `custom` 模式手动切的 provider 也会写入最近历史，后续可直接复用
 
+最小管理命令：
+
+```bash
+mms config load-balance.show
+mms config load-balance.profile.add coding claude-sonnet-4-6 kimi-k2.5 claude-haiku-4-5
+mms config set load_balance.profiles.coding.heavy.provider default
+mms config load-balance.default coding
+mms config load-balance.profile.remove coding
+```
+
 ### 5.4 历史持久化
 
 `~/.config/mms/lb_history.json`:

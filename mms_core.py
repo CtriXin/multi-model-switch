@@ -758,6 +758,170 @@ def _default_load_balance_profile_name(cfg):
     return str(section.get("default") or "").strip()
 
 
+def _normalize_config_sections(cfg):
+    cfg, _ = _ensure_provider_config(cfg)
+    cfg, _ = _ensure_account_config(cfg)
+    cfg, _ = _normalize_presets_config(cfg)
+    cfg, _ = _normalize_user_config(cfg)
+    cfg, _ = _normalize_cache_config(cfg)
+    cfg, _ = _normalize_load_balance_config(cfg)
+    return cfg
+
+
+def _format_load_balance_slot(slot):
+    if isinstance(slot, str):
+        return slot.strip()
+    if not isinstance(slot, dict):
+        return "-"
+    model = str(slot.get("model") or "").strip()
+    provider = str(slot.get("provider") or "").strip()
+    if model and provider:
+        return f"{model} @ {provider}"
+    return model or "-"
+
+
+def _display_load_balance_profiles(cfg):
+    profiles = _load_balance_profiles(cfg)
+    default_name = _default_load_balance_profile_name(cfg)
+    if not profiles:
+        console.print("[yellow]当前未配置 load_balance profiles[/yellow]")
+        console.print(
+            f"[dim]可用命令: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/dim]"
+        )
+        return
+
+    _ensure_rich()
+    table = Table(title="Load Balance Profiles", show_lines=True)
+    table.add_column("名称", style="cyan")
+    table.add_column("标签", style="green")
+    table.add_column("默认", style="yellow", width=6)
+    table.add_column("Heavy", style="magenta")
+    table.add_column("Medium", style="white")
+    table.add_column("Light", style="blue")
+    for name, profile in profiles.items():
+        table.add_row(
+            name,
+            str(profile.get("label") or name),
+            "yes" if name == default_name else "",
+            _format_load_balance_slot(profile.get("heavy")),
+            _format_load_balance_slot(profile.get("medium")),
+            _format_load_balance_slot(profile.get("light")),
+        )
+    console.print(table)
+
+
+def _handle_load_balance_show_config(cfg):
+    _display_load_balance_profiles(cfg)
+
+
+def _handle_load_balance_default_config(cfg, args_rest):
+    profiles = _load_balance_profiles(cfg)
+    if not args_rest:
+        default_name = _default_load_balance_profile_name(cfg)
+        if not default_name:
+            console.print("[yellow]当前未设置默认 load_balance profile[/yellow]")
+        else:
+            console.print(f"[cyan]load_balance.default[/cyan] = {default_name}")
+        return
+
+    profile_name = str(args_rest[0] or "").strip()
+    if not profile_name:
+        console.print(f"[red]用法: {current_command()} config load-balance.default <name>[/red]")
+        return
+    if profile_name not in profiles:
+        console.print(f"[red]未找到 load_balance profile: {profile_name}[/red]")
+        if profiles:
+            console.print(f"[dim]可用 profile: {', '.join(profiles.keys())}[/dim]")
+        return
+
+    updated_cfg = dict(cfg)
+    section = dict(updated_cfg.get("load_balance", {}))
+    section["default"] = profile_name
+    updated_cfg["load_balance"] = section
+    updated_cfg = _normalize_config_sections(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ load_balance.default = {profile_name}[/green]")
+
+
+def _handle_load_balance_profile_add_config(cfg, args_rest):
+    if len(args_rest) < 2:
+        console.print(
+            f"[red]用法: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/red]"
+        )
+        return
+
+    profile_name = str(args_rest[0] or "").strip()
+    heavy = str(args_rest[1] or "").strip()
+    medium = str(args_rest[2] or "").strip() if len(args_rest) >= 3 else ""
+    light = str(args_rest[3] or "").strip() if len(args_rest) >= 4 else ""
+    if not profile_name or not heavy:
+        console.print(
+            f"[red]用法: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/red]"
+        )
+        return
+
+    updated_cfg = dict(cfg)
+    section = dict(updated_cfg.get("load_balance", {}))
+    profiles = dict(section.get("profiles", {}))
+    existing = profiles.get(profile_name, {})
+    profile = {
+        "label": str(existing.get("label") or profile_name),
+        "slots": list(LB_SLOT_NAMES),
+        "heavy": {"model": heavy},
+    }
+    if medium:
+        profile["medium"] = {"model": medium}
+    elif isinstance(existing, dict) and existing.get("medium"):
+        profile["medium"] = existing.get("medium")
+    if light:
+        profile["light"] = {"model": light}
+    elif isinstance(existing, dict) and existing.get("light"):
+        profile["light"] = existing.get("light")
+
+    for slot_name in LB_SLOT_NAMES:
+        existing_slot = existing.get(slot_name) if isinstance(existing, dict) else None
+        if isinstance(existing_slot, dict) and existing_slot.get("provider") and slot_name in profile:
+            slot = dict(profile[slot_name])
+            slot["provider"] = existing_slot.get("provider")
+            profile[slot_name] = slot
+
+    profiles[profile_name] = profile
+    section["profiles"] = profiles
+    if not str(section.get("default") or "").strip():
+        section["default"] = profile_name
+    updated_cfg["load_balance"] = section
+    updated_cfg = _normalize_config_sections(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已保存 load_balance profile: {profile_name}[/green]")
+
+
+def _handle_load_balance_profile_remove_config(cfg, args_rest):
+    if not args_rest:
+        console.print(f"[red]用法: {current_command()} config load-balance.profile.remove <name>[/red]")
+        return
+
+    profile_name = str(args_rest[0] or "").strip()
+    profiles = _load_balance_profiles(cfg)
+    if profile_name not in profiles:
+        console.print(f"[red]未找到 load_balance profile: {profile_name}[/red]")
+        return
+
+    updated_cfg = dict(cfg)
+    section = dict(updated_cfg.get("load_balance", {}))
+    updated_profiles = dict(section.get("profiles", {}))
+    updated_profiles.pop(profile_name, None)
+    if updated_profiles:
+        section["profiles"] = updated_profiles
+        if str(section.get("default") or "").strip() == profile_name:
+            section["default"] = next(iter(updated_profiles))
+        updated_cfg["load_balance"] = section
+    else:
+        updated_cfg.pop("load_balance", None)
+    updated_cfg = _normalize_config_sections(updated_cfg)
+    save_config(updated_cfg)
+    console.print(f"[green]✓ 已删除 load_balance profile: {profile_name}[/green]")
+
+
 def _normalize_user_config(cfg):
     user_cfg = cfg.get("user", {})
     if not isinstance(user_cfg, dict):
@@ -5311,6 +5475,18 @@ def handle_config(cfg, args_rest):
     if key_path == "validate":
         _handle_config_validate(cfg)
         return
+    if key_path == "load-balance.show":
+        _handle_load_balance_show_config(cfg)
+        return
+    if key_path == "load-balance.default":
+        _handle_load_balance_default_config(cfg, args_rest[1:])
+        return
+    if key_path == "load-balance.profile.add":
+        _handle_load_balance_profile_add_config(cfg, args_rest[1:])
+        return
+    if key_path == "load-balance.profile.remove":
+        _handle_load_balance_profile_remove_config(cfg, args_rest[1:])
+        return
     if key_path == "get":
         _handle_config_get(cfg, args_rest[1:])
         return
@@ -5933,6 +6109,12 @@ def _display_config_help():
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
+    console.print("\n[bold]Load Balance:[/bold]")
+    console.print(f"  {command} config load-balance.show")
+    console.print(f"  {command} config load-balance.default [name]")
+    console.print(f"  {command} config load-balance.profile.add <name> <heavy> [medium] [light]")
+    console.print(f"  {command} config load-balance.profile.remove <name>")
+    console.print(f"  [dim]更细的 slot provider 可用 config set load_balance.profiles.<name>.<slot>.provider <id>[/dim]")
     console.print("\n[bold]Provider:[/bold]")
     console.print(f"  {command} config provider.list")
     console.print(f"  {command} config provider.default [id]")
@@ -6240,8 +6422,7 @@ def _handle_config_set(cfg, args_rest):
     new_val = _coerce_config_value(key_path, raw_value)
     updated_cfg = dict(cfg)
     _set_nested(updated_cfg, key_path.split("."), new_val)
-    updated_cfg, _ = _ensure_provider_config(updated_cfg)
-    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    updated_cfg = _normalize_config_sections(updated_cfg)
     save_config(updated_cfg)
     display = _mask_key(str(new_val)) if "key" in key_path.lower() else str(new_val)
     console.print(f"[green]✓ {key_path} = {display}[/green]")
@@ -6257,8 +6438,7 @@ def _handle_config_unset(cfg, args_rest):
     if not removed:
         console.print(f"[red]配置项 '{key_path}' 不存在[/red]")
         return
-    updated_cfg, _ = _ensure_provider_config(updated_cfg)
-    updated_cfg, _ = _ensure_account_config(updated_cfg)
+    updated_cfg = _normalize_config_sections(updated_cfg)
     save_config(updated_cfg)
     console.print(f"[green]✓ 已移除 {key_path}[/green]")
 
