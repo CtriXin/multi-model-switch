@@ -995,7 +995,63 @@ def _get_scene_usage():
     return stats.get("last_by_cli", {}), scene_counts
 
 
+# ── Trace ─────────────────────────────────────────────
+
+_trace_enabled = False
+_trace_overrides = []
+
+
+def _trace_record(source, **kv):
+    """记录一步 override 来源。source 是 config default / preset / CLI flags 等。"""
+    if not _trace_enabled:
+        return
+    _trace_overrides.append((source, {k: v for k, v in kv.items() if v is not None}))
+
+
+def _print_trace(cli_name, model_info, runtime):
+    """打印 [MMS Trace] 到 stderr。"""
+    model = ""
+    if isinstance(model_info, dict):
+        model = model_info.get("model", "")
+    elif isinstance(model_info, str):
+        model = model_info
+
+    provider_id = runtime.get("id", "") if isinstance(runtime, dict) else ""
+    account_id = runtime.get("account_id", "") if isinstance(runtime, dict) else ""
+    auth_mode = runtime.get("auth_mode", "") if isinstance(runtime, dict) else ""
+    bridge = ""
+    if isinstance(runtime, dict):
+        bridge = runtime.get("bridge_url", "") or runtime.get("base_url", "") if auth_mode == "oauth_bridge" else ""
+
+    lines = [
+        "",
+        "[MMS Trace]",
+        f"  cli:      {cli_name}",
+        f"  provider: {provider_id or '-'}",
+        f"  account:  {account_id or '-'}",
+        f"  model:    {model or '-'}",
+        f"  bridge:   {bridge or '-'}",
+        f"  runtime:  {auth_mode or '-'}",
+        "",
+        "Override chain:",
+    ]
+    if _trace_overrides:
+        for source, kv in _trace_overrides:
+            if kv:
+                parts = ", ".join(f"{k}={v}" for k, v in kv.items())
+                lines.append(f"  {source:<16s}-> {parts}")
+            else:
+                lines.append(f"  {source:<16s}-> (none)")
+    else:
+        lines.append("  (no overrides recorded)")
+    lines.append("")
+
+    print("\n".join(lines), file=sys.stderr)
+
+
 def _launch_with_tracking(cli_name, model_info, runtime, once=False):
+    if _trace_enabled:
+        _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
     from mms_launchers import launch_cli
     launch_cli(cli_name, model_info, runtime, once=once)
@@ -4382,12 +4438,28 @@ def _preset_model_info(preset):
     }
 
 
-def _resolve_named_preset(cfg, preset_name):
+def _emit_preset_error(message, *, stderr_only=False):
+    if stderr_only:
+        print(message, file=sys.stderr)
+    else:
+        console.print(message)
+
+
+def _preset_env_file_path(preset_name):
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "-"
+        for ch in str(preset_name or "").strip().lower()
+    ).strip("-_")
+    safe_name = safe_name or "preset"
+    return os.path.join(ENV_DIR, f"{safe_name}.sh")
+
+
+def _resolve_named_preset(cfg, preset_name, *, stderr_only=False):
     presets = cfg.get("presets", {})
     if preset_name not in presets:
-        console.print(f"[red]预设 '{preset_name}' 不存在[/red]")
+        _emit_preset_error(f"预设 '{preset_name}' 不存在", stderr_only=stderr_only)
         if presets:
-            console.print(f"可用预设: {', '.join(presets.keys())}")
+            _emit_preset_error(f"可用预设: {', '.join(presets.keys())}", stderr_only=stderr_only)
         return None
     return _normalize_preset_entry(preset_name, presets[preset_name])
 
@@ -4846,7 +4918,7 @@ def handle_export(cli_name, provider, apply=False):
 # ── Preset env/activate ───────────────────────────────
 
 
-def _resolve_preset_export_runtime(cfg, preset, provider_override=None):
+def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stderr_only=False):
     """解析 preset 的 export 环境变量。只支持 provider runtime (api_key 模式)。
 
     返回 (cli, exports_dict, runtime) 或 None（如果不可导出）。
@@ -4857,14 +4929,14 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None):
     auth_mode = _infer_preset_auth_mode(preset)
 
     if auth_mode in ("oauth", "oauth_bridge"):
-        console.print(f"[yellow]此预设使用 {auth_mode} 模式，不支持 env export[/yellow]")
+        _emit_preset_error(f"此预设使用 {auth_mode} 模式，不支持 env export", stderr_only=stderr_only)
         return None
 
     provider_id = provider_override or preset.get("provider") or None
 
     runtime = ensure_provider_credentials(cfg, provider_id)
     if runtime is None:
-        console.print(f"[red]无法解析 provider: {provider_id or 'default'}[/red]")
+        _emit_preset_error(f"无法解析 provider: {provider_id or 'default'}", stderr_only=stderr_only)
         return None
 
     if not provider_id and sys.stderr.isatty():
@@ -4874,12 +4946,12 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None):
     try:
         validate_provider_for_cli(cli, runtime)
     except Exception as exc:
-        console.print(f"[red]{exc}[/red]")
+        _emit_preset_error(str(exc), stderr_only=stderr_only)
         return None
 
     exports = get_export_env(cli, runtime)
     if not exports:
-        console.print(f"[yellow]{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
+        _emit_preset_error(f"{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理", stderr_only=stderr_only)
         return None
 
     return cli, exports, runtime
@@ -4914,7 +4986,7 @@ def handle_env_command(cfg, argv):
 
     if args.apply:
         os.makedirs(ENV_DIR, exist_ok=True)
-        env_path = os.path.join(ENV_DIR, f"{args.preset_name}.sh")
+        env_path = _preset_env_file_path(args.preset_name)
         with open(env_path, "w") as f:
             f.write(f"# Generated by {display_title()} — preset: {args.preset_name}\n")
             f.write(export_block + "\n")
@@ -4938,11 +5010,11 @@ def handle_activate_command(cfg, argv):
     parser.add_argument("--provider", help="临时覆盖预设中的 provider")
     args = parser.parse_args(argv)
 
-    preset = _resolve_named_preset(cfg, args.preset_name)
+    preset = _resolve_named_preset(cfg, args.preset_name, stderr_only=True)
     if preset is None:
         sys.exit(1)
 
-    result = _resolve_preset_export_runtime(cfg, preset, provider_override=args.provider)
+    result = _resolve_preset_export_runtime(cfg, preset, provider_override=args.provider, stderr_only=True)
     if result is None:
         sys.exit(1)
 
@@ -6258,8 +6330,15 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
+    parser.add_argument("--trace", action="store_true",
+                        help="启动前打印选择链路追踪信息（输出到 stderr）")
 
     args = parser.parse_args()
+
+    global _trace_enabled, _trace_overrides
+    if args.trace:
+        _trace_enabled = True
+        _trace_overrides = []
 
     if args.account and args.provider:
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
@@ -6279,6 +6358,7 @@ def main():
     cfg = apply_local_overrides(user_cfg)
 
     default_provider = ensure_provider_credentials(cfg)
+    _trace_record("config default", provider=default_provider.get("id") if isinstance(default_provider, dict) else None)
     role = normalize_user_role(cfg.get("user", {}).get("role", MODE_ALL))
     recommend = cfg.get("recommend", {}).get("models", [])
 
@@ -6331,12 +6411,16 @@ def main():
             return
         cli = p["cli"]
         model_info = _preset_model_info(p)
+        _trace_record(f'preset "{args.preset}"', cli=cli, model=p.get("model"), provider=p.get("provider"), account=p.get("account"), bridge=p.get("bridge"))
+        if args.account or args.provider:
+            _trace_record("CLI flags", account=args.account, provider=args.provider)
+        preset_account_id = p.get("account") or p.get("bridge")
         runtime, _, cli = _choose_runtime_source(
             cfg,
             cli,
             ensure_provider_credentials(cfg, p.get("provider")),
             models_cache,
-            account_id=args.account,
+            account_id=args.account or preset_account_id,
             provider_id=args.provider,
             model_info=model_info,
             allow_selected_model_accounts=True,
@@ -6365,6 +6449,9 @@ def main():
                 scene = visible_scenes[scene_name]
                 cli = scene["cli"]
                 model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
+                _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
+                if args.account or args.provider:
+                    _trace_record("CLI flags", account=args.account, provider=args.provider)
                 runtime, _, cli = _choose_runtime_source(
                     cfg,
                     cli,
@@ -6396,6 +6483,9 @@ def main():
         # Is it a CLI name?
         if target in visible_clis:
             cli = target
+            _trace_record("CLI target", cli=cli)
+            if args.account or args.provider:
+                _trace_record("CLI flags", account=args.account, provider=args.provider)
             runtime, cli_models, cli = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
             )
@@ -6416,6 +6506,8 @@ def main():
                 base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
                 models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
                 model = select_model_interactive(models_list)
+            if model:
+                _trace_record("manual select", model=model)
             model_info = {} if _uses_native_account_entry(runtime, cli) else model
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
@@ -6426,6 +6518,9 @@ def main():
             return
         if target in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, target):
             cli = target
+            _trace_record("CLI target", cli=cli)
+            if args.account or args.provider:
+                _trace_record("CLI flags", account=args.account, provider=args.provider)
             runtime, cli_models, cli = _choose_runtime_source(
                 cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
             )
@@ -6444,6 +6539,8 @@ def main():
                     return
                 models_list = display_models(cli_models or models_cache, role, recommend)
                 model = select_model_interactive(models_list)
+            if model:
+                _trace_record("manual select", model=model)
             model_info = {} if _uses_native_account_entry(runtime, cli) else model
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
@@ -6555,6 +6652,9 @@ def main():
     scene = visible_scenes[scene_name]
     cli = scene["cli"]
     model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
+    _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
+    if args.account or args.provider:
+        _trace_record("CLI flags", account=args.account, provider=args.provider)
     runtime, _, cli = _choose_runtime_source(
         cfg,
         cli,
