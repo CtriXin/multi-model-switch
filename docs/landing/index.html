@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MMS - Multi-Model Switch | 统一 AI CLI 启动器</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #e4e4e7;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+        /* Hero */
+        .hero {
+            min-height: 90vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: radial-gradient(ellipse at 50% 0%, #1a1a2e 0%, #0a0a0f 70%);
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
+            top: -200px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .hero-content { position: relative; z-index: 1; }
+        .badge {
+            display: inline-block;
+            padding: 6px 16px;
+            background: rgba(99,102,241,0.1);
+            border: 1px solid rgba(99,102,241,0.3);
+            border-radius: 20px;
+            font-size: 14px;
+            color: #818cf8;
+            margin-bottom: 24px;
+        }
+        h1 {
+            font-size: 64px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff 0%, #818cf8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+            letter-spacing: -2px;
+        }
+        .tagline {
+            font-size: 24px;
+            color: #a1a1aa;
+            margin-bottom: 40px;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* Install Block */
+        .install-block {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 20px 28px;
+            display: inline-flex;
+            align-items: center;
+            gap: 16px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 16px;
+        }
+        .install-block code { color: #4ade80; }
+        .copy-btn {
+            background: #3f3f46;
+            border: none;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .copy-btn:hover { background: #52525b; }
+
+        /* Terminal Mockup */
+        .terminal-wrap {
+            margin-top: 60px;
+            perspective: 1000px;
+        }
+        .terminal {
+            background: #0c0c0c;
+            border-radius: 12px;
+            border: 1px solid #27272a;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+            max-width: 800px;
+            margin: 0 auto;
+            transform: rotateX(5deg);
+        }
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            border-bottom: 1px solid #27272a;
+        }
+        .dot { width: 12px; height: 12px; border-radius: 50%; }
+        .dot-red { background: #ef4444; }
+        .dot-yellow { background: #f59e0b; }
+        .dot-green { background: #22c55e; }
+        .terminal-title { margin-left: 8px; font-size: 13px; color: #71717a; }
+        .terminal-body {
+            padding: 20px 24px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            text-align: left;
+        }
+        .prompt { color: #22c55e; }
+        .command { color: #e4e4e7; }
+        .output { color: #a1a1aa; }
+        .highlight { color: #818cf8; }
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 18px;
+            background: #22c55e;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+        }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+        /* Features */
+        .features {
+            padding: 100px 0;
+            background: #0f0f14;
+        }
+        .section-title {
+            text-align: center;
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 60px;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 32px;
+        }
+        .feature-card {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 16px;
+            padding: 32px;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: #3f3f46;
+        }
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        .feature-card h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            color: #fff;
+        }
+        .feature-card p { color: #a1a1aa; font-size: 15px; }
+        .code-snippet {
+            background: #0c0c0c;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-top: 16px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #4ade80;
+        }
+
+        /* CTA */
+        .cta {
+            padding: 100px 0;
+            text-align: center;
+            background: radial-gradient(ellipse at 50% 100%, #1a1a2e 0%, #0a0a0f 70%);
+        }
+        .cta h2 {
+            font-size: 40px;
+            margin-bottom: 24px;
+        }
+        .cta p { color: #a1a1aa; font-size: 18px; margin-bottom: 32px; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: #fff;
+            text-decoration: none;
+            padding: 16px 32px;
+            border-radius: 10px;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.9; }
+
+        /* Footer */
+        footer {
+            padding: 40px 0;
+            text-align: center;
+            border-top: 1px solid #27272a;
+            color: #71717a;
+            font-size: 14px;
+        }
+        footer a { color: #818cf8; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <section class="hero">
+        <div class="hero-content">
+            <div class="badge">🚀 现已开源 v1.0</div>
+            <h1>MMS</h1>
+            <p class="tagline">Multi-Model Switch — 统一管理 Claude、Codex、Qwen、Kimi 等 AI 编程 CLI</p>
+
+            <div class="install-block">
+                <span class="prompt">$</span>
+                <code>curl -fsSL mms.dev/install.sh | bash</code>
+                <button class="copy-btn" onclick="copyInstall()">复制</button>
+            </div>
+
+            <div class="terminal-wrap">
+                <div class="terminal">
+                    <div class="terminal-header">
+                        <span class="dot dot-red"></span>
+                        <span class="dot dot-yellow"></span>
+                        <span class="dot dot-green"></span>
+                        <span class="terminal-title">mms</span>
+                    </div>
+                    <div class="terminal-body">
+                        <div><span class="prompt">❯</span> <span class="command">mms</span></div>
+                        <div class="output">╔══════════════════════════════════════╗</div>
+                        <div class="output">║  <span class="highlight">MMS</span> — Multi-Model Switch v1.0      ║</div>
+                        <div class="output">╠══════════════════════════════════════╣</div>
+                        <div class="output">║  [1] 💻 claude-sonnet-4-6            ║</div>
+                        <div class="output">║  [2] 🧠 deepseek-r1                  ║</div>
+                        <div class="output">║  [3] ⚡ qwen3-coder-plus             ║</div>
+                        <div class="output">║  [4] 🔮 gemini-2.5-pro               ║</div>
+                        <div class="output">║                                      ║</div>
+                        <div class="output">║  ←/→ 切换CLI  ↑/↓ 选择  Enter 启动  ║</div>
+                        <div class="output">╚══════════════════════════════════════╝</div>
+                        <div><span class="prompt">❯</span> <span class="command">mms codex --provider openrouter</span></div>
+                        <div class="output">✓ 已启动 codex with gpt-5.4</div>
+                        <div><span class="prompt">❯</span> <span class="cursor"></span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="container">
+            <h2 class="section-title">三大核心能力</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>统一 TUI 启动</h3>
+                    <p>一个命令 mms 进入交互界面，方向键选模型，回车直接启动。告别繁琐的环境变量配置。</p>
+                    <div class="code-snippet">$ mms --preset coding</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚡</div>
+                    <h3>快速切换 Provider</h3>
+                    <p>临时切换模型源或账号，一行命令搞定。不污染 shell 配置，用完即走。</p>
+                    <div class="code-snippet">$ mms claude --provider foo</div>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <h3>环境导出 & 诊断</h3>
+                    <p>一键导出环境变量供脚本使用，内置 doctor 命令快速诊断 provider 健康度。</p>
+                    <div class="code-snippet">$ mms env my-preset --apply</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>开始简化你的 AI 工作流</h2>
+            <p>MIT 协议开源，即刻安装体验</p>
+            <a href="https://github.com/CtriXin/multi-model-switch" class="btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                GitHub 仓库
+            </a>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>Made by <a href="https://github.com/CtriXin">@CtriXin</a> · MIT License</p>
+        </div>
+    </footer>
+
+    <script>
+        function copyInstall() {
+            navigator.clipboard.writeText('curl -fsSL mms.dev/install.sh | bash');
+            alert('已复制到剪贴板');
+        }
+    </script>
+</body>
+</html>
