@@ -16,6 +16,16 @@ docs/archive/todo-snapshot-*.md
 apps/runtime-api/gateway-config.json
 apps/runtime-api/gateway-state.db
 
+# local CRS/MMS ops docs and scripts
+docs/CRS_MMS_QUICKSTART.md
+docs/CRS_MMS_TROUBLESHOOTING_TREE.md
+scripts/crs_openai_account_migrate.py
+scripts/diagnose_newapi_crs_cache.py
+
+# local TUI prototypes and scratch outputs
+scripts/tui_demo_*.py
+tmp/
+
 # web-v2 local release/build artifacts
 apps/web-v2/.ai/
 apps/web-v2/.playwright-cli/
