@@ -2,9 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> 一个让 `claude`、`codex`、`qwen`、`kimi` 等 AI 编程 CLI 统一接入的本地 launcher。
+> 一个让 `claude`、`codex` 等 AI 编程 CLI 统一接入的本地 launcher。
 
-![MMS TUI - Claude Tab](assets/mms-tui.png)
+![MMS - Before vs After](assets/cover.svg)
 
 **MMS** 是一个面向本地开发者的多模型 CLI 启动器。它让你用**一个入口**管理所有 AI 编程工具，告别繁琐的环境变量配置。
 

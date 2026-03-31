@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="600" y="100" text-anchor="middle" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="64" font-weight="800">
+    MMS
+  </text>
+  <text x="600" y="150" text-anchor="middle" fill="#a1a1aa" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="28">
+    Multi-Model Switch
+  </text>
+
+  <!-- Subtitle -->
+  <text x="600" y="200" text-anchor="middle" fill="#6366f1" font-family="-apple-system, sans-serif" font-size="20" font-weight="600">
+    一个入口 · 管理 Claude + Codex · 3 秒启动
+  </text>
+
+  <!-- Left Card: Before -->
+  <g transform="translate(80, 260)">
+    <rect width="500" height="300" rx="12" fill="#18181b" stroke="#ef4444" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="50" rx="12" fill="#ef4444" opacity="0.15"/>
+    <text x="20" y="35" fill="#ef4444" font-family="monospace" font-size="18" font-weight="bold">Before</text>
+
+    <!-- Terminal content -->
+    <text x="20" y="85" fill="#6b7280" font-family="monospace" font-size="13"># 改环境变量...</text>
+    <text x="20" y="110" fill="#e4e4e7" font-family="monospace" font-size="13">$ export KEY=xxx</text>
+    <text x="20" y="135" fill="#e4e4e7" font-family="monospace" font-size="13">$ export URL=yyy</text>
+    <text x="20" y="160" fill="#e4e4e7" font-family="monospace" font-size="13">$ claude</text>
+    <text x="20" y="185" fill="#ef4444" font-family="monospace" font-size="13">Error: Invalid key</text>
+    <text x="20" y="210" fill="#6b7280" font-family="monospace" font-size="13"># 10 分钟过去了...</text>
+    <text x="20" y="250" fill="#ef4444" font-family="monospace" font-size="16">😫 崩溃</text>
+  </g>
+
+  <!-- Right Card: After -->
+  <g transform="translate(620, 260)">
+    <rect width="500" height="300" rx="12" fill="#18181b" stroke="#22c55e" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="50" rx="12" fill="#22c55e" opacity="0.15"/>
+    <text x="20" y="35" fill="#22c55e" font-family="monospace" font-size="18" font-weight="bold">After</text>
+
+    <!-- Terminal content -->
+    <text x="20" y="85" fill="#6b7280" font-family="monospace" font-size="13"># 一个命令</text>
+    <text x="20" y="110" fill="#e4e4e7" font-family="monospace" font-size="13">$ mms</text>
+
+    <!-- TUI Box -->
+    <rect x="20" y="130" width="460" height="100" rx="8" fill="#0f0f1a" stroke="#4a5568" stroke-width="1" stroke-dasharray="4"/>
+    <text x="35" y="155" fill="#5eead4" font-family="monospace" font-size="12" font-weight="bold">MMS</text>
+    <text x="320" y="155" fill="#f87171" font-family="monospace" font-size="11">CLAUDE  codex</text>
+    <line x1="35" y1="165" x2="465" y2="165" stroke="#4a5568" stroke-dasharray="3"/>
+    <text x="35" y="185" fill="#5eead4" font-family="monospace" font-size="11">| Claude</text>
+    <text x="200" y="185" fill="#fbbf24" font-family="monospace" font-size="11">5</text>
+    <text x="35" y="200" fill="#6b7280" font-family="monospace" font-size="11">  GPT</text>
+    <text x="200" y="200" fill="#6b7280" font-family="monospace" font-size="11">16</text>
+    <text x="35" y="215" fill="#6b7280" font-family="monospace" font-size="11">↑↓ 选择  Enter 启动</text>
+
+    <text x="20" y="255" fill="#22c55e" font-family="monospace" font-size="14">✓ 已启动 claude-opus-4-6</text>
+  </g>
+
+  <!-- Arrow in middle -->
+  <g transform="translate(575, 400)">
+    <text x="0" y="0" fill="#6366f1" font-family="sans-serif" font-size="40" font-weight="bold">→</text>
+  </g>
+
+  <!-- Bottom info -->
+  <text x="600" y="610" text-anchor="middle" fill="#6b7280" font-family="monospace" font-size="14">
+    curl -fsSL mms.dev/install.sh | bash · MIT License
+  </text>
+</svg>
