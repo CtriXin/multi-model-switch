@@ -149,7 +149,7 @@ _FAMILY_COLORS = {
 _CLI_COLORS = {"claude": 3, "codex": 5}
 
 
-def select_family_tui(families_by_cli, cli_names, last_used=None, families_detail=None):
+def select_family_tui(families_by_cli, cli_names, last_used=None, families_detail=None, provider_options_by_cli=None):
     """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
 
     Args:
@@ -157,6 +157,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
         cli_names: list[str] — ["claude", "codex"]
         last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
         families_detail: dict[str, dict] or None — {cli_name: {family: [model_list]}}
+        provider_options_by_cli: dict[str, dict] or None — {cli_name: {model_name: [provider_options]}}
 
     Returns:
         ("family", cli_name, family_name) | ("last", cli_name, dict) |
@@ -179,7 +180,8 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
         curses.init_pair(11, curses.COLOR_WHITE, -1)
 
         cli_idx = 0
-        sel_idx = 0
+        initial_last = ((last_used or {}).get(cli_names[0]) or {}) if cli_names else {}
+        sel_idx = -1 if initial_last.get("model") else 0
         search_query = ""
 
         while True:
@@ -190,6 +192,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             ac = curses.color_pair(accent)
             families = families_by_cli.get(cli, [])
             detail = families_detail.get(cli, {})
+            provider_options_map = (provider_options_by_cli or {}).get(cli, {})
 
             # 搜索过滤
             if search_query:
@@ -200,16 +203,20 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             else:
                 fams = families
 
-            # 上次使用（独立显示，不在列表里）
+            # 上次使用
             cli_last = (last_used or {}).get(cli)
             has_last = cli_last and cli_last.get("model") and not search_query
 
-            # 构建列表项：只有品类
+            # 构建列表项：只有品类；上次使用保持独立显示，但参与默认焦点
             items = []
             for f in fams:
                 items.append(("family", f))
 
-            if sel_idx >= len(items):
+            max_idx = len(items) - 1
+            min_idx = -1 if has_last else 0
+            if sel_idx < min_idx:
+                sel_idx = min_idx
+            if sel_idx > max_idx:
                 sel_idx = max(0, len(items) - 1)
 
             # 尺寸
@@ -248,12 +255,20 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
 
-            # -- 上次使用（独立区域）--
+            # -- 上次使用（独立区，但可选）--
             if has_last:
                 last_model = cli_last.get("model", "?")
-                _safe_addstr(stdscr, row, ll, "<-", curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, row, ll + 3, last_model, curses.color_pair(4), max_w=total_w - 20)
-                _safe_addstr(stdscr, row, rr - 8, "R 继续 <-", curses.color_pair(4) | curses.A_DIM)
+                is_last_sel = (sel_idx == -1)
+                last_attr = curses.color_pair(4) | curses.A_BOLD | (curses.A_REVERSE if is_last_sel else 0)
+                marker_attr = curses.color_pair(4) | curses.A_BOLD
+                if is_last_sel:
+                    _safe_addstr(stdscr, row, ll + 1, " " * (rr - ll - 1), last_attr)
+                    _safe_addstr(stdscr, row, ll - 1, "|", marker_attr)
+                else:
+                    _safe_addstr(stdscr, row, ll, "<-", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 1, "继续上次", last_attr)
+                _safe_addstr(stdscr, row, ll + 11, last_model, last_attr, max_w=total_w - 24)
+                _safe_addstr(stdscr, row, rr - 1, "R", last_attr if is_last_sel else curses.color_pair(4) | curses.A_DIM)
                 row += 1
 
             # -- 搜索栏 --
@@ -284,10 +299,11 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                     fc = curses.color_pair(_FAMILY_COLORS.get(name, 2))
                     if is_sel:
                         sel_fam_name = name
+                        _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), curses.color_pair(1) | curses.A_REVERSE)
                         _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                        _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, name, curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE)
                         cnt = str(count)
-                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.color_pair(1))
+                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.color_pair(1) | curses.A_REVERSE)
                     else:
                         _safe_addstr(stdscr, y, ll, ".", fc | curses.A_DIM)
                         _safe_addstr(stdscr, y, ll + 2, name, curses.color_pair(2))
@@ -295,8 +311,24 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                         _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.A_DIM)
 
             # -- 右栏预览 --
-            if sel_fam_name and detail.get(sel_fam_name):
+            if has_last and sel_idx == -1 and cli_last:
+                model_names = [cli_last.get("model", "?")]
+                fc = curses.color_pair(4)
+                max_p = max(1, len(items))
+                for mi, model in enumerate(model_names[:max_p]):
+                    my = content_y + mi
+                    attr = fc | curses.A_BOLD if mi == 0 else curses.color_pair(2)
+                    _safe_addstr(stdscr, my, rl, model, attr, max_w=right_w - 3)
+            elif sel_fam_name and detail.get(sel_fam_name):
                 raw_models = detail[sel_fam_name]
+                if raw_models and isinstance(raw_models[0], dict):
+                    raw_models = sorted(
+                        raw_models,
+                        key=lambda item: (
+                            -int(item.get("use_count", 0) or 0),
+                            str(item.get("model", "")),
+                        ),
+                    )
                 # raw_models 可能是 str 列表或 dict 列表（含 model/provider_id 等）
                 model_names = []
                 for m in raw_models:
@@ -323,16 +355,18 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
             else:
-                _safe_addstr(stdscr, bot_y, ll, "L", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 2, "负载", curses.color_pair(5) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 8, "S", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 10, "设置", curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 16, "P", curses.color_pair(6) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 18, "通道", curses.color_pair(6) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 24, "O", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 26, "接入", curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 32, "Q", curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 34, "退出", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll, "Tab", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 4, "切CLI", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, "→", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 13, "进模型", curses.color_pair(1) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 21, "L", curses.color_pair(5) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 23, "负载", curses.color_pair(5) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 29, "S", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 31, "设置", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 37, "P", curses.color_pair(6) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 39, "通道", curses.color_pair(6) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 45, "O", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 47, "接入", curses.color_pair(4) | curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
@@ -340,23 +374,85 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             key = stdscr.getch()
 
             if key == curses.KEY_UP:
-                sel_idx = (sel_idx - 1) % len(items) if items else 0
+                if not items and has_last:
+                    sel_idx = -1
+                elif items:
+                    if has_last and sel_idx == 0:
+                        sel_idx = -1
+                    elif sel_idx == -1:
+                        sel_idx = len(items) - 1
+                    else:
+                        sel_idx = (sel_idx - 1) % len(items)
             elif key == curses.KEY_DOWN:
-                sel_idx = (sel_idx + 1) % len(items) if items else 0
-            elif key == curses.KEY_LEFT:
+                if not items and has_last:
+                    sel_idx = -1
+                elif items:
+                    if has_last and sel_idx == -1:
+                        sel_idx = 0
+                    else:
+                        sel_idx = (sel_idx + 1) % len(items)
+            elif key in (9, ):
+                cli_idx = (cli_idx + 1) % len(cli_names)
+                next_cli = cli_names[cli_idx]
+                next_last = (last_used or {}).get(next_cli)
+                sel_idx = -1 if next_last and next_last.get("model") else 0
+                search_query = ""
+            elif key == curses.KEY_BTAB:
                 cli_idx = (cli_idx - 1) % len(cli_names)
-                sel_idx = 0
+                next_cli = cli_names[cli_idx]
+                next_last = (last_used or {}).get(next_cli)
+                sel_idx = -1 if next_last and next_last.get("model") else 0
                 search_query = ""
             elif key == curses.KEY_RIGHT:
-                cli_idx = (cli_idx + 1) % len(cli_names)
-                sel_idx = 0
-                search_query = ""
-            elif key in (10, 13, curses.KEY_ENTER):
+                if has_last and sel_idx == -1:
+                    return ("last", cli, cli_last)
                 if not items:
                     continue
                 itype, idata = items[sel_idx]
                 if itype == "family":
-                    return ("family", cli, idata["family"])
+                    family_name = idata["family"]
+                    models = detail.get(family_name, [])
+                    if not models:
+                        continue
+                    selected = select_submodel_tui(
+                        family_name,
+                        models,
+                        provider_options=provider_options_map,
+                        last_used=cli_last,
+                        stdscr=stdscr,
+                    )
+                    if selected == "__last__":
+                        return ("last", cli, cli_last)
+                    if selected is not None:
+                        if isinstance(selected, dict):
+                            selected = dict(selected)
+                            selected["_family_name"] = family_name
+                        return ("submodel", cli, selected)
+            elif key in (10, 13, curses.KEY_ENTER):
+                if has_last and sel_idx == -1:
+                    return ("last", cli, cli_last)
+                if not items:
+                    continue
+                itype, idata = items[sel_idx]
+                if itype == "family":
+                    family_name = idata["family"]
+                    models = detail.get(family_name, [])
+                    if not models:
+                        continue
+                    selected = select_submodel_tui(
+                        family_name,
+                        models,
+                        provider_options=provider_options_map,
+                        last_used=cli_last,
+                        stdscr=stdscr,
+                    )
+                    if selected == "__last__":
+                        return ("last", cli, cli_last)
+                    if selected is not None:
+                        if isinstance(selected, dict):
+                            selected = dict(selected)
+                            selected["_family_name"] = family_name
+                        return ("submodel", cli, selected)
             elif key in (ord('r'), ord('R')) and not search_query and has_last:
                 return ("last", cli, cli_last)
             elif key in (ord('l'), ord('L')) and not search_query:
@@ -370,7 +466,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             elif key == 27:
                 if search_query:
                     search_query = ""
-                    sel_idx = 0
+                    sel_idx = -1 if has_last else 0
                 else:
                     return None
             elif key in (ord('q'), ord('Q')) and not search_query:
@@ -378,7 +474,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             elif key in (curses.KEY_BACKSPACE, 127, 8):
                 if search_query:
                     search_query = search_query[:-1]
-                    sel_idx = 0
+                    sel_idx = -1 if has_last else 0
             elif 32 <= key <= 126:
                 search_query += chr(key)
                 sel_idx = 0
@@ -391,16 +487,19 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
 
 # ── 第 2 步：子模型选择 TUI ──────────────────────────────────
 
-def select_submodel_tui(family_name, models, provider_options=None):
+def select_submodel_tui(family_name, models, provider_options=None, last_used=None, stdscr=None):
     """子模型选择 TUI，P 键弹出 provider 列表，+/- 快速循环切换 provider。
 
     Args:
         family_name: str — 品类名
         models: list[dict] — [{"model": str, "provider_name": str, "provider_id": str, "provider_ctx": dict}]
         provider_options: dict or None — model_name -> [{"provider_name": str, "provider_id": str, "provider_ctx": dict}]
+        last_used: dict or None — 当前 CLI 的上次使用记录
+        stdscr: curses window or None — 传入时复用当前 TUI session，避免切页闪烁
 
     Returns:
         dict — 选中的 model entry (含 provider_ctx)，附带 "priority_changes": {provider_id: new_priority}
+        "__last__" — 返回上一次使用
         None — 取消 (Esc)
     """
     if not models:
@@ -413,6 +512,35 @@ def select_submodel_tui(family_name, models, provider_options=None):
     # provider priority 变更记录 (provider_id -> new_priority)
     priority_changes = {}
 
+    def _provider_choices(m):
+        choices = []
+        seen = set()
+
+        current = {
+            "provider_name": m.get("provider_name", ""),
+            "provider_id": m.get("provider_id", ""),
+            "provider_ctx": m.get("provider_ctx", {}),
+        }
+        current_id = current.get("provider_id")
+        if current_id:
+            choices.append(current)
+            seen.add(current_id)
+
+        for opt in provider_options.get(m["model"], []) if provider_options else []:
+            pid = opt.get("provider_id", "")
+            if not pid or pid in seen:
+                continue
+            choices.append(opt)
+            seen.add(pid)
+
+        choices.sort(
+            key=lambda opt: (
+                int((opt.get("provider_ctx") or {}).get("priority", 100) or 100),
+                opt.get("provider_name", ""),
+            )
+        )
+        return choices
+
     def _get_provider_info(m):
         """返回当前生效的 (provider_name, provider_id, priority)"""
         override = provider_overrides.get(m["model"])
@@ -421,24 +549,6 @@ def select_submodel_tui(family_name, models, provider_options=None):
         pid = override["provider_id"] if override else m.get("provider_id", "")
         pri = ctx.get("priority", 100)
         return name, pid, pri
-
-    def _cycle_provider(m, direction):
-        """在可用 provider 中循环切换（+1 或 -1），仅改显示，不动 priority。"""
-        model_name = m["model"]
-        if not provider_options or model_name not in provider_options:
-            return
-        opts = provider_options[model_name]
-        if len(opts) <= 1:
-            return
-        cur_name, cur_id, cur_pri = _get_provider_info(m)
-        cur_idx = 0
-        for i, o in enumerate(opts):
-            if o.get("provider_id") == cur_id:
-                cur_idx = i
-                break
-        new_idx = (cur_idx + direction) % len(opts)
-        chosen = opts[new_idx]
-        provider_overrides[model_name] = chosen
 
     def _get_result(m):
         override = provider_overrides.get(m["model"])
@@ -451,6 +561,19 @@ def select_submodel_tui(family_name, models, provider_options=None):
         if priority_changes:
             result["priority_changes"] = dict(priority_changes)
         return result
+
+    def _record_priority_swap(m, chosen):
+        new_pid = chosen.get("provider_id", "")
+        orig_pid = m.get("provider_id", "")
+        if not new_pid or not orig_pid or new_pid == orig_pid:
+            return
+
+        orig_pri = int((m.get("provider_ctx") or {}).get("priority", 100) or 100)
+        new_base = int((chosen.get("provider_ctx") or {}).get("priority", 100) or 100)
+
+        # 当前系统语义是数字越小越优先；手动选中的 provider 应提升到默认前面。
+        priority_changes[new_pid] = max(0, min(new_base, orig_pri) - 5)
+        priority_changes[orig_pid] = max(orig_pri, new_base) + 5
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -465,9 +588,8 @@ def select_submodel_tui(family_name, models, provider_options=None):
 
         idx = 0
         scroll = 0
-        in_provider_popup = False
-        popup_idx = 0
-        popup_options = []
+        provider_idx_map = {}
+        focus = "model"
         search_query = ""
 
         fam_color = _FAMILY_COLORS.get(family_name, 1)
@@ -525,6 +647,12 @@ def select_submodel_tui(family_name, models, provider_options=None):
                 _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
                 row += 1
 
+            model_header_attr = (curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE) if focus == "model" else (fc | curses.A_BOLD)
+            provider_header_attr = (curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE) if focus == "provider" else curses.A_DIM
+            _safe_addstr(stdscr, row, ll + 1, "模型", model_header_attr)
+            _safe_addstr(stdscr, row, rl + 1, "通道", provider_header_attr)
+            row += 1
+
             # 双栏分隔
             _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
             row += 1
@@ -536,33 +664,68 @@ def select_submodel_tui(family_name, models, provider_options=None):
             elif idx >= scroll + visible:
                 scroll = idx - visible + 1
 
+            current_model = filtered[idx] if filtered else None
+            current_choices = _provider_choices(current_model) if current_model else []
+            active_provider_id = _get_provider_info(current_model)[1] if current_model else ""
+            if current_model:
+                model_name = current_model["model"]
+                if model_name not in provider_idx_map:
+                    active_idx = 0
+                    for i, opt in enumerate(current_choices):
+                        if opt.get("provider_id") == active_provider_id:
+                            active_idx = i
+                            break
+                    provider_idx_map[model_name] = active_idx
+                provider_idx_map[model_name] = max(0, min(provider_idx_map[model_name], max(0, len(current_choices) - 1)))
+
             for i in range(scroll, min(scroll + visible, len(filtered))):
                 y = content_y + (i - scroll)
                 m = filtered[i]
                 is_sel = (i == idx)
                 model_name = m["model"]
                 prov_name, prov_id, prov_pri = _get_provider_info(m)
-                tag_text = f"{prov_name} P:{prov_pri}"
 
                 # 竖分割
                 _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
 
                 # 左栏：模型名
                 if is_sel:
-                    _safe_addstr(stdscr, y, ll - 1, "|", fc | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(1) | curses.A_BOLD, max_w=left_w - 4)
+                    marker_attr = fc | curses.A_BOLD if focus == "model" else curses.color_pair(4) | curses.A_BOLD
+                    name_attr = curses.color_pair(1) | curses.A_BOLD | (curses.A_REVERSE if focus == "model" else 0)
+                    if focus == "model":
+                        _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), name_attr)
+                    _safe_addstr(stdscr, y, ll - 1, "|", marker_attr)
+                    _safe_addstr(stdscr, y, ll + 1, model_name, name_attr, max_w=left_w - 4)
                 else:
                     _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(2), max_w=left_w - 4)
 
-                # 右栏：provider + priority
-                is_overridden = m["model"] in provider_overrides
-                if is_sel:
-                    tag_attr = curses.color_pair(4) | curses.A_BOLD
-                elif is_overridden:
-                    tag_attr = curses.color_pair(5)
+            provider_content_h = visible
+            for offset in range(provider_content_h):
+                y = content_y + offset
+                if offset >= len(current_choices):
+                    continue
+                opt = current_choices[offset]
+                is_provider_sel = (
+                    current_model is not None
+                    and provider_idx_map.get(current_model["model"], 0) == offset
+                )
+                opt_name = opt.get("provider_name", "")
+                opt_pri = int((opt.get("provider_ctx") or {}).get("priority", 100) or 100)
+                tag_text = f"{opt_name} P:{opt_pri}"
+                if opt.get("provider_id") == active_provider_id:
+                    tag_text += " *"
+
+                if is_provider_sel:
+                    marker_attr = curses.color_pair(4) | curses.A_BOLD if focus == "provider" else fc | curses.A_BOLD
+                    text_attr = curses.color_pair(4) | curses.A_BOLD | (curses.A_REVERSE if focus == "provider" else 0)
+                    if focus == "provider":
+                        _safe_addstr(stdscr, y, rl + 1, " " * max(1, right_w - 4), text_attr)
+                    _safe_addstr(stdscr, y, rl - 1, "|", marker_attr)
+                    _safe_addstr(stdscr, y, rl + 1, tag_text, text_attr, max_w=right_w - 4)
+                elif opt.get("provider_id") == active_provider_id:
+                    _safe_addstr(stdscr, y, rl + 1, tag_text, curses.color_pair(5), max_w=right_w - 4)
                 else:
-                    tag_attr = curses.A_DIM
-                _safe_addstr(stdscr, y, rl, tag_text, tag_attr, max_w=right_w - 3)
+                    _safe_addstr(stdscr, y, rl + 1, tag_text, curses.A_DIM, max_w=right_w - 4)
 
             # -- 底栏 --
             bot_y = content_y + visible
@@ -573,90 +736,65 @@ def select_submodel_tui(family_name, models, provider_options=None):
                 _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
             else:
-                _safe_addstr(stdscr, bot_y, ll, "P", curses.color_pair(6) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 2, "通道", curses.color_pair(6) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 8, "+/-", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 12, "切通道", curses.color_pair(5) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 21, "Enter", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 27, "确认", curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 33, "Esc", curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 37, "返回", curses.A_DIM)
+                focus_text = "模型" if focus == "model" else "通道"
+                _safe_addstr(stdscr, bot_y, ll, "←/→", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, ll + 5, f"焦点:{focus_text}", curses.color_pair(4) | curses.A_DIM)
+                if last_used and last_used.get("model"):
+                    _safe_addstr(stdscr, bot_y, ll + 16, "R", curses.color_pair(5) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 18, "上次", curses.color_pair(5) | curses.A_DIM)
+                    enter_x = ll + 24
+                else:
+                    enter_x = ll + 16
+                _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, enter_x + 6, "确认", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, enter_x + 16, "返回", curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
-
-            # -- Provider popup --
-            if in_provider_popup and popup_options:
-                popup_h = len(popup_options) + 4
-                popup_w = max(30, max((_display_width(o.get("provider_name", "")) for o in popup_options), default=10) + 12)
-                popup_sx = (max_w - popup_w) // 2
-                popup_sy = max(0, (max_y - popup_h) // 2)
-                # 画弹窗
-                _safe_addstr(stdscr, popup_sy, popup_sx, "-" * popup_w, fc)
-                for pi_y in range(1, popup_h - 1):
-                    _safe_addstr(stdscr, popup_sy + pi_y, popup_sx, " " * popup_w, 0)
-                _safe_addstr(stdscr, popup_sy + 1, popup_sx + 2, "选择通道", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, popup_sy + popup_h - 1, popup_sx, "-" * popup_w, fc)
-                for pi, opt in enumerate(popup_options):
-                    p_y = popup_sy + 3 + pi
-                    if pi == popup_idx:
-                        _safe_addstr(stdscr, p_y, popup_sx + 2, "|", fc | curses.A_BOLD)
-                        _safe_addstr(stdscr, p_y, popup_sx + 4, opt.get("provider_name", ""), curses.color_pair(1) | curses.A_BOLD)
-                    else:
-                        _safe_addstr(stdscr, p_y, popup_sx + 4, opt.get("provider_name", ""), curses.color_pair(2))
 
             stdscr.refresh()
             key = stdscr.getch()
 
-            if in_provider_popup:
-                if key == curses.KEY_UP:
-                    popup_idx = (popup_idx - 1) % len(popup_options)
-                elif key == curses.KEY_DOWN:
-                    popup_idx = (popup_idx + 1) % len(popup_options)
-                elif key in (10, 13, curses.KEY_ENTER):
-                    chosen = popup_options[popup_idx]
-                    model_name = sorted_models[idx]["model"]
-                    provider_overrides[model_name] = chosen
-                    in_provider_popup = False
-                elif key == 27 or key in (ord('p'), ord('P')):
-                    in_provider_popup = False
-                continue
-
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(filtered)
+                if focus == "provider" and current_model and current_choices:
+                    model_name = current_model["model"]
+                    provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) - 1) % len(current_choices)
+                else:
+                    idx = (idx - 1) % len(filtered)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(filtered)
+                if focus == "provider" and current_model and current_choices:
+                    model_name = current_model["model"]
+                    provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) + 1) % len(current_choices)
+                else:
+                    idx = (idx + 1) % len(filtered)
+            elif key == curses.KEY_RIGHT and not search_query:
+                if current_choices:
+                    focus = "provider"
+            elif key == curses.KEY_LEFT and not search_query:
+                if focus == "provider":
+                    focus = "model"
+                else:
+                    return None
+            elif key in (ord('r'), ord('R')) and not search_query and last_used and last_used.get("model"):
+                return "__last__"
             elif key in (10, 13, curses.KEY_ENTER):
                 if filtered:
                     m = filtered[idx]
-                    override = provider_overrides.get(m["model"])
-                    if override:
-                        new_pid = override.get("provider_id", "")
-                        orig_pid = m.get("provider_id", "")
-                        if new_pid != orig_pid:
-                            orig_pri = m.get("provider_ctx", {}).get("priority", 100)
-                            new_base = override.get("provider_ctx", {}).get("priority", 100)
-                            priority_changes[new_pid] = max(new_base, orig_pri + 5)
-                            priority_changes[orig_pid] = max(0, orig_pri - 5)
+                    if focus == "provider" and current_choices:
+                        chosen = current_choices[provider_idx_map.get(m["model"], 0)]
+                        provider_overrides[m["model"]] = chosen
+                        _record_priority_swap(m, chosen)
+                    else:
+                        override = provider_overrides.get(m["model"])
+                        if override:
+                            _record_priority_swap(m, override)
                     return _get_result(m)
-            elif key in (ord('p'), ord('P')) and not search_query:
-                if filtered:
-                    model_name = filtered[idx]["model"]
-                    if provider_options and model_name in provider_options:
-                        popup_options = provider_options[model_name]
-                        if len(popup_options) > 1:
-                            popup_idx = 0
-                            in_provider_popup = True
-            elif key in (ord('+'), ord('=')) and not search_query:
-                if filtered:
-                    _cycle_provider(filtered[idx], +1)
-            elif key in (ord('-'), ord('_')) and not search_query:
-                if filtered:
-                    _cycle_provider(filtered[idx], -1)
             elif key == 27:
                 if search_query:
                     search_query = ""
                     idx = 0
                     scroll = 0
+                    focus = "model"
                 else:
                     return None
             elif key in (ord('q'), ord('Q')) and not search_query:
@@ -666,11 +804,17 @@ def select_submodel_tui(family_name, models, provider_options=None):
                     search_query = search_query[:-1]
                     idx = 0
                     scroll = 0
-            elif 32 <= key <= 126 and not in_provider_popup:
+            elif 32 <= key <= 126:
                 # 可打印 ASCII 字符 → 搜索
                 search_query += chr(key)
                 idx = 0
                 scroll = 0
+
+    if stdscr is not None:
+        try:
+            return _inner(stdscr)
+        except curses.error:
+            return None
 
     try:
         return curses.wrapper(_inner)
