@@ -2880,6 +2880,7 @@ def _manage_provider_target(cfg, provider_id):
             console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
             return load_config(), True
         if choice == "4":
+            _ensure_rich()
             new_id = _normalize_provider_id_input(Prompt.ask("新的内部标识", default=provider_id).strip())
             new_name = Prompt.ask("新的显示名", default=provider.get("name", provider_id)).strip() or new_id
             if new_id == provider_id and new_name == provider.get("name", provider_id):
@@ -2899,6 +2900,7 @@ def _manage_provider_target(cfg, provider_id):
 
 
 def _prompt_account_rename(cfg, account_id):
+    _ensure_rich()
     console.print(f"[cyan]准备重命名官方通道: {account_id}[/cyan]")
     new_id = Prompt.ask("新的文件夹名", default=account_id).strip()
     if not new_id or new_id == account_id:
@@ -5079,6 +5081,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     def _rebuild_families():
         fbc = {}
         fd = {}
+        pbc = {}
         for cli_name in current_cli_names:
             raw = _build_model_families_for_cli(
                 current_cfg, cli_name, current_provider, default_models
@@ -5098,20 +5101,31 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             )
             fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
-        return fbc, fd
+            model_names = [m["model"] for f in raw for m in f["models"] if isinstance(m, dict) and m.get("model")]
+            pbc[cli_name] = _build_provider_options_map(
+                current_cfg, cli_name, current_provider, default_models, model_names
+            ) if model_names else {}
+        return fbc, fd, pbc
 
-    families_by_cli, families_detail = _rebuild_families()
+    families_by_cli, families_detail, provider_options_by_cli = _rebuild_families()
     _families_dirty = False
 
     while True:
         if _families_dirty:
-            families_by_cli, families_detail = _rebuild_families()
+            families_by_cli, families_detail, provider_options_by_cli = _rebuild_families()
             _families_dirty = False
 
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
         last_by_cli, _ = _get_scene_usage()
 
-        result = _safe_tui_call(select_family_tui, families_by_cli, current_cli_names, last_used=last_by_cli, families_detail=families_detail)
+        result = _safe_tui_call(
+            select_family_tui,
+            families_by_cli,
+            current_cli_names,
+            last_used=last_by_cli,
+            families_detail=families_detail,
+            provider_options_by_cli=provider_options_by_cli,
+        )
 
         if result == "fallback":
             return False
@@ -5367,26 +5381,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             # fall through to confirm
 
         # ── 品类选择 → 子模型 ──
-        elif action_type == "family":
-            family_name = action_data
-            models = families_detail.get(cli, {}).get(family_name, [])
-            if not models:
-                console.print(f"[yellow]{family_name} 下没有可用模型[/yellow]")
-                continue
+        elif action_type == "submodel":
+            selected = dict(action_data or {})
+            family_name = selected.pop("_family_name", "模型")
 
-            # 构建 P 键 provider 替代选项
-            model_names = [m["model"] for m in models]
-            provider_options = _build_provider_options_map(
-                current_cfg, cli, current_provider, default_models, model_names
-            )
-
-            selected = _safe_tui_call(select_submodel_tui, family_name, models, provider_options=provider_options)
-            if selected == "__interrupt__":
-                return True
-            if selected is None:
-                continue  # Esc 返回品类列表
-
-            # 持久化 priority 变更
             pri_changes = selected.pop("priority_changes", None)
             if pri_changes:
                 for pid, new_pri in pri_changes.items():
@@ -5396,7 +5394,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                             break
                 save_config(current_cfg)
                 _families_dirty = True
-                # 静默重新生成 routes
                 try:
                     from mms_router import export_model_routes
                     export_model_routes(current_cfg, force=True)
@@ -5422,6 +5419,86 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             )
             if runtime_from_best_provider:
                 _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
+            # fall through to confirm
+
+        elif action_type == "family":
+            family_name = action_data
+            models = families_detail.get(cli, {}).get(family_name, [])
+            if not models:
+                console.print(f"[yellow]{family_name} 下没有可用模型[/yellow]")
+                continue
+
+            provider_options = provider_options_by_cli.get(cli, {})
+
+            selected = _safe_tui_call(
+                select_submodel_tui,
+                family_name,
+                models,
+                provider_options=provider_options,
+                last_used=last_by_cli.get(cli),
+            )
+            if selected == "__interrupt__":
+                return True
+            if selected is None:
+                continue  # Esc 返回品类列表
+            if selected == "__last__":
+                action_data = last_by_cli.get(cli) or {}
+                if not action_data.get("model"):
+                    continue
+                model_info = {"model": action_data["model"]}
+                _trace_record("last used", cli=cli, model=action_data.get("model"))
+                runtime_runtime, _ = _resolve_best_provider(
+                    current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+                )
+                runtime_from_best_provider = runtime_runtime is not None
+                if runtime_runtime is None:
+                    runtime_runtime, _, cli = _choose_runtime_source(
+                        current_cfg, cli, current_provider, default_models,
+                        account_id=account_id, provider_id=provider_id,
+                        model_info=model_info, allow_selected_model_accounts=True,
+                    )
+                if runtime_runtime is None:
+                    console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
+                    continue
+                if runtime_from_best_provider:
+                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
+            else:
+                # 持久化 priority 变更
+                pri_changes = selected.pop("priority_changes", None)
+                if pri_changes:
+                    for pid, new_pri in pri_changes.items():
+                        for pdef in current_cfg.get("providers", []):
+                            if pdef.get("id") == pid:
+                                pdef["priority"] = new_pri
+                                break
+                    save_config(current_cfg)
+                    _families_dirty = True
+                    # 静默重新生成 routes
+                    try:
+                        from mms_router import export_model_routes
+                        export_model_routes(current_cfg, force=True)
+                    except Exception:
+                        pass
+
+                model_info = {"model": selected["model"]}
+                runtime_runtime = selected.get("provider_ctx")
+                runtime_from_best_provider = runtime_runtime is not None
+                if runtime_runtime is None:
+                    runtime_runtime, _ = _resolve_best_provider(
+                        current_cfg, selected["model"], current_provider, default_models, cli_name=cli
+                    )
+                    runtime_from_best_provider = runtime_runtime is not None
+                if runtime_runtime is None:
+                    console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
+                    continue
+                _trace_record(
+                    f'family "{family_name}"',
+                    cli=cli,
+                    model=selected.get("model"),
+                    provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
+                )
+                if runtime_from_best_provider:
+                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
         elif action_type not in ("provider_browse", "load_balance", "last", "family"):
             continue
