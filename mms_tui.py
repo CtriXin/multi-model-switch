@@ -149,6 +149,24 @@ _FAMILY_COLORS = {
 _CLI_COLORS = {"claude": 3, "codex": 5}
 
 
+def _last_used_label(last_item):
+    if not isinstance(last_item, dict):
+        return "?"
+    model_info = last_item.get("model_info")
+    if isinstance(model_info, dict):
+        heavy = str(model_info.get("model") or "").strip()
+        medium = str(model_info.get("lb_medium") or "").strip()
+        light = str(model_info.get("lb_light") or "").strip()
+        if heavy and (medium or light):
+            parts = [heavy]
+            if medium:
+                parts.append(medium)
+            if light:
+                parts.append(light)
+            return " / ".join(parts)
+    return str(last_item.get("model") or "?")
+
+
 def select_family_tui(families_by_cli, cli_names, last_used=None, families_detail=None, provider_options_by_cli=None):
     """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
 
@@ -261,7 +279,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
 
             # -- 上次使用（独立区，但可选）--
             if has_last:
-                last_model = cli_last.get("model", "?")
+                last_model = _last_used_label(cli_last)
                 is_last_sel = (sel_idx == -1)
                 last_attr = curses.color_pair(4) | curses.A_BOLD | (curses.A_REVERSE if is_last_sel else 0)
                 marker_attr = curses.color_pair(4) | curses.A_BOLD
@@ -1038,6 +1056,40 @@ def save_lb_history(heavy, medium, light, slot_providers=None, label=None):
         pass
 
 
+def _delete_lb_recent(entry):
+    """删除一条最近负载历史。"""
+    history = _load_lb_history()
+    recent = history.get("recent", [])
+    slot_providers = {k: v for k, v in (entry.get("slot_providers") or {}).items() if v}
+    filtered = [
+        item for item in recent
+        if not (
+            item.get("heavy") == entry.get("heavy")
+            and item.get("medium", "") == entry.get("medium", "")
+            and item.get("light") == entry.get("light")
+            and (item.get("slot_providers") or {}) == slot_providers
+        )
+    ]
+    history["recent"] = filtered[:3]
+    try:
+        os.makedirs(os.path.dirname(_LB_HISTORY_PATH), exist_ok=True)
+        with open(_LB_HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+
+
+def _lb_option_label(option):
+    label = str(option.get("label") or "").strip()
+    combo = f"{option.get('heavy','')} / {option.get('medium','')} / {option.get('light','')}".strip()
+    combo = combo.strip(" /")
+    if option.get("type") == "custom":
+        return label or "自定义..."
+    if label == "自定义负载":
+        return f"{label} · {combo}" if combo else label
+    return label or combo
+
+
 def select_load_balance_tui(available_models=None, families_detail=None, provider_options_map=None, profiles=None, default_profile=""):
     """负载模式 TUI — H6 风格：profiles + 最近 3 条 + 自定义。"""
     profile_options = []
@@ -1047,10 +1099,9 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
             profile_options.append(option)
     profile_options.sort(key=lambda item: (0 if item.get("profile_name") == default_profile else 1, item.get("label", "")))
 
-    history = _load_lb_history(default_entry=profile_options[0] if profile_options else {})
-    recent = history.get("recent", [])
-
     def _build_options():
+        history = _load_lb_history(default_entry=profile_options[0] if profile_options else {})
+        recent = history.get("recent", [])
         opts = []
         opts.extend(profile_options)
         seen = set()
@@ -1079,6 +1130,8 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
 
         options = _build_options()
         idx = 0
+        pending_delete_key = None
+        status_text = ""
 
         while True:
             stdscr.erase()
@@ -1105,31 +1158,42 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
             for i, opt in enumerate(options):
                 y = row + i
                 is_sel = (i == idx)
+                label = _lb_option_label(opt)
                 if is_sel:
+                    _safe_addstr(stdscr, y, ll, " " * max(1, total_w - 4), curses.color_pair(1) | curses.A_REVERSE)
                     _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 6)
+                    _safe_addstr(stdscr, y, ll + 1, label, curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE, max_w=total_w - 6)
                 elif opt.get("type") == "recent":
-                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(4), max_w=total_w - 6)
+                    _safe_addstr(stdscr, y, ll + 1, label, curses.color_pair(4), max_w=total_w - 6)
                 else:
-                    _safe_addstr(stdscr, y, ll + 1, opt["label"], curses.color_pair(2), max_w=total_w - 6)
+                    _safe_addstr(stdscr, y, ll + 1, label, curses.color_pair(2), max_w=total_w - 6)
 
             bot_y = row + len(options)
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
+            if status_text:
+                _safe_addstr(stdscr, bot_y, ll, status_text, curses.color_pair(4) | curses.A_DIM, max_w=total_w - 4)
+                bot_y += 1
             _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
             _safe_addstr(stdscr, bot_y, ll + 6, "确认", curses.A_DIM)
-            _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 17, "取消", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 13, "D", curses.color_pair(4) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 15, "删除(最近项)", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 28, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 32, "取消", curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
+            status_text = ""
             if key == curses.KEY_UP:
+                pending_delete_key = None
                 idx = (idx - 1) % len(options)
             elif key == curses.KEY_DOWN:
+                pending_delete_key = None
                 idx = (idx + 1) % len(options)
             elif key in (10, 13, curses.KEY_ENTER):
+                pending_delete_key = None
                 chosen = options[idx]
                 if chosen["type"] == "custom":
                     return "custom"
@@ -1141,7 +1205,29 @@ def select_load_balance_tui(available_models=None, families_detail=None, provide
                     slot_providers=chosen.get("slot_providers", {}),
                     profile_name=chosen.get("profile_name", ""),
                 )
+            elif key in (ord('d'), ord('D')):
+                chosen = options[idx]
+                if chosen.get("type") != "recent":
+                    pending_delete_key = None
+                    status_text = "只能删除 recent 项"
+                    continue
+                chosen_key = (
+                    chosen.get("heavy"),
+                    chosen.get("medium", ""),
+                    chosen.get("light"),
+                    json.dumps(chosen.get("slot_providers", {}), sort_keys=True, ensure_ascii=False),
+                )
+                if pending_delete_key == chosen_key:
+                    _delete_lb_recent(chosen)
+                    options = _build_options()
+                    idx = max(0, min(idx, len(options) - 1))
+                    pending_delete_key = None
+                    status_text = "已删除该最近项"
+                else:
+                    pending_delete_key = chosen_key
+                    status_text = "再按一次 D 确认删除当前最近项"
             elif key in (ord('q'), ord('Q'), 27):
+                pending_delete_key = None
                 return None
 
     try:

@@ -4173,6 +4173,23 @@ def _provider_supports_cli_name(provider, cli_name):
     return cli_name in supported_clis
 
 
+def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
+    normalized_model = str(model_name or "").strip()
+    if cli_name == "claude" and normalized_model:
+        if _model_matches_account_cli("claude", normalized_model):
+            return _provider_supports_cli_name(provider, "claude")
+        native_clis = _native_clis_for_model(normalized_model)
+        if not native_clis:
+            return False
+        return any(_provider_supports_cli_name(provider, native_cli) for native_cli in native_clis)
+
+    if _provider_supports_cli_name(provider, cli_name):
+        return True
+    if not normalized_model:
+        return False
+    return False
+
+
 def _provider_candidates(cfg, default_provider, default_models):
     candidates = [(default_provider, list(default_models or []))]
     seen_ids = {default_provider.get("id")}
@@ -5027,7 +5044,7 @@ _CLI_DEFAULT_FAMILY_FIRST = {
 
 
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
-    """为一组模型名构建 provider 替代选项映射（供 P 键使用）。
+    """为一组模型名构建运行来源替代选项映射（供 P 键使用）。
 
     Returns:
         dict[str, list[dict]] — model_name -> [{"provider_name", "provider_id", "provider_ctx"}]
@@ -5038,8 +5055,6 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
         for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
             if not provider.get("enabled", True):
                 continue
-            if not _provider_supports_cli_name(provider, cli_name):
-                continue
             if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
                 continue
             if not provider.get("api_key"):
@@ -5048,10 +5063,26 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
             model_lower = [str(m or "").strip().lower() for m in models]
             if model_name.strip().lower() not in model_lower:
                 continue
+            if not _provider_supports_model_for_cli(provider, cli_name, model_name):
+                continue
             options.append({
                 "provider_name": _provider_label(provider),
                 "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
                 "provider_ctx": provider,
+            })
+        account_options = _account_options_for_model(
+            cfg,
+            cli_name,
+            default_models,
+            model_info={"model": model_name},
+            allow_selected_model=True,
+        )
+        for option in account_options:
+            runtime = option.get("runtime") or {}
+            options.append({
+                "provider_name": f"{option.get('title', runtime.get('id', 'account'))} OAuth",
+                "provider_id": runtime.get("id", ""),
+                "provider_ctx": runtime,
             })
         if len(options) > 1:
             result[model_name] = options
@@ -5361,7 +5392,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         # ── 上次使用 ──
         elif action_type == "last":
-            model_info = {"model": action_data["model"]}
+            model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
             _trace_record("last used", cli=cli, model=action_data.get("model"))
             runtime_runtime, _ = _resolve_best_provider(
                 current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
@@ -5445,7 +5476,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 action_data = last_by_cli.get(cli) or {}
                 if not action_data.get("model"):
                     continue
-                model_info = {"model": action_data["model"]}
+                model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
                 _trace_record("last used", cli=cli, model=action_data.get("model"))
                 runtime_runtime, _ = _resolve_best_provider(
                     current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
