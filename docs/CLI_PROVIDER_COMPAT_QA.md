@@ -1035,6 +1035,17 @@ A：是，而且这轮已经用本机 `Claude Code 2.1.81` 直接抓包确认。
 
 ---
 
+## Claude 会话默认设置
+
+`MMS` 启动 `claude` 时，会在隔离 session 的 `~/.claude/settings.json` 上做“叠加式”处理，而不是整份覆盖：
+
+- 用户已有的 `statusLine`、`permissions`、`skipDangerousModePermissionPrompt`、`includeCoAuthoredBy`、`attribution`、`promptSuggestionEnabled` 会保留
+- 用户没有这些项时，`MMS` 会补默认值
+- `env` 里只有运行必需字段会被强制覆盖，例如 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、模型 slot、`MMS_ROUTE_STATUS_PATH`
+- `agent-im` 相关 hooks 会从 session 设置里剥离，其它用户自定义 hooks 保留
+
+---
+
 ## 已知未修限制
 
 ### Claude 对 openai-only provider 的自动降级仍不完整

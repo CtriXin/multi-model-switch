@@ -2430,6 +2430,18 @@ def _display_provider_model_table(provider, probe):
         console.print(f"[dim]原始模型数: {len(raw_models)} | 最终展示模型数: {len(probe.get('models') or [])}[/dim]")
 
 
+def _pause_after_tui_report(prompt_text="按 Enter 返回"):
+    _ensure_rich()
+    try:
+        console.print(f"[dim]{prompt_text}[/dim]")
+    except Exception:
+        pass
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def _manage_provider_models(cfg, provider_id):
     changed = False
     current_cfg = cfg
@@ -2477,7 +2489,14 @@ def _manage_provider_models(cfg, provider_id):
         if choice is None:
             return current_cfg, changed
         if choice == "1":
+            if _use_tui():
+                try:
+                    console.clear()
+                except Exception:
+                    pass
             _display_provider_model_table(provider, probe)
+            if _use_tui():
+                _pause_after_tui_report("按 Enter 返回模型管理")
             continue
         if choice == "2":
             probe = _probe_models(provider, emit_output=True, force_refresh=True)
@@ -5134,9 +5153,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             selected_pid, selected_pname = prov_result
             # 获取该 provider 的完整上下文和模型列表
             selected_prov = resolve_provider_context(current_cfg, selected_pid)
-            file_cached = _load_probe_file_cache(selected_pid, allow_stale=True)
-            cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
-            prov_models = _provider_effective_models(selected_prov, cached_models, current_cfg)
+            selected_probe = _probe_models(selected_prov, emit_output=False)
+            prov_models = list(selected_probe.get("models") or [])
             if not prov_models:
                 console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
                 continue

@@ -189,6 +189,43 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 _AGENT_IM_DIR = _real_user_path("auto-skills", "CtriXin-repo", "agent-im")
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 
+_CLAUDE_STATUSLINE_CONFIG = {
+    "command": "/bin/bash ~/.claude/statusline-command.sh",
+    "type": "command",
+}
+
+_CLAUDE_DEFAULT_PERMISSION_ALLOW = [
+    "Read",
+    "Edit",
+    "Write",
+    "Bash(yarn *)",
+    "Bash(npm *)",
+    "Bash(node *)",
+    "Bash(git *)",
+    "Bash(ls *)",
+    "Bash(cat *)",
+    "Bash(head *)",
+    "Bash(tail *)",
+    "Bash(find *)",
+    "Bash(grep *)",
+    "Bash(which *)",
+    "Bash(chmod *)",
+    "Bash(cd *)",
+    "Bash(python3 *)",
+    "Bash(rsync *)",
+    "Bash(coscli *)",
+    "Bash(mkdir -p /Users/xin/.claude/mailbox*)",
+    "Bash(rm -rf /Users/xin/.claude/mailbox/*)",
+    "Bash(ls /Users/xin/.claude/mailbox*)",
+    "Skill(*)",
+    "Agent(*)",
+]
+
+_CLAUDE_DEFAULT_PERMISSION_DENY = [
+    "Bash(rm -rf /)*",
+    "Bash(git push --force *)",
+]
+
 
 def _claude_gateway_home():
     gateway_base = _real_user_path(".config", "mms", "claude-gateway")
@@ -261,6 +298,109 @@ def _ensure_agent_im():
         console.print("[dim]agent-im daemon 启动中（socket 未就绪，不影响启动）[/dim]")
     except Exception:
         pass  # daemon 启动失败不阻塞 CLI
+
+
+def _load_real_claude_settings():
+    import json as _json
+
+    real_settings_path = os.path.join(_real_user_path(".claude"), "settings.json")
+    if not os.path.exists(real_settings_path):
+        return {}
+    try:
+        with open(real_settings_path, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _strip_agent_im_hooks(hooks_data):
+    if not isinstance(hooks_data, dict):
+        return None
+
+    filtered = {}
+    for event_name, entries in hooks_data.items():
+        if not isinstance(entries, list):
+            filtered[event_name] = entries
+            continue
+
+        kept_entries = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                kept_entries.append(entry)
+                continue
+
+            hook_defs = entry.get("hooks")
+            if not isinstance(hook_defs, list):
+                kept_entries.append(entry)
+                continue
+
+            kept_hook_defs = []
+            for hook_def in hook_defs:
+                if not isinstance(hook_def, dict):
+                    kept_hook_defs.append(hook_def)
+                    continue
+                command = str(hook_def.get("command", ""))
+                if "agent-im" in command:
+                    continue
+                kept_hook_defs.append(hook_def)
+
+            if kept_hook_defs:
+                new_entry = dict(entry)
+                new_entry["hooks"] = kept_hook_defs
+                kept_entries.append(new_entry)
+
+        if kept_entries:
+            filtered[event_name] = kept_entries
+
+    return filtered or None
+
+
+def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
+    settings_data = dict(base_settings or {})
+
+    existing_env = settings_data.get("env")
+    merged_env = dict(existing_env) if isinstance(existing_env, dict) else {}
+    if isinstance(default_env, dict):
+        for key, value in default_env.items():
+            merged_env.setdefault(key, value)
+    if isinstance(required_env, dict):
+        merged_env.update(required_env)
+    settings_data["env"] = merged_env
+
+    hooks = _strip_agent_im_hooks(settings_data.get("hooks"))
+    if hooks:
+        settings_data["hooks"] = hooks
+    else:
+        settings_data.pop("hooks", None)
+
+    settings_data.setdefault("includeCoAuthoredBy", False)
+    settings_data.setdefault("attribution", {"commit": "", "pr": ""})
+    settings_data.setdefault("promptSuggestionEnabled", False)
+    settings_data.setdefault("skipDangerousModePermissionPrompt", True)
+    settings_data.setdefault("statusLine", dict(_CLAUDE_STATUSLINE_CONFIG))
+    settings_data.setdefault("permissions", {
+        "allow": list(_CLAUDE_DEFAULT_PERMISSION_ALLOW),
+        "defaultMode": "bypassPermissions",
+        "deny": list(_CLAUDE_DEFAULT_PERMISSION_DENY),
+    })
+    return settings_data
+
+
+def _write_claude_session_settings(session_claude_dir, *, required_env=None, default_env=None):
+    import json as _json
+
+    os.makedirs(session_claude_dir, exist_ok=True)
+    settings_data = _build_claude_session_settings(
+        _load_real_claude_settings(),
+        required_env=required_env,
+        default_env=default_env,
+    )
+    settings_path = os.path.join(session_claude_dir, "settings.json")
+    with open(settings_path, "w", encoding="utf-8") as f:
+        _json.dump(settings_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return settings_data, settings_path
 
 
 def _gateway_ping(base_url, api_key):
@@ -405,7 +545,13 @@ def _account_env(account):
         _link_shared_dotfiles(session_home)
         # .claude/ 目录：创建真实目录，分项 symlink
         session_claude_dir = os.path.join(session_home, ".claude")
-        _prepare_claude_session_tree(session_home, session_claude_dir, account_id=account.get("id", ""), runtime_kind="oauth")
+        _prepare_claude_session_tree(
+            session_home,
+            session_claude_dir,
+            account_id=account.get("id", ""),
+            runtime_kind="oauth",
+            skip_real_entries={"settings.json"},
+        )
         env["HOME"] = session_home
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
@@ -736,6 +882,16 @@ def launch_claude(model_info, runtime, once=False):
     bridge_cfg = None  # 由 gateway_claude_bridge 赋值，用于退出摘要
     if auth_mode == "oauth":
         env = _account_env(runtime)
+        session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
+        _write_claude_session_settings(
+            session_claude_dir,
+            default_env={
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            },
+        )
+        env.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
+        env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
         state_home = None  # per-PID HOME 已隔离，不需要 swap .claude.json
         cleanup_ctx = None
     elif auth_mode == "oauth_bridge":
@@ -1402,50 +1558,38 @@ def _claude_gateway_env(
         best_model = fallback[0] if fallback else "qwen3.5-plus"
     else:
         best_model = _pick_gateway_model(runtime, base_url)
-    settings_env: dict = {
+    required_settings_env: dict = {
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
-        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
+    default_settings_env: dict = {
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+    }
     if sensitive_provider:
-        settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
+        required_settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
     else:
-        settings_env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+        default_settings_env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
     if best_model:
         for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
                     "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
                     "ANTHROPIC_REASONING_MODEL"):
-            settings_env[key] = best_model
+            required_settings_env[key] = best_model
     if selected_model:
         _apply_claude_model_overrides(
-            settings_env,
+            required_settings_env,
             selected_model,
             enable_1m=enable_claude_1m,
         )
     # 非 Claude 模型：ANTHROPIC_MODEL 用真实模型名让 status line 显示正确
     # 其余 DEFAULT_*_MODEL slot 保持 Claude 壳名供 Claude Code 内部 slot 匹配
     if display_model:
-        settings_env["ANTHROPIC_MODEL"] = display_model
-    # 读取用户真实 settings.json 作为基础
-    real_settings_path = os.path.join(real_claude_dir, "settings.json")
-    settings_data: dict = {}
-    if os.path.exists(real_settings_path):
-        try:
-            with open(real_settings_path, encoding="utf-8") as f:
-                settings_data = _json.load(f)
-        except Exception:
-            settings_data = {}
-    # gateway 必须控制的字段 — 覆盖
-    settings_data["env"] = settings_env
-    settings_data["includeCoAuthoredBy"] = False
-    settings_data["attribution"] = {"commit": "", "pr": ""}
-    # 禁用 prompt suggestions — 每轮自动补全会发送完整 context，浪费大量 token
-    settings_data["promptSuggestionEnabled"] = False
-    gw_settings = os.path.join(gw_claude_dir, "settings.json")
-    with open(gw_settings, "w", encoding="utf-8") as f:
-        _json.dump(settings_data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+        required_settings_env["ANTHROPIC_MODEL"] = display_model
+    _write_claude_session_settings(
+        gw_claude_dir,
+        required_env=required_settings_env,
+        default_env=default_settings_env,
+    )
 
     env = os.environ.copy()
     env["MMS_REAL_HOME"] = _real_user_home()
@@ -1466,7 +1610,7 @@ def _claude_gateway_env(
     if display_model:
         env["ANTHROPIC_MODEL"] = display_model
     if not sensitive_provider:
-        env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1"
+        env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
 
     # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
 
@@ -1479,45 +1623,6 @@ def _claude_gateway_env(
         _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
     except Exception:
         pass
-
-    # ── 为 Claude Code 添加 SessionStart hook，启动时显示路由状态 ──
-    if auth_token and heavy_model:
-        try:
-            # 生成 hook 脚本，显示当前路由配置
-            hook_script = os.path.join(gateway_home, "mms_status_hook.sh")
-            tier_symbol = {"heavy": "▲", "medium": "●", "light": "▼"}
-            tier_color = {"heavy": "red", "medium": "yellow", "light": "green"}
-            with open(hook_script, "w") as f:
-                f.write(f'#!/bin/bash\n')
-                f.write(f'# MMS 路由状态显示\n')
-                f.write(f'echo ""\n')
-                f.write(f'echo "[MMS] 智能路由已启用"\n')
-                f.write(f'echo "  Heavy: {heavy_model}"\n')
-                if medium_model:
-                    f.write(f'echo "  Medium: {medium_model}"\n')
-                if light_model:
-                    f.write(f'echo "  Light: {light_model}"\n')
-                f.write('ctx_k=$((${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-200000} / 1000))\n')
-                f.write('echo "  Context: ${ctx_k}K"\n')
-                f.write(f'echo ""\n')
-            os.chmod(hook_script, 0o755)
-
-            # 添加 hook 到 settings.json
-            if "hooks" not in settings_data:
-                settings_data["hooks"] = {}
-            if "SessionStart" not in settings_data["hooks"]:
-                settings_data["hooks"]["SessionStart"] = []
-            # 添加我们的 hook（不覆盖已有的）
-            settings_data["hooks"]["SessionStart"].append({
-                "matcher": "",
-                "hooks": [{"type": "command", "command": f"bash {hook_script}"}]
-            })
-            # 重新写入 settings.json
-            with open(gw_settings, "w", encoding="utf-8") as f:
-                _json.dump(settings_data, f, ensure_ascii=False, indent=2)
-                f.write("\n")
-        except Exception:
-            pass
 
     return env
 
@@ -1585,7 +1690,7 @@ def _codex_gateway_env(runtime, base_url):
         header_pattern = rf'^\[projects\."{escaped_path}"\]\s*$'
         match = re.search(header_pattern, text, flags=re.MULTILINE)
         if not match:
-            block = f'\n[projects."{project_path}"]\nbase_url = "{value}"\n'
+            block = f'\n[projects."{project_path}"]\nbase_url = {_toml_literal(value)}\n'
             return text.rstrip() + block + "\n"
 
         block_start = match.end()
@@ -1595,15 +1700,17 @@ def _codex_gateway_env(runtime, base_url):
         if re.search(r'^\s*base_url\s*=\s*"[^"]*"', block, flags=re.MULTILINE):
             block = re.sub(
                 r'^\s*base_url\s*=\s*"[^"]*"',
-                f'base_url = "{value}"',
+                f'base_url = {_toml_literal(value)}',
                 block,
                 count=1,
                 flags=re.MULTILINE,
             )
         else:
+            if not block.startswith("\n"):
+                block = "\n" + block
             if block and not block.endswith("\n"):
                 block += "\n"
-            block += f'base_url = "{value}"\n'
+            block += f'base_url = {_toml_literal(value)}\n'
         return text[:block_start] + block + text[block_end:]
 
     def _set_table_scalar(text, table_header, key, value):
@@ -1612,7 +1719,7 @@ def _codex_gateway_env(runtime, base_url):
         header_pattern = rf'^\[{escaped_header}\]\s*$'
         match = re.search(header_pattern, text, flags=re.MULTILINE)
         if not match:
-            block = f'\n[{table_header}]\n{key} = "{value}"\n'
+            block = f'\n[{table_header}]\n{key} = {_toml_literal(value)}\n'
             return text.rstrip() + block + "\n"
 
         block_start = match.end()
@@ -1629,6 +1736,8 @@ def _codex_gateway_env(runtime, base_url):
                 flags=re.MULTILINE,
             )
         else:
+            if not block.startswith("\n"):
+                block = "\n" + block
             if block and not block.endswith("\n"):
                 block += "\n"
             block += f'{key} = {_toml_literal(value)}\n'
@@ -1932,7 +2041,6 @@ def _show_launch_info(cli, runtime, auth_mode):
 
 def launch_cli(cli, model_info, runtime, once=False):
     """统一启动入口"""
-    _ensure_agent_im()
     runtime = dict(runtime)
     launcher = LAUNCHERS.get(cli)
     if not launcher:
