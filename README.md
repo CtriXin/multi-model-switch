@@ -27,7 +27,22 @@
 ### 一键安装（推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
+```
+
+默认会安装最新发布的 semver tag。
+安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
+
+### 一键升级
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
+```
+
+### 安装指定版本
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v1.2.0
 ```
 
 ### 手动安装
@@ -35,8 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```bash
 git clone https://github.com/CtriXin/multi-model-switch.git
 cd multi-model-switch
-pip install -r requirements.txt
-ln -s $(pwd)/mms /usr/local/bin/mms
+bash install.sh --write-shell-rc
 ```
 
 ---

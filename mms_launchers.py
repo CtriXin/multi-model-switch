@@ -226,9 +226,10 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 # agent-im daemon 路径（auto-start on mms launch）
 _AGENT_IM_DIR = _real_user_path("auto-skills", "CtriXin-repo", "agent-im")
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
+_LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
-    "command": "/bin/bash ~/.claude/statusline-command.sh",
+    "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
     "type": "command",
 }
 
