@@ -4,6 +4,12 @@
 
 > 一个让 `claude`、`codex` 等 AI 编程 CLI 统一接入的本地 launcher。
 
+## 一键安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
+```
+
 ![MMS - Before vs After](assets/cover.svg)
 
 **MMS** 是一个面向本地开发者的多模型 CLI 启动器。它让你用**一个入口**管理所有 AI 编程工具，告别繁琐的环境变量配置。
