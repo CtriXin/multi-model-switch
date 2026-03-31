@@ -187,6 +187,10 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
         while True:
             stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
+            if not cli_names:
+                return None
+            if cli_idx >= len(cli_names):
+                cli_idx = max(0, len(cli_names) - 1)
             cli = cli_names[cli_idx]
             accent = _CLI_COLORS.get(cli, 1)
             ac = curses.color_pair(accent)
