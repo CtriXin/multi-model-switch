@@ -3903,6 +3903,7 @@ def categorize_models(models):
 
 
 def display_models(models, role=MODE_ALL, recommend=None):
+    _ensure_rich()
     categorized = categorize_models(models)
     table = Table(title="可用模型", show_lines=True)
     table.add_column("#", style="cyan", width=4)
@@ -6952,8 +6953,6 @@ def main():
     _trace_record("config default", provider=default_provider.get("id") if isinstance(default_provider, dict) else None)
     role = normalize_user_role(cfg.get("user", {}).get("role", MODE_ALL))
     recommend = cfg.get("recommend", {}).get("models", [])
-
-    from mms_launchers import launch_cli
 
     # --presets
     if args.presets:

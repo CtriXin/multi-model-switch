@@ -2057,6 +2057,37 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                 display_v = v
             env_lines.append(f"{k}={display_v}")
 
+    detail_lines = []
+    if env_vars:
+        preferred_keys = [
+            ("ANTHROPIC_BASE_URL", "URL"),
+            ("OPENAI_BASE_URL", "URL"),
+            ("ANTHROPIC_AUTH_TOKEN", "Key"),
+            ("OPENAI_API_KEY", "Key"),
+            ("GEMINI_API_KEY", "Key"),
+            ("MMS_ACTIVE_MODEL", "激活"),
+            ("MMS_ACTIVE_PRESET", "预设"),
+            ("MMS_ACTIVE_CLI", "CLI源"),
+        ]
+        seen = set()
+        for env_key, label in preferred_keys:
+            if env_key in env_vars:
+                value = env_vars.get(env_key, "")
+                if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
+                    value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
+                detail_lines.append((label, value))
+                seen.add(env_key)
+        for env_key, value in env_vars.items():
+            if env_key in seen:
+                continue
+            upper_key = env_key.upper()
+            if any(token in upper_key for token in ("BASE_URL", "API_KEY", "AUTH_TOKEN", "ACTIVE_", "MODEL")):
+                if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
+                    value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
+                label = env_key[:6] + "…" if len(env_key) > 7 else env_key
+                detail_lines.append((label, value))
+        detail_lines = detail_lines[:4]
+
     has_bypass = cli in ("codex", "claude")
 
     def _inner(stdscr):
@@ -2084,7 +2115,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                 mode_text = "BYPASS（跳过审批）" if bypass_mode else "正常"
                 info_lines.append(("模式", f"[Tab] {mode_text}"))
 
-            ph = len(info_lines) + 5
+            ph = len(info_lines) + len(detail_lines) + 5
             px = (max_w - total_w) // 2
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
@@ -2106,6 +2137,11 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                     val_attr = curses.color_pair(1)
                 _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
                 _safe_addstr(stdscr, row, ll + 7, value, val_attr, max_w=total_w - 12)
+                row += 1
+
+            for label, value in detail_lines:
+                _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 7, str(value), curses.color_pair(2), max_w=total_w - 12)
                 row += 1
 
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)

@@ -11,11 +11,49 @@ from datetime import datetime
 from time import perf_counter
 
 from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from mms_bridge import _build_gateway_url, codex_claude_bridge, gemini_claude_bridge, gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
 from mms_core import _probe_models, detect_working_base_url
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
-from mms_speed_stats import build_provider_speed_scope
+
+_build_gateway_url = None
+codex_claude_bridge = None
+gemini_claude_bridge = None
+gateway_claude_bridge = None
+codex_chatcompletions_bridge = None
+codex_responses_bridge = None
+_write_route_status = None
+build_provider_speed_scope = None
+
+
+def _ensure_bridge_helpers():
+    global _build_gateway_url, codex_claude_bridge, gemini_claude_bridge
+    global gateway_claude_bridge, codex_chatcompletions_bridge, codex_responses_bridge, _write_route_status
+    if _build_gateway_url is not None:
+        return
+    from mms_bridge import (
+        _build_gateway_url as _bgw,
+        codex_claude_bridge as _ccb,
+        gemini_claude_bridge as _gcb,
+        gateway_claude_bridge as _gwb,
+        codex_chatcompletions_bridge as _cccb,
+        codex_responses_bridge as _crb,
+        _write_route_status as _wrs,
+    )
+    _build_gateway_url = _bgw
+    codex_claude_bridge = _ccb
+    gemini_claude_bridge = _gcb
+    gateway_claude_bridge = _gwb
+    codex_chatcompletions_bridge = _cccb
+    codex_responses_bridge = _crb
+    _write_route_status = _wrs
+
+
+def _ensure_speed_stats():
+    global build_provider_speed_scope
+    if build_provider_speed_scope is not None:
+        return
+    from mms_speed_stats import build_provider_speed_scope as _bps
+    build_provider_speed_scope = _bps
 
 class _LazyConsole:
     _instance = None
@@ -194,6 +232,8 @@ _CLAUDE_STATUSLINE_CONFIG = {
     "type": "command",
 }
 
+_CLAUDE_MAILBOX_PREFIX = os.path.join(_real_user_path(".claude"), "mailbox")
+
 _CLAUDE_DEFAULT_PERMISSION_ALLOW = [
     "Read",
     "Edit",
@@ -214,9 +254,9 @@ _CLAUDE_DEFAULT_PERMISSION_ALLOW = [
     "Bash(python3 *)",
     "Bash(rsync *)",
     "Bash(coscli *)",
-    "Bash(mkdir -p /Users/xin/.claude/mailbox*)",
-    "Bash(rm -rf /Users/xin/.claude/mailbox/*)",
-    "Bash(ls /Users/xin/.claude/mailbox*)",
+    f"Bash(mkdir -p {_CLAUDE_MAILBOX_PREFIX}*)",
+    f"Bash(rm -rf {_CLAUDE_MAILBOX_PREFIX}/*)",
+    f"Bash(ls {_CLAUDE_MAILBOX_PREFIX}*)",
     "Skill(*)",
     "Agent(*)",
 ]
@@ -405,6 +445,7 @@ def _write_claude_session_settings(session_claude_dir, *, required_env=None, def
 
 def _gateway_ping(base_url, api_key):
     """Quick connectivity check; returns True/False/None (None = can't determine)."""
+    _ensure_bridge_helpers()
     try:
         import httpx as _httpx
     except ImportError:
@@ -876,6 +917,8 @@ def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
 
 def launch_claude(model_info, runtime, once=False):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
+    _ensure_bridge_helpers()
+    _ensure_speed_stats()
     auth_mode = runtime.get("auth_mode", "api_key")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     advertised_models = []
@@ -1619,6 +1662,7 @@ def _claude_gateway_env(
     status_model = display_model or selected_model or heavy_model or best_model or "unknown"
     status_tier = "heavy" if auth_token else "-"
     status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
+    _ensure_bridge_helpers()
     try:
         _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
     except Exception:
@@ -1821,6 +1865,8 @@ def _codex_provider_base_url(base_url):
 def launch_codex(model_info, runtime, once=False):
     """启动 Codex，支持 provider 和 OAuth 账号档案两种模式。
     GPT 模型优先直连 Responses API；非 GPT 模型走本地 Chat Completions bridge。"""
+    _ensure_bridge_helpers()
+    _ensure_speed_stats()
     auth_mode = runtime.get("auth_mode", "api_key")
     if auth_mode == "oauth":
         env = _account_env(runtime)
