@@ -2,19 +2,169 @@
 # MMS 一键安装脚本
 # 用法: curl -fsSL <url>/install.sh | bash
 #   或: bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]
+#   或: bash install.sh --ref v1.2.0
 
 set -e
 
+REPO_OWNER="CtriXin"
+REPO_NAME="multi-model-switch"
 MMS_HOME="$HOME/.mms"
 BIN_DIR="$HOME/.local/bin"
 VENV_DIR="$MMS_HOME/.venv"
 CREDENTIALS_PATH="$HOME/.config/mms/credentials.sh"
 CONFIG_PATH="$HOME/.config/mms/config.toml"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
+SOURCE_DIR=""
+SOURCE_TMP_DIR=""
+INSTALL_REF=""
+INSTALL_CHANNEL="latest-tag"
 WRITE_SHELL_RC=0
 RUN_SETUP=0
 ENSURE_NODE22=0
 LAUNCH_AFTER_INSTALL=0
+
+cleanup() {
+    if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
+        rm -rf "$SOURCE_TMP_DIR"
+    fi
+}
+
+trap cleanup EXIT
+
+usage() {
+    cat <<EOF
+用法:
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]
+  bash install.sh --ref <tag-or-branch>
+  bash install.sh --main
+  bash install.sh --latest-tag
+  bash install.sh --latest-release
+
+说明:
+  - 默认远程安装/升级使用最新 semver tag
+  - --ref 可指定版本号或分支，例如 v1.2.0 / main
+  - 同一条命令可重复执行，用于升级
+EOF
+}
+
+resolve_latest_tag() {
+    python3 - <<'PY'
+import json
+import re
+import sys
+from urllib.request import Request, urlopen
+
+url = "https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page=100"
+req = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mms-install-script"})
+try:
+    with urlopen(req, timeout=15) as resp:
+        data = json.load(resp)
+except Exception:
+    sys.exit(1)
+
+if not isinstance(data, list):
+    sys.exit(1)
+
+semver = []
+for item in data:
+    if not isinstance(item, dict):
+        continue
+    tag = str(item.get("name") or "").strip()
+    m = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
+    if not m:
+        continue
+    semver.append(((int(m.group(1)), int(m.group(2)), int(m.group(3))), tag))
+
+if not semver:
+    sys.exit(1)
+
+semver.sort(reverse=True)
+print(semver[0][1])
+PY
+}
+
+resolve_latest_release_tag() {
+    python3 - <<'PY'
+import json
+import sys
+from urllib.request import Request, urlopen
+
+url = "https://api.github.com/repos/CtriXin/multi-model-switch/releases/latest"
+req = Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "mms-install-script"})
+try:
+    with urlopen(req, timeout=15) as resp:
+        data = json.load(resp)
+except Exception:
+    sys.exit(1)
+
+tag = str(data.get("tag_name") or "").strip()
+if not tag:
+    sys.exit(1)
+print(tag)
+PY
+}
+
+download_remote_source() {
+    local ref="$1"
+    local archive_url=""
+    local tarball="$SOURCE_TMP_DIR/source.tar.gz"
+
+    if [ -z "$ref" ]; then
+        return 1
+    fi
+
+    if [ "$ref" = "main" ]; then
+        archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/main.tar.gz"
+    else
+        archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/tags/${ref}.tar.gz"
+    fi
+
+    echo "正在下载源码归档: $archive_url"
+    curl -fsSL "$archive_url" -o "$tarball"
+    tar -xzf "$tarball" -C "$SOURCE_TMP_DIR"
+
+    SOURCE_DIR="$(find "$SOURCE_TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
+        echo "❌ 远程源码解压失败"
+        return 1
+    fi
+    echo "✓ 已获取源码: $SOURCE_DIR"
+}
+
+prepare_source_dir() {
+    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
+        SOURCE_DIR="$SCRIPT_DIR"
+        echo "✓ 使用本地源码: $SOURCE_DIR"
+        return
+    fi
+
+    SOURCE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mms-install.XXXXXX")"
+
+    local ref="$INSTALL_REF"
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-release" ]; then
+        ref="$(resolve_latest_release_tag || true)"
+        if [ -n "$ref" ]; then
+            echo "✓ latest release: $ref"
+        else
+            echo "⚠ 获取 latest release 失败，回退到最新 tag"
+            INSTALL_CHANNEL="latest-tag"
+        fi
+    fi
+    if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-tag" ]; then
+        ref="$(resolve_latest_tag || true)"
+        if [ -n "$ref" ]; then
+            echo "✓ latest tag: $ref"
+        else
+            echo "⚠ 获取最新 tag 失败，回退到 main"
+            ref="main"
+        fi
+    fi
+    if [ -z "$ref" ]; then
+        ref="main"
+    fi
+
+    download_remote_source "$ref"
+}
 
 detect_node_major() {
     if ! command -v node >/dev/null 2>&1; then
@@ -75,9 +225,34 @@ while [[ $# -gt 0 ]]; do
         --launch-after-install)
             LAUNCH_AFTER_INSTALL=1
             ;;
+        --ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ --ref 需要一个版本号或分支名"
+                usage
+                exit 1
+            fi
+            INSTALL_REF="$1"
+            ;;
+        --main)
+            INSTALL_REF="main"
+            INSTALL_CHANNEL="branch"
+            ;;
+        --latest-release)
+            INSTALL_REF=""
+            INSTALL_CHANNEL="latest-release"
+            ;;
+        --latest-tag)
+            INSTALL_REF=""
+            INSTALL_CHANNEL="latest-tag"
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
         *)
             echo "❌ 未知参数: $1"
-            echo "用法: bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]"
+            usage
             exit 1
             ;;
     esac
@@ -122,28 +297,30 @@ echo "✓ 依赖已安装到 $VENV_DIR"
 # ── 3. 复制文件到 ~/.mms ──
 echo ""
 
-# 判断来源：本地目录 or 远程
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
-    # 从本地安装
-    cp "$SCRIPT_DIR"/ccs "$MMS_HOME/ccs"
-    cp "$SCRIPT_DIR"/mms "$MMS_HOME/mms"
-    cp "$SCRIPT_DIR"/mms_core.py "$MMS_HOME/"
-    cp "$SCRIPT_DIR"/mms_tui.py "$MMS_HOME/"
-    cp "$SCRIPT_DIR"/mms_launchers.py "$MMS_HOME/"
-    cp "$SCRIPT_DIR"/mms_installer.py "$MMS_HOME/"
-    # 复制所有 mms_*.py 确保完整
-    for f in "$SCRIPT_DIR"/mms_*.py; do
-        [ -f "$f" ] && cp "$f" "$MMS_HOME/"
-    done
-    [ -f "$SCRIPT_DIR/config.example.toml" ] && cp "$SCRIPT_DIR/config.example.toml" "$MMS_HOME/"
-    echo "✓ 文件已复制到 $MMS_HOME"
-else
-    echo "❌ 找不到 MMS 源文件，请在仓库目录下运行此脚本"
+prepare_source_dir
+
+if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
+    echo "❌ 找不到 MMS 源文件"
     exit 1
 fi
 
+cp "$SOURCE_DIR"/ccs "$MMS_HOME/ccs"
+cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
+cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
+cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
+cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
+cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
+[ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
+# 复制所有 mms_*.py 确保完整
+for f in "$SOURCE_DIR"/mms_*.py; do
+    [ -f "$f" ] && cp "$f" "$MMS_HOME/"
+done
+[ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
+echo "✓ 文件已复制到 $MMS_HOME"
+
 chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
+[ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
@@ -203,7 +380,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "  ✅ MMS 安装完成"
     echo "===================================="
     echo ""
-    echo "  运行 $BIN_DIR/mms 开始使用"
+    echo "  运行 $BIN_DIR/mms 开始使用 / 升级后继续使用"
     echo ""
     echo "  常用命令:"
     echo "    mms              交互选择场景"
