@@ -23,6 +23,7 @@ scripts/tui_demo_*.py
 tmp/
 
 # web-v2 local release/build artifacts
+apps/web-v2/
 apps/web-v2/.ai/
 apps/web-v2/.playwright-cli/
 apps/web-v2/.env
@@ -62,6 +63,7 @@ apps/web-v2/src/data/screenshotScenarios.ts
 apps/worktree-app-store-launch/
 
 # local AI context / scratch files
+EOF
 DESIGN_V3_SPEC.md
 apps/web-v2/GEMINI.md
 apps/web-v2/*-worktree/
