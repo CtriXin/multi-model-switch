@@ -43,6 +43,30 @@ This file applies to both `Codex` and `Claude`.
   - validation run and result
 - Before preparing a version bump, tag, or GitHub release, `Codex` should read this file first.
 
+## Versioning And GitHub Release
+
+- For user-facing iterations intended to land publicly, do not stop at `git push`; also prepare a version bump, git tag, and GitHub Release.
+- Use monotonic semver-like tags (for example `v1.0.1`, `v1.1.0`, `v2.0.0`); do not reuse or overwrite an existing tag.
+- Patch release:
+  - bug fix
+  - docs/install/release-note only changes tied to a shipped fix
+- Minor release:
+  - backward-compatible feature or notable UX improvement
+- Major release:
+  - breaking CLI/config/runtime behavior change
+- Before `gh release create`, summarize at least:
+  - what changed
+  - what was fixed
+  - any install/upgrade note users must know
+- If a turn includes “commit push gh发布” or equivalent release intent, prefer:
+  1. choose next version
+  2. commit
+  3. push branch
+  4. create annotated tag
+  5. push tag
+  6. create GitHub Release with concise notes
+- If the version bump policy is ambiguous, state the proposed next version explicitly before tagging.
+
 ## Iteration Commit Gate
 
 - After each completed iteration stage, ask the user whether to create a commit before starting the next substantial change.

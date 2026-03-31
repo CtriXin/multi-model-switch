@@ -5018,6 +5018,12 @@ def _use_tui():
         return False
 
 
+_CLI_DEFAULT_FAMILY_FIRST = {
+    "claude": "Claude",
+    "codex": "GPT",
+}
+
+
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
     """为一组模型名构建 provider 替代选项映射（供 P 键使用）。
 
@@ -5081,8 +5087,15 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             for f in raw:
                 total_use = sum(m.get("use_count", 0) for m in f["models"] if isinstance(m, dict))
                 fam_list.append({"family": f["family"], "count": len(f["models"]), "use_count": total_use})
-            # 按使用量降序排列（用的多的在前）
-            fam_list.sort(key=lambda x: x.get("use_count", 0), reverse=True)
+            preferred_family = _CLI_DEFAULT_FAMILY_FIRST.get(cli_name)
+            # 当前 CLI 的默认主族群置顶，其余再按使用量降序排列。
+            fam_list.sort(
+                key=lambda x: (
+                    0 if x.get("family") == preferred_family else 1,
+                    -x.get("use_count", 0),
+                    x.get("family", ""),
+                )
+            )
             fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
         return fbc, fd
