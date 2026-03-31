@@ -498,8 +498,12 @@ def _submit_async_llm_classify(text, api_url, api_key, light_model):
             result = _llm_classify(text, api_url, api_key, light_model)
             if result:
                 import time
-                _async_llm_result = (text_key, tier, confidence, ts) = (
-                    text_key, result[0], result[1], time.time()
+                tier, confidence = result[0], result[1]
+                _async_llm_result = (
+                    text_key,
+                    tier,
+                    confidence,
+                    time.time(),
                 )
         finally:
             _async_llm_lock.release()

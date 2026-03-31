@@ -924,6 +924,11 @@ def launch_claude(model_info, runtime, once=False):
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     advertised_models = []
     bridge_cfg = None  # 由 gateway_claude_bridge 赋值，用于退出摘要
+    probe_model = _resolve_model(model_info) if model_info else "claude-sonnet-4-6"
+    lb_light = model_info.get("lb_light") if isinstance(model_info, dict) else None
+    lb_medium = model_info.get("lb_medium") if isinstance(model_info, dict) else None
+    lb_light = lb_light if lb_light and lb_light.strip() else None
+    lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
     if auth_mode == "oauth":
         env = _account_env(runtime)
         session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
@@ -1013,12 +1018,6 @@ def launch_claude(model_info, runtime, once=False):
         else:
             _print_launch_step_done("Anthropic endpoint 解析", step_start, resolve_detail, style="yellow")
 
-        # 智能路由：提取 lb_light / lb_medium，需要通过 bridge 拦截请求
-        lb_light = model_info.get("lb_light") if isinstance(model_info, dict) else None
-        lb_medium = model_info.get("lb_medium") if isinstance(model_info, dict) else None
-        # 过滤空字符串（用户可能只选了 heavy+light，medium 为空字符串）
-        lb_light = lb_light if lb_light and lb_light.strip() else None
-        lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
         # 跨 provider 负载配置：per-slot upstream url/key
         lb_slot_configs = model_info.get("lb_slot_configs") if isinstance(model_info, dict) else None
 
