@@ -631,12 +631,12 @@ def export_model_routes(cfg=None, force=False):
             "role": role,
             "priority": priority,
             "models": models,
-            # Default provider sorts first within same role tier
-            "sort_key": (0 if is_default else 1, ROLE_WEIGHTS.get(role, 1), -priority),
+            # Default provider only gets a boost within the same role tier.
+            "sort_key": (ROLE_WEIGHTS.get(role, 1), 0 if is_default else 1, -priority),
         })
         seen_ids.add(pid)
 
-    # 排序：default first → primary > auto > fallback → priority 降序
+    # 排序：primary > auto > fallback；同 role 下 default first，再按 priority 降序
     providers_info.sort(key=lambda p: p["sort_key"])
 
     # 模型 claim：高优先级 provider 先 claim
