@@ -534,6 +534,12 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
     # provider priority 变更记录 (provider_id -> new_priority)
     priority_changes = {}
 
+    def _effective_priority(opt):
+        pid = opt.get("provider_id", "")
+        if pid in priority_changes:
+            return int(priority_changes[pid])
+        return int((opt.get("provider_ctx") or {}).get("priority", 100) or 100)
+
     def _provider_choices(m):
         choices = []
         seen = set()
@@ -557,29 +563,45 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
 
         choices.sort(
             key=lambda opt: (
-                int((opt.get("provider_ctx") or {}).get("priority", 100) or 100),
+                _effective_priority(opt),
                 opt.get("provider_name", ""),
             )
         )
         return choices
 
+    def _active_provider_choice(m):
+        override = provider_overrides.get(m["model"])
+        if override:
+            return override
+        choices = _provider_choices(m)
+        if choices:
+            return choices[0]
+        return {
+            "provider_name": m.get("provider_name", ""),
+            "provider_id": m.get("provider_id", ""),
+            "provider_ctx": m.get("provider_ctx", {}),
+        }
+
     def _get_provider_info(m):
         """返回当前生效的 (provider_name, provider_id, priority)"""
-        override = provider_overrides.get(m["model"])
-        ctx = override["provider_ctx"] if override else m.get("provider_ctx", {})
-        name = override["provider_name"] if override else m.get("provider_name", "")
-        pid = override["provider_id"] if override else m.get("provider_id", "")
-        pri = ctx.get("priority", 100)
+        active = _active_provider_choice(m)
+        ctx = active.get("provider_ctx", {})
+        name = active.get("provider_name", "")
+        pid = active.get("provider_id", "")
+        pri = _effective_priority(active)
         return name, pid, pri
 
     def _get_result(m):
-        override = provider_overrides.get(m["model"])
-        if override:
-            result = {**m, "provider_name": override["provider_name"],
-                      "provider_id": override["provider_id"],
-                      "provider_ctx": override["provider_ctx"]}
-        else:
-            result = dict(m)
+        active = _active_provider_choice(m)
+        result = {
+            **m,
+            "provider_name": active.get("provider_name", ""),
+            "provider_id": active.get("provider_id", ""),
+            "provider_ctx": {
+                **(active.get("provider_ctx", {}) or {}),
+                "priority": _effective_priority(active),
+            },
+        }
         if priority_changes:
             result["priority_changes"] = dict(priority_changes)
         return result
@@ -590,12 +612,23 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         if not new_pid or not orig_pid or new_pid == orig_pid:
             return
 
-        orig_pri = int((m.get("provider_ctx") or {}).get("priority", 100) or 100)
-        new_base = int((chosen.get("provider_ctx") or {}).get("priority", 100) or 100)
+        orig_pri = _effective_priority({
+            "provider_id": orig_pid,
+            "provider_ctx": m.get("provider_ctx", {}),
+        })
+        new_base = _effective_priority(chosen)
 
         # 当前系统语义是数字越小越优先；手动选中的 provider 应提升到默认前面。
-        priority_changes[new_pid] = max(0, min(new_base, orig_pri) - 5)
-        priority_changes[orig_pid] = max(orig_pri, new_base) + 5
+        # 若用户已经用 +/- 显式调过任一通道，保留用户值，不在确认时覆盖。
+        priority_changes.setdefault(new_pid, max(0, min(new_base, orig_pri) - 5))
+        priority_changes.setdefault(orig_pid, max(orig_pri, new_base) + 5)
+
+    def _adjust_provider_priority(opt, delta):
+        pid = opt.get("provider_id", "")
+        if not pid:
+            return
+        current = _effective_priority(opt)
+        priority_changes[pid] = max(0, min(200, current + delta))
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -613,6 +646,16 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         provider_idx_map = {}
         focus = "model"
         search_query = ""
+
+        def _sync_provider_cursor(m, pid):
+            if not m or not pid:
+                return
+            choices = _provider_choices(m)
+            for i, opt in enumerate(choices):
+                if opt.get("provider_id") == pid:
+                    provider_idx_map[m["model"]] = i
+                    return
+            provider_idx_map[m["model"]] = 0
 
         fam_color = _FAMILY_COLORS.get(family_name, 1)
         fc = curses.color_pair(fam_color)
@@ -653,7 +696,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             row += 1
 
             # -- 标题 --
-            has_changes = bool(provider_overrides)
+            has_changes = bool(provider_overrides or priority_changes)
             title = f"{family_name}" + (" *" if has_changes else "")
             _safe_addstr(stdscr, row, ll, title, fc | curses.A_BOLD)
             cnt_info = f"{len(filtered)}/{len(sorted_models)}" if search_query else str(len(sorted_models))
@@ -732,7 +775,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
                     and provider_idx_map.get(current_model["model"], 0) == offset
                 )
                 opt_name = opt.get("provider_name", "")
-                opt_pri = int((opt.get("provider_ctx") or {}).get("priority", 100) or 100)
+                opt_pri = _effective_priority(opt)
                 tag_text = f"{opt_name} P:{opt_pri}"
                 if opt.get("provider_id") == active_provider_id:
                     tag_text += " *"
@@ -764,9 +807,12 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
                 if last_used and last_used.get("model"):
                     _safe_addstr(stdscr, bot_y, ll + 16, "R", curses.color_pair(5) | curses.A_BOLD)
                     _safe_addstr(stdscr, bot_y, ll + 18, "上次", curses.color_pair(5) | curses.A_DIM)
-                    enter_x = ll + 24
+                    adjust_x = ll + 24
                 else:
-                    enter_x = ll + 16
+                    adjust_x = ll + 16
+                _safe_addstr(stdscr, bot_y, adjust_x, "+/-", curses.color_pair(5) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, adjust_x + 4, "权重", curses.color_pair(5) | curses.A_DIM)
+                enter_x = adjust_x + 10
                 _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
                 _safe_addstr(stdscr, bot_y, enter_x + 6, "确认", curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
@@ -799,6 +845,17 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
                     return None
             elif key in (ord('r'), ord('R')) and not search_query and last_used and last_used.get("model"):
                 return "__last__"
+            elif key in (ord('+'), ord('=')) and not search_query:
+                if focus == "provider" and current_model and current_choices:
+                    chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
+                    # 当前语义是数字越小越优先；"+" 应提升优先级并把通道往上排。
+                    _adjust_provider_priority(chosen, -5)
+                    _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
+            elif key in (ord('-'), ord('_')) and not search_query:
+                if focus == "provider" and current_model and current_choices:
+                    chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
+                    _adjust_provider_priority(chosen, +5)
+                    _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
             elif key in (10, 13, curses.KEY_ENTER):
                 if filtered:
                     m = filtered[idx]

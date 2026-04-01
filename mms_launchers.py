@@ -595,6 +595,7 @@ def _account_env(account):
             skip_real_entries={"settings.json"},
         )
         env["HOME"] = session_home
+        _install_session_command_wrappers(session_home, env)
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
         env["GEMINI_CLI_HOME"] = home_dir
@@ -624,6 +625,7 @@ def _account_env(account):
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
+        _install_session_command_wrappers(session_home, env)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
 
@@ -671,6 +673,38 @@ def _link_shared_dotfiles(session_home):
         dst = os.path.join(session_home, dot_name)
         if os.path.exists(src) and not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
+
+
+def _install_session_command_wrappers(session_home, env):
+    """Install wrappers for tools that must run against the real HOME."""
+    wrapper_dir = os.path.join(session_home, ".mms", "bin")
+    os.makedirs(wrapper_dir, exist_ok=True)
+
+    real_home = _real_user_home()
+    current_path = os.environ.get("PATH", "")
+    for command_name in ("lark-cli", "hive"):
+        real_bin = shutil.which(command_name, path=current_path)
+        if not real_bin:
+            continue
+
+        wrapper_path = os.path.join(wrapper_dir, command_name)
+        wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f'export HOME="{real_home}"',
+                f'export MMS_REAL_HOME="{real_home}"',
+                f'export REAL_HOME="{real_home}"',
+                f'export ORIGINAL_HOME="{real_home}"',
+                f'exec "{real_bin}" "$@"',
+                "",
+            ]
+        )
+        with open(wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(wrapper)
+        os.chmod(wrapper_path, 0o755)
+
+    session_path = env.get("PATH") or current_path
+    env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
 
 
 def _sync_codex_session_claude_json(session_home):
@@ -1635,7 +1669,7 @@ def _claude_gateway_env(
     )
 
     env = os.environ.copy()
-    env["MMS_REAL_HOME"] = _real_user_home()
+    _inject_real_home_hints(env)
     env["HOME"] = gateway_home
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
@@ -1654,6 +1688,7 @@ def _claude_gateway_env(
         env["ANTHROPIC_MODEL"] = display_model
     if not sensitive_provider:
         env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
+    _install_session_command_wrappers(gateway_home, env)
 
     # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
 
@@ -1844,6 +1879,7 @@ def _codex_gateway_env(runtime, base_url):
     env["HOME"] = session_home
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
+    _install_session_command_wrappers(session_home, env)
     return env
 
 

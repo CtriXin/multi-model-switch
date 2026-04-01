@@ -1085,6 +1085,7 @@ A：会，而且这轮又补了一层“防套娃”。
 
 - 隔离 session 里的 `git` / `ssh` 可用
 - `Codex` 还能继续看到全局安装的 skills
+- 对像 `lark-cli`、`hive` 这种必须绑定真实 `HOME` / keychain 的工具，launcher 会在 session PATH 前注入 wrapper，让它们执行时临时回到真实用户目录
 - skill 里技术上可以再调用一次 `mms`
 
 但之前有一个隐患：
