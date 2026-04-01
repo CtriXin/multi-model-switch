@@ -587,6 +587,7 @@ def export_model_routes(cfg=None, force=False):
     # 收集所有 enabled providers（只看 anthropic_messages 协议）
     providers_info = []
     seen_ids = set()
+    default_provider_id = str(cfg.get("provider", {}).get("default") or "").strip()
 
     for provider_def in cfg.get("providers", []):
         pid = provider_def.get("id")
@@ -612,6 +613,7 @@ def export_model_routes(cfg=None, force=False):
 
         role = _normalize_role(provider_def.get("role", "auto"))
         priority = _normalize_priority(provider_def.get("priority", DEFAULT_PRIORITY))
+        is_default = (pid == default_provider_id)
 
         # 获取模型列表（先用缓存，再 fallback_models）
         models = list(_probe_models(ctx, emit_output=False).get("models") or [])
@@ -629,11 +631,12 @@ def export_model_routes(cfg=None, force=False):
             "role": role,
             "priority": priority,
             "models": models,
-            "sort_key": (ROLE_WEIGHTS.get(role, 1), -priority),
+            # Default provider sorts first within same role tier
+            "sort_key": (0 if is_default else 1, ROLE_WEIGHTS.get(role, 1), -priority),
         })
         seen_ids.add(pid)
 
-    # 排序：primary > auto > fallback，同 role 按 priority 降序
+    # 排序：default first → primary > auto > fallback → priority 降序
     providers_info.sort(key=lambda p: p["sort_key"])
 
     # 模型 claim：高优先级 provider 先 claim
@@ -645,11 +648,12 @@ def export_model_routes(cfg=None, force=False):
         "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
     }
+    _MAX_FALLBACKS = 3
     routes = {}
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
             normalized = str(model_name or "").strip()
-            if not normalized or normalized in routes:
+            if not normalized:
                 continue
             # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
             if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
@@ -657,20 +661,34 @@ def export_model_routes(cfg=None, force=False):
             # 旧版 Claude 模型 → 跳过，只保留白名单
             if normalized.startswith("claude-") and normalized not in _CLAUDE_KEEP:
                 continue
-            route_entry = {
+
+            fb_entry = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
                 "api_key": pinfo["api_key"],
                 "provider_id": pinfo["provider_id"],
                 "priority": pinfo["priority"],
                 "role": pinfo["role"],
-                "capabilities": _model_capability_tags(normalized),
-                "native_clis": _native_clis_for_model(normalized),
-                "bridge_clis": _bridge_clis_for_model(normalized),
-                "cli_modes": _model_cli_modes(normalized),
             }
             if pinfo.get("openai_base_url"):
-                route_entry["openai_base_url"] = pinfo["openai_base_url"]
-            routes[normalized] = route_entry
+                fb_entry["openai_base_url"] = pinfo["openai_base_url"]
+
+            if normalized not in routes:
+                # First (highest priority) provider claims the primary route
+                route_entry = dict(fb_entry)
+                route_entry.update({
+                    "capabilities": _model_capability_tags(normalized),
+                    "native_clis": _native_clis_for_model(normalized),
+                    "bridge_clis": _bridge_clis_for_model(normalized),
+                    "cli_modes": _model_cli_modes(normalized),
+                })
+                routes[normalized] = route_entry
+            else:
+                # Subsequent providers become fallback routes
+                existing = routes[normalized]
+                fallbacks = existing.get("fallback_routes", [])
+                if len(fallbacks) < _MAX_FALLBACKS:
+                    fallbacks.append(fb_entry)
+                    existing["fallback_routes"] = fallbacks
 
     # 写入文件
     output = {
