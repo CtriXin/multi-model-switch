@@ -5089,6 +5089,29 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
     return result
 
 
+def _apply_runtime_priority_changes(cfg, pri_changes):
+    changed = False
+    if not pri_changes:
+        return changed
+
+    for runtime_id, new_pri in pri_changes.items():
+        matched = False
+        for pdef in cfg.get("providers", []):
+            if pdef.get("id") == runtime_id:
+                pdef["priority"] = new_pri
+                changed = True
+                matched = True
+                break
+        if matched:
+            continue
+        for adef in cfg.get("accounts", []):
+            if adef.get("id") == runtime_id:
+                adef["priority"] = new_pri
+                changed = True
+                break
+    return changed
+
+
 def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
@@ -5417,12 +5440,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             family_name = selected.pop("_family_name", "模型")
 
             pri_changes = selected.pop("priority_changes", None)
-            if pri_changes:
-                for pid, new_pri in pri_changes.items():
-                    for pdef in current_cfg.get("providers", []):
-                        if pdef.get("id") == pid:
-                            pdef["priority"] = new_pri
-                            break
+            if _apply_runtime_priority_changes(current_cfg, pri_changes):
                 save_config(current_cfg)
                 _families_dirty = True
                 try:
@@ -5496,12 +5514,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             else:
                 # 持久化 priority 变更
                 pri_changes = selected.pop("priority_changes", None)
-                if pri_changes:
-                    for pid, new_pri in pri_changes.items():
-                        for pdef in current_cfg.get("providers", []):
-                            if pdef.get("id") == pid:
-                                pdef["priority"] = new_pri
-                                break
+                if _apply_runtime_priority_changes(current_cfg, pri_changes):
                     save_config(current_cfg)
                     _families_dirty = True
                     # 静默重新生成 routes
