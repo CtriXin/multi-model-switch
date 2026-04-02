@@ -563,6 +563,7 @@ def export_model_routes(cfg=None, force=False):
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
+        _provider_effective_models,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
         _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
         _load_usage_stats,
@@ -598,7 +599,9 @@ def export_model_routes(cfg=None, force=False):
             continue
 
         protocols = provider_def.get("protocols", [])
-        if "anthropic_messages" not in protocols:
+        has_anthropic = "anthropic_messages" in protocols
+        has_openai = "openai_chat_completions" in protocols
+        if not has_anthropic and not has_openai:
             continue
 
         try:
@@ -607,7 +610,8 @@ def export_model_routes(cfg=None, force=False):
             continue
 
         anthropic_url = (ctx.get("anthropic_base_url") or "").strip()
-        if not anthropic_url:
+        openai_url_early = (ctx.get("openai_base_url") or "").strip()
+        if not anthropic_url and not openai_url_early:
             continue
         if not ctx.get("api_key"):
             continue
@@ -616,13 +620,13 @@ def export_model_routes(cfg=None, force=False):
         priority = _normalize_priority(provider_def.get("priority", DEFAULT_PRIORITY))
         is_default = (pid == default_provider_id)
 
-        # 获取模型列表（先用缓存，再 fallback_models）
-        models = list(_probe_models(ctx, emit_output=False).get("models") or [])
-        if not models:
-            models = list(provider_def.get("fallback_models") or [])
+        # 获取模型列表（probe + extra_models + fallback_models，与 TUI 一致）
+        cached_models = _probe_models(ctx, emit_output=False).get("models")
+        models = list(_provider_effective_models(provider_def, cached_models, cfg))
 
-        openai_url = (ctx.get("openai_base_url") or "").strip()
+        openai_url = openai_url_early
         pname = _provider_label(ctx)
+        supported_clis = provider_def.get("supported_clis", [])
         providers_info.append({
             "provider_id": pid,
             "provider_name": pname,
@@ -632,6 +636,7 @@ def export_model_routes(cfg=None, force=False):
             "role": role,
             "priority": priority,
             "models": models,
+            "supported_clis": supported_clis,
             # Default provider only gets a boost within the same role tier.
             "sort_key": (ROLE_WEIGHTS.get(role, 1), 0 if is_default else 1, -priority),
         })
@@ -659,12 +664,28 @@ def export_model_routes(cfg=None, force=False):
     except Exception:
         pass
 
+    # Model-CLI compatibility: GPT/Gemini/O-series need codex-capable provider,
+    # Claude needs claude-capable. Matches MMS TUI's supported_clis filtering.
+    def _model_cli_compatible(model_name, supported_clis):
+        if not supported_clis:
+            return True  # no restriction
+        lower = model_name.lower()
+        if lower.startswith(("gpt-", "gemini-", "o1-", "o3-", "o4-")):
+            return "codex" in supported_clis
+        if lower.startswith("claude-"):
+            return "claude" in supported_clis
+        # Domestic models: usually work with any CLI
+        return True
+
     _MAX_FALLBACKS = 3
     routes = {}
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
             normalized = str(model_name or "").strip()
             if not normalized:
+                continue
+            # Skip if provider doesn't support the CLI this model family needs
+            if not _model_cli_compatible(normalized, pinfo.get("supported_clis", [])):
                 continue
             # claude- 前缀 + 国产关键词 → 虚拟别名，跳过
             if normalized.startswith("claude-") and any(kw in normalized.lower() for kw in _DOMESTIC_KEYWORDS):
