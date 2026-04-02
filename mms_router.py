@@ -565,6 +565,7 @@ def export_model_routes(cfg=None, force=False):
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
         _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
+        _load_usage_stats,
     )
 
     if cfg is None:
@@ -648,6 +649,16 @@ def export_model_routes(cfg=None, force=False):
         "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
     }
+    # Aggregate use_count from usage.json for fuzzy-resolve ranking
+    _use_counts = {}
+    try:
+        _usage_stats = _load_usage_stats()
+        for _src in _usage_stats.get("sources", {}).values():
+            for _mname, _cnt in (_src.get("models") or {}).items():
+                _use_counts[_mname] = _use_counts.get(_mname, 0) + _cnt
+    except Exception:
+        pass
+
     _MAX_FALLBACKS = 3
     routes = {}
     for pinfo in providers_info:
@@ -680,6 +691,7 @@ def export_model_routes(cfg=None, force=False):
                     "native_clis": _native_clis_for_model(normalized),
                     "bridge_clis": _bridge_clis_for_model(normalized),
                     "cli_modes": _model_cli_modes(normalized),
+                    "use_count": _use_counts.get(normalized, 0),
                 })
                 routes[normalized] = route_entry
             else:
