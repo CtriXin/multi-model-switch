@@ -82,6 +82,24 @@ This file applies to both `Codex` and `Claude`.
 - Do not silently change default launch behavior, model/source resolution order, config schema, account isolation semantics, or bridge fallback rules without an explicit note in the task and targeted validation.
 - If a task would alter a protected surface beyond the user's stated scope, stop and narrow the change or ask for confirmation.
 
+## Routing Signal Contract
+
+- `priority` is a runtime-level field on `providers` and `accounts`, not a per-model field.
+- Current global rule: larger `priority` means higher precedence.
+- TUI channel lists, runtime source lists, and exported route ordering should all follow descending `priority`.
+- Changing one provider/account `priority` affects every model that can route through that same runtime.
+- `role` still outranks `priority`: `primary > auto > fallback`, then compare `priority` within the same role tier.
+- `use_count` is model-level usage metadata aggregated from `usage.json`; it is for display/ranking/export metadata, not the primary runtime routing key.
+- Current family ordering rule:
+  - preferred family for current CLI first (`claude -> Claude`, `codex -> GPT`)
+  - then family total `use_count` descending
+  - then family name
+- Current model ordering rule inside one family:
+  - model `use_count` descending
+  - then model name
+- `model-routes.json` is a derived export for tools such as Hive. It is refreshed by explicit export, config-affecting mutations, and best-effort async export after usage writes; `force=False` reads also invalidate on newer `usage.json`.
+- If a new feature needs ranking, affinity, or pinning semantics, prefer reusing or explicitly extending these fields instead of inventing hidden parallel state.
+
 ## Local Slash Triggers
 
 - In this repo, if the user sends `/distill`, `distill`, `蒸馏`, or `checkpoint`, treat it as an explicit request to run the global `distill` skill.
