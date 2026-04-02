@@ -13,10 +13,12 @@ BIN_DIR="$HOME/.local/bin"
 VENV_DIR="$MMS_HOME/.venv"
 CREDENTIALS_PATH="$HOME/.config/mms/credentials.sh"
 CONFIG_PATH="$HOME/.config/mms/config.toml"
+VERSION_META_PATH="$HOME/.config/mms/version.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
 SOURCE_DIR=""
 SOURCE_TMP_DIR=""
 INSTALL_REF=""
+RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 WRITE_SHELL_RC=0
 RUN_SETUP=0
@@ -131,6 +133,36 @@ download_remote_source() {
     echo "✓ 已获取源码: $SOURCE_DIR"
 }
 
+write_version_metadata() {
+    mkdir -p "$(dirname "$VERSION_META_PATH")"
+    python3 - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" <<'PY'
+import json
+import re
+import sys
+from datetime import datetime, timezone
+
+path, resolved_ref, install_channel = sys.argv[1:4]
+resolved_ref = str(resolved_ref or "").strip()
+installed_version = resolved_ref if re.fullmatch(r"v\d+\.\d+\.\d+", resolved_ref) else ""
+
+payload = {
+    "installed_ref": resolved_ref,
+    "installed_version": installed_version,
+    "install_channel": install_channel,
+    "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "source": "install.sh",
+}
+
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, ensure_ascii=False, indent=2)
+    handle.write("\n")
+PY
+    chmod 600 "$VERSION_META_PATH"
+    if [ -n "$RESOLVED_INSTALL_REF" ]; then
+        echo "✓ 已记录安装版本: $RESOLVED_INSTALL_REF"
+    fi
+}
+
 prepare_source_dir() {
     if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
         SOURCE_DIR="$SCRIPT_DIR"
@@ -162,6 +194,7 @@ prepare_source_dir() {
     if [ -z "$ref" ]; then
         ref="main"
     fi
+    RESOLVED_INSTALL_REF="$ref"
 
     download_remote_source "$ref"
 }
@@ -317,6 +350,7 @@ for f in "$SOURCE_DIR"/mms_*.py; do
 done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ 文件已复制到 $MMS_HOME"
+write_version_metadata
 
 chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
