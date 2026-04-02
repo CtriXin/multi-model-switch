@@ -1825,6 +1825,14 @@ def _codex_gateway_env(runtime, base_url):
             block += f'{key} = {_toml_literal(value)}\n'
         return text[:block_start] + block + text[block_end:]
 
+    def _normalize_toml_layout(text):
+        import re
+        # Repair malformed cases like `[model_providers.custom]name = "custom"`.
+        text = re.sub(r'(\[[^\]\n]+\])([A-Za-z0-9_"-]+\s*=)', r'\1' + "\n" + r'\2', text)
+        if text and not text.endswith("\n"):
+            text += "\n"
+        return text
+
     # 复制用户 config.toml，但把顶层和当前项目的 base_url 都替换成隔离地址
     # Codex CLI 会读取 project-scoped config，单改顶层 base_url 不够。
     gateway_config_template = os.path.join(gateway_base, ".codex", "config.toml")
@@ -1842,6 +1850,7 @@ def _codex_gateway_env(runtime, base_url):
             config_text = _set_table_scalar(config_text, "model_providers.custom", "requires_openai_auth", True)
             config_text = _set_table_scalar(config_text, "model_providers.custom", "base_url", base_url)
             config_text = _append_codex_mcp_servers_from_claude_json(config_text)
+            config_text = _normalize_toml_layout(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
@@ -1860,6 +1869,7 @@ def _codex_gateway_env(runtime, base_url):
             with open(gateway_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
             config_text = _append_codex_mcp_servers_from_claude_json(config_text)
+            config_text = _normalize_toml_layout(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
