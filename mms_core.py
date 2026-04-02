@@ -1923,7 +1923,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         models_endpoint = _normalize_models_endpoint(
             Prompt.ask("模型列表接口路径（输入 manual 表示仅用手工模型）", default=current.get("models_endpoint", "/models"))
         )
-    priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
@@ -2003,7 +2003,7 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         cli_name = Prompt.ask("绑定的 CLI", choices=list(OAUTH_CAPABLE_CLIS), default=cli_name)
     name = Prompt.ask("显示名", default=current.get("name") or account_id).strip() or account_id
     home_dir = current.get("home_dir") or _default_account_home(account_id)
-    priority = _normalize_priority(Prompt.ask("优先级（数字越小越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
@@ -4179,9 +4179,10 @@ def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
         if _model_matches_account_cli("claude", normalized_model):
             return _provider_supports_cli_name(provider, "claude")
         native_clis = _native_clis_for_model(normalized_model)
-        if not native_clis:
-            return False
-        return any(_provider_supports_cli_name(provider, native_cli) for native_cli in native_clis)
+        if native_clis:
+            return any(_provider_supports_cli_name(provider, native_cli) for native_cli in native_clis)
+        bridge_clis = _bridge_clis_for_model(normalized_model)
+        return cli_name in bridge_clis and _provider_supports_cli_name(provider, cli_name)
 
     if _provider_supports_cli_name(provider, cli_name):
         return True
@@ -4237,14 +4238,14 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not _provider_supports_cli_name(provider, cli_name):
-            continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
         models = _provider_effective_models(provider, cached_models, cfg)
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized or normalized in seen:
+                continue
+            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             seen.add(normalized)
             merged.append(normalized)
@@ -4261,8 +4262,6 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not _provider_supports_cli_name(provider, cli_name):
-            continue
         if not provider.get("base_url") or not provider.get("api_key"):
             continue
         models = _provider_effective_models(provider, cached_models, cfg)
@@ -4271,6 +4270,8 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized:
+                continue
+            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             aggregated.append({
                 "model": normalized,
@@ -4282,7 +4283,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,
                            cli_name=None, protocol=None):
-    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority desc。
+    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority 高到低。
 
     如果指定了 protocol（如 "anthropic_messages"），只考虑支持该协议的 provider。
     如果指定了 cli_name，只考虑支持该 CLI 的 provider。
@@ -4296,7 +4297,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if cli_name and not _provider_supports_cli_name(provider, cli_name):
+        if cli_name and not _provider_supports_model_for_cli(provider, cli_name, model_name):
             continue
         if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
             continue
@@ -4369,8 +4370,6 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not _provider_supports_cli_name(provider, cli_name):
-            continue
         if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
             continue
         if not provider.get("api_key"):
@@ -4389,6 +4388,8 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
         for m in models:
             normalized = str(m or "").strip()
             if not normalized:
+                continue
+            if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             existing = model_best.get(normalized)
             if existing is None or score < existing[0]:
@@ -4430,9 +4431,6 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
         if not provider.get("enabled", True):
             _probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
             continue
-        if not _provider_supports_cli_name(provider, cli_name):
-            _probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
-            continue
         if not provider.get("base_url") or not provider.get("api_key"):
             _probe_debug_logger.debug("  %s: SKIP (no base_url=%s or api_key=%s)", pid, bool(provider.get("base_url")), bool(provider.get("api_key")))
             continue
@@ -4447,11 +4445,17 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
         cli_models = _provider_models_for_cli(cli_name, models)
 
         if selected_model:
+            if not _provider_supports_model_for_cli(provider, cli_name, selected_model):
+                _probe_debug_logger.info("  %s: SKIP (cli/model incompatible for %s -> %s)", pid, cli_name, selected_model)
+                continue
             if selected_model not in models:
                 _probe_debug_logger.info("  %s: SKIP (model '%s' not in %s)", pid, selected_model, models[:5])
                 continue
             option_models = [selected_model]
         else:
+            if not _provider_supports_cli_name(provider, cli_name):
+                _probe_debug_logger.debug("  %s: SKIP (cli not supported)", pid)
+                continue
             option_models = cli_models
 
         if not option_models:
@@ -4596,7 +4600,7 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
         )
     )
     options.sort(key=lambda item: (
-        item.get("priority", DEFAULT_PRIORITY),
+        -int(item.get("priority", DEFAULT_PRIORITY) or DEFAULT_PRIORITY),
         0 if item.get("launch_cli") == cli_name else 1,
         0 if item["kind"] == "provider" else 1,
         item.get("title", ""),

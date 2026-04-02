@@ -516,6 +516,7 @@ def validate_provider_for_cli(cli, provider):
     provider_name = provider.get("name", provider.get("id", "provider"))
     provider_id = provider.get("id", "provider")
     required_protocol = CLI_PROTOCOL_REQUIREMENTS.get(cli)
+    protocols = _provider_protocols(provider)
 
     if cli == "codex" and str(provider_id).strip().lower().startswith("kimi"):
         console.print(f"[red]provider '{provider_id}' 当前不支持直接驱动 codex；请改走 claude 路径[/red]")
@@ -526,12 +527,14 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
 
     if not _provider_supports_cli(provider, cli):
-        console.print(f"[red]provider '{provider_id}' 不支持 CLI: {cli}[/red]")
-        sys.exit(1)
+        # OpenAI-compatible providers can still drive Claude through the bridge path.
+        if not (cli == "claude" and "openai_chat_completions" in protocols):
+            console.print(f"[red]provider '{provider_id}' 不支持 CLI: {cli}[/red]")
+            sys.exit(1)
 
     if required_protocol and required_protocol not in _provider_protocols(provider):
         # OpenAI-only provider 可以通过 bridge 驱动 claude，不阻断
-        if cli == "claude" and "openai_chat_completions" in _provider_protocols(provider):
+        if cli == "claude" and "openai_chat_completions" in protocols:
             pass
         else:
             console.print(

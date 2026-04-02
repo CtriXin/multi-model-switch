@@ -527,7 +527,13 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
     if not models:
         return None
 
-    sorted_models = sorted(models, key=lambda m: m.get("use_count", 0), reverse=True)
+    sorted_models = sorted(
+        models,
+        key=lambda m: (
+            -int(m.get("use_count", 0) or 0),
+            str(m.get("model", "")),
+        ),
+    )
 
     # 当前每个模型的 provider 覆盖 (model_name -> provider info)
     provider_overrides = {}
@@ -563,7 +569,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
 
         choices.sort(
             key=lambda opt: (
-                _effective_priority(opt),
+                -_effective_priority(opt),
                 opt.get("provider_name", ""),
             )
         )
@@ -618,10 +624,10 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         })
         new_base = _effective_priority(chosen)
 
-        # 当前系统语义是数字越小越优先；手动选中的 provider 应提升到默认前面。
+        # 当前系统语义是数字越大越优先；手动选中的 provider 应提升到默认前面。
         # 若用户已经用 +/- 显式调过任一通道，保留用户值，不在确认时覆盖。
-        priority_changes.setdefault(new_pid, max(0, min(new_base, orig_pri) - 5))
-        priority_changes.setdefault(orig_pid, max(orig_pri, new_base) + 5)
+        priority_changes.setdefault(new_pid, min(200, max(new_base, orig_pri) + 5))
+        priority_changes.setdefault(orig_pid, max(0, min(orig_pri, new_base) - 5))
 
     def _adjust_provider_priority(opt, delta):
         pid = opt.get("provider_id", "")
@@ -848,13 +854,13 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             elif key in (ord('+'), ord('=')) and not search_query:
                 if focus == "provider" and current_model and current_choices:
                     chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                    # 当前语义是数字越小越优先；"+" 应提升优先级并把通道往上排。
-                    _adjust_provider_priority(chosen, -5)
+                    # 当前语义是数字越大越优先；"+" 应提升优先级并把通道往上排。
+                    _adjust_provider_priority(chosen, +5)
                     _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
             elif key in (ord('-'), ord('_')) and not search_query:
                 if focus == "provider" and current_model and current_choices:
                     chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                    _adjust_provider_priority(chosen, +5)
+                    _adjust_provider_priority(chosen, -5)
                     _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
             elif key in (10, 13, curses.KEY_ENTER):
                 if filtered:
@@ -1688,6 +1694,13 @@ def select_provider_browse_tui(providers):
         return None
 
     _ROLE_COLORS = {"primary": 3, "auto": 4, "fallback": 5}
+    providers = sorted(
+        providers,
+        key=lambda p: (
+            -int(p.get("priority", 100) or 100),
+            p.get("name", p.get("id", "")),
+        ),
+    )
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -1789,9 +1802,15 @@ def select_provider_browse_tui(providers):
             elif key in (ord('+'), ord('=')):
                 providers[idx]["priority"] = min(200, providers[idx].get("priority", 100) + 5)
                 providers[idx]["_changed"] = True
+                selected_id = providers[idx].get("id")
+                providers.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name", p.get("id", ""))))
+                idx = next((i for i, item in enumerate(providers) if item.get("id") == selected_id), idx)
             elif key in (ord('-'), ord('_')):
                 providers[idx]["priority"] = max(0, providers[idx].get("priority", 100) - 5)
                 providers[idx]["_changed"] = True
+                selected_id = providers[idx].get("id")
+                providers.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name", p.get("id", ""))))
+                idx = next((i for i, item in enumerate(providers) if item.get("id") == selected_id), idx)
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
@@ -1925,6 +1944,12 @@ def select_provider_mgmt_tui(providers):
 
     import copy
     items = copy.deepcopy(providers)
+    items.sort(
+        key=lambda p: (
+            -int(p.get("priority", 100) or 100),
+            p.get("name") or p.get("id", ""),
+        ),
+    )
     changed = False
 
     def _inner(stdscr):
@@ -2032,9 +2057,15 @@ def select_provider_mgmt_tui(providers):
             elif key in (ord('+'), ord('=')):
                 items[idx]["priority"] = min(200, items[idx].get("priority", 100) + 5)
                 changed = True
+                selected_id = items[idx].get("id")
+                items.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name") or p.get("id", "")))
+                idx = next((i for i, item in enumerate(items) if item.get("id") == selected_id), idx)
             elif key in (ord('-'), ord('_')):
                 items[idx]["priority"] = max(0, items[idx].get("priority", 100) - 5)
                 changed = True
+                selected_id = items[idx].get("id")
+                items.sort(key=lambda p: (-int(p.get("priority", 100) or 100), p.get("name") or p.get("id", "")))
+                idx = next((i for i, item in enumerate(items) if item.get("id") == selected_id), idx)
             elif key in (10, 13, curses.KEY_ENTER):
                 if changed:
                     return items

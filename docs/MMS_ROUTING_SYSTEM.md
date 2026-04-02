@@ -54,7 +54,7 @@ Provider A   Provider B     （跨 provider 负载）
 id = "bailian-codingplan"
 name = "百炼 CodingPlan"
 role = "primary"        # primary | auto | fallback
-priority = 75           # 正整数，数值越小越优先
+priority = 75           # 正整数，数值越大越优先
 enabled = true
 ```
 
@@ -78,7 +78,7 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 1. 遍历所有 enabled provider
 2. 过滤：支持目标 CLI + 支持目标协议 + 有 API key + 有 base_url
 3. 检查该 provider 是否有目标模型（probe 缓存 or fallback_models）
-4. 打分：(ROLE_WEIGHTS[role], -priority)
+4. 打分：(ROLE_WEIGHTS[role], -priority)，即同 role 下 priority 越大越优先
 5. 升序排序，取第一个 → 最优 provider
 ```
 
@@ -371,7 +371,7 @@ mms routes export   # 强制重新生成
 ### 6.3 生成规则
 
 1. 只收录支持 `anthropic_messages` 协议且有 `anthropic_base_url` 的 provider
-2. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority desc）
+2. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority 高到低）
 3. 同一模型不重复，先 claim 先得
 4. mtime 缓存：config.toml 未变时直接读缓存
 5. `capabilities / native_clis / bridge_clis / cli_modes` 是 MMS 的启发式元数据，用于展示层和 Hive 消费，不改变实际启动决策
