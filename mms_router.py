@@ -566,7 +566,7 @@ def export_model_routes(cfg=None, force=False):
         _provider_effective_models,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
         _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
-        _load_usage_stats,
+        _load_usage_stats, _active_usage_path,
     )
 
     if cfg is None:
@@ -575,12 +575,14 @@ def export_model_routes(cfg=None, force=False):
             return {}
         cfg = apply_local_overrides(cfg)
 
-    # mtime 检查：config 未变且 routes 已存在 → 直接返回缓存
+    # mtime 检查：config / usage 未变且 routes 已存在 → 直接返回缓存
     if not force and os.path.exists(MODEL_ROUTES_PATH) and os.path.exists(_MMS_CONFIG_PATH):
         try:
             config_mtime = os.path.getmtime(_MMS_CONFIG_PATH)
             routes_mtime = os.path.getmtime(MODEL_ROUTES_PATH)
-            if routes_mtime >= config_mtime:
+            usage_path = _active_usage_path()
+            usage_mtime = os.path.getmtime(usage_path) if os.path.exists(usage_path) else 0
+            if routes_mtime >= config_mtime and routes_mtime >= usage_mtime:
                 with open(MODEL_ROUTES_PATH, "r", encoding="utf-8") as f:
                     return json.load(f).get("routes", {})
         except (OSError, json.JSONDecodeError):

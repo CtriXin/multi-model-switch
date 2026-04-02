@@ -58,6 +58,22 @@ priority = 75           # 正整数，数值越大越优先
 enabled = true
 ```
 
+同理，`[[accounts]]` 上的 `priority` 也使用同一语义：
+
+```toml
+[[accounts]]
+id = "apple-codex"
+cli = "codex"
+priority = 110          # 正整数，数值越大越优先
+enabled = true
+```
+
+注意：
+
+1. `priority` 是 **runtime 级字段**，挂在 `provider/account` 上，不是每个 model 一份。
+2. 同一个 runtime 承载多个 model 时，改一次 `priority` 会影响这些 model 的通道顺序与默认命中。
+3. 如果未来要做 per-model affinity / pinning，必须显式扩展 schema，不要把它偷偷塞进 `priority`。
+
 ### 2.2 Role 权重
 
 ```python
@@ -82,7 +98,46 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 5. 升序排序，取第一个 → 最优 provider
 ```
 
-排序效果：`primary:P75` > `primary:P100` > `auto:P75` > `auto:P100` > `fallback:*`
+排序效果：`primary:P100` > `primary:P75` > `auto:P100` > `auto:P75` > `fallback:*`
+
+更准确地说，当前比较顺序是：
+
+1. `role`
+2. `priority`
+3. 其余 tie-break（名称/遍历顺序等）
+
+所以在同一 role 内，一定是 `P100` 优先于 `P75`。
+
+---
+
+## 2.4 展示排序信号
+
+当前展示层与执行层已统一为高数值优先，但不同字段的职责不同：
+
+| 字段 | 级别 | 当前作用 | 是否影响实际选路 |
+|------|------|----------|------------------|
+| `role` | provider | 主/自动/备用分层 | 是 |
+| `priority` | provider/account | 同层级内排序与默认命中 | 是 |
+| `use_count` | model | family/model 列表排序、导出元数据 | 否 |
+| `last_used_at` / recent | scene/runtime | 继续上次、最近路径 | 否（不直接参与 provider 自动选路） |
+
+当前排序规则：
+
+1. family 列表：
+   - 当前 CLI 的默认主族群优先
+   - 再按该 family 总 `use_count` 降序
+   - 再按 family 名称
+2. family 内 model 列表：
+   - 按 `use_count` 降序
+   - 同分按 model 名称
+3. model 右侧通道/provider 列表：
+   - 按 `priority` 降序
+   - 同分按名称
+
+因此：
+
+- 新模型刚出现时，如果 `use_count=0`，会被历史高频 model 压住
+- 这不会改变实际 runtime 选路，只影响你在 TUI 里看到的顺序
 
 ---
 
@@ -336,6 +391,17 @@ mms routes export   # 强制重新生成
       "provider_id": "kimi-codingplan",
       "priority": 75,
       "role": "auto",
+      "use_count": 12,
+      "fallback_routes": [
+        {
+          "anthropic_base_url": "https://relay.example.com/v1",
+          "openai_base_url": "https://relay.example.com/v1",
+          "api_key": "sk-relay-xxx",
+          "provider_id": "xin",
+          "priority": 70,
+          "role": "auto"
+        }
+      ],
       "capabilities": ["tool_use", "reasoning", "long_context", "bridge_required"],
       "native_clis": ["kimi"],
       "bridge_clis": ["claude", "codex"],
@@ -353,6 +419,24 @@ mms routes export   # 强制重新生成
       "provider_id": "bailian-codingplan",
       "priority": 75,
       "role": "primary",
+      "use_count": 44,
+      "fallback_routes": [
+        {
+          "anthropic_base_url": "https://...",
+          "api_key": "sk-yyy",
+          "provider_id": "private",
+          "priority": 70,
+          "role": "auto"
+        },
+        {
+          "anthropic_base_url": "https://...",
+          "openai_base_url": "https://...",
+          "api_key": "sk-zzz",
+          "provider_id": "xin",
+          "priority": 65,
+          "role": "auto"
+        }
+      ],
       "capabilities": ["tool_use", "reasoning", "long_context"],
       "native_clis": ["claude"],
       "bridge_clis": ["codex"],
@@ -370,15 +454,38 @@ mms routes export   # 强制重新生成
 
 ### 6.3 生成规则
 
-1. 只收录支持 `anthropic_messages` 协议且有 `anthropic_base_url` 的 provider
-2. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority 高到低）
-3. 同一模型不重复，先 claim 先得
-4. mtime 缓存：config.toml 未变时直接读缓存
-5. `capabilities / native_clis / bridge_clis / cli_modes` 是 MMS 的启发式元数据，用于展示层和 Hive 消费，不改变实际启动决策
+1. 收录支持 `anthropic_messages` 或 `openai_chat_completions` 的 provider；`anthropic_base_url` / `openai_base_url` 至少要有一个可用
+2. 每个模型会先做 model-CLI compatibility 过滤：
+   - `gpt-* / gemini-* / o*` 只从 `supported_clis` 含 `codex` 的 provider claim
+   - `claude-*` 只从 `supported_clis` 含 `claude` 的 provider claim
+   - 国产模型当前默认放宽
+3. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority 高到低）
+4. 同一模型不重复，先 claim 先得
+5. 每个模型除主路由外，最多附带 3 条 `fallback_routes`，按优先级顺序保留备选通道
+6. `use_count` 会被写入导出结果，来自 `usage.json` 聚合，供展示层和消费端做模糊解析排序；它不会反向驱动 runtime 选路
+7. `capabilities / native_clis / bridge_clis / cli_modes` 是 MMS 的启发式元数据，用于展示层和 Hive 消费，不改变实际启动决策
+8. mtime 缓存：`config.toml` 与 `usage.json` 都未更新时直接读缓存
 
 ### 6.4 Hive MCP 消费方式
 
 Hive 读取 `~/.config/mms/model-routes.json`，按 model name 查找对应的 `anthropic_base_url` + `api_key`，直接发 Anthropic Messages API 请求。无需关心 provider 选择逻辑。
+
+### 6.5 刷新机制
+
+`model-routes.json` 是派生文件，不是主配置源。
+
+当前刷新规则：
+
+1. 手动执行 `mms routes export` / `mms routes export --force`
+2. 某些会改 `provider/account priority/role` 的 TUI 操作后，会在保存配置时同步触发重导出
+3. 写 `usage.json` 后，会后台异步触发一次轻量 re-export（best-effort，不阻塞前台启动）
+4. `mms routes show` / `export_model_routes(force=False)` 会同时检查 `config.toml` 和 `usage.json` 的 mtime；如果 routes 同时新于这两者，则直接读缓存
+
+因此：
+
+- `use_count` 或“最近使用”变化通常会通过 `usage.json` 写入带动后台刷新
+- 即使后台任务没赶上，下次任何走 `export_model_routes(force=False)` 的路径也会因为 `usage.json` 更新而重算
+- Hive 直接读文件时，通常能拿到较新的 `use_count`；极短窗口内可能滞后一拍，但不会长期卡住旧值
 
 ---
 
@@ -440,6 +547,6 @@ tail -f ~/.config/mms/lb_route.log
 
 1. **LLM 分类模型选择** — 当前用 light_model（负载里的 light slot 模型）做分类。是否需要独立配置一个 classify 专用模型？
 2. **分类结果跨 session 持久化** — 当前 LLM 异步结果只在内存中缓存（5 分钟），是否需要持久化到磁盘？
-3. **Hive 消费 model-routes.json 的刷新机制** — 当前只在 `mms` 启动时检查 mtime 自动重新生成。Hive 是否需要 watch 机制或 webhook？
+3. **Hive 消费 model-routes.json 的刷新机制** — 当前主要跟 config 变更和显式 export 绑定，不跟 usage 写入实时绑定。Hive 是否需要 watch 机制或 webhook？
 4. **负载模式的 provider 一致性** — 当前 heavy/medium/light 各自独立选 provider。是否需要策略约束（如同一 provider 优先）？
 5. **路由日志分析** — 是否需要定期统计 tier 分布、LLM 命中率、关键词覆盖率？

@@ -9,6 +9,7 @@ import json
 import shutil
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 try:
@@ -1267,6 +1268,53 @@ def _save_usage_stats(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
     os.chmod(USAGE_PATH, 0o600)
+    _trigger_routes_export_after_usage_write()
+
+
+_USAGE_ROUTES_EXPORT_LOCK = threading.Lock()
+_USAGE_ROUTES_EXPORT_RUNNING = False
+_USAGE_ROUTES_EXPORT_LAST_STARTED_AT = 0.0
+_USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC = 15.0
+
+
+def _trigger_routes_export_after_usage_write():
+    """Best-effort async routes export after usage changes.
+
+    This keeps model-routes.json reasonably fresh for file readers such as Hive
+    without blocking the foreground launch path on a full export.
+    """
+    global _USAGE_ROUTES_EXPORT_RUNNING, _USAGE_ROUTES_EXPORT_LAST_STARTED_AT
+
+    now = time.monotonic()
+    with _USAGE_ROUTES_EXPORT_LOCK:
+        if _USAGE_ROUTES_EXPORT_RUNNING:
+            return
+        if now - _USAGE_ROUTES_EXPORT_LAST_STARTED_AT < _USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC:
+            return
+        _USAGE_ROUTES_EXPORT_RUNNING = True
+        _USAGE_ROUTES_EXPORT_LAST_STARTED_AT = now
+
+    def _run():
+        global _USAGE_ROUTES_EXPORT_RUNNING
+        try:
+            from mms_router import export_model_routes
+
+            cfg = load_config()
+            if cfg is None:
+                return
+            cfg = apply_local_overrides(cfg)
+            export_model_routes(cfg, force=True)
+        except Exception:
+            pass
+        finally:
+            with _USAGE_ROUTES_EXPORT_LOCK:
+                _USAGE_ROUTES_EXPORT_RUNNING = False
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name="mms-usage-routes-export",
+    ).start()
 
 
 def _backup_config_tree(label):
