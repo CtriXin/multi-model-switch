@@ -10,6 +10,7 @@ import shutil
 import logging
 import threading
 import time
+from urllib.request import Request, urlopen
 from datetime import datetime, timezone
 
 try:
@@ -100,6 +101,8 @@ CREDENTIALS_PATH = os.path.join(PRIMARY_CONFIG_DIR, "credentials.sh")
 ENV_DIR = os.path.join(PRIMARY_CONFIG_DIR, "env")
 ACCOUNTS_DIR = os.path.join(PRIMARY_CONFIG_DIR, "accounts")
 USAGE_PATH = os.path.join(PRIMARY_CONFIG_DIR, "usage.json")
+VERSION_META_PATH = os.path.join(PRIMARY_CONFIG_DIR, "version.json")
+UPDATE_CHECK_PATH = os.path.join(PRIMARY_CONFIG_DIR, "update-check.json")
 LEGACY_CONFIG_PATH = os.path.join(LEGACY_CONFIG_DIR, "config.toml")
 LEGACY_CREDENTIALS_PATH = os.path.join(LEGACY_CONFIG_DIR, "credentials.sh")
 LEGACY_ENV_DIR = os.path.join(LEGACY_CONFIG_DIR, "env")
@@ -122,6 +125,11 @@ MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
 DIRECT_CLI_MODES = {"qwen", "kimi"}
 DEFAULT_KIMI_MODEL = "kimi-k2.5"
+UPDATE_CHECK_INTERVAL_SEC = 24 * 60 * 60
+UPDATE_PROMPT_INTERVAL_SEC = 24 * 60 * 60
+
+_UPDATE_CHECK_LOCK = threading.Lock()
+_UPDATE_CHECK_RUNNING = False
 
 
 class WizardBack(Exception):
@@ -130,6 +138,148 @@ class WizardBack(Exception):
 
 class WizardCancel(Exception):
     pass
+
+
+def _parse_semver_tag(tag):
+    value = str(tag or "").strip()
+    if not value.startswith("v"):
+        return None
+    parts = value[1:].split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def _load_json_file(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else default
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _save_json_file(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+
+
+def _load_version_meta():
+    return _load_json_file(VERSION_META_PATH, {})
+
+
+def _load_update_check_cache():
+    return _load_json_file(UPDATE_CHECK_PATH, {})
+
+
+def _save_update_check_cache(payload):
+    _save_json_file(UPDATE_CHECK_PATH, payload)
+
+
+def _fetch_latest_semver_tag():
+    req = Request(
+        "https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page=100",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "mms-update-check",
+        },
+    )
+    with urlopen(req, timeout=3) as resp:
+        data = json.load(resp)
+
+    if not isinstance(data, list):
+        return ""
+
+    best = None
+    best_tag = ""
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("name") or "").strip()
+        parsed = _parse_semver_tag(tag)
+        if parsed is None:
+            continue
+        if best is None or parsed > best:
+            best = parsed
+            best_tag = tag
+    return best_tag
+
+
+def _major_update_notice():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+
+    version_meta = _load_version_meta()
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    installed_semver = _parse_semver_tag(installed_version)
+    if installed_semver is None:
+        return None
+
+    cache = _load_update_check_cache()
+    latest_tag = str(cache.get("latest_tag") or "").strip()
+    latest_semver = _parse_semver_tag(latest_tag)
+    if latest_semver is None or latest_semver[0] <= installed_semver[0]:
+        return None
+
+    now = time.time()
+    last_prompted_for = str(cache.get("last_prompted_for") or "").strip()
+    last_prompted_at = float(cache.get("last_prompted_at") or 0)
+    if last_prompted_for == latest_tag and now - last_prompted_at < UPDATE_PROMPT_INTERVAL_SEC:
+        return None
+
+    cache["last_prompted_for"] = latest_tag
+    cache["last_prompted_at"] = now
+    _save_update_check_cache(cache)
+    return {
+        "installed_version": installed_version,
+        "latest_tag": latest_tag,
+        "upgrade_command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
+    }
+
+
+def _start_async_update_check():
+    global _UPDATE_CHECK_RUNNING
+
+    version_meta = _load_version_meta()
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    if _parse_semver_tag(installed_version) is None:
+        return
+
+    cache = _load_update_check_cache()
+    last_checked_at = float(cache.get("checked_at") or 0)
+    if time.time() - last_checked_at < UPDATE_CHECK_INTERVAL_SEC:
+        return
+
+    with _UPDATE_CHECK_LOCK:
+        if _UPDATE_CHECK_RUNNING:
+            return
+        _UPDATE_CHECK_RUNNING = True
+
+    def _run():
+        global _UPDATE_CHECK_RUNNING
+        try:
+            latest_tag = _fetch_latest_semver_tag()
+            payload = _load_update_check_cache()
+            payload["checked_at"] = time.time()
+            if latest_tag:
+                payload["latest_tag"] = latest_tag
+            _save_update_check_cache(payload)
+        except Exception:
+            pass
+        finally:
+            with _UPDATE_CHECK_LOCK:
+                _UPDATE_CHECK_RUNNING = False
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name="mms-update-check",
+    ).start()
 
 # 统一模型家族规则表（有序）。
 # keywords 匹配模型名任意部分（不限前缀），支持 provider/model 格式。
@@ -7117,6 +7267,15 @@ def main():
     if args.trace:
         _trace_enabled = True
         _trace_overrides = []
+
+    update_notice = _major_update_notice()
+    if update_notice:
+        console.print(
+            f"[yellow]发现新版本 {update_notice['latest_tag']}[/yellow] "
+            f"[dim](当前 {update_notice['installed_version']})[/dim]"
+        )
+        console.print(f"[dim]升级命令: {update_notice['upgrade_command']}[/dim]")
+    _start_async_update_check()
 
     if args.account and args.provider:
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
