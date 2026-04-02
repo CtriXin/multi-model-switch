@@ -1825,6 +1825,22 @@ def _codex_gateway_env(runtime, base_url):
             block += f'{key} = {_toml_literal(value)}\n'
         return text[:block_start] + block + text[block_end:]
 
+    def _rewrite_table_block(text, table_header, entries):
+        import re
+        escaped_header = re.escape(table_header)
+        pattern = re.compile(
+            rf'^\[{escaped_header}\]\s*$.*?(?=^\[|\Z)',
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        text = pattern.sub("", text).rstrip()
+        block_lines = [f'[{table_header}]']
+        for key, value in entries:
+            block_lines.append(f'{key} = {_toml_literal(value)}')
+        block = "\n".join(block_lines) + "\n"
+        if text:
+            text += "\n\n"
+        return text + block
+
     def _normalize_toml_layout(text):
         import re
         # Repair malformed cases like `[model_providers.custom]name = "custom"`.
@@ -1837,7 +1853,9 @@ def _codex_gateway_env(runtime, base_url):
     # Codex CLI 会读取 project-scoped config，单改顶层 base_url 不够。
     gateway_config_template = os.path.join(gateway_base, ".codex", "config.toml")
     real_config = _real_user_path(".codex", "config.toml")
-    source_config = gateway_config_template if os.path.exists(gateway_config_template) else real_config
+    # Prefer the user's real config as the source of truth. The gateway template
+    # may contain stale custom sections from previous buggy generations.
+    source_config = real_config if os.path.exists(real_config) else gateway_config_template
     gateway_config = os.path.join(codex_dir, "config.toml")
     if os.path.exists(source_config):
         try:
@@ -1845,10 +1863,16 @@ def _codex_gateway_env(runtime, base_url):
                 config_text = f.read()
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
             config_text = _set_project_base_url(config_text, os.getcwd(), base_url)
-            config_text = _set_table_scalar(config_text, "model_providers.custom", "name", "custom")
-            config_text = _set_table_scalar(config_text, "model_providers.custom", "wire_api", "responses")
-            config_text = _set_table_scalar(config_text, "model_providers.custom", "requires_openai_auth", True)
-            config_text = _set_table_scalar(config_text, "model_providers.custom", "base_url", base_url)
+            config_text = _rewrite_table_block(
+                config_text,
+                "model_providers.custom",
+                [
+                    ("name", "custom"),
+                    ("wire_api", "responses"),
+                    ("requires_openai_auth", True),
+                    ("base_url", base_url),
+                ],
+            )
             config_text = _append_codex_mcp_servers_from_claude_json(config_text)
             config_text = _normalize_toml_layout(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
