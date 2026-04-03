@@ -6,6 +6,7 @@ import locale
 import os
 import sys
 import unicodedata
+from mms_i18n import pick as _L
 
 # CJK locale 下 ambiguous-width 字符渲染为 2 列
 _lang = os.environ.get("LANG", "") or locale.getdefaultlocale()[0] or ""
@@ -35,23 +36,24 @@ for _cli in CLI_LOGOS:
     CLI_LOGOS[_cli] = [""] * top_pad + lines + [""] * bot_pad
 
 
-CONNECT_ACTIONS = [
-    {
-        "id": "connect_gateway",
-        "title": "添加网关通道",
-        "summary": "输入 API URL 和 API Key，接入 newapi 或兼容网关",
-    },
-    {
-        "id": "connect_official",
-        "title": "添加官方通道",
-        "summary": "创建 OAuth 账号并进入官方登录流程",
-    },
-    {
-        "id": "manage_channels",
-        "title": "管理现有通道",
-        "summary": "查看状态、设默认、删除通道、查看本地统计",
-    },
-]
+def _connect_actions():
+    return [
+        {
+            "id": "connect_gateway",
+            "title": _L("添加网关通道", "Add Gateway Channel"),
+            "summary": _L("输入接口地址和 API Key，接入兼容 OpenAI / Anthropic 的服务", "Connect any OpenAI / Anthropic compatible service with Base URL and API key"),
+        },
+        {
+            "id": "connect_official",
+            "title": _L("添加官方通道", "Add Official Channel"),
+            "summary": _L("创建 OAuth 账号并进入官方登录流程", "Create an OAuth account and continue to the official login flow"),
+        },
+        {
+            "id": "manage_channels",
+            "title": _L("管理现有通道", "Manage Channels"),
+            "summary": _L("查看状态、设默认、删除通道、查看本地统计", "Inspect status, set defaults, remove channels, and view local stats"),
+        },
+    ]
 
 
 # ── 辅助函数 ──────────────────────────────────────────────
@@ -288,7 +290,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                     _safe_addstr(stdscr, row, ll - 1, "|", marker_attr)
                 else:
                     _safe_addstr(stdscr, row, ll, "<-", curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, row, ll + 1, "继续上次", last_attr)
+                _safe_addstr(stdscr, row, ll + 1, _L("继续上次", "Resume Last"), last_attr)
                 _safe_addstr(stdscr, row, ll + 11, last_model, last_attr, max_w=total_w - 24)
                 _safe_addstr(stdscr, row, rr - 1, "R", last_attr if is_last_sel else curses.color_pair(4) | curses.A_DIM)
                 row += 1
@@ -373,22 +375,22 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
             if search_query:
-                _safe_addstr(stdscr, bot_y, ll, "Esc 清除", curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, _L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)
             else:
                 _safe_addstr(stdscr, bot_y, ll, "Tab", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 4, "切CLI", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 4, _L("切CLI", "Switch CLI"), curses.color_pair(4) | curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 11, "→", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 13, "进模型", curses.color_pair(1) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 13, _L("进模型", "Models"), curses.color_pair(1) | curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 21, "L", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 23, "负载", curses.color_pair(5) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 23, _L("负载", "Load"), curses.color_pair(5) | curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 29, "S", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 31, "设置", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 31, _L("设置", "Settings"), curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 37, "P", curses.color_pair(6) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 39, "通道", curses.color_pair(6) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 39, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 45, "O", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 47, "接入", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 47, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
@@ -720,8 +722,8 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
 
             model_header_attr = (curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE) if focus == "model" else (fc | curses.A_BOLD)
             provider_header_attr = (curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE) if focus == "provider" else curses.A_DIM
-            _safe_addstr(stdscr, row, ll + 1, "模型", model_header_attr)
-            _safe_addstr(stdscr, row, rl + 1, "通道", provider_header_attr)
+            _safe_addstr(stdscr, row, ll + 1, _L("模型", "Model"), model_header_attr)
+            _safe_addstr(stdscr, row, rl + 1, _L("通道", "Channel"), provider_header_attr)
             row += 1
 
             # 双栏分隔
@@ -803,26 +805,26 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
             if search_query:
-                _safe_addstr(stdscr, bot_y, ll, "Esc 清除", curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 11, "BS 删字", curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 20, "Enter 确认", curses.color_pair(1) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 20, _L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)
             else:
-                focus_text = "模型" if focus == "model" else "通道"
+                focus_text = _L("模型", "Model") if focus == "model" else _L("通道", "Channel")
                 _safe_addstr(stdscr, bot_y, ll, "←/→", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 5, f"焦点:{focus_text}", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, ll + 5, _L(f"焦点:{focus_text}", f"Focus:{focus_text}"), curses.color_pair(4) | curses.A_DIM)
                 if last_used and last_used.get("model"):
                     _safe_addstr(stdscr, bot_y, ll + 16, "R", curses.color_pair(5) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 18, "上次", curses.color_pair(5) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 18, _L("上次", "Last"), curses.color_pair(5) | curses.A_DIM)
                     adjust_x = ll + 24
                 else:
                     adjust_x = ll + 16
                 _safe_addstr(stdscr, bot_y, adjust_x, "+/-", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, adjust_x + 4, "权重", curses.color_pair(5) | curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, adjust_x + 4, _L("权重", "Weight"), curses.color_pair(5) | curses.A_DIM)
                 enter_x = adjust_x + 10
                 _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, enter_x + 6, "确认", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, enter_x + 6, _L("确认", "Confirm"), curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, enter_x + 16, "返回", curses.A_DIM)
+                _safe_addstr(stdscr, bot_y, enter_x + 16, _L("返回", "Back"), curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
 
@@ -1607,13 +1609,14 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
 
 # ── 统一设置面板 TUI ──────────────────────────────────────
 
-SETTINGS_MENU = [
-    {"id": "provider_mgmt", "label": "Provider 管理", "desc": "查看/调整 role 与 priority"},
-    {"id": "account_mgmt", "label": "账号管理", "desc": "查看 OAuth 账号状态"},
-    {"id": "recommend", "label": "推荐模型", "desc": "编辑推荐模型列表"},
-    {"id": "routes_export", "label": "路由导出", "desc": "导出 model-routes.json"},
-    {"id": "about", "label": "关于", "desc": "版本与环境信息"},
-]
+def _settings_menu():
+    return [
+        {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
+        {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
+        {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
+        {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
+        {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
+    ]
 
 
 def select_settings_tui():
@@ -1628,12 +1631,13 @@ def select_settings_tui():
 
         idx = 0
         while True:
+            items = _settings_menu()
             stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
             ac = curses.color_pair(1)
 
             total_w = min(56, max_w - 4)
-            ph = len(SETTINGS_MENU) + 5
+            ph = len(items) + 5
             px = (max_w - total_w) // 2
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
@@ -1642,13 +1646,13 @@ def select_settings_tui():
             row = py
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
             row += 1
-            _safe_addstr(stdscr, row, ll, "设置", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll, _L("设置", "Settings"), curses.color_pair(1) | curses.A_BOLD)
             _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
             row += 1
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
 
-            for i, item in enumerate(SETTINGS_MENU):
+            for i, item in enumerate(items):
                 y = row + i
                 is_sel = (i == idx)
                 if is_sel:
@@ -1659,24 +1663,24 @@ def select_settings_tui():
                     _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
                     _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.A_DIM)
 
-            bot_y = row + len(SETTINGS_MENU)
+            bot_y = row + len(items)
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 6, "进入", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 6, _L("进入", "Open"), curses.A_DIM)
             _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 17, _L("返回", "Back"), curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(SETTINGS_MENU)
+                idx = (idx - 1) % len(items)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(SETTINGS_MENU)
+                idx = (idx + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER):
-                return SETTINGS_MENU[idx]["id"]
+                return items[idx]["id"]
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
@@ -2295,6 +2299,7 @@ def select_connect_tui():
 
         idx = 0
         while True:
+            actions = _connect_actions()
             stdscr.erase()
             max_y, max_w = stdscr.getmaxyx()
             ac = curses.color_pair(5)
@@ -2302,7 +2307,7 @@ def select_connect_tui():
             total_w = min(56, max_w - 4)
             left_w = 18
             right_w = total_w - left_w
-            ph = len(CONNECT_ACTIONS) + 5
+            ph = len(actions) + 5
             px = (max_w - total_w) // 2
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
@@ -2312,14 +2317,14 @@ def select_connect_tui():
             row = py
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
             row += 1
-            _safe_addstr(stdscr, row, ll, "接入通道", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, ll, _L("接入通道", "Connect Channels"), curses.color_pair(1) | curses.A_BOLD)
             _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
             row += 1
             _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
             row += 1
 
             content_y = row
-            for i, action in enumerate(CONNECT_ACTIONS):
+            for i, action in enumerate(actions):
                 y = content_y + i
                 is_sel = (i == idx)
                 _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
@@ -2332,24 +2337,24 @@ def select_connect_tui():
                     _safe_addstr(stdscr, y, ll + 1, action["title"], curses.color_pair(2), max_w=left_w - 4)
                     _safe_addstr(stdscr, y, rl, action["summary"], curses.A_DIM, max_w=right_w - 3)
 
-            bot_y = content_y + len(CONNECT_ACTIONS)
+            bot_y = content_y + len(actions)
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 6, "进入", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 6, _L("进入", "Open"), curses.A_DIM)
             _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 17, _L("返回", "Back"), curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
             if key == curses.KEY_UP:
-                idx = (idx - 1) % len(CONNECT_ACTIONS)
+                idx = (idx - 1) % len(actions)
             elif key == curses.KEY_DOWN:
-                idx = (idx + 1) % len(CONNECT_ACTIONS)
+                idx = (idx + 1) % len(actions)
             elif key in (10, 13, curses.KEY_ENTER):
-                return CONNECT_ACTIONS[idx]["id"]
+                return actions[idx]["id"]
             elif key in (27, ord("q"), ord("Q")):
                 return None
 
@@ -2387,9 +2392,9 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             ("ANTHROPIC_AUTH_TOKEN", "Key"),
             ("OPENAI_API_KEY", "Key"),
             ("GEMINI_API_KEY", "Key"),
-            ("MMS_ACTIVE_MODEL", "激活"),
-            ("MMS_ACTIVE_PRESET", "预设"),
-            ("MMS_ACTIVE_CLI", "CLI源"),
+            ("MMS_ACTIVE_MODEL", _L("激活", "Active")),
+            ("MMS_ACTIVE_PRESET", _L("预设", "Preset")),
+            ("MMS_ACTIVE_CLI", _L("CLI源", "CLI source")),
         ]
         seen = set()
         for env_key, label in preferred_keys:
@@ -2431,11 +2436,11 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             total_w = min(56, max_w - 4)
             info_lines = []
             info_lines.append(("CLI", cli))
-            info_lines.append(("模型", model_display[:total_w - 14]))
-            info_lines.append(("启动", "一次性命令" if once else "交互会话"))
+            info_lines.append((_L("模型", "Model"), model_display[:total_w - 14]))
+            info_lines.append((_L("启动", "Launch"), _L("一次性命令", "One-shot command") if once else _L("交互会话", "Interactive session")))
             if has_bypass:
-                mode_text = "BYPASS（跳过审批）" if bypass_mode else "正常"
-                info_lines.append(("模式", f"[Tab] {mode_text}"))
+                mode_text = _L("BYPASS（跳过审批）", "BYPASS (skip approvals)") if bypass_mode else _L("正常", "Normal")
+                info_lines.append((_L("模式", "Mode"), f"[Tab] {mode_text}"))
 
             ph = len(info_lines) + len(detail_lines) + 5
             px = (max_w - total_w) // 2
@@ -2446,14 +2451,14 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             row = py
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
             row += 1
-            title = "BYPASS 确认" if bypass_mode else "确认启动"
+            title = _L("BYPASS 确认", "BYPASS Confirm") if bypass_mode else _L("确认启动", "Confirm Launch")
             _safe_addstr(stdscr, row, ll, title, ac | curses.A_BOLD)
             row += 1
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
 
             for label, value in info_lines:
-                if label == "模式":
+                if label in {"模式", "Mode"}:
                     val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
                 else:
                     val_attr = curses.color_pair(1)
@@ -2469,14 +2474,14 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
             _safe_addstr(stdscr, row, ll, "Enter", curses.color_pair(5) | curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 6, "启动", curses.color_pair(5) | curses.A_DIM)
+            _safe_addstr(stdscr, row, ll + 6, _L("启动", "Launch"), curses.color_pair(5) | curses.A_DIM)
             if has_bypass:
                 _safe_addstr(stdscr, row, ll + 13, "Tab", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, row, ll + 17, "切模式", curses.color_pair(4) | curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 17, _L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_DIM)
             _safe_addstr(stdscr, row, ll + 27, "B", curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 29, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, row, ll + 29, _L("返回", "Back"), curses.A_DIM)
             _safe_addstr(stdscr, row, ll + 36, "Q", curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 38, "取消", curses.A_DIM)
+            _safe_addstr(stdscr, row, ll + 38, _L("取消", "Cancel"), curses.A_DIM)
             row += 1
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
 

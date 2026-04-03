@@ -20,6 +20,7 @@ SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
+INSTALL_LANG="zh"
 WRITE_SHELL_RC=0
 RUN_SETUP=0
 ENSURE_NODE22=0
@@ -36,7 +37,7 @@ trap cleanup EXIT
 usage() {
     cat <<EOF
 用法:
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -45,6 +46,7 @@ usage() {
 说明:
   - 默认远程安装/升级使用最新 semver tag
   - --ref 可指定版本号或分支，例如 v1.2.0 / main
+  - --lang 可设置默认 UI 语言（zh / en）
   - 同一条命令可重复执行，用于升级
 EOF
 }
@@ -135,20 +137,22 @@ download_remote_source() {
 
 write_version_metadata() {
     mkdir -p "$(dirname "$VERSION_META_PATH")"
-    python3 - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" <<'PY'
+    python3 - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
 import json
 import re
 import sys
 from datetime import datetime, timezone
 
-path, resolved_ref, install_channel = sys.argv[1:4]
+path, resolved_ref, install_channel, preferred_language = sys.argv[1:5]
 resolved_ref = str(resolved_ref or "").strip()
 installed_version = resolved_ref if re.fullmatch(r"v\d+\.\d+\.\d+", resolved_ref) else ""
+preferred_language = "en" if str(preferred_language).strip().lower().startswith("en") else "zh"
 
 payload = {
     "installed_ref": resolved_ref,
     "installed_version": installed_version,
     "install_channel": install_channel,
+    "preferred_language": preferred_language,
     "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "source": "install.sh",
 }
@@ -161,6 +165,45 @@ PY
     if [ -n "$RESOLVED_INSTALL_REF" ]; then
         echo "✓ 已记录安装版本: $RESOLVED_INSTALL_REF"
     fi
+}
+
+write_language_config() {
+    mkdir -p "$(dirname "$CONFIG_PATH")"
+    python3 - "$CONFIG_PATH" "$INSTALL_LANG" <<'PY'
+import os
+import sys
+
+config_path, preferred_language = sys.argv[1:3]
+preferred_language = "en" if str(preferred_language).strip().lower().startswith("en") else "zh"
+
+if not os.path.exists(config_path):
+    sys.exit(0)
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+
+try:
+    import tomli_w
+except ImportError:
+    tomli_w = None
+
+if tomli_w is None:
+    sys.exit(0)
+
+with open(config_path, "rb") as handle:
+    data = tomllib.load(handle)
+
+ui = data.get("ui")
+if not isinstance(ui, dict):
+    ui = {}
+data["ui"] = ui
+ui["language"] = preferred_language
+
+with open(config_path, "wb") as handle:
+    tomli_w.dump(data, handle)
+PY
 }
 
 prepare_source_dir() {
@@ -279,6 +322,15 @@ while [[ $# -gt 0 ]]; do
             INSTALL_REF=""
             INSTALL_CHANNEL="latest-tag"
             ;;
+        --lang)
+            shift
+            if [[ -z "${1:-}" ]] || [[ "$1" != "zh" && "$1" != "en" ]]; then
+                echo "❌ --lang 只支持 zh 或 en"
+                usage
+                exit 1
+            fi
+            INSTALL_LANG="$1"
+            ;;
         -h|--help)
             usage
             exit 0
@@ -351,6 +403,7 @@ done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ 文件已复制到 $MMS_HOME"
 write_version_metadata
+write_language_config
 
 chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
