@@ -1709,7 +1709,7 @@ def _claude_gateway_env(
         if _h:
             _s = _h.get("status", "?")
             _b = _h.get("latency_bucket", "?")
-            _icon = {"ok": "●", "slow": "◐", "degraded": "◑", "blocked": "○"}.get(_s, "?")
+            _icon = {"ok": "●", "slow": "◐", "degraded": "◑"}.get(_s, "?")
             print(f"  {_icon} {status_model}: {_s} ({_b})")
     except Exception:
         pass

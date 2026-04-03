@@ -66,21 +66,17 @@ class TestDetermineStatus:
 
     def test_ok_even_hours_old(self):
         from mms_health_cache import _determine_status
-        # Good TTFB + data from 2 hours ago = still ok (not degraded)
+        # Good TTFB + data from 2 hours ago = still ok
         assert _determine_status(500, 7200) == "ok"
 
-    def test_blocked_very_stale(self):
+    def test_none_when_no_data(self):
         from mms_health_cache import _determine_status
-        # Only blocked after 7 days of no data
-        assert _determine_status(500, 700000) == "blocked"
+        # No TTFB data = None (don't display), not "blocked"
+        assert _determine_status(None, None) is None
 
-    def test_blocked_no_data(self):
+    def test_none_when_no_ttfb(self):
         from mms_health_cache import _determine_status
-        assert _determine_status(None, None) == "blocked"
-
-    def test_blocked_no_ttfb(self):
-        from mms_health_cache import _determine_status
-        assert _determine_status(None, 10) == "blocked"
+        assert _determine_status(None, 10) is None
 
 
 # ── latency bucket ──
