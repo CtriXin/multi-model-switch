@@ -2350,11 +2350,18 @@ def _quick_connect_gateway(cfg, preset_id=None):
     template_key = _select_provider_template(preset_id=preset_id)
     template = _provider_template_payload(template_key)
     console.print(Panel(
-        "[bold]网关通道[/bold]\n\n填写接口地址（请求地址 / Base URL）和 API Key，接入兼容 OpenAI / Anthropic 的服务。\n"
-        "显示名称给你自己看；系统会自动生成内部标识，避免后续功能和外部消费引用丢失。\n"
-        "如果模型列表地址和请求地址不同，再额外填写“模型列表地址（高级）”。\n"
-        "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
-        "[dim]输入 b 返回，q 退出。[/dim]",
+        _L(
+            "[bold]网关通道[/bold]\n\n填写接口地址（请求地址 / Base URL）和 API Key，接入兼容 OpenAI / Anthropic 的服务。\n"
+            "显示名称给你自己看；系统会自动生成内部标识，避免后续功能和外部消费引用丢失。\n"
+            "如果模型列表地址和请求地址不同，再额外填写“模型列表地址（高级）”。\n"
+            "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
+            "[dim]输入 b 返回，q 退出。[/dim]",
+            "[bold]Gateway channel[/bold]\n\nEnter the request Base URL and API key for any OpenAI- or Anthropic-compatible service.\n"
+            "The display name is for you; MMS auto-generates a stable system ID so presets and external consumers do not break.\n"
+            "Only fill a separate model list URL if listing models uses a different endpoint.\n"
+            "All CLIs are enabled by default; use provider.edit later if you need tighter limits.\n"
+            "[dim]Type b to go back, q to cancel.[/dim]",
+        ),
         title=_L("快速接入", "Quick Connect"),
         border_style="cyan",
     ))
@@ -2392,10 +2399,16 @@ def _quick_connect_gateway(cfg, preset_id=None):
 def _quick_connect_official(cfg, preset_cli=None):
     _ensure_interactive_terminal(_L("官方通道接入", "official channel setup"))
     console.print(Panel(
-        "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
-        "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
-        "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
-        "[dim]输入 b 返回，q 退出。[/dim]",
+        _L(
+            "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
+            "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
+            "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
+            "[dim]输入 b 返回，q 退出。[/dim]",
+            "[bold]Official channel[/bold]\n\nCreate an isolated login directory and continue into the official CLI login flow.\n"
+            "The display name is user-facing; MMS auto-generates the stable system ID used by config and follow-up commands.\n"
+            "Use this when you want multiple ChatGPT / Claude / Gemini accounts in parallel.\n"
+            "[dim]Type b to go back, q to cancel.[/dim]",
+        ),
         title=_L("快速接入", "Quick Connect"),
         border_style="cyan",
     ))
