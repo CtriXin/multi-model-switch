@@ -24,6 +24,11 @@ codex_responses_bridge = None
 _write_route_status = None
 build_provider_speed_scope = None
 
+try:
+    from mms_health_cache import get_model_health as _get_model_health
+except ImportError:
+    def _get_model_health(*_a, **_kw): return None
+
 
 def _ensure_bridge_helpers():
     global _build_gateway_url, codex_claude_bridge, gemini_claude_bridge
@@ -356,45 +361,41 @@ def _load_real_claude_settings():
 
 
 def _strip_agent_im_hooks(hooks_data):
-    if not isinstance(hooks_data, dict):
-        return None
+    # Inherit hooks from global settings as-is
+    # Users control what's in their ~/.claude/settings.json
+    return hooks_data if isinstance(hooks_data, dict) else None
 
-    filtered = {}
-    for event_name, entries in hooks_data.items():
-        if not isinstance(entries, list):
-            filtered[event_name] = entries
+
+def _merge_claude_statusline(existing):
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(_CLAUDE_STATUSLINE_CONFIG)
+    return merged
+
+
+def _merge_claude_permissions(existing):
+    base = dict(existing) if isinstance(existing, dict) else {}
+    allow_existing = base.get("allow")
+    deny_existing = base.get("deny")
+    allow = []
+    seen_allow = set()
+    for item in list(allow_existing or []) + list(_CLAUDE_DEFAULT_PERMISSION_ALLOW):
+        value = str(item or "").strip()
+        if not value or value in seen_allow:
             continue
-
-        kept_entries = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                kept_entries.append(entry)
-                continue
-
-            hook_defs = entry.get("hooks")
-            if not isinstance(hook_defs, list):
-                kept_entries.append(entry)
-                continue
-
-            kept_hook_defs = []
-            for hook_def in hook_defs:
-                if not isinstance(hook_def, dict):
-                    kept_hook_defs.append(hook_def)
-                    continue
-                command = str(hook_def.get("command", ""))
-                if "agent-im" in command:
-                    continue
-                kept_hook_defs.append(hook_def)
-
-            if kept_hook_defs:
-                new_entry = dict(entry)
-                new_entry["hooks"] = kept_hook_defs
-                kept_entries.append(new_entry)
-
-        if kept_entries:
-            filtered[event_name] = kept_entries
-
-    return filtered or None
+        seen_allow.add(value)
+        allow.append(value)
+    deny = []
+    seen_deny = set()
+    for item in list(deny_existing or []) + list(_CLAUDE_DEFAULT_PERMISSION_DENY):
+        value = str(item or "").strip()
+        if not value or value in seen_deny:
+            continue
+        seen_deny.add(value)
+        deny.append(value)
+    base["allow"] = allow
+    base["deny"] = deny
+    base["defaultMode"] = "bypassPermissions"
+    return base
 
 
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
@@ -418,13 +419,9 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
     settings_data.setdefault("includeCoAuthoredBy", False)
     settings_data.setdefault("attribution", {"commit": "", "pr": ""})
     settings_data.setdefault("promptSuggestionEnabled", False)
-    settings_data.setdefault("skipDangerousModePermissionPrompt", True)
-    settings_data.setdefault("statusLine", dict(_CLAUDE_STATUSLINE_CONFIG))
-    settings_data.setdefault("permissions", {
-        "allow": list(_CLAUDE_DEFAULT_PERMISSION_ALLOW),
-        "defaultMode": "bypassPermissions",
-        "deny": list(_CLAUDE_DEFAULT_PERMISSION_DENY),
-    })
+    settings_data["skipDangerousModePermissionPrompt"] = True
+    settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
+    settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
     return settings_data
 
 
@@ -1703,6 +1700,17 @@ def _claude_gateway_env(
     _ensure_bridge_helpers()
     try:
         _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
+    except Exception:
+        pass
+
+    # ── health 预检摘要 ──
+    try:
+        _h = _get_model_health(status_model)
+        if _h:
+            _s = _h.get("status", "?")
+            _b = _h.get("latency_bucket", "?")
+            _icon = {"ok": "●", "slow": "◐", "degraded": "◑", "blocked": "○"}.get(_s, "?")
+            print(f"  {_icon} {status_model}: {_s} ({_b})")
     except Exception:
         pass
 

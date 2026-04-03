@@ -13,6 +13,11 @@ from urllib.parse import urlsplit
 
 from mms_speed_stats import record_model_speed
 
+try:
+    from mms_events import emit_event as _emit_event
+except ImportError:
+    def _emit_event(*_a, **_kw): pass
+
 
 class _SilentHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer that silences BrokenPipeError/ConnectionResetError on client disconnect."""
@@ -1496,6 +1501,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     reason,
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
+                _emit_event("started", payload.get("model", ""), note=f"tier={level} reason={reason}")
                 # 保存 level 供后续使用
                 self.server._last_level = level
             elif user_msgs:
@@ -1511,6 +1517,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     "tool_continue",
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
+                _emit_event("streaming", payload.get("model", ""), note="tool_continue")
                 from mms_router import log_route
                 log_route(prev_level, "tool_continue", payload.get("model", "?"), "(tool_result)")
             else:
@@ -1522,6 +1529,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     "no_user_msg",
                     status_paths=getattr(self.server, "route_status_paths", None),
                 )
+                _emit_event("streaming", payload.get("model", ""), note="no_user_msg")
                 self.server._last_level = prev_level
 
         # 无论是否路由，都写 status 供 statusline 显示真实 model
@@ -1532,6 +1540,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 "direct",
                 status_paths=getattr(self.server, "route_status_paths", None),
             )
+            _emit_event("started", payload.get("model", ""), note="direct")
 
         # 剥离 query string 再匹配路由（Claude Code 会发 /v1/messages?beta=true）
         path_bare = path.split("?")[0]
