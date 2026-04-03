@@ -116,6 +116,27 @@ if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]] && [ -n "$_ROUTE_STATUS" ] 
     fi
 fi
 
+# ── health indicator ──
+health_icon=""
+_HEALTH_CACHE="$HOME/.config/mms/health-cache.json"
+if [[ "$HOME" == *"/.config/mms/claude-gateway/"* ]]; then
+    _HEALTH_CACHE="${HOME%%/.config/mms/claude-gateway/*}/.config/mms/health-cache.json"
+fi
+if [ -f "$_HEALTH_CACHE" ]; then
+    h_age=$(( $(date +%s) - $(stat -f %m "$_HEALTH_CACHE" 2>/dev/null || echo 0) ))
+    if [ "$h_age" -lt 120 ]; then
+        _h_model="${r_model:-$model_short}"
+        _h_status=$(jq -r --arg m "$_h_model" '.records[$m].status // empty' "$_HEALTH_CACHE" 2>/dev/null)
+        case "$_h_status" in
+            ok)       health_icon=" ●" ;;
+            slow)     health_icon=" ◐" ;;
+            degraded) health_icon=" ◑" ;;
+            blocked)  health_icon=" ○" ;;
+        esac
+    fi
+fi
+model_short="${model_short}${health_icon}"
+
 project=$(basename "$cwd" 2>/dev/null || echo "-")
 
 git_branch="-"
