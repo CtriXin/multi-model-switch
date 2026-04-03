@@ -10,9 +10,9 @@ import pytest
 
 # Timestamps for testing age-based logic
 NOW = datetime.now(timezone.utc).isoformat()
-STALE_7M = datetime.fromtimestamp(time.time() - 420, tz=timezone.utc).isoformat()
-STALE_12M = datetime.fromtimestamp(time.time() - 720, tz=timezone.utc).isoformat()
-STALE_35M = datetime.fromtimestamp(time.time() - 2100, tz=timezone.utc).isoformat()
+STALE_2H = datetime.fromtimestamp(time.time() - 7200, tz=timezone.utc).isoformat()
+STALE_25H = datetime.fromtimestamp(time.time() - 90000, tz=timezone.utc).isoformat()
+STALE_8D = datetime.fromtimestamp(time.time() - 691200, tz=timezone.utc).isoformat()
 
 
 def _entry(ttfb, last_updated=NOW, provider_key="pk-test", **kw):
@@ -64,14 +64,15 @@ class TestDetermineStatus:
         from mms_health_cache import _determine_status
         assert _determine_status(8001, 100) == "degraded"
 
-    def test_degraded_stale_sample(self):
+    def test_ok_even_hours_old(self):
         from mms_health_cache import _determine_status
-        # age > 600s triggers degraded even with good ttfb
-        assert _determine_status(500, 700) == "degraded"
+        # Good TTFB + data from 2 hours ago = still ok (not degraded)
+        assert _determine_status(500, 7200) == "ok"
 
     def test_blocked_very_stale(self):
         from mms_health_cache import _determine_status
-        assert _determine_status(500, 2000) == "blocked"
+        # Only blocked after 7 days of no data
+        assert _determine_status(500, 700000) == "blocked"
 
     def test_blocked_no_data(self):
         from mms_health_cache import _determine_status
