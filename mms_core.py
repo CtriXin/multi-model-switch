@@ -72,6 +72,7 @@ def _ensure_rich():
 
 from mms_account_state import seed_claude_state, seed_gemini_state
 from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
+from mms_i18n import normalize_language, set_language, pick as _L
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
@@ -467,6 +468,50 @@ def normalize_user_role(role):
     return MODE_ALL
 
 
+def _normalize_ui_config(cfg):
+    cfg = dict(cfg)
+    raw_ui = cfg.get("ui")
+    current = raw_ui if isinstance(raw_ui, dict) else {}
+    lang = normalize_language(current.get("language", "")) or "zh"
+    new_cfg = dict(cfg)
+    new_cfg["ui"] = {"language": lang}
+    return new_cfg, new_cfg != cfg
+
+
+def _resolve_ui_language(cfg=None, cli_override=None):
+    cli_lang = normalize_language(cli_override)
+    if cli_lang:
+        return cli_lang
+    env_lang = normalize_language(os.environ.get("MMS_LANG", ""))
+    if env_lang:
+        return env_lang
+    if isinstance(cfg, dict):
+        ui_lang = normalize_language((cfg.get("ui") or {}).get("language", ""))
+        if ui_lang:
+            return ui_lang
+    version_lang = normalize_language(_load_version_meta().get("preferred_language", ""))
+    if version_lang:
+        return version_lang
+    return "zh"
+
+
+def _extract_global_lang(argv):
+    cleaned = []
+    lang = ""
+    idx = 0
+    while idx < len(argv):
+        item = argv[idx]
+        if item == "--lang" and idx + 1 < len(argv):
+            candidate = normalize_language(argv[idx + 1])
+            if candidate:
+                lang = candidate
+                idx += 2
+                continue
+        cleaned.append(item)
+        idx += 1
+    return cleaned, lang
+
+
 ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 VALID_ROLES = set(ROLE_WEIGHTS.keys())
 _REASONING_MODEL_HINTS = (
@@ -583,6 +628,20 @@ def _normalize_model_id_list(values):
         seen.add(model_id)
         normalized.append(model_id)
     return normalized
+
+
+def _unique_runtime_id(existing_ids, base_id):
+    normalized = str(base_id or "").strip()
+    if not normalized:
+        normalized = "default"
+    if normalized not in existing_ids:
+        return normalized
+    suffix = 2
+    while True:
+        candidate = f"{normalized}-{suffix}"
+        if candidate not in existing_ids:
+            return candidate
+        suffix += 1
 
 
 def _normalize_models_endpoint(value):
@@ -919,6 +978,7 @@ def _default_load_balance_profile_name(cfg):
 def _normalize_config_sections(cfg):
     cfg, _ = _ensure_provider_config(cfg)
     cfg, _ = _ensure_account_config(cfg)
+    cfg, _ = _normalize_ui_config(cfg)
     cfg, _ = _normalize_presets_config(cfg)
     cfg, _ = _normalize_user_config(cfg)
     cfg, _ = _normalize_cache_config(cfg)
@@ -1821,6 +1881,7 @@ def resolve_account_context(cfg, account_id=None, cli_name=None):
 
 def _default_config(role=MODE_ALL):
     return {
+        "ui": {"language": "zh"},
         "user": {"role": normalize_user_role(role)},
         "cache": {
             "probe_async_refresh_after_sec": _PROBE_ASYNC_REFRESH_AFTER,
@@ -2100,8 +2161,8 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     current = _normalize_provider(existing or {})
     provider_id = preset_id or current.get("id") or DEFAULT_PROVIDER_ID
     if not preset_id:
-        provider_id = Prompt.ask("模型源 ID", default=provider_id).strip() or DEFAULT_PROVIDER_ID
-    name = Prompt.ask("模型源名称", default=current.get("name") or provider_id).strip() or provider_id
+        provider_id = Prompt.ask("系统内部标识（高级）", default=provider_id).strip() or DEFAULT_PROVIDER_ID
+    name = Prompt.ask("显示名称", default=current.get("name") or provider_id).strip() or provider_id
     protocols = _prompt_csv_values(
         "协议（逗号分隔）",
         current.get("protocols", list(DEFAULT_PROVIDER_PROTOCOLS)),
@@ -2113,13 +2174,13 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         list(CLI_NAMES),
     )
     use_custom_models_endpoint = Confirm.ask(
-        "模型拉取使用自定义 endpoint？",
+        "模型列表地址与接口地址不同？（高级）",
         default=current.get("models_endpoint", "/models") != "/models",
     )
     models_endpoint = "/models"
     if use_custom_models_endpoint:
         models_endpoint = _normalize_models_endpoint(
-            Prompt.ask("模型列表接口路径（输入 manual 表示仅用手工模型）", default=current.get("models_endpoint", "/models"))
+            Prompt.ask("模型列表地址（高级；仅用于拉取模型列表，输入 manual 表示完全手工维护模型）", default=current.get("models_endpoint", "/models"))
         )
     priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
@@ -2186,7 +2247,7 @@ def _select_provider_template(preset_id=None):
     console.print("  8. MiniMax CN")
     console.print("  9. MiniMax CodingPlan")
     console.print("  10. MiniMax EN")
-    selected = Prompt.ask("选择网关通道类型", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], default="1")
+    selected = Prompt.ask(_L("选择网关通道类型", "Select gateway type"), choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], default="1")
     return _provider_template_names()[selected]
 
 
@@ -2218,8 +2279,8 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
 def _prompt_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
     if not sys.stdin.isatty():
         console.print(
-            f"[red]当前不是交互终端，无法输入 API URL / API Key，请在终端里运行 {current_command()} "
-            f"或执行 {config_command_hint()}[/red]"
+            f"[red]{_L('当前不是交互终端，无法输入 API URL / API Key，请在终端里运行', 'Not running in an interactive terminal. Please run')} {current_command()} "
+            f"{_L('或执行', 'or')} {config_command_hint()}[/red]"
         )
         sys.exit(1)
 
@@ -2237,38 +2298,38 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
 
     if needs_openai and needs_anthropic and default_openai and default_anthropic and default_openai != default_anthropic:
         openai_base_url = Prompt.ask(
-            f"请输入 OpenAI API 地址（模型源: {_provider_label(provider)}）",
+            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
             default=current_openai or default_openai,
         ).rstrip("/")
         anthropic_base_url = Prompt.ask(
-            f"请输入 Anthropic API 地址（模型源: {_provider_label(provider)}）",
+            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
             default=current_anthropic or default_anthropic,
         ).rstrip("/")
         base_url = anthropic_base_url or openai_base_url
     elif needs_openai and not needs_anthropic:
         openai_base_url = Prompt.ask(
-            f"请输入 OpenAI API 地址（模型源: {_provider_label(provider)}）",
+            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
             default=current_openai or default_openai or existing_base_url or DEFAULT_BASE_URL,
         ).rstrip("/")
         base_url = openai_base_url
     elif needs_anthropic and not needs_openai:
         anthropic_base_url = Prompt.ask(
-            f"请输入 Anthropic API 地址（模型源: {_provider_label(provider)}）",
+            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
             default=current_anthropic or default_anthropic or existing_base_url or DEFAULT_BASE_URL,
         ).rstrip("/")
         base_url = anthropic_base_url
     else:
         base_default = existing_base_url or DEFAULT_BASE_URL
         base_url = Prompt.ask(
-            f"请输入 API 地址（模型源: {_provider_label(provider)}）",
+            f"请输入接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
             default=base_default,
         ).rstrip("/")
         openai_base_url = base_url if needs_openai else ""
         anthropic_base_url = base_url if needs_anthropic else ""
 
-    key_prompt = f"请输入 API Key（模型源: {_provider_label(provider)}）"
+        key_prompt = f"{_L('请输入 API Key', 'Enter API key')}（{_L('通道', 'channel')}: {_provider_label(provider)}）"
     if allow_keep and existing_api_key:
-        key_prompt = f"请输入 API Key（模型源: {_provider_label(provider)}，留空保持不变）"
+        key_prompt = f"{_L('请输入 API Key', 'Enter API key')}（{_L('通道', 'channel')}: {_provider_label(provider)}，{_L('留空保持不变', 'leave empty to keep current value')}）"
 
     prompt_kwargs = {"password": True}
     if allow_keep:
@@ -2278,64 +2339,64 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
         api_key = existing_api_key
 
     if not api_key:
-        console.print("[red]API Key 不能为空[/red]")
+        console.print(f"[red]{_L('API Key 不能为空', 'API key cannot be empty')}[/red]")
         sys.exit(1)
 
     return base_url, api_key, openai_base_url, anthropic_base_url
 
 
 def _quick_connect_gateway(cfg, preset_id=None):
-    _ensure_interactive_terminal("网关通道接入")
+    _ensure_interactive_terminal(_L("网关通道接入", "gateway channel setup"))
     template_key = _select_provider_template(preset_id=preset_id)
     template = _provider_template_payload(template_key)
     console.print(Panel(
-        "[bold]网关通道[/bold]\n\n输入一个兼容 OpenAI / Anthropic 的 API 地址和 Key。\n"
+        "[bold]网关通道[/bold]\n\n填写接口地址（请求地址 / Base URL）和 API Key，接入兼容 OpenAI / Anthropic 的服务。\n"
+        "显示名称给你自己看；系统会自动生成内部标识，避免后续功能和外部消费引用丢失。\n"
+        "如果模型列表地址和请求地址不同，再额外填写“模型列表地址（高级）”。\n"
         "默认会启用全部 CLI；后续如需精细限制，再用 provider.edit 调整。\n"
         "[dim]输入 b 返回，q 退出。[/dim]",
-        title="快速接入",
+        title=_L("快速接入", "Quick Connect"),
         border_style="cyan",
     ))
     providers = _provider_map(cfg)
     suggested_name = template["name"]
     try:
-        name = _wizard_prompt("显示名称（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
-        suggested_id = _normalize_provider_id_input(name)
-        provider_id = _normalize_provider_id_input(
-            _wizard_prompt("内部标识（用于配置和命令）", default=template["id"] or suggested_id).strip() or suggested_id
-        )
+        name = _wizard_prompt(_L("显示名称（主界面里看到的名字）", "Display name"), default=suggested_name).strip() or suggested_name
+        suggested_id = _normalize_provider_id_input(template["id"] or name)
+        provider_id = _unique_runtime_id(set(providers.keys()), suggested_id)
     except WizardBack:
-        console.print("[yellow]已返回上一层[/yellow]")
+        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
         return cfg, False
     except WizardCancel:
-        console.print("[yellow]已退出接入[/yellow]")
+        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
         return cfg, False
-    if provider_id in providers:
-        console.print(f"[red]通道 ID '{provider_id}' 已存在，请换一个，或使用 {current_command()} config provider.edit {provider_id}[/red]")
-        return cfg, False
+    console.print(f"[dim]{_L('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {provider_id}[/dim]")
 
     provider = _normalize_provider({
         **template,
         "id": provider_id,
         "name": name,
     })
-    if Confirm.ask("模型拉取使用自定义 endpoint？", default=False):
+    if Confirm.ask(_L("模型列表地址与请求地址不同？（高级）", "Use a separate model list URL? (advanced)"), default=False):
         provider["models_endpoint"] = _normalize_models_endpoint(
-            Prompt.ask("模型列表接口路径", default=provider.get("models_endpoint", "/models"))
+            Prompt.ask(_L("模型列表地址（高级，仅用于拉取模型列表；通常留默认）", "Model list URL (advanced, only used to fetch models)"), default=provider.get("models_endpoint", "/models"))
         )
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
     setup_provider_credentials(provider)
-    console.print(f"[green]✓ 已接入网关通道: {provider_id}[/green]")
+    console.print(f"[green]✓ {_L('已接入网关通道', 'Gateway channel added')}: {name}[/green]")
+    console.print(f"[dim]{_L('内部标识', 'System ID')}: {provider_id}[/dim]")
     return load_config(), True
 
 
 def _quick_connect_official(cfg, preset_cli=None):
-    _ensure_interactive_terminal("官方通道接入")
+    _ensure_interactive_terminal(_L("官方通道接入", "official channel setup"))
     console.print(Panel(
         "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
+        "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
         "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
         "[dim]输入 b 返回，q 退出。[/dim]",
-        title="快速接入",
+        title=_L("快速接入", "Quick Connect"),
         border_style="cyan",
     ))
     choices = {
@@ -2350,37 +2411,30 @@ def _quick_connect_official(cfg, preset_cli=None):
         console.print("  2. Claude")
         console.print("  3. Gemini")
         try:
-            selected = _wizard_prompt("选择官方通道类型", default="1")
+            selected = _wizard_prompt(_L("选择官方通道类型", "Select official channel type"), default="1")
         except WizardBack:
-            console.print("[yellow]已返回上一层[/yellow]")
+            console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
             return cfg, False
         except WizardCancel:
-            console.print("[yellow]已退出接入[/yellow]")
+            console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
             return cfg, False
         if selected not in choices:
-            console.print("[red]请输入 1-3[/red]")
+            console.print(f"[red]{_L('请输入 1-3', 'Please enter 1-3')}[/red]")
             return cfg, False
         cli_name = choices[selected][0]
 
     suggested_name = f"{cli_name}-main"
     try:
-        name = _wizard_prompt("显示名（主界面里看到的名字）", default=suggested_name).strip() or suggested_name
-        account_id = _normalize_account_id(
-            _wizard_prompt(
-                "文件夹名（用于目录和命令，例如 apple / work / personal）",
-                default=_normalize_account_id(name),
-            ).strip()
-        )
+        name = _wizard_prompt(_L("显示名（主界面里看到的名字）", "Display name"), default=suggested_name).strip() or suggested_name
     except WizardBack:
-        console.print("[yellow]已返回上一层[/yellow]")
+        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
         return cfg, False
     except WizardCancel:
-        console.print("[yellow]已退出接入[/yellow]")
+        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
         return cfg, False
     accounts = _account_map(cfg)
-    if account_id in accounts:
-        console.print(f"[red]文件夹名 '{account_id}' 已存在，请换一个，或使用 {current_command()} config account.edit {account_id}[/red]")
-        return cfg, False
+    account_id = _unique_runtime_id(set(accounts.keys()), _normalize_account_id(name))
+    console.print(f"[dim]{_L('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {account_id}[/dim]")
 
     home_dir = _default_account_home(account_id)
     account = _normalize_account({
@@ -2395,16 +2449,17 @@ def _quick_connect_official(cfg, preset_cli=None):
     updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
     updated_cfg, _ = _ensure_account_config(updated_cfg)
     save_config(updated_cfg)
-    console.print(f"[green]✓ 已添加官方通道: {account_id}[/green]")
-    console.print(f"[dim]文件夹目录: {home_dir}[/dim]")
-    if Confirm.ask("现在去登录这个官方通道？", default=True):
+    console.print(f"[green]✓ {_L('已添加官方通道', 'Official channel added')}: {name}[/green]")
+    console.print(f"[dim]{_L('内部标识', 'System ID')}: {account_id}[/dim]")
+    console.print(f"[dim]{_L('文件夹目录', 'Directory')}: {home_dir}[/dim]")
+    if Confirm.ask(_L("现在去登录这个官方通道？", "Log in to this official channel now?"), default=True):
         _run_account_login(account)
-    if Confirm.ask(f"设为 {cli_name} 的默认官方通道？", default=True):
+    if Confirm.ask(_L(f"设为 {cli_name} 的默认官方通道？", f"Set as the default {cli_name} official channel?"), default=True):
         updated_cfg = load_config()
         updated_cfg.setdefault("account", {}).setdefault("defaults", {})
         updated_cfg["account"]["defaults"][cli_name] = account_id
         save_config(updated_cfg)
-        console.print(f"[green]✓ {cli_name} 默认官方通道已更新为 {account_id}[/green]")
+        console.print(f"[green]✓ {_L(f'{cli_name} 默认官方通道已更新为 {account_id}', f'Default {cli_name} official channel set to {account_id}')}[/green]")
     return load_config(), True
 
 
@@ -2652,7 +2707,7 @@ def _manage_provider_models(cfg, provider_id):
 
         info_lines = [
             ("通道", provider.get("name", provider_id)),
-            ("模型接口", provider.get("models_endpoint", "/models")),
+            ("模型列表地址", provider.get("models_endpoint", "/models")),
             ("来源", _model_source_label(probe.get("base_source", "remote"))),
             ("模型数", str(model_count)),
             ("补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
@@ -3035,7 +3090,7 @@ def _manage_provider_target(cfg, provider_id):
             ("默认", default_tag),
             ("OpenAI", _provider_openai_base_url(provider) or "(未设置)"),
             ("Anthropic", _provider_anthropic_base_url(provider) or "(未设置)"),
-            ("模型接口", provider.get("models_endpoint", "/models")),
+            ("模型列表地址", provider.get("models_endpoint", "/models")),
             ("模型补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
             ("协议", ", ".join(provider.get("protocols", []))),
         ]
@@ -4040,22 +4095,26 @@ def ensure_api_credentials():
     return provider_ctx["base_url"], provider_ctx["api_key"]
 
 
-def setup_wizard():
+def setup_wizard(ui_language=None):
+    ui_language = normalize_language(ui_language) or "zh"
+    set_language(ui_language)
     title = display_title()
     console.print(Panel(
-        f"[bold cyan]欢迎使用 {title} — AI Coding CLI 统一启动器[/bold cyan]\n\n"
-        f"{title} 帮你一键启动 AI 编程助手\n"
-        "首次使用，需要配置 API 地址和认证信息",
+        f"[bold cyan]{_L(f'欢迎使用 {title} — AI Coding CLI 统一启动器', f'Welcome to {title} — unified AI coding CLI launcher')}[/bold cyan]\n\n"
+        f"{_L(f'{title} 帮你一键启动 AI 编程助手', f'{title} helps you launch AI coding assistants from one entrypoint')}\n"
+        f"{_L('首次使用，需要配置 API 地址和认证信息', 'First-time setup needs an API endpoint and credentials')}",
         title=f"{title} Setup",
     ))
 
     cfg = _default_config()
+    cfg.setdefault("ui", {})["language"] = ui_language
     setup_provider_credentials(get_provider_definition(cfg))
 
-    role = Prompt.ask("模型模式", choices=[MODE_ALL, MODE_RECOMMENDED], default=MODE_ALL)
+    role = Prompt.ask(_L("模型模式", "Model mode"), choices=[MODE_ALL, MODE_RECOMMENDED], default=MODE_ALL)
     cfg = _default_config(role)
+    cfg.setdefault("ui", {})["language"] = ui_language
     save_config(cfg)
-    console.print(f"\n[green]✓ 配置已保存到 {CONFIG_PATH}[/green]\n")
+    console.print(f"\n[green]✓ {_L('配置已保存到', 'Config saved to')} {CONFIG_PATH}[/green]\n")
     return cfg
 
 
@@ -6746,6 +6805,11 @@ def _unset_nested(d, parts):
 def _coerce_config_value(key_path, raw_value):
     if key_path == "user.role":
         return _validate_user_role(raw_value)
+    if key_path == "ui.language":
+        lang = normalize_language(raw_value)
+        if not lang:
+            raise ValueError("ui.language 只支持 zh 或 en")
+        return lang
     if key_path == "provider.default":
         return str(raw_value).strip()
     if key_path in {"cache.probe_async_refresh_after_sec", "cache.probe_async_min_interval_sec"}:
@@ -7158,67 +7222,71 @@ def handle_test_command(argv, subcommand_name="test"):
 
 
 def main():
-    if len(sys.argv) >= 2:
-        command = sys.argv[1]
+    argv, lang_override = _extract_global_lang(sys.argv[1:])
+    bootstrap_cfg = load_config()
+    set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
+
+    if len(argv) >= 1:
+        command = argv[0]
         if command == "config":
-            cfg = load_config()
+            cfg = bootstrap_cfg
             if cfg is None:
                 cfg = _default_config()
                 save_config(cfg)
-            handle_config(cfg, sys.argv[2:])
+            handle_config(cfg, argv[1:])
             return
         if command == "chat":
             from mms_chat import chat_main
 
-            chat_main(_load_command_config(), sys.argv[2:])
+            chat_main(_load_command_config(), argv[1:])
             return
         if command == "discuss":
             from mms_discuss import discuss_main
 
-            discuss_main(_load_command_config(), sys.argv[2:])
+            discuss_main(_load_command_config(), argv[1:])
             return
         if command == "usage":
             from mms_usage import usage_main
 
-            usage_main(_load_command_config(), sys.argv[2:])
+            usage_main(_load_command_config(), argv[1:])
             return
         if command in {"models", "ls"}:
-            handle_models_command(_load_command_config(), sys.argv[2:])
+            handle_models_command(_load_command_config(), argv[1:])
             return
         if command == "warm":
-            handle_warm_command(_load_command_config(), sys.argv[2:])
+            handle_warm_command(_load_command_config(), argv[1:])
             return
         if command == "session":
-            handle_session_command(sys.argv[2:])
+            handle_session_command(argv[1:])
             return
         if command == "cache":
-            handle_cache_command(sys.argv[2:])
+            handle_cache_command(argv[1:])
             return
         if command == "routes":
             from mms_router import routes_main
 
-            routes_main(_load_command_config(), sys.argv[2:])
+            routes_main(_load_command_config(), argv[1:])
             return
         if command == "doctor":
-            raise SystemExit(handle_doctor_command(sys.argv[2:]))
+            raise SystemExit(handle_doctor_command(argv[1:]))
         if command in {"test", "smoke"}:
-            raise SystemExit(handle_test_command(sys.argv[2:], subcommand_name=command))
+            raise SystemExit(handle_test_command(argv[1:], subcommand_name=command))
         if command == "env":
-            handle_env_command(_load_command_config(), sys.argv[2:])
+            handle_env_command(_load_command_config(), argv[1:])
             return
         if command == "activate":
-            handle_activate_command(_load_command_config(), sys.argv[2:])
+            handle_activate_command(_load_command_config(), argv[1:])
             return
 
-    if len(sys.argv) >= 2 and sys.argv[1] == "discuss":
+    if len(argv) >= 1 and argv[0] == "discuss":
         from mms_discuss import discuss_main
 
-        cfg = load_config()
+        cfg = bootstrap_cfg
         if cfg is None:
             cfg = _default_config()
             save_config(cfg)
         cfg = apply_local_overrides(cfg)
-        discuss_main(cfg, sys.argv[2:])
+        discuss_main(cfg, argv[1:])
         return
 
     parser = argparse.ArgumentParser(
@@ -7258,10 +7326,14 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
+    parser.add_argument("--lang", choices=["zh", "en"], help="临时指定 UI 语言")
     parser.add_argument("--trace", action="store_true",
                         help="启动前打印选择链路追踪信息（输出到 stderr）")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    user_cfg = bootstrap_cfg
+    set_language(_resolve_ui_language(user_cfg, args.lang or lang_override))
 
     global _trace_enabled, _trace_overrides
     if args.trace:
@@ -7271,10 +7343,10 @@ def main():
     update_notice = _major_update_notice()
     if update_notice:
         console.print(
-            f"[yellow]发现新版本 {update_notice['latest_tag']}[/yellow] "
-            f"[dim](当前 {update_notice['installed_version']})[/dim]"
+            f"[yellow]{_L(f'发现新版本 {update_notice['latest_tag']}', f'New version available: {update_notice['latest_tag']}')}[/yellow] "
+            f"[dim]({_L('当前', 'current')} {update_notice['installed_version']})[/dim]"
         )
-        console.print(f"[dim]升级命令: {update_notice['upgrade_command']}[/dim]")
+        console.print(f"[dim]{_L('升级命令', 'Upgrade command')}: {update_notice['upgrade_command']}[/dim]")
     _start_async_update_check()
 
     if args.account and args.provider:
@@ -7288,11 +7360,11 @@ def main():
         return
 
     # Load or create config
-    user_cfg = load_config()
     if user_cfg is None:
-        user_cfg = setup_wizard()
+        user_cfg = setup_wizard(_resolve_ui_language(None, args.lang or lang_override))
 
     cfg = apply_local_overrides(user_cfg)
+    set_language(_resolve_ui_language(cfg, args.lang or lang_override))
 
     default_provider = ensure_provider_credentials(cfg)
     _trace_record("config default", provider=default_provider.get("id") if isinstance(default_provider, dict) else None)
