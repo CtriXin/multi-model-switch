@@ -77,18 +77,15 @@ def _cache_expired() -> bool:
     return age is None or age * 1000 > CACHE_TTL_MS
 
 
-def _determine_status(ttfb_ms: float | None, age_seconds: float | None) -> str:
-    if ttfb_ms is None or age_seconds is None:
-        return "blocked"
-    if age_seconds > _BLOCKED_SECONDS:
-        return "blocked"
-    if ttfb_ms > _SLOW_TTFB_MAX or age_seconds > _DEGRADED_SECONDS:
+def _determine_status(ttfb_ms: float | None, age_seconds: float | None) -> str | None:
+    """纯基于 TTFB 判定，无数据时返回 None（不显示）。"""
+    if ttfb_ms is None:
+        return None  # 没数据就不判定，不假装 blocked
+    if ttfb_ms > _SLOW_TTFB_MAX:
         return "degraded"
     if ttfb_ms >= _OK_TTFB_MAX:
         return "slow"
-    if age_seconds <= _FRESH_SECONDS:
-        return "ok"
-    return "slow"
+    return "ok"
 
 
 def _determine_latency_bucket(ttfb_ms: float | None) -> str:
@@ -101,13 +98,16 @@ def _determine_latency_bucket(ttfb_ms: float | None) -> str:
     return "slow"
 
 
-def _build_health_record(model: str, provider_key: str, entry: dict) -> dict:
+def _build_health_record(model: str, provider_key: str, entry: dict) -> dict | None:
     ttfb = entry.get("ttfb_avg_ms")
     age = _age_seconds(entry.get("last_updated"))
+    status = _determine_status(ttfb, age)
+    if status is None:
+        return None  # 无数据，不生成记录
     return {
         "model": model,
         "provider_key": provider_key,
-        "status": _determine_status(ttfb, age),
+        "status": status,
         "latency_bucket": _determine_latency_bucket(ttfb),
         "checked_at": _utc_now(),
         "ttl_ms": CACHE_TTL_MS,
@@ -127,8 +127,10 @@ def _build_all_health() -> dict[str, dict]:
         if not model_id:
             continue
         record = _build_health_record(model_id, pk, scoped_entry)
+        if record is None:
+            continue
         existing = records.get(model_id)
-        if existing is None or existing["status"] in ("degraded", "blocked"):
+        if existing is None or existing["status"] == "degraded":
             records[model_id] = record
 
     top_level_keys = [k for k in stats if not k.startswith("_")]
