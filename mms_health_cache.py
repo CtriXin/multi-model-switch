@@ -15,9 +15,31 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mms_speed_stats import load_speed_stats, get_speed_entry
+from mms_speed_stats import get_speed_entry
 
-HEALTH_CACHE_DIR = Path(os.path.expanduser("~/.config/mms"))
+
+def _real_home() -> str:
+    """Resolve real user home, respecting MMS_REAL_HOME for gateway sessions."""
+    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
+        v = os.environ.get(key, "").strip()
+        if v:
+            return v
+    return os.path.expanduser("~")
+
+
+HEALTH_CACHE_DIR = Path(_real_home()) / ".config" / "mms"
+_REAL_SPEED_STATS_PATH = HEALTH_CACHE_DIR / "speed-stats.json"
+
+
+def _load_speed_stats_real() -> dict:
+    """Load speed-stats from real user home, bypassing gateway $HOME redirect."""
+    if not _REAL_SPEED_STATS_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_REAL_SPEED_STATS_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 HEALTH_CACHE_PATH = HEALTH_CACHE_DIR / "health-cache.json"
 CACHE_TTL_MS = 30000
 
@@ -93,7 +115,7 @@ def _build_health_record(model: str, provider_key: str, entry: dict) -> dict:
 
 
 def _build_all_health() -> dict[str, dict]:
-    stats = load_speed_stats()
+    stats = _load_speed_stats_real()
     records: dict[str, dict] = {}
 
     scoped_models = stats.get("_scoped_models") or {}
