@@ -35,7 +35,7 @@ def _reset_cache():
 
 @pytest.fixture
 def mock_empty_stats():
-    with patch("mms_health_cache.load_speed_stats", return_value={}), \
+    with patch("mms_health_cache._load_speed_stats_real", return_value={}), \
          patch("mms_health_cache.get_speed_entry", return_value=None), \
          patch("mms_health_cache._persist_cache"):
         yield
@@ -140,7 +140,7 @@ class TestGetAllHealth:
                 },
             },
         }
-        with patch("mms_health_cache.load_speed_stats", return_value=stats), \
+        with patch("mms_health_cache._load_speed_stats_real", return_value=stats), \
              patch("mms_health_cache.get_speed_entry", return_value=None), \
              patch("mms_health_cache._persist_cache"):
             from mms_health_cache import get_all_health
