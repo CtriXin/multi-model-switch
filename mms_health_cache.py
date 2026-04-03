@@ -47,9 +47,9 @@ _OK_TTFB_MAX = 3000
 _SLOW_TTFB_MAX = 8000
 _FAST_TTFB_MAX = 1500
 _MEDIUM_TTFB_MAX = 5000
-_FRESH_SECONDS = 300
-_DEGRADED_SECONDS = 600
-_BLOCKED_SECONDS = 1800
+_FRESH_SECONDS = 86400       # 24h — 有数据就算 fresh
+_DEGRADED_SECONDS = 86400    # 纯靠 TTFB 判定，不靠数据年龄
+_BLOCKED_SECONDS = 604800    # 7 天无数据才 blocked
 
 _lock = threading.Lock()
 _memory_cache: dict = {}
