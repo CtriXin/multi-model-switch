@@ -5508,6 +5508,31 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
                 "provider_id": runtime.get("id", ""),
                 "provider_ctx": runtime,
             })
+        if cli_name == "claude":
+            for profile in list_broker_profiles(cfg, enabled_only=True):
+                profile_id = str(profile.get("id", "")).strip()
+                if not profile_id:
+                    continue
+                options.append({
+                    "provider_name": f"{profile.get('name', profile_id)} Broker",
+                    "provider_id": profile_id,
+                    "provider_ctx": {
+                        "runtime_kind": "broker",
+                        "auth_mode": "broker_profile",
+                        "id": profile_id,
+                        "name": profile.get("name", profile_id),
+                        "broker_profile_id": profile_id,
+                        "broker_base_url": profile.get("broker_base_url", ""),
+                        "device_id": profile.get("device_id", ""),
+                        "workspace_id": profile.get("workspace_id", ""),
+                        "entry_mode": profile.get("entry_mode", "shell"),
+                        "remote_service_label": profile.get("remote_service_label", ""),
+                        "remote_service_base_url": profile.get("remote_service_base_url", ""),
+                        "remote_service_endpoint": profile.get("remote_service_endpoint", ""),
+                        "remote_service_model": model_name,
+                        "priority": 10,
+                    },
+                })
         if len(options) > 1:
             result[model_name] = options
     return result
