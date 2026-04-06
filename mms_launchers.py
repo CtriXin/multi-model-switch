@@ -2101,6 +2101,8 @@ LAUNCHERS = {
 
 def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
+    if runtime.get("auth_mode") == "broker_profile":
+        return {}
     if runtime.get("auth_mode") == "oauth_bridge":
         return {}
     if runtime.get("auth_mode") == "oauth":
