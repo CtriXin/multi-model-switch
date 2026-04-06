@@ -72,6 +72,12 @@ def _ensure_rich():
 
 from mms_account_state import seed_claude_state, seed_gemini_state
 from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
+from mms_broker import (
+    ensure_broker_config,
+    handle_broker_command,
+    list_broker_profiles,
+    run_broker_profile,
+)
 from mms_i18n import normalize_language, set_language, pick as _L
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
@@ -978,6 +984,7 @@ def _default_load_balance_profile_name(cfg):
 def _normalize_config_sections(cfg):
     cfg, _ = _ensure_provider_config(cfg)
     cfg, _ = _ensure_account_config(cfg)
+    cfg, _ = ensure_broker_config(cfg)
     cfg, _ = _normalize_ui_config(cfg)
     cfg, _ = _normalize_presets_config(cfg)
     cfg, _ = _normalize_user_config(cfg)
@@ -1352,11 +1359,12 @@ def load_config():
     cfg = _migrate_legacy_api_config(cfg)
     cfg, changed = _ensure_provider_config(cfg)
     cfg, account_changed = _ensure_account_config(cfg)
+    cfg, broker_changed = ensure_broker_config(cfg)
     cfg, preset_changed = _normalize_presets_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
     cfg, cache_changed = _normalize_cache_config(cfg)
     cfg, lb_changed = _normalize_load_balance_config(cfg)
-    changed = changed or account_changed or preset_changed or role_changed or cache_changed or lb_changed
+    changed = changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
     if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
@@ -1737,6 +1745,16 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
     if _trace_enabled:
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
+    if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
+        exit_code = run_broker_profile(
+            load_config(),
+            runtime.get("broker_profile_id", runtime.get("id", "")),
+            resume_last=True,
+            model_override=runtime.get("remote_service_model", ""),
+        )
+        if exit_code != 0:
+            raise SystemExit(exit_code)
+        return
     from mms_launchers import launch_cli
     launch_cli(cli_name, model_info, runtime, once=once)
 
@@ -4800,6 +4818,50 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None, a
     return options
 
 
+def _broker_options_for_cli(cfg, cli_name, model_info=None):
+    if cli_name != "claude":
+        return []
+
+    selected_model = _resolve_model_name(model_info) if model_info else ""
+    if selected_model == "official-default":
+        selected_model = ""
+
+    options = []
+    for profile in list_broker_profiles(cfg, enabled_only=True):
+        profile_id = str(profile.get("id", "")).strip()
+        if not profile_id:
+            continue
+        runtime = {
+            "runtime_kind": "broker",
+            "auth_mode": "broker_profile",
+            "id": profile_id,
+            "name": profile.get("name", profile_id),
+            "broker_profile_id": profile_id,
+            "broker_base_url": profile.get("broker_base_url", ""),
+            "device_id": profile.get("device_id", ""),
+            "workspace_id": profile.get("workspace_id", ""),
+            "entry_mode": profile.get("entry_mode", "shell"),
+            "remote_service_label": profile.get("remote_service_label", ""),
+            "remote_service_base_url": profile.get("remote_service_base_url", ""),
+            "remote_service_endpoint": profile.get("remote_service_endpoint", ""),
+            "remote_service_model": selected_model or profile.get("remote_service_model", ""),
+        }
+        options.append({
+            "kind": "broker",
+            "id": profile_id,
+            "runtime": runtime,
+            "models": [selected_model] if selected_model else [],
+            "label": _runtime_choice_label(runtime),
+            "title": profile.get("name", profile_id),
+            "desc": "Broker / remote official cc",
+            "icon": "B",
+            "priority": DEFAULT_PRIORITY - 10,
+            "is_default": False,
+            "launch_cli": cli_name,
+        })
+    return options
+
+
 def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
     options = _provider_options_for_model(cfg, cli_name, default_provider, default_models)
     for option in options:
@@ -4851,6 +4913,8 @@ def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, p
 
 
 def _runtime_choice_label(runtime):
+    if runtime.get("auth_mode") == "broker_profile":
+        return f"Broker / {runtime.get('name', runtime.get('id', 'broker'))}"
     if runtime.get("auth_mode") == "oauth_bridge":
         return f"官方桥接 / {_account_label(runtime)}"
     if runtime.get("auth_mode") == "oauth":
@@ -4869,14 +4933,28 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
             allow_selected_model=allow_selected_model_accounts,
         )
     )
+    options.extend(_broker_options_for_cli(cfg, cli_name, model_info=model_info))
     options.sort(key=lambda item: (
         -int(item.get("priority", DEFAULT_PRIORITY) or DEFAULT_PRIORITY),
         0 if item.get("launch_cli") == cli_name else 1,
-        0 if item["kind"] == "provider" else 1,
+        0 if item["kind"] == "provider" else 1 if item["kind"] == "account" else 2,
         item.get("title", ""),
     ))
     default_choice = _resolve_source_default_index(options, cli_name)
     return options, default_choice
+
+
+def _runtime_source_kind_label(runtime):
+    if not runtime:
+        return "网关"
+    auth_mode = runtime.get("auth_mode")
+    if auth_mode == "broker_profile" or runtime.get("runtime_kind") == "broker":
+        return "Broker"
+    if auth_mode == "oauth_bridge":
+        return "官方桥接"
+    if auth_mode == "oauth":
+        return "官方"
+    return "网关"
 
 
 def _choose_runtime_source(
@@ -4932,7 +5010,7 @@ def _choose_runtime_source(
     table.add_column("说明", style="magenta")
     for idx, option in enumerate(options, 1):
         runtime = option["runtime"]
-        source_type = "官方" if option["kind"] == "account" else "网关"
+        source_type = _runtime_source_kind_label(runtime)
         desc = option.get("desc", "")
         if idx - 1 == default_choice:
             desc = f"{desc} / 默认"
@@ -5174,7 +5252,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
     source_line = ""
     if runtime:
-        source_kind = "官方" if runtime.get("auth_mode") == "oauth" else "网关"
+        source_kind = _runtime_source_kind_label(runtime)
         source_label = runtime.get("name", runtime.get("id", "default"))
         source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
     panel_text = (
@@ -5211,6 +5289,14 @@ def save_preset_interactive(cfg, cli, model_info):
 
 def _uses_native_account_entry(runtime, cli):
     return bool(runtime and runtime.get("auth_mode") == "oauth" and cli in OAUTH_CAPABLE_CLIS)
+
+
+def _uses_broker_entry(runtime, cli):
+    return bool(runtime and runtime.get("runtime_kind") == "broker" and cli == "claude")
+
+
+def _uses_managed_entry(runtime, cli):
+    return _uses_native_account_entry(runtime, cli) or _uses_broker_entry(runtime, cli)
 
 
 def _preset_model_info(preset):
@@ -5259,6 +5345,70 @@ def _infer_preset_auth_mode(preset):
     if preset.get("provider"):
         return "api_key"
     return None
+
+
+def _available_broker_profiles_for_cli(cfg, cli_name):
+    if cli_name != "claude":
+        return []
+    return list_broker_profiles(cfg, enabled_only=True)
+
+
+def _broker_enabled_by_cli(cfg, cli_names):
+    return {
+        cli_name: bool(_available_broker_profiles_for_cli(cfg, cli_name))
+        for cli_name in (cli_names or [])
+    }
+
+
+def _select_broker_profile_interactive(cfg, cli_name):
+    profiles = _available_broker_profiles_for_cli(cfg, cli_name)
+    if not profiles:
+        return None
+    if len(profiles) == 1:
+        return profiles[0]
+
+    _ensure_rich()
+    table = Table(title="Broker Experiment", show_lines=True)
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("ID", style="green")
+    table.add_column("设备/工作区", style="yellow")
+    table.add_column("Broker", style="blue")
+    table.add_column("Remote", style="magenta")
+    for idx, profile in enumerate(profiles, 1):
+        table.add_row(
+            str(idx),
+            str(profile.get("id", "")),
+            f"{profile.get('device_id', '-')}/{profile.get('workspace_id', '-')}",
+            str(profile.get("broker_base_url") or "-"),
+            str(profile.get("remote_service_label") or profile.get("remote_service_base_url") or "-"),
+        )
+    console.print(table)
+
+    while True:
+        raw = Prompt.ask("选择 broker profile，直接回车取消", default="").strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            picked = int(raw)
+            if 1 <= picked <= len(profiles):
+                return profiles[picked - 1]
+        console.print("[yellow]请输入有效编号[/yellow]")
+
+
+def _launch_broker_experiment_interactive(cfg, cli_name):
+    profile = _select_broker_profile_interactive(cfg, cli_name)
+    if profile is None:
+        return False
+
+    console.print(
+        f"[cyan]Broker experiment[/cyan] -> {profile['name']} "
+        f"[dim]({profile['device_id']}/{profile['workspace_id']})[/dim]"
+    )
+    console.print("[dim]默认会先尝试 resume-last；如果当前项目没有记忆 session，会自动创建新 session。[/dim]")
+    exit_code = run_broker_profile(cfg, profile["id"], resume_last=True)
+    if exit_code != 0:
+        console.print(f"[red]broker experiment 启动失败，退出码 {exit_code}[/red]")
+    return True
 
 
 # ── CLI Selection (fallback) ───────────────────────────
@@ -5453,6 +5603,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             last_used=last_by_cli,
             families_detail=families_detail,
             provider_options_by_cli=provider_options_by_cli,
+            broker_enabled_by_cli=_broker_enabled_by_cli(current_cfg, current_cli_names),
         )
 
         if result == "fallback":
@@ -5475,6 +5626,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 default_models = _probe_models(current_provider, emit_output=False).get("models")
                 current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
                 _families_dirty = True
+            continue
+
+        # ── Broker experiment ──
+        if action_type == "broker":
+            if _launch_broker_experiment_interactive(current_cfg, cli):
+                return True
             continue
 
         # ── Provider 浏览 ──
@@ -7280,6 +7437,8 @@ def main():
 
             routes_main(_load_command_config(), argv[1:])
             return
+        if command == "broker":
+            raise SystemExit(handle_broker_command(_load_command_config(), argv[1:], command_name=current_command()))
         if command == "doctor":
             raise SystemExit(handle_doctor_command(argv[1:]))
         if command in {"test", "smoke"}:
@@ -7313,6 +7472,7 @@ def main():
             f"  {current_command()} cache ...       查看或调整模型 cache 异步刷新窗口\n"
             f"  {current_command()} session ...     查看托管 session\n"
             f"  {current_command()} routes ...      查看路由配置\n"
+            f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
@@ -7355,9 +7515,11 @@ def main():
 
     update_notice = _major_update_notice()
     if update_notice:
+        latest_tag = update_notice.get("latest_tag", "")
+        installed_version = update_notice.get("installed_version", "")
         console.print(
-            f"[yellow]{_L(f'发现新版本 {update_notice['latest_tag']}', f'New version available: {update_notice['latest_tag']}')}[/yellow] "
-            f"[dim]({_L('当前', 'current')} {update_notice['installed_version']})[/dim]"
+            f"[yellow]{_L(f'发现新版本 {latest_tag}', f'New version available: {latest_tag}')}[/yellow] "
+            f"[dim]({_L('当前', 'current')} {installed_version})[/dim]"
         )
         console.print(f"[dim]{_L('升级命令', 'Upgrade command')}: {update_notice['upgrade_command']}[/dim]")
     _start_async_update_check()
@@ -7518,6 +7680,9 @@ def main():
             if _uses_native_account_entry(runtime, cli):
                 console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
                 model = None
+            elif _uses_broker_entry(runtime, cli):
+                console.print(f"[cyan]{cli} 当前使用 broker profile，直接进入 remote official cc；模型由 broker/official side 决定。[/cyan]")
+                model = None
             elif cli == "kimi":
                 model = DEFAULT_KIMI_MODEL
             else:
@@ -7528,13 +7693,13 @@ def main():
                 model = select_model_interactive(models_list)
             if model:
                 _trace_record("manual select", model=model)
-            model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            model_info = {} if _uses_managed_entry(runtime, cli) else model
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model_info)
-            _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+            _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, target):
             cli = target
@@ -7554,6 +7719,9 @@ def main():
             if _uses_native_account_entry(runtime, cli):
                 console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 自己处理。[/cyan]")
                 model = None
+            elif _uses_broker_entry(runtime, cli):
+                console.print(f"[cyan]{cli} 当前使用 broker profile，直接进入 remote official cc；模型由 broker/official side 决定。[/cyan]")
+                model = None
             else:
                 if not _ensure_models_cache_available(cli_models or models_cache):
                     return
@@ -7561,13 +7729,13 @@ def main():
                 model = select_model_interactive(models_list)
             if model:
                 _trace_record("manual select", model=model)
-            model_info = {} if _uses_native_account_entry(runtime, cli) else model
+            model_info = {} if _uses_managed_entry(runtime, cli) else model
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
             if action == "s":
                 save_preset_interactive(user_cfg, cli, model_info)
-            _launch_with_tracking(cli, {} if _uses_native_account_entry(runtime, cli) else {"model": model}, runtime, once=once)
+            _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
         if target in CLI_NAMES:
             console.print(f"[yellow]{target} 当前没有匹配模型或未被 provider 支持，所以已隐藏。[/yellow]")

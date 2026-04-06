@@ -169,7 +169,14 @@ def _last_used_label(last_item):
     return str(last_item.get("model") or "?")
 
 
-def select_family_tui(families_by_cli, cli_names, last_used=None, families_detail=None, provider_options_by_cli=None):
+def select_family_tui(
+    families_by_cli,
+    cli_names,
+    last_used=None,
+    families_detail=None,
+    provider_options_by_cli=None,
+    broker_enabled_by_cli=None,
+):
     """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
 
     Args:
@@ -182,6 +189,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
     Returns:
         ("family", cli_name, family_name) | ("last", cli_name, dict) |
         ("load_balance", cli_name, None) | ("settings", cli_name, None) |
+        ("broker", cli_name, None) |
         ("connect", cli_name, None) | ("provider_browse", cli_name, None) | None
     """
     families_detail = families_detail or {}
@@ -217,6 +225,7 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
             families = families_by_cli.get(cli, [])
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
+            broker_available = bool((broker_enabled_by_cli or {}).get(cli))
 
             # 搜索过滤
             if search_query:
@@ -385,12 +394,22 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 _safe_addstr(stdscr, bot_y, ll + 13, _L("进模型", "Models"), curses.color_pair(1) | curses.A_DIM)
                 _safe_addstr(stdscr, bot_y, ll + 21, "L", curses.color_pair(5) | curses.A_BOLD)
                 _safe_addstr(stdscr, bot_y, ll + 23, _L("负载", "Load"), curses.color_pair(5) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 29, "S", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 31, _L("设置", "Settings"), curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 37, "P", curses.color_pair(6) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 39, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 45, "O", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 47, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
+                if broker_available:
+                    _safe_addstr(stdscr, bot_y, ll + 29, "B", curses.color_pair(3) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 31, "Broker", curses.color_pair(3) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 39, "P", curses.color_pair(6) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 41, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 47, "O", curses.color_pair(4) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 49, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 57, "S", curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 59, _L("设", "Set"), curses.A_DIM)
+                else:
+                    _safe_addstr(stdscr, bot_y, ll + 29, "S", curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 31, _L("设置", "Settings"), curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 37, "P", curses.color_pair(6) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 39, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 45, "O", curses.color_pair(4) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 47, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
@@ -481,6 +500,8 @@ def select_family_tui(families_by_cli, cli_names, last_used=None, families_detai
                 return ("last", cli, cli_last)
             elif key in (ord('l'), ord('L')) and not search_query:
                 return ("load_balance", cli, None)
+            elif key in (ord('b'), ord('B')) and not search_query and broker_available:
+                return ("broker", cli, None)
             elif key in (ord('s'), ord('S')) and not search_query:
                 return ("settings", cli, None)
             elif key in (ord('p'), ord('P')) and not search_query:

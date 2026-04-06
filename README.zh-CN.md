@@ -216,6 +216,80 @@ mms doctor --skip-claude-cli          # 跳过 CLI 层，只测协议
 mms test --provider <id> --cli <name> # 最小闭环测试
 ```
 
+### Broker 实验入口
+
+```bash
+mms broker ls                         # 查看 broker profiles
+mms broker show <id>                  # 查看单个 broker profile
+mms broker run <id>                   # 从 MMS 启动 broker session shell
+mms broker run <id> --resume-last     # 续上当前项目最近一次 broker session
+mms broker smoke <id>                 # 跑一条 official child attach smoke test
+```
+
+现在也可以直接：
+
+- 运行 `mms`
+- 切到 `claude` tab
+- 按 `B`
+
+如果配置了多个 broker profile，MMS 会先让你选一个；进入后默认先尝试 `resume-last`，当前项目还没有本地记忆 session 时会自动新建，不会直接报错退出。
+
+现在 broker profile 也会出现在 `claude` 的正常“使用入口”列表里：
+
+- 你可以像选 `官方` / `网关` 一样选它
+- 选中后会直接走 `cc-official-broker`
+- 如果 profile 的 `entry_mode = "official_attach"`，MMS 会直接进入 official child attach，不需要再按 `B` 进 broker shell
+- 如果你是 `mms claude` 这种直接启动，选中 broker 后会直接进 remote official cc，不再额外弹本地模型列表
+
+当前按 `B` 进去后，如果你不知道该测什么，先记两条命令就够了：
+
+- `/tool pwd`
+  - 验证本地 runner / 本地文件现场这条线
+- `/official`
+  - 验证 broker 是否真的返回 `sdk_url + access_token`，并让真实 official child attach 上来
+
+如果你连 broker shell 都不想看，只想“按 B 后直接走 official child attach”，现在可以在对应 `broker_profile` 里加：
+
+```toml
+entry_mode = "official_attach"
+```
+
+这样按 `B` 选中这个 profile 后，会直接调用 `cc-official-broker official:attach`，不再先进 broker shell。
+
+`broker_profiles` 现在也可以顺带声明远端 runtime service 目标，例如：
+
+- `remote_service_label`
+- `remote_service_base_url`
+- `remote_service_endpoint`
+- `remote_service_model`
+- `remote_service_bearer_token_env`
+
+这样一个 broker profile 就可以对应一个 server-side runtime / OAuth 池，便于后续做多 OAuth 测试，而不影响原有 provider/account 主路径。
+
+当前 broker shell 还会把最近一次本地 session 记到 `~/.config/cc-official-broker/session-registry.json`，作用域按 `device/workspace/project_root` 区分，所以 `--resume-last` 只会续当前项目自己的那条会话，不会去串别的项目。
+
+如果你现在想先验证“这个 broker profile 能不能真的吐出 `sdk_url + access_token` 给 official child”，可以直接：
+
+```bash
+mms broker smoke official-broker-personal
+```
+
+它会复用 profile 里的 `broker_base_url + device_key`，然后内部调用 `cc-official-broker` 的 `official:attach`：
+
+- 先做 `POST /auth/device`
+- 再做 `POST /sessions`
+- 再拉起本机真实 official `claude --print --sdk-url ...`
+
+如果结果是：
+
+- `protocol_ok_auth_missing`
+
+就说明：
+
+- MMS 侧 profile 接线是通的
+- broker 已经返回了真实可消费的 `sdk_url + access_token`
+- 当前机器只是 local Claude CLI 还没登录
+
 ### 聊天与讨论
 
 ```bash

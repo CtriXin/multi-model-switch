@@ -37,3 +37,27 @@ model = "qwen3-coder-plus"
 cli = "codex"
 provider = "default"
 model = "gpt-5.4"
+
+[[broker_profiles]]
+id = "official-broker-personal"
+name = "Official Broker Personal"
+enabled = false
+# 启动后可直接：
+#   mms broker run official-broker-personal
+#   mms broker run official-broker-personal --resume-last
+#   mms broker smoke official-broker-personal
+broker_base_url = "http://127.0.0.1:8787"
+# entry_mode = "official_attach"   # 按 B 或在 claude 的“使用入口”里选中它时，直接跑 official child attach
+# device_key = "replace-me"
+device_key_env = "MMS_BROKER_DEVICE_KEY_PERSONAL"
+owner_user_id = "xin"
+device_id = "mac"
+workspace_id = "personal"
+remote_runtime = "official-claude-code"
+remote_service_label = "server-mms-personal"
+remote_service_base_url = "https://cc-service.example.com"
+remote_service_endpoint = "responses"
+remote_service_model = "claude-opus-4-6"
+# remote_service_bearer_token_env = "MMS_REMOTE_SERVICE_TOKEN_PERSONAL"
+# broker_repo_path = "~/auto-skills/CtriXin-repo/cc-official-broker"
+# runner_tools = ["pwd", "git_status", "read_file", "search"]
