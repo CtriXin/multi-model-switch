@@ -47,7 +47,7 @@ enabled = false
 #   mms broker run official-broker-personal --resume-last
 #   mms broker smoke official-broker-personal
 broker_base_url = "http://127.0.0.1:8787"
-# entry_mode = "official_attach"   # 按 B 或在 claude 的“使用入口”里选中它时，直接跑 official child attach
+# entry_mode = "official_attach"   # 按 B 或在 claude 的“使用入口”里选中它时，直接尝试进入 official cc direct-connect
 # device_key = "replace-me"
 device_key_env = "MMS_BROKER_DEVICE_KEY_PERSONAL"
 owner_user_id = "xin"

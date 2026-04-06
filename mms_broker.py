@@ -247,7 +247,7 @@ def _run_profile(
     workspace_root = os.getcwd()
     env = _build_broker_env(profile, workspace_root=workspace_root, model_override=model_override)
     entry_mode = _normalize_optional_str(profile.get("entry_mode") or "shell").lower()
-    entry_command = "official:attach" if entry_mode == "official_attach" else "mms:run"
+    entry_command = "official:connect" if entry_mode in {"official_attach", "official_connect"} else "mms:run"
     cmd = [node, entry_path, entry_command]
     if resume_last and session_id:
         print("--resume-last 不能和 --session 同时使用", file=sys.stderr)
@@ -269,7 +269,7 @@ def _run_profile(
                 cmd.append(session_id)
             cmd.append("resume")
     elif resume or resume_last or session_id:
-        print("entry_mode=official_attach 时会忽略 --session / --resume / --resume-last", flush=True)
+        print("entry_mode=official_attach/official_connect 时会忽略 --session / --resume / --resume-last", flush=True)
 
     print(
         f"启动 broker profile {profile['id']} "
