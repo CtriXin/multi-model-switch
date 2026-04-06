@@ -673,6 +673,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         idx = 0
         scroll = 0
         provider_idx_map = {}
+        provider_scroll_map = {}
         focus = "model"
         search_query = ""
 
@@ -771,6 +772,17 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
                             break
                     provider_idx_map[model_name] = active_idx
                 provider_idx_map[model_name] = max(0, min(provider_idx_map[model_name], max(0, len(current_choices) - 1)))
+                provider_scroll = provider_scroll_map.get(model_name, 0)
+                selected_provider_idx = provider_idx_map.get(model_name, 0)
+                provider_visible = max(1, visible)
+                if selected_provider_idx < provider_scroll:
+                    provider_scroll = selected_provider_idx
+                elif selected_provider_idx >= provider_scroll + provider_visible:
+                    provider_scroll = selected_provider_idx - provider_visible + 1
+                provider_scroll = max(0, min(provider_scroll, max(0, len(current_choices) - provider_visible)))
+                provider_scroll_map[model_name] = provider_scroll
+            else:
+                provider_scroll = 0
 
             for i in range(scroll, min(scroll + visible, len(filtered))):
                 y = content_y + (i - scroll)
@@ -796,12 +808,13 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             provider_content_h = visible
             for offset in range(provider_content_h):
                 y = content_y + offset
-                if offset >= len(current_choices):
+                opt_index = provider_scroll + offset
+                if opt_index >= len(current_choices):
                     continue
-                opt = current_choices[offset]
+                opt = current_choices[opt_index]
                 is_provider_sel = (
                     current_model is not None
-                    and provider_idx_map.get(current_model["model"], 0) == offset
+                    and provider_idx_map.get(current_model["model"], 0) == opt_index
                 )
                 opt_name = opt.get("provider_name", "")
                 opt_pri = _effective_priority(opt)
