@@ -43,6 +43,7 @@
 - 不要为了“更智能”加入隐式自动切换，除非用户明确要求
 - 不要覆盖未提交改动里已经存在的核心链路修改
 - 不要在一个未确认是否提交的迭代上继续叠加下一轮实质性改动
+- 如果当前进程跑在 MMS / Codex / gateway 之类会重写 `HOME` 的 session 里，不要直接根据隔离环境里的 `gh` / cloud CLI / package CLI 认证失败下结论；先检查 `REAL_HOME` / `ORIGINAL_HOME` / `MMS_REAL_HOME`，必要时切回真实全局 home 再验证一次
 
 ## 用户请求的解释规则
 
