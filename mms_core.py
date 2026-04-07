@@ -76,6 +76,7 @@ from mms_broker import (
     ensure_broker_config,
     handle_broker_command,
     list_broker_profiles,
+    run_broker_profile_interactive,
     run_broker_profile,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
@@ -118,6 +119,54 @@ OVERRIDE_PATHS = [
     os.path.join(LEGACY_CONFIG_DIR, "override.toml"),
     os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
+
+_GATEWAY_SESSION_MARKERS = (
+    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
+    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+)
+
+
+def _base_user_config_path_from_gateway(config_path):
+    normalized = os.path.normpath(str(config_path or ""))
+    for marker in _GATEWAY_SESSION_MARKERS:
+        idx = normalized.find(marker)
+        if idx == -1:
+            continue
+        base_home = normalized[:idx]
+        if base_home:
+            return os.path.join(base_home, ".config", "mms", "config.toml")
+    return ""
+
+
+def _merge_base_user_broker_profiles(cfg, config_path):
+    base_config_path = _base_user_config_path_from_gateway(config_path)
+    if not base_config_path:
+        return cfg, False
+    if os.path.normpath(base_config_path) == os.path.normpath(config_path):
+        return cfg, False
+    if not os.path.exists(base_config_path):
+        return cfg, False
+
+    try:
+        with open(base_config_path, "rb") as f:
+            base_cfg = tomllib.loads(f.read().decode("utf-8"))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return cfg, False
+
+    if not isinstance(base_cfg, dict):
+        return cfg, False
+
+    active_profiles = cfg.get("broker_profiles")
+    base_profiles = base_cfg.get("broker_profiles")
+    if not isinstance(base_profiles, list) or not base_profiles:
+        return cfg, False
+
+    merged = dict(cfg)
+    merged["broker_profiles"] = (
+        list(active_profiles) if isinstance(active_profiles, list) else []
+    ) + list(base_profiles)
+    merged, _ = ensure_broker_config(merged)
+    return merged, merged.get("broker_profiles") != cfg.get("broker_profiles")
 DEFAULT_BASE_URL = "https://your-api.example.com"
 API_URL_ENV_NAME = "MMS_API_BASE_URL"
 API_KEY_ENV_NAME = "MMS_API_KEY"
@@ -1355,8 +1404,9 @@ def load_config():
     if not os.path.exists(config_path):
         return None
     with open(config_path, "rb") as f:
-        cfg = tomllib.load(f)
+        cfg = tomllib.loads(f.read().decode("utf-8"))
     cfg = _migrate_legacy_api_config(cfg)
+    cfg, gateway_broker_changed = _merge_base_user_broker_profiles(cfg, config_path)
     cfg, changed = _ensure_provider_config(cfg)
     cfg, account_changed = _ensure_account_config(cfg)
     cfg, broker_changed = ensure_broker_config(cfg)
@@ -1364,7 +1414,7 @@ def load_config():
     cfg, role_changed = _normalize_user_config(cfg)
     cfg, cache_changed = _normalize_cache_config(cfg)
     cfg, lb_changed = _normalize_load_balance_config(cfg)
-    changed = changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
+    changed = changed or gateway_broker_changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
     if changed or config_path != CONFIG_PATH:
         save_config(cfg)
     return cfg
@@ -1388,7 +1438,7 @@ def save_config(cfg):
 
 def _load_toml_file(path):
     with open(path, "rb") as f:
-        return tomllib.load(f)
+        return tomllib.loads(f.read().decode("utf-8"))
 
 
 def _existing_override_paths():
@@ -1746,10 +1796,9 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
     if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
-        exit_code = run_broker_profile(
+        exit_code = run_broker_profile_interactive(
             load_config(),
             runtime.get("broker_profile_id", runtime.get("id", "")),
-            resume_last=True,
             model_override=runtime.get("remote_service_model", ""),
         )
         if exit_code != 0:
@@ -1804,7 +1853,7 @@ def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     config_path = _active_config_path()
     if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(config_path):
         with open(config_path, "rb") as f:
-            legacy_cfg = tomllib.load(f)
+            legacy_cfg = tomllib.loads(f.read().decode("utf-8"))
         legacy_api = legacy_cfg.get("api", {})
         if isinstance(legacy_api, dict):
             base_url = base_url or str(legacy_api.get("base_url", "")).strip()
@@ -4825,6 +4874,8 @@ def _broker_options_for_cli(cfg, cli_name, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
     if selected_model == "official-default":
         selected_model = ""
+    if selected_model and not _model_matches_account_cli("claude", selected_model):
+        return []
 
     options = []
     for profile in list_broker_profiles(cfg, enabled_only=True):
@@ -5404,8 +5455,8 @@ def _launch_broker_experiment_interactive(cfg, cli_name):
         f"[cyan]Broker experiment[/cyan] -> {profile['name']} "
         f"[dim]({profile['device_id']}/{profile['workspace_id']})[/dim]"
     )
-    console.print("[dim]默认会先尝试 resume-last；如果当前项目没有记忆 session，会自动创建新 session。[/dim]")
-    exit_code = run_broker_profile(cfg, profile["id"], resume_last=True)
+    console.print("[dim]支持续最近 / 新开 / 切换旧会话；默认直接回车续最近。[/dim]")
+    exit_code = run_broker_profile_interactive(cfg, profile["id"])
     if exit_code != 0:
         console.print(f"[red]broker experiment 启动失败，退出码 {exit_code}[/red]")
     return True
@@ -5512,6 +5563,8 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
             for profile in list_broker_profiles(cfg, enabled_only=True):
                 profile_id = str(profile.get("id", "")).strip()
                 if not profile_id:
+                    continue
+                if model_name and not _model_matches_account_cli("claude", model_name):
                     continue
                 options.append({
                     "provider_name": f"{profile.get('name', profile_id)} Broker",
