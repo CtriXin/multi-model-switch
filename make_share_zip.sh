@@ -24,8 +24,16 @@ FILES=(
     "install.sh"
 )
 
+DIRS=(
+    "hooks"
+)
+
 for file in "${FILES[@]}"; do
     cp "$SCRIPT_DIR/$file" "$PKG_DIR/$file"
+done
+
+for dir in "${DIRS[@]}"; do
+    cp -R "$SCRIPT_DIR/$dir" "$PKG_DIR/$dir"
 done
 
 rm -f "$ZIP_PATH"
