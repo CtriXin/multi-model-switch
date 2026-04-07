@@ -39,6 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 默认会安装最新发布的 semver tag。
+如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后询问是否安装 RTK enhancement，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 
 ### 一键升级
@@ -46,6 +47,28 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
+
+### 安装时改成 English UI
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang en
+```
+
+### 安装时顺手加上 RTK rewrite 增强
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-rtk
+```
+
+这条可选路径会额外安装 `jq` + `rtk`，并把 Claude 的 `PreToolUse:Bash` hook 配好；之后通过 MMS 启动的 Claude session 会自动继承 RTK rewrite。若本机已经有 `Codex CLI`，或者本轮安装时顺手装上了 `Codex CLI`，安装器也会继续执行 `rtk init --codex --global`。
+
+### 安装 MMS 时顺手补齐常用 CLI
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex
+```
+
+支持的名字只保留：`claude`、`codex`。
 
 ### 安装指定版本
 

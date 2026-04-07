@@ -26,12 +26,29 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 By default, the installer pulls the latest semver tag.
+When run in an interactive terminal, it asks for UI language first, then the optional RTK enhancement, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 
 ### Default English UI on install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang en
 ```
+
+### Install with optional RTK rewrite enhancement
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-rtk
+```
+
+This optional path installs `jq` + `rtk`, wires the Claude `PreToolUse:Bash` hook, and when `Codex CLI` is already available (or gets installed in the same run) it also runs `rtk init --codex --global`.
+
+### Install MMS plus selected CLIs
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex
+```
+
+Supported names: `claude`, `codex`.
 
 ### Upgrade
 
