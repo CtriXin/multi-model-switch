@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 默认会安装最新发布的 semver tag。
-如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后询问是否安装 RTK enhancement，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
+如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后询问是否安装 RTK enhancement、是否安装 `MindKeeper context pack`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 
 ### 一键升级
@@ -61,6 +61,27 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 这条可选路径会额外安装 `jq` + `rtk`，并把 Claude 的 `PreToolUse:Bash` hook 配好；之后通过 MMS 启动的 Claude session 会自动继承 RTK rewrite。若本机已经有 `Codex CLI`，或者本轮安装时顺手装上了 `Codex CLI`，安装器也会继续执行 `rtk init --codex --global`。
+
+### 安装 MMS 时顺手加上 MindKeeper context pack
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context
+```
+
+这条可选路径会安装：
+
+- `MindKeeper MCP`
+- Claude 的 `/distill`
+- Claude 的 `/cz`
+- Claude 的 `UserPromptSubmit` token monitor hook
+
+如果本机没有 `jq`，安装器也会尝试补装，因为 token monitor hook 依赖它。
+
+边界说明：
+
+- 这是 `Claude` 优先的 context 可选包，不包含 Hive compact/restore
+- 当前不会顺手给 `Codex` 写独立 slash command
+- `Hive` 相关 hook / pack 仍保持独立，不进 MMS 默认安装
 
 ### 安装 MMS 时顺手补齐常用 CLI
 

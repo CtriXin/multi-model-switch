@@ -28,6 +28,8 @@ ENSURE_NODE22=0
 LAUNCH_AFTER_INSTALL=0
 INSTALL_RTK=0
 INSTALL_RTK_EXPLICIT=0
+INSTALL_MINDKEEPER_CONTEXT=0
+INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 
@@ -90,7 +92,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -101,6 +103,7 @@ $(t "说明:" "Notes:")
   - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main" "--ref can pin a specific version or branch, for example v1.2.0 / main")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
+  - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -211,6 +214,23 @@ prompt_optional_install_choices() {
             echo "  RTK rewrite 可以把 Claude 里的 Bash 命令改写成更省 token 的形式。"
             if confirm_from_tty "是否安装 jq + rtk 并启用 Claude RTK rewrite hook？[y/N]: " "n"; then
                 INSTALL_RTK=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_MINDKEEPER_CONTEXT_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional context tools"
+            echo "  MindKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
+            if confirm_from_tty "Install MindKeeper context pack for Claude? [y/N]: " "n"; then
+                INSTALL_MINDKEEPER_CONTEXT=1
+            fi
+        else
+            echo "可选上下文工具"
+            echo "  MindKeeper context pack 会安装 Claude 的 /distill、/cz 和 token monitor hook。"
+            if confirm_from_tty "是否安装 MindKeeper context pack（Claude）？[y/N]: " "n"; then
+                INSTALL_MINDKEEPER_CONTEXT=1
             fi
         fi
     fi
@@ -700,6 +720,325 @@ install_optional_rtk() {
     enable_rtk_codex_integration || true
 }
 
+run_mindkeeper_installer() {
+    local local_installer=""
+
+    local_installer="$(dirname "$SOURCE_DIR")/mindkeeper/install.sh"
+    if [ -f "$local_installer" ]; then
+        run_optional_command \
+            "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
+            "bash \"$local_installer\""
+        return 0
+    fi
+
+    run_optional_command \
+        "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
+        "curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash"
+}
+
+write_mindkeeper_distill_command() {
+    local command_dir="$HOME/.claude/commands"
+    local target="$command_dir/distill.md"
+    local marker="Managed by MMS MindKeeper context pack"
+    local tmp_file=""
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-distill.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+<!-- Managed by MMS MindKeeper context pack -->
+# /distill — 上下文蒸馏
+
+蒸馏当前工作状态，保存为 thread 文件，支持跨 session 恢复。
+
+## 执行步骤
+
+1. 回顾本次对话，提取 5 类信息：
+
+   - **decisions** — 关键决策（≤5 条）
+   - **changes** — 改了哪些文件
+   - **findings** — 踩坑和重要发现
+   - **next** — 待续事项
+   - **status** — 一句话当前状态
+
+2. 调用 MCP 工具 `brain_checkpoint`，传入提取的信息。
+
+3. 展示蒸馏回执（仅 1-2 行）。
+
+## 极简写法（最重要！）
+
+**MCP 工具的参数会在终端原样展示，所以必须极度精简，避免文字墙。**
+
+每个字段的写法要求：
+
+- **task**: ≤15 字，如 `"修复计算器5个问题"`
+- **status**: ≤20 字，如 `"全部完成已验证"`
+- **decisions**: 每条 ≤10 字，如 `"隐藏39页到_hidden"`, `"server-side transform全局清理"`
+- **changes**: 每条只写文件名，不要路径和详细描述，如 `"static-server.js"`, `"39 HTML → _hidden/"`
+- **findings**: 每条 ≤15 字，如 `"AI cleanup需两轮regex"`, `"右侧栏关闭模式不一致"`
+- **next**: 每条 ≤12 字，如 `"部署验证"`, `"恢复hidden页需4步"`
+
+**反例（禁止）**:
+```
+"隐藏而非删除39个页面 — 移到 public/_hidden/ 和 content/_hidden/，方便以后恢复"
+```
+**正例（要求）**:
+```
+"39页移到_hidden/暂藏"
+```
+
+## 回执格式
+
+只输出 1-2 行：
+```
+已蒸馏 `dst-20260326-abc123` — {status一句话}
+```
+
+不需要展示决策/变更/发现的详细内容，thread 文件里都有。
+
+## 其他规则
+
+- status 必须让下个 session 立刻知道"从哪续"
+- 蒸馏后不需要 /clear，用户可以继续工作
+- 如果 brain_checkpoint MCP 不可用，写入 `~/.sce/threads/`
+EOF
+
+    mkdir -p "$command_dir"
+    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
+        echo "⚠ $(t "检测到已有自定义 Claude /distill，跳过覆盖" "Detected custom Claude /distill, skipping overwrite")"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    cp "$tmp_file" "$target"
+    chmod 644 "$target"
+    rm -f "$tmp_file"
+    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /distill"
+    return 0
+}
+
+write_mindkeeper_contextzip_command() {
+    local command_dir="$HOME/.claude/commands"
+    local target="$command_dir/contextzip.md"
+    local marker="Managed by MMS MindKeeper context pack"
+    local tmp_file=""
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-contextzip.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+---
+name: contextzip
+description: '蒸馏当前工作状态并重置 token 计数器。当用户提到 "contextzip"、"cz"、"压缩 context"、"context 满了"、"达到 token 上限" 时使用。也用于手动触发上下文压缩，保存当前进度到 thread 文件。'
+---
+
+<!-- Managed by MMS MindKeeper context pack -->
+# /contextzip — 蒸馏状态 + 重置计数器
+
+## 执行步骤
+
+1. **调用 `brain_checkpoint`** 蒸馏当前状态：
+   - `repo`: 当前工作目录
+   - `task`: 当前任务（从对话中提取）
+   - `status`: "已压缩 context，准备重置计数器"
+   - `decisions`: 提取对话中的关键决策（≤5 条）
+   - `changes`: 本次对话修改的文件
+   - `findings`: 重要发现/踩坑
+   - `next`: 待续事项
+
+2. **调用 `brain_token_reset`** 重置 token 计数器
+
+3. **输出回执**（1-2 行）：
+   ```
+   ✅ 已蒸馏到 thread: {threadId}
+   💡 运行 /clear 开始新对话，新 session 自动恢复上下文
+   ```
+
+## 极简写法
+
+MCP 参数要精简：
+- `task`: ≤15 字
+- `status`: ≤20 字
+- `decisions/findings/next`: 每条 ≤15 字
+
+## 快捷方式
+
+用户说 `/cz` 时也使用此命令。
+EOF
+
+    mkdir -p "$command_dir"
+    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
+        echo "⚠ $(t "检测到已有自定义 Claude /cz，跳过覆盖" "Detected custom Claude /cz, skipping overwrite")"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    cp "$tmp_file" "$target"
+    chmod 644 "$target"
+    rm -f "$tmp_file"
+    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /cz"
+    return 0
+}
+
+write_mindkeeper_cz_alias_command() {
+    local command_dir="$HOME/.claude/commands"
+    local target="$command_dir/cz.md"
+    local marker="Managed by MMS MindKeeper context pack"
+    local tmp_file=""
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cz.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+---
+name: cz
+description: '蒸馏当前工作状态并重置 token 计数器；是 /contextzip 的短命令版本。'
+---
+
+<!-- Managed by MMS MindKeeper context pack -->
+# /cz — 蒸馏状态 + 重置计数器
+
+执行逻辑与 `/contextzip` 相同：
+
+1. 调用 `brain_checkpoint` 蒸馏当前状态
+2. 调用 `brain_token_reset` 重置计数器
+3. 输出 1-2 行回执，并提示 `/clear` 开新 session
+
+## 极简写法
+
+- `task`: ≤15 字
+- `status`: ≤20 字
+- `decisions/findings/next`: 每条 ≤15 字
+EOF
+
+    mkdir -p "$command_dir"
+    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
+        echo "⚠ $(t "检测到已有自定义 Claude /cz alias，跳过覆盖" "Detected custom Claude /cz alias, skipping overwrite")"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    cp "$tmp_file" "$target"
+    chmod 644 "$target"
+    rm -f "$tmp_file"
+    return 0
+}
+
+enable_mindkeeper_token_monitor_hook() {
+    local hook_source="$HOME/.local/share/mindkeeper/hooks/token-monitor-hook.sh"
+    local claude_dir="$HOME/.claude"
+    local hook_dir="$claude_dir/hooks"
+    local hook_target="$hook_dir/token-monitor-hook.sh"
+    local py_output=""
+
+    if [ ! -f "$hook_source" ]; then
+        echo "⚠ $(t "找不到 token monitor hook 模板，跳过" "Token monitor hook template not found, skipping"): $hook_source"
+        return 1
+    fi
+
+    mkdir -p "$hook_dir"
+    cp "$hook_source" "$hook_target"
+    chmod +x "$hook_target"
+
+    py_output="$(python3 - "$claude_dir/settings.json" "$hook_target" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+hook_path = sys.argv[2]
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+data = {}
+backup_path = None
+
+if settings_path.exists():
+    try:
+        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        backup_path = settings_path.with_name(
+            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(settings_path, backup_path)
+        data = {}
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+data["hooks"] = hooks
+
+user_prompt = hooks.get("UserPromptSubmit")
+if not isinstance(user_prompt, list):
+    user_prompt = []
+
+exists = False
+for entry in user_prompt:
+    if not isinstance(entry, dict):
+        continue
+    hook_items = entry.get("hooks")
+    if not isinstance(hook_items, list):
+        continue
+    for hook in hook_items:
+        if not isinstance(hook, dict):
+            continue
+        if str(hook.get("command") or "").strip() == hook_path:
+            exists = True
+            break
+    if exists:
+        break
+
+if not exists:
+    user_prompt.append(
+        {
+            "matcher": "",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": hook_path,
+                }
+            ],
+        }
+    )
+
+hooks["UserPromptSubmit"] = user_prompt
+settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+if backup_path is not None:
+    print(f"BACKUP:{backup_path}")
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                BACKUP:*)
+                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
+                    ;;
+            esac
+        done
+    fi
+
+    echo "✓ $(t "已启用 Claude token monitor hook" "Claude token monitor hook enabled")"
+    return 0
+}
+
+install_optional_mindkeeper_context() {
+    echo ""
+    echo "$(t "正在安装 MindKeeper context pack..." "Installing MindKeeper context pack...")"
+
+    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json、~/.claude/commands/ 和 ~/.claude/hooks/；若缺少 jq 会尝试安装。" "This optional pack updates ~/.claude/settings.json, ~/.claude/commands/, and ~/.claude/hooks/; it also attempts to install jq if missing.")"
+
+    run_mindkeeper_installer || true
+    ensure_brew_package "jq" "jq" "jq" || true
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "⚠ $(t "未检测到 jq，token monitor hook 已安装但会保持静默，直到 jq 可用" "jq not found; the token monitor hook is installed but remains inactive until jq is available")"
+    fi
+
+    write_mindkeeper_distill_command || true
+    write_mindkeeper_contextzip_command || true
+    write_mindkeeper_cz_alias_command || true
+    enable_mindkeeper_token_monitor_hook || true
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
@@ -717,6 +1056,10 @@ while [[ $# -gt 0 ]]; do
         --install-rtk)
             INSTALL_RTK=1
             INSTALL_RTK_EXPLICIT=1
+            ;;
+        --install-mindkeeper-context)
+            INSTALL_MINDKEEPER_CONTEXT=1
+            INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=1
             ;;
         --install-cli)
             shift
@@ -783,6 +1126,11 @@ if [ "$INSTALL_RTK" -eq 1 ]; then
     echo "• $(t "附带安装 RTK rewrite 增强" "Optional RTK rewrite enhancement"): on"
 fi
 
+if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
+    echo "• $(t "附带安装 MindKeeper context pack" "Optional MindKeeper context pack"): on"
+    echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，不包含 Hive 能力。" "This writes Claude MCP / command / hook config and does not include Hive features.")"
+fi
+
 if [ "$ENSURE_NODE22" -eq 1 ]; then
     echo "⚠ $(t "将检查并安装 nvm / Node.js 22，这可能更新你的 shell 配置。" "This will check and install nvm / Node.js 22 and may update your shell config.")"
 fi
@@ -830,6 +1178,7 @@ cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
+[ -d "$SOURCE_DIR/hooks" ] && rm -rf "$MMS_HOME/hooks" && cp -R "$SOURCE_DIR"/hooks "$MMS_HOME/"
 # 复制所有 mms_*.py 确保完整
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
@@ -842,6 +1191,7 @@ write_language_config
 chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
+[ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
 
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
@@ -853,6 +1203,9 @@ sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$MMS_HOME/mms" && rm -f "$MMS_HOME/mms.
 install_requested_clis
 if [ "$INSTALL_RTK" -eq 1 ]; then
     install_optional_rtk || true
+fi
+if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
+    install_optional_mindkeeper_context || true
 fi
 
 # ── 5. 建立命令入口 ──
@@ -921,6 +1274,12 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "  $(t "RTK rewrite 已配置到 Claude 的 PreToolUse:Bash。" "RTK rewrite has been wired into Claude PreToolUse:Bash.")"
         echo "  $(t "如果本机已有或本轮装上了 Codex CLI，也会顺手执行 rtk init --codex --global。" "If Codex CLI is already available or gets installed in this run, the installer also runs rtk init --codex --global.")"
         echo "  $(t "后续通过 MMS 启动的 Claude session 会自动继承这个 hook。" "Claude sessions launched through MMS will inherit this hook automatically.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
+        echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, and the token monitor hook.")"
+        echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
         echo ""
     fi
 
