@@ -213,6 +213,12 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     return env
 
 
+def _set_session_home_hint(env, session_home):
+    if session_home:
+        env["MMS_SESSION_HOME"] = session_home
+    return env
+
+
 RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
 HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
 ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
@@ -232,6 +238,8 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 _AGENT_IM_DIR = _real_user_path("auto-skills", "CtriXin-repo", "agent-im")
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
+_LOCAL_HOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks")
+_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -398,6 +406,61 @@ def _merge_claude_permissions(existing):
     return base
 
 
+def _hook_command_exists(hook_items, command_path):
+    if not isinstance(hook_items, list):
+        return False
+    for hook in hook_items:
+        if not isinstance(hook, dict):
+            continue
+        if str(hook.get("type") or "").strip() != "command":
+            continue
+        if str(hook.get("command") or "").strip() == command_path:
+            return True
+    return False
+
+
+def _append_command_hook(hooks_data, event_name, command_path, matcher=None):
+    if not command_path or not os.path.isfile(command_path):
+        return hooks_data
+
+    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
+    event_groups = list(merged.get(event_name) or [])
+
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
+        target_matcher = str(matcher or "").strip()
+        if existing_matcher != target_matcher:
+            continue
+        hook_items = group.get("hooks")
+        if _hook_command_exists(hook_items, command_path):
+            merged[event_name] = event_groups
+            return merged
+        if isinstance(hook_items, list):
+            hook_items.append({"type": "command", "command": command_path})
+            merged[event_name] = event_groups
+            return merged
+
+    new_group = {"hooks": [{"type": "command", "command": command_path}]}
+    if matcher is not None:
+        new_group["matcher"] = matcher
+    event_groups.append(new_group)
+    merged[event_name] = event_groups
+    return merged
+
+
+def _merge_mms_session_hooks(existing_hooks):
+    hooks_data = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "PreToolUse",
+        _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
+        matcher="WebFetch",
+    )
+    return hooks_data
+
+
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
     settings_data = dict(base_settings or {})
 
@@ -410,7 +473,7 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
         merged_env.update(required_env)
     settings_data["env"] = merged_env
 
-    hooks = _strip_agent_im_hooks(settings_data.get("hooks"))
+    hooks = _merge_mms_session_hooks(_strip_agent_im_hooks(settings_data.get("hooks")))
     if hooks:
         settings_data["hooks"] = hooks
     else:
@@ -595,6 +658,7 @@ def _account_env(account):
             skip_real_entries={"settings.json"},
         )
         env["HOME"] = session_home
+        _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
@@ -625,6 +689,7 @@ def _account_env(account):
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
+        _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
@@ -682,7 +747,7 @@ def _install_session_command_wrappers(session_home, env):
 
     real_home = _real_user_home()
     current_path = os.environ.get("PATH", "")
-    for command_name in ("lark-cli", "hive"):
+    for command_name in ("gh", "lark-cli", "hive"):
         real_bin = shutil.which(command_name, path=current_path)
         if not real_bin:
             continue
@@ -695,6 +760,7 @@ def _install_session_command_wrappers(session_home, env):
                 f'export MMS_REAL_HOME="{real_home}"',
                 f'export REAL_HOME="{real_home}"',
                 f'export ORIGINAL_HOME="{real_home}"',
+                f'export GH_CONFIG_DIR="{_real_user_path(".config", "gh")}"',
                 f'exec "{real_bin}" "$@"',
                 "",
             ]
@@ -1671,6 +1737,7 @@ def _claude_gateway_env(
     env = os.environ.copy()
     _inject_real_home_hints(env)
     env["HOME"] = gateway_home
+    _set_session_home_hint(env, gateway_home)
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
     env["MMS_ROUTE_STATUS_PATH"] = route_status_path
@@ -1922,6 +1989,7 @@ def _codex_gateway_env(runtime, base_url):
     env = os.environ.copy()
     _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = session_home
+    _set_session_home_hint(env, session_home)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
     _install_session_command_wrappers(session_home, env)
