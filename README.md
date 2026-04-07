@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 By default, the installer pulls the latest semver tag.
-When run in an interactive terminal, it asks for UI language first, then the optional RTK enhancement, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
+When run in an interactive terminal, it asks for UI language first, then the optional RTK enhancement, the optional `MindKeeper context pack`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 
 ### Default English UI on install
 
@@ -41,6 +41,20 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 This optional path installs `jq` + `rtk`, wires the Claude `PreToolUse:Bash` hook, and when `Codex CLI` is already available (or gets installed in the same run) it also runs `rtk init --codex --global`.
+
+### Install with optional MindKeeper context pack
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context
+```
+
+This optional path installs `MindKeeper MCP`, Claude `/distill`, Claude `/cz`, and the Claude `UserPromptSubmit` token monitor hook. If `jq` is missing, the installer also attempts to install it because the hook depends on it.
+
+Scope notes:
+
+- This pack is `Claude`-first; it does not add Hive compact/restore features
+- It does not auto-create a separate `Codex` slash command surface
+- `Hive`-related hooks and packs remain outside the default MMS install path
 
 ### Install MMS plus selected CLIs
 
