@@ -7,14 +7,23 @@ existing gateway and OAuth flows keep their current behavior.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
+from functools import lru_cache
 from typing import Any
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 
 DEFAULT_BROKER_REPO = os.path.expanduser("~/auto-skills/CtriXin-repo/cc-official-broker")
+PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")
+LEGACY_CREDENTIALS_PATH = os.path.expanduser("~/.config/ccs/credentials.sh")
+BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")
 
 
 def _normalize_broker_profile_id(profile_id: str) -> str:
@@ -29,12 +38,40 @@ def _normalize_optional_str(value: Any) -> str:
     return str(value or "").strip()
 
 
+@lru_cache(maxsize=2)
+def _load_env_file(path: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path or not os.path.exists(path):
+        return values
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line.startswith("export ") or "=" not in line:
+                    continue
+                key, raw_value = line[len("export "):].split("=", 1)
+                key = key.strip()
+                raw_value = raw_value.strip()
+                if not key:
+                    continue
+                if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+                    raw_value = raw_value[1:-1]
+                values[key] = raw_value
+    except OSError:
+        return {}
+    return values
+
+
 def _resolve_secret_value(profile: dict[str, Any], direct_key: str, env_key: str) -> str:
     env_name = _normalize_optional_str(profile.get(env_key))
     if env_name:
         env_value = os.environ.get(env_name)
         if env_value:
             return env_value.strip()
+        for credentials_path in (PRIMARY_CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
+            env_value = _load_env_file(credentials_path).get(env_name, "")
+            if env_value:
+                return env_value.strip()
     return _normalize_optional_str(profile.get(direct_key))
 
 
@@ -51,6 +88,7 @@ def normalize_broker_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(profile.get("enabled", True)),
         "broker_base_url": _normalize_optional_str(profile.get("broker_base_url")).rstrip("/"),
         "entry_mode": _normalize_optional_str(profile.get("entry_mode") or "shell") or "shell",
+        "fallback_entry_mode": _normalize_optional_str(profile.get("fallback_entry_mode") or ""),
         "device_key": _normalize_optional_str(profile.get("device_key")),
         "device_key_env": _normalize_optional_str(profile.get("device_key_env")),
         "owner_user_id": _normalize_optional_str(profile.get("owner_user_id") or "xin") or "xin",
@@ -67,6 +105,7 @@ def normalize_broker_profile(profile: dict[str, Any]) -> dict[str, Any]:
         or "multi-model-switch",
         "runner_tools": runner_tools,
         "runner_writable_scope": _normalize_optional_str(profile.get("runner_writable_scope") or "none") or "none",
+        "claude_bypass_permissions": bool(profile.get("claude_bypass_permissions", False)),
         "remote_service_label": _normalize_optional_str(profile.get("remote_service_label")),
         "remote_service_base_url": _normalize_optional_str(profile.get("remote_service_base_url")).rstrip("/"),
         "remote_service_endpoint": _normalize_optional_str(profile.get("remote_service_endpoint") or "responses")
@@ -142,6 +181,8 @@ def _build_broker_env(profile: dict[str, Any], *, workspace_root: str, model_ove
     if runner_tools:
         env["CC_BROKER_RUNNER_TOOLS"] = ",".join(runner_tools)
     env["CC_BROKER_RUNNER_WRITABLE_SCOPE"] = profile.get("runner_writable_scope", "none")
+    if profile.get("claude_bypass_permissions"):
+        env["CC_BROKER_CLAUDE_BYPASS_PERMISSIONS"] = "1"
     if profile.get("remote_service_label"):
         env["CC_BROKER_REMOTE_SERVICE_LABEL"] = profile.get("remote_service_label", "")
     if profile.get("remote_service_base_url"):
@@ -163,6 +204,340 @@ def _build_broker_env(profile: dict[str, Any], *, workspace_root: str, model_ove
     if remote_service_api_key:
         env["CC_BROKER_REMOTE_SERVICE_X_API_KEY"] = remote_service_api_key
     return env
+
+
+def _is_loopback_broker_base_url(base_url: str) -> bool:
+    try:
+        parsed = urlparse(base_url)
+    except ValueError:
+        return False
+    return parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+def _broker_healthz_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/healthz"
+
+
+def _fetch_json(url: str, timeout: float = 1.5) -> dict[str, Any] | None:
+    try:
+        with urlopen(url, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except (OSError, URLError, TimeoutError, ValueError):
+        return None
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _broker_is_healthy(base_url: str) -> bool:
+    payload = _fetch_json(_broker_healthz_url(base_url))
+    return bool(payload and payload.get("ok"))
+
+
+def _start_broker_live_background(profile: dict[str, Any]) -> dict[str, Any]:
+    node = shutil.which("node")
+    if not node:
+        raise RuntimeError("未找到 node，无法自动拉起本地 broker")
+
+    entry_path = _broker_entry_path(profile)
+    if not os.path.exists(entry_path):
+        raise RuntimeError(f"未找到 broker launcher: {entry_path}")
+
+    os.makedirs(BROKER_CACHE_DIR, exist_ok=True)
+    log_path = os.path.join(BROKER_CACHE_DIR, f"{profile['id']}.log")
+    log_handle = open(log_path, "ab")
+    process = subprocess.Popen(
+        [node, entry_path, "broker:live", profile["id"]],
+        cwd=profile.get("broker_repo_path") or DEFAULT_BROKER_REPO,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    log_handle.close()
+    return {
+        "pid": process.pid,
+        "log_path": log_path,
+    }
+
+
+def _ensure_local_broker_running(profile: dict[str, Any]) -> dict[str, Any]:
+    base_url = profile.get("broker_base_url", "")
+    if not base_url or not _is_loopback_broker_base_url(base_url):
+        return {
+            "started": False,
+            "base_url": base_url,
+            "log_path": "",
+        }
+
+    if _broker_is_healthy(base_url):
+        return {
+            "started": False,
+            "base_url": base_url,
+            "log_path": "",
+        }
+
+    started = _start_broker_live_background(profile)
+    deadline = time.time() + 12
+    while time.time() < deadline:
+        if _broker_is_healthy(base_url):
+            return {
+                "started": True,
+                "base_url": base_url,
+                "pid": started["pid"],
+                "log_path": started["log_path"],
+            }
+        time.sleep(0.4)
+
+    raise RuntimeError(
+        f"本地 broker 没能在预期时间内起来: {base_url}；可查看日志 {started['log_path']}"
+    )
+
+
+def _probe_official_doctor(profile: dict[str, Any], *, workspace_root: str, model_override: str = "") -> dict[str, Any]:
+    node = shutil.which("node")
+    if not node:
+        return {"ok": False, "error": "未找到 node"}
+
+    entry_path = _broker_entry_path(profile)
+    if not os.path.exists(entry_path):
+        return {"ok": False, "error": f"未找到 broker launcher: {entry_path}"}
+
+    env = _build_broker_env(profile, workspace_root=workspace_root, model_override=model_override)
+    result = subprocess.run(
+        [node, entry_path, "official:doctor"],
+        env=env,
+        cwd=workspace_root,
+        capture_output=True,
+        text=True,
+    )
+
+    raw = (result.stdout or result.stderr or "").strip()
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    if isinstance(payload, dict):
+        payload.setdefault("ok", result.returncode == 0)
+        return payload
+
+    return {
+        "ok": result.returncode == 0,
+        "raw": raw,
+    }
+
+
+def _run_broker_json_command(
+    profile: dict[str, Any],
+    command: str,
+    *,
+    workspace_root: str,
+    model_override: str = "",
+) -> dict[str, Any]:
+    node = shutil.which("node")
+    if not node:
+        return {"ok": False, "error": "未找到 node"}
+
+    entry_path = _broker_entry_path(profile)
+    if not os.path.exists(entry_path):
+        return {"ok": False, "error": f"未找到 broker launcher: {entry_path}"}
+
+    env = _build_broker_env(profile, workspace_root=workspace_root, model_override=model_override)
+    result = subprocess.run(
+        [node, entry_path, command],
+        env=env,
+        cwd=workspace_root,
+        capture_output=True,
+        text=True,
+    )
+
+    raw = (result.stdout or result.stderr or "").strip()
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        return {"ok": False, "error": raw or f"{command} returned non-json output"}
+
+    if isinstance(payload, dict):
+        payload.setdefault("ok", result.returncode == 0)
+        return payload
+
+    return {"ok": result.returncode == 0, "raw": raw}
+
+
+def _load_official_proxy_history(
+    profile: dict[str, Any],
+    *,
+    workspace_root: str,
+    model_override: str = "",
+) -> list[dict[str, Any]]:
+    payload = _run_broker_json_command(
+        profile,
+        "session:history",
+        workspace_root=workspace_root,
+        model_override=model_override,
+    )
+    sessions = payload.get("sessions") if isinstance(payload, dict) else None
+    if not isinstance(sessions, list):
+        return []
+    return [item for item in sessions if isinstance(item, dict) and _normalize_optional_str(item.get("session_id"))]
+
+
+def _summarize_history_item(item: dict[str, Any]) -> str:
+    session_id = _normalize_optional_str(item.get("session_id")) or "-"
+    remote_session_id = _normalize_optional_str(item.get("remote_session_id")) or "-"
+    updated_at = _normalize_optional_str(item.get("updated_at"))
+    short_time = updated_at.replace("T", " ").replace("Z", "")[:16] if updated_at else "-"
+    return f"{short_time} | local={session_id} | remote={remote_session_id}"
+
+
+def _resolve_profile_launch_mode_interactive(
+    profile: dict[str, Any],
+    *,
+    workspace_root: str,
+    model_override: str = "",
+) -> tuple[str, str]:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return "resume_last", ""
+
+    history = _load_official_proxy_history(
+        profile,
+        workspace_root=workspace_root,
+        model_override=model_override,
+    )
+    if not history:
+        return "new", ""
+
+    print(
+        "[broker] 当前项目检测到历史会话；直接回车续最近，输入 2 新开，输入 3 切换旧会话。",
+        flush=True,
+    )
+    while True:
+        raw = input("选择 [1/2/3] (默认 1): ").strip()
+        if raw in {"", "1"}:
+            return "resume_last", ""
+        if raw == "2":
+            return "new", ""
+        if raw == "3":
+            print("可切换的历史会话：", flush=True)
+            for index, item in enumerate(history, 1):
+                print(f"  {index}. {_summarize_history_item(item)}", flush=True)
+            while True:
+                picked = input("输入编号，直接回车取消并续最近: ").strip()
+                if not picked:
+                    return "resume_last", ""
+                if picked.isdigit():
+                    pos = int(picked)
+                    if 1 <= pos <= len(history):
+                        return "resume", _normalize_optional_str(history[pos - 1].get("session_id"))
+                print("请输入有效编号。", flush=True)
+        print("请输入 1、2 或 3。", flush=True)
+
+
+def _resolve_entry_command(
+    profile: dict[str, Any],
+    *,
+    workspace_root: str,
+    model_override: str = "",
+) -> tuple[str, str]:
+    entry_mode = _normalize_optional_str(profile.get("entry_mode") or "shell").lower()
+    fallback_entry_mode = _normalize_optional_str(profile.get("fallback_entry_mode") or "").lower()
+
+    if entry_mode not in {"official_attach", "official_connect", "official_proxy"}:
+        return "mms:run", entry_mode
+
+    if entry_mode == "official_proxy":
+        return "official:proxy", entry_mode
+
+    doctor = _probe_official_doctor(profile, workspace_root=workspace_root, model_override=model_override)
+    direct_connect = doctor.get("direct_connect") if isinstance(doctor, dict) else {}
+    local_auth = doctor.get("local_auth") if isinstance(doctor, dict) else {}
+    remote_auth = doctor.get("remote_auth") if isinstance(doctor, dict) else {}
+    current_direction = doctor.get("current_direction") if isinstance(doctor, dict) else {}
+    supported = bool(isinstance(direct_connect, dict) and direct_connect.get("supported"))
+    logged_in = bool(isinstance(local_auth, dict) and local_auth.get("logged_in"))
+    remote_auth_ready = bool(isinstance(remote_auth, dict) and remote_auth.get("available"))
+    recommended_entry = (
+        _normalize_optional_str(current_direction.get("recommended_entry"))
+        if isinstance(current_direction, dict)
+        else ""
+    )
+
+    if supported and (logged_in or remote_auth_ready):
+        return "official:connect", entry_mode
+
+    if recommended_entry == "official:proxy":
+        print(
+            "[broker] official_connect 当前不可用，自动改走 official_proxy。",
+            flush=True,
+        )
+        return "official:proxy", "official_proxy"
+
+    if fallback_entry_mode == "shell":
+        version = ""
+        local_claude = doctor.get("local_claude") if isinstance(doctor, dict) else {}
+        if isinstance(local_claude, dict):
+            version = _normalize_optional_str(local_claude.get("version"))
+        reason = ""
+        if isinstance(direct_connect, dict):
+            reason = _normalize_optional_str(direct_connect.get("reason"))
+        if supported and not logged_in and not remote_auth_ready:
+            auth_method = ""
+            if isinstance(local_auth, dict):
+                auth_method = _normalize_optional_str(local_auth.get("auth_method"))
+            remote_reason = ""
+            if isinstance(remote_auth, dict):
+                remote_reason = _normalize_optional_str(remote_auth.get("reason"))
+            message = "本机 Claude Code 尚未登录，且远端 claude auth bundle 也不可用"
+            if remote_reason:
+                message = f"{message}（remote_auth={remote_reason}）"
+            if auth_method and auth_method != "unknown":
+                message = f"{message}（当前 auth_method={auth_method}）"
+        else:
+            message = reason or "当前本机 Claude Code 还不支持 direct-connect"
+        if version:
+            print(f"[broker] official entry 暂不可用，回退到 shell：{version} | {message}", flush=True)
+        else:
+            print(f"[broker] official entry 暂不可用，回退到 shell：{message}", flush=True)
+        return "mms:run", fallback_entry_mode
+
+    raise RuntimeError(
+        "当前 profile 配置为 official_connect，但本机 Claude Code 还不支持 direct-connect；"
+        "请升级 Claude Code，或给 profile 增加 fallback_entry_mode = \"shell\""
+    )
+
+
+def _run_with_shell_fallback(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    workspace_root: str,
+    requested_entry_mode: str,
+    effective_entry_mode: str,
+    fallback_entry_mode: str,
+) -> int:
+    result = subprocess.run(cmd, env=env, cwd=workspace_root)
+    if result.returncode == 0:
+        return 0
+
+    if requested_entry_mode not in {"official_connect", "official_proxy"}:
+        return result.returncode
+
+    if effective_entry_mode not in {"official_connect", "official_proxy"}:
+        return result.returncode
+
+    if fallback_entry_mode != "shell":
+        return result.returncode
+
+    print(
+        "[broker] official entry 退出，自动回退到 broker shell。",
+        flush=True,
+    )
+    fallback_cmd = [cmd[0], cmd[1], "mms:run"]
+    return subprocess.run(fallback_cmd, env=env, cwd=workspace_root).returncode
 
 
 def _print_profile_table(cfg: dict[str, Any]) -> None:
@@ -193,6 +568,7 @@ def _show_profile(cfg: dict[str, Any], profile_id: str) -> int:
         ("enabled", "true" if profile.get("enabled", True) else "false"),
         ("broker_base_url", profile.get("broker_base_url") or "-"),
         ("entry_mode", profile.get("entry_mode") or "shell"),
+        ("fallback_entry_mode", profile.get("fallback_entry_mode") or "-"),
         ("device_key_source", profile.get("device_key_env") or "inline"),
         ("owner_user_id", profile.get("owner_user_id") or "-"),
         ("device_id", profile.get("device_id") or "-"),
@@ -205,6 +581,8 @@ def _show_profile(cfg: dict[str, Any], profile_id: str) -> int:
         ("remote_service_auth", profile.get("remote_service_bearer_token_env") or profile.get("remote_service_api_key_env") or "inline/none"),
         ("broker_repo_path", profile.get("broker_repo_path") or "-"),
         ("runner_tools", ", ".join(profile.get("runner_tools") or []) or "-"),
+        ("runner_writable_scope", profile.get("runner_writable_scope") or "-"),
+        ("claude_bypass_permissions", "true" if profile.get("claude_bypass_permissions") else "false"),
     ]
     for key, value in fields:
         print(f"{key}: {value}")
@@ -218,6 +596,7 @@ def _run_profile(
     session_id: str = "",
     resume: bool = False,
     resume_last: bool = False,
+    new_session: bool = False,
     model_override: str = "",
 ) -> int:
     profile = resolve_broker_profile(cfg, profile_id)
@@ -245,15 +624,24 @@ def _run_profile(
         return 1
 
     workspace_root = os.getcwd()
+    broker_boot = _ensure_local_broker_running(profile)
     env = _build_broker_env(profile, workspace_root=workspace_root, model_override=model_override)
-    entry_mode = _normalize_optional_str(profile.get("entry_mode") or "shell").lower()
-    entry_command = "official:connect" if entry_mode in {"official_attach", "official_connect"} else "mms:run"
+    entry_command, effective_entry_mode = _resolve_entry_command(
+        profile,
+        workspace_root=workspace_root,
+        model_override=model_override,
+    )
+    requested_entry_mode = _normalize_optional_str(profile.get("entry_mode") or "shell").lower()
+    fallback_entry_mode = _normalize_optional_str(profile.get("fallback_entry_mode") or "").lower()
     cmd = [node, entry_path, entry_command]
     if resume_last and session_id:
         print("--resume-last 不能和 --session 同时使用", file=sys.stderr)
         return 1
     if resume and resume_last:
         print("--resume 和 --resume-last 只能二选一", file=sys.stderr)
+        return 1
+    if new_session and (resume or resume_last or session_id):
+        print("--new 不能和 --session / --resume / --resume-last 同时使用", file=sys.stderr)
         return 1
 
     if entry_command == "mms:run":
@@ -268,24 +656,30 @@ def _run_profile(
             if len(cmd) == 2:
                 cmd.append(session_id)
             cmd.append("resume")
+    elif entry_command == "official:proxy":
+        if resume_last:
+            cmd.append("--continue")
+        elif resume:
+            if not session_id:
+                print("--resume 需要配合 --session 使用", file=sys.stderr)
+                return 1
+            cmd.extend(["--resume", session_id])
+        elif session_id:
+            cmd.extend(["--resume", session_id])
     elif resume or resume_last or session_id:
-        print("entry_mode=official_attach/official_connect 时会忽略 --session / --resume / --resume-last", flush=True)
-
-    print(
-        f"启动 broker profile {profile['id']} "
-        f"({profile['device_id']}/{profile['workspace_id']}) -> {profile['broker_base_url']}",
-        flush=True,
-    )
-    print(f"entry_mode: {entry_mode}", flush=True)
-    if profile.get("remote_service_base_url"):
-        remote_service_name = profile.get("remote_service_label") or profile.get("remote_service_base_url")
-        remote_service_model = _normalize_optional_str(model_override) or profile.get("remote_service_model") or "-"
         print(
-            f"remote service: {remote_service_name} [{profile.get('remote_service_endpoint', 'responses')}] model={remote_service_model}",
+            "entry_mode=official_attach/official_connect/official_proxy 时会忽略 --session / --resume / --resume-last",
             flush=True,
         )
-    print(f"workspace: {workspace_root}", flush=True)
-    return subprocess.run(cmd, env=env, cwd=workspace_root).returncode
+
+    return _run_with_shell_fallback(
+        cmd,
+        env=env,
+        workspace_root=workspace_root,
+        requested_entry_mode=requested_entry_mode,
+        effective_entry_mode=effective_entry_mode,
+        fallback_entry_mode=fallback_entry_mode,
+    )
 
 
 def _run_official_smoke(cfg: dict[str, Any], profile_id: str, *, prompt: str = "") -> int:
@@ -335,6 +729,7 @@ def run_broker_profile(
     session_id: str = "",
     resume: bool = False,
     resume_last: bool = False,
+    new_session: bool = False,
     model_override: str = "",
 ) -> int:
     return _run_profile(
@@ -343,6 +738,47 @@ def run_broker_profile(
         session_id=session_id,
         resume=resume,
         resume_last=resume_last,
+        new_session=new_session,
+        model_override=model_override,
+    )
+
+
+def run_broker_profile_interactive(
+    cfg: dict[str, Any],
+    profile_id: str,
+    *,
+    model_override: str = "",
+) -> int:
+    profile = resolve_broker_profile(cfg, profile_id)
+    if profile is None:
+        print(f"未找到 broker profile: {profile_id}", file=sys.stderr)
+        return 1
+
+    workspace_root = os.getcwd()
+    entry_command, _effective_entry_mode = _resolve_entry_command(
+        profile,
+        workspace_root=workspace_root,
+        model_override=model_override,
+    )
+    if entry_command not in {"mms:run", "official:proxy"}:
+        return run_broker_profile(
+            cfg,
+            profile_id,
+            model_override=model_override,
+        )
+
+    launch_mode, selected_session_id = _resolve_profile_launch_mode_interactive(
+        profile,
+        workspace_root=workspace_root,
+        model_override=model_override,
+    )
+    return run_broker_profile(
+        cfg,
+        profile_id,
+        session_id=selected_session_id,
+        resume=launch_mode == "resume",
+        resume_last=launch_mode == "resume_last",
+        new_session=launch_mode == "new",
         model_override=model_override,
     )
 
@@ -364,6 +800,8 @@ def handle_broker_command(cfg: dict[str, Any], argv: list[str], *, command_name:
     run_parser.add_argument("--session", default="", help="显式指定 session id")
     run_parser.add_argument("--resume", action="store_true", help="恢复指定 session id")
     run_parser.add_argument("--resume-last", action="store_true", help="恢复当前项目最近一次本地记住的 session")
+    run_parser.add_argument("--new", action="store_true", help="明确新开一条 broker 会话")
+    run_parser.add_argument("--pick", action="store_true", help="交互选择续最近 / 新开 / 切换旧会话")
 
     smoke_parser = subparsers.add_parser("smoke", help="跑一条 official child attach smoke test")
     smoke_parser.add_argument("profile_id")
@@ -381,12 +819,18 @@ def handle_broker_command(cfg: dict[str, Any], argv: list[str], *, command_name:
     if args.subcommand == "show":
         return _show_profile(cfg, args.profile_id)
     if args.subcommand == "run":
+        if args.pick:
+            return run_broker_profile_interactive(
+                cfg,
+                args.profile_id,
+            )
         return run_broker_profile(
             cfg,
             args.profile_id,
             session_id=args.session,
             resume=bool(args.resume),
             resume_last=bool(args.resume_last),
+            new_session=bool(args.new),
         )
     if args.subcommand == "smoke":
         return _run_official_smoke(cfg, args.profile_id, prompt=args.prompt)
