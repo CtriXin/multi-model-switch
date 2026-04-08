@@ -10,6 +10,8 @@ name = "Default Gateway"
 protocols = ["anthropic_messages", "openai_chat_completions"]
 supported_clis = ["claude", "codex", "qwen", "kimi"]
 enabled = true
+# Claude 1M 策略：auto / enable / disable
+# claude_1m_mode = "auto"
 # 对“慢但实际可用”的 Claude-compatible gateway，可显式跳过首启探测：
 # skip_gateway_health_check = true
 # skip_anthropic_probe = true
@@ -61,3 +63,11 @@ remote_service_model = "claude-opus-4-6"
 # remote_service_bearer_token_env = "MMS_REMOTE_SERVICE_TOKEN_PERSONAL"
 # broker_repo_path = "~/auto-skills/CtriXin-repo/cc-official-broker"
 # runner_tools = ["pwd", "git_status", "read_file", "search"]
+
+#[[accounts]]
+#id = "claude-main"
+#name = "Claude Main"
+#cli = "claude"
+#enabled = true
+#priority = 100
+#claude_1m_mode = "disable"  # auto / enable / disable

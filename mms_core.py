@@ -175,6 +175,7 @@ _LEGACY_API_URL_ENV = "CCS_API_BASE_URL"
 _LEGACY_API_KEY_ENV = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
+VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
 OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
 DEFAULT_PRIORITY = 100
 MODE_ALL = "全部模型"
@@ -614,6 +615,17 @@ def _normalize_priority(value):
         return DEFAULT_PRIORITY
 
 
+def _normalize_claude_1m_mode(value, default="auto"):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in VALID_CLAUDE_1M_MODES else "auto"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in VALID_CLAUDE_1M_MODES else "auto"
+
+
 def _normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")
@@ -653,6 +665,7 @@ def _normalize_account(account):
         "enabled": bool(account.get("enabled", True)),
         "home_dir": os.path.expanduser(home_dir),
         "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
+        "claude_1m_mode": _normalize_claude_1m_mode(account.get("claude_1m_mode", "auto")),
         "note": str(account.get("note", "")).strip(),
     }
 
@@ -781,6 +794,7 @@ def _normalize_provider(provider):
 
     merged["enabled"] = bool(merged.get("enabled", True))
     merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
+    merged["claude_1m_mode"] = _normalize_claude_1m_mode(merged.get("claude_1m_mode", "auto"))
     merged["note"] = str(merged.get("note", "")).strip()
     merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
     merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
@@ -2253,6 +2267,13 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
             Prompt.ask("模型列表地址（高级；仅用于拉取模型列表，输入 manual 表示完全手工维护模型）", default=current.get("models_endpoint", "/models"))
         )
     priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    claude_1m_mode = _normalize_claude_1m_mode(
+        Prompt.ask(
+            "Claude 1M 策略（auto/enable/disable）",
+            choices=["auto", "enable", "disable"],
+            default=current.get("claude_1m_mode", "auto"),
+        )
+    )
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
@@ -2262,6 +2283,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         "supported_clis": supported_clis,
         "models_endpoint": models_endpoint,
         "priority": priority,
+        "claude_1m_mode": claude_1m_mode,
         "note": note,
         "enabled": enabled,
     })
@@ -2333,6 +2355,13 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
     name = Prompt.ask("显示名", default=current.get("name") or account_id).strip() or account_id
     home_dir = current.get("home_dir") or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
+    claude_1m_mode = _normalize_claude_1m_mode(
+        Prompt.ask(
+            "Claude 1M 策略（auto/enable/disable）",
+            choices=["auto", "enable", "disable"],
+            default=current.get("claude_1m_mode", "auto"),
+        )
+    )
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
@@ -2341,6 +2370,7 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         "cli": cli_name,
         "home_dir": home_dir,
         "priority": priority,
+        "claude_1m_mode": claude_1m_mode,
         "note": note,
         "enabled": enabled,
     })
@@ -6081,13 +6111,22 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         result = _safe_tui_call(confirm_tui, cli, clean_model_info, env_vars=env_vars, once=once)
         if result == "__interrupt__":
             return True
-        action, bypass = result if isinstance(result, tuple) else (result, False)
+        if isinstance(result, tuple):
+            if len(result) >= 3:
+                action, bypass, claude_1m_enabled = result[:3]
+            else:
+                action, bypass = result[:2]
+                claude_1m_enabled = False
+        else:
+            action, bypass, claude_1m_enabled = result, False, False
         if action == "q":
             return True
         if action == "b":
             continue
         if bypass:
             runtime_runtime["bypass"] = True
+        if cli == "claude":
+            runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 
@@ -7130,6 +7169,8 @@ def _validate_config(cfg):
                 errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"模型源 {provider_id} 的 priority 必须是正整数")
+            if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
+                errors.append(f"模型源 {provider_id} 的 claude_1m_mode 必须是 auto/enable/disable")
     default_id = cfg.get("provider", {}).get("default")
     provider_ids = {item.get("id") for item in providers if isinstance(item, dict)}
     if default_id and default_id not in provider_ids:
@@ -7161,6 +7202,8 @@ def _validate_config(cfg):
                 errors.append(f"账号档案 {account_id} 缺少 home_dir")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"账号档案 {account_id} 的 priority 必须是正整数")
+            if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
+                errors.append(f"账号档案 {account_id} 的 claude_1m_mode 必须是 auto/enable/disable")
     account_defaults = cfg.get("account", {}).get("defaults", {})
     if isinstance(account_defaults, dict):
         for cli_name, account_id in account_defaults.items():
