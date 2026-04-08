@@ -282,7 +282,7 @@ mms broker smoke <id>                 # 跑一条 official child attach smoke te
 
 - 你可以像选 `官方` / `网关` 一样选它
 - 选中后会直接走 `cc-official-broker`
-- 如果 profile 的 `entry_mode = "official_attach"`，MMS 会直接尝试进入 official `Claude` 的 direct-connect TUI，不需要再按 `B` 进 broker shell
+- 如果 profile 的 `entry_mode = "official_proxy"`，MMS 会直接拉起本机真实 official `Claude` CLI，再通过本地 proxy 接到远端 official runtime，不需要再按 `B` 进 broker shell
 - 如果你是 `mms claude` 这种直接启动，选中 broker 后会直接进 remote official cc，不再额外弹本地模型列表
 
 当前按 `B` 进去后，如果你不知道该测什么，先记两条命令就够了：
@@ -295,16 +295,12 @@ mms broker smoke <id>                 # 跑一条 official child attach smoke te
 如果你连 broker shell 都不想看，只想“按 B 后直接像普通通道一样进 cc”，现在可以在对应 `broker_profile` 里加：
 
 ```toml
-entry_mode = "official_attach"
+entry_mode = "official_proxy"
 ```
 
-这样按 `B` 选中这个 profile 后，会直接调用 `cc-official-broker official:connect`，不再先进 broker shell。
+这样按 `B` 选中这个 profile 后，会直接调用 `cc-official-broker official:proxy`，不再先进 broker shell。
 
-注意当前这条路依然会复用你本机真实 official `claude` binary；如果本机还没登录，你会先看到：
-
-- `Not logged in · Please run /login`
-
-这时先在本机把 official `claude` 登录好，再回到 MMS 重试。
+如果你之前已经配成 `entry_mode = "official_connect"`，但本机 public `Claude Code` 不支持 direct-connect，MMS 现在也会自动改走 `official:proxy`，不需要手动回 shell。
 
 `broker_profiles` 现在也可以顺带声明远端 runtime service 目标，例如：
 

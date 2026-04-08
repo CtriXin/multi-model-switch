@@ -621,6 +621,7 @@ def _normalize_account_id(account_id):
 
 
 def _wizard_prompt(label, default="", password=False, required=False):
+    _ensure_rich()
     prompt = f"{label}（输入 b 返回，q 退出）"
     kwargs = {"password": password}
     if default != "":
@@ -2168,6 +2169,7 @@ def _parse_csv_values(raw_value, allowed_values=None):
 
 
 def _prompt_csv_values(label, default_values, allowed_values):
+    _ensure_rich()
     default_text = ",".join(default_values)
     raw_value = Prompt.ask(label, default=default_text)
     values = _parse_csv_values(raw_value, allowed_values=allowed_values)
@@ -2776,6 +2778,7 @@ def _pause_after_tui_report(prompt_text="按 Enter 返回"):
 
 
 def _manage_provider_models(cfg, provider_id):
+    _ensure_rich()
     changed = False
     current_cfg = cfg
     while True:
