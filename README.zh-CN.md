@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 默认会安装最新发布的 semver tag。
-如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后询问是否安装 RTK enhancement、是否安装 `MindKeeper context pack`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
+如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 
 ### 一键升级
@@ -82,6 +82,33 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 这是 `Claude` 优先的 context 可选包，不包含 Hive compact/restore
 - 当前不会顺手给 `Codex` 写独立 slash command
 - `Hive` 相关 hook / pack 仍保持独立，不进 MMS 默认安装
+
+### 安装 MMS 时顺手加上 Map auto-index
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map
+```
+
+这条可选路径会安装 `Map`，并把 Claude 的 `SessionStart` auto-index hook 配好。之后进入项目时，Claude 会自动建立或刷新项目结构索引。
+
+边界说明：
+
+- 当前优先接入 `Claude` 的 `SessionStart` hook
+- 需要本机已有可用的 `Node.js` / `npm`
+- 如果 `Map` 构建产物不存在，安装器会跳过 hook 注入并给出提示
+
+### 安装 MMS 时顺手加上 read-once
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-read-once
+```
+
+这条可选路径会安装 `read-once`，并把 Claude 的下面两类 hook 配好：
+
+- `PreToolUse:Read` token saver hook
+- `PostCompact` cache reset hook
+
+效果是避免重复全文读取文件，并在文件变化后优先提供 diff。若本机没有 `jq`，安装器也会尝试补装；如果仍然缺失，hook 会保持 fail-open 静默模式，不阻塞 Claude 正常使用。
 
 ### 安装 MMS 时顺手补齐常用 CLI
 
