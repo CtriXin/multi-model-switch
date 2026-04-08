@@ -2145,6 +2145,7 @@ def _run_account_login(account):
 
 def _ensure_interactive_terminal(action_hint):
     if sys.stdin.isatty():
+        _ensure_rich()
         return
     console.print(
         f"[red]当前不是交互终端，无法执行 {action_hint}，请在终端里运行 {current_command()}[/red]"
@@ -2352,6 +2353,7 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
             f"{_L('或执行', 'or')} {config_command_hint()}[/red]"
         )
         sys.exit(1)
+    _ensure_rich()
 
     default_openai = provider.get("default_openai_base_url", "")
     default_anthropic = provider.get("default_anthropic_base_url", "")
@@ -2563,10 +2565,17 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):
+    if _use_tui():
+        try:
+            console.clear()
+        except Exception:
+            pass
     rows = _usage_rows_for_runtime(runtime_kind, runtime_id)
     if not rows:
         console.print(f"[yellow]{title} 还没有本地启动统计[/yellow]")
         console.print(f"[dim]统计文件: {_active_usage_path()}[/dim]")
+        if _use_tui():
+            _pause_after_tui_report("按 Enter 返回通道详情")
         return
 
     table = Table(title=f"{title} · 本地统计", show_lines=True)
@@ -2583,6 +2592,8 @@ def _display_runtime_usage(runtime_kind, runtime_id, title):
         )
     console.print(table)
     console.print("[dim]这里只是本地启动统计，不代表官方真实余额或剩余额度。[/dim]")
+    if _use_tui():
+        _pause_after_tui_report("按 Enter 返回通道详情")
 
 
 def _list_manage_targets(cfg):
@@ -6431,6 +6442,7 @@ def _handle_provider_remove_config(cfg, args_rest):
     if not args_rest:
         console.print(f"[red]用法: {current_command()} config provider.remove <id>[/red]")
         return
+    _ensure_interactive_terminal("模型源删除确认")
     provider_id = args_rest[0].strip()
     providers = _provider_map(cfg)
     if provider_id not in providers:
@@ -6529,6 +6541,7 @@ def _handle_account_remove_config(cfg, args_rest):
     if not args_rest:
         console.print(f"[red]用法: {current_command()} config account.remove <id>[/red]")
         return
+    _ensure_interactive_terminal("账号档案删除确认")
     account_id = args_rest[0].strip()
     accounts = _account_map(cfg)
     if account_id not in accounts:
