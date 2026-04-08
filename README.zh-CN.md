@@ -89,7 +89,14 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map
 ```
 
-这条可选路径会安装 `Map`，并把 Claude 的 `SessionStart` auto-index hook 配好。之后进入项目时，Claude 会自动建立或刷新项目结构索引。
+这条可选路径会安装 `Map`，并把 Claude 的 `SessionStart` auto-index hook 配好。之后进入项目时，Claude 会自动建立或刷新项目结构索引。默认会锁定到经过 MMS 验证的 `Map v0.3.1`。
+
+如果你要覆盖 Map 版本，可以显式传 `--map-ref`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map --map-ref main
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map --map-ref v0.3.1
+```
 
 边界说明：
 

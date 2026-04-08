@@ -20,6 +20,8 @@ SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
+MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
+MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
 INSTALL_LANG="zh"
 INSTALL_LANG_EXPLICIT=0
 WRITE_SHELL_RC=0
@@ -101,7 +103,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-map] [--install-read-once] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -113,7 +115,8 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
   - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook")
-  - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook" "--install-map installs Map and enables the Claude SessionStart auto-index hook")
+  - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
+  - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -1347,18 +1350,26 @@ install_optional_mindkeeper_context() {
 
 run_map_installer() {
     local local_installer=""
+    local effective_map_ref="${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
+    local quoted_home=""
+    local quoted_map_ref=""
+    local quoted_local_installer=""
+
+    quoted_home="$(printf '%q' "$REAL_HOME")"
+    quoted_map_ref="$(printf '%q' "$effective_map_ref")"
 
     local_installer="$(dirname "$SOURCE_DIR")/folder-graphy/bin/install.sh"
     if [ -f "$local_installer" ]; then
+        quoted_local_installer="$(printf '%q' "$local_installer")"
         run_optional_command \
             "$(t "Map 安装" "Map install")" \
-            "env HOME=\"$REAL_HOME\" bash \"$local_installer\""
+            "env HOME=$quoted_home MAP_INSTALL_REF=$quoted_map_ref bash $quoted_local_installer --ref $quoted_map_ref"
         return 0
     fi
 
     run_optional_command \
         "$(t "Map 安装" "Map install")" \
-        "env HOME=\"$REAL_HOME\" bash -lc 'curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash'"
+        "env HOME=$quoted_home MAP_INSTALL_REF=$quoted_map_ref bash -lc 'curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash -s -- --ref \"\$MAP_INSTALL_REF\"'"
 }
 
 install_optional_map() {
@@ -1481,6 +1492,15 @@ while [[ $# -gt 0 ]]; do
             INSTALL_MAP=1
             INSTALL_MAP_EXPLICIT=1
             ;;
+        --map-ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--map-ref 需要一个版本号或分支名" "--map-ref requires a tag or branch name")"
+                usage
+                exit 1
+            fi
+            MAP_INSTALL_REF="$1"
+            ;;
         --install-read-once)
             INSTALL_READ_ONCE=1
             INSTALL_READ_ONCE_EXPLICIT=1
@@ -1558,6 +1578,7 @@ fi
 if [ "$INSTALL_MAP" -eq 1 ]; then
     echo "• $(t "附带安装 Map auto-index" "Optional Map auto-index"): on"
     echo "  $(t "会安装 Map，并写入 Claude 的 SessionStart hook。" "This installs Map and writes the Claude SessionStart hook.")"
+    echo "  $(t "Map 版本" "Map ref"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
 fi
 
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
