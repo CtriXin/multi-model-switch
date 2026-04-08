@@ -2399,10 +2399,23 @@ def select_connect_tui():
 
 
 def confirm_tui(cli, model_info, env_vars=None, once=False):
-    """确认启动 TUI。返回 (action, bypass) 二元组。
+    """确认启动 TUI。返回 (action, bypass, claude_1m_enabled) 三元组。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
+    claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     """
+    def _supports_claude_1m_toggle(info):
+        values = []
+        if isinstance(info, dict):
+            values.extend(str(v or "") for k, v in info.items() if k != "subagent")
+        else:
+            values.append(str(info or ""))
+        for item in values:
+            lower = item.strip().lower()
+            if lower.startswith("claude-") and "haiku" not in lower and ("opus" in lower or "sonnet" in lower):
+                return True
+        return False
+
     if isinstance(model_info, dict):
         model_display = ", ".join(f"{k}={v}" for k, v in model_info.items()
                                   if k != "subagent")
@@ -2450,6 +2463,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
         detail_lines = detail_lines[:4]
 
     has_bypass = cli in ("codex", "claude")
+    has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -2461,6 +2475,7 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
         curses.init_pair(5, curses.COLOR_GREEN, -1)
 
         bypass_mode = True
+        claude_1m_mode = False
 
         while True:
             stdscr.erase()
@@ -2475,6 +2490,9 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             if has_bypass:
                 mode_text = _L("BYPASS（跳过审批）", "BYPASS (skip approvals)") if bypass_mode else _L("正常", "Normal")
                 info_lines.append((_L("模式", "Mode"), f"[Tab] {mode_text}"))
+            if has_claude_1m:
+                one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
+                info_lines.append(("1M", f"[M] {one_m_text}"))
 
             ph = len(info_lines) + len(detail_lines) + 5
             px = (max_w - total_w) // 2
@@ -2507,30 +2525,45 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
 
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
-            _safe_addstr(stdscr, row, ll, "Enter", curses.color_pair(5) | curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 6, _L("启动", "Launch"), curses.color_pair(5) | curses.A_DIM)
+            footer_items = [
+                ("Enter", _L("启动", "Launch"), curses.color_pair(5) | curses.A_BOLD, curses.color_pair(5) | curses.A_DIM),
+            ]
             if has_bypass:
-                _safe_addstr(stdscr, row, ll + 13, "Tab", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, row, ll + 17, _L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_DIM)
-            _safe_addstr(stdscr, row, ll + 27, "B", curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 29, _L("返回", "Back"), curses.A_DIM)
-            _safe_addstr(stdscr, row, ll + 36, "Q", curses.A_BOLD)
-            _safe_addstr(stdscr, row, ll + 38, _L("取消", "Cancel"), curses.A_DIM)
+                footer_items.append(("Tab", _L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_BOLD, curses.color_pair(4) | curses.A_DIM))
+            if has_claude_1m:
+                footer_items.append(("M", _L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+            footer_items.extend([
+                ("B", _L("返回", "Back"), curses.A_BOLD, curses.A_DIM),
+                ("Q", _L("取消", "Cancel"), curses.A_BOLD, curses.A_DIM),
+            ])
+
+            cursor = ll
+            for key_text, label_text, key_attr, label_attr in footer_items:
+                if cursor > rr:
+                    break
+                _safe_addstr(stdscr, row, cursor, key_text, key_attr, max_w=max(0, rr - cursor + 1))
+                cursor += _display_width(key_text) + 1
+                if cursor > rr:
+                    break
+                _safe_addstr(stdscr, row, cursor, label_text, label_attr, max_w=max(0, rr - cursor + 1))
+                cursor += _display_width(label_text) + 2
             row += 1
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode)
+                return ("", bypass_mode, claude_1m_mode)
             elif key in (ord('b'), ord('B')):
-                return ("b", False)
+                return ("b", False, False)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False)
+                return ("q", False, False)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
+            elif key in (ord('m'), ord('M')) and has_claude_1m:
+                claude_1m_mode = not claude_1m_mode
 
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False)
+        return ("q", False, False)

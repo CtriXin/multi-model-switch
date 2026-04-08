@@ -11,7 +11,7 @@ from datetime import datetime
 from time import perf_counter
 
 from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from mms_core import _probe_models, detect_working_base_url
+from mms_core import _normalize_claude_1m_mode, _probe_models, detect_working_base_url
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
 
@@ -114,6 +114,11 @@ _CLAUDE_DISABLE_1M_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
 _CLAUDE_SENSITIVE_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
 
 def _runtime_supports_claude_1m(runtime):
+    explicit = _normalize_claude_1m_mode((runtime or {}).get("claude_1m_mode", "auto"))
+    if explicit == "enable":
+        return True
+    if explicit == "disable":
+        return False
     provider_id = str((runtime or {}).get("id", "")).strip().lower()
     return provider_id not in _CLAUDE_DISABLE_1M_PROVIDER_IDS
 
@@ -2234,6 +2239,14 @@ def _show_launch_info(cli, runtime, auth_mode):
                 console.print(f"[dim]{' | '.join(parts)}[/dim]")
     except Exception:
         pass
+
+    if cli == "claude":
+        try:
+            one_m = "开启" if _runtime_supports_claude_1m(runtime) else "关闭"
+            mode = _normalize_claude_1m_mode((runtime or {}).get("claude_1m_mode", "auto"))
+            console.print(f"[dim]Claude 1M: {one_m} ({mode})[/dim]")
+        except Exception:
+            pass
 
 
 def launch_cli(cli, model_info, runtime, once=False):
