@@ -2225,7 +2225,7 @@ def select_manage_target_tui(targets):
 
     try:
         return curses.wrapper(_inner)
-    except curses.error:
+    except (curses.error, KeyboardInterrupt):
         return None
 
 
@@ -2317,7 +2317,7 @@ def select_channel_action_tui(title, info_lines, actions):
 
     try:
         return curses.wrapper(_inner)
-    except curses.error:
+    except (curses.error, KeyboardInterrupt):
         return None
 
 
