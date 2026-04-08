@@ -30,6 +30,10 @@ INSTALL_RTK=0
 INSTALL_RTK_EXPLICIT=0
 INSTALL_MINDKEEPER_CONTEXT=0
 INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=0
+INSTALL_MAP=0
+INSTALL_MAP_EXPLICIT=0
+INSTALL_READ_ONCE=0
+INSTALL_READ_ONCE_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 
@@ -97,7 +101,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-map] [--install-read-once] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -109,6 +113,8 @@ $(t "说明:" "Notes:")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
   - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook")
+  - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook" "--install-map installs Map and enables the Claude SessionStart auto-index hook")
+  - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -236,6 +242,40 @@ prompt_optional_install_choices() {
             echo "  MindKeeper context pack 会安装 Claude 的 /distill、/cz 和 token monitor hook。"
             if confirm_from_tty "是否安装 MindKeeper context pack（Claude）？[y/N]: " "n"; then
                 INSTALL_MINDKEEPER_CONTEXT=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_MAP_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional Claude hook"
+            echo "  Project map auto-index installs Map and refreshes the project structure index on session start."
+            if confirm_from_tty "Install Map plus the Claude SessionStart auto-index hook? [y/N]: " "n"; then
+                INSTALL_MAP=1
+            fi
+        else
+            echo "可选 Claude hook"
+            echo "  Project map auto-index 会安装 Map，并在 SessionStart 时自动建立或刷新项目结构索引。"
+            if confirm_from_tty "是否安装 Map 并启用 Claude SessionStart auto-index hook？[y/N]: " "n"; then
+                INSTALL_MAP=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_READ_ONCE_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional Claude hook"
+            echo "  Read token saver (read-once) avoids redundant full-file rereads and prefers diffs after edits."
+            if confirm_from_tty "Install read-once for Claude Read token saving? [y/N]: " "n"; then
+                INSTALL_READ_ONCE=1
+            fi
+        else
+            echo "可选 Claude hook"
+            echo "  Read token saver（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
+            if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
+                INSTALL_READ_ONCE=1
             fi
         fi
     fi
@@ -588,6 +628,109 @@ install_requested_clis() {
     for cli_name in "${_requested_cli_items[@]}"; do
         install_named_cli "$cli_name" || true
     done
+}
+
+append_claude_hook_command() {
+    local settings_path="$1"
+    local hook_event="$2"
+    local matcher="$3"
+    local command_to_add="$4"
+    local py_output=""
+
+    shift 4
+
+    py_output="$(python3 - "$settings_path" "$hook_event" "$matcher" "$command_to_add" "$@" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+hook_event = sys.argv[2]
+matcher = sys.argv[3]
+command_to_add = sys.argv[4]
+
+def normalize(value):
+    return " ".join(str(value or "").strip().split())
+
+dedupe_commands = {normalize(command_to_add)}
+dedupe_commands.update(normalize(value) for value in sys.argv[5:] if normalize(value))
+
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+data = {}
+backup_path = None
+
+if settings_path.exists():
+    try:
+        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        backup_path = settings_path.with_name(
+            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(settings_path, backup_path)
+        data = {}
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+data["hooks"] = hooks
+
+entries = hooks.get(hook_event)
+if not isinstance(entries, list):
+    entries = []
+
+exists = False
+for entry in entries:
+    if not isinstance(entry, dict):
+        continue
+    hook_items = entry.get("hooks")
+    if not isinstance(hook_items, list):
+        continue
+    for hook in hook_items:
+        if not isinstance(hook, dict):
+            continue
+        command = normalize(hook.get("command"))
+        if command in dedupe_commands:
+            exists = True
+            break
+    if exists:
+        break
+
+if not exists:
+    entries.append(
+        {
+            "matcher": matcher,
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": command_to_add,
+                }
+            ],
+        }
+    )
+
+hooks[hook_event] = entries
+settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+if backup_path is not None:
+    print(f"BACKUP:{backup_path}")
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                BACKUP:*)
+                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
+                    ;;
+            esac
+        done
+    fi
+
+    return 0
 }
 
 enable_rtk_rewrite_hook() {
@@ -1202,6 +1345,116 @@ install_optional_mindkeeper_context() {
     enable_mindkeeper_context_restore_hint_hook || true
 }
 
+run_map_installer() {
+    local local_installer=""
+
+    local_installer="$(dirname "$SOURCE_DIR")/folder-graphy/bin/install.sh"
+    if [ -f "$local_installer" ]; then
+        run_optional_command \
+            "$(t "Map 安装" "Map install")" \
+            "env HOME=\"$REAL_HOME\" bash \"$local_installer\""
+        return 0
+    fi
+
+    run_optional_command \
+        "$(t "Map 安装" "Map install")" \
+        "env HOME=\"$REAL_HOME\" bash -lc 'curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash'"
+}
+
+install_optional_map() {
+    local hook_source="$SOURCE_DIR/hooks/claude-map-auto-index.sh"
+    local claude_dir="$REAL_HOME/.claude"
+    local hook_dir="$claude_dir/hooks"
+    local hook_target="$hook_dir/map-auto-index.sh"
+    local map_install_dir="${MAP_INSTALL_DIR:-$REAL_HOME/.local/share/map}"
+    local map_session_start_hook="$map_install_dir/dist/hooks/session-start.js"
+
+    echo ""
+    echo "$(t "正在安装 Map auto-index..." "Installing Map auto-index...")"
+    echo "⚠ $(t "这个可选包会安装 Map，并修改 ~/.claude/settings.json 和 ~/.claude/hooks/。" "This optional pack installs Map and updates ~/.claude/settings.json plus ~/.claude/hooks/.")"
+
+    run_map_installer || true
+
+    if [ ! -f "$map_session_start_hook" ]; then
+        echo "⚠ $(t "未检测到 Map 的 SessionStart hook 构建产物，跳过 Claude hook 注入" "Map SessionStart hook build output not found, skipping Claude hook enablement"): $map_session_start_hook"
+        return 1
+    fi
+
+    if [ ! -f "$hook_source" ]; then
+        echo "⚠ $(t "找不到 Map hook 模板，跳过" "Map hook template not found, skipping"): $hook_source"
+        return 1
+    fi
+
+    mkdir -p "$hook_dir"
+    cp "$hook_source" "$hook_target"
+    chmod +x "$hook_target"
+
+    append_claude_hook_command \
+        "$claude_dir/settings.json" \
+        "SessionStart" \
+        "" \
+        "/bin/bash $hook_target" \
+        "$hook_target" \
+        "bash $hook_target" \
+        "/bin/bash $hook_target"
+
+    echo "✓ $(t "已启用 Claude Map auto-index hook" "Claude Map auto-index hook enabled")"
+    return 0
+}
+
+install_optional_read_once() {
+    local claude_dir="$REAL_HOME/.claude"
+    local install_dir="$claude_dir/read-once"
+    local hook_source="$SOURCE_DIR/hooks/read-once-hook.sh"
+    local compact_source="$SOURCE_DIR/hooks/read-once-compact.sh"
+    local hook_target="$install_dir/hook.sh"
+    local compact_target="$install_dir/compact.sh"
+
+    echo ""
+    echo "$(t "正在安装 read-once..." "Installing read-once...")"
+    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json 和 ~/.claude/read-once/；若缺少 jq 会尝试安装。" "This optional pack updates ~/.claude/settings.json and ~/.claude/read-once/; it also attempts to install jq if missing.")"
+
+    ensure_brew_package "jq" "jq" "jq" || true
+
+    if [ ! -f "$hook_source" ] || [ ! -f "$compact_source" ]; then
+        echo "⚠ $(t "找不到 read-once hook 模板，跳过" "read-once hook templates not found, skipping")"
+        return 1
+    fi
+
+    mkdir -p "$install_dir"
+    cp "$hook_source" "$hook_target"
+    cp "$compact_source" "$compact_target"
+    chmod +x "$hook_target" "$compact_target"
+
+    append_claude_hook_command \
+        "$claude_dir/settings.json" \
+        "PreToolUse" \
+        "Read" \
+        "READ_ONCE_DIFF=1 /bin/bash $hook_target" \
+        "$hook_target" \
+        "bash $hook_target" \
+        "/bin/bash $hook_target" \
+        "READ_ONCE_DIFF=1 $hook_target" \
+        "READ_ONCE_DIFF=1 bash $hook_target" \
+        "READ_ONCE_DIFF=1 /bin/bash $hook_target"
+
+    append_claude_hook_command \
+        "$claude_dir/settings.json" \
+        "PostCompact" \
+        "" \
+        "/bin/bash $compact_target" \
+        "$compact_target" \
+        "bash $compact_target" \
+        "/bin/bash $compact_target"
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "⚠ $(t "未检测到 jq，read-once hook 已安装但会保持静默，直到 jq 可用" "jq not found; read-once is installed but remains inactive until jq is available")"
+    fi
+
+    echo "✓ $(t "已启用 Claude read-once hooks" "Claude read-once hooks enabled")"
+    return 0
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
@@ -1223,6 +1476,14 @@ while [[ $# -gt 0 ]]; do
         --install-mindkeeper-context)
             INSTALL_MINDKEEPER_CONTEXT=1
             INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=1
+            ;;
+        --install-map)
+            INSTALL_MAP=1
+            INSTALL_MAP_EXPLICIT=1
+            ;;
+        --install-read-once)
+            INSTALL_READ_ONCE=1
+            INSTALL_READ_ONCE_EXPLICIT=1
             ;;
         --install-cli)
             shift
@@ -1292,6 +1553,16 @@ fi
 if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
     echo "• $(t "附带安装 MindKeeper context pack" "Optional MindKeeper context pack"): on"
     echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，不包含 Hive 能力。" "This writes Claude MCP / command / hook config and does not include Hive features.")"
+fi
+
+if [ "$INSTALL_MAP" -eq 1 ]; then
+    echo "• $(t "附带安装 Map auto-index" "Optional Map auto-index"): on"
+    echo "  $(t "会安装 Map，并写入 Claude 的 SessionStart hook。" "This installs Map and writes the Claude SessionStart hook.")"
+fi
+
+if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
+    echo "• $(t "附带安装 read-once" "Optional read-once"): on"
+    echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
 fi
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
@@ -1369,6 +1640,12 @@ if [ "$INSTALL_RTK" -eq 1 ]; then
 fi
 if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
     install_optional_mindkeeper_context || true
+fi
+if [ "$INSTALL_MAP" -eq 1 ]; then
+    install_optional_map || true
+fi
+if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
+    install_optional_read_once || true
 fi
 
 # ── 5. 建立命令入口 ──

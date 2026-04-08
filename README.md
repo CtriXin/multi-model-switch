@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 By default, the installer pulls the latest semver tag.
-When run in an interactive terminal, it asks for UI language first, then the optional RTK enhancement, the optional `MindKeeper context pack`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
+When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, and `read-once`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 
 ### Default English UI on install
 
@@ -55,6 +55,33 @@ Scope notes:
 - This pack is `Claude`-first; it does not add Hive compact/restore features
 - It does not auto-create a separate `Codex` slash command surface
 - `Hive`-related hooks and packs remain outside the default MMS install path
+
+### Install with optional Map auto-index
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map
+```
+
+This optional path installs `Map` and wires the Claude `SessionStart` auto-index hook so project structure indexing can be built or refreshed automatically when a session starts.
+
+Scope notes:
+
+- The current integration targets the Claude `SessionStart` hook first
+- It expects a working local `Node.js` / `npm`
+- If the `Map` build output is missing, the installer skips hook injection and prints a warning
+
+### Install with optional read-once
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-read-once
+```
+
+This optional path installs `read-once` and wires two Claude hooks:
+
+- `PreToolUse:Read` token saver hook
+- `PostCompact` cache reset hook
+
+It avoids redundant full-file rereads and prefers diffs after file changes. If `jq` is missing, the installer attempts to install it; if it is still unavailable, the hooks stay fail-open and do not block Claude.
 
 ### Install MMS plus selected CLIs
 
