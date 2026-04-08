@@ -33,6 +33,11 @@ INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 
+REAL_HOME="$HOME"
+if [[ "$HOME" =~ ^(/Users/[^/]+)/\.config/mms/ ]]; then
+    REAL_HOME="${BASH_REMATCH[1]}"
+fi
+
 cleanup() {
     if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
         rm -rf "$SOURCE_TMP_DIR"
@@ -737,7 +742,7 @@ run_mindkeeper_installer() {
 }
 
 write_mindkeeper_distill_command() {
-    local command_dir="$HOME/.claude/commands"
+    local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/distill.md"
     local marker="Managed by MMS MindKeeper context pack"
     local tmp_file=""
@@ -816,7 +821,7 @@ EOF
 }
 
 write_mindkeeper_contextzip_command() {
-    local command_dir="$HOME/.claude/commands"
+    local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/contextzip.md"
     local marker="Managed by MMS MindKeeper context pack"
     local tmp_file=""
@@ -847,7 +852,7 @@ description: '蒸馏当前工作状态并重置 token 计数器。当用户提�
 3. **输出回执**（1-2 行）：
    ```
    ✅ 已蒸馏到 thread: {threadId}
-   💡 运行 /clear 开始新对话，新 session 自动恢复上下文
+   💡 运行 /clear 开始新对话；新 session 输入 /cr 恢复
    ```
 
 ## 极简写法
@@ -872,12 +877,12 @@ EOF
     cp "$tmp_file" "$target"
     chmod 644 "$target"
     rm -f "$tmp_file"
-    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /cz"
+    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /contextzip"
     return 0
 }
 
 write_mindkeeper_cz_alias_command() {
-    local command_dir="$HOME/.claude/commands"
+    local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/cz.md"
     local marker="Managed by MMS MindKeeper context pack"
     local tmp_file=""
@@ -896,7 +901,7 @@ description: '蒸馏当前工作状态并重置 token 计数器；是 /contextzi
 
 1. 调用 `brain_checkpoint` 蒸馏当前状态
 2. 调用 `brain_token_reset` 重置计数器
-3. 输出 1-2 行回执，并提示 `/clear` 开新 session
+3. 输出 1-2 行回执，并提示 `/clear` 后新 session 使用 `/cr` 恢复
 
 ## 极简写法
 
@@ -918,9 +923,61 @@ EOF
     return 0
 }
 
+write_mindkeeper_cr_command() {
+    local command_dir="$REAL_HOME/.claude/commands"
+    local target="$command_dir/cr.md"
+    local marker="Managed by MMS MindKeeper context pack"
+    local tmp_file=""
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cr.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+---
+name: cr
+description: '恢复当前 repo 最近的 thread，或恢复指定 thread id（context restore）。'
+argument-hint: [dst-thread-id]
+---
+
+<!-- Managed by MMS MindKeeper context pack -->
+# /cr — 恢复上次进度
+
+## 执行步骤
+
+1. 先解析当前 repo：
+   - 优先运行 `git rev-parse --show-toplevel`
+   - 如果失败，再使用当前工作目录
+
+2. 如果 `$ARGUMENTS` 非空：
+   - 提取其中的 thread id（如 `dst-0407-gpkzox`）
+   - 调用 `brain_bootstrap`，传入：
+     - `repo`: 上一步解析出的 repo
+     - `task`: `"恢复"`
+     - `thread`: 提取到的 id
+
+3. 如果 `$ARGUMENTS` 为空：
+   - 调用 `brain_bootstrap`，传入：
+     - `repo`: 上一步解析出的 repo
+     - `task`: `"恢复"`
+
+4. 直接展示 `brain_bootstrap` 的返回结果，不额外改写。
+EOF
+
+    mkdir -p "$command_dir"
+    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
+        echo "⚠ $(t "检测到已有自定义 Claude /cr，跳过覆盖" "Detected custom Claude /cr, skipping overwrite")"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    cp "$tmp_file" "$target"
+    chmod 644 "$target"
+    rm -f "$tmp_file"
+    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /cr"
+    return 0
+}
+
 enable_mindkeeper_token_monitor_hook() {
-    local hook_source="$HOME/.local/share/mindkeeper/hooks/token-monitor-hook.sh"
-    local claude_dir="$HOME/.claude"
+    local hook_source="$REAL_HOME/.local/share/mindkeeper/hooks/token-monitor-hook.sh"
+    local claude_dir="$REAL_HOME/.claude"
     local hook_dir="$claude_dir/hooks"
     local hook_target="$hook_dir/token-monitor-hook.sh"
     local py_output=""
@@ -979,7 +1036,8 @@ for entry in user_prompt:
     for hook in hook_items:
         if not isinstance(hook, dict):
             continue
-        if str(hook.get("command") or "").strip() == hook_path:
+        command = str(hook.get("command") or "").strip()
+        if command in {hook_path, f"bash {hook_path}", f"/bin/bash {hook_path}"}:
             exists = True
             break
     if exists:
@@ -992,7 +1050,7 @@ if not exists:
             "hooks": [
                 {
                     "type": "command",
-                    "command": hook_path,
+                    "command": f"/bin/bash {hook_path}",
                 }
             ],
         }
@@ -1020,6 +1078,109 @@ PY
     return 0
 }
 
+enable_mindkeeper_context_restore_hint_hook() {
+    local hook_source="$REAL_HOME/.local/share/mindkeeper/hooks/claude-context-restore-hint.sh"
+    local claude_dir="$REAL_HOME/.claude"
+    local hook_dir="$claude_dir/hooks"
+    local hook_target="$hook_dir/claude-context-restore-hint.sh"
+    local py_output=""
+
+    if [ ! -f "$hook_source" ]; then
+        echo "⚠ $(t "找不到 context restore hint hook 模板，跳过" "Context restore hint hook template not found, skipping"): $hook_source"
+        return 1
+    fi
+
+    mkdir -p "$hook_dir"
+    cp "$hook_source" "$hook_target"
+    chmod +x "$hook_target"
+
+    py_output="$(python3 - "$claude_dir/settings.json" "$hook_target" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+hook_path = sys.argv[2]
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+data = {}
+backup_path = None
+
+if settings_path.exists():
+    try:
+        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        backup_path = settings_path.with_name(
+            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(settings_path, backup_path)
+        data = {}
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+data["hooks"] = hooks
+
+session_start = hooks.get("SessionStart")
+if not isinstance(session_start, list):
+    session_start = []
+
+exists = False
+for entry in session_start:
+    if not isinstance(entry, dict):
+        continue
+    hook_items = entry.get("hooks")
+    if not isinstance(hook_items, list):
+        continue
+    for hook in hook_items:
+        if not isinstance(hook, dict):
+            continue
+        command = str(hook.get("command") or "").strip()
+        if command in {hook_path, f"bash {hook_path}", f"/bin/bash {hook_path}"}:
+            exists = True
+            break
+    if exists:
+        break
+
+if not exists:
+    session_start.append(
+        {
+            "matcher": "",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f"/bin/bash {hook_path}",
+                }
+            ],
+        }
+    )
+
+hooks["SessionStart"] = session_start
+settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+if backup_path is not None:
+    print(f"BACKUP:{backup_path}")
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                BACKUP:*)
+                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
+                    ;;
+            esac
+        done
+    fi
+
+    echo "✓ $(t "已启用 Claude context restore hint hook" "Claude context restore hint hook enabled")"
+    return 0
+}
+
 install_optional_mindkeeper_context() {
     echo ""
     echo "$(t "正在安装 MindKeeper context pack..." "Installing MindKeeper context pack...")"
@@ -1036,7 +1197,9 @@ install_optional_mindkeeper_context() {
     write_mindkeeper_distill_command || true
     write_mindkeeper_contextzip_command || true
     write_mindkeeper_cz_alias_command || true
+    write_mindkeeper_cr_command || true
     enable_mindkeeper_token_monitor_hook || true
+    enable_mindkeeper_context_restore_hint_hook || true
 }
 
 while [[ $# -gt 0 ]]; do
