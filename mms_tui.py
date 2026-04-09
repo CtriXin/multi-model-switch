@@ -5,6 +5,7 @@ import json
 import locale
 import os
 import sys
+import time
 import unicodedata
 from mms_i18n import pick as _L
 
@@ -131,6 +132,43 @@ def _safe_addstr(stdscr, y, x, text, attr=0, max_w=None):
         stdscr.addstr(y, max(0, x), text, attr)
     except curses.error:
         pass
+
+
+def _slice_display_text(text, start_w, max_w):
+    """按显示宽度切片，返回从 start_w 开始、最多 max_w 列的文本。"""
+    if max_w <= 0:
+        return ""
+
+    skipped = 0
+    out = []
+    used = 0
+    started = False
+
+    for ch in text:
+        ch_w = _display_width(ch)
+        if not started:
+            if skipped + ch_w <= start_w:
+                skipped += ch_w
+                continue
+            started = True
+        if used + ch_w > max_w:
+            break
+        out.append(ch)
+        used += ch_w
+    return "".join(out)
+
+
+def _marquee_text(text, max_w, tick, gap=4):
+    """长文本的循环横向滚动，仅用于展示层。"""
+    if max_w <= 0:
+        return ""
+    if _display_width(text) <= max_w:
+        return text
+    spacer = " " * max(2, gap)
+    loop = text + spacer + text + spacer
+    cycle_w = _display_width(text) + _display_width(spacer)
+    start_w = tick % max(1, cycle_w)
+    return _slice_display_text(loop, start_w, max_w)
 
 
 def _draw_separator(stdscr, y, cx, width, attr=0):
@@ -661,6 +699,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
 
     def _inner(stdscr):
         curses.curs_set(0)
+        stdscr.timeout(120)
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_CYAN, -1)
         curses.init_pair(2, curses.COLOR_WHITE, -1)
@@ -676,6 +715,9 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         provider_scroll_map = {}
         focus = "model"
         search_query = ""
+        marquee_tick = 0
+        last_tick_at = time.monotonic()
+        marquee_key = None
 
         def _sync_provider_cursor(m, pid):
             if not m or not pid:
@@ -690,246 +732,251 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
         fam_color = _FAMILY_COLORS.get(family_name, 1)
         fc = curses.color_pair(fam_color)
 
-        while True:
-            stdscr.erase()
-            max_y, max_w = stdscr.getmaxyx()
+        try:
+            while True:
+                stdscr.erase()
+                max_y, max_w = stdscr.getmaxyx()
 
-            # 搜索过滤
-            if search_query:
-                q = search_query.lower()
-                filtered = [m for m in sorted_models if q in m["model"].lower()]
-            else:
-                filtered = sorted_models
-            if not filtered:
-                filtered = sorted_models
+                # 搜索过滤
+                if search_query:
+                    q = search_query.lower()
+                    filtered = [m for m in sorted_models if q in m["model"].lower()]
+                else:
+                    filtered = sorted_models
+                if not filtered:
+                    filtered = sorted_models
 
-            if idx >= len(filtered):
-                idx = max(0, len(filtered) - 1)
+                if idx >= len(filtered):
+                    idx = max(0, len(filtered) - 1)
 
-            # 尺寸
-            total_w = min(60, max_w - 4)
-            left_w = 28
-            right_w = total_w - left_w
-            visible = min(len(filtered), max_y - 8)
-            ph = visible + 6 + (1 if search_query else 0)
-            px = (max_w - total_w) // 2
-            py = max(1, (max_y - ph) // 2)
-            ll = px + 2
-            lr = px + left_w - 1
-            rl = px + left_w + 2
-            rr = px + total_w - 2
+                # 尺寸
+                total_w = min(60, max_w - 4)
+                left_w = 28
+                right_w = total_w - left_w
+                visible = min(len(filtered), max_y - 8)
+                ph = visible + 6 + (1 if search_query else 0)
+                px = (max_w - total_w) // 2
+                py = max(1, (max_y - ph) // 2)
+                ll = px + 2
+                rl = px + left_w + 2
+                rr = px + total_w - 2
 
-            row = py
+                row = py
 
-            # -- 顶线（品类色）--
-            _safe_addstr(stdscr, row, px, "-" * total_w, fc)
-            row += 1
-
-            # -- 标题 --
-            has_changes = bool(provider_overrides or priority_changes)
-            title = f"{family_name}" + (" *" if has_changes else "")
-            _safe_addstr(stdscr, row, ll, title, fc | curses.A_BOLD)
-            cnt_info = f"{len(filtered)}/{len(sorted_models)}" if search_query else str(len(sorted_models))
-            _safe_addstr(stdscr, row, rr - len(cnt_info) - 6, cnt_info, curses.A_DIM)
-            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
-            row += 1
-
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
-            row += 1
-
-            # -- 搜索栏 --
-            if search_query:
-                _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, row, px, "-" * total_w, fc)
                 row += 1
 
-            model_header_attr = (curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE) if focus == "model" else (fc | curses.A_BOLD)
-            provider_header_attr = (curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE) if focus == "provider" else curses.A_DIM
-            _safe_addstr(stdscr, row, ll + 1, _L("模型", "Model"), model_header_attr)
-            _safe_addstr(stdscr, row, rl + 1, _L("通道", "Channel"), provider_header_attr)
-            row += 1
+                has_changes = bool(provider_overrides or priority_changes)
+                title = f"{family_name}" + (" *" if has_changes else "")
+                _safe_addstr(stdscr, row, ll, title, fc | curses.A_BOLD)
+                cnt_info = f"{len(filtered)}/{len(sorted_models)}" if search_query else str(len(sorted_models))
+                _safe_addstr(stdscr, row, rr - len(cnt_info) - 6, cnt_info, curses.A_DIM)
+                _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+                row += 1
 
-            # 双栏分隔
-            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
-            row += 1
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
 
-            # 滚动
-            content_y = row
-            if idx < scroll:
-                scroll = idx
-            elif idx >= scroll + visible:
-                scroll = idx - visible + 1
+                if search_query:
+                    _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
+                    row += 1
 
-            current_model = filtered[idx] if filtered else None
-            current_choices = _provider_choices(current_model) if current_model else []
-            active_provider_id = _get_provider_info(current_model)[1] if current_model else ""
-            if current_model:
-                model_name = current_model["model"]
-                if model_name not in provider_idx_map:
-                    active_idx = 0
-                    for i, opt in enumerate(current_choices):
-                        if opt.get("provider_id") == active_provider_id:
-                            active_idx = i
-                            break
-                    provider_idx_map[model_name] = active_idx
-                provider_idx_map[model_name] = max(0, min(provider_idx_map[model_name], max(0, len(current_choices) - 1)))
-                provider_scroll = provider_scroll_map.get(model_name, 0)
-                selected_provider_idx = provider_idx_map.get(model_name, 0)
-                provider_visible = max(1, visible)
-                if selected_provider_idx < provider_scroll:
-                    provider_scroll = selected_provider_idx
-                elif selected_provider_idx >= provider_scroll + provider_visible:
-                    provider_scroll = selected_provider_idx - provider_visible + 1
-                provider_scroll = max(0, min(provider_scroll, max(0, len(current_choices) - provider_visible)))
-                provider_scroll_map[model_name] = provider_scroll
-            else:
-                provider_scroll = 0
+                model_header_attr = (curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE) if focus == "model" else (fc | curses.A_BOLD)
+                provider_header_attr = (curses.color_pair(4) | curses.A_BOLD | curses.A_REVERSE) if focus == "provider" else curses.A_DIM
+                _safe_addstr(stdscr, row, ll + 1, _L("模型", "Model"), model_header_attr)
+                _safe_addstr(stdscr, row, rl + 1, _L("通道", "Channel"), provider_header_attr)
+                row += 1
 
-            for i in range(scroll, min(scroll + visible, len(filtered))):
-                y = content_y + (i - scroll)
-                m = filtered[i]
-                is_sel = (i == idx)
-                model_name = m["model"]
-                prov_name, prov_id, prov_pri = _get_provider_info(m)
+                _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (right_w - 1), curses.A_DIM)
+                row += 1
 
-                # 竖分割
-                _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
+                content_y = row
+                if idx < scroll:
+                    scroll = idx
+                elif idx >= scroll + visible:
+                    scroll = idx - visible + 1
 
-                # 左栏：模型名
-                if is_sel:
-                    marker_attr = fc | curses.A_BOLD if focus == "model" else curses.color_pair(4) | curses.A_BOLD
-                    name_attr = curses.color_pair(1) | curses.A_BOLD | (curses.A_REVERSE if focus == "model" else 0)
-                    if focus == "model":
-                        _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), name_attr)
-                    _safe_addstr(stdscr, y, ll - 1, "|", marker_attr)
-                    _safe_addstr(stdscr, y, ll + 1, model_name, name_attr, max_w=left_w - 4)
-                else:
-                    _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(2), max_w=left_w - 4)
-
-            provider_content_h = visible
-            for offset in range(provider_content_h):
-                y = content_y + offset
-                opt_index = provider_scroll + offset
-                if opt_index >= len(current_choices):
-                    continue
-                opt = current_choices[opt_index]
-                is_provider_sel = (
-                    current_model is not None
-                    and provider_idx_map.get(current_model["model"], 0) == opt_index
-                )
-                opt_name = opt.get("provider_name", "")
-                opt_pri = _effective_priority(opt)
-                tag_text = f"{opt_name} P:{opt_pri}"
-                if opt.get("provider_id") == active_provider_id:
-                    tag_text += " *"
-
-                if is_provider_sel:
-                    marker_attr = curses.color_pair(4) | curses.A_BOLD if focus == "provider" else fc | curses.A_BOLD
-                    text_attr = curses.color_pair(4) | curses.A_BOLD | (curses.A_REVERSE if focus == "provider" else 0)
-                    if focus == "provider":
-                        _safe_addstr(stdscr, y, rl + 1, " " * max(1, right_w - 4), text_attr)
-                    _safe_addstr(stdscr, y, rl - 1, "|", marker_attr)
-                    _safe_addstr(stdscr, y, rl + 1, tag_text, text_attr, max_w=right_w - 4)
-                elif opt.get("provider_id") == active_provider_id:
-                    _safe_addstr(stdscr, y, rl + 1, tag_text, curses.color_pair(5), max_w=right_w - 4)
-                else:
-                    _safe_addstr(stdscr, y, rl + 1, tag_text, curses.A_DIM, max_w=right_w - 4)
-
-            # -- 底栏 --
-            bot_y = content_y + visible
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
-            bot_y += 1
-            if search_query:
-                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 20, _L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)
-            else:
-                focus_text = _L("模型", "Model") if focus == "model" else _L("通道", "Channel")
-                _safe_addstr(stdscr, bot_y, ll, "←/→", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 5, _L(f"焦点:{focus_text}", f"Focus:{focus_text}"), curses.color_pair(4) | curses.A_DIM)
-                if last_used and last_used.get("model"):
-                    _safe_addstr(stdscr, bot_y, ll + 16, "R", curses.color_pair(5) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 18, _L("上次", "Last"), curses.color_pair(5) | curses.A_DIM)
-                    adjust_x = ll + 24
-                else:
-                    adjust_x = ll + 16
-                _safe_addstr(stdscr, bot_y, adjust_x, "+/-", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, adjust_x + 4, _L("权重", "Weight"), curses.color_pair(5) | curses.A_DIM)
-                enter_x = adjust_x + 10
-                _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, enter_x + 6, _L("确认", "Confirm"), curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, enter_x + 16, _L("返回", "Back"), curses.A_DIM)
-            bot_y += 1
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
-
-            stdscr.refresh()
-            key = stdscr.getch()
-
-            if key == curses.KEY_UP:
-                if focus == "provider" and current_model and current_choices:
+                current_model = filtered[idx] if filtered else None
+                current_choices = _provider_choices(current_model) if current_model else []
+                active_provider_id = _get_provider_info(current_model)[1] if current_model else ""
+                if current_model:
                     model_name = current_model["model"]
-                    provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) - 1) % len(current_choices)
+                    if model_name not in provider_idx_map:
+                        active_idx = 0
+                        for i, opt in enumerate(current_choices):
+                            if opt.get("provider_id") == active_provider_id:
+                                active_idx = i
+                                break
+                        provider_idx_map[model_name] = active_idx
+                    provider_idx_map[model_name] = max(0, min(provider_idx_map[model_name], max(0, len(current_choices) - 1)))
+                    provider_scroll = provider_scroll_map.get(model_name, 0)
+                    selected_provider_idx = provider_idx_map.get(model_name, 0)
+                    provider_visible = max(1, visible)
+                    if selected_provider_idx < provider_scroll:
+                        provider_scroll = selected_provider_idx
+                    elif selected_provider_idx >= provider_scroll + provider_visible:
+                        provider_scroll = selected_provider_idx - provider_visible + 1
+                    provider_scroll = max(0, min(provider_scroll, max(0, len(current_choices) - provider_visible)))
+                    provider_scroll_map[model_name] = provider_scroll
+                    new_marquee_key = f"{model_name}:{selected_provider_idx}:{focus}"
                 else:
-                    idx = (idx - 1) % len(filtered)
-            elif key == curses.KEY_DOWN:
-                if focus == "provider" and current_model and current_choices:
-                    model_name = current_model["model"]
-                    provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) + 1) % len(current_choices)
-                else:
-                    idx = (idx + 1) % len(filtered)
-            elif key == curses.KEY_RIGHT and not search_query:
-                if current_choices:
-                    focus = "provider"
-            elif key == curses.KEY_LEFT and not search_query:
-                if focus == "provider":
-                    focus = "model"
-                else:
-                    return None
-            elif key in (ord('r'), ord('R')) and not search_query and last_used and last_used.get("model"):
-                return "__last__"
-            elif key in (ord('+'), ord('=')) and not search_query:
-                if focus == "provider" and current_model and current_choices:
-                    chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                    # 当前语义是数字越大越优先；"+" 应提升优先级并把通道往上排。
-                    _adjust_provider_priority(chosen, +5)
-                    _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
-            elif key in (ord('-'), ord('_')) and not search_query:
-                if focus == "provider" and current_model and current_choices:
-                    chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
-                    _adjust_provider_priority(chosen, -5)
-                    _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
-            elif key in (10, 13, curses.KEY_ENTER):
-                if filtered:
-                    m = filtered[idx]
-                    if focus == "provider" and current_choices:
-                        chosen = current_choices[provider_idx_map.get(m["model"], 0)]
-                        provider_overrides[m["model"]] = chosen
-                        _record_priority_swap(m, chosen)
+                    provider_scroll = 0
+                    new_marquee_key = None
+
+                if new_marquee_key != marquee_key:
+                    marquee_key = new_marquee_key
+                    marquee_tick = 0
+                    last_tick_at = time.monotonic()
+
+                for i in range(scroll, min(scroll + visible, len(filtered))):
+                    y = content_y + (i - scroll)
+                    m = filtered[i]
+                    is_sel = (i == idx)
+                    model_name = m["model"]
+
+                    _safe_addstr(stdscr, y, px + left_w, "|", curses.A_DIM)
+
+                    if is_sel:
+                        marker_attr = fc | curses.A_BOLD if focus == "model" else curses.color_pair(4) | curses.A_BOLD
+                        name_attr = curses.color_pair(1) | curses.A_BOLD | (curses.A_REVERSE if focus == "model" else 0)
+                        if focus == "model":
+                            _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), name_attr)
+                        _safe_addstr(stdscr, y, ll - 1, "|", marker_attr)
+                        _safe_addstr(stdscr, y, ll + 1, model_name, name_attr, max_w=left_w - 4)
                     else:
-                        override = provider_overrides.get(m["model"])
-                        if override:
-                            _record_priority_swap(m, override)
-                    return _get_result(m)
-            elif key == 27:
+                        _safe_addstr(stdscr, y, ll + 1, model_name, curses.color_pair(2), max_w=left_w - 4)
+
+                for offset in range(visible):
+                    y = content_y + offset
+                    opt_index = provider_scroll + offset
+                    if opt_index >= len(current_choices):
+                        continue
+                    opt = current_choices[opt_index]
+                    is_provider_sel = (
+                        current_model is not None
+                        and provider_idx_map.get(current_model["model"], 0) == opt_index
+                    )
+                    opt_name = opt.get("provider_name", "")
+                    opt_pri = _effective_priority(opt)
+                    tag_text = f"{opt_name} P:{opt_pri}"
+                    if opt.get("provider_id") == active_provider_id:
+                        tag_text += " *"
+
+                    if is_provider_sel:
+                        marker_attr = curses.color_pair(4) | curses.A_BOLD if focus == "provider" else fc | curses.A_BOLD
+                        text_attr = curses.color_pair(4) | curses.A_BOLD | (curses.A_REVERSE if focus == "provider" else 0)
+                        if focus == "provider":
+                            _safe_addstr(stdscr, y, rl + 1, " " * max(1, right_w - 4), text_attr)
+                        _safe_addstr(stdscr, y, rl - 1, "|", marker_attr)
+                        visible_text = _marquee_text(tag_text, right_w - 4, marquee_tick)
+                        _safe_addstr(stdscr, y, rl + 1, visible_text, text_attr, max_w=right_w - 4)
+                    elif opt.get("provider_id") == active_provider_id:
+                        _safe_addstr(stdscr, y, rl + 1, tag_text, curses.color_pair(5), max_w=right_w - 4)
+                    else:
+                        _safe_addstr(stdscr, y, rl + 1, tag_text, curses.A_DIM, max_w=right_w - 4)
+
+                bot_y = content_y + visible
+                _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+                bot_y += 1
                 if search_query:
-                    search_query = ""
-                    idx = 0
-                    scroll = 0
-                    focus = "model"
+                    _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, ll + 20, _L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)
                 else:
+                    focus_text = _L("模型", "Model") if focus == "model" else _L("通道", "Channel")
+                    _safe_addstr(stdscr, bot_y, ll, "←/→", curses.color_pair(4) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, ll + 5, _L(f"焦点:{focus_text}", f"Focus:{focus_text}"), curses.color_pair(4) | curses.A_DIM)
+                    if last_used and last_used.get("model"):
+                        _safe_addstr(stdscr, bot_y, ll + 16, "R", curses.color_pair(5) | curses.A_BOLD)
+                        _safe_addstr(stdscr, bot_y, ll + 18, _L("上次", "Last"), curses.color_pair(5) | curses.A_DIM)
+                        adjust_x = ll + 24
+                    else:
+                        adjust_x = ll + 16
+                    _safe_addstr(stdscr, bot_y, adjust_x, "+/-", curses.color_pair(5) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, adjust_x + 4, _L("权重", "Weight"), curses.color_pair(5) | curses.A_DIM)
+                    enter_x = adjust_x + 10
+                    _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, enter_x + 6, _L("确认", "Confirm"), curses.A_DIM)
+                    _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, enter_x + 16, _L("返回", "Back"), curses.A_DIM)
+                bot_y += 1
+                _safe_addstr(stdscr, bot_y, px, "-" * total_w, fc)
+
+                stdscr.refresh()
+                key = stdscr.getch()
+
+                now = time.monotonic()
+                if now - last_tick_at >= 0.18:
+                    marquee_tick += 1
+                    last_tick_at = now
+
+                if key == -1:
+                    continue
+                if key == curses.KEY_UP:
+                    if focus == "provider" and current_model and current_choices:
+                        model_name = current_model["model"]
+                        provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) - 1) % len(current_choices)
+                    else:
+                        idx = (idx - 1) % len(filtered)
+                elif key == curses.KEY_DOWN:
+                    if focus == "provider" and current_model and current_choices:
+                        model_name = current_model["model"]
+                        provider_idx_map[model_name] = (provider_idx_map.get(model_name, 0) + 1) % len(current_choices)
+                    else:
+                        idx = (idx + 1) % len(filtered)
+                elif key == curses.KEY_RIGHT and not search_query:
+                    if current_choices:
+                        focus = "provider"
+                elif key == curses.KEY_LEFT and not search_query:
+                    if focus == "provider":
+                        focus = "model"
+                    else:
+                        return None
+                elif key in (ord('r'), ord('R')) and not search_query and last_used and last_used.get("model"):
+                    return "__last__"
+                elif key in (ord('+'), ord('=')) and not search_query:
+                    if focus == "provider" and current_model and current_choices:
+                        chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
+                        _adjust_provider_priority(chosen, +5)
+                        _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
+                elif key in (ord('-'), ord('_')) and not search_query:
+                    if focus == "provider" and current_model and current_choices:
+                        chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
+                        _adjust_provider_priority(chosen, -5)
+                        _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
+                elif key in (10, 13, curses.KEY_ENTER):
+                    if filtered:
+                        m = filtered[idx]
+                        if focus == "provider" and current_choices:
+                            chosen = current_choices[provider_idx_map.get(m["model"], 0)]
+                            provider_overrides[m["model"]] = chosen
+                            _record_priority_swap(m, chosen)
+                        else:
+                            override = provider_overrides.get(m["model"])
+                            if override:
+                                _record_priority_swap(m, override)
+                        return _get_result(m)
+                elif key == 27:
+                    if search_query:
+                        search_query = ""
+                        idx = 0
+                        scroll = 0
+                        focus = "model"
+                    else:
+                        return None
+                elif key in (ord('q'), ord('Q')) and not search_query:
                     return None
-            elif key in (ord('q'), ord('Q')) and not search_query:
-                return None
-            elif key in (curses.KEY_BACKSPACE, 127, 8):
-                if search_query:
-                    search_query = search_query[:-1]
+                elif key in (curses.KEY_BACKSPACE, 127, 8):
+                    if search_query:
+                        search_query = search_query[:-1]
+                        idx = 0
+                        scroll = 0
+                elif 32 <= key <= 126:
+                    search_query += chr(key)
                     idx = 0
                     scroll = 0
-            elif 32 <= key <= 126:
-                # 可打印 ASCII 字符 → 搜索
-                search_query += chr(key)
-                idx = 0
-                scroll = 0
+        finally:
+            stdscr.timeout(-1)
 
     if stdscr is not None:
         try:
