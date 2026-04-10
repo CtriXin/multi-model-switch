@@ -115,6 +115,106 @@ _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
 _CLAUDE_DISABLE_1M_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
 _CLAUDE_SENSITIVE_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
 
+
+def _coerce_context_window(value):
+    try:
+        window = int(value)
+    except Exception:
+        return None
+    return window if window > 0 else None
+
+
+def _load_model_context_overrides():
+    try:
+        mtime = os.path.getmtime(_MODEL_CONTEXT_OVERRIDES_PATH)
+    except OSError:
+        _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = None
+        _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {"models": {}, "provider_overrides": {}}
+        return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
+
+    if _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] == mtime:
+        return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
+
+    models = {}
+    provider_overrides = {}
+    try:
+        with open(_MODEL_CONTEXT_OVERRIDES_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        payload = {}
+
+    if isinstance(payload, dict):
+        raw_models = payload.get("models", payload)
+        if isinstance(raw_models, dict):
+            for key, value in raw_models.items():
+                if key in {"models", "provider_overrides"}:
+                    continue
+                window = _coerce_context_window(value)
+                if window:
+                    models[str(key).strip()] = window
+
+        raw_provider_overrides = payload.get("provider_overrides", {})
+        if isinstance(raw_provider_overrides, dict):
+            for key, value in raw_provider_overrides.items():
+                if isinstance(value, dict):
+                    provider_id = str(key or "").strip()
+                    if not provider_id:
+                        continue
+                    for model_id, window_value in value.items():
+                        window = _coerce_context_window(window_value)
+                        if window:
+                            provider_overrides[f"{provider_id}:{str(model_id).strip()}"] = window
+                else:
+                    window = _coerce_context_window(value)
+                    if window:
+                        provider_overrides[str(key).strip()] = window
+
+    _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = mtime
+    _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {
+        "models": models,
+        "provider_overrides": provider_overrides,
+    }
+    return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
+
+
+def _lookup_context_window(model_name, provider_id=None):
+    clean = str(model_name or "").replace("[1m]", "").strip()
+    if not clean:
+        return None
+
+    provider_key = str(provider_id or "").strip()
+    lower = clean.lower()
+    overrides = _load_model_context_overrides()
+
+    if provider_key:
+        provider_overrides = overrides.get("provider_overrides", {})
+        direct = provider_overrides.get(f"{provider_key}:{clean}")
+        if direct is not None:
+            return direct
+        for key, value in provider_overrides.items():
+            try:
+                override_provider, override_model = key.split(":", 1)
+            except ValueError:
+                continue
+            if override_provider == provider_key and override_model.lower() == lower:
+                return value
+
+    models = overrides.get("models", {})
+    direct = models.get(clean)
+    if direct is not None:
+        return direct
+    for key, value in models.items():
+        if key.lower() == lower:
+            return value
+
+    direct = _MODEL_CONTEXT_WINDOWS.get(clean)
+    if direct is not None:
+        return direct
+    for key, value in _MODEL_CONTEXT_WINDOWS.items():
+        if key.lower() == lower:
+            return value
+    return None
+
 def _runtime_supports_claude_1m(runtime):
     explicit = _normalize_claude_1m_mode((runtime or {}).get("claude_1m_mode", "auto"))
     if explicit == "enable":
@@ -130,7 +230,7 @@ def _runtime_is_sensitive_claude_provider(runtime):
     return provider_id in _CLAUDE_SENSITIVE_PROVIDER_IDS
 
 
-def _effective_context_window(*models, enable_claude_1m=True):
+def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
     """取所有活跃模型中最小的 context window。
     智能路由场景下 heavy/medium/light 可能是不同模型，
     conversation context 必须 fit 最小的那个。
@@ -140,14 +240,7 @@ def _effective_context_window(*models, enable_claude_1m=True):
         if not m:
             continue
         clean = m.replace("[1m]", "").strip()
-        w = _MODEL_CONTEXT_WINDOWS.get(clean)
-        if w is None:
-            # 大小写不敏感匹配
-            lower = clean.lower()
-            for k, v in _MODEL_CONTEXT_WINDOWS.items():
-                if k.lower() == lower:
-                    w = v
-                    break
+        w = _lookup_context_window(clean, provider_id=provider_id)
         if not enable_claude_1m:
             lower = clean.lower()
             if lower.startswith("claude-") and "haiku" not in lower:
@@ -207,6 +300,10 @@ def _real_user_home():
 
 def _real_user_path(*parts):
     return os.path.join(_real_user_home(), *parts)
+
+
+_MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
+_MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
@@ -1362,7 +1459,11 @@ def launch_claude(model_info, runtime, once=False):
     _real_models = [m for m in (probe_model, lb_medium, lb_light) if m]
     if not _real_models:
         _real_models = [_resolved or "claude-sonnet-4-6"]
-    ctx_window = _effective_context_window(*_real_models, enable_claude_1m=enable_claude_1m)
+    ctx_window = _effective_context_window(
+        *_real_models,
+        enable_claude_1m=enable_claude_1m,
+        provider_id=(runtime or {}).get("id"),
+    )
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
 
