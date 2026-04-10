@@ -82,8 +82,9 @@ _MODEL_CONTEXT_WINDOWS = {
     # Kimi — kimi-k2.5 系列均为 256K (262144)
     "kimi-for-coding": 262_144,
     "kimi-k2.5": 262_144,
-    # Qwen — hosted 版本支持 1M；qwen3-max 为 262K
+    # Qwen — hosted plus/coder-plus/3.6-plus 支持 1M；qwen3-max 为 262K
     "qwen3.5-plus": 1_000_000,
+    "qwen3.6-plus": 1_000_000,
     "qwen3-coder-plus": 1_000_000,
     "qwen3-max": 262_144,
     # GLM — 全系 200K
@@ -91,7 +92,8 @@ _MODEL_CONTEXT_WINDOWS = {
     "glm-5-turbo": 200_000,
     "glm-5.1": 200_000,
     "glm-4.7": 200_000,
-    # MiniMax — M2.5 为 196K，M2.7 为 200K
+    # MiniMax / MiMo — 已确认 mimo-v2-pro 为 1M；M2.5 为 196K，M2.7 为 200K
+    "mimo-v2-pro": 1_000_000,
     "MiniMax-M2.5": 196_608,
     "MiniMax-M2.7": 200_000,
     # GPT-5 系列 — 大部分 1M，nano 256K
