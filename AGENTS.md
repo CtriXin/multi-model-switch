@@ -85,10 +85,11 @@ This file applies to both `Codex` and `Claude`.
 
 ## Routing Signal Contract
 
-- `priority` is a runtime-level field on `providers` and `accounts`, not a per-model field.
-- Current global rule: larger `priority` means higher precedence.
-- TUI channel lists, runtime source lists, and exported route ordering should all follow descending `priority`.
-- Changing one provider/account `priority` affects every model that can route through that same runtime.
+- `priority` is the runtime-level default field on `providers` and `accounts`.
+- `family_priority_overrides` is the explicit family-level extension; it overrides runtime `priority` for the matched family only.
+- Current global rule: larger effective `priority` means higher precedence.
+- TUI channel lists, runtime source lists, and exported route ordering should all follow descending effective `priority`.
+- Changing one provider/account `priority` still affects every model on that runtime unless a matching `family_priority_overrides` entry exists.
 - `role` still outranks `priority`: `primary > auto > fallback`, then compare `priority` within the same role tier.
 - `use_count` is model-level usage metadata aggregated from `usage.json`; it is for display/ranking/export metadata, not the primary runtime routing key.
 - Current family ordering rule:

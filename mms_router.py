@@ -563,7 +563,7 @@ def export_model_routes(cfg=None, force=False):
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
-        _provider_effective_models,
+        _provider_effective_models, _runtime_priority_for_model,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
         _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
         _load_usage_stats, _active_usage_path,
@@ -588,7 +588,7 @@ def export_model_routes(cfg=None, force=False):
         except (OSError, json.JSONDecodeError):
             pass
 
-    # 收集所有 enabled providers（只看 anthropic_messages 协议）
+    # 收集所有 enabled providers（只看 anthropic_messages/openai_chat_completions 协议）
     providers_info = []
     seen_ids = set()
     default_provider_id = str(cfg.get("provider", {}).get("default") or "").strip()
@@ -637,17 +637,14 @@ def export_model_routes(cfg=None, force=False):
             "api_key": ctx["api_key"],
             "role": role,
             "priority": priority,
+            "family_priority_overrides": provider_def.get("family_priority_overrides", {}),
             "models": models,
             "supported_clis": supported_clis,
-            # Default provider only gets a boost within the same role tier.
-            "sort_key": (ROLE_WEIGHTS.get(role, 1), 0 if is_default else 1, -priority),
+            "is_default": is_default,
         })
         seen_ids.add(pid)
 
-    # 排序：primary > auto > fallback；同 role 下 default first，再按 priority 降序
-    providers_info.sort(key=lambda p: p["sort_key"])
-
-    # 模型 claim：高优先级 provider 先 claim
+    # 模型 claim：按每个 model 的有效 priority 单独排序后 claim
     # 过滤上游 gateway 吐出的 claude- 前缀国产模型别名（如 claude-glm-5、claude-kimi-k2.5）
     _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
     # 只保留最新一代 Claude 模型，过滤旧版（3.x、4-1、4-20250514 等）
@@ -680,7 +677,7 @@ def export_model_routes(cfg=None, force=False):
         return True
 
     _MAX_FALLBACKS = 3
-    routes = {}
+    candidates_by_model = defaultdict(list)
     for pinfo in providers_info:
         for model_name in pinfo["models"]:
             normalized = str(model_name or "").strip()
@@ -696,34 +693,50 @@ def export_model_routes(cfg=None, force=False):
             if normalized.startswith("claude-") and normalized not in _CLAUDE_KEEP:
                 continue
 
-            fb_entry = {
+            effective_priority = _runtime_priority_for_model(pinfo, normalized)
+            candidate = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
                 "api_key": pinfo["api_key"],
                 "provider_id": pinfo["provider_id"],
-                "priority": pinfo["priority"],
+                "provider_name": pinfo["provider_name"],
+                "priority": effective_priority,
                 "role": pinfo["role"],
+                "sort_key": (
+                    ROLE_WEIGHTS.get(pinfo["role"], 1),
+                    0 if pinfo.get("is_default") else 1,
+                    -effective_priority,
+                    pinfo["provider_name"],
+                    pinfo["provider_id"],
+                ),
             }
             if pinfo.get("openai_base_url"):
-                fb_entry["openai_base_url"] = pinfo["openai_base_url"]
+                candidate["openai_base_url"] = pinfo["openai_base_url"]
+            candidates_by_model[normalized].append(candidate)
 
-            if normalized not in routes:
-                # First (highest priority) provider claims the primary route
-                route_entry = dict(fb_entry)
-                route_entry.update({
-                    "capabilities": _model_capability_tags(normalized),
-                    "native_clis": _native_clis_for_model(normalized),
-                    "bridge_clis": _bridge_clis_for_model(normalized),
-                    "cli_modes": _model_cli_modes(normalized),
-                    "use_count": _use_counts.get(normalized, 0),
-                })
-                routes[normalized] = route_entry
-            else:
-                # Subsequent providers become fallback routes
-                existing = routes[normalized]
-                fallbacks = existing.get("fallback_routes", [])
-                if len(fallbacks) < _MAX_FALLBACKS:
-                    fallbacks.append(fb_entry)
-                    existing["fallback_routes"] = fallbacks
+    routes = {}
+    for normalized, candidates in candidates_by_model.items():
+        ordered = sorted(candidates, key=lambda item: item["sort_key"])
+        if not ordered:
+            continue
+        primary = dict(ordered[0])
+        primary.pop("provider_name", None)
+        primary.pop("sort_key", None)
+        primary.update({
+            "capabilities": _model_capability_tags(normalized),
+            "native_clis": _native_clis_for_model(normalized),
+            "bridge_clis": _bridge_clis_for_model(normalized),
+            "cli_modes": _model_cli_modes(normalized),
+            "use_count": _use_counts.get(normalized, 0),
+        })
+        fallback_routes = []
+        for item in ordered[1:1 + _MAX_FALLBACKS]:
+            fallback_entry = dict(item)
+            fallback_entry.pop("provider_name", None)
+            fallback_entry.pop("sort_key", None)
+            fallback_routes.append(fallback_entry)
+        if fallback_routes:
+            primary["fallback_routes"] = fallback_routes
+        routes[normalized] = primary
 
     # 写入文件
     output = {

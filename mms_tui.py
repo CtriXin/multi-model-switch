@@ -213,6 +213,7 @@ def select_family_tui(
     last_used=None,
     families_detail=None,
     provider_options_by_cli=None,
+    provider_options_loader_by_cli=None,
     broker_enabled_by_cli=None,
 ):
     """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
@@ -223,6 +224,7 @@ def select_family_tui(
         last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
         families_detail: dict[str, dict] or None — {cli_name: {family: [model_list]}}
         provider_options_by_cli: dict[str, dict] or None — {cli_name: {model_name: [provider_options]}}
+        provider_options_loader_by_cli: dict[str, callable] or None — {cli_name: fn(model_name) -> [provider_options]}
 
     Returns:
         ("family", cli_name, family_name) | ("last", cli_name, dict) |
@@ -263,6 +265,7 @@ def select_family_tui(
             families = families_by_cli.get(cli, [])
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
+            provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
             broker_available = bool((broker_enabled_by_cli or {}).get(cli))
 
             # 搜索过滤
@@ -499,6 +502,7 @@ def select_family_tui(
                         family_name,
                         models,
                         provider_options=provider_options_map,
+                        provider_options_loader=provider_options_loader,
                         last_used=cli_last,
                         stdscr=stdscr,
                     )
@@ -524,6 +528,7 @@ def select_family_tui(
                         family_name,
                         models,
                         provider_options=provider_options_map,
+                        provider_options_loader=provider_options_loader,
                         last_used=cli_last,
                         stdscr=stdscr,
                     )
@@ -570,18 +575,26 @@ def select_family_tui(
 
 # ── 第 2 步：子模型选择 TUI ──────────────────────────────────
 
-def select_submodel_tui(family_name, models, provider_options=None, last_used=None, stdscr=None):
+def select_submodel_tui(
+    family_name,
+    models,
+    provider_options=None,
+    provider_options_loader=None,
+    last_used=None,
+    stdscr=None,
+):
     """子模型选择 TUI，P 键弹出 provider 列表，+/- 快速循环切换 provider。
 
     Args:
         family_name: str — 品类名
         models: list[dict] — [{"model": str, "provider_name": str, "provider_id": str, "provider_ctx": dict}]
         provider_options: dict or None — model_name -> [{"provider_name": str, "provider_id": str, "provider_ctx": dict}]
+        provider_options_loader: callable or None — 懒加载 provider options；仅在进入模型页后按需计算
         last_used: dict or None — 当前 CLI 的上次使用记录
         stdscr: curses window or None — 传入时复用当前 TUI session，避免切页闪烁
 
     Returns:
-        dict — 选中的 model entry (含 provider_ctx)，附带 "priority_changes": {provider_id: new_priority}
+        dict — 选中的 model entry (含 provider_ctx)，附带 "priority_changes": {provider_id 或 provider_id||family: new_priority}
         "__last__" — 返回上一次使用
         None — 取消 (Esc)
     """
@@ -595,17 +608,46 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             str(m.get("model", "")),
         ),
     )
+    provider_options_cache = dict(provider_options or {})
 
     # 当前每个模型的 provider 覆盖 (model_name -> provider info)
     provider_overrides = {}
-    # provider priority 变更记录 (provider_id -> new_priority)
+    # provider priority 变更记录 (provider_id 或 provider_id||family -> new_priority)
     priority_changes = {}
 
+    def _priority_change_key(opt):
+        if not isinstance(opt, dict):
+            return ""
+        pid = str(opt.get("provider_id", "")).strip()
+        if not pid:
+            return ""
+        family = str(
+            opt.get("priority_family")
+            or (opt.get("provider_ctx") or {}).get("priority_family")
+            or ""
+        ).strip()
+        return f"{pid}||{family}" if family else pid
+
     def _effective_priority(opt):
-        pid = opt.get("provider_id", "")
-        if pid in priority_changes:
-            return int(priority_changes[pid])
+        change_key = _priority_change_key(opt)
+        if change_key and change_key in priority_changes:
+            return int(priority_changes[change_key])
         return int((opt.get("provider_ctx") or {}).get("priority", 100) or 100)
+
+    def _provider_options_for_model(model_name):
+        model_key = str(model_name or "").strip()
+        if not model_key:
+            return []
+        if model_key in provider_options_cache:
+            return provider_options_cache[model_key]
+        if callable(provider_options_loader):
+            try:
+                provider_options_cache[model_key] = list(provider_options_loader(model_key) or [])
+            except Exception:
+                provider_options_cache[model_key] = []
+        else:
+            provider_options_cache[model_key] = []
+        return provider_options_cache[model_key]
 
     def _provider_choices(m):
         choices = []
@@ -621,7 +663,7 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
             choices.append(current)
             seen.add(current_id)
 
-        for opt in provider_options.get(m["model"], []) if provider_options else []:
+        for opt in _provider_options_for_model(m["model"]):
             pid = opt.get("provider_id", "")
             if not pid or pid in seen:
                 continue
@@ -687,15 +729,22 @@ def select_submodel_tui(family_name, models, provider_options=None, last_used=No
 
         # 当前系统语义是数字越大越优先；手动选中的 provider 应提升到默认前面。
         # 若用户已经用 +/- 显式调过任一通道，保留用户值，不在确认时覆盖。
-        priority_changes.setdefault(new_pid, min(200, max(new_base, orig_pri) + 5))
-        priority_changes.setdefault(orig_pid, max(0, min(orig_pri, new_base) - 5))
+        new_key = _priority_change_key(chosen)
+        orig_key = _priority_change_key({
+            "provider_id": orig_pid,
+            "provider_ctx": m.get("provider_ctx", {}),
+        })
+        if new_key:
+            priority_changes.setdefault(new_key, min(200, max(new_base, orig_pri) + 5))
+        if orig_key:
+            priority_changes.setdefault(orig_key, max(0, min(orig_pri, new_base) - 5))
 
     def _adjust_provider_priority(opt, delta):
-        pid = opt.get("provider_id", "")
-        if not pid:
+        change_key = _priority_change_key(opt)
+        if not change_key:
             return
         current = _effective_priority(opt)
-        priority_changes[pid] = max(0, min(200, current + delta))
+        priority_changes[change_key] = max(0, min(200, current + delta))
 
     def _inner(stdscr):
         curses.curs_set(0)
