@@ -138,6 +138,18 @@ def _base_user_config_path_from_gateway(config_path):
     return ""
 
 
+def _base_user_primary_dir_from_gateway(path):
+    normalized = os.path.normpath(str(path or ""))
+    for marker in _GATEWAY_SESSION_MARKERS:
+        idx = normalized.find(marker)
+        if idx == -1:
+            continue
+        base_home = normalized[:idx]
+        if base_home:
+            return os.path.join(base_home, ".config", "mms")
+    return ""
+
+
 def _merge_base_user_broker_profiles(cfg, config_path):
     base_config_path = _base_user_config_path_from_gateway(config_path)
     if not base_config_path:
@@ -615,6 +627,61 @@ def _normalize_priority(value):
         return DEFAULT_PRIORITY
 
 
+def _canonical_model_family(value):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    for entry in MODEL_FAMILIES:
+        family = str(entry.get("family") or "").strip()
+        if family.lower() == raw:
+            return family
+    return ""
+
+
+def _normalize_family_priority_overrides(value):
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for family_name, priority in value.items():
+        canonical = _canonical_model_family(family_name)
+        if not canonical:
+            continue
+        normalized[canonical] = _normalize_priority(priority)
+    return normalized
+
+
+def _runtime_priority_for_family(runtime, family_name):
+    canonical = _canonical_model_family(family_name)
+    overrides = runtime.get("family_priority_overrides", {}) if isinstance(runtime, dict) else {}
+    if canonical and isinstance(overrides, dict) and canonical in overrides:
+        return _normalize_priority(overrides.get(canonical))
+    if isinstance(runtime, dict):
+        return _normalize_priority(runtime.get("priority", DEFAULT_PRIORITY))
+    return DEFAULT_PRIORITY
+
+
+def _runtime_priority_for_model(runtime, model_name):
+    family_name, _ = _infer_model_family(model_name)
+    return _runtime_priority_for_family(runtime, family_name)
+
+
+def _runtime_with_priority(runtime, *, model_name="", family_name=""):
+    if not isinstance(runtime, dict):
+        return runtime
+    canonical_family = _canonical_model_family(family_name)
+    if not canonical_family and model_name:
+        canonical_family, _ = _infer_model_family(model_name)
+    merged = dict(runtime)
+    merged["priority"] = (
+        _runtime_priority_for_family(runtime, canonical_family)
+        if canonical_family
+        else _normalize_priority(runtime.get("priority", DEFAULT_PRIORITY))
+    )
+    if canonical_family:
+        merged["priority_family"] = canonical_family
+    return merged
+
+
 def _normalize_claude_1m_mode(value, default="auto"):
     raw = str(value or "").strip().lower()
     if raw in {"", "inherit", "default", "auto"}:
@@ -665,6 +732,9 @@ def _normalize_account(account):
         "enabled": bool(account.get("enabled", True)),
         "home_dir": os.path.expanduser(home_dir),
         "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
+        "family_priority_overrides": _normalize_family_priority_overrides(
+            account.get("family_priority_overrides", {})
+        ),
         "claude_1m_mode": _normalize_claude_1m_mode(account.get("claude_1m_mode", "auto")),
         "note": str(account.get("note", "")).strip(),
     }
@@ -794,6 +864,9 @@ def _normalize_provider(provider):
 
     merged["enabled"] = bool(merged.get("enabled", True))
     merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
+    merged["family_priority_overrides"] = _normalize_family_priority_overrides(
+        merged.get("family_priority_overrides", {})
+    )
     merged["claude_1m_mode"] = _normalize_claude_1m_mode(merged.get("claude_1m_mode", "auto"))
     merged["note"] = str(merged.get("note", "")).strip()
     merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
@@ -1404,14 +1477,29 @@ def _first_existing_path(*paths):
 
 
 def _active_config_path():
+    base_primary_dir = _base_user_primary_dir_from_gateway(CONFIG_PATH)
+    if base_primary_dir:
+        base_config_path = os.path.join(base_primary_dir, "config.toml")
+        if os.path.exists(base_config_path):
+            return base_config_path
     return _first_existing_path(CONFIG_PATH, LEGACY_CONFIG_PATH)
 
 
 def _active_credentials_path():
+    base_primary_dir = _base_user_primary_dir_from_gateway(CREDENTIALS_PATH)
+    if base_primary_dir:
+        base_credentials_path = os.path.join(base_primary_dir, "credentials.sh")
+        if os.path.exists(base_credentials_path):
+            return base_credentials_path
     return _first_existing_path(CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH)
 
 
 def _active_usage_path():
+    base_primary_dir = _base_user_primary_dir_from_gateway(USAGE_PATH)
+    if base_primary_dir:
+        base_usage_path = os.path.join(base_primary_dir, "usage.json")
+        if os.path.exists(base_usage_path):
+            return base_usage_path
     return _first_existing_path(USAGE_PATH, LEGACY_USAGE_PATH)
 
 def load_config():
@@ -4697,7 +4785,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
             continue
 
         role = _normalize_role(provider.get("role", "auto"))
-        priority = _normalize_priority(provider.get("priority", DEFAULT_PRIORITY))
+        priority = _runtime_priority_for_model(provider, model_name)
         pname = _provider_label(provider)
         scored.append((ROLE_WEIGHTS.get(role, 1), -priority, provider, pname))
 
@@ -4705,7 +4793,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
         return None, None
 
     scored.sort(key=lambda x: (x[0], x[1]))
-    return scored[0][2], scored[0][3]
+    return _runtime_with_priority(scored[0][2], model_name=model_name), scored[0][3]
 
 
 def _resolve_lb_slot_provider(cfg, cli_name, model_name, provider_id):
@@ -4761,8 +4849,6 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             continue
 
         role = _normalize_role(provider.get("role", "auto"))
-        priority = _normalize_priority(provider.get("priority", DEFAULT_PRIORITY))
-        score = (ROLE_WEIGHTS.get(role, 1), -priority)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
         pname = _provider_label(provider)
 
@@ -4772,9 +4858,16 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
                 continue
             if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
+            priority = _runtime_priority_for_model(provider, normalized)
+            score = (ROLE_WEIGHTS.get(role, 1), -priority)
             existing = model_best.get(normalized)
             if existing is None or score < existing[0]:
-                model_best[normalized] = (score, provider, pname, pid)
+                model_best[normalized] = (
+                    score,
+                    _runtime_with_priority(provider, model_name=normalized),
+                    pname,
+                    pid,
+                )
 
     # 注入 use_count（用于 TUI 排序）
     use_counts = {}
@@ -4794,6 +4887,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             family_order.append(family)
         family_map[family].append({
             "model": model_name,
+            "family": family,
             "provider_id": pid,
             "provider_name": pname,
             "provider_ctx": provider_ctx,
@@ -4805,6 +4899,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
 
 def _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=None):
     selected_model = _resolve_model_name(model_info) if model_info else ""
+    selected_family, _ = _infer_model_family(selected_model) if selected_model else ("", "")
     _probe_debug_logger.info("=== _provider_options_for_model(cli=%s, selected_model=%s) ===", cli_name, selected_model)
     options = []
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
@@ -4847,13 +4942,18 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
         options.append({
             "kind": "provider",
             "id": provider.get("id"),
-            "runtime": provider,
+            "runtime": _runtime_with_priority(provider, model_name=selected_model, family_name=selected_family),
             "models": option_models,
             "label": _runtime_choice_label(provider),
             "title": _provider_label(provider),
             "desc": "网关",
             "icon": "🌐",
-            "priority": provider.get("priority", DEFAULT_PRIORITY),
+            "priority": (
+                _runtime_priority_for_family(provider, selected_family)
+                if selected_family
+                else provider.get("priority", DEFAULT_PRIORITY)
+            ),
+            "priority_family": selected_family,
             "is_default": provider.get("id") == default_provider.get("id"),
             "launch_cli": cli_name,
         })
@@ -4862,6 +4962,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
 
 def _account_options_for_model(cfg, cli_name, default_models, model_info=None, allow_selected_model=False):
     selected_model = _resolve_model_name(model_info) if model_info else ""
+    selected_family, _ = _infer_model_family(selected_model) if selected_model else ("", "")
     options = []
     defaults = cfg.get("account", {}).get("defaults", {})
 
@@ -4895,6 +4996,7 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None, a
             runtime = bridged
             launch_cli = "claude"
             desc = "官方桥接"
+        runtime = _runtime_with_priority(runtime, model_name=selected_model, family_name=selected_family)
         options.append({
             "kind": "account",
             "id": runtime.get("id"),
@@ -5570,6 +5672,7 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
     """
     result = {}
     for model_name in model_names:
+        selected_family, _ = _infer_model_family(model_name)
         options = []
         for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
             if not provider.get("enabled", True):
@@ -5584,10 +5687,12 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
                 continue
             if not _provider_supports_model_for_cli(provider, cli_name, model_name):
                 continue
+            runtime = _runtime_with_priority(provider, model_name=model_name, family_name=selected_family)
             options.append({
                 "provider_name": _provider_label(provider),
                 "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
-                "provider_ctx": provider,
+                "priority_family": selected_family,
+                "provider_ctx": runtime,
             })
         account_options = _account_options_for_model(
             cfg,
@@ -5601,6 +5706,7 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
             options.append({
                 "provider_name": f"{option.get('title', runtime.get('id', 'account'))} OAuth",
                 "provider_id": runtime.get("id", ""),
+                "priority_family": option.get("priority_family", selected_family),
                 "provider_ctx": runtime,
             })
         if cli_name == "claude":
@@ -5635,24 +5741,60 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
     return result
 
 
+def _make_provider_options_loader(cfg, cli_name, default_provider, default_models):
+    """按模型懒加载 provider options，避免 TUI 首屏全量预计算。"""
+    cache = {}
+
+    def _loader(model_name):
+        key = str(model_name or "").strip()
+        if not key:
+            return []
+        if key not in cache:
+            cache[key] = _build_provider_options_map(
+                cfg, cli_name, default_provider, default_models, [key]
+            ).get(key, [])
+        return cache[key]
+
+    return _loader
+
+
 def _apply_runtime_priority_changes(cfg, pri_changes):
     changed = False
     if not pri_changes:
         return changed
 
     for runtime_id, new_pri in pri_changes.items():
+        family_name = ""
+        actual_runtime_id = runtime_id
+        if "||" in str(runtime_id):
+            actual_runtime_id, family_name = str(runtime_id).split("||", 1)
+            family_name = _canonical_model_family(family_name)
         matched = False
         for pdef in cfg.get("providers", []):
-            if pdef.get("id") == runtime_id:
-                pdef["priority"] = new_pri
+            if pdef.get("id") == actual_runtime_id:
+                if family_name:
+                    overrides = _normalize_family_priority_overrides(
+                        pdef.get("family_priority_overrides", {})
+                    )
+                    overrides[family_name] = _normalize_priority(new_pri)
+                    pdef["family_priority_overrides"] = overrides
+                else:
+                    pdef["priority"] = _normalize_priority(new_pri)
                 changed = True
                 matched = True
                 break
         if matched:
             continue
         for adef in cfg.get("accounts", []):
-            if adef.get("id") == runtime_id:
-                adef["priority"] = new_pri
+            if adef.get("id") == actual_runtime_id:
+                if family_name:
+                    overrides = _normalize_family_priority_overrides(
+                        adef.get("family_priority_overrides", {})
+                    )
+                    overrides[family_name] = _normalize_priority(new_pri)
+                    adef["family_priority_overrides"] = overrides
+                else:
+                    adef["priority"] = _normalize_priority(new_pri)
                 changed = True
                 break
     return changed
@@ -5682,6 +5824,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         fbc = {}
         fd = {}
         pbc = {}
+        pol = {}
         for cli_name in current_cli_names:
             raw = _build_model_families_for_cli(
                 current_cfg, cli_name, current_provider, default_models
@@ -5701,18 +5844,18 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             )
             fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
-            model_names = [m["model"] for f in raw for m in f["models"] if isinstance(m, dict) and m.get("model")]
-            pbc[cli_name] = _build_provider_options_map(
-                current_cfg, cli_name, current_provider, default_models, model_names
-            ) if model_names else {}
-        return fbc, fd, pbc
+            pbc[cli_name] = {}
+            pol[cli_name] = _make_provider_options_loader(
+                current_cfg, cli_name, current_provider, default_models
+            )
+        return fbc, fd, pbc, pol
 
-    families_by_cli, families_detail, provider_options_by_cli = _rebuild_families()
+    families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
     _families_dirty = False
 
     while True:
         if _families_dirty:
-            families_by_cli, families_detail, provider_options_by_cli = _rebuild_families()
+            families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
             _families_dirty = False
 
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
@@ -7124,6 +7267,21 @@ def _coerce_config_value(key_path, raw_value):
 
 def _validate_config(cfg):
     errors = []
+
+    def _validate_family_priority_overrides(value, label):
+        if value is None:
+            return
+        if not isinstance(value, dict):
+            errors.append(f"{label} 的 family_priority_overrides 必须是对象")
+            return
+        for family_name, priority in value.items():
+            canonical_family = _canonical_model_family(family_name)
+            if not canonical_family:
+                errors.append(f"{label} 的 family_priority_overrides 存在不支持的 family: {family_name}")
+                continue
+            if _normalize_priority(priority) != priority:
+                errors.append(f"{label} 的 family_priority_overrides.{canonical_family} 必须是正整数")
+
     cache_cfg = cfg.get("cache", {})
     if cache_cfg and not isinstance(cache_cfg, dict):
         errors.append("cache 必须是对象")
@@ -7169,6 +7327,10 @@ def _validate_config(cfg):
                 errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"模型源 {provider_id} 的 priority 必须是正整数")
+            _validate_family_priority_overrides(
+                item.get("family_priority_overrides"),
+                f"模型源 {provider_id}",
+            )
             if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
                 errors.append(f"模型源 {provider_id} 的 claude_1m_mode 必须是 auto/enable/disable")
     default_id = cfg.get("provider", {}).get("default")

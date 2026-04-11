@@ -47,7 +47,7 @@ Provider A   Provider B     （跨 provider 负载）
 
 ### 2.1 config.toml 配置
 
-每个 `[[providers]]` 支持 `role` 和 `priority` 字段：
+每个 `[[providers]]` 支持 `role`、`priority`，以及可选的 `family_priority_overrides`：
 
 ```toml
 [[providers]]
@@ -56,9 +56,13 @@ name = "百炼 CodingPlan"
 role = "primary"        # primary | auto | fallback
 priority = 75           # 正整数，数值越大越优先
 enabled = true
+
+[providers.family_priority_overrides]
+GLM = 105              # 只覆盖 GLM family 的有效 priority
+Kimi = 95              # 其他 family 仍回退到 priority = 75
 ```
 
-同理，`[[accounts]]` 上的 `priority` 也使用同一语义：
+同理，`[[accounts]]` 上的 `priority` 也使用同一语义，也支持同样的 family override：
 
 ```toml
 [[accounts]]
@@ -66,13 +70,17 @@ id = "apple-codex"
 cli = "codex"
 priority = 110          # 正整数，数值越大越优先
 enabled = true
+
+[accounts.family_priority_overrides]
+Claude = 120
 ```
 
 注意：
 
-1. `priority` 是 **runtime 级字段**，挂在 `provider/account` 上，不是每个 model 一份。
-2. 同一个 runtime 承载多个 model 时，改一次 `priority` 会影响这些 model 的通道顺序与默认命中。
-3. 如果未来要做 per-model affinity / pinning，必须显式扩展 schema，不要把它偷偷塞进 `priority`。
+1. `priority` 是 **runtime 级默认字段**，挂在 `provider/account` 上。
+2. `family_priority_overrides` 是显式扩展；命中某个 family 时，实际排序和默认命中使用该 family 的 override。
+3. 同一个 runtime 承载多个 model 时，改一次 `priority` 仍会影响这些 model，除非对应 family 已显式写了 override。
+4. 目前还不是 per-model affinity；如果未来要做更细粒度 pinning，仍应继续显式扩展 schema。
 
 ### 2.2 Role 权重
 
@@ -94,8 +102,9 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 1. 遍历所有 enabled provider
 2. 过滤：支持目标 CLI + 支持目标协议 + 有 API key + 有 base_url
 3. 检查该 provider 是否有目标模型（probe 缓存 or fallback_models）
-4. 打分：(ROLE_WEIGHTS[role], -priority)，即同 role 下 priority 越大越优先
-5. 升序排序，取第一个 → 最优 provider
+4. 计算该 model 的 effective priority：优先取 `family_priority_overrides[family]`，否则回退 `priority`
+5. 打分：(ROLE_WEIGHTS[role], -effective_priority)，即同 role 下 priority 越大越优先
+6. 升序排序，取第一个 → 最优 provider
 ```
 
 排序效果：`primary:P100` > `primary:P75` > `auto:P100` > `auto:P75` > `fallback:*`
@@ -103,7 +112,7 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 更准确地说，当前比较顺序是：
 
 1. `role`
-2. `priority`
+2. 当前 model 的 effective `priority`
 3. 其余 tie-break（名称/遍历顺序等）
 
 所以在同一 role 内，一定是 `P100` 优先于 `P75`。
@@ -117,7 +126,8 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 | 字段 | 级别 | 当前作用 | 是否影响实际选路 |
 |------|------|----------|------------------|
 | `role` | provider | 主/自动/备用分层 | 是 |
-| `priority` | provider/account | 同层级内排序与默认命中 | 是 |
+| `priority` | provider/account | runtime 默认排序值 | 是 |
+| `family_priority_overrides` | provider/account | family 级排序覆盖 | 是 |
 | `use_count` | model | family/model 列表排序、导出元数据 | 否 |
 | `last_used_at` / recent | scene/runtime | 继续上次、最近路径 | 否（不直接参与 provider 自动选路） |
 
@@ -131,7 +141,7 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
    - 按 `use_count` 降序
    - 同分按 model 名称
 3. model 右侧通道/provider 列表：
-   - 按 `priority` 降序
+   - 按当前 family 的 effective `priority` 降序
    - 同分按名称
 
 因此：
