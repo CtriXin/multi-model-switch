@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,3 +117,179 @@ def test_sync_claude_session_state_back_to_account(tmp_path):
 
     assert json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))["userID"] == "device-b"
     assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8"))["theme"] == "dark"
+
+
+def test_apply_runtime_network_profile_sets_proxy_and_timezone():
+    from mms_launchers import _apply_runtime_network_profile
+
+    env = {}
+    runtime = {
+        "id": "claude-b",
+        "proxy": "http://127.0.0.1:7890",
+        "no_proxy": "localhost,127.0.0.1",
+        "timezone": "Asia/Singapore",
+    }
+
+    with patch("mms_launchers._check_proxy_connectivity_or_exit") as check_proxy:
+        result = _apply_runtime_network_profile(env, runtime, validate_proxy=True)
+
+    check_proxy.assert_called_once()
+    assert result["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert result["HTTPS_PROXY"] == "http://127.0.0.1:7890"
+    assert result["NO_PROXY"] == "localhost,127.0.0.1"
+    assert result["TZ"] == "Asia/Singapore"
+
+
+def test_normalize_account_keeps_proxy_and_timezone():
+    from mms_core import _normalize_account
+
+    account = _normalize_account(
+        {
+            "id": "claude-b",
+            "cli": "claude",
+            "proxy": "http://127.0.0.1:7890",
+            "no_proxy": "localhost",
+            "timezone": "Asia/Singapore",
+        }
+    )
+
+    assert account["proxy"] == "http://127.0.0.1:7890"
+    assert account["no_proxy"] == "localhost"
+    assert account["timezone"] == "Asia/Singapore"
+
+
+def test_normalize_account_defaults_timezone_to_us():
+    from mms_core import DEFAULT_ACCOUNT_TIMEZONE, _normalize_account
+
+    account = _normalize_account(
+        {
+            "id": "claude-default",
+            "cli": "claude",
+        }
+    )
+
+    assert account["timezone"] == DEFAULT_ACCOUNT_TIMEZONE
+
+
+def test_normalize_provider_keeps_proxy_and_timezone():
+    from mms_core import _normalize_provider
+
+    provider = _normalize_provider(
+        {
+            "id": "gateway-b",
+            "proxy": "http://127.0.0.1:7890",
+            "no_proxy": "localhost",
+            "timezone": "America/Los_Angeles",
+        }
+    )
+
+    assert provider["proxy"] == "http://127.0.0.1:7890"
+    assert provider["no_proxy"] == "localhost"
+    assert provider["timezone"] == "America/Los_Angeles"
+
+
+def test_normalize_provider_defaults_timezone_to_us():
+    from mms_core import DEFAULT_ACCOUNT_TIMEZONE, _normalize_provider
+
+    provider = _normalize_provider({"id": "gateway-default"})
+
+    assert provider["timezone"] == DEFAULT_ACCOUNT_TIMEZONE
+
+
+def test_detect_working_base_url_uses_runtime_proxy(monkeypatch):
+    import mms_core
+
+    calls = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    class FakeHttpx:
+        @staticmethod
+        def post(url, **kwargs):
+            calls["url"] = url
+            calls["kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(mms_core, "httpx", FakeHttpx())
+
+    candidate = mms_core.detect_working_base_url(
+        "https://gateway.example.com",
+        "/v1/messages",
+        {"x-api-key": "sk-test"},
+        body=b"{}",
+        runtime={"proxy": "http://127.0.0.1:7890"},
+    )
+
+    assert candidate == "https://gateway.example.com"
+    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert calls["kwargs"]["trust_env"] is False
+
+
+def test_probe_models_uses_provider_proxy(monkeypatch):
+    import mms_core
+
+    calls = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "claude-sonnet-4-6"}]}
+
+    class FakeHttpx:
+        @staticmethod
+        def get(url, **kwargs):
+            calls["url"] = url
+            calls["kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr(mms_core, "httpx", FakeHttpx())
+    monkeypatch.setattr(mms_core, "_save_probe_file_cache", lambda *args, **kwargs: None)
+
+    result = mms_core._probe_models(
+        {
+            "id": "gateway-proxy",
+            "base_url": "https://gateway.example.com",
+            "api_key": "sk-test",
+            "protocols": ["openai_chat_completions"],
+            "proxy": "http://127.0.0.1:7890",
+        },
+        emit_output=False,
+        force_refresh=True,
+        skip_cache=True,
+    )
+
+    assert result["models"] == ["claude-sonnet-4-6"]
+    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert calls["kwargs"]["trust_env"] is False
+
+
+def test_gateway_ping_uses_runtime_proxy(monkeypatch):
+    import mms_launchers
+
+    calls = {}
+
+    def fake_get(url, **kwargs):
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(get=fake_get))
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
+
+    ok = mms_launchers._gateway_ping(
+        "https://gateway.example.com/v1",
+        "sk-test",
+        runtime={"proxy": "http://127.0.0.1:7890"},
+    )
+
+    assert ok is True
+    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert calls["kwargs"]["trust_env"] is False

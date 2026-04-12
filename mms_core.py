@@ -12,6 +12,7 @@ import threading
 import time
 from urllib.request import Request, urlopen
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 try:
     import tomllib
@@ -187,6 +188,7 @@ _LEGACY_API_URL_ENV = "CCS_API_BASE_URL"
 _LEGACY_API_KEY_ENV = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
+DEFAULT_ACCOUNT_TIMEZONE = "America/Los_Angeles"
 VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
 OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
 DEFAULT_PRIORITY = 100
@@ -359,6 +361,7 @@ MODEL_FAMILIES = [
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi",),                           "category": "国产系"},
+    {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
 ]
@@ -499,7 +502,7 @@ SCENES = {
     },
 }
 
-CLI_NAMES = ["claude", "codex"]
+CLI_NAMES = ["claude", "codex", "gemini"]
 CLI_MODEL_FAMILY_HINTS = {
     "qwen": ("qwen",),
     "kimi": ("kimi",),
@@ -693,6 +696,24 @@ def _normalize_claude_1m_mode(value, default="auto"):
     return default if default in VALID_CLAUDE_1M_MODES else "auto"
 
 
+def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
+    timezone_name = str(value or "").strip() or default
+    if timezone_name:
+        try:
+            ZoneInfo(timezone_name)
+        except Exception:
+            timezone_name = default
+    return timezone_name
+
+
+def _runtime_httpx_kwargs(runtime):
+    proxy_url = str((runtime or {}).get("proxy") or "").strip()
+    if not proxy_url:
+        return {}
+    # 只在显式配置时覆盖，避免预探测漂移到全局 proxy。
+    return {"proxy": proxy_url, "trust_env": False}
+
+
 def _normalize_account_id(account_id):
     value = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(account_id or "").strip().lower())
     value = value.strip("-_")
@@ -724,6 +745,9 @@ def _normalize_account(account):
         cli = "claude"
     account_id = _normalize_account_id(account.get("id") or f"{cli}-account")
     home_dir = str(account.get("home_dir") or _default_account_home(account_id)).strip() or _default_account_home(account_id)
+    proxy = str(account.get("proxy") or "").strip()
+    no_proxy = str(account.get("no_proxy") or "").strip()
+    timezone_name = _normalize_timezone_name(account.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE)
     return {
         "id": account_id,
         "name": str(account.get("name") or account_id).strip() or account_id,
@@ -736,6 +760,9 @@ def _normalize_account(account):
             account.get("family_priority_overrides", {})
         ),
         "claude_1m_mode": _normalize_claude_1m_mode(account.get("claude_1m_mode", "auto")),
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
         "note": str(account.get("note", "")).strip(),
     }
 
@@ -868,6 +895,9 @@ def _normalize_provider(provider):
         merged.get("family_priority_overrides", {})
     )
     merged["claude_1m_mode"] = _normalize_claude_1m_mode(merged.get("claude_1m_mode", "auto"))
+    merged["proxy"] = str(merged.get("proxy", "")).strip()
+    merged["no_proxy"] = str(merged.get("no_proxy", "")).strip()
+    merged["timezone"] = _normalize_timezone_name(merged.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE)
     merged["note"] = str(merged.get("note", "")).strip()
     merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
     merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
@@ -1899,10 +1929,13 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
     if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
+        model_override = _resolve_model_name(model_info)
+        if model_override == "official-default":
+            model_override = runtime.get("remote_service_model", "")
         exit_code = run_broker_profile_interactive(
             load_config(),
             runtime.get("broker_profile_id", runtime.get("id", "")),
-            model_override=runtime.get("remote_service_model", ""),
+            model_override=model_override,
         )
         if exit_code != 0:
             raise SystemExit(exit_code)
@@ -2154,6 +2187,16 @@ def _account_env(account):
         xdg_config_home = os.path.join(home_dir, ".config")
         env["HOME"] = home_dir
         env["XDG_CONFIG_HOME"] = xdg_config_home
+    proxy = str(account.get("proxy", "")).strip()
+    no_proxy = str(account.get("no_proxy", "")).strip()
+    timezone_name = str(account.get("timezone", "")).strip()
+    if proxy:
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env[key] = proxy
+        for key in ("NO_PROXY", "no_proxy"):
+            env[key] = no_proxy
+    if timezone_name:
+        env["TZ"] = timezone_name
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
 
@@ -2362,6 +2405,12 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
             default=current.get("claude_1m_mode", "auto"),
         )
     )
+    proxy = Prompt.ask("代理地址（可选，例 http://127.0.0.1:7890）", default=current.get("proxy", "")).strip()
+    no_proxy = Prompt.ask("NO_PROXY（可选）", default=current.get("no_proxy", "")).strip()
+    timezone_name = Prompt.ask(
+        "启动时区（默认 America/Los_Angeles）",
+        default=current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+    ).strip()
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
@@ -2372,6 +2421,9 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
         "models_endpoint": models_endpoint,
         "priority": priority,
         "claude_1m_mode": claude_1m_mode,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
         "note": note,
         "enabled": enabled,
     })
@@ -2450,6 +2502,12 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
             default=current.get("claude_1m_mode", "auto"),
         )
     )
+    proxy = Prompt.ask("代理地址（可选，例 http://127.0.0.1:7890）", default=current.get("proxy", "")).strip()
+    no_proxy = Prompt.ask("NO_PROXY（可选）", default=current.get("no_proxy", "")).strip()
+    timezone_name = Prompt.ask(
+        "启动时区（默认 America/Los_Angeles）",
+        default=current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+    ).strip()
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
@@ -2459,6 +2517,9 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         "home_dir": home_dir,
         "priority": priority,
         "claude_1m_mode": claude_1m_mode,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
         "note": note,
         "enabled": enabled,
     })
@@ -2577,6 +2638,26 @@ def _quick_connect_gateway(cfg, preset_id=None):
         provider["models_endpoint"] = _normalize_models_endpoint(
             Prompt.ask(_L("模型列表地址（高级，仅用于拉取模型列表；通常留默认）", "Model list URL (advanced, only used to fetch models)"), default=provider.get("models_endpoint", "/models"))
         )
+    try:
+        provider["proxy"] = _wizard_prompt(
+            _L("代理地址（可选，例 http://127.0.0.1:7890）", "Proxy URL (optional)"),
+            default=provider.get("proxy", ""),
+        ).strip()
+        provider["no_proxy"] = _wizard_prompt(
+            _L("NO_PROXY（可选）", "NO_PROXY (optional)"),
+            default=provider.get("no_proxy", ""),
+        ).strip()
+        provider["timezone"] = _wizard_prompt(
+            _L("启动时区（默认 America/Los_Angeles）", "Launch timezone (default America/Los_Angeles)"),
+            default=provider.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+        ).strip()
+        provider = _normalize_provider(provider)
+    except WizardBack:
+        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except WizardCancel:
+        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
     setup_provider_credentials(provider)
@@ -2639,6 +2720,25 @@ def _quick_connect_official(cfg, preset_cli=None):
     console.print(f"[dim]{_L('系统内部标识（自动生成）', 'System ID (auto-generated)')}: {account_id}[/dim]")
 
     home_dir = _default_account_home(account_id)
+    try:
+        proxy = _wizard_prompt(
+            _L("代理地址（可选，例 http://127.0.0.1:7890）", "Proxy URL (optional)"),
+            default="",
+        ).strip()
+        no_proxy = _wizard_prompt(
+            _L("NO_PROXY（可选）", "NO_PROXY (optional)"),
+            default="",
+        ).strip()
+        timezone_name = _wizard_prompt(
+            _L("启动时区（默认 America/Los_Angeles）", "Launch timezone (default America/Los_Angeles)"),
+            default=DEFAULT_ACCOUNT_TIMEZONE,
+        ).strip()
+    except WizardBack:
+        console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
+        return cfg, False
+    except WizardCancel:
+        console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
+        return cfg, False
     account = _normalize_account({
         "id": account_id,
         "name": name,
@@ -2646,6 +2746,9 @@ def _quick_connect_official(cfg, preset_cli=None):
         "home_dir": home_dir,
         "enabled": True,
         "priority": DEFAULT_PRIORITY,
+        "proxy": proxy,
+        "no_proxy": no_proxy,
+        "timezone": timezone_name,
     })
     updated_cfg = dict(cfg)
     updated_cfg["accounts"] = list(cfg.get("accounts", [])) + [account]
@@ -3140,6 +3243,7 @@ def _warm_model_request(provider, model_name):
         return False, "缺少 API Key"
 
     use_anthropic = "anthropic_messages" in protocols and "claude" in model_name.lower()
+    request_kwargs = _runtime_httpx_kwargs(provider)
     try:
         if use_anthropic:
             from mms_launchers import _resolve_anthropic_base_url
@@ -3160,6 +3264,7 @@ def _warm_model_request(provider, model_name):
                     "messages": [{"role": "user", "content": "warmup"}],
                 },
                 timeout=timeout,
+                **request_kwargs,
             )
         else:
             base_url = _provider_openai_base_url(provider)
@@ -3179,6 +3284,7 @@ def _warm_model_request(provider, model_name):
                     "stream": False,
                 },
                 timeout=timeout,
+                **request_kwargs,
             )
         if response.status_code >= 400:
             detail = response.text.strip().replace("\n", " ")
@@ -3305,6 +3411,8 @@ def _manage_provider_target(cfg, provider_id):
             ("模型列表地址", provider.get("models_endpoint", "/models")),
             ("模型补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
             ("协议", ", ".join(provider.get("protocols", []))),
+            ("Proxy", provider.get("proxy", "") or "-"),
+            ("Timezone", provider.get("timezone", "") or "-"),
         ]
         actions = [
             ("1", "查看本地统计"),
@@ -3391,6 +3499,8 @@ def _manage_account_target(cfg, account_id):
             ("CLI", account.get("cli", "").upper()),
             ("默认", f"{default_tag}（{account.get('cli', '').upper()}）"),
             ("登录", login_state.get("summary") or login_state.get("state", "")),
+            ("Proxy", account.get("proxy", "") or "-"),
+            ("Timezone", account.get("timezone", "") or "-"),
         ]
         actions = [
             ("1", "查看本地统计"),
@@ -3600,7 +3710,7 @@ def run_connect_wizard(cfg):
     return cfg, False
 
 
-def detect_working_base_url(configured_url, path, headers, body=None, timeout=5):
+def detect_working_base_url(configured_url, path, headers, body=None, timeout=5, runtime=None):
     """
     公共 URL 探测工具：自动兼容 /v1 有无后缀的 gateway。
 
@@ -3623,12 +3733,19 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5)
         return None
     url = configured_url.rstrip("/")
     candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
+    request_kwargs = _runtime_httpx_kwargs(runtime)
     for candidate in candidates:
         try:
             if body is not None:
-                resp = httpx.post(f"{candidate}{path}", headers=headers, content=body, timeout=timeout)
+                resp = httpx.post(
+                    f"{candidate}{path}",
+                    headers=headers,
+                    content=body,
+                    timeout=timeout,
+                    **request_kwargs,
+                )
             else:
-                resp = httpx.get(f"{candidate}{path}", headers=headers, timeout=timeout)
+                resp = httpx.get(f"{candidate}{path}", headers=headers, timeout=timeout, **request_kwargs)
             if resp.status_code == 200:
                 return candidate
         except Exception:
@@ -3957,6 +4074,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
         last_exc = None
         models_endpoint = provider.get("models_endpoint", "/models")
+        request_kwargs = _runtime_httpx_kwargs(provider)
         if models_endpoint == "manual":
             fallback = provider.get("fallback_models") or []
             result["raw_models"] = list(fallback)
@@ -3982,7 +4100,7 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     headers = {}
                     if "/api/models/info" not in models_endpoint:
                         headers["Authorization"] = f"Bearer {api_key}"
-                    response = httpx.get(full_url, headers=headers, timeout=15)
+                    response = httpx.get(full_url, headers=headers, timeout=15, **request_kwargs)
                     response.raise_for_status()
                     data = response.json()
                     models = [m["id"] for m in data.get("data", [])]
@@ -5007,6 +5125,7 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None, a
             "desc": desc,
             "icon": "🔑",
             "priority": runtime.get("priority", DEFAULT_PRIORITY),
+            "priority_family": selected_family,
             "is_default": runtime.get("id") == defaults.get(account_cli),
             "launch_cli": launch_cli,
         })
@@ -5493,7 +5612,7 @@ def _uses_broker_entry(runtime, cli):
 
 
 def _uses_managed_entry(runtime, cli):
-    return _uses_native_account_entry(runtime, cli) or _uses_broker_entry(runtime, cli)
+    return _uses_native_account_entry(runtime, cli)
 
 
 def _preset_model_info(preset):
@@ -5868,6 +5987,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             last_used=last_by_cli,
             families_detail=families_detail,
             provider_options_by_cli=provider_options_by_cli,
+            provider_options_loader_by_cli=provider_options_loader_by_cli,
             broker_enabled_by_cli=_broker_enabled_by_cli(current_cfg, current_cli_names),
         )
 
@@ -7095,7 +7215,7 @@ def _display_config_help():
     console.print(f"  {command} config provider.credentials [id]")
     console.print("\n[bold]Account:[/bold]")
     console.print(f"  {command} config account.list")
-    console.print(f"  {command} config account.add [claude|codex]")
+    console.print(f"  {command} config account.add [claude|codex|gemini]")
     console.print(f"  {command} config account.edit <id>")
     console.print(f"  {command} config account.remove <id>")
     console.print(f"  {command} config account.status [id]")
@@ -7364,6 +7484,10 @@ def _validate_config(cfg):
                 errors.append(f"账号档案 {account_id} 缺少 home_dir")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
                 errors.append(f"账号档案 {account_id} 的 priority 必须是正整数")
+            _validate_family_priority_overrides(
+                item.get("family_priority_overrides"),
+                f"账号档案 {account_id}",
+            )
             if _normalize_claude_1m_mode(item.get("claude_1m_mode", "auto")) != item.get("claude_1m_mode", "auto"):
                 errors.append(f"账号档案 {account_id} 的 claude_1m_mode 必须是 auto/enable/disable")
     account_defaults = cfg.get("account", {}).get("defaults", {})
@@ -7980,8 +8104,7 @@ def main():
                 console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
                 model = None
             elif _uses_broker_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用 broker profile，直接进入 remote official cc；模型由 broker/official side 决定。[/cyan]")
-                model = None
+                console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
             elif cli == "kimi":
                 model = DEFAULT_KIMI_MODEL
             else:
@@ -8019,8 +8142,7 @@ def main():
                 console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 自己处理。[/cyan]")
                 model = None
             elif _uses_broker_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用 broker profile，直接进入 remote official cc；模型由 broker/official side 决定。[/cyan]")
-                model = None
+                console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
             else:
                 if not _ensure_models_cache_available(cli_models or models_cache):
                     return
