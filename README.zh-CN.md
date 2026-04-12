@@ -181,6 +181,7 @@ mms codex --account work               # 临时切换账号
 - `←/→`：切换 CLI Tab（claude / codex / qwen / kimi）
 - `↑/↓`：选择模型族群 / 模型
 - `Enter`：确认启动
+- `A`：在当前模型族内按本地测速结果智能排序通道
 - `P`：从 Provider 角度浏览
 - `O`：接入新通道
 - `Q/Esc`：退出
