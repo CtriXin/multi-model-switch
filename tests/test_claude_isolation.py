@@ -361,3 +361,35 @@ def test_apply_runtime_ip_stack_profile_sets_ipv4first():
 
     assert result["MMS_FORCE_IPV4"] == "1"
     assert "--dns-result-order=ipv4first" in result["NODE_OPTIONS"]
+
+
+def test_test_proxy_connectivity_accepts_http_404(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core.subprocess,
+        "run",
+        lambda *args, **kwargs: types.SimpleNamespace(returncode=0, stdout="404", stderr=""),
+    )
+
+    ok, detail = mms_core._test_proxy_connectivity("http://127.0.0.1:7890")
+
+    assert ok is True
+    assert "HTTP 404" in detail
+
+
+def test_runtime_network_summary_masks_proxy_secret():
+    from mms_launchers import _runtime_network_summary
+
+    summary = _runtime_network_summary(
+        {
+            "proxy": "http://uqdefwnm:mxewpcc42roq@168.158.185.127:6394",
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        }
+    )
+
+    assert "mxewpcc42roq" not in summary
+    assert "168.158.185.127:6394" in summary
+    assert "TZ America/Los_Angeles" in summary
+    assert "IPv4 on" in summary

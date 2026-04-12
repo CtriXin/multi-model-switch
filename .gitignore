@@ -93,3 +93,10 @@ docs/landing/*
 !docs/landing/index.html
 !docs/landing/en.html
 docs/assets/
+
+# local Claude/MMS templates and scratch config
+.rtk/
+claude-settings.global-template.json
+claude-settings.template.json
+gbrain_memory_hook.py
+tsconfig.json
