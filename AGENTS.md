@@ -111,31 +111,31 @@ This file applies to both `Codex` and `Claude`.
 ## Stability Window
 
 - The following chain is now under a stability window and must be treated as a protected integration surface:
-  - `MMS -> private(/claude) -> CRS`
-  - `MMS -> privateopenai(/openai) -> CRS`
-  - `MMS -> xin/newapi(4001) -> CRS`
-  - `MMS -> fishcrs(/claude) -> CRS`
+  - `MMS -> sensitive Claude relay -> upstream`
+  - `MMS -> sensitive OpenAI-compatible relay -> upstream`
+  - `MMS -> sticky-session relay -> upstream`
+  - `MMS -> brokered private runtime -> upstream`
 - Any person or agent touching any of the following must explicitly confirm whether the change can affect the above chain before proceeding:
   - provider `models_endpoint`
   - `extra_models` / `hidden_models`
   - model probe logic / cache logic
   - `channel_affinity`
   - `Codex` / `Claude` header passthrough
-  - CRS-facing `/claude` or `/openai` route assumptions
+  - upstream-facing `/claude` or `/openai` route assumptions
 - Minimum pre-change checklist for that chain:
   - Does this change alter model visibility, aliasing, or fallback behavior?
   - Does this change alter whether `/models` is probed, skipped, or cached?
   - Does this change alter client identity headers or sticky-session key sources?
-  - Can this break `private`, `privateopenai`, or `xin/newapi` even if the local unit test still passes?
+  - Can this break any private relay / broker / sticky-session deployment even if the local unit test still passes?
 - Any change on that chain must update:
-  - `docs/CLI_PROVIDER_COMPAT_QA.md`
-  - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
+  - the public compatibility note
+  - the matching local smoke runbook, if you keep one outside git
 - Any change on that chain must run at least one matching smoke test from:
-  - `docs/PRIVATE_CRS_SMOKETEST_RUNBOOK.md`
+  - your matching local smoke runbook / deployment checklist
 
 ## Claude Provider Safety Notes
 
-- `xin` / `fishcrs` / `trcrs`（若恢复）属于 Claude 敏感 provider：
+- private relay / broker style Claude provider 属于敏感 provider：
   - 默认不要启用 `1M context`
   - 默认不要做额外 `Anthropic endpoint probe`
   - 只有在真实 smoke 证明可用时才允许继续放开

@@ -351,12 +351,12 @@ entry_mode = "official_proxy"
 
 这样一个 broker profile 就可以对应一个 server-side runtime / OAuth 池，便于后续做多 OAuth 测试，而不影响原有 provider/account 主路径。
 
-如果你的 live 路线已经固定到 host-path auth source，现在也可以直接由 MMS 帮你把这组 env 传给 `cc-official-broker`：
+如果你的部署已经固定到 host-path auth source，现在也可以直接由 MMS 帮你把这组 env 传给 `cc-official-broker`：
 
-- `CC_BROKER_REMOTE_CLAUDE_SSH_TARGET=root@23.95.30.199`
+- `CC_BROKER_REMOTE_CLAUDE_SSH_TARGET=root@broker-runtime.example.com`
 - `CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME=''`
-- `CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH=/var/lib/cc-mcp-bridge/claude-home-1/.credentials.json`
-- `CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH=/var/lib/cc-mcp-bridge/claude-home-1/.claude.json`
+- `CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH=/path/to/isolated-claude/.credentials.json`
+- `CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH=/path/to/isolated-claude/.claude.json`
 
 注意：
 
@@ -364,6 +364,11 @@ entry_mode = "official_proxy"
 - MMS 现在会保留这个空字符串传给 broker，不会再偷偷 fallback 回旧 container 名
 
 当前 broker shell 还会把最近一次本地 session 记到 `~/.config/cc-official-broker/session-registry.json`，作用域按 `device/workspace/project_root` 区分，所以 `--resume-last` 只会续当前项目自己的那条会话，不会去串别的项目。
+
+开源说明：
+
+- 文档里只保留占位 host / path 示例
+- 真实部署地址、SSH target、凭据路径请保存在你自己的本地运维文档里，不要直接写进仓库
 
 如果你现在想先验证“这个 broker profile 能不能真的吐出 `sdk_url + access_token` 给 official child”，可以直接：
 
