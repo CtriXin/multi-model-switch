@@ -459,23 +459,480 @@ def _ensure_agent_im():
 
 
 def _load_real_claude_settings():
+    return _load_claude_settings_from_dir(_real_user_path(".claude"))
+
+
+def _load_claude_settings_from_dir(claude_dir):
     import json as _json
 
-    real_settings_path = os.path.join(_real_user_path(".claude"), "settings.json")
-    if not os.path.exists(real_settings_path):
+    settings_path = os.path.join(str(claude_dir), "settings.json")
+    if not os.path.exists(settings_path):
         return {}
     try:
-        with open(real_settings_path, encoding="utf-8") as f:
+        with open(settings_path, encoding="utf-8") as f:
             loaded = _json.load(f)
         return loaded if isinstance(loaded, dict) else {}
     except Exception:
         return {}
 
 
+def _load_claude_settings_template(filename):
+    import json as _json
+
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    if not os.path.exists(template_path):
+        return {}
+    try:
+        with open(template_path, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _load_mms_claude_settings_template():
+    return _load_claude_settings_template("claude-settings.template.json")
+
+
+def _load_global_claude_settings_template():
+    return _load_claude_settings_template("claude-settings.global-template.json")
+
+
+def _global_claude_snapshot_path():
+    state_root = os.environ.get("MMS_HOME") or os.path.join(_real_user_path(".mms"), "state")
+    return os.path.join(state_root, "claude-global-managed-snapshot.json")
+
+
+def _normalize_hook_command(command):
+    return " ".join(str(command or "").strip().split())
+
+
+def _extract_managed_claude_snapshot(settings_data, template_settings):
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    template_settings = template_settings if isinstance(template_settings, dict) else {}
+    snapshot = {}
+
+    managed_scalar_keys = set(
+        [
+            "includeCoAuthoredBy",
+            "skipDangerousModePermissionPrompt",
+            "model",
+            "promptSuggestionEnabled",
+        ]
+    )
+    if isinstance(template_settings.get("statusLine"), dict):
+        managed_scalar_keys.add("statusLine")
+    if isinstance(template_settings.get("attribution"), dict):
+        managed_scalar_keys.add("attribution")
+    if isinstance(template_settings.get("permissions"), dict):
+        managed_scalar_keys.add("permissions")
+
+    for key in managed_scalar_keys:
+        value = settings_data.get(key)
+        if isinstance(value, dict):
+            snapshot[key] = dict(value)
+        elif isinstance(value, list):
+            snapshot[key] = list(value)
+        else:
+            snapshot[key] = value
+
+    current_hooks = settings_data.get("hooks") or {}
+    template_hooks = template_settings.get("hooks") or {}
+    snapshot_hooks = {}
+
+    for event_name, current_groups in current_hooks.items():
+        event_snapshot = []
+        known_matchers = set()
+        template_groups = template_hooks.get(event_name) or []
+        for template_group in template_groups:
+            if not isinstance(template_group, dict):
+                continue
+            known_matchers.add(str(template_group.get("matcher") or "").strip())
+        for group in current_groups:
+            if not isinstance(group, dict):
+                continue
+            matcher = str(group.get("matcher") or "").strip()
+            commands = []
+            for hook in group.get("hooks") or []:
+                if not isinstance(hook, dict):
+                    continue
+                command = _normalize_hook_command(hook.get("command"))
+                if command:
+                    commands.append(command)
+            if not commands:
+                continue
+            event_snapshot.append({"matcher": matcher, "commands": sorted(set(commands))})
+            known_matchers.add(matcher)
+        if event_snapshot:
+            snapshot_hooks[event_name] = sorted(
+                event_snapshot,
+                key=lambda item: (item.get("matcher") or "", ",".join(item.get("commands") or [])),
+            )
+    snapshot["hooks"] = snapshot_hooks
+    return snapshot
+
+
+def _snapshot_to_template(snapshot_data, seed_template):
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    seed_template = seed_template if isinstance(seed_template, dict) else {}
+    template = {}
+
+    for key in [
+        "includeCoAuthoredBy",
+        "skipDangerousModePermissionPrompt",
+        "model",
+        "promptSuggestionEnabled",
+        "statusLine",
+        "attribution",
+        "permissions",
+    ]:
+        if key in snapshot_data:
+            value = snapshot_data.get(key)
+        else:
+            value = seed_template.get(key)
+        if isinstance(value, dict):
+            template[key] = dict(value)
+        elif isinstance(value, list):
+            template[key] = list(value)
+        elif value is not None:
+            template[key] = value
+
+    hooks = {}
+    snapshot_hooks = snapshot_data.get("hooks") or {}
+    seed_hooks = seed_template.get("hooks") or {}
+    all_events = sorted(set(snapshot_hooks.keys()) | set(seed_hooks.keys()))
+    for event_name in all_events:
+        groups = []
+        seen = set()
+        for source_groups in [seed_hooks.get(event_name) or [], snapshot_hooks.get(event_name) or []]:
+            for group in source_groups:
+                if not isinstance(group, dict):
+                    continue
+                matcher = str(group.get("matcher") or "").strip()
+                commands = []
+                if "commands" in group:
+                    commands = [
+                        _normalize_hook_command(command)
+                        for command in group.get("commands") or []
+                        if _normalize_hook_command(command)
+                    ]
+                else:
+                    for hook in group.get("hooks") or []:
+                        if not isinstance(hook, dict):
+                            continue
+                        command = _normalize_hook_command(hook.get("command"))
+                        if command:
+                            commands.append(command)
+                commands = sorted(set(commands))
+                if not commands:
+                    continue
+                group_key = (matcher, tuple(commands))
+                if group_key in seen:
+                    continue
+                seen.add(group_key)
+                groups.append(
+                    {
+                        "matcher": matcher,
+                        "hooks": [
+                            {"type": "command", "command": command} for command in commands
+                        ],
+                    }
+                )
+        if groups:
+            hooks[event_name] = groups
+    if hooks:
+        template["hooks"] = hooks
+    return template
+
+
+def _merge_snapshot_with_current(snapshot_data, current_settings):
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    current_snapshot = _extract_managed_claude_snapshot(current_settings, snapshot_data)
+    merged = dict(snapshot_data)
+
+    for key, value in current_snapshot.items():
+        if key == "hooks":
+            continue
+        if isinstance(value, dict):
+            merged[key] = dict(value)
+        elif isinstance(value, list):
+            merged[key] = list(value)
+        elif value is not None:
+            merged[key] = value
+
+    merged_hooks = {}
+    known_events = set((snapshot_data.get("hooks") or {}).keys()) | set((current_snapshot.get("hooks") or {}).keys())
+    for event_name in known_events:
+        groups = []
+        seen = set()
+        for source_groups in [snapshot_data.get("hooks", {}).get(event_name) or [], current_snapshot.get("hooks", {}).get(event_name) or []]:
+            for group in source_groups:
+                if not isinstance(group, dict):
+                    continue
+                matcher = str(group.get("matcher") or "").strip()
+                commands = sorted(
+                    set(
+                        _normalize_hook_command(command)
+                        for command in group.get("commands") or []
+                        if _normalize_hook_command(command)
+                    )
+                )
+                if not commands:
+                    continue
+                group_key = (matcher, tuple(commands))
+                if group_key in seen:
+                    continue
+                seen.add(group_key)
+                groups.append({"matcher": matcher, "commands": commands})
+        if groups:
+            merged_hooks[event_name] = groups
+    merged["hooks"] = merged_hooks
+    return merged
+
+
+def _prune_session_only_snapshot_entries(snapshot_data):
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    hooks = snapshot_data.get("hooks") or {}
+    session_only_commands = {
+        _normalize_hook_command("/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/hooks/claude-feishu-webfetch-guard.sh"),
+        _normalize_hook_command("bash /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/hooks/hive-compact-hook.sh"),
+    }
+    pruned_hooks = {}
+    for event_name, groups in hooks.items():
+        kept_groups = []
+        for group in groups or []:
+            if not isinstance(group, dict):
+                continue
+            commands = [
+                command
+                for command in group.get("commands") or []
+                if _normalize_hook_command(command) not in session_only_commands
+            ]
+            if not commands:
+                continue
+            kept_groups.append({"matcher": str(group.get("matcher") or "").strip(), "commands": commands})
+        if kept_groups:
+            pruned_hooks[event_name] = kept_groups
+    snapshot_data["hooks"] = pruned_hooks
+    return snapshot_data
+
+
+def _sanitize_global_snapshot(snapshot_data):
+    snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+    snapshot_data.pop("env", None)
+    return _prune_session_only_snapshot_entries(snapshot_data)
+
+
+def _managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
+    previous_snapshot = _sanitize_global_snapshot(previous_snapshot)
+    current_snapshot = _sanitize_global_snapshot(_extract_managed_claude_snapshot(current_settings, seed_template))
+    return previous_snapshot != current_snapshot
+
+
+def _managed_snapshot_template(previous_snapshot, seed_template, current_settings):
+    merged_snapshot = _merge_snapshot_with_current(previous_snapshot, current_settings)
+    sanitized_snapshot = _sanitize_global_snapshot(merged_snapshot)
+    return sanitized_snapshot, _snapshot_to_template(sanitized_snapshot, seed_template)
+
+
+def _load_global_claude_snapshot():
+    import json as _json
+
+    snapshot_path = _global_claude_snapshot_path()
+    if not os.path.exists(snapshot_path):
+        return {}
+    try:
+        with open(snapshot_path, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_global_claude_snapshot(snapshot_data):
+    import json as _json
+
+    snapshot_path = _global_claude_snapshot_path()
+    os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
+    with open(snapshot_path, "w", encoding="utf-8") as f:
+        _json.dump(snapshot_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
+def _merge_claude_settings(base_settings, template_settings):
+    settings_data = dict(base_settings) if isinstance(base_settings, dict) else {}
+    template_settings = template_settings if isinstance(template_settings, dict) else {}
+
+    hooks = _merge_claude_hooks(settings_data.get("hooks"), template_settings.get("hooks"))
+    if hooks:
+        settings_data["hooks"] = hooks
+
+    if isinstance(template_settings.get("statusLine"), dict):
+        settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
+    if isinstance(template_settings.get("permissions"), dict):
+        settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
+
+    settings_data.setdefault(
+        "includeCoAuthoredBy",
+        template_settings.get("includeCoAuthoredBy", False),
+    )
+    settings_data.setdefault(
+        "attribution",
+        template_settings.get("attribution") if isinstance(template_settings.get("attribution"), dict) else {"commit": "", "pr": ""},
+    )
+    settings_data.setdefault(
+        "promptSuggestionEnabled",
+        template_settings.get("promptSuggestionEnabled", False),
+    )
+    if template_settings.get("model") and not settings_data.get("model"):
+        settings_data["model"] = template_settings.get("model")
+    if "skipDangerousModePermissionPrompt" in template_settings:
+        settings_data["skipDangerousModePermissionPrompt"] = bool(
+            template_settings.get("skipDangerousModePermissionPrompt")
+        )
+    return settings_data
+
+
+def _repair_real_claude_settings():
+    import json as _json
+
+    real_claude_dir = _real_user_path(".claude")
+    os.makedirs(real_claude_dir, exist_ok=True)
+    settings_path = os.path.join(real_claude_dir, "settings.json")
+    current_settings = _load_real_claude_settings()
+    seed_template = _load_global_claude_settings_template()
+    previous_snapshot = _load_global_claude_snapshot()
+    snapshot_data, managed_template = _managed_snapshot_template(
+        previous_snapshot,
+        seed_template,
+        current_settings,
+    )
+
+    repaired = _merge_claude_settings(current_settings, managed_template)
+    repaired_snapshot = _sanitize_global_snapshot(
+        _extract_managed_claude_snapshot(repaired, managed_template)
+    )
+    should_write = (
+        _managed_snapshot_differs(previous_snapshot, current_settings, managed_template)
+        or repaired_snapshot != snapshot_data
+        or not os.path.exists(settings_path)
+    )
+    if should_write:
+        with open(settings_path, "w", encoding="utf-8") as f:
+            _json.dump(repaired, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+    _write_global_claude_snapshot(repaired_snapshot)
+    return repaired
+
+
+def _refresh_global_claude_snapshot_from_current_settings():
+    current_settings = _load_real_claude_settings()
+    seed_template = _load_global_claude_settings_template()
+    snapshot_data, _ = _managed_snapshot_template({}, seed_template, current_settings)
+    _write_global_claude_snapshot(snapshot_data)
+    return snapshot_data
+
+
+def repair_real_claude_settings_for_startup():
+    return _repair_real_claude_settings()
+
+
+def repair_current_session_claude_settings(session_claude_dir):
+    import json as _json
+
+    os.makedirs(session_claude_dir, exist_ok=True)
+    session_path = os.path.join(session_claude_dir, "settings.json")
+    current = {}
+    if os.path.exists(session_path):
+        try:
+            with open(session_path, encoding="utf-8") as f:
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                current = loaded
+        except Exception:
+            current = {}
+    repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
+    with open(session_path, "w", encoding="utf-8") as f:
+        _json.dump(repaired, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return repaired
+
+
+def repair_real_claude_settings_for_startup():
+    return _repair_real_claude_settings()
+
+
+def repair_current_session_claude_settings(session_claude_dir):
+    import json as _json
+
+    os.makedirs(session_claude_dir, exist_ok=True)
+    session_path = os.path.join(session_claude_dir, "settings.json")
+    current = {}
+    if os.path.exists(session_path):
+        try:
+            with open(session_path, encoding="utf-8") as f:
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                current = loaded
+        except Exception:
+            current = {}
+    repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
+    with open(session_path, "w", encoding="utf-8") as f:
+        _json.dump(repaired, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return repaired
+
+
 def _strip_agent_im_hooks(hooks_data):
     # Inherit hooks from global settings as-is
     # Users control what's in their ~/.claude/settings.json
     return hooks_data if isinstance(hooks_data, dict) else None
+
+
+def _merge_claude_hook_groups(existing_groups, template_groups):
+    groups = []
+    if isinstance(existing_groups, list):
+        groups.extend(existing_groups)
+    if not isinstance(template_groups, list):
+        return groups
+    for template_group in template_groups:
+        if not isinstance(template_group, dict):
+            continue
+        matcher = str(template_group.get("matcher") or "").strip()
+        template_hooks = template_group.get("hooks")
+        if not isinstance(template_hooks, list):
+            continue
+        target_group = None
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            if str(group.get("matcher") or "").strip() == matcher:
+                target_group = group
+                break
+        if target_group is None:
+            target_group = {"matcher": matcher, "hooks": []}
+            groups.append(target_group)
+        hook_items = target_group.get("hooks")
+        if not isinstance(hook_items, list):
+            hook_items = []
+            target_group["hooks"] = hook_items
+        for hook in template_hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = str(hook.get("command") or "").strip()
+            if not command or _hook_command_exists(hook_items, command):
+                continue
+            hook_items.append(dict(hook))
+    return groups
+
+
+def _merge_claude_hooks(existing_hooks, template_hooks):
+    merged = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
+    if not isinstance(template_hooks, dict):
+        return merged
+    for event_name, template_groups in template_hooks.items():
+        merged[event_name] = _merge_claude_hook_groups(merged.get(event_name), template_groups)
+    return merged
 
 
 def _merge_claude_statusline(existing):
@@ -554,8 +1011,8 @@ def _append_command_hook(hooks_data, event_name, command_path, matcher=None):
     return merged
 
 
-def _merge_mms_session_hooks(existing_hooks):
-    hooks_data = dict(existing_hooks) if isinstance(existing_hooks, dict) else {}
+def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
+    hooks_data = _merge_claude_hooks(existing_hooks, template_hooks)
     hooks_data = _append_command_hook(
         hooks_data,
         "PreToolUse",
@@ -566,10 +1023,25 @@ def _merge_mms_session_hooks(existing_hooks):
 
 
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
-    settings_data = dict(base_settings or {})
+    template_settings = _load_mms_claude_settings_template()
+    settings_data = _merge_claude_settings(base_settings or {}, _load_global_claude_settings_template())
+
+    template_hooks = template_settings.get("hooks")
+    hooks = _merge_mms_session_hooks(
+        _strip_agent_im_hooks(settings_data.get("hooks")),
+        template_hooks,
+    )
+    if hooks:
+        settings_data["hooks"] = hooks
+    else:
+        settings_data.pop("hooks", None)
 
     existing_env = settings_data.get("env")
     merged_env = dict(existing_env) if isinstance(existing_env, dict) else {}
+    template_env = template_settings.get("env")
+    if isinstance(template_env, dict):
+        for key, value in template_env.items():
+            merged_env.setdefault(key, value)
     if isinstance(default_env, dict):
         for key, value in default_env.items():
             merged_env.setdefault(key, value)
@@ -577,27 +1049,43 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
         merged_env.update(required_env)
     settings_data["env"] = merged_env
 
-    hooks = _merge_mms_session_hooks(_strip_agent_im_hooks(settings_data.get("hooks")))
-    if hooks:
-        settings_data["hooks"] = hooks
-    else:
-        settings_data.pop("hooks", None)
-
-    settings_data.setdefault("includeCoAuthoredBy", False)
-    settings_data.setdefault("attribution", {"commit": "", "pr": ""})
-    settings_data.setdefault("promptSuggestionEnabled", False)
-    settings_data["skipDangerousModePermissionPrompt"] = True
+    settings_data.setdefault(
+        "includeCoAuthoredBy",
+        template_settings.get("includeCoAuthoredBy", False),
+    )
+    settings_data.setdefault(
+        "attribution",
+        template_settings.get("attribution") if isinstance(template_settings.get("attribution"), dict) else {"commit": "", "pr": ""},
+    )
+    settings_data.setdefault(
+        "promptSuggestionEnabled",
+        template_settings.get("promptSuggestionEnabled", False),
+    )
+    if template_settings.get("model") and not settings_data.get("model"):
+        settings_data["model"] = template_settings.get("model")
+    settings_data["skipDangerousModePermissionPrompt"] = bool(
+        template_settings.get("skipDangerousModePermissionPrompt", True)
+    )
     settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
     settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
     return settings_data
 
 
-def _write_claude_session_settings(session_claude_dir, *, required_env=None, default_env=None):
+def _write_claude_session_settings(
+    session_claude_dir,
+    *,
+    required_env=None,
+    default_env=None,
+    base_settings=None,
+):
     import json as _json
 
     os.makedirs(session_claude_dir, exist_ok=True)
+    source_settings = (
+        dict(base_settings) if isinstance(base_settings, dict) else _load_real_claude_settings()
+    )
     settings_data = _build_claude_session_settings(
-        _load_real_claude_settings(),
+        source_settings,
         required_env=required_env,
         default_env=default_env,
     )
@@ -727,6 +1215,8 @@ def _account_env(account):
     cli_name = account.get("cli")
     if cli_name == "claude":
         seed_claude_state(home_dir)
+        account_claude_dir = os.path.join(home_dir, ".claude")
+        os.makedirs(account_claude_dir, exist_ok=True)
         # per-PID 会话隔离：每个窗口独立 HOME，避免多窗口 race ~/.claude.json
         sessions_dir = os.path.join(home_dir, "s")
         session_home = os.path.join(sessions_dir, str(os.getpid()))
@@ -758,8 +1248,10 @@ def _account_env(account):
             session_home,
             session_claude_dir,
             account_id=account.get("id", ""),
+            account_home=home_dir,
             runtime_kind="oauth",
             skip_real_entries={"settings.json"},
+            source_claude_dir=account_claude_dir,
         )
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -1136,12 +1628,17 @@ def launch_claude(model_info, runtime, once=False):
     if auth_mode == "oauth":
         env = _account_env(runtime)
         session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
+        account_claude_dir = os.path.join(
+            os.path.expanduser(str(runtime.get("home_dir", "")).strip()),
+            ".claude",
+        )
         _write_claude_session_settings(
             session_claude_dir,
             default_env={
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
             },
+            base_settings=_load_claude_settings_from_dir(account_claude_dir),
         )
         env.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
         env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
@@ -1208,6 +1705,7 @@ def launch_claude(model_info, runtime, once=False):
 
         # 对不支持 Claude 模型的 provider，自动映射到支持的模型
         provider_id = runtime.get("id", "")
+        strip_upstream_user_agent = "cliproxyapi" in provider_id.lower()
         if provider_id == "bailian-codingplan" and probe_model.startswith(("claude-", "sonnet-", "opus-", "haiku-")):
             # 百炼 CodingPlan 不支持 Claude 模型，使用其支持的 fallback 模型
             probe_model = "qwen3.5-plus"
@@ -1255,7 +1753,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
-                                                    openai_url=_gpt_openai_url)
+                                                    openai_url=_gpt_openai_url,
+                                                    strip_upstream_user_agent=strip_upstream_user_agent)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -1285,6 +1784,7 @@ def launch_claude(model_info, runtime, once=False):
                     speed_scope=speed_scope,
                     route_status_paths=route_status_paths,
                     openai_url=_gpt_openai_url,
+                    strip_upstream_user_agent=strip_upstream_user_agent,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -1334,7 +1834,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
-                                                openai_url=openai_url)
+                                                openai_url=openai_url,
+                                                strip_upstream_user_agent=strip_upstream_user_agent)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -1363,7 +1864,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
-                                                openai_url=openai_url)
+                                                openai_url=openai_url,
+                                                strip_upstream_user_agent=strip_upstream_user_agent)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -1399,7 +1901,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
-                                                    openai_url=openai_url)
+                                                    openai_url=openai_url,
+                                                    strip_upstream_user_agent=strip_upstream_user_agent)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -1639,30 +2142,46 @@ def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
             pass  # 进程存在但无权限发信号，跳过
 
 
-def _prepare_claude_session_tree(session_home, session_claude_dir, *, account_id="", runtime_kind="api_key", skip_real_entries=None):
+def _prepare_claude_session_tree(
+    session_home,
+    session_claude_dir,
+    *,
+    account_id="",
+    account_home="",
+    runtime_kind="api_key",
+    skip_real_entries=None,
+    source_claude_dir=None,
+):
     current_cwd = os.path.realpath(os.getcwd())
-    store = ensure_claude_project_store(current_cwd)
+    normalized_account_id = str(account_id or "").strip()
+    store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
-    real_claude_dir = _real_user_path(".claude")
+    scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
     if os.path.islink(session_claude_dir):
         os.unlink(session_claude_dir)
     os.makedirs(session_claude_dir, exist_ok=True)
-    if os.path.isdir(real_claude_dir):
-        for entry in os.listdir(real_claude_dir):
+    if os.path.isdir(scoped_claude_dir):
+        for entry in os.listdir(scoped_claude_dir):
             if entry in skip_real_entries or entry in CLAUDE_PERSISTENT_ENTRIES:
                 continue
-            src = os.path.join(real_claude_dir, entry)
+            src = os.path.join(scoped_claude_dir, entry)
             dst = os.path.join(session_claude_dir, entry)
             if not os.path.exists(dst) and not os.path.islink(dst):
                 os.symlink(src, dst)
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
-        target = str(claude_raw_entry_path(entry, current_cwd))
+        target = str(
+            claude_raw_entry_path(
+                entry,
+                current_cwd,
+                account_id=normalized_account_id,
+            )
+        )
         if not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(target, dst)
     record_claude_session_start(
         cwd=current_cwd,
-        account_id=str(account_id or ""),
+        account_id=normalized_account_id,
         pid=os.getpid(),
         runtime_kind=runtime_kind,
         slot_home=session_home,
@@ -1671,9 +2190,39 @@ def _prepare_claude_session_tree(session_home, session_claude_dir, *, account_id
         session_home,
         cwd=current_cwd,
         project_key_value=store["project_key"],
-        account_id=str(account_id or ""),
+        account_id=normalized_account_id,
         runtime_kind=runtime_kind,
+        account_home=account_home,
     )
+
+
+def _sync_claude_session_state_to_account_home(session_home, account_home):
+    account_home = os.path.expanduser(str(account_home or "").strip())
+    if not account_home:
+        return
+
+    os.makedirs(account_home, exist_ok=True)
+    account_claude_dir = os.path.join(account_home, ".claude")
+    os.makedirs(account_claude_dir, exist_ok=True)
+
+    sync_pairs = [
+        (
+            os.path.join(session_home, ".claude.json"),
+            os.path.join(account_home, ".claude.json"),
+        ),
+        (
+            os.path.join(session_home, ".claude", "settings.json"),
+            os.path.join(account_claude_dir, "settings.json"),
+        ),
+    ]
+    for src, dst in sync_pairs:
+        if not os.path.exists(src):
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            shutil.copy2(src, dst)
+        except Exception:
+            continue
 
 
 def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
@@ -1685,9 +2234,13 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
     except (TypeError, ValueError):
         return
     cwd = marker.get("cwd") or os.getcwd()
+    account_id = str(marker.get("account_id") or "").strip()
+    account_home = str(marker.get("account_home") or "").strip()
+    _sync_claude_session_state_to_account_home(session_home, account_home)
     finalize_claude_session(
         cwd=cwd,
         pid=pid,
+        account_id=account_id,
         exit_code=exit_code,
         stale_cleanup=stale_cleanup,
     )
