@@ -7,7 +7,7 @@ import shutil
 import sys
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from time import perf_counter
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
@@ -124,6 +124,10 @@ def _runtime_network_summary(runtime):
     if no_proxy:
         parts.append("NO_PROXY set")
     return " | ".join(parts)
+
+
+def _guard_utc_now():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
@@ -355,6 +359,232 @@ def _real_user_home():
 
 def _real_user_path(*parts):
     return os.path.join(_real_user_home(), *parts)
+
+
+def _account_guard_state_path():
+    return _real_user_path(".config", "mms", "account-guard-state.json")
+
+
+def _read_account_guard_state():
+    path = _account_guard_state_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_account_guard_state(payload):
+    path = _account_guard_state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _claude_account_guard_entry(state, account_id):
+    if not isinstance(state, dict):
+        state = {}
+    accounts = state.setdefault("accounts", {})
+    key = str(account_id or "").strip() or "_anonymous"
+    entry = accounts.get(key)
+    if not isinstance(entry, dict):
+        entry = {}
+        accounts[key] = entry
+    return accounts, key, entry
+
+
+def _count_live_session_dirs(sessions_dir):
+    if not os.path.isdir(sessions_dir):
+        return 0
+    alive = 0
+    for name in os.listdir(sessions_dir):
+        try:
+            pid = int(str(name))
+            os.kill(pid, 0)
+            alive += 1
+        except (TypeError, ValueError, ProcessLookupError, FileNotFoundError):
+            continue
+        except PermissionError:
+            alive += 1
+    return alive
+
+
+def _proxy_fingerprint(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return "direct"
+    try:
+        parsed = urlsplit(proxy_url)
+    except Exception:
+        return proxy_url
+    scheme = parsed.scheme or "proxy"
+    host = parsed.hostname or "unknown"
+    port = f":{parsed.port}" if parsed.port else ""
+    auth = "+auth" if parsed.username or parsed.password else ""
+    return f"{scheme}://{host}{port}{auth}"
+
+
+def _account_guard_profile(runtime):
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    return {
+        "proxy_fingerprint": _proxy_fingerprint(runtime.get("proxy")),
+        "timezone": str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE,
+        "force_ipv4": bool(_runtime_force_ipv4(runtime)),
+        "no_proxy": no_proxy,
+        "no_proxy_set": bool(no_proxy),
+    }
+
+
+def _build_account_guard_report(account):
+    account_id = str(account.get("id") or "").strip()
+    home_dir = os.path.expanduser(str(account.get("home_dir") or "").strip())
+    sessions_dir = os.path.join(home_dir, "s") if home_dir else ""
+    active_before = _count_live_session_dirs(sessions_dir)
+    active_after = active_before + 1 if home_dir else active_before
+
+    state = _read_account_guard_state()
+    _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
+    previous_profile = entry.get("last_profile") if isinstance(entry.get("last_profile"), dict) else {}
+    current_profile = _account_guard_profile(account)
+
+    drift_fields = []
+    drift_labels = {
+        "proxy_fingerprint": "proxy",
+        "timezone": "timezone",
+        "force_ipv4": "ipv4",
+        "no_proxy": "no_proxy",
+    }
+    if previous_profile:
+        for key, label in drift_labels.items():
+            previous_value = previous_profile.get(key)
+            current_value = current_profile.get(key)
+            if previous_value is None:
+                continue
+            if previous_value != current_value:
+                drift_fields.append(label)
+
+    consecutive_failures = 0
+    try:
+        consecutive_failures = max(0, int(entry.get("consecutive_failures", 0) or 0))
+    except Exception:
+        consecutive_failures = 0
+
+    score = 100
+    if active_after >= 3:
+        score -= 18
+    elif active_after >= 2:
+        score -= 8
+    if "proxy" in drift_fields:
+        score -= 22
+    if "timezone" in drift_fields:
+        score -= 10
+    if "ipv4" in drift_fields:
+        score -= 8
+    if "no_proxy" in drift_fields:
+        score -= 5
+    score -= min(consecutive_failures, 3) * 12
+    score = max(0, min(100, score))
+
+    if active_after > 4:
+        status = "blocked"
+        blocked_reason = f"该账号当前将达到 {active_after} 个并发会话，已超过安全上限 4"
+    elif score >= 85:
+        status = "stable"
+        blocked_reason = ""
+    elif score >= 60:
+        status = "watch"
+        blocked_reason = ""
+    else:
+        status = "risky"
+        blocked_reason = ""
+
+    return {
+        "account_id": account_id,
+        "profile": current_profile,
+        "drift_fields": drift_fields,
+        "active_sessions_before": active_before,
+        "active_sessions_after": active_after,
+        "consecutive_failures": consecutive_failures,
+        "score": score,
+        "status": status,
+        "blocked_reason": blocked_reason,
+        "first_seen": not bool(previous_profile),
+        "last_exit_code": entry.get("last_exit_code"),
+    }
+
+
+def _format_account_guard_summary(report):
+    if not isinstance(report, dict):
+        return ""
+    status_labels = {
+        "stable": "stable",
+        "watch": "watch",
+        "risky": "risky",
+        "blocked": "blocked",
+    }
+    drift = report.get("drift_fields") or []
+    drift_label = "first run" if report.get("first_seen") else ("stable" if not drift else ",".join(drift))
+    parts = [
+        f"账号守护 {status_labels.get(report.get('status'), 'unknown')}",
+        f"score {report.get('score', 0)}",
+        f"sessions {report.get('active_sessions_after', 0)}",
+        f"profile {drift_label}",
+    ]
+    failures = int(report.get("consecutive_failures", 0) or 0)
+    if failures:
+        parts.append(f"failures {failures}")
+    return " | ".join(parts)
+
+
+def _persist_account_guard_launch(account_id, report, *, session_home=""):
+    state = _read_account_guard_state()
+    _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
+    launch_count = 0
+    try:
+        launch_count = int(entry.get("launch_count", 0) or 0)
+    except Exception:
+        launch_count = 0
+    entry.update(
+        {
+            "launch_count": launch_count + 1,
+            "last_launch_at": _guard_utc_now(),
+            "last_profile": dict((report or {}).get("profile") or {}),
+            "last_score": int((report or {}).get("score", 0) or 0),
+            "last_status": str((report or {}).get("status") or ""),
+            "last_drift_fields": list((report or {}).get("drift_fields") or []),
+            "last_active_sessions": int((report or {}).get("active_sessions_after", 0) or 0),
+            "last_session_home": str(session_home or ""),
+        }
+    )
+    _write_account_guard_state(state)
+
+
+def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=False):
+    account_id = str(account_id or "").strip()
+    if not account_id:
+        return
+    state = _read_account_guard_state()
+    _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
+    entry["last_exit_at"] = _guard_utc_now()
+    entry["last_exit_code"] = exit_code
+    if stale_cleanup or exit_code is None:
+        _write_account_guard_state(state)
+        return
+    failures = 0
+    try:
+        failures = int(entry.get("consecutive_failures", 0) or 0)
+    except Exception:
+        failures = 0
+    entry["consecutive_failures"] = 0 if int(exit_code) == 0 else max(0, failures) + 1
+    _write_account_guard_state(state)
 
 
 _MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
@@ -1449,6 +1679,12 @@ def _account_env(account, *, validate_proxy=True):
         _install_session_command_wrappers(session_home, env)
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
+    if cli_name == "claude":
+        _persist_account_guard_launch(
+            account.get("id", ""),
+            account.get("_account_guard_report", {}),
+            session_home=env.get("HOME", ""),
+        )
     return env
 
 
@@ -2410,6 +2646,11 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
         exit_code=exit_code,
         stale_cleanup=stale_cleanup,
     )
+    _record_account_guard_finalize(
+        account_id,
+        exit_code=exit_code,
+        stale_cleanup=stale_cleanup,
+    )
 
 
 def _claude_gateway_env(
@@ -3078,6 +3319,18 @@ def _show_launch_info(cli, runtime, auth_mode):
             console.print(f"[dim]Claude 1M: {one_m} ({mode})[/dim]")
         except Exception:
             pass
+        try:
+            report = runtime.get("_account_guard_report")
+            if report:
+                style = {
+                    "stable": "green",
+                    "watch": "yellow",
+                    "risky": "yellow",
+                    "blocked": "red",
+                }.get(report.get("status"), "dim")
+                console.print(f"[{style}]{_format_account_guard_summary(report)}[/{style}]")
+        except Exception:
+            pass
     try:
         console.print(f"[dim]网络: {_runtime_network_summary(runtime)}[/dim]")
     except Exception:
@@ -3103,6 +3356,13 @@ def launch_cli(cli, model_info, runtime, once=False):
         validate_provider_for_cli(cli, runtime)
         source_label = runtime.get("name", runtime.get("id", "provider"))
         source_kind = "模型源"
+
+    if cli == "claude" and auth_mode == "oauth":
+        report = _build_account_guard_report(runtime)
+        runtime["_account_guard_report"] = report
+        if report.get("status") == "blocked":
+            console.print(f"[red]{report.get('blocked_reason') or '账号守护已阻止启动'}[/red]")
+            sys.exit(1)
 
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))

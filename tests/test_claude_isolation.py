@@ -393,3 +393,98 @@ def test_runtime_network_summary_masks_proxy_secret():
     assert "168.158.185.127:6394" in summary
     assert "TZ America/Los_Angeles" in summary
     assert "IPv4 on" in summary
+
+
+def test_account_guard_report_detects_profile_drift(monkeypatch, tmp_path):
+    import mms_launchers
+
+    state_path = tmp_path / "account-guard-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "accounts": {
+                    "claude-a": {
+                        "last_profile": {
+                            "proxy_fingerprint": "http://1.1.1.1:80",
+                            "timezone": "America/Los_Angeles",
+                            "force_ipv4": True,
+                            "no_proxy": "",
+                        },
+                        "consecutive_failures": 1,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_account_guard_state_path", lambda: str(state_path))
+    monkeypatch.setattr(mms_launchers, "_count_live_session_dirs", lambda _path: 1)
+
+    report = mms_launchers._build_account_guard_report(
+        {
+            "id": "claude-a",
+            "home_dir": str(tmp_path / "account"),
+            "proxy": "http://2.2.2.2:90",
+            "timezone": "America/New_York",
+            "force_ipv4": False,
+            "no_proxy": "localhost",
+        }
+    )
+
+    assert report["status"] == "risky"
+    assert report["active_sessions_after"] == 2
+    assert set(report["drift_fields"]) == {"proxy", "timezone", "ipv4", "no_proxy"}
+    assert report["score"] < 85
+
+
+def test_account_guard_report_blocks_excessive_parallel_sessions(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_account_guard_state_path", lambda: str(tmp_path / "guard.json"))
+    monkeypatch.setattr(mms_launchers, "_count_live_session_dirs", lambda _path: 4)
+
+    report = mms_launchers._build_account_guard_report(
+        {
+            "id": "claude-a",
+            "home_dir": str(tmp_path / "account"),
+            "timezone": "America/Los_Angeles",
+        }
+    )
+
+    assert report["status"] == "blocked"
+    assert "安全上限 4" in report["blocked_reason"]
+
+
+def test_record_account_guard_finalize_tracks_failures(monkeypatch, tmp_path):
+    import mms_launchers
+
+    state_path = tmp_path / "account-guard-state.json"
+    monkeypatch.setattr(mms_launchers, "_account_guard_state_path", lambda: str(state_path))
+
+    mms_launchers._persist_account_guard_launch(
+        "claude-a",
+        {
+            "profile": {
+                "proxy_fingerprint": "direct",
+                "timezone": "America/Los_Angeles",
+                "force_ipv4": True,
+                "no_proxy": "",
+            },
+            "score": 100,
+            "status": "stable",
+            "drift_fields": [],
+            "active_sessions_after": 1,
+        },
+        session_home=str(tmp_path / "session"),
+    )
+    mms_launchers._record_account_guard_finalize("claude-a", exit_code=1)
+    mms_launchers._record_account_guard_finalize("claude-a", exit_code=2)
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    account = payload["accounts"]["claude-a"]
+    assert account["consecutive_failures"] == 2
+    assert account["last_exit_code"] == 2
+
+    mms_launchers._record_account_guard_finalize("claude-a", exit_code=0)
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["accounts"]["claude-a"]["consecutive_failures"] == 0
