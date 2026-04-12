@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from datetime import datetime
 from time import perf_counter
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
@@ -77,6 +78,52 @@ class _LazyConsole:
         return getattr(_LazyConsole._instance, name)
 
 console = _LazyConsole()
+
+
+def _mask_secret(value, *, keep=2):
+    text = str(value or "")
+    if not text:
+        return ""
+    if len(text) <= keep:
+        return "*" * len(text)
+    return text[:keep] + "*" * max(2, len(text) - keep)
+
+
+def _mask_proxy_url(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return ""
+    try:
+        parsed = urlsplit(proxy_url)
+    except Exception:
+        return proxy_url
+    username = parsed.username or ""
+    password = parsed.password or ""
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    auth = ""
+    if username:
+        auth = _mask_secret(username)
+        if password:
+            auth += ":****"
+        auth += "@"
+    netloc = f"{auth}{host}{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path or "", parsed.query or "", parsed.fragment or ""))
+
+
+def _runtime_network_summary(runtime):
+    proxy_url = _mask_proxy_url(runtime.get("proxy", ""))
+    timezone_name = str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE
+    ipv4_label = "on" if _runtime_force_ipv4(runtime) else "off"
+    parts = [f"TZ {timezone_name}", f"IPv4 {ipv4_label}"]
+    if proxy_url:
+        parts.insert(0, f"Proxy {proxy_url}")
+    else:
+        parts.insert(0, "Proxy direct")
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    if no_proxy:
+        parts.append("NO_PROXY set")
+    return " | ".join(parts)
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
@@ -368,11 +415,14 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
         *(["-4"] if force_ipv4 else []),
         "--silent",
         "--show-error",
-        "--fail",
         "--head",
         "--location",
         "--max-time",
         "8",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
         "--proxy",
         proxy_url,
         "https://api.anthropic.com",
@@ -380,8 +430,11 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
     if str(no_proxy or "").strip():
         cmd.extend(["--noproxy", str(no_proxy).strip()])
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+    http_code = str(result.stdout or "").strip()
+    if result.returncode != 0 or not http_code or http_code in {"000", "407"}:
+        detail = (result.stderr or "").strip()
+        if http_code and http_code not in {"000"}:
+            detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
         if len(detail) > 200:
             detail = detail[:200] + "..."
         console.print(
@@ -3025,6 +3078,10 @@ def _show_launch_info(cli, runtime, auth_mode):
             console.print(f"[dim]Claude 1M: {one_m} ({mode})[/dim]")
         except Exception:
             pass
+    try:
+        console.print(f"[dim]网络: {_runtime_network_summary(runtime)}[/dim]")
+    except Exception:
+        pass
 
 
 def launch_cli(cli, model_info, runtime, once=False):

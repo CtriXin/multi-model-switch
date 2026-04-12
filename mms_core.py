@@ -775,11 +775,14 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
         *(["-4"] if force_ipv4 else []),
         "--silent",
         "--show-error",
-        "--fail",
         "--head",
         "--location",
         "--max-time",
         "8",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
         "--proxy",
         proxy_url,
         target_url,
@@ -787,9 +790,12 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
     if str(no_proxy or "").strip():
         cmd.extend(["--noproxy", str(no_proxy).strip()])
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode == 0:
-        return True, f"代理连通性测试通过：{target_url}"
-    detail = (result.stderr or result.stdout or "").strip()
+    http_code = str(result.stdout or "").strip()
+    if result.returncode == 0 and http_code and http_code not in {"000", "407"}:
+        return True, f"代理连通性测试通过：{target_url} (HTTP {http_code})"
+    detail = (result.stderr or "").strip()
+    if http_code and http_code not in {"000"}:
+        detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
     if len(detail) > 200:
         detail = detail[:200] + "..."
     return False, detail or f"代理连通性测试失败：{target_url}"
@@ -2805,11 +2811,11 @@ def _quick_connect_official(cfg, preset_cli=None):
     _ensure_interactive_terminal(_L("官方通道接入", "official channel setup"))
     console.print(Panel(
         _L(
-            "[bold]官方通道[/bold]\n\n创建一个独立登录目录，然后进入官方 CLI 登录。\n"
+            "[bold]官方通道[/bold]\n\n创建一个独立登录目录；创建完成后，回主界面启动该通道时再进入官方 CLI 登录。\n"
             "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
             "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
             "[dim]输入 b 返回，q 退出。[/dim]",
-            "[bold]Official channel[/bold]\n\nCreate an isolated login directory and continue into the official CLI login flow.\n"
+            "[bold]Official channel[/bold]\n\nCreate an isolated login directory first; after setup, launch this channel from the main UI to continue the official CLI login flow.\n"
             "The display name is user-facing; MMS auto-generates the stable system ID used by config and follow-up commands.\n"
             "Use this when you want multiple ChatGPT / Claude / Gemini accounts in parallel.\n"
             "[dim]Type b to go back, q to cancel.[/dim]",
@@ -2882,8 +2888,9 @@ def _quick_connect_official(cfg, preset_cli=None):
     console.print(f"[green]✓ {_L('已添加官方通道', 'Official channel added')}: {name}[/green]")
     console.print(f"[dim]{_L('内部标识', 'System ID')}: {account_id}[/dim]")
     console.print(f"[dim]{_L('文件夹目录', 'Directory')}: {home_dir}[/dim]")
-    if Confirm.ask(_L("现在去登录这个官方通道？", "Log in to this official channel now?"), default=True):
-        _run_account_login(account)
+    console.print(
+        f"[dim]{_L('已跳过立即登录；请回主界面启动这个官方通道，再完成登录。', 'Immediate login skipped; launch this official channel from the main UI when you are ready to sign in.')}[/dim]"
+    )
     if Confirm.ask(_L(f"设为 {cli_name} 的默认官方通道？", f"Set as the default {cli_name} official channel?"), default=True):
         updated_cfg = load_config()
         updated_cfg.setdefault("account", {}).setdefault("defaults", {})
