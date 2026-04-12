@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -560,6 +561,9 @@ def _resolve_ui_language(cfg=None, cli_override=None):
         ui_lang = normalize_language((cfg.get("ui") or {}).get("language", ""))
         if ui_lang:
             return ui_lang
+    locale_lang = normalize_language(os.environ.get("LC_ALL", "") or os.environ.get("LANG", ""))
+    if locale_lang:
+        return locale_lang
     version_lang = normalize_language(_load_version_meta().get("preferred_language", ""))
     if version_lang:
         return version_lang
@@ -707,11 +711,141 @@ def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
 
 
 def _runtime_httpx_kwargs(runtime):
+    transport_kwargs = {}
     proxy_url = str((runtime or {}).get("proxy") or "").strip()
+    if proxy_url:
+        # 只在显式配置时覆盖，避免预探测漂移到全局 proxy。
+        transport_kwargs["proxy"] = proxy_url
+        transport_kwargs["trust_env"] = False
+    if _runtime_force_ipv4(runtime):
+        transport_kwargs["local_address"] = "0.0.0.0"
+    return transport_kwargs
+
+
+def _runtime_force_ipv4(runtime):
+    raw = True if not isinstance(runtime, dict) else runtime.get("force_ipv4", True)
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw or "").strip().lower()
+    if value in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
+        return True
+    return True
+
+
+def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False, **kwargs):
+    _ensure_httpx()
+    if httpx is None:
+        raise RuntimeError("missing httpx")
+    transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime))
+    with httpx.Client(transport=transport, follow_redirects=follow_redirects) as client:
+        return client.request(method, url, **kwargs)
+
+
+_SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
+
+
+def _validate_proxy_url(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
-        return {}
-    # 只在显式配置时覆盖，避免预探测漂移到全局 proxy。
-    return {"proxy": proxy_url, "trust_env": False}
+        return None
+    try:
+        parsed = urlparse(proxy_url)
+    except Exception:
+        return "代理地址解析失败"
+    if parsed.scheme.lower() not in _SUPPORTED_PROXY_SCHEMES:
+        return "代理协议仅支持 http / https / socks5 / socks5h"
+    if not parsed.hostname:
+        return "代理地址缺少 host"
+    if parsed.port is None:
+        return "代理地址缺少 port"
+    return None
+
+
+def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.anthropic.com", force_ipv4=True):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return True, "未配置代理，跳过检测"
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return False, "当前系统没有 curl，无法测试代理连通性"
+    cmd = [
+        curl_bin,
+        *(["-4"] if force_ipv4 else []),
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--head",
+        "--location",
+        "--max-time",
+        "8",
+        "--proxy",
+        proxy_url,
+        target_url,
+    ]
+    if str(no_proxy or "").strip():
+        cmd.extend(["--noproxy", str(no_proxy).strip()])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        return True, f"代理连通性测试通过：{target_url}"
+    detail = (result.stderr or result.stdout or "").strip()
+    if len(detail) > 200:
+        detail = detail[:200] + "..."
+    return False, detail or f"代理连通性测试失败：{target_url}"
+
+
+def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wizard=False, target_url="https://api.anthropic.com"):
+    prompt_fn = _wizard_prompt if wizard else Prompt.ask
+    proxy_label = "代理地址（可选，例 http://127.0.0.1:7890 / socks5h://127.0.0.1:7890）"
+    no_proxy_label = "NO_PROXY（可选）"
+    while True:
+        proxy = prompt_fn(
+            _L(proxy_label, "Proxy URL (optional, e.g. http://127.0.0.1:7890 / socks5h://127.0.0.1:7890)"),
+            default=current_proxy or "",
+        ).strip()
+        error = _validate_proxy_url(proxy)
+        if error:
+            console.print(f"[red]{error}[/red]")
+            continue
+        no_proxy = prompt_fn(_L(no_proxy_label, "NO_PROXY (optional)"), default=current_no_proxy or "").strip()
+        if proxy:
+            console.print(f"[dim]正在测试代理连通性: {target_url}[/dim]")
+            ok, detail = _test_proxy_connectivity(
+                proxy,
+                no_proxy=no_proxy,
+                target_url=target_url,
+                force_ipv4=True,
+            )
+            if ok:
+                console.print(f"[green]✓ {detail}[/green]")
+                return proxy, no_proxy
+            console.print(
+                f"[yellow]代理测试未通过[/yellow]\n"
+                f"[dim]{detail}[/dim]\n"
+                f"[dim]这可能是 proxy 不通，也可能是当前代理策略不放行 {target_url}。[/dim]"
+            )
+            if Confirm.ask("仍然保存这个代理配置？", default=False):
+                return proxy, no_proxy
+            current_proxy = proxy
+            current_no_proxy = no_proxy
+            continue
+        return proxy, no_proxy
+
+
+def _prompt_validated_timezone(current_timezone="", *, wizard=False):
+    prompt_fn = _wizard_prompt if wizard else Prompt.ask
+    label = _L(
+        f"启动时区（默认 {DEFAULT_ACCOUNT_TIMEZONE}）",
+        f"Launch timezone (default {DEFAULT_ACCOUNT_TIMEZONE})",
+    )
+    while True:
+        timezone_name = prompt_fn(label, default=current_timezone or DEFAULT_ACCOUNT_TIMEZONE).strip()
+        try:
+            ZoneInfo(timezone_name)
+            return timezone_name
+        except Exception:
+            console.print(f"[red]无效时区: {timezone_name}[/red]")
 
 
 def _normalize_account_id(account_id):
@@ -763,6 +897,7 @@ def _normalize_account(account):
         "proxy": proxy,
         "no_proxy": no_proxy,
         "timezone": timezone_name,
+        "force_ipv4": _runtime_force_ipv4(account),
         "note": str(account.get("note", "")).strip(),
     }
 
@@ -898,6 +1033,7 @@ def _normalize_provider(provider):
     merged["proxy"] = str(merged.get("proxy", "")).strip()
     merged["no_proxy"] = str(merged.get("no_proxy", "")).strip()
     merged["timezone"] = _normalize_timezone_name(merged.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE)
+    merged["force_ipv4"] = _runtime_force_ipv4(merged)
     merged["note"] = str(merged.get("note", "")).strip()
     merged["default_openai_base_url"] = str(merged.get("default_openai_base_url", "")).strip().rstrip("/")
     merged["default_anthropic_base_url"] = str(merged.get("default_anthropic_base_url", "")).strip().rstrip("/")
@@ -2405,12 +2541,12 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
             default=current.get("claude_1m_mode", "auto"),
         )
     )
-    proxy = Prompt.ask("代理地址（可选，例 http://127.0.0.1:7890）", default=current.get("proxy", "")).strip()
-    no_proxy = Prompt.ask("NO_PROXY（可选）", default=current.get("no_proxy", "")).strip()
-    timezone_name = Prompt.ask(
-        "启动时区（默认 America/Los_Angeles）",
-        default=current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-    ).strip()
+    proxy, no_proxy = _prompt_validated_proxy_fields(
+        current.get("proxy", ""),
+        current.get("no_proxy", ""),
+        wizard=False,
+    )
+    timezone_name = _prompt_validated_timezone(current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE, wizard=False)
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个模型源？", default=bool(current.get("enabled", True)))
     return _normalize_provider({
@@ -2502,12 +2638,12 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
             default=current.get("claude_1m_mode", "auto"),
         )
     )
-    proxy = Prompt.ask("代理地址（可选，例 http://127.0.0.1:7890）", default=current.get("proxy", "")).strip()
-    no_proxy = Prompt.ask("NO_PROXY（可选）", default=current.get("no_proxy", "")).strip()
-    timezone_name = Prompt.ask(
-        "启动时区（默认 America/Los_Angeles）",
-        default=current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-    ).strip()
+    proxy, no_proxy = _prompt_validated_proxy_fields(
+        current.get("proxy", ""),
+        current.get("no_proxy", ""),
+        wizard=False,
+    )
+    timezone_name = _prompt_validated_timezone(current.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE, wizard=False)
     note = Prompt.ask("备注（可选）", default=current.get("note", "")).strip()
     enabled = Confirm.ask("启用这个账号档案？", default=bool(current.get("enabled", True)))
     return _normalize_account({
@@ -2619,7 +2755,9 @@ def _quick_connect_gateway(cfg, preset_id=None):
     suggested_name = template["name"]
     try:
         name = _wizard_prompt(_L("显示名称（主界面里看到的名字）", "Display name"), default=suggested_name).strip() or suggested_name
-        suggested_id = _normalize_provider_id_input(template["id"] or name)
+        suggested_id = _normalize_provider_id_input(name)
+        if suggested_id == DEFAULT_PROVIDER_ID:
+            suggested_id = _normalize_provider_id_input(template["id"] or name)
         provider_id = _unique_runtime_id(set(providers.keys()), suggested_id)
     except WizardBack:
         console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
@@ -2639,18 +2777,15 @@ def _quick_connect_gateway(cfg, preset_id=None):
             Prompt.ask(_L("模型列表地址（高级，仅用于拉取模型列表；通常留默认）", "Model list URL (advanced, only used to fetch models)"), default=provider.get("models_endpoint", "/models"))
         )
     try:
-        provider["proxy"] = _wizard_prompt(
-            _L("代理地址（可选，例 http://127.0.0.1:7890）", "Proxy URL (optional)"),
-            default=provider.get("proxy", ""),
-        ).strip()
-        provider["no_proxy"] = _wizard_prompt(
-            _L("NO_PROXY（可选）", "NO_PROXY (optional)"),
-            default=provider.get("no_proxy", ""),
-        ).strip()
-        provider["timezone"] = _wizard_prompt(
-            _L("启动时区（默认 America/Los_Angeles）", "Launch timezone (default America/Los_Angeles)"),
-            default=provider.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-        ).strip()
+        provider["proxy"], provider["no_proxy"] = _prompt_validated_proxy_fields(
+            provider.get("proxy", ""),
+            provider.get("no_proxy", ""),
+            wizard=True,
+        )
+        provider["timezone"] = _prompt_validated_timezone(
+            provider.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+            wizard=True,
+        )
         provider = _normalize_provider(provider)
     except WizardBack:
         console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
@@ -2721,18 +2856,8 @@ def _quick_connect_official(cfg, preset_cli=None):
 
     home_dir = _default_account_home(account_id)
     try:
-        proxy = _wizard_prompt(
-            _L("代理地址（可选，例 http://127.0.0.1:7890）", "Proxy URL (optional)"),
-            default="",
-        ).strip()
-        no_proxy = _wizard_prompt(
-            _L("NO_PROXY（可选）", "NO_PROXY (optional)"),
-            default="",
-        ).strip()
-        timezone_name = _wizard_prompt(
-            _L("启动时区（默认 America/Los_Angeles）", "Launch timezone (default America/Los_Angeles)"),
-            default=DEFAULT_ACCOUNT_TIMEZONE,
-        ).strip()
+        proxy, no_proxy = _prompt_validated_proxy_fields("", "", wizard=True)
+        timezone_name = _prompt_validated_timezone(DEFAULT_ACCOUNT_TIMEZONE, wizard=True)
     except WizardBack:
         console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
         return cfg, False
@@ -3243,7 +3368,6 @@ def _warm_model_request(provider, model_name):
         return False, "缺少 API Key"
 
     use_anthropic = "anthropic_messages" in protocols and "claude" in model_name.lower()
-    request_kwargs = _runtime_httpx_kwargs(provider)
     try:
         if use_anthropic:
             from mms_launchers import _resolve_anthropic_base_url
@@ -3251,8 +3375,10 @@ def _warm_model_request(provider, model_name):
             base_url, _method = _resolve_anthropic_base_url(provider, probe_model=model_name)
             if not base_url:
                 return False, "无法解析 Anthropic 地址"
-            response = httpx.post(
+            response = _runtime_httpx_request(
+                "POST",
                 f"{base_url.rstrip('/')}/v1/messages",
+                runtime=provider,
                 headers={
                     "x-api-key": api_key,
                     "anthropic-version": "2023-06-01",
@@ -3264,14 +3390,15 @@ def _warm_model_request(provider, model_name):
                     "messages": [{"role": "user", "content": "warmup"}],
                 },
                 timeout=timeout,
-                **request_kwargs,
             )
         else:
             base_url = _provider_openai_base_url(provider)
             if not base_url:
                 return False, "缺少 OpenAI 地址"
-            response = httpx.post(
+            response = _runtime_httpx_request(
+                "POST",
                 f"{base_url.rstrip('/')}/chat/completions",
+                runtime=provider,
                 headers={
                     "Authorization": f"Bearer {openai_api_key}",
                     "Content-Type": "application/json",
@@ -3284,7 +3411,6 @@ def _warm_model_request(provider, model_name):
                     "stream": False,
                 },
                 timeout=timeout,
-                **request_kwargs,
             )
         if response.status_code >= 400:
             detail = response.text.strip().replace("\n", " ")
@@ -3733,19 +3859,25 @@ def detect_working_base_url(configured_url, path, headers, body=None, timeout=5,
         return None
     url = configured_url.rstrip("/")
     candidates = [url[:-3], url] if url.endswith("/v1") else [url, url + "/v1"]
-    request_kwargs = _runtime_httpx_kwargs(runtime)
     for candidate in candidates:
         try:
             if body is not None:
-                resp = httpx.post(
+                resp = _runtime_httpx_request(
+                    "POST",
                     f"{candidate}{path}",
+                    runtime=runtime,
                     headers=headers,
                     content=body,
                     timeout=timeout,
-                    **request_kwargs,
                 )
             else:
-                resp = httpx.get(f"{candidate}{path}", headers=headers, timeout=timeout, **request_kwargs)
+                resp = _runtime_httpx_request(
+                    "GET",
+                    f"{candidate}{path}",
+                    runtime=runtime,
+                    headers=headers,
+                    timeout=timeout,
+                )
             if resp.status_code == 200:
                 return candidate
         except Exception:
@@ -4074,7 +4206,6 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
         alt_url = base_url[:-3] if base_url.endswith("/v1") else f"{base_url}/v1"
         last_exc = None
         models_endpoint = provider.get("models_endpoint", "/models")
-        request_kwargs = _runtime_httpx_kwargs(provider)
         if models_endpoint == "manual":
             fallback = provider.get("fallback_models") or []
             result["raw_models"] = list(fallback)
@@ -4100,7 +4231,13 @@ def _probe_models(provider, emit_output=True, force_refresh=False, skip_cache=Fa
                     headers = {}
                     if "/api/models/info" not in models_endpoint:
                         headers["Authorization"] = f"Bearer {api_key}"
-                    response = httpx.get(full_url, headers=headers, timeout=15, **request_kwargs)
+                    response = _runtime_httpx_request(
+                        "GET",
+                        full_url,
+                        runtime=provider,
+                        headers=headers,
+                        timeout=15,
+                    )
                     response.raise_for_status()
                     data = response.json()
                     models = [m["id"] for m in data.get("data", [])]
@@ -6180,7 +6317,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         # ── 设置 ──
         elif action_type == "settings":
-            from mms_tui import select_settings_tui, select_provider_mgmt_tui
+            from mms_tui import select_language_tui, select_settings_tui, select_provider_mgmt_tui
             settings_action = _safe_tui_call(select_settings_tui)
             if settings_action == "__interrupt__":
                 return True
@@ -6211,6 +6348,14 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         export_model_routes(current_cfg, force=True)
                     except Exception:
                         pass
+            elif settings_action == "language":
+                chosen_lang = _safe_tui_call(select_language_tui)
+                if chosen_lang == "__interrupt__":
+                    return True
+                if chosen_lang in {"zh", "en"}:
+                    current_cfg.setdefault("ui", {})["language"] = chosen_lang
+                    save_config(current_cfg)
+                    set_language(chosen_lang)
             elif settings_action == "routes_export":
                 try:
                     from mms_router import export_model_routes
