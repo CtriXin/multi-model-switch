@@ -143,6 +143,7 @@ ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
 3. model 右侧通道/provider 列表：
    - 按当前 family 的 effective `priority` 降序
    - 同分按名称
+   - 在子模型页可按 `A` 打开基于 `speed-stats.json` 的 family 级智能排序预览，并把建议写回当前 family 的 `priority` 调整
 
 因此：
 

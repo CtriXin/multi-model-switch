@@ -609,6 +609,10 @@ def select_submodel_tui(
         ),
     )
     provider_options_cache = dict(provider_options or {})
+    try:
+        from mms_speed_stats import get_speed_entry as _get_speed_entry
+    except Exception:
+        _get_speed_entry = None
 
     # 当前每个模型的 provider 覆盖 (model_name -> provider info)
     provider_overrides = {}
@@ -745,6 +749,293 @@ def select_submodel_tui(
             return
         current = _effective_priority(opt)
         priority_changes[change_key] = max(0, min(200, current + delta))
+
+    def _format_ttfb(value):
+        if isinstance(value, (int, float)):
+            return f"{value:.0f}ms"
+        return "-"
+
+    def _format_age(seconds):
+        if not isinstance(seconds, (int, float)):
+            return "-"
+        if seconds < 3600:
+            minutes = max(1, int(seconds // 60) or 1)
+            return f"{minutes}m"
+        if seconds < 86400:
+            return f"{int(seconds // 3600)}h"
+        return f"{int(seconds // 86400)}d"
+
+    def _build_family_autosort_plan():
+        if not callable(_get_speed_entry):
+            return {
+                "items": [],
+                "changes": {},
+                "can_apply": False,
+                "summary": _L("本地测速模块不可用", "Local speed stats unavailable"),
+            }
+
+        aggregated = {}
+        for m in sorted_models:
+            model_name = str(m.get("model") or "").strip()
+            if not model_name:
+                continue
+            seen = set()
+            for opt in _provider_choices(m):
+                change_key = _priority_change_key(opt)
+                if not change_key or change_key in seen:
+                    continue
+                seen.add(change_key)
+                entry = aggregated.setdefault(
+                    change_key,
+                    {
+                        "change_key": change_key,
+                        "provider_id": opt.get("provider_id", ""),
+                        "provider_name": opt.get("provider_name", ""),
+                        "provider_ctx": dict(opt.get("provider_ctx") or {}),
+                        "current_priority": _effective_priority(opt),
+                        "available_models": 0,
+                        "fresh_samples": 0,
+                        "fresh_ttfb_sum": 0.0,
+                        "fresh_models": 0,
+                        "stale_samples": 0,
+                        "stale_ttfb_sum": 0.0,
+                        "stale_models": 0,
+                        "warming_models": 0,
+                        "best_age_seconds": None,
+                    },
+                )
+                entry["available_models"] += 1
+                speed = _get_speed_entry(model_name, provider=opt.get("provider_ctx"))
+                if not isinstance(speed, dict):
+                    continue
+                ttfb = speed.get("ttfb_avg_ms")
+                samples = int(speed.get("samples") or 0)
+                age_seconds = speed.get("age_seconds")
+                if isinstance(age_seconds, (int, float)):
+                    best_age = entry.get("best_age_seconds")
+                    if best_age is None or age_seconds < best_age:
+                        entry["best_age_seconds"] = float(age_seconds)
+                if speed.get("warming_up"):
+                    entry["warming_models"] += 1
+                if not isinstance(ttfb, (int, float)) or samples <= 0:
+                    continue
+                if speed.get("is_stale"):
+                    entry["stale_samples"] += samples
+                    entry["stale_ttfb_sum"] += float(ttfb) * samples
+                    entry["stale_models"] += 1
+                else:
+                    entry["fresh_samples"] += samples
+                    entry["fresh_ttfb_sum"] += float(ttfb) * samples
+                    entry["fresh_models"] += 1
+
+        items = []
+        for entry in aggregated.values():
+            fresh_avg = (
+                round(entry["fresh_ttfb_sum"] / entry["fresh_samples"], 2)
+                if entry["fresh_samples"] > 0
+                else None
+            )
+            stale_avg = (
+                round(entry["stale_ttfb_sum"] / entry["stale_samples"], 2)
+                if entry["stale_samples"] > 0
+                else None
+            )
+            if fresh_avg is not None:
+                state = "fresh"
+                effective_ttfb = fresh_avg
+                samples = entry["fresh_samples"]
+            elif stale_avg is not None:
+                state = "stale"
+                effective_ttfb = stale_avg
+                samples = entry["stale_samples"]
+            else:
+                state = "none"
+                effective_ttfb = None
+                samples = 0
+            measured_models = int(entry["fresh_models"] + entry["stale_models"])
+            item = dict(entry)
+            item.update(
+                {
+                    "state": state,
+                    "effective_ttfb_ms": effective_ttfb,
+                    "samples": samples,
+                    "measured_models": measured_models,
+                    "sort_key": (
+                        {"fresh": 0, "stale": 1, "none": 2}.get(state, 2),
+                        float(effective_ttfb) if isinstance(effective_ttfb, (int, float)) else float("inf"),
+                        -measured_models,
+                        -samples,
+                        str(entry.get("provider_name") or ""),
+                        str(entry.get("provider_id") or ""),
+                    ),
+                }
+            )
+            items.append(item)
+
+        items.sort(key=lambda item: item["sort_key"])
+        base_priority = max((int(item.get("current_priority", 100) or 100) for item in items), default=100)
+        changes = {}
+        measured_count = 0
+        for idx, item in enumerate(items):
+            suggested = max(0, min(200, base_priority - idx * 5))
+            item["suggested_priority"] = suggested
+            item["priority_diff"] = suggested - int(item.get("current_priority", 100) or 100)
+            if item.get("state") != "none":
+                measured_count += 1
+            if suggested != int(item.get("current_priority", 100) or 100):
+                changes[item["change_key"]] = suggested
+
+        if not items:
+            summary = _L("当前 family 没有可排序的通道", "No sortable channels in this family")
+        elif measured_count < 2:
+            summary = _L(
+                "测速数据不足：至少需要 2 条通道有有效样本",
+                "Not enough speed samples: need at least two measured channels",
+            )
+        elif not changes:
+            summary = _L("当前顺序已经和测速结果一致", "Current order already matches speed stats")
+        else:
+            summary = _L(
+                "规则：fresh 优先，其次 stale；同状态按 TTFB 更快优先；无数据放最后",
+                "Rule: fresh first, then stale; faster TTFB wins; no-data goes last",
+            )
+
+        return {
+            "items": items,
+            "changes": changes,
+            "can_apply": measured_count >= 2 and bool(changes),
+            "summary": summary,
+            "measured_count": measured_count,
+        }
+
+    def _apply_family_autosort():
+        plan = _build_family_autosort_plan()
+        if plan.get("can_apply"):
+            priority_changes.update(plan.get("changes") or {})
+            for model_entry in sorted_models:
+                active = _active_provider_choice(model_entry)
+                _sync_provider_cursor(model_entry, active.get("provider_id", ""))
+        return plan
+
+    def _show_family_autosort_modal(stdscr):
+        plan = _build_family_autosort_plan()
+        items = list(plan.get("items") or [])
+        selected_idx = 0
+        scroll = 0
+
+        while True:
+            max_y, max_w = stdscr.getmaxyx()
+            body_h = min(max(6, max_y - 10), max(6, len(items)))
+            box_h = min(max_y - 2, body_h + 8)
+            box_w = min(max_w - 4, 88)
+            py = max(1, (max_y - box_h) // 2)
+            px = max(2, (max_w - box_w) // 2)
+            visible = max(1, box_h - 8)
+
+            if selected_idx < scroll:
+                scroll = selected_idx
+            elif selected_idx >= scroll + visible:
+                scroll = selected_idx - visible + 1
+            scroll = max(0, min(scroll, max(0, len(items) - visible)))
+
+            _draw_box(
+                stdscr,
+                py,
+                px,
+                box_h,
+                box_w,
+                title=_L(f"{family_name} 自动排序", f"{family_name} Auto Rank"),
+                color=curses.color_pair(4),
+            )
+            row = py + 1
+            _safe_addstr(
+                stdscr,
+                row,
+                px + 2,
+                _L("使用现有 speed-stats.json 预估，不会主动测速", "Preview only; uses existing speed-stats.json"),
+                curses.A_DIM,
+                max_w=box_w - 4,
+            )
+            row += 1
+            _safe_addstr(stdscr, row, px + 2, str(plan.get("summary") or ""), curses.color_pair(5), max_w=box_w - 4)
+            row += 1
+            _safe_addstr(stdscr, row, px + 2, "Provider", curses.A_BOLD)
+            _safe_addstr(stdscr, row, px + 34, "State", curses.A_BOLD)
+            _safe_addstr(stdscr, row, px + 46, "TTFB", curses.A_BOLD)
+            _safe_addstr(stdscr, row, px + 56, "Samples", curses.A_BOLD)
+            _safe_addstr(stdscr, row, px + 67, "P", curses.A_BOLD)
+            row += 1
+            _safe_addstr(stdscr, row, px + 1, "─" * (box_w - 2), curses.A_DIM)
+            row += 1
+
+            if not items:
+                _safe_addstr(
+                    stdscr,
+                    row,
+                    px + 2,
+                    _L("没有可展示的 provider", "No providers to preview"),
+                    curses.A_DIM,
+                    max_w=box_w - 4,
+                )
+            else:
+                for offset in range(visible):
+                    index = scroll + offset
+                    if index >= len(items):
+                        break
+                    item = items[index]
+                    y = row + offset
+                    is_sel = index == selected_idx
+                    attr = curses.A_REVERSE if is_sel else 0
+                    state = item.get("state")
+                    if state == "fresh":
+                        state_text = _L("fresh", "fresh")
+                        state_attr = curses.color_pair(5)
+                    elif state == "stale":
+                        state_text = _L("stale", "stale")
+                        state_attr = curses.color_pair(4)
+                    else:
+                        state_text = _L("none", "none")
+                        state_attr = curses.A_DIM
+                    if item.get("warming_models"):
+                        state_text += "+warm"
+                    provider_text = str(item.get("provider_name") or item.get("provider_id") or "-")
+                    if item.get("available_models"):
+                        provider_text += f" ({item['measured_models']}/{item['available_models']})"
+                    pri_text = f"{int(item.get('current_priority', 0) or 0)}->{int(item.get('suggested_priority', 0) or 0)}"
+                    age_text = _format_age(item.get("best_age_seconds"))
+
+                    _safe_addstr(stdscr, y, px + 2, provider_text, attr, max_w=30)
+                    _safe_addstr(stdscr, y, px + 34, state_text, state_attr | attr, max_w=10)
+                    _safe_addstr(stdscr, y, px + 46, _format_ttfb(item.get("effective_ttfb_ms")), attr, max_w=8)
+                    _safe_addstr(stdscr, y, px + 56, str(item.get("samples", 0) or 0), attr, max_w=8)
+                    _safe_addstr(stdscr, y, px + 64, age_text, curses.A_DIM | attr, max_w=4)
+                    pri_attr = (curses.color_pair(5) if item.get("priority_diff", 0) > 0 else curses.color_pair(4)) | attr
+                    if item.get("priority_diff", 0) == 0:
+                        pri_attr = curses.A_DIM | attr
+                    _safe_addstr(stdscr, y, px + 67, pri_text, pri_attr, max_w=box_w - 69)
+
+            footer_y = py + box_h - 2
+            if plan.get("can_apply"):
+                footer = _L("↑↓ 查看  Enter 应用  Esc 返回", "Up/Down Preview  Enter Apply  Esc Back")
+                footer_attr = curses.color_pair(4) | curses.A_BOLD
+            else:
+                footer = _L("↑↓ 查看  Esc 返回", "Up/Down Preview  Esc Back")
+                footer_attr = curses.A_DIM
+            _safe_addstr(stdscr, footer_y, px + 2, footer, footer_attr, max_w=box_w - 4)
+            stdscr.refresh()
+
+            key = stdscr.getch()
+            if key == -1:
+                continue
+            if key == curses.KEY_UP and items:
+                selected_idx = (selected_idx - 1) % len(items)
+            elif key == curses.KEY_DOWN and items:
+                selected_idx = (selected_idx + 1) % len(items)
+            elif key in (10, 13, curses.KEY_ENTER):
+                if plan.get("can_apply"):
+                    return _apply_family_autosort()
+            elif key in (27, ord('q'), ord('Q'), curses.KEY_LEFT):
+                return None
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -943,7 +1234,10 @@ def select_submodel_tui(
                         adjust_x = ll + 16
                     _safe_addstr(stdscr, bot_y, adjust_x, "+/-", curses.color_pair(5) | curses.A_BOLD)
                     _safe_addstr(stdscr, bot_y, adjust_x + 4, _L("权重", "Weight"), curses.color_pair(5) | curses.A_DIM)
-                    enter_x = adjust_x + 10
+                    auto_x = adjust_x + 12
+                    _safe_addstr(stdscr, bot_y, auto_x, "A", curses.color_pair(4) | curses.A_BOLD)
+                    _safe_addstr(stdscr, bot_y, auto_x + 2, _L("智排", "Auto"), curses.color_pair(4) | curses.A_DIM)
+                    enter_x = auto_x + 8
                     _safe_addstr(stdscr, bot_y, enter_x, "Enter", curses.color_pair(1) | curses.A_BOLD)
                     _safe_addstr(stdscr, bot_y, enter_x + 6, _L("确认", "Confirm"), curses.A_DIM)
                     _safe_addstr(stdscr, bot_y, enter_x + 12, "Esc", curses.A_BOLD)
@@ -993,6 +1287,8 @@ def select_submodel_tui(
                         chosen = current_choices[provider_idx_map.get(current_model["model"], 0)]
                         _adjust_provider_priority(chosen, -5)
                         _sync_provider_cursor(current_model, chosen.get("provider_id", ""))
+                elif key in (ord('a'), ord('A')) and not search_query:
+                    _show_family_autosort_modal(stdscr)
                 elif key in (10, 13, curses.KEY_ENTER):
                     if filtered:
                         m = filtered[idx]
