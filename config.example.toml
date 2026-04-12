@@ -10,6 +10,9 @@ name = "Default Gateway"
 protocols = ["anthropic_messages", "openai_chat_completions"]
 supported_clis = ["claude", "codex", "qwen", "kimi"]
 enabled = true
+# proxy = "http://127.0.0.1:7890" # 可选：通道级强制 proxy；预探测和实际启动都走它
+# no_proxy = ""                   # 可选：传给 NO_PROXY
+# timezone = "America/Los_Angeles"   # 可选：默认就是这个；仅影响该次启动环境
 # Claude 1M 策略：auto / enable / disable
 # claude_1m_mode = "auto"
 # 对“慢但实际可用”的 Claude-compatible gateway，可显式跳过首启探测：
@@ -49,7 +52,8 @@ enabled = false
 #   mms broker run official-broker-personal --resume-last
 #   mms broker smoke official-broker-personal
 broker_base_url = "http://127.0.0.1:8787"
-# entry_mode = "official_attach"   # 按 B 或在 claude 的“使用入口”里选中它时，直接尝试进入 official cc direct-connect
+# entry_mode = "official_proxy"    # 当前推荐主线：直接拉起本机 Claude Code，再通过本地 proxy 接到远端 official runtime
+# fallback_entry_mode = "shell"    # 如需失败后自动回 broker shell，可显式打开
 # device_key = "replace-me"
 device_key_env = "MMS_BROKER_DEVICE_KEY_PERSONAL"
 owner_user_id = "xin"
@@ -61,6 +65,15 @@ remote_service_base_url = "https://cc-service.example.com"
 remote_service_endpoint = "responses"
 remote_service_model = "claude-opus-4-6"
 # remote_service_bearer_token_env = "MMS_REMOTE_SERVICE_TOKEN_PERSONAL"
+# remote_claude_ssh_target_env = "CC_BROKER_REMOTE_CLAUDE_SSH_TARGET"
+# remote_claude_container_name_env = "CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME"
+# remote_claude_credentials_path_env = "CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH"
+# remote_claude_global_config_path_env = "CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH"
+# 当前 live 组合示例：
+#   export CC_BROKER_REMOTE_CLAUDE_SSH_TARGET='root@23.95.30.199'
+#   export CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME=''
+#   export CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH='/var/lib/cc-mcp-bridge/claude-home-1/.credentials.json'
+#   export CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH='/var/lib/cc-mcp-bridge/claude-home-1/.claude.json'
 # broker_repo_path = "~/auto-skills/CtriXin-repo/cc-official-broker"
 # runner_tools = ["pwd", "git_status", "read_file", "search"]
 
@@ -71,3 +84,6 @@ remote_service_model = "claude-opus-4-6"
 #enabled = true
 #priority = 100
 #claude_1m_mode = "disable"  # auto / enable / disable
+#proxy = "http://127.0.0.1:7890" # 可选：账号级强制 proxy；不通则阻止启动
+#no_proxy = ""                   # 可选：传给 NO_PROXY
+#timezone = "America/Los_Angeles"   # 可选：默认就是这个；仅本次 Claude 进程生效，不改系统时区

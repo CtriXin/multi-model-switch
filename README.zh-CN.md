@@ -318,7 +318,7 @@ mms broker smoke <id>                 # 跑一条 official child attach smoke te
 - 你可以像选 `官方` / `网关` 一样选它
 - 选中后会直接走 `cc-official-broker`
 - 如果 profile 的 `entry_mode = "official_proxy"`，MMS 会直接拉起本机真实 official `Claude` CLI，再通过本地 proxy 接到远端 official runtime，不需要再按 `B` 进 broker shell
-- 如果你是 `mms claude` 这种直接启动，选中 broker 后会直接进 remote official cc，不再额外弹本地模型列表
+- 如果你是 `mms claude` 这种直接启动，选中 broker 后仍然会先让你选模型；确认后直接进 remote official cc
 
 当前按 `B` 进去后，如果你不知道该测什么，先记两条命令就够了：
 
@@ -344,8 +344,24 @@ entry_mode = "official_proxy"
 - `remote_service_endpoint`
 - `remote_service_model`
 - `remote_service_bearer_token_env`
+- `remote_claude_ssh_target_env`
+- `remote_claude_container_name_env`
+- `remote_claude_credentials_path_env`
+- `remote_claude_global_config_path_env`
 
 这样一个 broker profile 就可以对应一个 server-side runtime / OAuth 池，便于后续做多 OAuth 测试，而不影响原有 provider/account 主路径。
+
+如果你的 live 路线已经固定到 host-path auth source，现在也可以直接由 MMS 帮你把这组 env 传给 `cc-official-broker`：
+
+- `CC_BROKER_REMOTE_CLAUDE_SSH_TARGET=root@23.95.30.199`
+- `CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME=''`
+- `CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH=/var/lib/cc-mcp-bridge/claude-home-1/.credentials.json`
+- `CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH=/var/lib/cc-mcp-bridge/claude-home-1/.claude.json`
+
+注意：
+
+- `CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME=''` 这里的空字符串是“显式走 host-path auth source”，不是没配
+- MMS 现在会保留这个空字符串传给 broker，不会再偷偷 fallback 回旧 container 名
 
 当前 broker shell 还会把最近一次本地 session 记到 `~/.config/cc-official-broker/session-registry.json`，作用域按 `device/workspace/project_root` 区分，所以 `--resume-last` 只会续当前项目自己的那条会话，不会去串别的项目。
 
@@ -436,11 +452,17 @@ id = "openrouter"
 name = "OpenRouter"
 protocols = ["anthropic_messages", "openai_chat_completions"]
 supported_clis = ["claude", "codex"]
+# proxy = "http://127.0.0.1:7890"   # 可选：通道级强制 proxy；预探测和实际启动都走它
+# no_proxy = ""                     # 可选：传给 NO_PROXY
+# timezone = "America/Los_Angeles"  # 可选：默认就是这个；只影响该次启动环境
 
 [[accounts]]
 id = "personal"
 cli = "claude"
 home_dir = "~/.config/mms/accounts/personal"
+# proxy = "http://127.0.0.1:7890"   # 可选：账号级强制 proxy，不通则不启动
+# no_proxy = ""                     # 可选：传给 NO_PROXY
+# timezone = "America/Los_Angeles"  # 可选：默认就是这个；只影响该次 Claude 进程
 ```
 
 ---

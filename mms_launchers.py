@@ -9,9 +9,16 @@ import subprocess
 import tempfile
 from datetime import datetime
 from time import perf_counter
+from zoneinfo import ZoneInfo
 
 from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
-from mms_core import _normalize_claude_1m_mode, _probe_models, detect_working_base_url
+from mms_core import (
+    DEFAULT_ACCOUNT_TIMEZONE,
+    _normalize_claude_1m_mode,
+    _probe_models,
+    _runtime_httpx_kwargs,
+    detect_working_base_url,
+)
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
 
@@ -320,6 +327,85 @@ def _inject_real_home_hints(env, *, include_xdg=False):
 def _set_session_home_hint(env, session_home):
     if session_home:
         env["MMS_SESSION_HOME"] = session_home
+    return env
+
+
+def _apply_proxy_env(env, proxy_url, no_proxy=""):
+    proxy_url = str(proxy_url or "").strip()
+    no_proxy = str(no_proxy or "").strip()
+    if not proxy_url:
+        return env
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env[key] = proxy_url
+    for key in ("NO_PROXY", "no_proxy"):
+        env[key] = no_proxy
+    return env
+
+
+def _validate_timezone_or_exit(timezone_name, *, label="account"):
+    timezone_name = str(timezone_name or "").strip()
+    if not timezone_name:
+        return ""
+    try:
+        ZoneInfo(timezone_name)
+    except Exception:
+        console.print(f"[red]{label} 配置了无效时区: {timezone_name}[/red]")
+        sys.exit(1)
+    return timezone_name
+
+
+def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        console.print(f"[red]{label} 要求强制 proxy，但当前系统没有 curl，无法做启动前连通性检查[/red]")
+        sys.exit(1)
+    cmd = [
+        curl_bin,
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--head",
+        "--location",
+        "--max-time",
+        "8",
+        "--proxy",
+        proxy_url,
+        "https://api.anthropic.com",
+    ]
+    if str(no_proxy or "").strip():
+        cmd.extend(["--noproxy", str(no_proxy).strip()])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if len(detail) > 200:
+            detail = detail[:200] + "..."
+        console.print(
+            f"[red]{label} 配置的 proxy 不可用，已阻止启动[/red]"
+            + (f"\n[dim]{detail}[/dim]" if detail else "")
+        )
+        sys.exit(1)
+
+
+def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    timezone_name = _validate_timezone_or_exit(
+        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+        label=str(runtime.get("id") or runtime.get("name") or "runtime"),
+    )
+    if timezone_name:
+        env["TZ"] = timezone_name
+    if proxy_url:
+        if validate_proxy:
+            _check_proxy_connectivity_or_exit(
+                proxy_url,
+                no_proxy=no_proxy,
+                label=str(runtime.get("id") or runtime.get("name") or "runtime"),
+            )
+        _apply_proxy_env(env, proxy_url, no_proxy=no_proxy)
     return env
 
 
@@ -1096,7 +1182,7 @@ def _write_claude_session_settings(
     return settings_data, settings_path
 
 
-def _gateway_ping(base_url, api_key):
+def _gateway_ping(base_url, api_key, runtime=None):
     """Quick connectivity check; returns True/False/None (None = can't determine)."""
     _ensure_bridge_helpers()
     try:
@@ -1106,8 +1192,14 @@ def _gateway_ping(base_url, api_key):
     if not base_url or not api_key:
         return None
     models_url = _build_gateway_url(base_url, "/models")
+    request_kwargs = _runtime_httpx_kwargs(runtime)
     try:
-        r = _httpx.get(models_url, headers={"Authorization": f"Bearer {api_key}"}, timeout=8)
+        r = _httpx.get(
+            models_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+            **request_kwargs,
+        )
         return r.status_code < 500
     except Exception:
         return False
@@ -1134,7 +1226,7 @@ def gateway_health_check(provider):
         return
     base_url = _openai_base_url(provider) or _anthropic_base_url(provider)
     api_key = provider.get("api_key", "")
-    ok = _gateway_ping(base_url, api_key)
+    ok = _gateway_ping(base_url, api_key, runtime=provider)
     if ok is None:
         return
     try:
@@ -1205,7 +1297,7 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
 
 
-def _account_env(account):
+def _account_env(account, *, validate_proxy=True):
     env = os.environ.copy()
     _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
@@ -1287,6 +1379,7 @@ def _account_env(account):
         env["XDG_CONFIG_HOME"] = xdg_config_home
         _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
+    _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     return env
 
@@ -2078,7 +2171,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
-    candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5)
+    candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5, runtime=runtime)
 
     if candidate is not None:
         _remember_anthropic_url(provider_id, url, candidate)
@@ -2102,10 +2195,15 @@ def _pick_gateway_model(runtime, base_url):
     if not base_url or not api_key:
         return None
     url_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    request_kwargs = _runtime_httpx_kwargs(runtime)
     try:
-        r = _httpx.get(f"{url_v1}/models",
-                       headers={"Authorization": f"Bearer {api_key}"},
-                       timeout=8, follow_redirects=True)
+        r = _httpx.get(
+            f"{url_v1}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=8,
+            follow_redirects=True,
+            **request_kwargs,
+        )
         if r.status_code != 200:
             return None
         models = [m.get("id", "") for m in r.json().get("data", [])]
@@ -2416,6 +2514,11 @@ def _claude_gateway_env(
         env["ANTHROPIC_MODEL"] = display_model
     if not sensitive_provider:
         env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
+    _apply_runtime_network_profile(
+        env,
+        runtime,
+        validate_proxy=bool(runtime.get("proxy")),
+    )
     _install_session_command_wrappers(gateway_home, env)
 
     # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
