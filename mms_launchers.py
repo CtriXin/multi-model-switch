@@ -16,7 +16,8 @@ from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
     _probe_models,
-    _runtime_httpx_kwargs,
+    _runtime_force_ipv4,
+    _runtime_httpx_request,
     detect_working_base_url,
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
@@ -354,7 +355,7 @@ def _validate_timezone_or_exit(timezone_name, *, label="account"):
     return timezone_name
 
 
-def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"):
+def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account", force_ipv4=True):
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
         return
@@ -364,6 +365,7 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
         sys.exit(1)
     cmd = [
         curl_bin,
+        *(["-4"] if force_ipv4 else []),
         "--silent",
         "--show-error",
         "--fail",
@@ -398,14 +400,27 @@ def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
     )
     if timezone_name:
         env["TZ"] = timezone_name
+    _apply_runtime_ip_stack_profile(env, runtime)
     if proxy_url:
         if validate_proxy:
             _check_proxy_connectivity_or_exit(
                 proxy_url,
                 no_proxy=no_proxy,
                 label=str(runtime.get("id") or runtime.get("name") or "runtime"),
+                force_ipv4=_runtime_force_ipv4(runtime),
             )
         _apply_proxy_env(env, proxy_url, no_proxy=no_proxy)
+    return env
+
+
+def _apply_runtime_ip_stack_profile(env, runtime):
+    if not _runtime_force_ipv4(runtime):
+        return env
+    env["MMS_FORCE_IPV4"] = "1"
+    existing = str(env.get("NODE_OPTIONS") or "").strip()
+    token = "--dns-result-order=ipv4first"
+    if token not in existing.split():
+        env["NODE_OPTIONS"] = f"{existing} {token}".strip()
     return env
 
 
@@ -1186,19 +1201,19 @@ def _gateway_ping(base_url, api_key, runtime=None):
     """Quick connectivity check; returns True/False/None (None = can't determine)."""
     _ensure_bridge_helpers()
     try:
-        import httpx as _httpx
+        import httpx as _httpx  # noqa: F401
     except ImportError:
         return None
     if not base_url or not api_key:
         return None
     models_url = _build_gateway_url(base_url, "/models")
-    request_kwargs = _runtime_httpx_kwargs(runtime)
     try:
-        r = _httpx.get(
+        r = _runtime_httpx_request(
+            "GET",
             models_url,
+            runtime=runtime,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=8,
-            **request_kwargs,
         )
         return r.status_code < 500
     except Exception:
@@ -2188,21 +2203,21 @@ def _pick_gateway_model(runtime, base_url):
     Priority: opus-4 > opus > sonnet-4 > sonnet > first available > None
     """
     try:
-        import httpx as _httpx
+        import httpx as _httpx  # noqa: F401
     except ImportError:
         return None
     api_key = runtime.get("api_key", "")
     if not base_url or not api_key:
         return None
     url_v1 = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-    request_kwargs = _runtime_httpx_kwargs(runtime)
     try:
-        r = _httpx.get(
+        r = _runtime_httpx_request(
+            "GET",
             f"{url_v1}/models",
+            runtime=runtime,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=8,
             follow_redirects=True,
-            **request_kwargs,
         )
         if r.status_code != 200:
             return None
@@ -2756,6 +2771,7 @@ def _codex_gateway_env(runtime, base_url):
     _set_session_home_hint(env, session_home)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
+    _apply_runtime_ip_stack_profile(env, runtime)
     _install_session_command_wrappers(session_home, env)
     return env
 
@@ -2873,7 +2889,9 @@ def launch_qwen(model_info, provider, once=False):
     if model:
         cmd += ["-m", model]
 
-    _exec_or_run(cmd, os.environ.copy(), once)
+    env = os.environ.copy()
+    _apply_runtime_ip_stack_profile(env, provider)
+    _exec_or_run(cmd, env, once)
 
 
 def launch_kimi(model_info, provider, once=False):
@@ -2881,6 +2899,7 @@ def launch_kimi(model_info, provider, once=False):
     api_key = provider["api_key"]
     model = _resolve_model(model_info)
     env = os.environ.copy()
+    _apply_runtime_ip_stack_profile(env, provider)
     cmd = ["kimi"]
 
     if _openai_base_url(provider) and api_key and model:

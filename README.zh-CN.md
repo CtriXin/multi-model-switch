@@ -455,6 +455,7 @@ supported_clis = ["claude", "codex"]
 # proxy = "http://127.0.0.1:7890"   # 可选：通道级强制 proxy；预探测和实际启动都走它
 # no_proxy = ""                     # 可选：传给 NO_PROXY
 # timezone = "America/Los_Angeles"  # 可选：默认就是这个；只影响该次启动环境
+# force_ipv4 = true                 # 可选：默认开启；MMS 预探测和子进程优先 IPv4
 
 [[accounts]]
 id = "personal"
@@ -463,6 +464,7 @@ home_dir = "~/.config/mms/accounts/personal"
 # proxy = "http://127.0.0.1:7890"   # 可选：账号级强制 proxy，不通则不启动
 # no_proxy = ""                     # 可选：传给 NO_PROXY
 # timezone = "America/Los_Angeles"  # 可选：默认就是这个；只影响该次 Claude 进程
+# force_ipv4 = true                 # 可选：默认开启；MMS 会话优先 IPv4
 ```
 
 ---

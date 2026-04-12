@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -204,14 +203,13 @@ def test_detect_working_base_url_uses_runtime_proxy(monkeypatch):
     class FakeResponse:
         status_code = 200
 
-    class FakeHttpx:
-        @staticmethod
-        def post(url, **kwargs):
-            calls["url"] = url
-            calls["kwargs"] = kwargs
-            return FakeResponse()
+    def fake_request(method, url, **kwargs):
+        calls["method"] = method
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return FakeResponse()
 
-    monkeypatch.setattr(mms_core, "httpx", FakeHttpx())
+    monkeypatch.setattr(mms_core, "_runtime_httpx_request", fake_request)
 
     candidate = mms_core.detect_working_base_url(
         "https://gateway.example.com",
@@ -222,8 +220,8 @@ def test_detect_working_base_url_uses_runtime_proxy(monkeypatch):
     )
 
     assert candidate == "https://gateway.example.com"
-    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
-    assert calls["kwargs"]["trust_env"] is False
+    assert calls["method"] == "POST"
+    assert calls["kwargs"]["runtime"]["proxy"] == "http://127.0.0.1:7890"
 
 
 def test_probe_models_uses_provider_proxy(monkeypatch):
@@ -242,14 +240,13 @@ def test_probe_models_uses_provider_proxy(monkeypatch):
         def json():
             return {"data": [{"id": "claude-sonnet-4-6"}]}
 
-    class FakeHttpx:
-        @staticmethod
-        def get(url, **kwargs):
-            calls["url"] = url
-            calls["kwargs"] = kwargs
-            return FakeResponse()
+    def fake_request(method, url, **kwargs):
+        calls["method"] = method
+        calls["url"] = url
+        calls["kwargs"] = kwargs
+        return FakeResponse()
 
-    monkeypatch.setattr(mms_core, "httpx", FakeHttpx())
+    monkeypatch.setattr(mms_core, "_runtime_httpx_request", fake_request)
     monkeypatch.setattr(mms_core, "_save_probe_file_cache", lambda *args, **kwargs: None)
 
     result = mms_core._probe_models(
@@ -266,8 +263,8 @@ def test_probe_models_uses_provider_proxy(monkeypatch):
     )
 
     assert result["models"] == ["claude-sonnet-4-6"]
-    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
-    assert calls["kwargs"]["trust_env"] is False
+    assert calls["method"] == "GET"
+    assert calls["kwargs"]["runtime"]["proxy"] == "http://127.0.0.1:7890"
 
 
 def test_gateway_ping_uses_runtime_proxy(monkeypatch):
@@ -275,13 +272,13 @@ def test_gateway_ping_uses_runtime_proxy(monkeypatch):
 
     calls = {}
 
-    def fake_get(url, **kwargs):
+    def fake_request(method, url, **kwargs):
+        calls["method"] = method
         calls["url"] = url
         calls["kwargs"] = kwargs
         return types.SimpleNamespace(status_code=200)
 
-    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(get=fake_get))
-    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_runtime_httpx_request", fake_request)
     monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
 
     ok = mms_launchers._gateway_ping(
@@ -291,5 +288,76 @@ def test_gateway_ping_uses_runtime_proxy(monkeypatch):
     )
 
     assert ok is True
-    assert calls["kwargs"]["proxy"] == "http://127.0.0.1:7890"
-    assert calls["kwargs"]["trust_env"] is False
+    assert calls["method"] == "GET"
+    assert calls["kwargs"]["runtime"]["proxy"] == "http://127.0.0.1:7890"
+
+
+def test_validate_proxy_url_accepts_mainstream_formats():
+    from mms_core import _validate_proxy_url
+
+    assert _validate_proxy_url("http://user:pass@168.158.185.127:6394") is None
+    assert _validate_proxy_url("socks5h://127.0.0.1:7890") is None
+
+
+def test_validate_proxy_url_rejects_invalid_scheme():
+    from mms_core import _validate_proxy_url
+
+    assert _validate_proxy_url("socket5://127.0.0.1:7890") == "代理协议仅支持 http / https / socks5 / socks5h"
+
+
+def test_runtime_httpx_request_prefers_ipv4(monkeypatch):
+    import mms_core
+
+    calls = {}
+
+    class FakeTransport:
+        def __init__(self, **kwargs):
+            calls["transport_kwargs"] = kwargs
+
+    class FakeClient:
+        def __init__(self, *, transport=None, follow_redirects=False):
+            calls["follow_redirects"] = follow_redirects
+            calls["transport"] = transport
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def request(self, method, url, **kwargs):
+            calls["method"] = method
+            calls["url"] = url
+            calls["request_kwargs"] = kwargs
+            return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(
+        mms_core,
+        "httpx",
+        types.SimpleNamespace(HTTPTransport=FakeTransport, Client=FakeClient),
+    )
+
+    response = mms_core._runtime_httpx_request(
+        "GET",
+        "https://gateway.example.com/models",
+        runtime={"force_ipv4": True, "proxy": "http://127.0.0.1:7890"},
+        headers={"Authorization": "Bearer sk-test"},
+        timeout=8,
+    )
+
+    assert response.status_code == 200
+    assert calls["transport_kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert calls["transport_kwargs"]["trust_env"] is False
+    assert calls["transport_kwargs"]["local_address"] == "0.0.0.0"
+
+
+def test_apply_runtime_ip_stack_profile_sets_ipv4first():
+    from mms_launchers import _apply_runtime_ip_stack_profile
+
+    env = {"NODE_OPTIONS": "--max-old-space-size=4096"}
+    runtime = {"id": "claude-b", "force_ipv4": True}
+
+    result = _apply_runtime_ip_stack_profile(env, runtime)
+
+    assert result["MMS_FORCE_IPV4"] == "1"
+    assert "--dns-result-order=ipv4first" in result["NODE_OPTIONS"]
