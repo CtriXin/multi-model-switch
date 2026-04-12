@@ -100,3 +100,6 @@ claude-settings.global-template.json
 claude-settings.template.json
 gbrain_memory_hook.py
 tsconfig.json
+docs/CLI_PROVIDER_COMPAT_QA.local.md
+docs/QA_REGRESSION_RUNBOOK.md
+issue/
