@@ -41,37 +41,45 @@ def canonical_project_path(cwd: str | None = None) -> str:
     return cwd
 
 
-def project_key(cwd: str | None = None) -> str:
+def _normalize_account_id(account_id: str | None = None) -> str:
+    value = str(account_id or "").strip().lower()
+    if not value:
+        return "shared"
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value)
+
+
+def project_key(cwd: str | None = None, account_id: str | None = None) -> str:
     canonical = canonical_project_path(cwd)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    scope = f"{_normalize_account_id(account_id)}::{canonical}"
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()[:16]
 
 
-def project_root(cwd: str | None = None) -> Path:
-    return PROJECTS_DIR / project_key(cwd)
+def project_root(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return PROJECTS_DIR / project_key(cwd, account_id=account_id)
 
 
-def claude_project_root(cwd: str | None = None) -> Path:
-    return project_root(cwd) / "claude"
+def claude_project_root(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return project_root(cwd, account_id=account_id) / "claude"
 
 
-def claude_raw_root(cwd: str | None = None) -> Path:
-    return claude_project_root(cwd) / "raw"
+def claude_raw_root(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return claude_project_root(cwd, account_id=account_id) / "raw"
 
 
-def claude_state_root(cwd: str | None = None) -> Path:
-    return claude_project_root(cwd) / "state"
+def claude_state_root(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return claude_project_root(cwd, account_id=account_id) / "state"
 
 
-def claude_state_sessions_root(cwd: str | None = None) -> Path:
-    return claude_state_root(cwd) / "sessions"
+def claude_state_sessions_root(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return claude_state_root(cwd, account_id=account_id) / "sessions"
 
 
-def claude_raw_entry_path(entry: str, cwd: str | None = None) -> Path:
-    return claude_raw_root(cwd) / entry
+def claude_raw_entry_path(entry: str, cwd: str | None = None, account_id: str | None = None) -> Path:
+    return claude_raw_root(cwd, account_id=account_id) / entry
 
 
-def claude_project_metadata_path(cwd: str | None = None) -> Path:
-    return claude_state_root(cwd) / "metadata.json"
+def claude_project_metadata_path(cwd: str | None = None, account_id: str | None = None) -> Path:
+    return claude_state_root(cwd, account_id=account_id) / "metadata.json"
 
 
 def slot_marker_path(session_home: str | Path) -> Path:
@@ -88,13 +96,22 @@ def read_slot_marker(session_home: str | Path) -> dict | None:
         return None
 
 
-def write_slot_marker(session_home: str | Path, *, cwd: str, project_key_value: str, account_id: str, runtime_kind: str) -> Path:
+def write_slot_marker(
+    session_home: str | Path,
+    *,
+    cwd: str,
+    project_key_value: str,
+    account_id: str,
+    runtime_kind: str,
+    account_home: str | None = None,
+) -> Path:
     path = slot_marker_path(session_home)
     payload = {
         "cwd": os.path.realpath(cwd),
         "project_key": project_key_value,
         "account_id": account_id or "",
         "runtime_kind": runtime_kind,
+        "account_home": os.path.realpath(account_home) if account_home else "",
         "written_at": _utc_now(),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -110,13 +127,17 @@ def _copy_entry_if_missing(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def ensure_claude_project_store(cwd: str | None = None) -> dict:
+def ensure_claude_project_store(cwd: str | None = None, *, account_id: str | None = None) -> dict:
     canonical = canonical_project_path(cwd)
-    key = project_key(canonical)
-    root = claude_project_root(canonical)
-    raw_root = claude_raw_root(canonical)
-    state_root = claude_state_root(canonical)
-    state_sessions = claude_state_sessions_root(canonical)
+    normalized_account_id = _normalize_account_id(account_id)
+    key = project_key(canonical, account_id=normalized_account_id)
+    root = claude_project_root(canonical, account_id=normalized_account_id)
+    raw_root = claude_raw_root(canonical, account_id=normalized_account_id)
+    state_root = claude_state_root(canonical, account_id=normalized_account_id)
+    state_sessions = claude_state_sessions_root(
+        canonical,
+        account_id=normalized_account_id,
+    )
 
     for path in (PROJECTS_DIR, root, raw_root, state_root, state_sessions):
         path.mkdir(parents=True, exist_ok=True)
@@ -130,35 +151,25 @@ def ensure_claude_project_store(cwd: str | None = None) -> dict:
         else:
             target.mkdir(parents=True, exist_ok=True)
 
-    meta_path = claude_project_metadata_path(canonical)
+    meta_path = claude_project_metadata_path(
+        canonical,
+        account_id=normalized_account_id,
+    )
     if not meta_path.exists():
         payload = {
             "project_key": key,
             "canonical_path": canonical,
+            "account_id": normalized_account_id,
             "display_name": os.path.basename(canonical.rstrip(os.sep)) or canonical,
             "created_at": _utc_now(),
         }
         meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    _seed_claude_project_store_from_global(canonical)
-
     return {
         "project_key": key,
         "canonical_path": canonical,
+        "account_id": normalized_account_id,
         "project_root": str(root),
         "raw_root": str(raw_root),
         "state_root": str(state_root),
     }
-
-
-def _seed_claude_project_store_from_global(cwd: str | None = None) -> None:
-    raw_root = claude_raw_root(cwd)
-    sentinel = claude_state_root(cwd) / ".seeded"
-    if sentinel.exists():
-        return
-
-    real_claude_dir = Path(os.path.expanduser("~/.claude"))
-    if real_claude_dir.exists():
-        for entry in CLAUDE_PERSISTENT_ENTRIES:
-            _copy_entry_if_missing(real_claude_dir / entry, raw_root / entry)
-    sentinel.write_text(_utc_now() + "\n", encoding="utf-8")

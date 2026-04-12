@@ -33,12 +33,12 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _slot_state_path(cwd: str, pid: int) -> Path:
-    return claude_state_sessions_root(cwd) / f"pid-{pid}.json"
+def _slot_state_path(cwd: str, pid: int, account_id: str = "") -> Path:
+    return claude_state_sessions_root(cwd, account_id=account_id) / f"pid-{pid}.json"
 
 
-def _session_state_path(cwd: str, session_id: str) -> Path:
-    return claude_state_sessions_root(cwd) / f"{session_id}.json"
+def _session_state_path(cwd: str, session_id: str, account_id: str = "") -> Path:
+    return claude_state_sessions_root(cwd, account_id=account_id) / f"{session_id}.json"
 
 
 def _payload_started_at_ms(payload: dict) -> int | None:
@@ -55,7 +55,8 @@ def _payload_started_at_ms(payload: dict) -> int | None:
 
 
 def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
-    sessions_root = claude_raw_entry_path("sessions", cwd)
+    account_id = str(payload.get("account_id") or "").strip()
+    sessions_root = claude_raw_entry_path("sessions", cwd, account_id=account_id)
     if not sessions_root.is_dir():
         return None
 
@@ -93,6 +94,7 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
         return payload, path
 
     cwd = str(payload.get("cwd") or payload.get("project_path") or "").strip()
+    account_id = str(payload.get("account_id") or "").strip()
     if not cwd:
         return payload, path
 
@@ -110,7 +112,7 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
     updated["started_at_ms"] = session_data.get("startedAt") or updated.get("started_at_ms")
     updated["session_pid"] = session_data.get("pid")
 
-    target = _session_state_path(cwd, resolved_session_id)
+    target = _session_state_path(cwd, resolved_session_id, account_id=account_id)
     _write_json(target, updated)
     if path != target:
         try:
@@ -121,7 +123,7 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
 
 
 def record_claude_session_start(*, cwd: str, account_id: str, pid: int, runtime_kind: str, slot_home: str) -> dict:
-    store = ensure_claude_project_store(cwd)
+    store = ensure_claude_project_store(cwd, account_id=account_id)
     payload = {
         "session_id": None,
         "project_key": store["project_key"],
@@ -137,12 +139,12 @@ def record_claude_session_start(*, cwd: str, account_id: str, pid: int, runtime_
         "exit_code": None,
         "stale_cleanup": False,
     }
-    _write_json(_slot_state_path(cwd, pid), payload)
+    _write_json(_slot_state_path(cwd, pid, account_id=account_id), payload)
     return payload
 
 
-def finalize_claude_session(*, cwd: str, pid: int, exit_code: int | None, stale_cleanup: bool = False) -> dict | None:
-    slot_state = _slot_state_path(cwd, pid)
+def finalize_claude_session(*, cwd: str, pid: int, account_id: str = "", exit_code: int | None, stale_cleanup: bool = False) -> dict | None:
+    slot_state = _slot_state_path(cwd, pid, account_id=account_id)
     payload = _read_json(slot_state)
     if payload is None:
         return None
@@ -153,7 +155,7 @@ def finalize_claude_session(*, cwd: str, pid: int, exit_code: int | None, stale_
     payload, target = _reconcile_session_state(slot_state, payload)
     if target == slot_state:
         session_id = str(payload.get("session_id") or "").strip() or f"pid-{pid}"
-        target = _session_state_path(cwd, session_id)
+        target = _session_state_path(cwd, session_id, account_id=account_id)
         _write_json(target, payload)
     try:
         slot_state.unlink()
