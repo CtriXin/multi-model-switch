@@ -9020,6 +9020,85 @@ def handle_doctor_command(argv):
     return _run_script_subcommand("doctor_claude_models.py", argv, "doctor")
 
 
+def handle_exposure_command(argv):
+    _ensure_rich()
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} exposure",
+        description="审计当前 runtime 会向 CLI 暴露哪些 env / settings / HOME 信息",
+    )
+    parser.add_argument("cli", nargs="?", default="claude", choices=CLI_NAMES, help="目标 CLI")
+    parser.add_argument("--account", help="指定账号 id")
+    parser.add_argument("--provider", help="指定 provider id")
+    args = parser.parse_args(argv)
+
+    from mms_launchers import inspect_runtime_exposure
+
+    cfg = _load_command_config()
+    default_provider = ensure_provider_credentials(cfg)
+    default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    runtime, _models, launch_cli = _choose_runtime_source(
+        cfg,
+        args.cli,
+        default_provider,
+        models_cache,
+        account_id=args.account,
+        provider_id=args.provider,
+    )
+    if runtime is None:
+        console.print(f"[red]{args.cli} 当前没有可用运行来源[/red]")
+        return
+
+    payload = inspect_runtime_exposure(launch_cli, runtime)
+
+    summary = Table(title="MMS Exposure Audit")
+    summary.add_column("字段", style="cyan")
+    summary.add_column("值", style="green")
+    summary.add_row("cli", str(payload.get("cli") or "-"))
+    summary.add_row("runtime", str(payload.get("runtime_name") or payload.get("runtime_id") or "-"))
+    summary.add_row("auth_mode", str(payload.get("auth_mode") or "-"))
+    network = payload.get("network") or {}
+    summary.add_row("net", str(network.get("proxy_mode") or "-"))
+    summary.add_row("dns", str(network.get("dns_mode") or "-"))
+    summary.add_row("proxy", str(network.get("proxy_fingerprint") or "-"))
+    summary.add_row("timezone", str(network.get("timezone") or "-"))
+    summary.add_row("locale", str(network.get("locale") or "-"))
+    summary.add_row("fake_upstream", "on" if network.get("fake_upstream") else "off")
+    summary.add_row("ipv4", "on" if network.get("force_ipv4") else "off")
+    console.print(summary)
+
+    home = payload.get("home") or {}
+    home_table = Table(title="Session Home / Settings")
+    home_table.add_column("字段", style="cyan")
+    home_table.add_column("值", style="green")
+    home_table.add_row("real_home", str(home.get("real_home") or "-"))
+    home_table.add_row("account_home", str(home.get("account_home") or "-"))
+    home_table.add_row("session_home", str(home.get("session_home") or "-"))
+    home_table.add_row("settings_path", str(home.get("settings_path") or "-"))
+    console.print(home_table)
+
+    env_table = Table(title="Process Env Exposed To CLI")
+    env_table.add_column("Key", style="cyan")
+    env_table.add_column("Value", style="green")
+    for item in payload.get("process_env") or []:
+        env_table.add_row(str(item.get("key") or "-"), str(item.get("value") or "-"))
+    console.print(env_table)
+
+    settings = payload.get("settings") or {}
+    settings_table = Table(title="Session Settings Exposure")
+    settings_table.add_column("字段", style="cyan")
+    settings_table.add_column("值", style="green")
+    settings_table.add_row("statusLine", "on" if settings.get("statusline") else "off")
+    settings_table.add_row("hook_events", ", ".join(settings.get("hook_events") or []) or "-")
+    settings_table.add_row("env_keys", ", ".join(settings.get("env_keys") or []) or "-")
+    console.print(settings_table)
+
+    notes = payload.get("notes") or []
+    if notes:
+        console.print("[yellow]可观察性说明：[/yellow]")
+        for note in notes:
+            console.print(f"  - {note}")
+
+
 def handle_test_command(argv, subcommand_name="test"):
     return _run_script_subcommand("smoke_cli_channels.py", argv, subcommand_name)
 
@@ -9039,6 +9118,9 @@ def main():
             return
         if command == "fake-upstream":
             handle_fake_upstream_command(argv[1:])
+            return
+        if command == "exposure":
+            handle_exposure_command(argv[1:])
             return
 
     _ensure_startup_snapshot_guard(bootstrap_cfg or _default_config())
@@ -9121,6 +9203,7 @@ def main():
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
+            f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"

@@ -20,7 +20,23 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 
-DEFAULT_BROKER_REPO = os.path.expanduser("~/auto-skills/CtriXin-repo/cc-official-broker")
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _default_broker_repo() -> str:
+    explicit = str(os.environ.get("MMS_BROKER_REPO") or "").strip()
+    if explicit:
+        return os.path.expanduser(explicit)
+
+    sibling_repo = os.path.join(os.path.dirname(_ROOT_DIR), "cc-official-broker")
+    home_repo = os.path.expanduser("~/cc-official-broker")
+    for candidate in (sibling_repo, home_repo):
+        if os.path.exists(os.path.join(candidate, "src", "index.mjs")):
+            return candidate
+    return home_repo
+
+
+DEFAULT_BROKER_REPO = _default_broker_repo()
 PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")
 LEGACY_CREDENTIALS_PATH = os.path.expanduser("~/.config/ccs/credentials.sh")
 BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")
@@ -96,9 +112,10 @@ def normalize_broker_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "fallback_entry_mode": _normalize_optional_str(profile.get("fallback_entry_mode") or ""),
         "device_key": _normalize_optional_str(profile.get("device_key")),
         "device_key_env": _normalize_optional_str(profile.get("device_key_env")),
-        "owner_user_id": _normalize_optional_str(profile.get("owner_user_id") or "xin") or "xin",
-        "device_id": _normalize_optional_str(profile.get("device_id") or "mac") or "mac",
-        "workspace_id": _normalize_optional_str(profile.get("workspace_id") or "personal") or "personal",
+        "owner_user_id": _normalize_optional_str(profile.get("owner_user_id") or "default-user") or "default-user",
+        "device_id": _normalize_optional_str(profile.get("device_id") or "local-device") or "local-device",
+        "workspace_id": _normalize_optional_str(profile.get("workspace_id") or "default-workspace")
+        or "default-workspace",
         "remote_runtime": _normalize_optional_str(profile.get("remote_runtime") or "official-claude-code")
         or "official-claude-code",
         "broker_repo_path": os.path.expanduser(
@@ -183,9 +200,9 @@ def _build_broker_env(profile: dict[str, Any], *, workspace_root: str, model_ove
     env = os.environ.copy()
     env["CC_BROKER_BASE_URL"] = profile.get("broker_base_url", "")
     env["CC_BROKER_DEVICE_KEY"] = _resolve_secret_value(profile, "device_key", "device_key_env")
-    env["CC_BROKER_OWNER_USER_ID"] = profile.get("owner_user_id", "xin")
-    env["CC_BROKER_DEVICE_ID"] = profile.get("device_id", "mac")
-    env["CC_BROKER_WORKSPACE_ID"] = profile.get("workspace_id", "personal")
+    env["CC_BROKER_OWNER_USER_ID"] = profile.get("owner_user_id", "default-user")
+    env["CC_BROKER_DEVICE_ID"] = profile.get("device_id", "local-device")
+    env["CC_BROKER_WORKSPACE_ID"] = profile.get("workspace_id", "default-workspace")
     env["CC_BROKER_CLIENT_NAME"] = profile.get("client_name", "mms")
     env["CC_BROKER_CLIENT_VERSION"] = profile.get("client_version", "0.1.0")
     env["CC_BROKER_REQUEST_SOURCE"] = profile.get("request_source", "multi-model-switch")

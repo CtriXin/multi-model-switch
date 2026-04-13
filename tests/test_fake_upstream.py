@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import ssl
 import stat
 
@@ -211,3 +212,32 @@ def test_handle_connect_swallows_tls_handshake_failure(monkeypatch):
     assert sock.payloads[0].startswith(b"HTTP/1.1 200 Connection Established")
     assert events[0][0] == "tls_handshake_failed"
     assert events[0][1]["host"] == "api.anthropic.com"
+
+
+def test_ensure_host_tls_cert_rebuilds_stale_mismatched_pair(monkeypatch, tmp_path):
+    import mms_fake_upstream
+
+    if not shutil.which("openssl"):
+        return
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
+
+    host_a_cert, host_a_key, _ = mms_fake_upstream._ensure_host_tls_cert("api.anthropic.com")
+    host_b_cert, host_b_key, _ = mms_fake_upstream._ensure_host_tls_cert("api.github.com")
+
+    with open(host_a_cert, "rb") as f:
+        cert_bytes = f.read()
+    with open(host_b_key, "rb") as f:
+        key_bytes = f.read()
+    with open(host_a_cert, "wb") as f:
+        f.write(cert_bytes)
+    with open(host_a_key, "wb") as f:
+        f.write(key_bytes)
+
+    assert mms_fake_upstream._cert_key_pair_matches(host_a_cert, host_a_key) is False
+
+    repaired_cert, repaired_key, _ = mms_fake_upstream._ensure_host_tls_cert("api.anthropic.com")
+
+    assert repaired_cert == host_a_cert
+    assert repaired_key == host_a_key
+    assert mms_fake_upstream._cert_key_pair_matches(repaired_cert, repaired_key) is True

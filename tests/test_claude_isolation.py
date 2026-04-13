@@ -138,6 +138,8 @@ def test_apply_runtime_network_profile_sets_proxy_and_timezone():
     assert result["HTTPS_PROXY"] == "http://127.0.0.1:7890"
     assert result["NO_PROXY"] == "localhost,127.0.0.1"
     assert result["TZ"] == "Asia/Singapore"
+    assert result["LANG"] == "en_US.UTF-8"
+    assert result["LC_ALL"] == "en_US.UTF-8"
 
 
 def test_normalize_account_keeps_proxy_and_timezone():
@@ -514,7 +516,16 @@ def test_runtime_network_summary_masks_proxy_secret():
     assert "198.51.100.24:6394" in summary
     assert "DNS proxy-likely" in summary
     assert "TZ America/Los_Angeles" in summary
+    assert "LANG en_US.UTF-8" in summary
     assert "IPv4 on" in summary
+
+
+def test_mask_proxy_url_accepts_proxy_fingerprint_value():
+    from mms_launchers import _mask_proxy_url
+
+    value = _mask_proxy_url("http://198.51.100.24:6394+auth")
+
+    assert value == "http://198.51.100.24:6394+auth"
 
 
 def test_validate_home_context_accepts_isolated_oauth_session(tmp_path):
@@ -549,6 +560,25 @@ def test_validate_home_context_accepts_isolated_oauth_session(tmp_path):
     assert result["config_root"] == str(real_home / ".config" / "mms")
     assert result["net_mode"] == "proxy"
     assert result["dns_mode"] == "proxy-likely"
+    assert result["locale"] == "en_US.UTF-8"
+
+
+def test_runtime_locale_env_defaults_to_en_us():
+    from mms_launchers import _runtime_locale_env
+
+    result = _runtime_locale_env({})
+
+    assert result["LANG"] == "en_US.UTF-8"
+    assert result["LC_ALL"] == "en_US.UTF-8"
+
+
+def test_runtime_locale_env_supports_zh_language():
+    from mms_launchers import _runtime_locale_env
+
+    result = _runtime_locale_env({"language": "zh"})
+
+    assert result["LANG"] == "zh_CN.UTF-8"
+    assert result["LC_MESSAGES"] == "zh_CN.UTF-8"
 
 
 def test_validate_home_context_blocks_oauth_real_home_leak(tmp_path):
@@ -642,6 +672,8 @@ def test_session_required_env_from_runtime_env_keeps_fake_upstream_tls_env():
             "HTTPS_PROXY": "http://127.0.0.1:7890",
             "NO_PROXY": "127.0.0.1,localhost",
             "TZ": "America/Los_Angeles",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
             "SSL_CERT_FILE": "/tmp/mms-ca.pem",
             "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
             "MMS_FAKE_UPSTREAM_MODE": "upstream-proxy",
@@ -653,6 +685,8 @@ def test_session_required_env_from_runtime_env_keeps_fake_upstream_tls_env():
     )
 
     assert result["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert result["LANG"] == "en_US.UTF-8"
+    assert result["LC_ALL"] == "en_US.UTF-8"
     assert result["SSL_CERT_FILE"] == "/tmp/mms-ca.pem"
     assert result["NODE_EXTRA_CA_CERTS"] == "/tmp/mms-ca.pem"
     assert result["MMS_FAKE_UPSTREAM_MODE"] == "upstream-proxy"
@@ -668,6 +702,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
                 "HTTP_PROXY": "http://127.0.0.1:7890",
                 "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
                 "TZ": "America/Los_Angeles",
+                "LANG": "en_US.UTF-8",
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
             },
             "statusLine": {"type": "command", "command": "/tmp/status.sh"},
@@ -676,6 +711,43 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
 
     assert result["env"] == {"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
     assert result["statusLine"]["command"] == "/tmp/status.sh"
+
+
+def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path):
+    import json as _json
+    from mms_launchers import inspect_runtime_exposure
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
+    monkeypatch.setenv("MMS_FAKE_UPSTREAM", "0")
+
+    account_home = tmp_path / ".config" / "mms" / "accounts" / "claude-a"
+    claude_dir = account_home / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "settings.json").write_text(_json.dumps({}), encoding="utf-8")
+
+    payload = inspect_runtime_exposure(
+        "claude",
+        {
+            "id": "claude-a",
+            "name": "claude-a",
+            "cli": "claude",
+            "auth_mode": "oauth",
+            "home_dir": str(account_home),
+            "proxy": "http://127.0.0.1:7890",
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        },
+    )
+
+    env_map = {item["key"]: item["value"] for item in payload["process_env"]}
+    assert payload["network"]["locale"] == "en_US.UTF-8"
+    assert payload["home"]["account_home"] == str(account_home)
+    assert env_map["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert env_map["LANG"] == "en_US.UTF-8"
+    assert env_map["TZ"] == "America/Los_Angeles"
+    assert payload["settings"]["statusline"] is True
+    assert "PreToolUse" in payload["settings"]["hook_events"]
+    assert "LANG" in payload["settings"]["env_keys"]
 
 
 def test_gateway_claude_bridge_context_drops_unknown_kwargs(monkeypatch, capsys):

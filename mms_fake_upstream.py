@@ -22,6 +22,7 @@ _FAKE_PROXY_HOST = "127.0.0.1"
 _FAKE_PROXY_FINGERPRINT = "fake://127.0.0.1+local"
 _LOG_BODY_LIMIT = 4000
 _SERVER_LOCK = threading.Lock()
+_CERT_LOCK = threading.Lock()
 _SERVER_STATE: dict[str, object] = {}
 
 
@@ -110,6 +111,26 @@ def _chmod_private(path):
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+def _unlink_if_exists(path):
+    if not path or not os.path.exists(path):
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _cert_key_pair_matches(cert_path, key_path):
+    if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+        return False
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        return True
+    except ssl.SSLError:
+        return False
 
 
 
@@ -503,38 +524,45 @@ def _is_ip_hostname(hostname: str) -> bool:
 def _ensure_ca_cert():
     cert_path = _ca_cert_path()
     key_path = _ca_key_path()
-    if os.path.exists(cert_path) and os.path.exists(key_path):
+    with _CERT_LOCK:
+        if _cert_key_pair_matches(cert_path, key_path):
+            return cert_path, key_path
+        _unlink_if_exists(cert_path)
+        _unlink_if_exists(key_path)
+        openssl_bin = shutil.which("openssl")
+        if not openssl_bin:
+            raise RuntimeError("openssl missing")
+        os.makedirs(_cert_dir(), exist_ok=True)
+        cmd = [
+            openssl_bin,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "7",
+            "-keyout",
+            key_path,
+            "-out",
+            cert_path,
+            "-subj",
+            "/CN=MMS Fake Upstream CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE,pathlen:0",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "openssl failed").strip())
+        _chmod_private(cert_path)
+        _chmod_private(key_path)
+        if not _cert_key_pair_matches(cert_path, key_path):
+            _unlink_if_exists(cert_path)
+            _unlink_if_exists(key_path)
+            raise RuntimeError("generated fake upstream CA cert/key mismatch")
         return cert_path, key_path
-    openssl_bin = shutil.which("openssl")
-    if not openssl_bin:
-        raise RuntimeError("openssl missing")
-    os.makedirs(_cert_dir(), exist_ok=True)
-    cmd = [
-        openssl_bin,
-        "req",
-        "-x509",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-days",
-        "7",
-        "-keyout",
-        key_path,
-        "-out",
-        cert_path,
-        "-subj",
-        "/CN=MMS Fake Upstream CA",
-        "-addext",
-        "basicConstraints=critical,CA:TRUE,pathlen:0",
-        "-addext",
-        "keyUsage=critical,keyCertSign,cRLSign",
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "openssl failed").strip())
-    _chmod_private(cert_path)
-    _chmod_private(key_path)
-    return cert_path, key_path
 
 
 def _ensure_host_tls_cert(hostname: str):
@@ -544,68 +572,73 @@ def _ensure_host_tls_cert(hostname: str):
     host_dir = os.path.join(_hosts_cert_dir(), safe_name)
     cert_path = os.path.join(host_dir, "cert.pem")
     key_path = os.path.join(host_dir, "key.pem")
-    if os.path.exists(cert_path) and os.path.exists(key_path):
-        return cert_path, key_path, ca_cert_path
-    openssl_bin = shutil.which("openssl")
-    if not openssl_bin:
-        raise RuntimeError("openssl missing")
-    os.makedirs(host_dir, exist_ok=True)
     csr_path = os.path.join(host_dir, "req.csr")
     ext_path = os.path.join(host_dir, "ext.cnf")
-    san_value = f"IP:{hostname}" if _is_ip_hostname(hostname) else f"DNS:{hostname}"
-    with open(ext_path, "w", encoding="utf-8") as f:
-        f.write("basicConstraints=CA:FALSE\n")
-        f.write("keyUsage=digitalSignature,keyEncipherment\n")
-        f.write("extendedKeyUsage=serverAuth\n")
-        f.write(f"subjectAltName={san_value}\n")
-    req_cmd = [
-        openssl_bin,
-        "req",
-        "-new",
-        "-newkey",
-        "rsa:2048",
-        "-nodes",
-        "-keyout",
-        key_path,
-        "-out",
-        csr_path,
-        "-subj",
-        f"/CN={hostname}",
-    ]
-    result = subprocess.run(req_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "openssl req failed").strip())
-    sign_cmd = [
-        openssl_bin,
-        "x509",
-        "-req",
-        "-in",
-        csr_path,
-        "-CA",
-        ca_cert_path,
-        "-CAkey",
-        ca_key_path,
-        "-CAcreateserial",
-        "-out",
-        cert_path,
-        "-days",
-        "7",
-        "-sha256",
-        "-extfile",
-        ext_path,
-    ]
-    result = subprocess.run(sign_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "openssl x509 failed").strip())
-    _chmod_private(cert_path)
-    _chmod_private(key_path)
-    for path in (csr_path, ext_path):
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    return cert_path, key_path, ca_cert_path
+    with _CERT_LOCK:
+        if _cert_key_pair_matches(cert_path, key_path):
+            return cert_path, key_path, ca_cert_path
+        _unlink_if_exists(cert_path)
+        _unlink_if_exists(key_path)
+        _unlink_if_exists(csr_path)
+        _unlink_if_exists(ext_path)
+        openssl_bin = shutil.which("openssl")
+        if not openssl_bin:
+            raise RuntimeError("openssl missing")
+        os.makedirs(host_dir, exist_ok=True)
+        san_value = f"IP:{hostname}" if _is_ip_hostname(hostname) else f"DNS:{hostname}"
+        with open(ext_path, "w", encoding="utf-8") as f:
+            f.write("basicConstraints=CA:FALSE\n")
+            f.write("keyUsage=digitalSignature,keyEncipherment\n")
+            f.write("extendedKeyUsage=serverAuth\n")
+            f.write(f"subjectAltName={san_value}\n")
+        req_cmd = [
+            openssl_bin,
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            key_path,
+            "-out",
+            csr_path,
+            "-subj",
+            f"/CN={hostname}",
+        ]
+        result = subprocess.run(req_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "openssl req failed").strip())
+        sign_cmd = [
+            openssl_bin,
+            "x509",
+            "-req",
+            "-in",
+            csr_path,
+            "-CA",
+            ca_cert_path,
+            "-CAkey",
+            ca_key_path,
+            "-CAcreateserial",
+            "-out",
+            cert_path,
+            "-days",
+            "7",
+            "-sha256",
+            "-extfile",
+            ext_path,
+        ]
+        result = subprocess.run(sign_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "openssl x509 failed").strip())
+        _chmod_private(cert_path)
+        _chmod_private(key_path)
+        for path in (csr_path, ext_path):
+            _unlink_if_exists(path)
+        if not _cert_key_pair_matches(cert_path, key_path):
+            _unlink_if_exists(cert_path)
+            _unlink_if_exists(key_path)
+            raise RuntimeError(f"generated fake upstream TLS cert/key mismatch for host: {hostname}")
+        return cert_path, key_path, ca_cert_path
 
 
 

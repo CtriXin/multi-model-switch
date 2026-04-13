@@ -5,7 +5,7 @@
 当前工作目录：
 
 - `feature/web-app`
-- 路径：`/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/.claude/worktrees/feature-web-app`
+- worktree：`.claude/worktrees/feature-web-app`
 
 这条线的目标是给 MMS 新增一条独立的 web/macOS 产品线，而不是给现有 CLI 随便包一层页面。
 

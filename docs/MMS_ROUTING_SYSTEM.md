@@ -305,7 +305,7 @@ TUI 选完 3 个 slot 的模型后，`_resolve_best_provider()` 自动为每个 
 │  ✏ 自定义负载               │
 │                             │
 │  heavy:   MiniMax-M2.7  百炼│  ← Enter 进入全屏选模型
-│  medium:  MiniMax-M2.5  xin │  ← +/- 切 provider
+│  medium:  MiniMax-M2.5  relay-a │  ← +/- 切 provider
 │  light:   kimi-k2.5    kimi │
 │  ─────────────────────────  │
 │  ▶ 启动                     │  ← heavy 选好后才能点
@@ -408,7 +408,7 @@ mms routes export   # 强制重新生成
           "anthropic_base_url": "https://relay.example.com/v1",
           "openai_base_url": "https://relay.example.com/v1",
           "api_key": "sk-relay-xxx",
-          "provider_id": "xin",
+          "provider_id": "relay-a",
           "priority": 70,
           "role": "auto"
         }
@@ -443,7 +443,7 @@ mms routes export   # 强制重新生成
           "anthropic_base_url": "https://...",
           "openai_base_url": "https://...",
           "api_key": "sk-zzz",
-          "provider_id": "xin",
+          "provider_id": "relay-a",
           "priority": 65,
           "role": "auto"
         }
