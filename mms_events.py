@@ -105,6 +105,12 @@ def emit_event(
         with daily.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
         _cleanup_old_logs()
+    # GBrain memory hook (non-blocking)
+    try:
+        import gbrain_memory_hook
+        gbrain_memory_hook.ingest_mms_event(event)
+    except Exception:
+        pass
     return event
 
 

@@ -7,7 +7,8 @@ import os
 import sys
 import time
 import unicodedata
-from mms_i18n import pick as _L
+from mms_fake_upstream import status_payload as _fake_upstream_status_payload
+from mms_i18n import pick as _L, get_language as _get_language
 
 # CJK locale 下 ambiguous-width 字符渲染为 2 列
 _lang = os.environ.get("LANG", "") or locale.getdefaultlocale()[0] or ""
@@ -134,6 +135,31 @@ def _safe_addstr(stdscr, y, x, text, attr=0, max_w=None):
         pass
 
 
+def _wrap_display_lines(text, max_w):
+    text = str(text or "")
+    if max_w <= 0:
+        return [text]
+    lines = []
+    current = ""
+    width = 0
+    for ch in text:
+        if ch == "\n":
+            lines.append(current)
+            current = ""
+            width = 0
+            continue
+        ch_w = _display_width(ch)
+        if current and width + ch_w > max_w:
+            lines.append(current)
+            current = ch
+            width = ch_w
+            continue
+        current += ch
+        width += ch_w
+    lines.append(current)
+    return lines or [""]
+
+
 def _slice_display_text(text, start_w, max_w):
     """按显示宽度切片，返回从 start_w 开始、最多 max_w 列的文本。"""
     if max_w <= 0:
@@ -178,6 +204,25 @@ def _draw_separator(stdscr, y, cx, width, attr=0):
         stdscr.addstr(y, max(0, sx), "─" * width, attr)
     except curses.error:
         pass
+
+
+def _draw_footer_actions(stdscr, y, x, max_w, actions):
+    rows = 1
+    cursor_x = x
+    current_y = y
+    gap = 2
+    for chunks in actions:
+        chunk_w = sum(_display_width(text) for text, _attr in chunks)
+        if cursor_x > x and cursor_x - x + gap + chunk_w > max_w:
+            current_y += 1
+            rows += 1
+            cursor_x = x
+        elif cursor_x > x:
+            cursor_x += gap
+        for text, attr in chunks:
+            _safe_addstr(stdscr, current_y, cursor_x, text, attr, max_w=max_w - (cursor_x - x))
+            cursor_x += _display_width(text)
+    return rows
 
 
 # ── 第 1 步：品类选择 TUI ──────────────────────────────────
@@ -266,7 +311,7 @@ def select_family_tui(
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
             provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
-            broker_available = bool((broker_enabled_by_cli or {}).get(cli))
+            broker_available = False
 
             # 搜索过滤
             if search_query:
@@ -424,34 +469,24 @@ def select_family_tui(
             bot_y = content_y + len(items)
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
             bot_y += 1
+            footer_actions = []
             if search_query:
-                _safe_addstr(stdscr, bot_y, ll, _L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 11, _L("BS 删字", "BS Delete"), curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 20, _L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)
+                footer_actions = [
+                    [(_L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)],
+                    [(_L("BS 删字", "BS Delete"), curses.A_DIM)],
+                    [(_L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)],
+                ]
             else:
-                _safe_addstr(stdscr, bot_y, ll, "Tab", curses.color_pair(4) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 4, _L("切CLI", "Switch CLI"), curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 11, "→", curses.color_pair(1) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 13, _L("进模型", "Models"), curses.color_pair(1) | curses.A_DIM)
-                _safe_addstr(stdscr, bot_y, ll + 21, "L", curses.color_pair(5) | curses.A_BOLD)
-                _safe_addstr(stdscr, bot_y, ll + 23, _L("负载", "Load"), curses.color_pair(5) | curses.A_DIM)
-                if broker_available:
-                    _safe_addstr(stdscr, bot_y, ll + 29, "B", curses.color_pair(3) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 31, "Broker", curses.color_pair(3) | curses.A_DIM)
-                    _safe_addstr(stdscr, bot_y, ll + 39, "P", curses.color_pair(6) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 41, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
-                    _safe_addstr(stdscr, bot_y, ll + 47, "O", curses.color_pair(4) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 49, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
-                    _safe_addstr(stdscr, bot_y, ll + 57, "S", curses.color_pair(1) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 59, _L("设", "Set"), curses.A_DIM)
-                else:
-                    _safe_addstr(stdscr, bot_y, ll + 29, "S", curses.color_pair(1) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 31, _L("设置", "Settings"), curses.A_DIM)
-                    _safe_addstr(stdscr, bot_y, ll + 37, "P", curses.color_pair(6) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 39, _L("通道", "Channels"), curses.color_pair(6) | curses.A_DIM)
-                    _safe_addstr(stdscr, bot_y, ll + 45, "O", curses.color_pair(4) | curses.A_BOLD)
-                    _safe_addstr(stdscr, bot_y, ll + 47, _L("接入", "Connect"), curses.color_pair(4) | curses.A_DIM)
-            bot_y += 1
+                footer_actions = [
+                    [("Tab", curses.color_pair(4) | curses.A_BOLD), (_L(" 切CLI", " Switch CLI"), curses.color_pair(4) | curses.A_DIM)],
+                    [("→", curses.color_pair(1) | curses.A_BOLD), (_L(" 进模型", " Models"), curses.color_pair(1) | curses.A_DIM)],
+                    [("L", curses.color_pair(5) | curses.A_BOLD), (_L(" 负载", " Load"), curses.color_pair(5) | curses.A_DIM)],
+                    [("P", curses.color_pair(6) | curses.A_BOLD), (_L(" 通道", " Channels"), curses.color_pair(6) | curses.A_DIM)],
+                    [("O", curses.color_pair(4) | curses.A_BOLD), (_L(" 接入", " Connect"), curses.color_pair(4) | curses.A_DIM)],
+                    [("S", curses.color_pair(1) | curses.A_BOLD), (_L(" 设置", " Settings"), curses.A_DIM)],
+                ]
+            footer_rows = _draw_footer_actions(stdscr, bot_y, ll, max(10, total_w - (ll - px)), footer_actions)
+            bot_y += footer_rows
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
             stdscr.refresh()
@@ -543,8 +578,6 @@ def select_family_tui(
                 return ("last", cli, cli_last)
             elif key in (ord('l'), ord('L')) and not search_query:
                 return ("load_balance", cli, None)
-            elif key in (ord('b'), ord('B')) and not search_query and broker_available:
-                return ("broker", cli, None)
             elif key in (ord('s'), ord('S')) and not search_query:
                 return ("settings", cli, None)
             elif key in (ord('p'), ord('P')) and not search_query:
@@ -2045,6 +2078,95 @@ def _settings_menu():
     ]
 
 
+def _settings_menu():
+    current_lang = _get_language()
+    language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")
+    fake_status = _fake_upstream_status_payload()
+    fake_desc = _L("当前：开启", "Current: On") if fake_status.get("enabled") else _L("当前：关闭", "Current: Off")
+    return [
+        {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
+        {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
+        {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
+        {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
+        {"id": "fake_upstream", "label": _L("Fake Upstream", "Fake Upstream"), "desc": fake_desc},
+        {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
+        {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
+    ]
+
+
+def select_language_tui():
+    options = [
+        {"id": "zh", "label": "中文", "desc": _L("使用中文界面", "Use Simplified Chinese UI")},
+        {"id": "en", "label": "English", "desc": _L("使用英文界面", "Use English UI")},
+    ]
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+
+        current_lang = _get_language()
+        idx = 0 if current_lang == "zh" else 1
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+            total_w = min(56, max_w - 4)
+            ph = len(options) + 5
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, _L("界面语言", "UI Language"), curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            for i, item in enumerate(options):
+                y = row + i
+                is_sel = i == idx
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.color_pair(1) | curses.A_DIM)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
+                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.A_DIM)
+
+            bot_y = row + len(options)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, _L("切换", "Apply"), curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 14, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 18, _L("返回", "Back"), curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(options)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(options)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return options[idx]["id"]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
 def select_settings_tui():
     """设置菜单 — H6 风格。"""
 
@@ -2107,6 +2229,90 @@ def select_settings_tui():
                 idx = (idx + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER):
                 return items[idx]["id"]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
+def select_fake_upstream_tui():
+    options = [
+        {"id": "on", "label": _L("开启", "Enable"), "desc": _L("开发时拦截真实上游请求", "Block real upstream requests in development")},
+        {"id": "off", "label": _L("关闭", "Disable"), "desc": _L("恢复真实上游请求", "Restore real upstream requests")},
+    ]
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+
+        status = _fake_upstream_status_payload()
+        idx = 0 if not status.get("enabled") else 1
+
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+
+            total_w = min(72, max_w - 4)
+            ph = len(options) + 7
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, "Fake Upstream", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(
+                stdscr,
+                row,
+                ll,
+                _L("当前状态：开启" if status.get("enabled") else "当前状态：关闭",
+                   "Current: Enabled" if status.get("enabled") else "Current: Disabled"),
+                curses.A_DIM,
+                max_w=total_w - 4,
+            )
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            for i, item in enumerate(options):
+                y = row + i
+                is_sel = i == idx
+                if is_sel:
+                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD)
+                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.color_pair(1) | curses.A_DIM, max_w=total_w - 18)
+                else:
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
+                    _safe_addstr(stdscr, y, ll + 14, item["desc"], curses.A_DIM, max_w=total_w - 18)
+
+            bot_y = row + len(options)
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 6, _L("应用", "Apply"), curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 14, "Esc", curses.A_BOLD)
+            _safe_addstr(stdscr, bot_y, ll + 18, _L("返回", "Back"), curses.A_DIM)
+            bot_y += 1
+            _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = (idx - 1) % len(options)
+            elif key == curses.KEY_DOWN:
+                idx = (idx + 1) % len(options)
+            elif key in (10, 13, curses.KEY_ENTER):
+                return options[idx]["id"]
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
@@ -2790,7 +2996,7 @@ def select_connect_tui():
         return "fallback"
 
 
-def confirm_tui(cli, model_info, env_vars=None, once=False):
+def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
     """确认启动 TUI。返回 (action, bypass, claude_1m_enabled) 三元组。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
@@ -2853,6 +3059,12 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
                 label = env_key[:6] + "…" if len(env_key) > 7 else env_key
                 detail_lines.append((label, value))
         detail_lines = detail_lines[:4]
+    if context_lines:
+        for item in context_lines:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            detail_lines.append((str(item[0]), str(item[1])))
+    detail_lines = detail_lines[:10]
 
     has_bypass = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
@@ -2874,23 +3086,35 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             max_y, max_w = stdscr.getmaxyx()
             ac = curses.color_pair(3) if bypass_mode else curses.color_pair(5)
 
-            total_w = min(56, max_w - 4)
+            total_w = min(90, max_w - 4)
             info_lines = []
             info_lines.append(("CLI", cli))
-            info_lines.append((_L("模型", "Model"), model_display[:total_w - 14]))
+            info_lines.append((_L("模型", "Model"), model_display))
             info_lines.append((_L("启动", "Launch"), _L("一次性命令", "One-shot command") if once else _L("交互会话", "Interactive session")))
             if has_bypass:
-                mode_text = _L("BYPASS（跳过审批）", "BYPASS (skip approvals)") if bypass_mode else _L("正常", "Normal")
-                info_lines.append((_L("模式", "Mode"), f"[Tab] {mode_text}"))
+                info_lines.append(("Bypass", f"[Tab] {'ON' if bypass_mode else 'OFF'}"))
             if has_claude_1m:
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
                 info_lines.append(("1M", f"[M] {one_m_text}"))
 
-            ph = len(info_lines) + len(detail_lines) + 5
             px = (max_w - total_w) // 2
-            py = max(1, (max_y - ph) // 2)
             ll = px + 2
             rr = px + total_w - 2
+            all_labels = [str(label) for label, _ in info_lines] + [str(label) for label, _ in detail_lines]
+            label_w = max((_display_width(label) for label in all_labels), default=6)
+            value_x = ll + label_w + 3
+            value_w = max(10, rr - value_x)
+            wrapped_info_lines = []
+            for label, value in info_lines:
+                value_lines = _wrap_display_lines(value, value_w)
+                wrapped_info_lines.append((label, value_lines))
+            wrapped_detail_lines = []
+            for label, value in detail_lines:
+                value_lines = _wrap_display_lines(value, value_w)
+                wrapped_detail_lines.append((label, value_lines))
+
+            ph = sum(len(values) for _, values in wrapped_info_lines) + sum(len(values) for _, values in wrapped_detail_lines) + 5
+            py = max(1, (max_y - ph) // 2)
 
             row = py
             _safe_addstr(stdscr, row, px, "-" * total_w, ac)
@@ -2901,19 +3125,27 @@ def confirm_tui(cli, model_info, env_vars=None, once=False):
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1
 
-            for label, value in info_lines:
-                if label in {"模式", "Mode"}:
+            for label, value_lines in wrapped_info_lines:
+                if label in {"Bypass"}:
                     val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
                 else:
                     val_attr = curses.color_pair(1)
-                _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
-                _safe_addstr(stdscr, row, ll + 7, value, val_attr, max_w=total_w - 12)
-                row += 1
+                for idx, value in enumerate(value_lines):
+                    if idx == 0:
+                        _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
+                    _safe_addstr(stdscr, row, value_x, value, val_attr, max_w=value_w)
+                    row += 1
 
-            for label, value in detail_lines:
-                _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
-                _safe_addstr(stdscr, row, ll + 7, str(value), curses.color_pair(2), max_w=total_w - 12)
-                row += 1
+            for label, value_lines in wrapped_detail_lines:
+                if label == "Fake":
+                    detail_attr = curses.color_pair(3) | curses.A_BOLD
+                else:
+                    detail_attr = curses.color_pair(2)
+                for idx, value in enumerate(value_lines):
+                    if idx == 0:
+                        _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
+                    _safe_addstr(stdscr, row, value_x, str(value), detail_attr, max_w=value_w)
+                    row += 1
 
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
             row += 1

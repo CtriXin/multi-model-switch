@@ -63,16 +63,21 @@ def _load_env_file(path: str) -> dict[str, str]:
 
 
 def _resolve_secret_value(profile: dict[str, Any], direct_key: str, env_key: str) -> str:
+    return _resolve_profile_value(profile, direct_key, env_key)[0]
+
+
+def _resolve_profile_value(profile: dict[str, Any], direct_key: str, env_key: str) -> tuple[str, bool]:
     env_name = _normalize_optional_str(profile.get(env_key))
     if env_name:
-        env_value = os.environ.get(env_name)
-        if env_value:
-            return env_value.strip()
+        if env_name in os.environ:
+            return str(os.environ.get(env_name, "")).strip(), True
         for credentials_path in (PRIMARY_CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
-            env_value = _load_env_file(credentials_path).get(env_name, "")
-            if env_value:
-                return env_value.strip()
-    return _normalize_optional_str(profile.get(direct_key))
+            values = _load_env_file(credentials_path)
+            if env_name in values:
+                return str(values.get(env_name, "")).strip(), True
+    if direct_key in profile:
+        return _normalize_optional_str(profile.get(direct_key)), True
+    return "", False
 
 
 def normalize_broker_profile(profile: dict[str, Any]) -> dict[str, Any]:
@@ -115,6 +120,14 @@ def normalize_broker_profile(profile: dict[str, Any]) -> dict[str, Any]:
         "remote_service_bearer_token_env": _normalize_optional_str(profile.get("remote_service_bearer_token_env")),
         "remote_service_api_key": _normalize_optional_str(profile.get("remote_service_api_key")),
         "remote_service_api_key_env": _normalize_optional_str(profile.get("remote_service_api_key_env")),
+        "remote_claude_ssh_target": _normalize_optional_str(profile.get("remote_claude_ssh_target")),
+        "remote_claude_ssh_target_env": _normalize_optional_str(profile.get("remote_claude_ssh_target_env")),
+        "remote_claude_container_name": _normalize_optional_str(profile.get("remote_claude_container_name")),
+        "remote_claude_container_name_env": _normalize_optional_str(profile.get("remote_claude_container_name_env")),
+        "remote_claude_credentials_path": _normalize_optional_str(profile.get("remote_claude_credentials_path")),
+        "remote_claude_credentials_path_env": _normalize_optional_str(profile.get("remote_claude_credentials_path_env")),
+        "remote_claude_global_config_path": _normalize_optional_str(profile.get("remote_claude_global_config_path")),
+        "remote_claude_global_config_path_env": _normalize_optional_str(profile.get("remote_claude_global_config_path_env")),
         "note": _normalize_optional_str(profile.get("note")),
     }
 
@@ -203,6 +216,28 @@ def _build_broker_env(profile: dict[str, Any], *, workspace_root: str, model_ove
         env["CC_BROKER_REMOTE_SERVICE_BEARER_TOKEN"] = remote_service_bearer_token
     if remote_service_api_key:
         env["CC_BROKER_REMOTE_SERVICE_X_API_KEY"] = remote_service_api_key
+
+    remote_claude_ssh_target, has_ssh_target = _resolve_profile_value(
+        profile, "remote_claude_ssh_target", "remote_claude_ssh_target_env"
+    )
+    remote_claude_container_name, has_container_name = _resolve_profile_value(
+        profile, "remote_claude_container_name", "remote_claude_container_name_env"
+    )
+    remote_claude_credentials_path, has_credentials_path = _resolve_profile_value(
+        profile, "remote_claude_credentials_path", "remote_claude_credentials_path_env"
+    )
+    remote_claude_global_config_path, has_global_config_path = _resolve_profile_value(
+        profile, "remote_claude_global_config_path", "remote_claude_global_config_path_env"
+    )
+
+    if has_ssh_target:
+        env["CC_BROKER_REMOTE_CLAUDE_SSH_TARGET"] = remote_claude_ssh_target
+    if has_container_name:
+        env["CC_BROKER_REMOTE_CLAUDE_CONTAINER_NAME"] = remote_claude_container_name
+    if has_credentials_path:
+        env["CC_BROKER_REMOTE_CLAUDE_CREDENTIALS_PATH"] = remote_claude_credentials_path
+    if has_global_config_path:
+        env["CC_BROKER_REMOTE_CLAUDE_GLOBAL_CONFIG_PATH"] = remote_claude_global_config_path
     return env
 
 
@@ -579,6 +614,10 @@ def _show_profile(cfg: dict[str, Any], profile_id: str) -> int:
         ("remote_service_endpoint", profile.get("remote_service_endpoint") or "-"),
         ("remote_service_model", profile.get("remote_service_model") or "-"),
         ("remote_service_auth", profile.get("remote_service_bearer_token_env") or profile.get("remote_service_api_key_env") or "inline/none"),
+        ("remote_claude_ssh_target_source", profile.get("remote_claude_ssh_target_env") or "inline/none"),
+        ("remote_claude_container_name_source", profile.get("remote_claude_container_name_env") or "inline/none"),
+        ("remote_claude_credentials_path_source", profile.get("remote_claude_credentials_path_env") or "inline/none"),
+        ("remote_claude_global_config_path_source", profile.get("remote_claude_global_config_path_env") or "inline/none"),
         ("broker_repo_path", profile.get("broker_repo_path") or "-"),
         ("runner_tools", ", ".join(profile.get("runner_tools") or []) or "-"),
         ("runner_writable_scope", profile.get("runner_writable_scope") or "-"),

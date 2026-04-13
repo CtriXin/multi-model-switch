@@ -736,6 +736,167 @@ PY
     return 0
 }
 
+merge_claude_settings_template() {
+    local settings_path="$1"
+    local template_path="$2"
+    local py_output=""
+
+    if [ ! -f "$template_path" ]; then
+        echo "⚠ $(t "找不到 Claude settings 模板，跳过合并" "Claude settings template not found, skipping merge"): $template_path"
+        return 1
+    fi
+
+    py_output="$(python3 - "$settings_path" "$template_path" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+template_path = Path(sys.argv[2])
+
+
+def normalize(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def load_json(path):
+    if not path.exists():
+        return {}
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def ensure_backup(path):
+    backup = path.with_name(f"{path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    shutil.copy2(path, backup)
+    return backup
+
+
+def merge_command_groups(existing_groups, template_groups):
+    groups = []
+    if isinstance(existing_groups, list):
+        groups.extend(existing_groups)
+    if not isinstance(template_groups, list):
+        return groups
+    for template_group in template_groups:
+        if not isinstance(template_group, dict):
+            continue
+        matcher = str(template_group.get("matcher") or "").strip()
+        template_hooks = template_group.get("hooks")
+        if not isinstance(template_hooks, list):
+            continue
+        target = None
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            if str(group.get("matcher") or "").strip() == matcher:
+                target = group
+                break
+        if target is None:
+            target = {"matcher": matcher, "hooks": []}
+            groups.append(target)
+        hook_items = target.get("hooks")
+        if not isinstance(hook_items, list):
+            hook_items = []
+            target["hooks"] = hook_items
+        seen = {normalize(hook.get("command")) for hook in hook_items if isinstance(hook, dict)}
+        for hook in template_hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = normalize(hook.get("command"))
+            if not command or command in seen:
+                continue
+            hook_items.append(dict(hook))
+            seen.add(command)
+    return groups
+
+
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+backup_path = None
+try:
+    data = load_json(settings_path)
+except Exception:
+    backup_path = ensure_backup(settings_path)
+    data = {}
+
+template = load_json(template_path)
+
+for key in [
+    "includeCoAuthoredBy",
+    "skipDangerousModePermissionPrompt",
+    "model",
+    "promptSuggestionEnabled",
+]:
+    if key in template and key not in data:
+        data[key] = template[key]
+
+if isinstance(template.get("attribution"), dict) and not isinstance(data.get("attribution"), dict):
+    data["attribution"] = dict(template["attribution"])
+
+if isinstance(template.get("statusLine"), dict):
+    status = dict(data.get("statusLine") or {})
+    status.update(template["statusLine"])
+    data["statusLine"] = status
+
+if isinstance(template.get("permissions"), dict):
+    permissions = dict(data.get("permissions") or {})
+    for list_key in ["allow", "deny"]:
+        values = []
+        seen = set()
+        for item in list(permissions.get(list_key) or []) + list(template["permissions"].get(list_key) or []):
+            norm = str(item or "").strip()
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            values.append(norm)
+        permissions[list_key] = values
+    if "defaultMode" in template["permissions"] and not permissions.get("defaultMode"):
+        permissions["defaultMode"] = template["permissions"]["defaultMode"]
+    data["permissions"] = permissions
+
+hooks = data.get("hooks")
+if not isinstance(hooks, dict):
+    hooks = {}
+for event_name, template_groups in (template.get("hooks") or {}).items():
+    hooks[event_name] = merge_command_groups(hooks.get(event_name), template_groups)
+data["hooks"] = hooks
+
+settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+if backup_path is not None:
+    print(f"BACKUP:{backup_path}")
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                BACKUP:*)
+                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
+                    ;;
+            esac
+        done
+    fi
+
+    echo "✓ $(t "已合并 Claude settings 模板" "Merged Claude settings template"): $settings_path"
+    return 0
+}
+
+repair_managed_claude_settings() {
+    local global_template_path="$SOURCE_DIR/claude-settings.global-template.json"
+    local session_template_path="$SOURCE_DIR/claude-settings.template.json"
+    local snapshot_path="${MMS_HOME:-$REAL_HOME/.mms}/state/claude-global-managed-snapshot.json"
+
+    merge_claude_settings_template "$REAL_HOME/.claude/settings.json" "$global_template_path" || true
+    mkdir -p "$(dirname "$snapshot_path")"
+    cp "$global_template_path" "$snapshot_path" 2>/dev/null || true
+    merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
+}
+
+repair_managed_claude_settings
+
+
 enable_rtk_rewrite_hook() {
     local hook_source="$SOURCE_DIR/hooks/rtk-rewrite.sh"
     local claude_dir="$HOME/.claude"
@@ -1676,6 +1837,7 @@ mkdir -p "$BIN_DIR"
 # 创建 symlink
 ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms $(t "和" "and") $BIN_DIR/ccs"
 
 # 检查 PATH 是否包含 ~/.local/bin

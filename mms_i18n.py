@@ -26,7 +26,9 @@ def set_language(value):
 
 def get_language():
     env_lang = normalize_language(os.environ.get("MMS_LANG", ""))
-    return env_lang or _CURRENT_LANGUAGE
+    if env_lang:
+        return env_lang
+    return _CURRENT_LANGUAGE
 
 
 def pick(zh_text, en_text=None):
