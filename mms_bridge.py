@@ -1594,10 +1594,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             "x-api-key": gateway_key,
             "Authorization": f"Bearer {gateway_key}",
         }
+        claude_passthrough = _CLAUDE_HEADER_PASSTHROUGH
+        if getattr(self.server, "strip_upstream_user_agent", False):
+            claude_passthrough = tuple(name for name in _CLAUDE_HEADER_PASSTHROUGH if name != "User-Agent")
         fwd_headers.update(
             _copy_passthrough_headers(
                 self.headers,
-                names=_CLAUDE_HEADER_PASSTHROUGH,
+                names=claude_passthrough,
                 prefixes=_CLAUDE_HEADER_PREFIX_PASSTHROUGH,
             )
         )
@@ -2654,6 +2657,7 @@ def gateway_claude_bridge(
     route_status_paths=None,
     slot_configs=None,
     openai_url=None,
+    strip_upstream_user_agent=False,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -2683,6 +2687,7 @@ def gateway_claude_bridge(
     server.route_status_paths = list(route_status_paths or [])
     server.slot_configs = slot_configs or {}
     server.openai_url = openai_url
+    server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

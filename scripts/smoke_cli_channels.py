@@ -18,7 +18,10 @@ if ROOT_DIR not in sys.path:
 
 from mms_bridge import codex_chatcompletions_bridge, codex_responses_bridge, gateway_claude_bridge
 from mms_core import _probe_models, _provider_map, apply_local_overrides, load_config, resolve_provider_context
+from mms_fake_upstream import patch_httpx_module as _patch_fake_httpx
 from mms_launchers import _is_gpt_model, _openai_base_url, _resolve_anthropic_base_url
+
+_patch_fake_httpx(httpx)
 
 
 def _trim(text: str, limit: int = 240) -> str:
@@ -111,7 +114,10 @@ def _smoke_claude(runtime: dict[str, Any], *, model: str = "", timeout: int = 45
         "messages": [{"role": "user", "content": "Reply with OK only."}],
     }
 
-    if anthropic_url:
+    # CLIProxyAPI 对 Claude CLI 的 User-Agent 有差异化路由；为了和真实 launcher 行为一致，
+    # smoke 在这里也统一走本地 gateway bridge，再决定是否透传 User-Agent。
+    prefer_launcher_bridge = "cliproxyapi" in provider_id.lower()
+    if anthropic_url and not prefer_launcher_bridge:
         direct_headers = dict(headers)
         direct_headers["x-api-key"] = runtime.get("api_key", "")
         direct_headers["Authorization"] = f"Bearer {runtime.get('api_key', '')}"
@@ -124,12 +130,19 @@ def _smoke_claude(runtime: dict[str, Any], *, model: str = "", timeout: int = 45
         preview = body.get("content") if isinstance(body, dict) else None
         return _result(provider_id, "claude", ok, "direct", selected_model, str(resp.status_code), f"resolved={anthropic_url} method={method}", preview=preview)
 
-    openai_url = _openai_base_url(runtime)
-    api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
-    if not openai_url or not api_key:
+    bridge_url = anthropic_url.rstrip("/") + "/v1" if anthropic_url else _openai_base_url(runtime)
+    api_key = runtime.get("api_key", "") if anthropic_url else (runtime.get("openai_api_key") or runtime.get("api_key", ""))
+    if not bridge_url or not api_key:
         return _result(provider_id, "claude", False, "unavailable", selected_model, "no_route", "既没有可用 anthropic route，也没有可桥接的 openai route")
 
-    with gateway_claude_bridge(openai_url, api_key, heavy_model=selected_model, advertised_models=advertised) as bridge:
+    with gateway_claude_bridge(
+        bridge_url,
+        api_key,
+        heavy_model=selected_model,
+        advertised_models=advertised,
+        openai_url=_openai_base_url(runtime),
+        strip_upstream_user_agent=prefer_launcher_bridge,
+    ) as bridge:
         bridge_headers = dict(headers)
         bridge_headers["x-api-key"] = bridge["api_key"]
         bridge_headers["Authorization"] = f"Bearer {bridge['api_key']}"

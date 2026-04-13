@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import types
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -195,6 +196,87 @@ def test_normalize_provider_defaults_timezone_to_us():
     assert provider["timezone"] == DEFAULT_ACCOUNT_TIMEZONE
 
 
+def test_snapshot_file_entry_ignores_claude_runtime_noise(tmp_path):
+    import mms_core
+
+    path = tmp_path / ".claude.json"
+    path.write_text(
+        json.dumps(
+            {
+                "userID": "user-1",
+                "numStartups": 1,
+                "projects": {"/tmp/repo": {"lastSessionId": "a", "lastCost": 1}},
+                "oauthAccount": {
+                    "accountUuid": "acct-1",
+                    "emailAddress": "u@example.com",
+                    "organizationUuid": "org-1",
+                    "displayName": "User",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = mms_core._snapshot_file_entry(str(path))
+
+    path.write_text(
+        json.dumps(
+            {
+                "userID": "user-1",
+                "numStartups": 99,
+                "projects": {"/tmp/repo": {"lastSessionId": "b", "lastCost": 999}},
+                "oauthAccount": {
+                    "accountUuid": "acct-1",
+                    "emailAddress": "u@example.com",
+                    "organizationUuid": "org-1",
+                    "displayName": "User",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    second = mms_core._snapshot_file_entry(str(path))
+
+    assert first["sha256"] == second["sha256"]
+    assert first["normalized_kind"] == "claude_state_identity"
+
+
+def test_snapshot_file_entry_detects_claude_identity_change(tmp_path):
+    import mms_core
+
+    path = tmp_path / ".claude.json"
+    path.write_text(
+        json.dumps(
+            {
+                "userID": "user-1",
+                "oauthAccount": {
+                    "accountUuid": "acct-1",
+                    "emailAddress": "u@example.com",
+                    "organizationUuid": "org-1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = mms_core._snapshot_file_entry(str(path))
+
+    path.write_text(
+        json.dumps(
+            {
+                "userID": "user-2",
+                "oauthAccount": {
+                    "accountUuid": "acct-2",
+                    "emailAddress": "u@example.com",
+                    "organizationUuid": "org-1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    second = mms_core._snapshot_file_entry(str(path))
+
+    assert first["sha256"] != second["sha256"]
+
+
 def test_detect_working_base_url_uses_runtime_proxy(monkeypatch):
     import mms_core
 
@@ -295,7 +377,7 @@ def test_gateway_ping_uses_runtime_proxy(monkeypatch):
 def test_validate_proxy_url_accepts_mainstream_formats():
     from mms_core import _validate_proxy_url
 
-    assert _validate_proxy_url("http://user:pass@168.158.185.127:6394") is None
+    assert _validate_proxy_url("http://user:pass@198.51.100.24:6394") is None
     assert _validate_proxy_url("socks5h://127.0.0.1:7890") is None
 
 
@@ -383,16 +465,162 @@ def test_runtime_network_summary_masks_proxy_secret():
 
     summary = _runtime_network_summary(
         {
-            "proxy": "http://uqdefwnm:mxewpcc42roq@168.158.185.127:6394",
+            "proxy": "http://demo-user:demo-pass@198.51.100.24:6394",
             "timezone": "America/Los_Angeles",
             "force_ipv4": True,
         }
     )
 
-    assert "mxewpcc42roq" not in summary
-    assert "168.158.185.127:6394" in summary
+    assert "demo-pass" not in summary
+    assert "198.51.100.24:6394" in summary
+    assert "DNS proxy-likely" in summary
     assert "TZ America/Los_Angeles" in summary
     assert "IPv4 on" in summary
+
+
+def test_validate_home_context_accepts_isolated_oauth_session(tmp_path):
+    from mms_launchers import _build_home_context, _validate_home_context_or_exit
+
+    real_home = tmp_path / "real-home"
+    account_home = real_home / ".config" / "mms" / "accounts" / "claude-a"
+    session_home = account_home / "s" / "12345"
+
+    context = _build_home_context(
+        {
+            "HOME": str(session_home),
+            "MMS_SESSION_HOME": str(session_home),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        },
+        {
+            "id": "claude-a",
+            "cli": "claude",
+            "auth_mode": "oauth",
+            "home_dir": str(account_home),
+            "proxy": "http://127.0.0.1:7890",
+        },
+        "claude",
+    )
+
+    result = _validate_home_context_or_exit(context)
+
+    assert result["real_home"] == str(real_home)
+    assert result["session_home"] == str(session_home)
+    assert result["config_root"] == str(real_home / ".config" / "mms")
+    assert result["net_mode"] == "proxy"
+    assert result["dns_mode"] == "proxy-likely"
+
+
+def test_validate_home_context_blocks_oauth_real_home_leak(tmp_path):
+    from mms_launchers import _build_home_context, _validate_home_context_or_exit
+
+    real_home = tmp_path / "real-home"
+    account_home = real_home / ".config" / "mms" / "accounts" / "claude-a"
+
+    context = _build_home_context(
+        {
+            "HOME": str(real_home),
+            "MMS_SESSION_HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        },
+        {
+            "id": "claude-a",
+            "cli": "claude",
+            "auth_mode": "oauth",
+            "home_dir": str(account_home),
+        },
+        "claude",
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_home_context_or_exit(context)
+
+
+def test_validate_home_context_blocks_codex_xdg_drift(tmp_path):
+    from mms_launchers import _build_home_context, _validate_home_context_or_exit
+
+    real_home = tmp_path / "real-home"
+    account_home = real_home / ".config" / "mms" / "accounts" / "codex-a"
+    session_home = account_home / "s" / "23456"
+
+    context = _build_home_context(
+        {
+            "HOME": str(session_home),
+            "MMS_SESSION_HOME": str(session_home),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+            "XDG_CONFIG_HOME": str(real_home / ".config"),
+        },
+        {
+            "id": "codex-a",
+            "cli": "codex",
+            "auth_mode": "oauth",
+            "home_dir": str(account_home),
+        },
+        "codex",
+    )
+
+    with pytest.raises(SystemExit):
+        _validate_home_context_or_exit(context)
+
+
+def test_emit_dns_guard_hint_warns_for_local_dns_risk(capsys):
+    from mms_launchers import _emit_dns_guard_hint
+
+    _emit_dns_guard_hint(
+        {"proxy": "socks5://127.0.0.1:7890", "auth_mode": "oauth"},
+        cli_name="claude",
+        auth_mode="oauth",
+    )
+
+    captured = capsys.readouterr()
+    assert "DNS 风险" in captured.out
+
+
+def test_emit_dns_guard_hint_silent_for_proxy_likely(capsys):
+    from mms_launchers import _emit_dns_guard_hint
+
+    _emit_dns_guard_hint(
+        {"proxy": "http://127.0.0.1:7890", "auth_mode": "oauth"},
+        cli_name="claude",
+        auth_mode="oauth",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_gateway_claude_bridge_context_drops_unknown_kwargs(monkeypatch, capsys):
+    import mms_launchers
+
+    calls = {}
+
+    @contextmanager
+    def fake_old_bridge(gateway_url, gateway_key, heavy_model=None):
+        calls["gateway_url"] = gateway_url
+        calls["gateway_key"] = gateway_key
+        calls["heavy_model"] = heavy_model
+        yield {"base_url": "http://127.0.0.1:1", "api_key": "bridge-token"}
+
+    monkeypatch.setattr(mms_launchers, "gateway_claude_bridge", fake_old_bridge)
+
+    with mms_launchers._gateway_claude_bridge_context(
+        "https://gateway.example.com/v1",
+        "sk-test",
+        heavy_model="gpt-5.4",
+        strip_upstream_user_agent=True,
+    ) as bridge_cfg:
+        assert bridge_cfg["api_key"] == "bridge-token"
+
+    captured = capsys.readouterr()
+    assert calls["gateway_url"] == "https://gateway.example.com/v1"
+    assert calls["gateway_key"] == "sk-test"
+    assert calls["heavy_model"] == "gpt-5.4"
+    assert "旧版 bridge 签名" in captured.out
 
 
 def test_account_guard_report_detects_profile_drift(monkeypatch, tmp_path):
@@ -488,3 +716,63 @@ def test_record_account_guard_finalize_tracks_failures(monkeypatch, tmp_path):
     mms_launchers._record_account_guard_finalize("claude-a", exit_code=0)
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert payload["accounts"]["claude-a"]["consecutive_failures"] == 0
+
+
+def test_claude_network_guard_blocks_bypass_without_proxy():
+    from mms_launchers import build_claude_network_guard
+
+    guard = build_claude_network_guard(
+        {
+            "id": "claude-a",
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        },
+        require_proxy=True,
+    )
+
+    assert guard["status"] == "blocked"
+    assert "必须配置 proxy" in guard["block_reason"]
+
+
+def test_claude_network_guard_blocks_no_proxy_conflict():
+    from mms_launchers import build_claude_network_guard
+
+    guard = build_claude_network_guard(
+        {
+            "id": "claude-a",
+            "proxy": "http://127.0.0.1:7890",
+            "no_proxy": "claude.ai,localhost",
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        },
+        require_proxy=True,
+    )
+
+    assert guard["status"] == "blocked"
+    assert "直连泄漏风险" in guard["block_reason"]
+    assert "claude.ai" in guard["no_proxy_conflicts"]
+
+
+def test_claude_network_guard_collects_targets_and_egress(monkeypatch):
+    import mms_launchers
+
+    def fake_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, resolve_ip=False):
+        if resolve_ip:
+            return {"ok": True, "body": "1.2.3.4", "detail": "", "http_code": ""}
+        return {"ok": True, "detail": "", "http_code": "200", "body": "200"}
+
+    monkeypatch.setattr(mms_launchers, "_run_proxy_probe", fake_probe)
+    guard = mms_launchers.build_claude_network_guard(
+        {
+            "id": "claude-a",
+            "proxy": "http://127.0.0.1:7890",
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        },
+        require_proxy=True,
+    )
+
+    assert guard["status"] == "ok"
+    assert guard["dns_mode"] == "proxy-likely"
+    assert guard["ipv4_egress"] == "1.2.3.4"
+    assert all(item["ok"] for item in guard["targets"])

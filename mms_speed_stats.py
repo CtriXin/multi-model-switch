@@ -52,6 +52,7 @@ def _infer_upstream_provider(model_name: str | None) -> str:
         ("google", ("gemini",)),
         ("qwen", ("qwen",)),
         ("kimi", ("kimi",)),
+        ("mimo", ("mimo",)),
         ("minimax", ("minimax",)),
         ("glm", ("glm",)),
     ]

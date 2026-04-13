@@ -10,10 +10,19 @@ import shutil
 import logging
 import threading
 import time
+import inspect
+import hashlib
+import tempfile
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from contextlib import contextmanager
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - not expected on macOS/Linux
+    fcntl = None
 
 try:
     import tomllib
@@ -81,6 +90,15 @@ from mms_broker import (
     run_broker_profile_interactive,
     run_broker_profile,
 )
+from mms_fake_upstream import (
+    fake_httpx_response as _fake_httpx_response,
+    fake_proxy_probe as _fake_proxy_probe,
+    is_enabled as _fake_upstream_enabled,
+    is_local_url as _fake_upstream_is_local_url,
+    set_enabled as _set_fake_upstream_enabled,
+    status_payload as _fake_upstream_status_payload,
+    tail_log as _fake_upstream_tail_log,
+)
 from mms_i18n import normalize_language, set_language, pick as _L
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
@@ -121,6 +139,20 @@ OVERRIDE_PATHS = [
     os.path.join(LEGACY_CONFIG_DIR, "override.toml"),
     os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
+CONFIG_AUDIT_LOG = "config-audit.jsonl"
+CONFIG_LOCK_FILE = "config.toml.lock"
+CONFIG_GUARD_FILES = ("AGENTS.md", "CLAUDE.md")
+CONFIG_SNAPSHOT_DIR = "snapshots"
+CONFIG_SNAPSHOT_SCHEMA = 1
+CONFIG_GUARD_EXIT_CODE = 41
+SNAPSHOT_IGNORED_FILES = (
+    "config.toml",
+    CONFIG_AUDIT_LOG,
+    "usage.json",
+    "account-guard-state.json",
+)
+
+_CONFIG_WRITE_PROCESS_LOCK = threading.Lock()
 
 _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
@@ -738,6 +770,8 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
     _ensure_httpx()
     if httpx is None:
         raise RuntimeError("missing httpx")
+    if _fake_upstream_enabled() and not _fake_upstream_is_local_url(url):
+        return _fake_httpx_response(httpx, method, url, **kwargs)
     transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime))
     with httpx.Client(transport=transport, follow_redirects=follow_redirects) as client:
         return client.request(method, url, **kwargs)
@@ -767,6 +801,15 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
         return True, "未配置代理，跳过检测"
+    if _fake_upstream_enabled():
+        probe = _fake_proxy_probe(
+            target_url,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
+            force_ipv4=force_ipv4,
+            resolve_ip=False,
+        )
+        return bool(probe.get("ok")), str(probe.get("detail") or probe.get("http_code") or "fake upstream")
     curl_bin = shutil.which("curl")
     if not curl_bin:
         return False, "当前系统没有 curl，无法测试代理连通性"
@@ -1674,8 +1717,555 @@ def _active_usage_path():
             return base_usage_path
     return _first_existing_path(USAGE_PATH, LEGACY_USAGE_PATH)
 
+
+def _config_guard_root_dir(config_path=None):
+    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
+    base_primary_dir = _base_user_primary_dir_from_gateway(target_path)
+    if base_primary_dir:
+        return base_primary_dir
+    return os.path.dirname(target_path)
+
+
+def _config_snapshot_root(config_path=None):
+    return os.path.join(_config_guard_root_dir(config_path), CONFIG_SNAPSHOT_DIR)
+
+
+def _config_snapshot_path(snapshot_kind, filename="latest.json", *, config_path=None):
+    return os.path.join(_config_snapshot_root(config_path), snapshot_kind, filename)
+
+
+def _is_snapshot_ignored_file(path):
+    name = os.path.basename(str(path or ""))
+    return name in SNAPSHOT_IGNORED_FILES
+
+
+def _render_mms_config_agents_guard():
+    return """# AGENTS.md
+
+This folder stores the real MMS user config.
+
+## MMS Config Human Gate
+
+- Any agent, any repo, any automation touching this folder must stop and require human confirmation before write.
+- Before every write, create a timestamped backup first. Never overwrite in place without a backup.
+- Applies to the whole MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and any account state under this folder.
+- Agents may inspect, diff, and propose changes, but must not auto-apply user config edits without human confirmation.
+- Any proposed change must show target path, affected fields/files, before/after values, and reason.
+- If the process is running inside an isolated HOME or gateway session, still resolve and protect the real user config under `~/.config/mms`.
+"""
+
+
+def _render_mms_config_claude_guard():
+    return """# CLAUDE.md
+
+This folder stores the real MMS user config.
+
+## Claude Hard Rule
+
+- Claude must treat this folder as human-only config.
+- Claude must never auto-write MMS user config without explicit human confirmation.
+- Before every write, Claude must create a timestamped backup first.
+- Claude may only inspect, explain, and generate manual diffs for changes to this folder until the human confirms.
+- This applies to the full MMS config tree, including `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and account state files.
+- If Claude is about to touch these files, it must stop and report the exact path, intended change, before/after values, and reason.
+"""
+
+
+def _ensure_mms_config_guard_files(config_path=None):
+    root_dir = _config_guard_root_dir(config_path)
+    os.makedirs(root_dir, exist_ok=True)
+    guard_payloads = {
+        "AGENTS.md": _render_mms_config_agents_guard(),
+        "CLAUDE.md": _render_mms_config_claude_guard(),
+    }
+    backup_dir = ""
+    for filename, content in guard_payloads.items():
+        target_path = os.path.join(root_dir, filename)
+        existing = ""
+        if os.path.exists(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    existing = f.read()
+            except OSError:
+                existing = ""
+        if existing == content:
+            continue
+        if existing:
+            if not backup_dir:
+                backup_dir = os.path.join(
+                    _config_backup_root(os.path.join(root_dir, "config.toml")),
+                    f"guardrails-{_local_now_slug()}",
+                )
+                os.makedirs(backup_dir, exist_ok=True)
+            shutil.copy2(target_path, os.path.join(backup_dir, filename))
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        try:
+            os.chmod(target_path, 0o600)
+        except OSError:
+            pass
+
+
+def _sha256_text(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _snapshot_proxy_fingerprint(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return "direct"
+    parsed = urlparse(proxy_url)
+    scheme = parsed.scheme or "proxy"
+    host = parsed.hostname or "unknown"
+    port = f":{parsed.port}" if parsed.port else ""
+    auth = "+auth" if parsed.username or parsed.password else ""
+    return f"{scheme}://{host}{port}{auth}"
+
+
+def _snapshot_cli_state(home_dir, cli_name):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    if not home_dir:
+        return []
+    if cli_name == "claude":
+        return [
+            os.path.join(home_dir, ".claude", "settings.json"),
+        ]
+    if cli_name == "codex":
+        return [
+            os.path.join(home_dir, ".codex", "auth.json"),
+            os.path.join(home_dir, ".codex", "config.toml"),
+        ]
+    if cli_name == "gemini":
+        return [
+            os.path.join(home_dir, ".gemini", "settings.json"),
+            os.path.join(home_dir, ".gemini", ".env"),
+        ]
+    return []
+
+
+def _snapshot_file_entry(path):
+    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
+    entry = {"path": absolute_path, "exists": os.path.exists(absolute_path)}
+    if not entry["exists"]:
+        return entry
+    try:
+        stat = os.stat(absolute_path)
+        entry["size"] = int(stat.st_size)
+        entry["mtime"] = int(stat.st_mtime)
+    except OSError:
+        entry["size"] = 0
+        entry["mtime"] = 0
+    try:
+        normalized_bytes, normalized_kind = _snapshot_file_content_bytes(absolute_path)
+    except OSError:
+        entry["read_error"] = True
+        return entry
+    entry["sha256"] = hashlib.sha256(normalized_bytes).hexdigest()
+    if normalized_kind:
+        entry["normalized_kind"] = normalized_kind
+    return entry
+
+
+def _normalize_claude_state_snapshot_payload(data):
+    data = data if isinstance(data, dict) else {}
+    oauth_account = data.get("oauthAccount") if isinstance(data.get("oauthAccount"), dict) else {}
+    return {
+        "userID": str(data.get("userID") or "").strip(),
+        "oauthAccount": {
+            "accountUuid": str(oauth_account.get("accountUuid") or "").strip(),
+            "emailAddress": str(oauth_account.get("emailAddress") or "").strip(),
+            "organizationUuid": str(oauth_account.get("organizationUuid") or "").strip(),
+            "billingType": str(oauth_account.get("billingType") or "").strip(),
+            "displayName": str(oauth_account.get("displayName") or "").strip(),
+            "organizationRole": str(oauth_account.get("organizationRole") or "").strip(),
+            "workspaceRole": str(oauth_account.get("workspaceRole") or "").strip(),
+            "organizationName": str(oauth_account.get("organizationName") or "").strip(),
+        },
+    }
+
+
+def _snapshot_file_content_bytes(path):
+    absolute_path = os.path.abspath(os.path.expanduser(str(path)))
+    if os.path.basename(absolute_path) == ".claude.json":
+        with open(absolute_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        normalized = _normalize_claude_state_snapshot_payload(data)
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_state_identity"
+    with open(absolute_path, "rb") as f:
+        return f.read(), ""
+
+
+def _snapshot_account_entry(account):
+    account = account if isinstance(account, dict) else {}
+    proxy_value = str(account.get("proxy") or "").strip()
+    home_dir = os.path.expanduser(str(account.get("home_dir") or "").strip())
+    identity = _snapshot_claude_identity_entry(home_dir) if str(account.get("cli") or "").strip() == "claude" else {}
+    return {
+        "id": str(account.get("id") or "").strip(),
+        "cli": str(account.get("cli") or "").strip(),
+        "enabled": bool(account.get("enabled", True)),
+        "home_dir": home_dir,
+        "priority": _normalize_priority(account.get("priority", DEFAULT_PRIORITY)),
+        "claude_1m_mode": str(account.get("claude_1m_mode") or "auto").strip(),
+        "timezone": _normalize_timezone_name(account.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE),
+        "force_ipv4": bool(_runtime_force_ipv4(account)),
+        "no_proxy": str(account.get("no_proxy") or "").strip(),
+        "proxy_fingerprint": _snapshot_proxy_fingerprint(proxy_value),
+        "proxy_sha256": _sha256_text(proxy_value),
+        "identity_fingerprint": identity.get("fingerprint", ""),
+        "identity_sha256": identity.get("sha256", ""),
+    }
+
+
+def _snapshot_claude_identity_entry(home_dir):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    target = os.path.join(home_dir, ".claude.json")
+    if not target or not os.path.exists(target):
+        return {"fingerprint": "", "sha256": ""}
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"fingerprint": "", "sha256": ""}
+    normalized = _normalize_claude_state_snapshot_payload(data)
+    oauth = normalized.get("oauthAccount") if isinstance(normalized.get("oauthAccount"), dict) else {}
+    fingerprint = "|".join(
+        [
+            _mask_identity_value(normalized.get("userID") or "", keep=4),
+            _mask_identity_value(oauth.get("accountUuid") or "", keep=4),
+            _mask_identity_value(oauth.get("organizationUuid") or "", keep=4),
+            _mask_email_value(oauth.get("emailAddress") or ""),
+        ]
+    )
+    return {
+        "fingerprint": fingerprint,
+        "sha256": _sha256_text(json.dumps(normalized, ensure_ascii=False, sort_keys=True)),
+    }
+
+
+def _snapshot_provider_entry(provider):
+    provider = provider if isinstance(provider, dict) else {}
+    proxy_value = str(provider.get("proxy") or "").strip()
+    return {
+        "id": str(provider.get("id") or "").strip(),
+        "name": str(provider.get("name") or "").strip(),
+        "enabled": bool(provider.get("enabled", True)),
+        "priority": _normalize_priority(provider.get("priority", DEFAULT_PRIORITY)),
+        "models_endpoint": str(provider.get("models_endpoint") or "").strip(),
+        "timezone": _normalize_timezone_name(provider.get("timezone"), DEFAULT_ACCOUNT_TIMEZONE),
+        "force_ipv4": bool(_runtime_force_ipv4(provider)),
+        "no_proxy": str(provider.get("no_proxy") or "").strip(),
+        "proxy_fingerprint": _snapshot_proxy_fingerprint(proxy_value),
+        "proxy_sha256": _sha256_text(proxy_value),
+    }
+
+
+def _build_config_guard_snapshot(cfg, *, config_path=None):
+    cfg = cfg if isinstance(cfg, dict) else _default_config()
+    config_path = os.path.abspath(str(config_path or _config_write_target_path()))
+    config_root = _config_guard_root_dir(config_path)
+    real_home = os.path.expanduser(
+        str(os.environ.get("MMS_REAL_HOME") or os.environ.get("ORIGINAL_HOME") or os.environ.get("REAL_HOME") or "~")
+    )
+
+    files = [
+        os.path.join(config_root, "override.toml"),
+        os.path.join(config_root, "credentials.sh"),
+        os.path.join(config_root, "usage.json"),
+        os.path.join(config_root, "account-guard-state.json"),
+        os.path.join(config_root, "AGENTS.md"),
+        os.path.join(config_root, "CLAUDE.md"),
+    ]
+    accounts = []
+    for account in cfg.get("accounts", []):
+        if not isinstance(account, dict):
+            continue
+        entry = _snapshot_account_entry(account)
+        accounts.append(entry)
+        files.extend(_snapshot_cli_state(entry.get("home_dir"), entry.get("cli")))
+    providers = [
+        _snapshot_provider_entry(provider)
+        for provider in cfg.get("providers", [])
+        if isinstance(provider, dict)
+    ]
+
+    deduped_files = []
+    seen_paths = set()
+    for path in files:
+        normalized = os.path.abspath(os.path.expanduser(str(path)))
+        if _is_snapshot_ignored_file(normalized):
+            continue
+        if normalized in seen_paths:
+            continue
+        seen_paths.add(normalized)
+        deduped_files.append(_snapshot_file_entry(normalized))
+
+    return {
+        "schema": CONFIG_SNAPSHOT_SCHEMA,
+        "captured_at": _iso_now(),
+        "config_root": config_root,
+        "config_path": config_path,
+        "real_home": real_home,
+        "defaults": {
+            "provider_default": str(cfg.get("provider", {}).get("default") or "").strip(),
+            "account_defaults": dict(cfg.get("account", {}).get("defaults") or {}),
+        },
+        "accounts": sorted(accounts, key=lambda item: item.get("id", "")),
+        "providers": sorted(providers, key=lambda item: item.get("id", "")),
+        "files": sorted(deduped_files, key=lambda item: item.get("path", "")),
+    }
+
+
+def _snapshot_digest(snapshot_data):
+    payload = json.dumps(snapshot_data, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _load_json_snapshot(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _write_json_snapshot(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _snapshot_period_bucket(period_name):
+    now = datetime.now()
+    if period_name == "daily":
+        return now.strftime("%Y-%m-%d")
+    if period_name == "weekly":
+        year, week, _ = now.isocalendar()
+        return f"{year}-W{week:02d}"
+    return now.strftime("%Y-%m-%dT%H:%M")
+
+
+def _update_periodic_snapshot(period_name, snapshot_data, *, config_path=None):
+    path = _config_snapshot_path(period_name, "latest.json", config_path=config_path)
+    payload = {
+        "period": period_name,
+        "bucket": _snapshot_period_bucket(period_name),
+        "captured_at": _iso_now(),
+        "digest": _snapshot_digest(snapshot_data),
+        "snapshot": snapshot_data,
+    }
+    _write_json_snapshot(path, payload)
+
+
+def _snapshot_diff_lines(previous_snapshot, current_snapshot):
+    diffs = []
+    previous_snapshot = previous_snapshot if isinstance(previous_snapshot, dict) else {}
+    current_snapshot = current_snapshot if isinstance(current_snapshot, dict) else {}
+
+    previous_defaults = previous_snapshot.get("defaults") or {}
+    current_defaults = current_snapshot.get("defaults") or {}
+    if previous_defaults != current_defaults:
+        diffs.append("default route/account changed")
+
+    previous_accounts = {
+        str(item.get("id") or "").strip(): item
+        for item in previous_snapshot.get("accounts", [])
+        if isinstance(item, dict)
+    }
+    current_accounts = {
+        str(item.get("id") or "").strip(): item
+        for item in current_snapshot.get("accounts", [])
+        if isinstance(item, dict)
+    }
+    for account_id in sorted(set(previous_accounts) | set(current_accounts)):
+        previous_entry = previous_accounts.get(account_id)
+        current_entry = current_accounts.get(account_id)
+        if previous_entry is None:
+            diffs.append(f"account added: {account_id}")
+            continue
+        if current_entry is None:
+            diffs.append(f"account removed: {account_id}")
+            continue
+        field_labels = {
+            "cli": "cli",
+            "enabled": "enabled",
+            "home_dir": "home_dir",
+            "priority": "priority",
+            "claude_1m_mode": "claude_1m_mode",
+            "timezone": "timezone",
+            "force_ipv4": "force_ipv4",
+            "no_proxy": "no_proxy",
+            "proxy_sha256": "proxy",
+            "identity_sha256": "identity",
+        }
+        for field_name, field_label in field_labels.items():
+            if field_name == "identity_sha256":
+                previous_value = previous_entry.get(field_name, "")
+                current_value = current_entry.get(field_name, "")
+            else:
+                previous_value = previous_entry.get(field_name)
+                current_value = current_entry.get(field_name)
+            if field_name == "identity_sha256" and field_name not in previous_entry:
+                continue
+            if previous_value != current_value:
+                if field_name == "proxy_sha256":
+                    old_value = previous_entry.get("proxy_fingerprint")
+                    new_value = current_entry.get("proxy_fingerprint")
+                elif field_name == "identity_sha256":
+                    old_value = previous_entry.get("identity_fingerprint")
+                    new_value = current_entry.get("identity_fingerprint")
+                else:
+                    old_value = previous_entry.get(field_name)
+                    new_value = current_entry.get(field_name)
+                diffs.append(f"account {account_id} {field_label}: {old_value} -> {new_value}")
+
+    previous_providers = {
+        str(item.get("id") or "").strip(): item
+        for item in previous_snapshot.get("providers", [])
+        if isinstance(item, dict)
+    }
+    current_providers = {
+        str(item.get("id") or "").strip(): item
+        for item in current_snapshot.get("providers", [])
+        if isinstance(item, dict)
+    }
+    for provider_id in sorted(set(previous_providers) | set(current_providers)):
+        previous_entry = previous_providers.get(provider_id)
+        current_entry = current_providers.get(provider_id)
+        if previous_entry is None:
+            diffs.append(f"provider added: {provider_id}")
+            continue
+        if current_entry is None:
+            diffs.append(f"provider removed: {provider_id}")
+            continue
+        field_labels = {
+            "enabled": "enabled",
+            "priority": "priority",
+            "models_endpoint": "models_endpoint",
+            "timezone": "timezone",
+            "force_ipv4": "force_ipv4",
+            "no_proxy": "no_proxy",
+            "proxy_sha256": "proxy",
+        }
+        for field_name, field_label in field_labels.items():
+            if previous_entry.get(field_name) != current_entry.get(field_name):
+                old_value = previous_entry.get("proxy_fingerprint") if field_name == "proxy_sha256" else previous_entry.get(field_name)
+                new_value = current_entry.get("proxy_fingerprint") if field_name == "proxy_sha256" else current_entry.get(field_name)
+                diffs.append(f"provider {provider_id} {field_label}: {old_value} -> {new_value}")
+
+    previous_files = {
+        str(item.get("path") or ""): item
+        for item in previous_snapshot.get("files", [])
+        if isinstance(item, dict) and not _is_snapshot_ignored_file(item.get("path"))
+    }
+    current_files = {
+        str(item.get("path") or ""): item
+        for item in current_snapshot.get("files", [])
+        if isinstance(item, dict) and not _is_snapshot_ignored_file(item.get("path"))
+    }
+    for path in sorted(set(previous_files) | set(current_files)):
+        if os.path.basename(str(path or "")) == ".claude.json":
+            continue
+        previous_entry = previous_files.get(path)
+        current_entry = current_files.get(path)
+        if previous_entry is None:
+            diffs.append(f"file added: {path}")
+            continue
+        if current_entry is None:
+            diffs.append(f"file removed: {path}")
+            continue
+        if bool(previous_entry.get("exists")) != bool(current_entry.get("exists")):
+            diffs.append(f"file presence changed: {path}")
+            continue
+        if previous_entry.get("sha256") != current_entry.get("sha256"):
+            diffs.append(f"file changed: {path}")
+    return diffs
+
+
+def _snapshot_prompt_allowed():
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
+    _ensure_rich()
+    preview = "\n".join(f"- {line}" for line in diff_lines[:12])
+    if len(diff_lines) > 12:
+        preview += f"\n- ... 还有 {len(diff_lines) - 12} 项"
+    panel_text = (
+        "检测到 MMS 配置/关键文件与上次确认快照不一致，已阻止静默启动。\n\n"
+        f"{preview}\n\n"
+        f"accepted: {accepted_path}\n"
+        f"latest:   {latest_path}\n"
+    )
+    console.print(Panel(panel_text, title="MMS Snapshot Guard", border_style="red"))
+    if not _snapshot_prompt_allowed():
+        return False
+    return bool(Confirm.ask("是否接受当前快照并继续启动？", default=False))
+
+
+def _ensure_startup_snapshot_guard(cfg):
+    config_path = _config_write_target_path()
+    current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
+    latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
+    accepted_path = _config_snapshot_path("startup", "accepted.json", config_path=config_path)
+
+    latest_payload = {
+        "kind": "startup",
+        "captured_at": _iso_now(),
+        "digest": _snapshot_digest(current_snapshot),
+        "snapshot": current_snapshot,
+    }
+    _write_json_snapshot(latest_path, latest_payload)
+    _update_periodic_snapshot("daily", current_snapshot, config_path=config_path)
+    _update_periodic_snapshot("weekly", current_snapshot, config_path=config_path)
+
+    accepted_payload = _load_json_snapshot(accepted_path)
+    accepted_snapshot = (accepted_payload or {}).get("snapshot") if isinstance(accepted_payload, dict) else None
+    if not accepted_snapshot:
+        _write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    diff_lines = _snapshot_diff_lines(accepted_snapshot, current_snapshot)
+    if not diff_lines:
+        _write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    pending_path = _config_snapshot_path("startup", "pending.json", config_path=config_path)
+    _write_json_snapshot(
+        pending_path,
+        {
+            "kind": "startup-pending",
+            "captured_at": _iso_now(),
+            "accepted_path": accepted_path,
+            "latest_path": latest_path,
+            "diffs": diff_lines,
+            "accepted": accepted_snapshot,
+            "current": current_snapshot,
+        },
+    )
+    if _confirm_startup_snapshot_drift(diff_lines, accepted_path=accepted_path, latest_path=latest_path):
+        _write_json_snapshot(accepted_path, latest_payload)
+        return current_snapshot
+
+    console.print(
+        f"[red]启动已阻止：检测到配置/关键文件漂移，请先确认快照。[/red]\n"
+        f"[dim]漂移详情: {pending_path}[/dim]"
+    )
+    sys.exit(CONFIG_GUARD_EXIT_CODE)
+
 def load_config():
-    config_path = _active_config_path()
+    config_path = _config_write_target_path()
+    _ensure_mms_config_guard_files(config_path)
     if not os.path.exists(config_path):
         return None
     with open(config_path, "rb") as f:
@@ -1690,7 +2280,7 @@ def load_config():
     cfg, cache_changed = _normalize_cache_config(cfg)
     cfg, lb_changed = _normalize_load_balance_config(cfg)
     changed = changed or gateway_broker_changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
-    if changed or config_path != CONFIG_PATH:
+    if changed:
         save_config(cfg)
     return cfg
 
@@ -1702,13 +2292,131 @@ def load_runtime_config():
     return apply_local_overrides(cfg)
 
 
-def save_config(cfg):
+def _config_write_target_path():
+    return _active_config_path() or CONFIG_PATH
+
+
+def _config_lock_path(config_path=None):
+    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), CONFIG_LOCK_FILE)
+
+
+def _config_audit_path(config_path=None):
+    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), CONFIG_AUDIT_LOG)
+
+
+def _config_backup_root(config_path=None):
+    target_path = os.path.abspath(str(config_path or _config_write_target_path()))
+    return os.path.join(os.path.dirname(target_path), "backups")
+
+
+def _sha1_file(path):
+    if not path or not os.path.exists(path):
+        return ""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _config_write_caller():
+    current = os.path.abspath(__file__)
+    stack = inspect.stack()
+    try:
+        for frame in stack[1:]:
+            filename = os.path.abspath(str(frame.filename))
+            if filename == current and frame.function == "save_config":
+                continue
+            return {
+                "path": filename,
+                "line": int(frame.lineno),
+                "function": str(frame.function or ""),
+            }
+    finally:
+        del stack
+    return {"path": current, "line": 0, "function": "unknown"}
+
+
+@contextmanager
+def _locked_config_write(config_path):
+    lock_path = _config_lock_path(config_path)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with _CONFIG_WRITE_PROCESS_LOCK:
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _backup_config_file(config_path):
+    if not os.path.exists(config_path):
+        return ""
+    backup_dir = os.path.join(_config_backup_root(config_path), f"config-write-{_local_now_slug()}")
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_path = os.path.join(backup_dir, os.path.basename(config_path))
+    shutil.copy2(config_path, backup_path)
+    return backup_path
+
+
+def _append_config_audit_entry(entry, *, config_path):
+    audit_path = _config_audit_path(config_path)
+    os.makedirs(os.path.dirname(audit_path), exist_ok=True)
+    with open(audit_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _atomic_write_toml(path, cfg):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            tomli_w.dump(cfg, f)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def save_config(cfg, *, reason=None):
     if tomli_w is None:
         console.print("[red]缺少 tomli-w，请执行: pip install tomli-w[/red]")
         sys.exit(1)
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_PATH, "wb") as f:
-        tomli_w.dump(cfg, f)
+    config_path = _config_write_target_path()
+    _ensure_mms_config_guard_files(config_path)
+    caller = _config_write_caller()
+    audit_reason = str(reason or "").strip() or f"auto:{caller.get('function') or 'unknown'}"
+    with _locked_config_write(config_path):
+        before_sha1 = _sha1_file(config_path)
+        backup_path = _backup_config_file(config_path)
+        _atomic_write_toml(config_path, cfg)
+        after_sha1 = _sha1_file(config_path)
+        _append_config_audit_entry(
+            {
+                "timestamp": _iso_now(),
+                "reason": audit_reason,
+                "target_path": os.path.abspath(config_path),
+                "backup_path": backup_path,
+                "caller_path": caller.get("path", ""),
+                "caller_line": int(caller.get("line", 0) or 0),
+                "caller_function": caller.get("function", ""),
+                "pid": os.getpid(),
+                "before_sha1": before_sha1,
+                "after_sha1": after_sha1,
+            },
+            config_path=config_path,
+        )
 
 
 def _load_toml_file(path):
@@ -1806,6 +2514,7 @@ def _load_usage_stats():
 
 
 def _save_usage_stats(data):
+    _ensure_mms_config_guard_files(_config_write_target_path())
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(USAGE_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -5701,6 +6410,108 @@ def select_scene_fallback(scenes):
 
 # ── Confirmation ────────────────────────────────────────
 
+def _mask_identity_value(value, *, keep=4):
+    text = str(value or "").strip()
+    if len(text) <= keep * 2:
+        return text or "-"
+    return f"{text[:keep]}***{text[-keep:]}"
+
+
+def _mask_email_value(value):
+    text = str(value or "").strip()
+    if not text or "@" not in text:
+        return _mask_identity_value(text)
+    name, domain = text.split("@", 1)
+    if len(name) <= 2:
+        masked_name = name[:1] + "*"
+    else:
+        masked_name = name[:2] + "***"
+    return f"{masked_name}@{domain}"
+
+
+def _runtime_network_summary_for_confirm(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    proxy = str(runtime.get("proxy") or "").strip()
+    timezone_name = str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE
+    force_ipv4 = bool(_runtime_force_ipv4(runtime))
+    mode = _snapshot_proxy_fingerprint(proxy)
+    return f"{mode} | TZ {timezone_name} | IPv4 {'on' if force_ipv4 else 'auto'}"
+
+
+def _load_runtime_identity_preview(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    home_dir = os.path.expanduser(str(runtime.get("home_dir") or "").strip())
+    if not home_dir:
+        return {}
+    target = os.path.join(home_dir, ".claude.json")
+    if not os.path.exists(target):
+        return {}
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    oauth_account = data.get("oauthAccount") if isinstance(data.get("oauthAccount"), dict) else {}
+    return {
+        "user_id": str(data.get("userID") or oauth_account.get("accountUuid") or "").strip(),
+        "account_uuid": str(oauth_account.get("accountUuid") or "").strip(),
+        "org_uuid": str(oauth_account.get("organizationUuid") or "").strip(),
+        "email": str(oauth_account.get("emailAddress") or "").strip(),
+    }
+
+
+def _confirm_context_lines(cli, runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    lines = []
+    if runtime:
+        runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
+        if runtime_id:
+            lines.append(("Source", runtime_id))
+    if cli == "claude" and runtime.get("auth_mode") == "oauth":
+        if _fake_upstream_enabled():
+            lines.append(("Fake", "ON"))
+        lines.append(("Proxy", str(_snapshot_proxy_fingerprint(runtime.get("proxy")))))
+        lines.append(("TZ", str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE)))
+        lines.append(("IPv4", "on" if _runtime_force_ipv4(runtime) else "auto"))
+        lines.append(("Slot", f"pid-{os.getpid()}"))
+        home_dir = os.path.expanduser(str(runtime.get("home_dir") or "").strip())
+        if home_dir:
+            lines.append(("Session", os.path.join(home_dir, "s", str(os.getpid()))))
+        identity = _load_runtime_identity_preview(runtime)
+        if identity.get("email"):
+            lines.append(("Email", _mask_email_value(identity.get("email"))))
+        if identity.get("user_id"):
+            lines.append(("UserID", _mask_identity_value(identity.get("user_id"))))
+        if identity.get("org_uuid"):
+            lines.append(("OrgID", _mask_identity_value(identity.get("org_uuid"))))
+        network_guard = runtime.get("_network_guard") if isinstance(runtime.get("_network_guard"), dict) else {}
+        if network_guard:
+            lines.append(("DNS", str(network_guard.get("dns_mode") or "-")))
+            proxy_validation = str(network_guard.get("proxy_validation") or "").strip()
+            if proxy_validation == "skipped_fake":
+                lines.append(("Check", "skipped(fake)"))
+            if network_guard.get("ipv4_egress") not in {"", "-"}:
+                lines.append(("IPv4Egress", str(network_guard.get("ipv4_egress") or "-")))
+            if network_guard.get("ipv6_egress") not in {"", "-", "blocked"}:
+                lines.append(("IPv6Egress", str(network_guard.get("ipv6_egress") or "-")))
+            target_states = []
+            for item in network_guard.get("targets") or []:
+                label = str(item.get("label") or "?")
+                target_states.append(f"{label}:{'ok' if item.get('ok') else 'fail'}")
+            if target_states:
+                lines.append(("Reach", " ".join(target_states[:3])))
+            no_proxy_conflicts = network_guard.get("no_proxy_conflicts") or []
+            if no_proxy_conflicts:
+                lines.append(("Leak", ",".join(no_proxy_conflicts[:2])))
+        report = runtime.get("_account_guard_report") if isinstance(runtime.get("_account_guard_report"), dict) else {}
+        if report:
+            lines.append(("Score", str(report.get("score", "-"))))
+            lines.append(("Sessions", str(report.get("active_sessions_after", "-"))))
+            drift = report.get("drift_fields") or []
+            lines.append(("Profile", "stable" if not drift else ",".join(drift)))
+    return lines[:12]
+
+
 def confirm_launch(cli, model_info, once=False, runtime=None):
     if isinstance(model_info, dict):
         model_items = [f"{k}={v}" for k, v in model_info.items() if k != "subagent" and v]
@@ -6324,7 +7135,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         # ── 设置 ──
         elif action_type == "settings":
-            from mms_tui import select_language_tui, select_settings_tui, select_provider_mgmt_tui
+            from mms_tui import (
+                select_fake_upstream_tui,
+                select_language_tui,
+                select_settings_tui,
+                select_provider_mgmt_tui,
+            )
             settings_action = _safe_tui_call(select_settings_tui)
             if settings_action == "__interrupt__":
                 return True
@@ -6363,6 +7179,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     current_cfg.setdefault("ui", {})["language"] = chosen_lang
                     save_config(current_cfg)
                     set_language(chosen_lang)
+            elif settings_action == "fake_upstream":
+                selected_fake = _safe_tui_call(select_fake_upstream_tui)
+                if selected_fake == "__interrupt__":
+                    return True
+                if selected_fake in {"on", "off"}:
+                    _set_fake_upstream_enabled(selected_fake == "on")
+                    status_payload = _fake_upstream_status_payload()
+                    console.print(
+                        f"[green]✓ Fake Upstream 已{'开启' if status_payload.get('enabled') else '关闭'}[/green]\n"
+                        f"[dim]log: {status_payload.get('log_path', '-')}[/dim]"
+                    )
             elif settings_action == "routes_export":
                 try:
                     from mms_router import export_model_routes
@@ -6523,7 +7350,31 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
-        result = _safe_tui_call(confirm_tui, cli, clean_model_info, env_vars=env_vars, once=once)
+        if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") == "oauth":
+            try:
+                from mms_launchers import get_claude_network_guard_preview
+                runtime_runtime["_network_guard"] = get_claude_network_guard_preview(
+                    runtime_runtime,
+                    require_proxy=False,
+                )
+            except Exception:
+                runtime_runtime["_network_guard"] = {
+                    "status": "unknown",
+                    "dns_mode": "unknown",
+                    "ipv4_egress": "-",
+                    "ipv6_egress": "-",
+                    "targets": [],
+                    "no_proxy_conflicts": [],
+                }
+        context_lines = _confirm_context_lines(cli, runtime_runtime)
+        result = _safe_tui_call(
+            confirm_tui,
+            cli,
+            clean_model_info,
+            env_vars=env_vars,
+            once=once,
+            context_lines=context_lines,
+        )
         if result == "__interrupt__":
             return True
         if isinstance(result, tuple):
@@ -6540,6 +7391,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             continue
         if bypass:
             runtime_runtime["bypass"] = True
+            if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") == "oauth":
+                from mms_launchers import _enforce_claude_network_guard_or_exit
+                _enforce_claude_network_guard_or_exit(runtime_runtime, require_proxy=True)
         if cli == "claude":
             runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
@@ -7944,6 +8798,165 @@ def handle_cache_command(argv):
     parser.print_help()
 
 
+def handle_guard_command(argv, bootstrap_cfg=None):
+    _ensure_rich()
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} guard",
+        description="查看或接受 MMS 配置/关键文件快照",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+    subparsers.add_parser("status", help="查看当前快照状态")
+    subparsers.add_parser("accept", help="把当前状态设为新的已确认快照")
+
+    args = parser.parse_args(argv)
+    config_path = _config_write_target_path()
+    cfg = bootstrap_cfg if isinstance(bootstrap_cfg, dict) else (load_config() or _default_config())
+    current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
+    latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
+    accepted_path = _config_snapshot_path("startup", "accepted.json", config_path=config_path)
+    pending_path = _config_snapshot_path("startup", "pending.json", config_path=config_path)
+    accepted_payload = _load_json_snapshot(accepted_path) or {}
+    accepted_snapshot = accepted_payload.get("snapshot") if isinstance(accepted_payload, dict) else None
+    diff_lines = _snapshot_diff_lines(accepted_snapshot, current_snapshot) if accepted_snapshot else []
+
+    if args.subcommand == "accept":
+        payload = {
+            "kind": "startup",
+            "captured_at": _iso_now(),
+            "digest": _snapshot_digest(current_snapshot),
+            "snapshot": current_snapshot,
+        }
+        _write_json_snapshot(latest_path, payload)
+        _write_json_snapshot(accepted_path, payload)
+        if os.path.exists(pending_path):
+            try:
+                os.remove(pending_path)
+            except OSError:
+                pass
+        console.print(f"[green]✓ 已接受当前快照[/green]\n[dim]{accepted_path}[/dim]")
+        return
+
+    status = "missing" if not accepted_snapshot else ("drift" if diff_lines else "stable")
+    table = Table(title="MMS Snapshot Guard")
+    table.add_column("字段", style="cyan")
+    table.add_column("值", style="green")
+    table.add_row("status", status)
+    table.add_row("accepted", accepted_path)
+    table.add_row("latest", latest_path)
+    table.add_row("pending", pending_path if os.path.exists(pending_path) else "-")
+    table.add_row("real_home", current_snapshot.get("real_home", "-"))
+    table.add_row("config_path", current_snapshot.get("config_path", "-"))
+    table.add_row("accounts", str(len(current_snapshot.get("accounts", []))))
+    table.add_row("providers", str(len(current_snapshot.get("providers", []))))
+    console.print(table)
+    if diff_lines:
+        console.print("[red]检测到漂移：[/red]")
+        for item in diff_lines[:20]:
+            console.print(f"  - {item}")
+        if len(diff_lines) > 20:
+            console.print(f"[dim]... 还有 {len(diff_lines) - 20} 项[/dim]")
+
+
+def handle_fake_upstream_command(argv):
+    _ensure_rich()
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} fake-upstream",
+        description="开发期 fake upstream：不访问真实上游，并把请求写入日志",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+    subparsers.add_parser("status", help="查看 fake upstream 状态")
+    subparsers.add_parser("on", help="开启 fake upstream")
+    subparsers.add_parser("off", help="关闭 fake upstream")
+    log_parser = subparsers.add_parser("log", help="查看 fake upstream 日志")
+    log_parser.add_argument("--tail", type=int, default=20, help="最后 N 条")
+
+    args = parser.parse_args(argv)
+
+    if args.subcommand == "on":
+        _set_fake_upstream_enabled(True)
+        payload = _fake_upstream_status_payload()
+        console.print(f"[green]✓ fake upstream 已开启[/green]")
+        console.print(f"[dim]state: {payload['state_path']}[/dim]")
+        console.print(f"[dim]log:   {payload['log_path']}[/dim]")
+        return
+    if args.subcommand == "off":
+        _set_fake_upstream_enabled(False)
+        payload = _fake_upstream_status_payload()
+        console.print(f"[green]✓ fake upstream 已关闭[/green]")
+        console.print(f"[dim]state: {payload['state_path']}[/dim]")
+        return
+    if args.subcommand == "log":
+        rows = _fake_upstream_tail_log(args.tail)
+        if not rows:
+            console.print("[yellow]暂无 fake upstream 日志[/yellow]")
+            return
+        table = Table(title="Fake Upstream Log")
+        table.add_column("Time", style="cyan")
+        table.add_column("Kind", style="green")
+        table.add_column("Target", style="magenta")
+        table.add_column("Detail", style="white")
+        for row in rows:
+            target = str(row.get("url") or row.get("host") or "-")
+            if str(row.get("kind") or "") == "upstream":
+                detail = row.get("request_body_preview") or row.get("path") or "-"
+            else:
+                detail = (
+                    row.get("path")
+                    or row.get("request_body_preview")
+                    or row.get("body")
+                    or row.get("proxy")
+                    or row.get("listen")
+                    or "-"
+                )
+            table.add_row(str(row.get("ts") or "-"), str(row.get("kind") or "-"), target, str(detail))
+        console.print(table)
+        return
+
+    payload = _fake_upstream_status_payload()
+    table = Table(title="Fake Upstream")
+    table.add_column("字段", style="cyan")
+    table.add_column("值", style="green")
+    table.add_row("enabled", "yes" if payload.get("enabled") else "no")
+    table.add_row("state_path", str(payload.get("state_path") or "-"))
+    table.add_row("log_path", str(payload.get("log_path") or "-"))
+    table.add_row("proxy_url", str(payload.get("proxy_url") or "-"))
+    table.add_row("ca_cert_path", str(payload.get("ca_cert_path") or "-"))
+    table.add_row("proxy_pid", str(payload.get("proxy_pid") or "-"))
+    table.add_row("proxy_started_at", str(payload.get("proxy_started_at") or "-"))
+    table.add_row("updated_at", str(payload.get("updated_at") or "-"))
+    console.print(table)
+
+
+def handle_logs_command(argv):
+    _ensure_rich()
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} logs",
+        description="显示 MMS 常用日志路径与可直接复制的查看命令",
+    )
+    parser.add_argument("--tail", type=int, default=20, help="默认 tail 行数")
+    args = parser.parse_args(argv)
+
+    fake_payload = _fake_upstream_status_payload()
+    config_root = _config_guard_root_dir(_config_write_target_path())
+    fake_log_path = str(fake_payload.get("log_path") or "-")
+    fake_status_cmd = f"{current_command()} fake-upstream status"
+    fake_log_cmd = f"{current_command()} fake-upstream log --tail {args.tail}"
+    raw_tail_cmd = f"tail -n {args.tail} {shlex.quote(fake_log_path)}" if fake_log_path not in {"", "-"} else "-"
+    guard_status_cmd = f"{current_command()} guard status"
+
+    table = Table(title="MMS Logs")
+    table.add_column("项", style="cyan", no_wrap=True)
+    table.add_column("值", style="green")
+    table.add_row("config_root", config_root)
+    table.add_row("fake_upstream", "on" if fake_payload.get("enabled") else "off")
+    table.add_row("fake_log_path", fake_log_path)
+    table.add_row("cmd.status", fake_status_cmd)
+    table.add_row("cmd.fake_log", fake_log_cmd)
+    table.add_row("cmd.raw_tail", raw_tail_cmd)
+    table.add_row("cmd.guard", guard_status_cmd)
+    console.print(table)
+
+
 def _run_script_subcommand(script_name, argv, subcommand_name):
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", script_name)
     if not os.path.exists(script_path):
@@ -7970,6 +8983,20 @@ def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
     bootstrap_cfg = load_config()
     set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
+
+    if len(argv) >= 1:
+        command = argv[0]
+        if command == "guard":
+            handle_guard_command(argv[1:], bootstrap_cfg=bootstrap_cfg)
+            return
+        if command == "logs":
+            handle_logs_command(argv[1:])
+            return
+        if command == "fake-upstream":
+            handle_fake_upstream_command(argv[1:])
+            return
+
+    _ensure_startup_snapshot_guard(bootstrap_cfg or _default_config())
 
     if len(argv) >= 1:
         command = argv[0]
@@ -8051,6 +9078,8 @@ def main():
             f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
+            f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
+            f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} chat ...        进入 chat 子命令\n"
             f"  {current_command()} discuss ...     进入 discuss 子命令\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"

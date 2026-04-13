@@ -11,6 +11,16 @@ import pytest
 
 
 @pytest.fixture
+def signal_dir(tmp_path):
+    d = tmp_path / "gbrain"
+    d.mkdir()
+    with patch("gbrain_memory_hook.PROFILE_DIR", d), \
+         patch("gbrain_memory_hook.MMS_SIGNAL_PATH", d / "mms-signals.json"), \
+         patch("gbrain_memory_hook.USER_PROFILE_PATH", d / "user-profile.json"):
+        yield d
+
+
+@pytest.fixture
 def event_dir(tmp_path):
     d = tmp_path / "events"
     d.mkdir()
@@ -70,6 +80,56 @@ class TestEmitEvent:
         assert len(lines) == 2
         assert json.loads(lines[0])["type"] == "started"
         assert json.loads(lines[1])["type"] == "done"
+
+    def test_writes_gbrain_signals_for_relevant_events(self, event_dir, signal_dir):
+        from mms_events import emit_event
+        emit_event("done", "glm-4", run_id="r1", task_id="t1", note="ok")
+        for _ in range(50):
+            signal_path = signal_dir / "mms-signals.json"
+            if signal_path.exists():
+                break
+            import time
+            time.sleep(0.01)
+        data = json.loads((signal_dir / "mms-signals.json").read_text())
+        assert len(data["signals"]) == 1
+        assert data["signals"][0]["type"] == "done"
+        assert data["signals"][0]["model"] == "glm-4"
+
+    def test_skips_gbrain_signals_for_irrelevant_events(self, event_dir, signal_dir):
+        from mms_events import emit_event
+        emit_event("started", "glm-4")
+        import time
+        time.sleep(0.02)
+        assert not (signal_dir / "mms-signals.json").exists()
+
+    def test_writes_user_profile_for_explicit_preference_note(self, event_dir, signal_dir):
+        from mms_events import emit_event
+        emit_event("done", "glm-4", run_id="r1", task_id="planner", note="user prefers terse responses and worktree flow")
+        for _ in range(50):
+            profile_path = signal_dir / "user-profile.json"
+            if profile_path.exists():
+                break
+            import time
+            time.sleep(0.01)
+        data = json.loads((signal_dir / "user-profile.json").read_text())
+        summaries = [entry["summary"] for entry in data["entries"]]
+        assert "prefers terse responses" in summaries
+        assert "prefers worktree workflow" in summaries
+
+    def test_merges_duplicate_profile_evidence(self, event_dir, signal_dir):
+        from mms_events import emit_event
+        emit_event("done", "glm-4", run_id="r1", task_id="planner", note="user prefers terse responses")
+        emit_event("done", "glm-4", run_id="r2", task_id="planner", note="user prefers terse responses")
+        for _ in range(50):
+            profile_path = signal_dir / "user-profile.json"
+            if profile_path.exists():
+                break
+            import time
+            time.sleep(0.01)
+        data = json.loads((signal_dir / "user-profile.json").read_text())
+        terse = [entry for entry in data["entries"] if entry["summary"] == "prefers terse responses"]
+        assert len(terse) == 1
+        assert len(terse[0]["evidence"]) == 2
 
 
 # ── get_latest_event ──

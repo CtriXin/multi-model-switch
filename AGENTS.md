@@ -77,7 +77,19 @@ This file applies to both `Codex` and `Claude`.
 ## Operational Guardrails
 
 - Before changing launcher, routing, bridge, config, account, or TUI selection logic, read `docs/AGENT_GUARDRAILS.md`.
+- The whole real MMS config tree under `~/.config/mms/` is `human-only` for agents unless the human explicitly confirms the write.
+- This applies to any repo, any agent, and any automation touching MMS config, not just this project.
+- Any write to the real MMS config file must go through the audited config writer: acquire the config lock, create a backup, and append a reason + caller path record to the config audit log.
+- Every MMS config change must create a backup first; no blind overwrite is allowed.
+- Protected MMS config scope includes at least: `config.toml`, `override.toml`, `credentials.sh`, `usage.json`, `accounts/**`, `env/**`, and related account state files under `~/.config/mms/`.
+- Agents may inspect, diff, and prepare manual edits for MMS config, but they must not auto-apply those edits before human confirmation.
 - `Claude` must also read `CLAUDE.md` before making any repo changes; when `CLAUDE.md` and a task conflict, Claude should stop and ask the user to confirm scope.
+- Claude config is under a hard `human-only` gate. Any agent touching Claude-related config must stop, warn the user first, and refuse to auto-write the change.
+- This `human-only` gate applies both to direct file edits and to indirect writes through TUI flows, migration, normalization, launch-time defaults, or helper scripts.
+- The protected real config target is `~/.config/mms/config.toml`; sensitive Claude fields include any `accounts[*]` entry with `cli = "claude"` plus `proxy`, `no_proxy`, `timezone`, `home_dir`, default Claude account/source selection, and network/direct/proxy policy.
+- For those fields, agents may only inspect, diff, and propose manual edits. They must never persist the change on the user's behalf.
+- If a task can affect Claude config, the agent's first user-facing line must clearly say that Claude config is `human-only` and will not be auto-modified.
+- If any agent notices it already changed Claude config or is about to do so, it must stop immediately, report the exact path + fields + before/after values, and wait for human direction.
 - Treat `mms_core.py`, `mms_launchers.py`, `mms_tui.py`, `mms_bridge.py`, `mms_account_state.py`, `mms_session.py`, `mms_adapter_registry.py`, `mms`, and `ccs` as protected surfaces.
 - Do not silently change default launch behavior, model/source resolution order, config schema, account isolation semantics, or bridge fallback rules without an explicit note in the task and targeted validation.
 - If a task would alter a protected surface beyond the user's stated scope, stop and narrow the change or ask for confirmation.

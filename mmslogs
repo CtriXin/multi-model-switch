@@ -1,0 +1,13 @@
+#!/opt/homebrew/bin/python3
+"""MMS logs 快捷入口。"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from mms_core import main
+
+if __name__ == "__main__":
+    sys.argv = [sys.argv[0], "logs", *sys.argv[1:]]
+    main()

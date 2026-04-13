@@ -1,6 +1,7 @@
 """MMS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
 from contextlib import contextmanager
+import inspect
 import json
 import os
 import shutil
@@ -20,6 +21,11 @@ from mms_core import (
     _runtime_force_ipv4,
     _runtime_httpx_request,
     detect_working_base_url,
+)
+from mms_fake_upstream import (
+    ensure_local_proxy as _ensure_fake_upstream_proxy,
+    fake_proxy_probe as _fake_proxy_probe,
+    is_enabled as _fake_upstream_enabled,
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
@@ -60,6 +66,31 @@ def _ensure_bridge_helpers():
     codex_chatcompletions_bridge = _cccb
     codex_responses_bridge = _crb
     _write_route_status = _wrs
+
+
+def _gateway_claude_bridge_context(*args, **kwargs):
+    target = gateway_claude_bridge
+    if target is None:
+        raise RuntimeError("gateway_claude_bridge 未初始化")
+    signature_target = getattr(target, "__wrapped__", target)
+    try:
+        signature = inspect.signature(signature_target)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is None:
+        return target(*args, **kwargs)
+    allowed = set(signature.parameters.keys())
+    filtered = dict(kwargs)
+    dropped = [key for key in list(filtered.keys()) if key not in allowed]
+    for key in dropped:
+        filtered.pop(key, None)
+    if dropped:
+        console.print(
+            "[yellow]检测到旧版 bridge 签名，已自动降级忽略参数: "
+            + ", ".join(sorted(dropped))
+            + "[/yellow]"
+        )
+    return target(*args, **filtered)
 
 
 def _ensure_speed_stats():
@@ -115,7 +146,8 @@ def _runtime_network_summary(runtime):
     proxy_url = _mask_proxy_url(runtime.get("proxy", ""))
     timezone_name = str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE
     ipv4_label = "on" if _runtime_force_ipv4(runtime) else "off"
-    parts = [f"TZ {timezone_name}", f"IPv4 {ipv4_label}"]
+    dns_mode = "fake-local" if _fake_upstream_enabled() else _proxy_dns_mode(runtime.get("proxy", ""))
+    parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"IPv4 {ipv4_label}"]
     if proxy_url:
         parts.insert(0, f"Proxy {proxy_url}")
     else:
@@ -589,6 +621,8 @@ def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=
 
 _MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
 _MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
+_CLAUDE_NETWORK_GUARD_CACHE: dict = {}
+_CLAUDE_NETWORK_GUARD_TTL_SEC = 20.0
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
@@ -608,6 +642,177 @@ def _set_session_home_hint(env, session_home):
     return env
 
 
+def _normalize_path(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return os.path.abspath(os.path.expanduser(text))
+
+
+def _path_is_within(path, root):
+    path = _normalize_path(path)
+    root = _normalize_path(root)
+    if not path or not root:
+        return False
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def _runtime_net_mode(runtime):
+    if _fake_upstream_enabled():
+        return "fake"
+    return "proxy" if str((runtime or {}).get("proxy") or "").strip() else "direct"
+
+
+def _runtime_dns_mode(runtime):
+    if _fake_upstream_enabled():
+        return "fake-local"
+    return _proxy_dns_mode((runtime or {}).get("proxy") or "")
+
+
+def _build_home_context(env, runtime, cli_name):
+    env = env or {}
+    runtime = dict(runtime or {})
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    real_home_values = {}
+    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
+        value = _normalize_path(env.get(key) or os.environ.get(key) or "")
+        if value:
+            real_home_values[key] = value
+    if not real_home_values:
+        real_home_values["derived"] = _real_user_home()
+    unique_real_homes = sorted(set(real_home_values.values()))
+    real_home = unique_real_homes[0] if unique_real_homes else ""
+    effective_home = _normalize_path(env.get("HOME") or "")
+    session_home = _normalize_path(env.get("MMS_SESSION_HOME") or "")
+    account_home = _normalize_path(runtime.get("home_dir") or "")
+    xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
+    gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
+    expected_session_home = auth_mode == "oauth" and cli_name in {"claude", "codex"}
+    config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
+    return {
+        "cli": str(cli_name or "").strip(),
+        "auth_mode": auth_mode,
+        "real_home": real_home,
+        "real_home_values": real_home_values,
+        "real_home_conflict": len(unique_real_homes) > 1,
+        "effective_home": effective_home,
+        "session_home": session_home,
+        "account_home": account_home,
+        "gemini_cli_home": gemini_cli_home,
+        "xdg_config_home": xdg_config_home,
+        "config_root": config_root,
+        "net_mode": _runtime_net_mode(runtime),
+        "dns_mode": _runtime_dns_mode(runtime),
+        "expected_session_home": expected_session_home,
+    }
+
+
+def _validate_home_context_or_exit(context):
+    context = dict(context or {})
+    cli_name = context.get("cli") or "cli"
+    auth_mode = context.get("auth_mode") or "api_key"
+    real_home = context.get("real_home") or ""
+    effective_home = context.get("effective_home") or ""
+    session_home = context.get("session_home") or ""
+    account_home = context.get("account_home") or ""
+    xdg_config_home = context.get("xdg_config_home") or ""
+    config_root = context.get("config_root") or ""
+    gemini_cli_home = context.get("gemini_cli_home") or ""
+
+    def _block(reason):
+        console.print(f"[red]{cli_name} HOME 保护阻止启动[/red]\n[dim]{reason}[/dim]")
+        sys.exit(1)
+
+    if context.get("real_home_conflict"):
+        detail = " | ".join(
+            f"{key}={value}" for key, value in sorted((context.get("real_home_values") or {}).items())
+        )
+        _block(f"REAL_HOME hints 不一致：{detail}")
+    if not real_home:
+        _block("无法解析真实 HOME")
+
+    if auth_mode != "oauth":
+        if effective_home and real_home and not _path_is_within(config_root, real_home):
+            _block(f"config_root 异常：{config_root}")
+        return context
+
+    if context.get("expected_session_home"):
+        if not effective_home:
+            _block("缺少 HOME")
+        if not session_home:
+            _block("缺少 MMS_SESSION_HOME")
+        if effective_home != session_home:
+            _block(f"HOME 与 MMS_SESSION_HOME 不一致：HOME={effective_home} | SESSION={session_home}")
+        if effective_home == real_home:
+            _block(f"隔离账号 HOME 落回真实 HOME：{effective_home}")
+        if account_home:
+            sessions_root = os.path.join(account_home, "s")
+            if not _path_is_within(session_home, sessions_root):
+                _block(f"session HOME 不在账号隔离目录内：{session_home}")
+        if cli_name == "codex":
+            expected_xdg = os.path.join(session_home, ".config")
+            if xdg_config_home and xdg_config_home != expected_xdg:
+                _block(f"XDG_CONFIG_HOME 未跟随 session HOME：{xdg_config_home}")
+    elif cli_name == "gemini":
+        if not gemini_cli_home:
+            _block("缺少 GEMINI_CLI_HOME")
+        if gemini_cli_home == real_home:
+            _block(f"GEMINI_CLI_HOME 落回真实 HOME：{gemini_cli_home}")
+        if account_home and gemini_cli_home != account_home:
+            _block(f"GEMINI_CLI_HOME 与账号目录不一致：{gemini_cli_home}")
+
+    if session_home and _path_is_within(config_root, session_home):
+        _block(f"config_root 不应落在 session HOME 内：{config_root}")
+    if gemini_cli_home and _path_is_within(config_root, gemini_cli_home):
+        _block(f"config_root 不应落在账号 HOME 内：{config_root}")
+    return context
+
+
+def _home_context_lines(context):
+    context = dict(context or {})
+    lines = []
+    real_home = context.get("real_home") or ""
+    if real_home:
+        lines.append(f"HOME real={real_home}")
+    session_home = context.get("session_home") or ""
+    if session_home:
+        lines.append(f"HOME session={session_home}")
+    account_home = context.get("account_home") or ""
+    if account_home:
+        lines.append(f"HOME account={account_home}")
+    gemini_cli_home = context.get("gemini_cli_home") or ""
+    if gemini_cli_home:
+        lines.append(f"GEMINI_CLI_HOME={gemini_cli_home}")
+    extras = []
+    xdg_config_home = context.get("xdg_config_home") or ""
+    if xdg_config_home:
+        extras.append(f"xdg={xdg_config_home}")
+    config_root = context.get("config_root") or ""
+    if config_root:
+        extras.append(f"config_root={config_root}")
+    net_mode = context.get("net_mode") or ""
+    if net_mode:
+        extras.append(f"net={net_mode}")
+    dns_mode = context.get("dns_mode") or ""
+    if dns_mode:
+        extras.append(f"dns={dns_mode}")
+    if extras:
+        lines.append(" | ".join(extras))
+    return lines
+
+
+def _prepare_oauth_home_context(runtime, env, cli_name):
+    context = _build_home_context(env, runtime, cli_name)
+    _validate_home_context_or_exit(context)
+    runtime["_home_context"] = dict(context)
+    for line in _home_context_lines(context):
+        console.print(f"[dim]{line}[/dim]")
+    return context
+
+
 def _apply_proxy_env(env, proxy_url, no_proxy=""):
     proxy_url = str(proxy_url or "").strip()
     no_proxy = str(no_proxy or "").strip()
@@ -618,6 +823,275 @@ def _apply_proxy_env(env, proxy_url, no_proxy=""):
     for key in ("NO_PROXY", "no_proxy"):
         env[key] = no_proxy
     return env
+
+
+_CLAUDE_PROXY_GUARD_TARGETS = [
+    ("api", "https://api.anthropic.com"),
+    ("site", "https://claude.ai"),
+    ("auth", "https://anthropic.auth0.com"),
+]
+_CLAUDE_NO_PROXY_TOKENS = (
+    "*",
+    "anthropic.com",
+    "api.anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "clau.de",
+    "anthropic.auth0.com",
+)
+
+
+def _proxy_dns_mode(proxy_url):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return "direct"
+    try:
+        scheme = (urlsplit(proxy_url).scheme or "").lower()
+    except Exception:
+        scheme = ""
+    if scheme == "socks5h":
+        return "remote"
+    if scheme == "socks5":
+        return "local-risk"
+    if scheme in {"http", "https"}:
+        return "proxy-likely"
+    return scheme or "proxy"
+
+
+def _split_no_proxy_values(no_proxy):
+    raw = str(no_proxy or "").strip()
+    if not raw:
+        return []
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def _claude_no_proxy_conflicts(no_proxy):
+    values = _split_no_proxy_values(no_proxy)
+    conflicts = []
+    for item in values:
+        normalized = item.lstrip(".")
+        if normalized in _CLAUDE_NO_PROXY_TOKENS:
+            conflicts.append(item)
+            continue
+        for token in _CLAUDE_NO_PROXY_TOKENS:
+            if token == "*":
+                continue
+            if normalized == token or normalized.endswith(f".{token}"):
+                conflicts.append(item)
+                break
+    return sorted(set(conflicts))
+
+
+def _run_proxy_probe(proxy_url, target_url, *, no_proxy="", force_ipv4=True, resolve_ip=False):
+    proxy_url = str(proxy_url or "").strip()
+    if _fake_upstream_enabled():
+        return _fake_proxy_probe(
+            target_url,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
+            force_ipv4=force_ipv4,
+            resolve_ip=resolve_ip,
+        )
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return {"ok": False, "detail": "curl missing", "http_code": "", "body": ""}
+    cmd = [
+        curl_bin,
+        *(["-4"] if force_ipv4 else []),
+        "--silent",
+        "--show-error",
+        "--location",
+        "--max-time",
+        "8",
+        "--proxy",
+        proxy_url,
+        target_url,
+    ]
+    if resolve_ip:
+        cmd.extend(["--output", "-"])
+    else:
+        cmd.extend(["--head", "--output", "/dev/null", "--write-out", "%{http_code}"])
+    if str(no_proxy or "").strip():
+        cmd.extend(["--noproxy", str(no_proxy).strip()])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    body = str(result.stdout or "").strip()
+    http_code = body if not resolve_ip else ""
+    detail = str(result.stderr or "").strip()
+    ok = result.returncode == 0
+    if not resolve_ip:
+        ok = ok and bool(http_code) and http_code not in {"000", "407"}
+        if http_code and http_code not in {"000"}:
+            detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
+    return {
+        "ok": ok,
+        "detail": detail[:200] + ("..." if len(detail) > 200 else ""),
+        "http_code": http_code,
+        "body": body[:200],
+    }
+
+
+def _base_claude_network_guard(runtime, *, require_proxy=False):
+    runtime = dict(runtime or {})
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    force_ipv4 = bool(_runtime_force_ipv4(runtime))
+    dns_mode = _proxy_dns_mode(proxy_url)
+    fake_enabled = bool(_fake_upstream_enabled())
+    return {
+        "proxy_required": bool(require_proxy),
+        "proxy_present": bool(proxy_url),
+        "proxy_fingerprint": _proxy_fingerprint(proxy_url),
+        "dns_mode": "fake-local" if fake_enabled else dns_mode,
+        "force_ipv4": force_ipv4,
+        "no_proxy": no_proxy,
+        "no_proxy_conflicts": _claude_no_proxy_conflicts(no_proxy),
+        "targets": [],
+        "ipv4_egress": "-",
+        "ipv6_egress": "blocked" if force_ipv4 else "unknown",
+        "status": "ok",
+        "block_reason": "",
+        "fake_upstream": fake_enabled,
+        "proxy_validation": "skipped_fake" if fake_enabled else "pending",
+    }
+
+
+def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
+    if auth_mode != "oauth":
+        return
+    if cli_name not in {"claude", "codex", "gemini"}:
+        return
+    dns_mode = _runtime_dns_mode(runtime)
+    if dns_mode == "local-risk":
+        console.print(
+            "[yellow]DNS 风险: 当前 proxy 为 socks5，hostname 可能仍在本地解析；"
+            "更稳的是 socks5h 或由上游 relay 负责 remote DNS[/yellow]"
+        )
+    elif dns_mode == "direct":
+        console.print("[yellow]DNS: 当前为 direct，未经过代理 DNS 路径[/yellow]")
+
+
+def _claude_network_guard_cache_key(runtime, require_proxy):
+    runtime = dict(runtime or {})
+    return (
+        str(runtime.get("id") or runtime.get("name") or "").strip(),
+        str(runtime.get("proxy") or "").strip(),
+        str(runtime.get("no_proxy") or "").strip(),
+        bool(_runtime_force_ipv4(runtime)),
+        bool(require_proxy),
+        bool(_fake_upstream_enabled()),
+    )
+
+
+def get_claude_network_guard_preview(runtime, *, require_proxy=False):
+    cache_key = _claude_network_guard_cache_key(runtime, require_proxy)
+    cached = _CLAUDE_NETWORK_GUARD_CACHE.get(cache_key)
+    now = perf_counter()
+    if cached and now - float(cached.get("ts", 0.0) or 0.0) < _CLAUDE_NETWORK_GUARD_TTL_SEC:
+        return dict(cached.get("guard") or {})
+    return _base_claude_network_guard(runtime, require_proxy=require_proxy)
+
+
+def build_claude_network_guard(runtime, *, require_proxy=False):
+    runtime = dict(runtime or {})
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    force_ipv4 = bool(_runtime_force_ipv4(runtime))
+    cache_key = _claude_network_guard_cache_key(runtime, require_proxy)
+    cached = _CLAUDE_NETWORK_GUARD_CACHE.get(cache_key)
+    now = perf_counter()
+    if cached and now - float(cached.get("ts", 0.0) or 0.0) < _CLAUDE_NETWORK_GUARD_TTL_SEC:
+        return dict(cached.get("guard") or {})
+    guard = _base_claude_network_guard(runtime, require_proxy=require_proxy)
+    if require_proxy and not proxy_url:
+        guard["status"] = "blocked"
+        guard["block_reason"] = "BYPASS 启动要求当前 Claude 账号必须配置 proxy"
+        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
+        return guard
+    if guard["no_proxy_conflicts"]:
+        guard["status"] = "blocked"
+        guard["block_reason"] = "NO_PROXY 命中了 Claude 域名，存在直连泄漏风险"
+        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
+        return guard
+    if not proxy_url:
+        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
+        return guard
+    if _fake_upstream_enabled():
+        guard["proxy_validation"] = "skipped_fake"
+        guard["block_reason"] = "fake upstream 模式下已跳过真实 proxy / egress 校验"
+        _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
+        return guard
+
+    failed_targets = []
+    for label, url in _CLAUDE_PROXY_GUARD_TARGETS:
+        probe = _run_proxy_probe(
+            proxy_url or "http://127.0.0.1:0",
+            url,
+            no_proxy=no_proxy,
+            force_ipv4=force_ipv4,
+        )
+        guard["targets"].append(
+            {
+                "label": label,
+                "url": url,
+                "ok": bool(probe.get("ok")),
+                "detail": probe.get("detail", ""),
+            }
+        )
+        if not probe.get("ok"):
+            failed_targets.append(label)
+
+    ipv4_probe = _run_proxy_probe(
+        proxy_url or "http://127.0.0.1:0",
+        "https://api4.ipify.org",
+        no_proxy=no_proxy,
+        force_ipv4=True,
+        resolve_ip=True,
+    )
+    if ipv4_probe.get("ok") and ipv4_probe.get("body"):
+        guard["ipv4_egress"] = ipv4_probe["body"]
+    if not force_ipv4:
+        ipv6_probe = _run_proxy_probe(
+            proxy_url or "http://127.0.0.1:0",
+            "https://api6.ipify.org",
+            no_proxy=no_proxy,
+            force_ipv4=False,
+            resolve_ip=True,
+        )
+        if ipv6_probe.get("ok") and ipv6_probe.get("body"):
+            guard["ipv6_egress"] = ipv6_probe["body"]
+
+    if failed_targets:
+        guard["status"] = "blocked"
+        guard["block_reason"] = f"Claude 关键域名代理检测失败: {', '.join(failed_targets)}"
+    elif guard.get("dns_mode") == "local-risk":
+        guard["status"] = "watch"
+        guard["block_reason"] = "当前 proxy 为 socks5，本地 DNS 解析有风险"
+    else:
+        guard["proxy_validation"] = "validated"
+    _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
+    return guard
+
+
+def _enforce_claude_network_guard_or_exit(runtime, *, require_proxy=False):
+    guard = build_claude_network_guard(runtime, require_proxy=require_proxy)
+    runtime["_network_guard"] = guard
+    if guard.get("status") != "blocked":
+        return guard
+    detail_lines = []
+    if guard.get("block_reason"):
+        detail_lines.append(str(guard["block_reason"]))
+    for item in guard.get("targets") or []:
+        if item.get("ok"):
+            continue
+        detail = str(item.get("detail") or "").strip()
+        detail_lines.append(
+            f"{item.get('label')}: {detail}" if detail else str(item.get("label") or "target")
+        )
+    console.print(
+        f"[red]{runtime.get('id') or runtime.get('name') or 'Claude runtime'} 网络保护阻止启动[/red]"
+        + (f"\n[dim]{' | '.join(detail_lines)}[/dim]" if detail_lines else "")
+    )
+    sys.exit(1)
 
 
 def _validate_timezone_or_exit(timezone_name, *, label="account"):
@@ -636,6 +1110,22 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
     proxy_url = str(proxy_url or "").strip()
     if not proxy_url:
         return
+    if _fake_upstream_enabled():
+        probe = _fake_proxy_probe(
+            "https://api.anthropic.com",
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
+            force_ipv4=force_ipv4,
+            resolve_ip=False,
+        )
+        if probe.get("ok"):
+            return
+        detail = str(probe.get("detail") or probe.get("http_code") or "fake upstream")
+        console.print(
+            f"[red]{label} 配置的 proxy 不可用，已阻止启动[/red]"
+            + (f"\n[dim]{detail}[/dim]" if detail else "")
+        )
+        sys.exit(1)
     curl_bin = shutil.which("curl")
     if not curl_bin:
         console.print(f"[red]{label} 要求强制 proxy，但当前系统没有 curl，无法做启动前连通性检查[/red]")
@@ -684,6 +1174,29 @@ def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
     if timezone_name:
         env["TZ"] = timezone_name
     _apply_runtime_ip_stack_profile(env, runtime)
+    if _fake_upstream_enabled():
+        try:
+            fake_proxy = _ensure_fake_upstream_proxy()
+        except Exception as exc:
+            console.print(
+                "[red]fake upstream 已开启，但本地 fake proxy 初始化失败，已阻止启动[/red]"
+                + f"\n[dim]{str(exc).strip() or 'unknown error'}[/dim]"
+            )
+            sys.exit(1)
+        fake_proxy_url = str(fake_proxy.get("proxy_url") or "").strip()
+        fake_ca_cert_path = str(fake_proxy.get("ca_cert_path") or "").strip()
+        if not fake_proxy_url:
+            console.print("[red]fake upstream 已开启，但本地 fake proxy 启动失败[/red]")
+            sys.exit(1)
+        env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
+        env["MMS_FAKE_UPSTREAM_PROXY"] = fake_proxy_url
+        env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = _proxy_fingerprint(proxy_url)
+        env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
+        if fake_ca_cert_path:
+            env["NODE_EXTRA_CA_CERTS"] = fake_ca_cert_path
+            env["SSL_CERT_FILE"] = fake_ca_cert_path
+        _apply_proxy_env(env, fake_proxy_url, no_proxy="127.0.0.1,localhost,::1")
+        return env
     if proxy_url:
         if validate_proxy:
             _check_proxy_connectivity_or_exit(
@@ -2024,6 +2537,7 @@ def launch_claude(model_info, runtime, once=False):
     lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
     if auth_mode == "oauth":
         env = _account_env(runtime)
+        _prepare_oauth_home_context(runtime, env, "claude")
         session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
         account_claude_dir = os.path.join(
             os.path.expanduser(str(runtime.get("home_dir", "")).strip()),
@@ -2142,7 +2656,7 @@ def launch_claude(model_info, runtime, once=False):
                 bridge_gw_url += "/v1"
             if lb_light or lb_medium:
                 # 智能路由：通过本地 bridge 路由，以便拦截并切换模型
-                cleanup_ctx = gateway_claude_bridge(bridge_gw_url, runtime["api_key"],
+                cleanup_ctx = _gateway_claude_bridge_context(bridge_gw_url, runtime["api_key"],
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium or None,
                                                     light_model=lb_light or None,
@@ -2173,7 +2687,7 @@ def launch_claude(model_info, runtime, once=False):
                 console.print(f"[dim]⚖️ 智能路由已启用 — {', '.join(parts)}[/dim]")
             else:
                 # 直连 Anthropic provider 也统一过本地 bridge，补齐测速与 patched /v1/models。
-                cleanup_ctx = gateway_claude_bridge(
+                cleanup_ctx = _gateway_claude_bridge_context(
                     bridge_gw_url,
                     runtime["api_key"],
                     heavy_model=probe_model,
@@ -2223,7 +2737,7 @@ def launch_claude(model_info, runtime, once=False):
             openai_url = _gpt_openai_url
             api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
             console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API[/dim]")
-            cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
+            cleanup_ctx = _gateway_claude_bridge_context(openai_url, api_key,
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None,
@@ -2253,7 +2767,7 @@ def launch_claude(model_info, runtime, once=False):
             console.print(
                 f"[yellow]⚠ 无 Anthropic 端点，自动通过 OpenAI 端点 bridge[/yellow]"
             )
-            cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
+            cleanup_ctx = _gateway_claude_bridge_context(openai_url, api_key,
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
                                                 light_model=lb_light or None,
@@ -2290,7 +2804,7 @@ def launch_claude(model_info, runtime, once=False):
             openai_url = _openai_base_url(runtime)
             api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
             if openai_url:
-                cleanup_ctx = gateway_claude_bridge(openai_url, api_key,
+                cleanup_ctx = _gateway_claude_bridge_context(openai_url, api_key,
                                                     heavy_model=probe_model,
                                                     medium_model=lb_medium,
                                                     light_model=lb_light,
@@ -3093,6 +3607,7 @@ def launch_codex(model_info, runtime, once=False):
     auth_mode = runtime.get("auth_mode", "api_key")
     if auth_mode == "oauth":
         env = _account_env(runtime)
+        _prepare_oauth_home_context(runtime, env, "codex")
         model = _resolve_model(model_info)
         cmd = ["codex"]
         if model:
@@ -3228,6 +3743,7 @@ def launch_gemini(model_info, runtime, once=False):
         sys.exit(1)
 
     env = _account_env(runtime)
+    _prepare_oauth_home_context(runtime, env, "gemini")
     model = _resolve_model(model_info)
     cmd = ["gemini"]
     if model:
@@ -3335,6 +3851,10 @@ def _show_launch_info(cli, runtime, auth_mode):
         console.print(f"[dim]网络: {_runtime_network_summary(runtime)}[/dim]")
     except Exception:
         pass
+    try:
+        _emit_dns_guard_hint(runtime, cli_name=cli, auth_mode=auth_mode)
+    except Exception:
+        pass
 
 
 def launch_cli(cli, model_info, runtime, once=False):
@@ -3363,6 +3883,8 @@ def launch_cli(cli, model_info, runtime, once=False):
         if report.get("status") == "blocked":
             console.print(f"[red]{report.get('blocked_reason') or '账号守护已阻止启动'}[/red]")
             sys.exit(1)
+        if runtime.get("bypass"):
+            _enforce_claude_network_guard_or_exit(runtime, require_proxy=True)
 
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))
