@@ -720,7 +720,21 @@ def _handle_connect(raw_socket, connect_host: str):
     raw_socket.sendall(b"HTTP/1.1 200 Connection Established\r\nConnection: close\r\n\r\n")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=cert_path, keyfile=key_path)
-    tls_socket = context.wrap_socket(raw_socket, server_side=True)
+    try:
+        tls_socket = context.wrap_socket(raw_socket, server_side=True)
+    except ssl.SSLError as exc:
+        append_log(
+            "tls_handshake_failed",
+            {
+                "host": connect_host,
+                "detail": str(exc),
+            },
+        )
+        try:
+            raw_socket.close()
+        except Exception:
+            pass
+        return
     tls_socket.settimeout(10)
     reader = tls_socket.makefile("rb")
     writer = tls_socket.makefile("wb")

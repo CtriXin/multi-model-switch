@@ -1247,6 +1247,26 @@ _CLAUDE_STATUSLINE_CONFIG = {
     "type": "command",
 }
 
+_CLAUDE_SESSION_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "TZ",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+    "MMS_FORCE_IPV4",
+    "MMS_FAKE_UPSTREAM_MODE",
+    "MMS_FAKE_UPSTREAM_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
+)
+
 _CLAUDE_MAILBOX_PREFIX = os.path.join(_real_user_path(".claude"), "mailbox")
 
 _CLAUDE_DEFAULT_PERMISSION_ALLOW = [
@@ -1919,6 +1939,32 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     return hooks_data
 
 
+def _session_required_env_from_runtime_env(env):
+    env = env if isinstance(env, dict) else {}
+    required = {}
+    for key in _CLAUDE_SESSION_ENV_KEYS:
+        value = str(env.get(key) or "").strip()
+        if value:
+            required[key] = value
+    return required
+
+
+def _sanitize_account_claude_settings_payload(settings_data):
+    settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
+    env_data = settings_data.get("env")
+    if isinstance(env_data, dict):
+        cleaned_env = {
+            key: value
+            for key, value in env_data.items()
+            if str(key or "").strip() not in _CLAUDE_SESSION_ENV_KEYS
+        }
+        if cleaned_env:
+            settings_data["env"] = cleaned_env
+        else:
+            settings_data.pop("env", None)
+    return settings_data
+
+
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
     template_settings = _load_mms_claude_settings_template()
     settings_data = _merge_claude_settings(base_settings or {}, _load_global_claude_settings_template())
@@ -2538,6 +2584,7 @@ def launch_claude(model_info, runtime, once=False):
     if auth_mode == "oauth":
         env = _account_env(runtime)
         _prepare_oauth_home_context(runtime, env, "claude")
+        session_required_env = _session_required_env_from_runtime_env(env)
         session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
         account_claude_dir = os.path.join(
             os.path.expanduser(str(runtime.get("home_dir", "")).strip()),
@@ -2545,6 +2592,7 @@ def launch_claude(model_info, runtime, once=False):
         )
         _write_claude_session_settings(
             session_claude_dir,
+            required_env=session_required_env,
             default_env={
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
@@ -3113,6 +3161,8 @@ def _prepare_claude_session_tree(
 
 
 def _sync_claude_session_state_to_account_home(session_home, account_home):
+    import json as _json
+
     account_home = os.path.expanduser(str(account_home or "").strip())
     if not account_home:
         return
@@ -3136,7 +3186,15 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
             continue
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
-            shutil.copy2(src, dst)
+            if os.path.basename(dst) == "settings.json":
+                with open(src, "r", encoding="utf-8") as f:
+                    loaded = _json.load(f)
+                cleaned = _sanitize_account_claude_settings_payload(loaded)
+                with open(dst, "w", encoding="utf-8") as f:
+                    _json.dump(cleaned, f, ensure_ascii=False, indent=2)
+                    f.write("\n")
+            else:
+                shutil.copy2(src, dst)
         except Exception:
             continue
 

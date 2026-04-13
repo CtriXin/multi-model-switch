@@ -1884,6 +1884,43 @@ def _normalize_claude_state_snapshot_payload(data):
     }
 
 
+_CLAUDE_SESSION_ENV_KEYS = {
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "TZ",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+    "MMS_FORCE_IPV4",
+    "MMS_FAKE_UPSTREAM_MODE",
+    "MMS_FAKE_UPSTREAM_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
+}
+
+
+def _normalize_claude_settings_snapshot_payload(data):
+    data = dict(data) if isinstance(data, dict) else {}
+    env_data = data.get("env")
+    if isinstance(env_data, dict):
+        cleaned_env = {
+            key: value
+            for key, value in env_data.items()
+            if str(key or "").strip() not in _CLAUDE_SESSION_ENV_KEYS
+        }
+        if cleaned_env:
+            data["env"] = cleaned_env
+        else:
+            data.pop("env", None)
+    return data
+
+
 def _snapshot_file_content_bytes(path):
     absolute_path = os.path.abspath(os.path.expanduser(str(path)))
     if os.path.basename(absolute_path) == ".claude.json":
@@ -1891,6 +1928,14 @@ def _snapshot_file_content_bytes(path):
             data = json.load(f)
         normalized = _normalize_claude_state_snapshot_payload(data)
         return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_state_identity"
+    if (
+        os.path.basename(absolute_path) == "settings.json"
+        and os.path.basename(os.path.dirname(absolute_path)) == ".claude"
+    ):
+        with open(absolute_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        normalized = _normalize_claude_settings_snapshot_payload(data)
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8"), "claude_settings_runtime_stripped"
     with open(absolute_path, "rb") as f:
         return f.read(), ""
 
