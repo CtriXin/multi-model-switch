@@ -171,3 +171,43 @@ def test_fake_upstream_guard_still_requires_real_proxy(monkeypatch):
 
     assert guard["status"] == "blocked"
     assert "必须配置 proxy" in guard["block_reason"]
+
+
+def test_handle_connect_swallows_tls_handshake_failure(monkeypatch):
+    import mms_fake_upstream
+
+    events = []
+
+    class FakeContext:
+        def load_cert_chain(self, certfile=None, keyfile=None):
+            return None
+
+        def wrap_socket(self, raw_socket, server_side=False):
+            raise ssl.SSLError("bad certificate")
+
+    class FakeSocket:
+        def __init__(self):
+            self.payloads = []
+            self.closed = False
+
+        def sendall(self, payload):
+            self.payloads.append(payload)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        mms_fake_upstream,
+        "_ensure_host_tls_cert",
+        lambda _host: ("/tmp/cert.pem", "/tmp/key.pem", "/tmp/ca.pem"),
+    )
+    monkeypatch.setattr(mms_fake_upstream.ssl, "SSLContext", lambda _protocol: FakeContext())
+    monkeypatch.setattr(mms_fake_upstream, "append_log", lambda kind, payload: events.append((kind, payload)))
+
+    sock = FakeSocket()
+    mms_fake_upstream._handle_connect(sock, "api.anthropic.com")
+
+    assert sock.closed is True
+    assert sock.payloads[0].startswith(b"HTTP/1.1 200 Connection Established")
+    assert events[0][0] == "tls_handshake_failed"
+    assert events[0][1]["host"] == "api.anthropic.com"

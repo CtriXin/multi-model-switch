@@ -277,6 +277,45 @@ def test_snapshot_file_entry_detects_claude_identity_change(tmp_path):
     assert first["sha256"] != second["sha256"]
 
 
+def test_snapshot_file_entry_ignores_claude_settings_session_env_noise(tmp_path):
+    import mms_core
+
+    path = tmp_path / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "env": {
+                    "HTTP_PROXY": "http://127.0.0.1:7890",
+                    "NODE_EXTRA_CA_CERTS": "/tmp/ca.pem",
+                    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                },
+                "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    first = mms_core._snapshot_file_entry(str(path))
+
+    path.write_text(
+        json.dumps(
+            {
+                "env": {
+                    "HTTP_PROXY": "http://127.0.0.1:9999",
+                    "NODE_EXTRA_CA_CERTS": "/tmp/other-ca.pem",
+                    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                },
+                "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    second = mms_core._snapshot_file_entry(str(path))
+
+    assert first["sha256"] == second["sha256"]
+    assert first["normalized_kind"] == "claude_settings_runtime_stripped"
+
+
 def test_detect_working_base_url_uses_runtime_proxy(monkeypatch):
     import mms_core
 
@@ -592,6 +631,51 @@ def test_emit_dns_guard_hint_silent_for_proxy_likely(capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+def test_session_required_env_from_runtime_env_keeps_fake_upstream_tls_env():
+    from mms_launchers import _session_required_env_from_runtime_env
+
+    result = _session_required_env_from_runtime_env(
+        {
+            "HTTP_PROXY": "http://127.0.0.1:7890",
+            "HTTPS_PROXY": "http://127.0.0.1:7890",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "TZ": "America/Los_Angeles",
+            "SSL_CERT_FILE": "/tmp/mms-ca.pem",
+            "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
+            "MMS_FAKE_UPSTREAM_MODE": "upstream-proxy",
+            "MMS_FAKE_UPSTREAM_PROXY": "http://127.0.0.1:8899",
+            "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY": "http://198.51.100.24:6394+auth",
+            "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY": "",
+            "UNRELATED": "skip-me",
+        }
+    )
+
+    assert result["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert result["SSL_CERT_FILE"] == "/tmp/mms-ca.pem"
+    assert result["NODE_EXTRA_CA_CERTS"] == "/tmp/mms-ca.pem"
+    assert result["MMS_FAKE_UPSTREAM_MODE"] == "upstream-proxy"
+    assert "UNRELATED" not in result
+
+
+def test_sanitize_account_claude_settings_payload_strips_session_env():
+    from mms_launchers import _sanitize_account_claude_settings_payload
+
+    result = _sanitize_account_claude_settings_payload(
+        {
+            "env": {
+                "HTTP_PROXY": "http://127.0.0.1:7890",
+                "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
+                "TZ": "America/Los_Angeles",
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+            },
+            "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+        }
+    )
+
+    assert result["env"] == {"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
+    assert result["statusLine"]["command"] == "/tmp/status.sh"
 
 
 def test_gateway_claude_bridge_context_drops_unknown_kwargs(monkeypatch, capsys):
