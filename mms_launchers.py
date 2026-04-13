@@ -14,6 +14,7 @@ from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
+from mms_i18n import normalize_language
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
@@ -26,6 +27,7 @@ from mms_fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
     fake_proxy_probe as _fake_proxy_probe,
     is_enabled as _fake_upstream_enabled,
+    status_payload as _fake_upstream_status_payload,
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
@@ -128,10 +130,14 @@ def _mask_proxy_url(proxy_url):
         parsed = urlsplit(proxy_url)
     except Exception:
         return proxy_url
+    try:
+        parsed_port = parsed.port
+    except ValueError:
+        return proxy_url
     username = parsed.username or ""
     password = parsed.password or ""
     host = parsed.hostname or ""
-    port = f":{parsed.port}" if parsed.port else ""
+    port = f":{parsed_port}" if parsed_port else ""
     auth = ""
     if username:
         auth = _mask_secret(username)
@@ -147,7 +153,8 @@ def _runtime_network_summary(runtime):
     timezone_name = str(runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE).strip() or DEFAULT_ACCOUNT_TIMEZONE
     ipv4_label = "on" if _runtime_force_ipv4(runtime) else "off"
     dns_mode = "fake-local" if _fake_upstream_enabled() else _proxy_dns_mode(runtime.get("proxy", ""))
-    parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"IPv4 {ipv4_label}"]
+    locale_value = _runtime_locale_env(runtime).get("LANG", "en_US.UTF-8")
+    parts = [f"DNS {dns_mode}", f"TZ {timezone_name}", f"LANG {locale_value}", f"IPv4 {ipv4_label}"]
     if proxy_url:
         parts.insert(0, f"Proxy {proxy_url}")
     else:
@@ -160,6 +167,40 @@ def _runtime_network_summary(runtime):
 
 def _guard_utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _runtime_locale_env(runtime=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw_locale = (
+        str(runtime.get("locale") or "").strip()
+        or str(os.environ.get("MMS_LOCALE") or "").strip()
+        or str(os.environ.get("LC_ALL") or "").strip()
+        or str(os.environ.get("LANG") or "").strip()
+    )
+    normalized_lang = normalize_language(
+        str(runtime.get("language") or "").strip()
+        or str(os.environ.get("MMS_LANG") or "").strip()
+        or raw_locale
+    )
+    if raw_locale and "." in raw_locale and "_" in raw_locale:
+        locale_value = raw_locale
+    elif normalized_lang == "zh":
+        locale_value = "zh_CN.UTF-8"
+    else:
+        locale_value = "en_US.UTF-8"
+    return {
+        "LANG": locale_value,
+        "LC_ALL": locale_value,
+        "LC_CTYPE": locale_value,
+        "LC_MESSAGES": locale_value,
+    }
+
+
+def _apply_runtime_locale_profile(env, runtime=None):
+    env = env if isinstance(env, dict) else {}
+    for key, value in _runtime_locale_env(runtime).items():
+        env[key] = value
+    return env
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
@@ -692,6 +733,7 @@ def _build_home_context(env, runtime, cli_name):
     gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
     expected_session_home = auth_mode == "oauth" and cli_name in {"claude", "codex"}
     config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
+    locale_value = str(env.get("LC_ALL") or env.get("LANG") or _runtime_locale_env(runtime).get("LANG") or "").strip()
     return {
         "cli": str(cli_name or "").strip(),
         "auth_mode": auth_mode,
@@ -706,6 +748,7 @@ def _build_home_context(env, runtime, cli_name):
         "config_root": config_root,
         "net_mode": _runtime_net_mode(runtime),
         "dns_mode": _runtime_dns_mode(runtime),
+        "locale": locale_value,
         "expected_session_home": expected_session_home,
     }
 
@@ -799,6 +842,9 @@ def _home_context_lines(context):
     dns_mode = context.get("dns_mode") or ""
     if dns_mode:
         extras.append(f"dns={dns_mode}")
+    locale_value = context.get("locale") or ""
+    if locale_value:
+        extras.append(f"lang={locale_value}")
     if extras:
         lines.append(" | ".join(extras))
     return lines
@@ -1165,6 +1211,7 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
 
 
 def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
+    _apply_runtime_locale_profile(env, runtime)
     proxy_url = str(runtime.get("proxy") or "").strip()
     no_proxy = str(runtime.get("no_proxy") or "").strip()
     timezone_name = _validate_timezone_or_exit(
@@ -1257,6 +1304,10 @@ _CLAUDE_SESSION_ENV_KEYS = (
     "all_proxy",
     "no_proxy",
     "TZ",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
     "SSL_CERT_FILE",
     "NODE_EXTRA_CA_CERTS",
     "REQUESTS_CA_BUNDLE",
@@ -1610,9 +1661,11 @@ def _merge_snapshot_with_current(snapshot_data, current_settings):
 def _prune_session_only_snapshot_entries(snapshot_data):
     snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     hooks = snapshot_data.get("hooks") or {}
+    feishu_guard = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
+    hive_compact = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
     session_only_commands = {
-        _normalize_hook_command("/Users/xin/auto-skills/CtriXin-repo/multi-model-switch/hooks/claude-feishu-webfetch-guard.sh"),
-        _normalize_hook_command("bash /Users/xin/auto-skills/CtriXin-repo/multi-model-switch/hooks/hive-compact-hook.sh"),
+        _normalize_hook_command(feishu_guard),
+        _normalize_hook_command(f"bash {hive_compact}"),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -1963,6 +2016,160 @@ def _sanitize_account_claude_settings_payload(settings_data):
         else:
             settings_data.pop("env", None)
     return settings_data
+
+
+def _masked_exposure_env_value(key, value):
+    key = str(key or "").strip()
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    lower_key = key.lower()
+    if "proxy" in lower_key and "://" in value:
+        return _mask_proxy_url(value)
+    return value
+
+
+def inspect_runtime_exposure(cli, runtime):
+    cli = str(cli or "").strip()
+    runtime = dict(runtime or {})
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
+    real_home = _real_user_home()
+    account_home = _normalize_path(runtime.get("home_dir") or "")
+    fake_payload = _fake_upstream_status_payload() if _fake_upstream_enabled() else {}
+    locale_env = _runtime_locale_env(runtime)
+    timezone_name = _validate_timezone_or_exit(
+        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+        label=runtime_id or cli or "runtime",
+    )
+    process_env = {
+        "MMS_REAL_HOME": real_home,
+        "REAL_HOME": real_home,
+        "ORIGINAL_HOME": real_home,
+        "TZ": timezone_name,
+    }
+    process_env.update(locale_env)
+    home_info = {
+        "real_home": real_home,
+        "account_home": account_home,
+        "session_home": "",
+        "settings_path": "",
+    }
+    settings_info = {
+        "path": "",
+        "statusline": False,
+        "hook_events": [],
+        "env_keys": [],
+    }
+    notes = [
+        "CLI 进程可直接读取这些环境变量；上游通常看不到本地 proxy URL，但能观察到出口 IP / DNS 行为 / 时间与语言表现。",
+    ]
+
+    if cli == "claude" and auth_mode == "oauth":
+        session_home = os.path.join(account_home, "s", str(os.getpid())) if account_home else ""
+        account_claude_dir = os.path.join(account_home, ".claude") if account_home else ""
+        session_claude_dir = os.path.join(session_home, ".claude") if session_home else ""
+        process_env["HOME"] = session_home
+        process_env["MMS_SESSION_HOME"] = session_home
+        home_info["session_home"] = session_home
+        home_info["settings_path"] = os.path.join(session_claude_dir, "settings.json") if session_claude_dir else ""
+        account_settings = _load_claude_settings_from_dir(account_claude_dir)
+        projected_env = dict(process_env)
+        _apply_runtime_network_profile(projected_env, runtime, validate_proxy=False)
+        required_env = _session_required_env_from_runtime_env(projected_env)
+        session_settings = _build_claude_session_settings(
+            base_settings=account_settings,
+            required_env=required_env,
+            default_env={
+                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+            },
+        )
+        settings_info = {
+            "path": home_info["settings_path"],
+            "statusline": isinstance(session_settings.get("statusLine"), dict),
+            "hook_events": sorted((session_settings.get("hooks") or {}).keys()),
+            "env_keys": sorted((session_settings.get("env") or {}).keys()),
+        }
+        notes.append("Claude OAuth 还会从 session settings.json 读取 statusLine / hooks / env。")
+    elif cli == "claude":
+        gateway_home = _claude_gateway_home()
+        home_info["session_home"] = gateway_home
+        home_info["settings_path"] = os.path.join(gateway_home, ".claude", "settings.json")
+        process_env["HOME"] = gateway_home
+        process_env["MMS_SESSION_HOME"] = gateway_home
+        projected_settings = _build_claude_session_settings(
+            base_settings=_load_real_claude_settings(),
+            default_env={"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"},
+        )
+        settings_info = {
+            "path": home_info["settings_path"],
+            "statusline": isinstance(projected_settings.get("statusLine"), dict),
+            "hook_events": sorted((projected_settings.get("hooks") or {}).keys()),
+            "env_keys": sorted((projected_settings.get("env") or {}).keys()),
+        }
+        notes.append("Claude provider/gateway 模式也会在 session settings.json 中暴露 statusLine / hooks / env。")
+    elif cli == "codex" and auth_mode == "oauth":
+        session_home = os.path.join(account_home, "s", str(os.getpid())) if account_home else ""
+        process_env["HOME"] = session_home
+        process_env["MMS_SESSION_HOME"] = session_home
+        process_env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config") if session_home else ""
+        home_info["session_home"] = session_home
+        notes.append("Codex OAuth 主要通过进程环境与 session HOME/XDG 路径感知隔离态。")
+    elif cli == "gemini" and auth_mode == "oauth":
+        process_env["GEMINI_CLI_HOME"] = account_home
+        home_info["session_home"] = account_home
+        notes.append("Gemini OAuth 当前通过 GEMINI_CLI_HOME 指向账号目录，不走 Claude 那套 session settings。")
+
+    if _runtime_force_ipv4(runtime):
+        process_env["MMS_FORCE_IPV4"] = "1"
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    if _fake_upstream_enabled():
+        fake_proxy_url = str(fake_payload.get("proxy_url") or "").strip()
+        if fake_proxy_url:
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                process_env[key] = fake_proxy_url
+        for key in ("NO_PROXY", "no_proxy"):
+            process_env[key] = "127.0.0.1,localhost,::1"
+        process_env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
+        if proxy_url:
+            process_env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = _proxy_fingerprint(proxy_url)
+        if no_proxy:
+            process_env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
+        if fake_payload.get("ca_cert_path"):
+            process_env["NODE_EXTRA_CA_CERTS"] = str(fake_payload.get("ca_cert_path") or "")
+            process_env["SSL_CERT_FILE"] = str(fake_payload.get("ca_cert_path") or "")
+    elif proxy_url:
+        for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            process_env[key] = proxy_url
+        for key in ("NO_PROXY", "no_proxy"):
+            process_env[key] = no_proxy
+
+    process_env_rows = [
+        {"key": key, "value": _masked_exposure_env_value(key, value)}
+        for key, value in sorted(process_env.items())
+        if str(value or "").strip()
+    ]
+    return {
+        "cli": cli,
+        "runtime_id": runtime_id,
+        "runtime_name": str(runtime.get("name") or runtime_id or "").strip(),
+        "auth_mode": auth_mode,
+        "network": {
+            "proxy_mode": _runtime_net_mode(runtime),
+            "proxy_fingerprint": _proxy_fingerprint(proxy_url),
+            "dns_mode": _runtime_dns_mode(runtime),
+            "timezone": timezone_name,
+            "locale": locale_env.get("LANG", ""),
+            "force_ipv4": bool(_runtime_force_ipv4(runtime)),
+            "fake_upstream": bool(_fake_upstream_enabled()),
+        },
+        "home": home_info,
+        "process_env": process_env_rows,
+        "settings": settings_info,
+        "notes": notes,
+    }
 
 
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
@@ -3637,6 +3844,7 @@ def _codex_gateway_env(runtime, base_url):
     _set_session_home_hint(env, session_home)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
+    _apply_runtime_locale_profile(env, runtime)
     _apply_runtime_ip_stack_profile(env, runtime)
     _install_session_command_wrappers(session_home, env)
     return env
@@ -3757,6 +3965,7 @@ def launch_qwen(model_info, provider, once=False):
         cmd += ["-m", model]
 
     env = os.environ.copy()
+    _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
     _exec_or_run(cmd, env, once)
 
@@ -3766,6 +3975,7 @@ def launch_kimi(model_info, provider, once=False):
     api_key = provider["api_key"]
     model = _resolve_model(model_info)
     env = os.environ.copy()
+    _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
     cmd = ["kimi"]
 
