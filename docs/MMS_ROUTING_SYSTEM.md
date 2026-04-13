@@ -413,11 +413,11 @@ mms routes export   # 强制重新生成
           "role": "auto"
         }
       ],
-      "capabilities": ["tool_use", "reasoning", "long_context", "bridge_required"],
-      "native_clis": ["kimi"],
-      "bridge_clis": ["claude", "codex"],
+      "capabilities": ["tool_use", "reasoning", "long_context"],
+      "native_clis": ["claude", "kimi"],
+      "bridge_clis": ["codex"],
       "cli_modes": {
-        "claude": "bridge",
+        "claude": "native",
         "codex": "bridge",
         "gemini": "unsupported",
         "qwen": "unsupported",
@@ -474,7 +474,10 @@ mms routes export   # 强制重新生成
 4. 同一模型不重复，先 claim 先得
 5. 每个模型除主路由外，最多附带 3 条 `fallback_routes`，按优先级顺序保留备选通道
 6. `use_count` 会被写入导出结果，来自 `usage.json` 聚合，供展示层和消费端做模糊解析排序；它不会反向驱动 runtime 选路
-7. `capabilities / native_clis / bridge_clis / cli_modes` 是 MMS 的启发式元数据，用于展示层和 Hive 消费，不改变实际启动决策
+7. `capabilities / native_clis / bridge_clis / cli_modes` 是导出层元数据，用于展示层和 Hive 消费，不改变实际启动决策
+   - 对 `claude` 来说，导出语义看的是“这条已 claim 的 route 能不能 direct 打 Anthropic Messages”
+   - 如果某个 non-Claude 模型的 claimed route 带有可用的 `anthropic_base_url`，则 `cli_modes.claude = "native"`，表示对 Hive / Claude executor 是 direct-compatible
+   - 只有当该 route 对 Claude 仍然只能走 bridge 时，才会保留 `bridge_required`
 8. mtime 缓存：`config.toml` 与 `usage.json` 都未更新时直接读缓存
 
 ### 6.4 Hive MCP 消费方式

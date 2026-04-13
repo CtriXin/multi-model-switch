@@ -546,6 +546,40 @@ import time as _time
 
 MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
 _MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
+_EXPORTED_CLI_ORDER = ("claude", "codex", "gemini", "qwen", "kimi")
+
+
+def _route_cli_modes_for_export(model_name, route_entry, base_modes):
+    """Route-scoped CLI modes for exported model-routes metadata.
+
+    `cli_modes` is consumed by Hive as executor compatibility metadata. For the
+    Claude executor, what matters is whether the claimed route exposes a direct
+    Anthropic-compatible endpoint, not whether the model family is "Claude".
+    """
+    modes = dict(base_modes(model_name))
+    anthropic_url = str((route_entry or {}).get("anthropic_base_url") or "").strip()
+    if anthropic_url and modes.get("claude") == "bridge":
+        modes["claude"] = "native"
+    return modes
+
+
+def _route_cli_lists_for_export(cli_modes):
+    native_clis = []
+    bridge_clis = []
+    for cli_name in _EXPORTED_CLI_ORDER:
+        mode = cli_modes.get(cli_name)
+        if mode == "native":
+            native_clis.append(cli_name)
+        elif mode == "bridge":
+            bridge_clis.append(cli_name)
+    return native_clis, bridge_clis
+
+
+def _route_capabilities_for_export(model_name, cli_modes, base_tags):
+    tags = [tag for tag in base_tags(model_name) if tag != "bridge_required"]
+    if cli_modes.get("claude") == "bridge":
+        tags.append("bridge_required")
+    return tags
 
 # role 权重复用 mms_core 的定义
 _EXPORT_ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
@@ -565,7 +599,7 @@ def export_model_routes(cfg=None, force=False):
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
         _provider_effective_models, _runtime_priority_for_model,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
-        _native_clis_for_model, _bridge_clis_for_model, _model_cli_modes,
+        _model_cli_modes,
         _load_usage_stats, _active_usage_path,
     )
 
@@ -721,11 +755,13 @@ def export_model_routes(cfg=None, force=False):
         primary = dict(ordered[0])
         primary.pop("provider_name", None)
         primary.pop("sort_key", None)
+        cli_modes = _route_cli_modes_for_export(normalized, primary, _model_cli_modes)
+        native_clis, bridge_clis = _route_cli_lists_for_export(cli_modes)
         primary.update({
-            "capabilities": _model_capability_tags(normalized),
-            "native_clis": _native_clis_for_model(normalized),
-            "bridge_clis": _bridge_clis_for_model(normalized),
-            "cli_modes": _model_cli_modes(normalized),
+            "capabilities": _route_capabilities_for_export(normalized, cli_modes, _model_capability_tags),
+            "native_clis": native_clis,
+            "bridge_clis": bridge_clis,
+            "cli_modes": cli_modes,
             "use_count": _use_counts.get(normalized, 0),
         })
         fallback_routes = []
