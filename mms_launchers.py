@@ -244,8 +244,26 @@ _MODEL_CONTEXT_WINDOWS = {
     "gpt-5.4-pro": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
-_CLAUDE_DISABLE_1M_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
-_CLAUDE_SENSITIVE_PROVIDER_IDS = {"xin", "fishcrs", "trcrs", "turkeycrs"}
+
+
+def _provider_id_set_from_env(env_name):
+    raw = str(os.environ.get(env_name) or "").strip()
+    return {
+        item.strip().lower()
+        for item in raw.split(",")
+        if item.strip()
+    }
+
+
+def _runtime_declares_sensitive_claude(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if bool(runtime.get("skip_anthropic_probe")):
+        return True
+    return str(runtime.get("claude_provider_sensitivity") or "").strip().lower() in {
+        "sensitive",
+        "private",
+        "isolated",
+    }
 
 
 def _coerce_context_window(value):
@@ -354,12 +372,16 @@ def _runtime_supports_claude_1m(runtime):
     if explicit == "disable":
         return False
     provider_id = str((runtime or {}).get("id", "")).strip().lower()
-    return provider_id not in _CLAUDE_DISABLE_1M_PROVIDER_IDS
+    disabled_ids = _provider_id_set_from_env("MMS_CLAUDE_DISABLE_1M_PROVIDER_IDS")
+    if provider_id and provider_id in disabled_ids:
+        return False
+    return not _runtime_declares_sensitive_claude(runtime)
 
 
 def _runtime_is_sensitive_claude_provider(runtime):
     provider_id = str((runtime or {}).get("id", "")).strip().lower()
-    return provider_id in _CLAUDE_SENSITIVE_PROVIDER_IDS
+    sensitive_ids = _provider_id_set_from_env("MMS_CLAUDE_SENSITIVE_PROVIDER_IDS")
+    return (provider_id and provider_id in sensitive_ids) or _runtime_declares_sensitive_claude(runtime)
 
 
 def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
