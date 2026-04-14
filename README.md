@@ -74,7 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Scope notes:
 
 - The current integration targets the Claude `SessionStart` hook first
-- It expects a working local `Node.js` / `npm`
+- It prefers an existing local `Node.js 18+` runtime; if none is available, MMS skips `Map` instead of changing your default `Node` automatically
+- Use `--ensure-node22` only when you explicitly want MMS to prepare a separate `Node 22` fallback
 - If the `Map` build output is missing, the installer skips hook injection and prints a warning
 
 ### Install with optional read-once
