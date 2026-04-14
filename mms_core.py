@@ -6615,6 +6615,29 @@ def _uses_managed_entry(runtime, cli):
     return _uses_native_account_entry(runtime, cli)
 
 
+def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, role, recommend):
+    if _uses_native_account_entry(runtime, cli):
+        console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
+        return True, None
+
+    if _uses_broker_entry(runtime, cli):
+        console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
+        available_models = cli_models or models_cache
+        if not _ensure_models_cache_available(available_models):
+            return False, None
+        models_list = display_models(available_models, role, recommend)
+        return True, select_model_interactive(models_list)
+
+    if cli == "kimi":
+        return True, DEFAULT_KIMI_MODEL
+
+    available_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+    if not _ensure_models_cache_available(available_models):
+        return False, None
+    models_list = display_models(available_models, role, recommend if cli != "qwen" else None)
+    return True, select_model_interactive(models_list)
+
+
 def _preset_model_info(preset):
     if not isinstance(preset, dict):
         return {}
@@ -9409,19 +9432,16 @@ def main():
             if not check_cli_installed(cli):
                 from mms_installer import check_and_offer_install
                 check_and_offer_install(cli)
-            if _uses_native_account_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 处理。[/cyan]")
-                model = None
-            elif _uses_broker_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
-            elif cli == "kimi":
-                model = DEFAULT_KIMI_MODEL
-            else:
-                if not _ensure_models_cache_available(cli_models or models_cache):
-                    return
-                base_models = cli_models if cli == "qwen" else (cli_models or models_cache)
-                models_list = display_models(base_models, role, recommend if cli != "qwen" else None)
-                model = select_model_interactive(models_list)
+            ok, model = _resolve_interactive_launch_model(
+                cli,
+                runtime,
+                cli_models,
+                models_cache,
+                role,
+                recommend,
+            )
+            if not ok:
+                return
             if model:
                 _trace_record("manual select", model=model)
             model_info = {} if _uses_managed_entry(runtime, cli) else model
@@ -9447,16 +9467,16 @@ def main():
                 from mms_installer import check_and_offer_install
                 if not check_and_offer_install(cli):
                     return
-            if _uses_native_account_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用账号档案登录，直接进入官方 CLI；模型选择交由官方 CLI 自己处理。[/cyan]")
-                model = None
-            elif _uses_broker_entry(runtime, cli):
-                console.print(f"[cyan]{cli} 当前使用 broker profile；先选模型，然后直接进入 remote official Claude Code。[/cyan]")
-            else:
-                if not _ensure_models_cache_available(cli_models or models_cache):
-                    return
-                models_list = display_models(cli_models or models_cache, role, recommend)
-                model = select_model_interactive(models_list)
+            ok, model = _resolve_interactive_launch_model(
+                cli,
+                runtime,
+                cli_models,
+                models_cache,
+                role,
+                recommend,
+            )
+            if not ok:
+                return
             if model:
                 _trace_record("manual select", model=model)
             model_info = {} if _uses_managed_entry(runtime, cli) else model
