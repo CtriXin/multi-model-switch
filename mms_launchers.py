@@ -2040,6 +2040,14 @@ def _sanitize_account_claude_settings_payload(settings_data):
     return settings_data
 
 
+def _strip_claude_restore_state(data):
+    payload = dict(data) if isinstance(data, dict) else {}
+    payload.pop("projects", None)
+    payload.pop("lastSessionId", None)
+    payload.pop("lastCost", None)
+    return payload
+
+
 def _masked_exposure_env_value(key, value):
     key = str(key or "").strip()
     value = str(value or "").strip()
@@ -3506,12 +3514,14 @@ def _claude_gateway_env(
                 data = _json.load(f)
         except Exception:
             data = {}
+    data = _strip_claude_restore_state(data)
     # 保留 per-session 里用户已确认的状态（如 bypass permissions accept）
     _GW_PRESERVE_KEYS = ("bypassPermissionsModeAccepted",)
     if os.path.exists(gw_json):
         try:
             with open(gw_json, encoding="utf-8") as f:
                 gw_existing = _json.load(f)
+            gw_existing = _strip_claude_restore_state(gw_existing)
             for k in _GW_PRESERVE_KEYS:
                 if k in gw_existing and k not in data:
                     data[k] = gw_existing[k]
