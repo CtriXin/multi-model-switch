@@ -162,6 +162,51 @@ def test_startup_snapshot_guard_blocks_on_proxy_drift(monkeypatch, tmp_path):
     assert any("account claude-a proxy" in item for item in payload["diffs"])
 
 
+def test_startup_snapshot_guard_skips_block_when_not_enforced(monkeypatch, tmp_path):
+    import mms_core
+
+    target = tmp_path / "config.toml"
+    target.write_text('reload = "--ok"\n', encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(target))
+    monkeypatch.setattr(mms_core, "_iso_now", lambda: "2026-04-12T08:03:30Z")
+    monkeypatch.setattr(mms_core, "_snapshot_period_bucket", lambda _name: "bucket-2b")
+    monkeypatch.setattr(mms_core, "_confirm_startup_snapshot_drift", lambda *args, **kwargs: False)
+
+    cfg = {
+        "provider": {"default": "default"},
+        "account": {"defaults": {"claude": "claude-a"}},
+        "providers": [],
+        "accounts": [
+            {
+                "id": "claude-a",
+                "cli": "claude",
+                "home_dir": str(tmp_path / "accounts" / "claude-a"),
+                "proxy": "http://127.0.0.1:7890",
+                "timezone": "America/Los_Angeles",
+                "force_ipv4": True,
+            }
+        ],
+    }
+
+    mms_core._ensure_startup_snapshot_guard(cfg)
+
+    drifted_cfg = {
+        **cfg,
+        "accounts": [
+            {
+                **cfg["accounts"][0],
+                "proxy": "",
+            }
+        ],
+    }
+
+    result = mms_core._ensure_startup_snapshot_guard(drifted_cfg, enforce=False)
+
+    assert result["accounts"][0]["id"] == "claude-a"
+    pending = tmp_path / "snapshots" / "startup" / "pending.json"
+    assert pending.exists()
+
+
 def test_startup_snapshot_guard_ignores_config_file_and_audit_churn(monkeypatch, tmp_path):
     import mms_core
 

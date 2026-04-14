@@ -2258,7 +2258,7 @@ def _confirm_startup_snapshot_drift(diff_lines, *, accepted_path, latest_path):
     return bool(Confirm.ask("是否接受当前快照并继续启动？", default=False))
 
 
-def _ensure_startup_snapshot_guard(cfg):
+def _ensure_startup_snapshot_guard(cfg, *, enforce=True):
     config_path = _config_write_target_path()
     current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
     latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
@@ -2298,6 +2298,8 @@ def _ensure_startup_snapshot_guard(cfg):
             "current": current_snapshot,
         },
     )
+    if not enforce:
+        return current_snapshot
     if _confirm_startup_snapshot_drift(diff_lines, accepted_path=accepted_path, latest_path=latest_path):
         _write_json_snapshot(accepted_path, latest_payload)
         return current_snapshot
@@ -9146,7 +9148,10 @@ def main():
             handle_exposure_command(argv[1:])
             return
 
-    _ensure_startup_snapshot_guard(bootstrap_cfg or _default_config())
+    _ensure_startup_snapshot_guard(
+        bootstrap_cfg or _default_config(),
+        enforce=not _snapshot_prompt_allowed(),
+    )
 
     if len(argv) >= 1:
         command = argv[0]
