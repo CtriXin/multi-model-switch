@@ -198,6 +198,55 @@ def test_normalize_provider_defaults_timezone_to_us():
     assert provider["timezone"] == DEFAULT_ACCOUNT_TIMEZONE
 
 
+def test_resolve_interactive_launch_model_selects_fresh_model_for_broker():
+    import mms_core
+
+    runtime = {"runtime_kind": "broker", "auth_mode": "broker_profile"}
+    seen = {}
+
+    with patch.object(mms_core, "_ensure_models_cache_available", return_value=True), patch.object(
+        mms_core,
+        "display_models",
+        side_effect=lambda models, _role, _recommend: seen.setdefault("models", list(models)) or list(models),
+    ), patch.object(
+        mms_core,
+        "select_model_interactive",
+        return_value="glm-5.1",
+    ):
+        ok, model = mms_core._resolve_interactive_launch_model(
+            "claude",
+            runtime,
+            ["glm-5.1", "MiniMax-M2.7"],
+            ["qwen3-coder-plus"],
+            "all",
+            ["glm-5.1"],
+        )
+
+    assert ok is True
+    assert model == "glm-5.1"
+    assert seen["models"] == ["glm-5.1", "MiniMax-M2.7"]
+
+
+def test_resolve_interactive_launch_model_for_native_account_skips_selection():
+    import mms_core
+
+    runtime = {"auth_mode": "oauth"}
+
+    with patch.object(mms_core, "select_model_interactive") as select_mock:
+        ok, model = mms_core._resolve_interactive_launch_model(
+            "claude",
+            runtime,
+            ["glm-5.1"],
+            ["qwen3-coder-plus"],
+            "all",
+            ["glm-5.1"],
+        )
+
+    assert ok is True
+    assert model is None
+    select_mock.assert_not_called()
+
+
 def test_snapshot_file_entry_ignores_claude_runtime_noise(tmp_path):
     import mms_core
 
