@@ -762,6 +762,26 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
     assert result["statusLine"]["command"] == "/tmp/status.sh"
 
 
+def test_strip_claude_restore_state_removes_project_resume_noise():
+    from mms_launchers import _strip_claude_restore_state
+
+    result = _strip_claude_restore_state(
+        {
+            "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+            "lastSessionId": "global-session",
+            "lastCost": 123,
+            "bypassPermissionsModeAccepted": True,
+            "alwaysThinkingEnabled": True,
+        }
+    )
+
+    assert "projects" not in result
+    assert "lastSessionId" not in result
+    assert "lastCost" not in result
+    assert result["bypassPermissionsModeAccepted"] is True
+    assert result["alwaysThinkingEnabled"] is True
+
+
 def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path):
     import json as _json
     from mms_launchers import inspect_runtime_exposure
