@@ -101,7 +101,8 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 边界说明：
 
 - 当前优先接入 `Claude` 的 `SessionStart` hook
-- 需要本机已有可用的 `Node.js` / `npm`
+- 默认优先复用本机已有的 `Node.js 18+`；如果没有合适版本，MMS 会跳过 `Map`，不会自动改你的默认 `Node`
+- 只有你明确希望 MMS 准备一个 `Node 22` fallback 时，才建议额外加 `--ensure-node22`
 - 如果 `Map` 构建产物不存在，安装器会跳过 hook 注入并给出提示
 
 ### 安装 MMS 时顺手加上 read-once

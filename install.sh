@@ -254,12 +254,14 @@ prompt_optional_install_choices() {
         if [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Project map auto-index installs Map and refreshes the project structure index on session start."
+            echo "  By default MMS reuses an existing Node.js 18+ runtime when available; otherwise Map is skipped unless you explicitly ask for --ensure-node22."
             if confirm_from_tty "Install Map plus the Claude SessionStart auto-index hook? [y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
         else
             echo "可选 Claude hook"
             echo "  Project map auto-index 会安装 Map，并在 SessionStart 时自动建立或刷新项目结构索引。"
+            echo "  默认优先复用现有 Node.js 18+；如果没有合适版本，会先跳过 Map，除非你显式要求 --ensure-node22。"
             if confirm_from_tty "是否安装 Map 并启用 Claude SessionStart auto-index hook？[y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
@@ -521,6 +523,23 @@ detect_node_major() {
     echo "${version%%.*}"
 }
 
+node_version_label() {
+    if ! command -v node >/dev/null 2>&1; then
+        return 1
+    fi
+    node --version 2>/dev/null || true
+}
+
+node_meets_min_major() {
+    local required_major="$1"
+    local current_major
+    current_major="$(detect_node_major || true)"
+    if [[ -n "$current_major" ]] && [[ "$current_major" -ge "$required_major" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 ensure_node22() {
     local major
     major="$(detect_node_major || true)"
@@ -530,7 +549,7 @@ ensure_node22() {
     fi
 
     echo ""
-    echo "$(t "正在准备 Node.js 22（通过 nvm）..." "Preparing Node.js 22 (via nvm)...")"
+    echo "$(t "未检测到可直接复用的 Node.js 22，开始准备 Node.js 22（通过 nvm）..." "No reusable Node.js 22 detected; preparing Node.js 22 (via nvm)...")"
     export NVM_DIR="$HOME/.nvm"
 
     if [ -s "$NVM_DIR/nvm.sh" ]; then
@@ -1540,10 +1559,22 @@ install_optional_map() {
     local hook_target="$hook_dir/map-auto-index.sh"
     local map_install_dir="${MAP_INSTALL_DIR:-$REAL_HOME/.local/share/map}"
     local map_session_start_hook="$map_install_dir/dist/hooks/session-start.js"
+    local node_label=""
+    node_label="$(node_version_label || true)"
 
     echo ""
     echo "$(t "正在安装 Map auto-index..." "Installing Map auto-index...")"
     echo "⚠ $(t "这个可选包会安装 Map，并修改 ~/.claude/settings.json 和 ~/.claude/hooks/。" "This optional pack installs Map and updates ~/.claude/settings.json plus ~/.claude/hooks/.")"
+
+    if ! node_meets_min_major 18; then
+        if [ -n "$node_label" ]; then
+            echo "⚠ $(t "检测到本机 Node 版本不足，跳过 Map 安装，不影响 MMS 主功能" "Detected an insufficient local Node.js version; skipping Map install without affecting core MMS"): $node_label"
+        else
+            echo "⚠ $(t "未检测到可用 Node.js，跳过 Map 安装，不影响 MMS 主功能" "No usable Node.js detected; skipping Map install without affecting core MMS")"
+        fi
+        echo "  $(t "如需安装 Map，优先复用现有 Node.js 18+ / 22；只有你明确愿意时再执行 --ensure-node22。" "To install Map later, prefer an existing Node.js 18+ / 22; only use --ensure-node22 when you explicitly want that fallback.")"
+        return 0
+    fi
 
     run_map_installer || true
 
@@ -1740,6 +1771,7 @@ if [ "$INSTALL_MAP" -eq 1 ]; then
     echo "• $(t "附带安装 Map auto-index" "Optional Map auto-index"): on"
     echo "  $(t "会安装 Map，并写入 Claude 的 SessionStart hook。" "This installs Map and writes the Claude SessionStart hook.")"
     echo "  $(t "Map 版本" "Map ref"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
+    echo "  $(t "默认优先复用现有 Node.js 18+；若版本不足则跳过，不会自动改你的默认 Node。" "By default MMS reuses an existing Node.js 18+ and skips Map when unavailable; it does not auto-change your default Node.")"
 fi
 
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
@@ -1748,7 +1780,7 @@ if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
 fi
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
-    echo "⚠ $(t "将检查并安装 nvm / Node.js 22，这可能更新你的 shell 配置。" "This will check and install nvm / Node.js 22 and may update your shell config.")"
+    echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
 fi
 
 # ── 1. 检查 Python3 ──
