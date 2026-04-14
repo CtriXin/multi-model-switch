@@ -15,6 +15,11 @@ def test_normalize_broker_profile_uses_generic_defaults():
     assert profile["workspace_id"] == "default-workspace"
 
 
+def test_broker_launch_defaults_to_new_when_model_override_present():
+    assert mms_broker._default_launch_mode_for_model_override("") == "resume_last"
+    assert mms_broker._default_launch_mode_for_model_override("glm-5.1") == "new"
+
+
 def test_prune_session_only_snapshot_entries_uses_local_hooks_dir(monkeypatch, tmp_path):
     hooks_dir = tmp_path / "hooks"
     hooks_dir.mkdir()

@@ -446,14 +446,19 @@ def _summarize_history_item(item: dict[str, Any]) -> str:
     return f"{short_time} | local={session_id} | remote={remote_session_id}"
 
 
+def _default_launch_mode_for_model_override(model_override: str) -> str:
+    return "new" if _normalize_optional_str(model_override) else "resume_last"
+
+
 def _resolve_profile_launch_mode_interactive(
     profile: dict[str, Any],
     *,
     workspace_root: str,
     model_override: str = "",
 ) -> tuple[str, str]:
+    default_mode = _default_launch_mode_for_model_override(model_override)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return "resume_last", ""
+        return default_mode, ""
 
     history = _load_official_proxy_history(
         profile,
@@ -463,13 +468,21 @@ def _resolve_profile_launch_mode_interactive(
     if not history:
         return "new", ""
 
-    print(
-        "[broker] 当前项目检测到历史会话；直接回车续最近，输入 2 新开，输入 3 切换旧会话。",
-        flush=True,
-    )
+    if default_mode == "new":
+        print(
+            "[broker] 当前显式选择了模型；为避免续到旧模型会话，默认新开。回车/2 新开，输入 1 续最近，输入 3 切换旧会话。",
+            flush=True,
+        )
+    else:
+        print(
+            "[broker] 当前项目检测到历史会话；直接回车续最近，输入 2 新开，输入 3 切换旧会话。",
+            flush=True,
+        )
     while True:
-        raw = input("选择 [1/2/3] (默认 1): ").strip()
-        if raw in {"", "1"}:
+        raw = input(f"选择 [1/2/3] (默认 {'2' if default_mode == 'new' else '1'}): ").strip()
+        if raw == "":
+            return default_mode, ""
+        if raw == "1":
             return "resume_last", ""
         if raw == "2":
             return "new", ""
@@ -478,9 +491,11 @@ def _resolve_profile_launch_mode_interactive(
             for index, item in enumerate(history, 1):
                 print(f"  {index}. {_summarize_history_item(item)}", flush=True)
             while True:
-                picked = input("输入编号，直接回车取消并续最近: ").strip()
+                picked = input(
+                    f"输入编号，直接回车取消并{'新开' if default_mode == 'new' else '续最近'}: "
+                ).strip()
                 if not picked:
-                    return "resume_last", ""
+                    return default_mode, ""
                 if picked.isdigit():
                     pos = int(picked)
                     if 1 <= pos <= len(history):
