@@ -846,18 +846,18 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
 
 def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wizard=False, target_url="https://api.anthropic.com"):
     prompt_fn = _wizard_prompt if wizard else Prompt.ask
-    proxy_label = "代理地址（可选，例 http://127.0.0.1:7890 / socks5h://127.0.0.1:7890）"
-    no_proxy_label = "NO_PROXY（可选）"
+    proxy_label = "代理地址（可选，直接回车跳过；例 http://127.0.0.1:7890 / socks5h://127.0.0.1:7890）"
+    no_proxy_label = "NO_PROXY（可选，直接回车跳过）"
     while True:
         proxy = prompt_fn(
-            _L(proxy_label, "Proxy URL (optional, e.g. http://127.0.0.1:7890 / socks5h://127.0.0.1:7890)"),
+            _L(proxy_label, "Proxy URL (optional, press Enter to skip; e.g. http://127.0.0.1:7890 / socks5h://127.0.0.1:7890)"),
             default=current_proxy or "",
         ).strip()
         error = _validate_proxy_url(proxy)
         if error:
             console.print(f"[red]{error}[/red]")
             continue
-        no_proxy = prompt_fn(_L(no_proxy_label, "NO_PROXY (optional)"), default=current_no_proxy or "").strip()
+        no_proxy = prompt_fn(_L(no_proxy_label, "NO_PROXY (optional, press Enter to skip)"), default=current_no_proxy or "").strip()
         if proxy:
             console.print(f"[dim]正在测试代理连通性: {target_url}[/dim]")
             ok, detail = _test_proxy_connectivity(
