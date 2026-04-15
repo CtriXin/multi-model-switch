@@ -2648,6 +2648,25 @@ def _resolve_model_name(model_info):
     return str(model_info or "official-default")
 
 
+def _runtime_hint_from_runtime(runtime):
+    if not isinstance(runtime, dict):
+        return {}
+    hint = {
+        "runtime_kind": str(runtime.get("runtime_kind", "")).strip(),
+        "auth_mode": str(runtime.get("auth_mode", "")).strip(),
+    }
+    provider_id = _trace_runtime_provider_id(runtime)
+    account_id = _trace_runtime_account_id(runtime)
+    runtime_id = str(runtime.get("id") or "").strip()
+    if provider_id:
+        hint["provider_id"] = provider_id
+    if account_id:
+        hint["account_id"] = account_id
+    if runtime_id:
+        hint["runtime_id"] = runtime_id
+    return {k: v for k, v in hint.items() if v}
+
+
 def _record_usage(runtime, cli_name, model_info):
     stats = _load_usage_stats()
     sources = stats.setdefault("sources", {})
@@ -2674,6 +2693,7 @@ def _record_usage(runtime, cli_name, model_info):
         "cli": cli_name,
         "model": model_name,
         "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
+        "runtime_hint": _runtime_hint_from_runtime(runtime),
         "last_used_at": _iso_now(),
     }
     _save_usage_stats(stats)
@@ -2706,7 +2726,108 @@ def _get_scene_usage():
     scene_counts = {}
     for name, entry in stats.get("scenes", {}).items():
         scene_counts[name] = entry.get("launches", 0)
-    return stats.get("last_by_cli", {}), scene_counts
+    last_by_cli = {}
+    for cli_name, item in (stats.get("last_by_cli", {}) or {}).items():
+        if not isinstance(item, dict):
+            continue
+        normalized = dict(item)
+        if not isinstance(normalized.get("runtime_hint"), dict):
+            model_name = _resolve_model_name(
+                normalized.get("model_info") if isinstance(normalized.get("model_info"), dict) else normalized.get("model")
+            )
+            inferred = _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name)
+            if inferred:
+                normalized["runtime_hint"] = inferred
+        last_by_cli[cli_name] = normalized
+    return last_by_cli, scene_counts
+
+
+def _infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
+    latest_entry = None
+    latest_at = ""
+    normalized_model = str(model_name or "").strip()
+    for entry in (stats.get("sources", {}) or {}).values():
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("cli") or "").strip() != str(cli_name or "").strip():
+            continue
+        if str(entry.get("last_model") or "").strip() != normalized_model:
+            continue
+        used_at = str(entry.get("last_used_at") or "").strip()
+        if used_at < latest_at:
+            continue
+        latest_at = used_at
+        latest_entry = entry
+
+    if not isinstance(latest_entry, dict):
+        return {}
+
+    runtime_kind = str(latest_entry.get("runtime_kind") or "").strip()
+    runtime_id = str(latest_entry.get("id") or "").strip()
+    if not runtime_kind or not runtime_id:
+        return {}
+
+    hint = {
+        "runtime_kind": runtime_kind,
+        "runtime_id": runtime_id,
+    }
+    if runtime_kind == "provider":
+        hint["auth_mode"] = "api_key"
+        hint["provider_id"] = runtime_id
+    elif runtime_kind == "account":
+        hint["auth_mode"] = "oauth"
+        hint["account_id"] = runtime_id
+    else:
+        return {}
+    return hint
+
+
+def _resolve_last_used_runtime(cfg, cli_name, last_item, default_models):
+    if not isinstance(last_item, dict):
+        return None, None, None
+
+    hint = last_item.get("runtime_hint")
+    if not isinstance(hint, dict):
+        return None, None, None
+
+    model_info = last_item.get("model_info") if isinstance(last_item.get("model_info"), dict) else {
+        "model": str(last_item.get("model") or "")
+    }
+    model_name = _resolve_model_name(model_info)
+
+    provider_id = str(hint.get("provider_id") or "").strip()
+    if provider_id:
+        try:
+            provider = resolve_provider_context(cfg, provider_id)
+        except Exception:
+            provider = None
+        if provider and _provider_supports_model_for_cli(provider, cli_name, model_name):
+            models = _probe_models(provider, emit_output=False).get("models")
+            models = _provider_effective_models(provider, models, cfg)
+            if str(model_name or "").strip().lower() in {
+                str(item or "").strip().lower() for item in (models or [])
+            }:
+                return (
+                    _runtime_with_priority(provider, model_name=model_name),
+                    models,
+                    f"last used provider:{provider_id}",
+                )
+
+    auth_mode = str(hint.get("auth_mode") or "").strip()
+    account_id = str(hint.get("account_id") or "").strip()
+    if account_id and auth_mode != "oauth_bridge":
+        try:
+            account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
+        except Exception:
+            account = None
+        if account and _model_matches_account_cli(cli_name, model_name):
+            return (
+                _runtime_with_priority(account, model_name=model_name),
+                list(default_models or []),
+                f"last used account:{account_id}",
+            )
+
+    return None, None, None
 
 
 # ── Trace ─────────────────────────────────────────────
@@ -7175,10 +7296,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         elif action_type == "last":
             model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
             _trace_record("last used", cli=cli, model=action_data.get("model"))
-            runtime_runtime, _ = _resolve_best_provider(
-                current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+            runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
+                current_cfg, cli, action_data, default_models
             )
-            runtime_from_best_provider = runtime_runtime is not None
+            runtime_from_best_provider = False
+            if runtime_runtime is not None:
+                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=restored_choice)
+            else:
+                runtime_runtime, _ = _resolve_best_provider(
+                    current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+                )
+                runtime_from_best_provider = runtime_runtime is not None
             if runtime_runtime is None:
                 runtime_runtime, _, cli = _choose_runtime_source(
                     current_cfg, cli, current_provider, default_models,
@@ -7254,10 +7382,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     continue
                 model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
                 _trace_record("last used", cli=cli, model=action_data.get("model"))
-                runtime_runtime, _ = _resolve_best_provider(
-                    current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+                runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
+                    current_cfg, cli, action_data, default_models
                 )
-                runtime_from_best_provider = runtime_runtime is not None
+                runtime_from_best_provider = False
+                if runtime_runtime is not None:
+                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=restored_choice)
+                else:
+                    runtime_runtime, _ = _resolve_best_provider(
+                        current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
+                    )
+                    runtime_from_best_provider = runtime_runtime is not None
                 if runtime_runtime is None:
                     runtime_runtime, _, cli = _choose_runtime_source(
                         current_cfg, cli, current_provider, default_models,
