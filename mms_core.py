@@ -3189,6 +3189,14 @@ def _provider_anthropic_base_url(provider):
     return str(provider.get("base_url", "")).strip().rstrip("/")
 
 
+def _provider_has_configured_base_url(provider):
+    return bool(
+        _provider_openai_base_url(provider)
+        or _provider_anthropic_base_url(provider)
+        or str(provider.get("base_url", "")).strip().rstrip("/")
+    )
+
+
 def _account_label(account):
     return account.get("name", account.get("id", "account"))
 
@@ -4846,7 +4854,8 @@ def _load_probe_file_cache(provider_id, allow_stale=False):
         error_kind = data.get("error_kind")
         ttl = _PROBE_FILE_CACHE_NEGATIVE_TTL if error_kind or not raw_models else _PROBE_FILE_CACHE_TTL
         age = _time.time() - os.path.getmtime(path)
-        if age > ttl and not allow_stale:
+        is_stale = age > ttl
+        if is_stale and not allow_stale:
             return None
         normalized = dict(data)
         normalized["raw_models"] = raw_models
@@ -4855,6 +4864,7 @@ def _load_probe_file_cache(provider_id, allow_stale=False):
         normalized.setdefault("error", None)
         normalized.setdefault("error_kind", None)
         normalized.setdefault("details", [])
+        normalized["is_stale"] = is_stale
         return normalized
     except Exception:
         pass
@@ -4893,11 +4903,12 @@ def _base_probe_result_from_cache(provider_id, file_cached):
         "provider_id": provider_id,
         "raw_models": list(file_cached["raw_models"]),
         "models": list(file_cached["raw_models"]),
-        "error": None,
-        "error_kind": None,
+        "error": file_cached.get("error"),
+        "error_kind": file_cached.get("error_kind"),
         "working_url": file_cached.get("working_url"),
-        "details": [],
+        "details": list(file_cached.get("details") or []),
         "base_source": file_cached.get("base_source", "remote"),
+        "is_stale": bool(file_cached.get("is_stale")),
     }
 
 
@@ -5808,7 +5819,9 @@ def _provider_candidates(cfg, default_provider, default_models):
             continue
         # 首屏/启动阶段允许使用 stale 文件缓存，避免单个慢 provider 卡住 TUI。
         file_cached = _load_probe_file_cache(provider_id, allow_stale=True)
-        cached_models = None if file_cached is None else list((file_cached or {}).get("raw_models") or [])
+        cached_models = None
+        if file_cached is not None and not file_cached.get("is_stale"):
+            cached_models = list((file_cached or {}).get("raw_models") or [])
         candidates.append((resolve_provider_context(cfg, provider_id), cached_models))
         seen_ids.add(provider_id)
     return candidates
@@ -5846,7 +5859,7 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not provider.get("base_url") or not provider.get("api_key"):
+        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
             continue
         models = _provider_effective_models(provider, cached_models, cfg)
         for model_name in models:
@@ -5870,7 +5883,7 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not provider.get("base_url") or not provider.get("api_key"):
+        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
             continue
         models = _provider_effective_models(provider, cached_models, cfg)
         pid = provider.get("id", DEFAULT_PROVIDER_ID)
@@ -5907,7 +5920,7 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
             continue
         if cli_name and not _provider_supports_model_for_cli(provider, cli_name, model_name):
             continue
-        if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+        if not _provider_has_configured_base_url(provider):
             continue
         if not provider.get("api_key"):
             continue
@@ -5947,7 +5960,7 @@ def _resolve_lb_slot_provider(cfg, cli_name, model_name, provider_id):
         return None, f"provider {provider_id} 不支持 {cli_name}"
     if not provider.get("api_key"):
         return None, f"provider {provider_id} 缺少 API key"
-    if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+    if not _provider_has_configured_base_url(provider):
         return None, f"provider {provider_id} 缺少可用 base_url"
 
     models = _probe_models(provider, emit_output=False).get("models")
@@ -5978,7 +5991,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
         if not provider.get("enabled", True):
             continue
-        if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+        if not _provider_has_configured_base_url(provider):
             continue
         if not provider.get("api_key"):
             continue
@@ -6046,8 +6059,13 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
         if not provider.get("enabled", True):
             _probe_debug_logger.debug("  %s: SKIP (disabled)", pid)
             continue
-        if not provider.get("base_url") or not provider.get("api_key"):
-            _probe_debug_logger.debug("  %s: SKIP (no base_url=%s or api_key=%s)", pid, bool(provider.get("base_url")), bool(provider.get("api_key")))
+        if not _provider_has_configured_base_url(provider) or not provider.get("api_key"):
+            _probe_debug_logger.debug(
+                "  %s: SKIP (no configured base_url=%s or api_key=%s)",
+                pid,
+                _provider_has_configured_base_url(provider),
+                bool(provider.get("api_key")),
+            )
             continue
 
         models = cached_models
@@ -6897,7 +6915,7 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
         for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
             if not provider.get("enabled", True):
                 continue
-            if not provider.get("base_url") and not provider.get("openai_base_url") and not provider.get("anthropic_base_url"):
+            if not _provider_has_configured_base_url(provider):
                 continue
             if not provider.get("api_key"):
                 continue
@@ -7448,12 +7466,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
-        if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") == "oauth":
+        if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
             try:
-                from mms_launchers import get_claude_network_guard_preview
+                from mms_launchers import get_claude_network_guard_preview, _claude_bypass_requires_proxy
                 runtime_runtime["_network_guard"] = get_claude_network_guard_preview(
                     runtime_runtime,
-                    require_proxy=False,
+                    require_proxy=bool(runtime_runtime.get("bypass")) and _claude_bypass_requires_proxy(runtime_runtime),
                 )
             except Exception:
                 runtime_runtime["_network_guard"] = {
@@ -7489,9 +7507,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             continue
         if bypass:
             runtime_runtime["bypass"] = True
-            if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") == "oauth":
-                from mms_launchers import _enforce_claude_network_guard_or_exit
-                _enforce_claude_network_guard_or_exit(runtime_runtime, require_proxy=True)
+            if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
+                from mms_launchers import _enforce_claude_network_guard_or_exit, _claude_bypass_requires_proxy
+                _enforce_claude_network_guard_or_exit(
+                    runtime_runtime,
+                    require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
+                )
         if cli == "claude":
             runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)

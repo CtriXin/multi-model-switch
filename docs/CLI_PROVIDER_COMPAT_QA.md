@@ -57,6 +57,8 @@
 - 不从真实 global 目录偷偷 seed 私有状态
 - 不因 launcher 混用状态目录而串号
 - `.claude.json` 在 copy-in / sync-back 时都应剥离 `projects`、`lastSessionId`、`lastCost` 这类 restore-state 噪声，避免“第一窗口正常、第二窗口继承旧恢复状态”
+- OAuth `.claude.json` 不应继续走 blacklist strip；应改成 allowlist，只保留 account-scoped OAuth 持久态（如 `userID` / `oauthAccount` / `claudeAiOauth` 的明确字段）
+- OAuth 启动前要清理父进程残留的 `ANTHROPIC_*` / `CLAUDE_CODE_*` 覆盖环境，避免 gateway/api_key session 把认证和模型槽位带进官方账号路径
 
 ### 5. Proxy / timezone / IPv4-first 现在是 runtime profile 的一部分
 
@@ -69,6 +71,25 @@
 
 不要把这些网络/环境参数混进展示层状态，也不要让它们只在最终子进程生效、但前置 probe 漂移到别的网络路径。
 
+### 6. Claude hardening 默认要走 allowlist + fail-closed
+
+当前公开仓库的基线应至少满足：
+
+- `settings.json` 只继承 `hooks` / `statusLine` / `permissions`；不要从真实 global state 宽拷贝 `env`、主题或未知字段
+- gateway `.claude.json` 只按 schema-based allowlist 写当前 session 需要的字段；未知 global 字段默认丢弃
+- Claude session `~/.claude/` 不再大面积继承真实目录；只保留 project-scoped 持久项
+- Claude session `~/Library/` 只暴露 `Keychains` 这类最小必要依赖；不要把整个 `Library` symlink 进去
+- Claude bypass 应区分路径：
+  - 官方 `Claude` account 的 bypass 继续要求 proxy 并 fail-closed
+  - 显式 sensitive Claude provider 的 bypass 也要求 proxy 并 fail-closed
+  - 普通 `api_key/gateway provider` 仍应走 network guard，但不应因为“没配 proxy”被一刀切误拦
+- 隔离 session 里会修改 global state 的命令（如 `claude update`、`pm2`、`npm/pnpm/yarn/corepack`）应通过 wrapper 强制回到 real `HOME/XDG/PM2_HOME`；找不到 real binary 时宁可 fail-closed，也不要掉回隔离态安装/更新
+- stale OAuth session cleanup 不应把旧 session state 再回写到账户目录
+- `Responses -> Chat Completions fallback` 只在明确“不支持 Responses API”时才写 cache；`empty body / empty stream / content-length=0` 这类模糊失败不能持久化成 fallback 结论
+- Anthropic-facing probe / classify / bridge fallback 遇到 `429` 时应优先 respect `Retry-After` 并对同一目标做最小 backoff，不要立刻横扫其它 candidate URL
+- probe metadata 不应带固定可识别前缀；如果必须带 session identity，默认使用中性/随机值
+- stale probe cache 可以用于“提示后台刷新”，但不能静默主导 provider 选择；缓存里的 `error / error_kind` 也不应被洗白
+
 ## 最小验证清单
 
 如果你改了 provider / launcher / bridge / account isolation，至少做下面这些验证：
@@ -79,6 +100,10 @@
 4. OAuth 账号隔离不串号
 5. 配置了 proxy 时，坏 proxy 会被拦截
 6. 启动环境里的 timezone / IPv4-first 符合预期
+7. Claude settings / `.claude.json` / `.claude` / `Library` 的继承面符合 allowlist 预期
+8. stale cache / fallback cache 不会把错误结论跨 provider、跨 URL、跨 session 固化下来
+9. 隔离 session 内执行 `claude/pm2/npm/pnpm/npx/yarn/corepack` 时，会明确落到 real `HOME`，不会把 global 安装/更新写进 session HOME
+10. Anthropic `429` 时不会继续 fanout 到其它 candidate URL，OAuth 路径也不会继承父进程里的 `ANTHROPIC_*` 认证环境
 
 ## 本地私有文档建议
 

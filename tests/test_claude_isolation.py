@@ -109,14 +109,25 @@ def test_sync_claude_session_state_back_to_account(tmp_path):
         encoding="utf-8",
     )
     (session_home / ".claude" / "settings.json").write_text(
-        json.dumps({"theme": "dark"}),
+        json.dumps(
+            {
+                "theme": "dark",
+                "hooks": {"preToolUse": [{"matcher": "*"}]},
+                "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+                "permissions": {"allow": ["Read"]},
+            }
+        ),
         encoding="utf-8",
     )
 
     _sync_claude_session_state_to_account_home(str(session_home), str(account_home))
 
     assert json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))["userID"] == "device-b"
-    assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8"))["theme"] == "dark"
+    settings = json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert "theme" not in settings
+    assert settings["hooks"]["preToolUse"][0]["matcher"] == "*"
+    assert settings["statusLine"]["command"] == "/tmp/status.sh"
+    assert settings["permissions"]["allow"] == ["Read"]
 
 
 def test_copy_claude_state_json_strips_restore_state(tmp_path):
@@ -194,6 +205,7 @@ def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path
     assert "projects" not in result
     assert "lastSessionId" not in result
     assert "lastCost" not in result
+    assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8")) == {}
 
 
 def test_apply_runtime_network_profile_is_noop_in_stopgap_mode():
@@ -828,12 +840,16 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
                 "LANG": "en_US.UTF-8",
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
             },
+            "hooks": {"preToolUse": [{"matcher": "*"}]},
             "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+            "permissions": {"allow": ["Read"], "deny": ["Bash(rm -rf /)*"]},
         }
     )
 
-    assert result["env"] == {"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
+    assert "env" not in result
+    assert result["hooks"]["preToolUse"][0]["matcher"] == "*"
     assert result["statusLine"]["command"] == "/tmp/status.sh"
+    assert result["permissions"]["allow"] == ["Read"]
 
 
 def test_strip_claude_restore_state_removes_project_resume_noise():
@@ -1100,12 +1116,14 @@ def test_record_account_guard_finalize_tracks_failures(monkeypatch, tmp_path):
     assert payload["accounts"]["claude-a"]["consecutive_failures"] == 0
 
 
-def test_claude_network_guard_blocks_bypass_without_proxy():
+def test_claude_network_guard_blocks_claude_account_bypass_without_proxy():
     from mms_launchers import build_claude_network_guard
 
     guard = build_claude_network_guard(
         {
             "id": "claude-a",
+            "auth_mode": "oauth",
+            "cli": "claude",
             "timezone": "America/Los_Angeles",
             "force_ipv4": True,
         },
@@ -1114,6 +1132,26 @@ def test_claude_network_guard_blocks_bypass_without_proxy():
 
     assert guard["status"] == "blocked"
     assert "必须配置 proxy" in guard["block_reason"]
+    assert "官方账号" in guard["block_reason"]
+
+
+def test_claude_network_guard_blocks_sensitive_provider_bypass_without_proxy():
+    from mms_launchers import build_claude_network_guard
+
+    guard = build_claude_network_guard(
+        {
+            "id": "relay-a",
+            "auth_mode": "api_key",
+            "skip_anthropic_probe": True,
+            "timezone": "America/Los_Angeles",
+            "force_ipv4": True,
+        },
+        require_proxy=True,
+    )
+
+    assert guard["status"] == "blocked"
+    assert "配置 proxy" in guard["block_reason"]
+    assert "敏感 Claude provider" in guard["block_reason"]
 
 
 def test_claude_network_guard_blocks_no_proxy_conflict():

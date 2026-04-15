@@ -17,6 +17,7 @@
 import json
 import os
 import re
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -277,6 +278,34 @@ Task: {task}
 Reply with LIGHT or HEAVY, followed by HIGH or LOW confidence. Example: "LIGHT HIGH" or "HEAVY LOW"."""
 
 
+def _retry_after_delay_seconds(value, *, max_delay=2.0):
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        delay = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if delay <= 0:
+        return 0.0
+    return min(delay, max_delay)
+
+
+def _post_with_retry_after(url, *, headers, json_body, timeout=5, max_attempts=2):
+    attempts = 0
+    response = None
+    while attempts < max_attempts:
+        attempts += 1
+        response = _httpx.post(url, headers=headers, json=json_body, timeout=timeout)
+        if response.status_code != 429:
+            return response
+        delay = _retry_after_delay_seconds(response.headers.get("Retry-After"))
+        if delay <= 0 or attempts >= max_attempts:
+            return response
+        time.sleep(delay)
+    return response
+
+
 def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[str, str] | None:
     """用 light 模型做二分类 + 置信度。返回 (tier, confidence) 或 None。
 
@@ -310,7 +339,7 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             "Content-Type": "application/json",
         }
         # 尝试 Anthropic messages → fallback OpenAI chat/completions
-        r = _httpx.post(f"{base_v1}/messages", headers=headers, json=body, timeout=5)
+        r = _post_with_retry_after(f"{base_v1}/messages", headers=headers, json_body=body, timeout=5)
         protocol = "anthropic"
         if r.status_code in (404, 405, 400):
             # 400 可能是不支持 thinking 参数，去掉重试
@@ -327,7 +356,12 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
                 "reasoning_effort": "low",      # OpenAI 兼容（"none" 非标准值）
                 "use_thinking": False,          # Kimi 系列
             }
-            r = _httpx.post(f"{base_v1}/chat/completions", headers=headers, json=oai_body, timeout=5)
+            r = _post_with_retry_after(
+                f"{base_v1}/chat/completions",
+                headers=headers,
+                json_body=oai_body,
+                timeout=5,
+            )
             protocol = "openai"
         elapsed_ms = int((_time.time() - t0) * 1000)
         if r.status_code != 200:

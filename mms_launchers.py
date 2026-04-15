@@ -1,6 +1,7 @@
 """MMS 启动器：按 provider 或账号档案启动四个 CLI。"""
 
 from contextlib import contextmanager
+import copy
 import inspect
 import json
 import os
@@ -614,6 +615,14 @@ def _build_account_guard_report(account):
     }
 
 
+def _claude_guard_runtime(runtime):
+    guard_runtime = dict(runtime or {})
+    auth_mode = str(guard_runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    if auth_mode == "api_key" and not str(guard_runtime.get("home_dir") or "").strip():
+        guard_runtime["home_dir"] = _real_user_path(".config", "mms", "claude-gateway")
+    return guard_runtime
+
+
 def _format_account_guard_summary(report):
     if not isinstance(report, dict):
         return ""
@@ -1021,6 +1030,17 @@ def _base_claude_network_guard(runtime, *, require_proxy=False):
     }
 
 
+def _claude_bypass_requires_proxy(runtime):
+    runtime = dict(runtime or {})
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    runtime_cli = str(runtime.get("cli") or "").strip()
+    if auth_mode == "oauth" and runtime_cli == "claude":
+        return True
+    if auth_mode == "api_key":
+        return _runtime_is_sensitive_claude_provider(runtime)
+    return False
+
+
 def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
     if auth_mode != "oauth":
         return
@@ -1062,6 +1082,7 @@ def build_claude_network_guard(runtime, *, require_proxy=False):
     proxy_url = str(runtime.get("proxy") or "").strip()
     no_proxy = str(runtime.get("no_proxy") or "").strip()
     force_ipv4 = bool(_runtime_force_ipv4(runtime))
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
     cache_key = _claude_network_guard_cache_key(runtime, require_proxy)
     cached = _CLAUDE_NETWORK_GUARD_CACHE.get(cache_key)
     now = perf_counter()
@@ -1070,7 +1091,10 @@ def build_claude_network_guard(runtime, *, require_proxy=False):
     guard = _base_claude_network_guard(runtime, require_proxy=require_proxy)
     if require_proxy and not proxy_url:
         guard["status"] = "blocked"
-        guard["block_reason"] = "BYPASS 启动要求当前 Claude 账号必须配置 proxy"
+        if auth_mode == "oauth":
+            guard["block_reason"] = "BYPASS 启动要求当前 Claude 官方账号必须配置 proxy"
+        else:
+            guard["block_reason"] = "敏感 Claude provider 的 BYPASS 启动要求当前通道配置 proxy"
         _CLAUDE_NETWORK_GUARD_CACHE[cache_key] = {"ts": now, "guard": dict(guard)}
         return guard
     if guard["no_proxy_conflicts"]:
@@ -1297,6 +1321,64 @@ _CLAUDE_SESSION_ENV_KEYS = (
     "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
 )
 
+_CLAUDE_SETTINGS_INHERIT_KEYS = (
+    "hooks",
+    "statusLine",
+    "permissions",
+)
+_CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = ()
+_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST = ("Keychains",)
+_SESSION_REAL_HOME_WRAPPER_COMMANDS = (
+    "gh",
+    "lark-cli",
+    "hive",
+    "pm2",
+    "claude",
+    "npm",
+    "pnpm",
+    "npx",
+    "yarn",
+    "corepack",
+)
+_CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST = (
+    "userID",
+    "firstStartTime",
+    "numStartups",
+    "bypassPermissionsModeAccepted",
+    "alwaysThinkingEnabled",
+    "hasCompletedOnboarding",
+    "lastOnboardingVersion",
+    "installMethod",
+)
+_CLAUDE_OAUTH_ACCOUNT_ALLOWLIST = (
+    "accountCreatedAt",
+    "accountUuid",
+    "billingType",
+    "displayName",
+    "emailAddress",
+    "hasExtraUsageEnabled",
+    "organizationName",
+    "organizationRole",
+    "organizationUuid",
+    "subscriptionCreatedAt",
+    "workspaceRole",
+)
+_CLAUDE_AI_OAUTH_ALLOWLIST = (
+    "accessToken",
+    "refreshToken",
+    "expiresAt",
+    "expiresIn",
+    "tokenType",
+    "token_type",
+    "emailAddress",
+    "accountUuid",
+    "organizationUuid",
+)
+_CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST = (
+    "ANTHROPIC_",
+    "CLAUDE_CODE_",
+)
+
 _CLAUDE_MAILBOX_PREFIX = os.path.join(_real_user_path(".claude"), "mailbox")
 
 _CLAUDE_DEFAULT_PERMISSION_ALLOW = [
@@ -1371,7 +1453,7 @@ def _save_anthropic_url_file_cache(cache_data):
 def _remember_anthropic_url(provider_id, configured_url, resolved_url):
     now_iso = datetime.now().isoformat()
     cache_key = _anthropic_cache_key(provider_id, configured_url)
-    _ANTHROPIC_URL_CACHE[provider_id] = {"url": resolved_url, "ts": datetime.now()}
+    _ANTHROPIC_URL_CACHE[cache_key] = {"url": resolved_url, "ts": datetime.now()}
     cache_data = _load_anthropic_url_file_cache()
     cache_data[cache_key] = {"url": resolved_url, "ts": now_iso}
     _save_anthropic_url_file_cache(cache_data)
@@ -1981,20 +2063,49 @@ def _session_required_env_from_runtime_env(env):
     return required
 
 
+def _sanitize_claude_inherited_settings_payload(settings_data):
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    inherited = {}
+    for key in _CLAUDE_SETTINGS_INHERIT_KEYS:
+        value = settings_data.get(key)
+        if isinstance(value, dict):
+            inherited[key] = copy.deepcopy(value)
+    return inherited
+
+
 def _sanitize_account_claude_settings_payload(settings_data):
-    settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
-    env_data = settings_data.get("env")
-    if isinstance(env_data, dict):
-        cleaned_env = {
-            key: value
-            for key, value in env_data.items()
-            if str(key or "").strip() not in _CLAUDE_SESSION_ENV_KEYS
-        }
-        if cleaned_env:
-            settings_data["env"] = cleaned_env
-        else:
-            settings_data.pop("env", None)
-    return settings_data
+    return _sanitize_claude_inherited_settings_payload(settings_data)
+
+
+def _copy_allowed_scalar_fields(payload, allowed_keys):
+    payload = payload if isinstance(payload, dict) else {}
+    copied = {}
+    for key in allowed_keys:
+        value = payload.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            copied[key] = copy.deepcopy(value)
+    return copied
+
+
+def _sanitize_oauth_claude_state_payload(data):
+    payload = _strip_claude_restore_state(data)
+    cleaned = _copy_allowed_scalar_fields(payload, _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST)
+
+    oauth_account = _copy_allowed_scalar_fields(
+        payload.get("oauthAccount"),
+        _CLAUDE_OAUTH_ACCOUNT_ALLOWLIST,
+    )
+    if oauth_account:
+        cleaned["oauthAccount"] = oauth_account
+
+    claude_ai_oauth = _copy_allowed_scalar_fields(
+        payload.get("claudeAiOauth"),
+        _CLAUDE_AI_OAUTH_ALLOWLIST,
+    )
+    if claude_ai_oauth:
+        cleaned["claudeAiOauth"] = claude_ai_oauth
+
+    return cleaned
 
 
 _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
@@ -2052,7 +2163,7 @@ def _ensure_claude_project_trust(data, project_path, project_state=None):
     return payload
 
 
-def _copy_claude_state_json(src, dst):
+def _copy_claude_state_json(src, dst, *, mode="restore"):
     import json as _json
 
     payload = {}
@@ -2064,7 +2175,10 @@ def _copy_claude_state_json(src, dst):
                 payload = loaded
         except Exception:
             payload = {}
-    payload = _strip_claude_restore_state(payload)
+    if mode == "oauth":
+        payload = _sanitize_oauth_claude_state_payload(payload)
+    else:
+        payload = _strip_claude_restore_state(payload)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "w", encoding="utf-8") as f:
         _json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -2227,7 +2341,8 @@ def inspect_runtime_exposure(cli, runtime):
 
 def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
     template_settings = _load_mms_claude_settings_template()
-    settings_data = _merge_claude_settings(base_settings or {}, _load_global_claude_settings_template())
+    inherited_settings = _sanitize_claude_inherited_settings_payload(base_settings)
+    settings_data = _merge_claude_settings(inherited_settings, _load_global_claude_settings_template())
 
     template_hooks = template_settings.get("hooks")
     hooks = _merge_mms_session_hooks(
@@ -2414,6 +2529,15 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
 
 
+def _scrub_claude_oauth_env(env):
+    env = env if isinstance(env, dict) else {}
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if any(normalized.startswith(prefix) for prefix in _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST):
+            env.pop(key, None)
+    return env
+
+
 def _account_env(account, *, validate_proxy=True):
     env = os.environ.copy()
     _inject_real_home_hints(env)
@@ -2437,7 +2561,7 @@ def _account_env(account, *, validate_proxy=True):
         session_json = os.path.join(session_home, ".claude.json")
         if os.path.exists(account_json):
             try:
-                _copy_claude_state_json(account_json, session_json)
+                _copy_claude_state_json(account_json, session_json, mode="oauth")
             except Exception:
                 pass
         # symlink .local
@@ -2445,13 +2569,10 @@ def _account_env(account, *, validate_proxy=True):
         gw_local = os.path.join(session_home, ".local")
         if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
             os.symlink(real_local, gw_local)
-        # symlink Library（macOS Keychain 需要 ~/Library/Keychains）
-        real_library = _real_user_path("Library")
-        session_library = os.path.join(session_home, "Library")
-        if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
-            os.symlink(real_library, session_library)
+        # 仅暴露 Keychain 依赖，避免把整个 ~/Library 带进 Claude session。
+        _link_claude_library_entries(session_home)
         _link_shared_dotfiles(session_home)
-        # .claude/ 目录：创建真实目录，分项 symlink
+        # .claude/ 目录：创建真实目录，只按 allowlist 暴露可继承项。
         session_claude_dir = os.path.join(session_home, ".claude")
         _prepare_claude_session_tree(
             session_home,
@@ -2462,6 +2583,7 @@ def _account_env(account, *, validate_proxy=True):
             skip_real_entries={"settings.json"},
             source_claude_dir=account_claude_dir,
         )
+        _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
@@ -2552,28 +2674,88 @@ def _link_shared_dotfiles(session_home):
             os.symlink(src, dst)
 
 
+def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
+    real_library = _real_user_path("Library")
+    if not os.path.isdir(real_library):
+        return
+
+    session_library = os.path.join(session_home, "Library")
+    if os.path.islink(session_library):
+        try:
+            os.unlink(session_library)
+        except OSError:
+            return
+    os.makedirs(session_library, exist_ok=True)
+
+    for entry in entries:
+        normalized = str(entry or "").strip()
+        if not normalized:
+            continue
+        src = os.path.join(real_library, normalized)
+        dst = os.path.join(session_library, normalized)
+        if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+            continue
+        os.symlink(src, dst)
+
+
+def _filter_real_home_wrapper_path(path_value):
+    raw_path = str(path_value or "")
+    if not raw_path:
+        return ""
+    session_home = os.path.abspath(os.path.expanduser(str(os.environ.get("HOME") or "").strip()))
+    real_home = os.path.abspath(os.path.expanduser(_real_user_home()))
+    strip_session_entries = bool(session_home) and session_home != real_home
+    filtered = []
+    for part in raw_path.split(os.pathsep):
+        normalized = os.path.abspath(os.path.expanduser(str(part or "").strip()))
+        if not normalized:
+            continue
+        if normalized.endswith(os.path.join(".mms", "bin")):
+            continue
+        if strip_session_entries and normalized.startswith(session_home + os.sep):
+            continue
+        filtered.append(part)
+    return os.pathsep.join(filtered)
+
+
 def _install_session_command_wrappers(session_home, env):
     """Install wrappers for tools that must run against the real HOME."""
     wrapper_dir = os.path.join(session_home, ".mms", "bin")
     os.makedirs(wrapper_dir, exist_ok=True)
 
     real_home = _real_user_home()
-    current_path = os.environ.get("PATH", "")
-    for command_name in ("gh", "lark-cli", "hive"):
-        real_bin = shutil.which(command_name, path=current_path)
-        if not real_bin:
-            continue
-
+    current_path = _filter_real_home_wrapper_path(os.environ.get("PATH", ""))
+    wrapper_path_env = json.dumps(current_path or os.defpath)
+    xdg_config_home = json.dumps(_real_user_path(".config"))
+    xdg_cache_home = json.dumps(_real_user_path(".cache"))
+    xdg_data_home = json.dumps(_real_user_path(".local", "share"))
+    xdg_state_home = json.dumps(_real_user_path(".local", "state"))
+    for command_name in _SESSION_REAL_HOME_WRAPPER_COMMANDS:
         wrapper_path = os.path.join(wrapper_dir, command_name)
+        extra_exports = []
+        if command_name == "gh":
+            extra_exports.append(f'export GH_CONFIG_DIR={json.dumps(_real_user_path(".config", "gh"))}')
+        if command_name == "pm2":
+            extra_exports.append(f'export PM2_HOME={json.dumps(_real_user_path(".pm2"))}')
         wrapper = "\n".join(
             [
                 "#!/bin/sh",
-                f'export HOME="{real_home}"',
-                f'export MMS_REAL_HOME="{real_home}"',
-                f'export REAL_HOME="{real_home}"',
-                f'export ORIGINAL_HOME="{real_home}"',
-                f'export GH_CONFIG_DIR="{_real_user_path(".config", "gh")}"',
-                f'exec "{real_bin}" "$@"',
+                f'export HOME={json.dumps(real_home)}',
+                f'export MMS_REAL_HOME={json.dumps(real_home)}',
+                f'export REAL_HOME={json.dumps(real_home)}',
+                f'export ORIGINAL_HOME={json.dumps(real_home)}',
+                f"export PATH={wrapper_path_env}",
+                f"export XDG_CONFIG_HOME={xdg_config_home}",
+                f"export XDG_CACHE_HOME={xdg_cache_home}",
+                f"export XDG_DATA_HOME={xdg_data_home}",
+                f"export XDG_STATE_HOME={xdg_state_home}",
+                *extra_exports,
+                f'real_bin="$(command -v {json.dumps(command_name)} 2>/dev/null || true)"',
+                'if [ -z "$real_bin" ]; then',
+                f'  printf "%s\\n" "mms: command {command_name} not found in real HOME PATH" >&2',
+                "  exit 127",
+                "fi",
+                'exec "$real_bin" "$@"',
                 "",
             ]
         )
@@ -2912,6 +3094,7 @@ def launch_claude(model_info, runtime, once=False):
         # 对不支持 Claude 模型的 provider，自动映射到支持的模型
         provider_id = runtime.get("id", "")
         strip_upstream_user_agent = "cliproxyapi" in provider_id.lower()
+        minimal_claude_header_passthrough = _runtime_is_sensitive_claude_provider(runtime)
         if provider_id == "bailian-codingplan" and probe_model.startswith(("claude-", "sonnet-", "opus-", "haiku-")):
             # 百炼 CodingPlan 不支持 Claude 模型，使用其支持的 fallback 模型
             probe_model = "qwen3.5-plus"
@@ -2969,6 +3152,7 @@ def launch_claude(model_info, runtime, once=False):
                                                     slot_configs=lb_slot_configs,
                                                     openai_url=_gpt_openai_url,
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
+                                                    minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     reasoning_effort=_reasoning_effort)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -3000,6 +3184,7 @@ def launch_claude(model_info, runtime, once=False):
                     route_status_paths=route_status_paths,
                     openai_url=_gpt_openai_url,
                     strip_upstream_user_agent=strip_upstream_user_agent,
+                    minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                     reasoning_effort=_reasoning_effort,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -3052,6 +3237,7 @@ def launch_claude(model_info, runtime, once=False):
                                                 slot_configs=lb_slot_configs,
                                                 openai_url=openai_url,
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
+                                                minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 reasoning_effort=_reasoning_effort)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -3082,7 +3268,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
                                                 openai_url=openai_url,
-                                                strip_upstream_user_agent=strip_upstream_user_agent)
+                                                strip_upstream_user_agent=strip_upstream_user_agent,
+                                                minimal_claude_header_passthrough=minimal_claude_header_passthrough)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -3119,7 +3306,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
                                                     openai_url=openai_url,
-                                                    strip_upstream_user_agent=strip_upstream_user_agent)
+                                                    strip_upstream_user_agent=strip_upstream_user_agent,
+                                                    minimal_claude_header_passthrough=minimal_claude_header_passthrough)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -3232,16 +3420,16 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     # 预处理 URL
     url = configured.rstrip("/")
     normalized_url = url[:-3] if url.endswith("/v1") else url
+    cache_key = _anthropic_cache_key(provider_id, url)
 
     # ---- 内存缓存（TTL 1h）----
-    cached = _ANTHROPIC_URL_CACHE.get(provider_id)
+    cached = _ANTHROPIC_URL_CACHE.get(cache_key)
     if cached:
         age = (datetime.now() - cached["ts"]).total_seconds()
         if age < 3600:
             return cached["url"], "cached"
 
     # ---- 文件缓存（跨进程，TTL 24h）----
-    cache_key = _anthropic_cache_key(provider_id, url)
     file_cached = _load_anthropic_url_file_cache().get(cache_key)
     if isinstance(file_cached, dict):
         cached_url = str(file_cached.get("url", "")).strip()
@@ -3252,7 +3440,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
             except ValueError:
                 age = 999999
             if age < 24 * 3600:
-                _ANTHROPIC_URL_CACHE[provider_id] = {"url": cached_url, "ts": datetime.now()}
+                _ANTHROPIC_URL_CACHE[cache_key] = {"url": cached_url, "ts": datetime.now()}
                 return cached_url, "file_cached"
 
     # ---- 快速兼容：Claude SDK 自己会拼 /v1/messages，配置尾部 /v1 时直接裁掉 ----
@@ -3278,15 +3466,16 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
 
     # ---- 使用公共工具探测（复用 mms_core.detect_working_base_url）----
     # Claude Code SDK 固定追加 /v1/messages，所以探测路径是 /v1/messages
+    probe_nonce = os.urandom(8).hex()
     body = json.dumps({
         "model": probe_model,
         "max_tokens": 1,
         "messages": [{"role": "user", "content": "hi"}],
         "metadata": {
             "user_id": json.dumps({
-                "device_id": f"mms-probe-{provider_id}",
+                "device_id": f"device-{probe_nonce}",
                 "account_uuid": str(runtime.get("id", "")),
-                "session_id": f"mms-probe-{provider_id}",
+                "session_id": f"session-{probe_nonce}",
             }, ensure_ascii=False),
         },
     }).encode()
@@ -3373,23 +3562,44 @@ def _prepare_claude_session_tree(
     runtime_kind="api_key",
     skip_real_entries=None,
     source_claude_dir=None,
+    allowed_source_entries=None,
 ):
     current_cwd = os.path.realpath(os.getcwd())
     normalized_account_id = str(account_id or "").strip()
     store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
+    allowed_source_entries = [
+        str(entry).strip()
+        for entry in (
+            allowed_source_entries
+            if allowed_source_entries is not None
+            else _CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST
+        )
+        if str(entry or "").strip()
+    ]
+    allowed_source_entry_set = set(allowed_source_entries)
     scoped_claude_dir = source_claude_dir or _real_user_path(".claude")
     if os.path.islink(session_claude_dir):
         os.unlink(session_claude_dir)
     os.makedirs(session_claude_dir, exist_ok=True)
+    for entry in os.listdir(session_claude_dir):
+        if entry in CLAUDE_PERSISTENT_ENTRIES or entry in allowed_source_entry_set:
+            continue
+        dst = os.path.join(session_claude_dir, entry)
+        if os.path.islink(dst):
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
     if os.path.isdir(scoped_claude_dir):
-        for entry in os.listdir(scoped_claude_dir):
+        for entry in allowed_source_entries:
             if entry in skip_real_entries or entry in CLAUDE_PERSISTENT_ENTRIES:
                 continue
             src = os.path.join(scoped_claude_dir, entry)
             dst = os.path.join(session_claude_dir, entry)
-            if not os.path.exists(dst) and not os.path.islink(dst):
-                os.symlink(src, dst)
+            if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+                continue
+            os.symlink(src, dst)
     for entry in CLAUDE_PERSISTENT_ENTRIES:
         dst = os.path.join(session_claude_dir, entry)
         target = str(
@@ -3452,7 +3662,7 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
                     _json.dump(cleaned, f, ensure_ascii=False, indent=2)
                     f.write("\n")
             elif os.path.basename(dst) == ".claude.json":
-                _copy_claude_state_json(src, dst)
+                _copy_claude_state_json(src, dst, mode="oauth")
             else:
                 shutil.copy2(src, dst)
         except Exception:
@@ -3470,7 +3680,8 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
     cwd = marker.get("cwd") or os.getcwd()
     account_id = str(marker.get("account_id") or "").strip()
     account_home = str(marker.get("account_home") or "").strip()
-    _sync_claude_session_state_to_account_home(session_home, account_home)
+    if not stale_cleanup:
+        _sync_claude_session_state_to_account_home(session_home, account_home)
     finalize_claude_session(
         cwd=cwd,
         pid=pid,
@@ -3526,8 +3737,7 @@ def _claude_gateway_env(
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
 
-    # ── .claude.json：剥离 migration flags + 写入 thinking/attribution ──
-    # 合并策略：真实 ~/.claude.json 为基础，保留 per-session 已有的用户确认状态
+    # ── .claude.json：schema-based allowlist，避免未知 global 字段渗入 gateway session ──
     real_json = _real_user_path(".claude.json")
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
@@ -3536,32 +3746,31 @@ def _claude_gateway_env(
     if os.path.exists(real_json):
         try:
             with open(real_json, encoding="utf-8") as f:
-                data = _json.load(f)
-            if isinstance(data, dict):
-                projects = data.get("projects")
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                projects = loaded.get("projects")
                 if isinstance(projects, dict):
                     current_project_state = projects.get(current_project)
         except Exception:
-            data = {}
-    data = _strip_claude_restore_state(data, strip_sensitive_auth=True)
-    # 保留 per-session 里用户已确认的状态（如 bypass permissions accept）
-    _GW_PRESERVE_KEYS = ("bypassPermissionsModeAccepted",)
+            current_project_state = None
+
     if os.path.exists(gw_json):
         try:
             with open(gw_json, encoding="utf-8") as f:
                 gw_existing = _json.load(f)
-            gw_existing = _strip_claude_restore_state(gw_existing, strip_sensitive_auth=True)
-            for k in _GW_PRESERVE_KEYS:
-                if k in gw_existing and k not in data:
-                    data[k] = gw_existing[k]
+            if (
+                runtime.get("bypass")
+                and isinstance(gw_existing, dict)
+                and gw_existing.get("bypassPermissionsModeAccepted") is True
+            ):
+                data["bypassPermissionsModeAccepted"] = True
         except Exception:
             pass
+
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
     if not runtime.get("bypass"):
         data.pop("bypassPermissionsModeAccepted", None)
-    data.pop("sonnet1m45MigrationComplete", None)
-    data.pop("opusProMigrationComplete", None)
     data["alwaysThinkingEnabled"] = True
     data = _ensure_claude_project_trust(
         data,
@@ -3578,17 +3787,13 @@ def _claude_gateway_env(
     if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
         os.symlink(real_local, gw_local)
 
-    # ── Library symlink：macOS Keychain 需要 ~/Library/Keychains ──
-    real_library = _real_user_path("Library")
-    gw_library = os.path.join(gateway_home, "Library")
-    if os.path.isdir(real_library) and not os.path.exists(gw_library) and not os.path.islink(gw_library):
-        os.symlink(real_library, gw_library)
+    # ── Library allowlist：仅保留 Keychain 依赖 ──
+    _link_claude_library_entries(gateway_home)
 
     _link_shared_dotfiles(gateway_home)
 
-    # ── ~/.claude 目录：持久化历史项指向 project store，其余沿用真实 ~/.claude ──
+    # ── ~/.claude 目录：仅保留 project-scoped 持久项，其余不再继承真实树 ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
-    real_claude_dir = _real_user_path(".claude")
     _prepare_claude_session_tree(
         gateway_home,
         gw_claude_dir,
@@ -3596,6 +3801,13 @@ def _claude_gateway_env(
         runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
         skip_real_entries={"settings.json"},
     )
+    report = runtime.get("_account_guard_report")
+    if report:
+        _persist_account_guard_launch(
+            str(runtime.get("id", "")),
+            report,
+            session_home=gateway_home,
+        )
 
     # ── settings.json：继承用户配置 + 覆盖 gateway 必要字段 ──
     effective_token = auth_token or runtime["api_key"]
@@ -4252,13 +4464,16 @@ def launch_cli(cli, model_info, runtime, once=False):
         source_kind = "模型源"
 
     if cli == "claude" and auth_mode == "oauth":
-        report = _build_account_guard_report(runtime)
+        report = _build_account_guard_report(_claude_guard_runtime(runtime))
         runtime["_account_guard_report"] = report
         if report.get("status") == "blocked":
             console.print(f"[red]{report.get('blocked_reason') or '账号守护已阻止启动'}[/red]")
             sys.exit(1)
-        if runtime.get("bypass"):
-            _enforce_claude_network_guard_or_exit(runtime, require_proxy=True)
+    if cli == "claude" and auth_mode in {"oauth", "api_key"} and runtime.get("bypass"):
+        _enforce_claude_network_guard_or_exit(
+            runtime,
+            require_proxy=_claude_bypass_requires_proxy(runtime),
+        )
 
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))
