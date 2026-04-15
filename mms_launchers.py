@@ -3978,6 +3978,9 @@ def launch_codex(model_info, runtime, once=False):
         return
 
     provider_id = runtime.get("id", "")
+    from mms_tui import select_reasoning_effort_tui as _sel_effort
+    reasoning_effort = _sel_effort(default="medium")
+    console.print(f"[dim]reasoning effort: {reasoning_effort}[/dim]")
     with codex_responses_bridge(
         gateway_url,
         api_key,
@@ -3985,6 +3988,7 @@ def launch_codex(model_info, runtime, once=False):
         advertised_models=advertised_models,
         speed_scope=speed_scope,
         provider_id=provider_id,
+        reasoning_effort=reasoning_effort,
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
