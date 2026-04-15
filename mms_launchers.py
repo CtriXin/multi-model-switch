@@ -2048,6 +2048,25 @@ def _strip_claude_restore_state(data):
     return payload
 
 
+def _copy_claude_state_json(src, dst):
+    import json as _json
+
+    payload = {}
+    if os.path.exists(src):
+        try:
+            with open(src, encoding="utf-8") as f:
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {}
+    payload = _strip_claude_restore_state(payload)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst, "w", encoding="utf-8") as f:
+        _json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+
+
 def _masked_exposure_env_value(key, value):
     key = str(key or "").strip()
     value = str(value or "").strip()
@@ -2414,7 +2433,7 @@ def _account_env(account, *, validate_proxy=True):
         session_json = os.path.join(session_home, ".claude.json")
         if os.path.exists(account_json):
             try:
-                shutil.copy2(account_json, session_json)
+                _copy_claude_state_json(account_json, session_json)
             except Exception:
                 pass
         # symlink .local
@@ -3430,6 +3449,8 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
                 with open(dst, "w", encoding="utf-8") as f:
                     _json.dump(cleaned, f, ensure_ascii=False, indent=2)
                     f.write("\n")
+            elif os.path.basename(dst) == ".claude.json":
+                _copy_claude_state_json(src, dst)
             else:
                 shutil.copy2(src, dst)
         except Exception:

@@ -119,6 +119,68 @@ def test_sync_claude_session_state_back_to_account(tmp_path):
     assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8"))["theme"] == "dark"
 
 
+def test_copy_claude_state_json_strips_restore_state(tmp_path):
+    from mms_launchers import _copy_claude_state_json
+
+    src = tmp_path / "src.json"
+    dst = tmp_path / "nested" / "dst.json"
+    src.write_text(
+        json.dumps(
+            {
+                "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+                "lastSessionId": "global-session",
+                "lastCost": 123,
+                "bypassPermissionsModeAccepted": True,
+                "alwaysThinkingEnabled": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _copy_claude_state_json(str(src), str(dst))
+
+    result = json.loads(dst.read_text(encoding="utf-8"))
+    assert "projects" not in result
+    assert "lastSessionId" not in result
+    assert "lastCost" not in result
+    assert result["bypassPermissionsModeAccepted"] is True
+    assert result["alwaysThinkingEnabled"] is True
+
+
+def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):
+    from mms_launchers import _sync_claude_session_state_to_account_home
+
+    session_home = tmp_path / "session"
+    account_home = tmp_path / "account"
+    (session_home / ".claude").mkdir(parents=True)
+
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "userID": "device-b",
+                "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+                "lastSessionId": "global-session",
+                "lastCost": 123,
+                "numStartups": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude" / "settings.json").write_text(
+        json.dumps({"theme": "dark"}),
+        encoding="utf-8",
+    )
+
+    _sync_claude_session_state_to_account_home(str(session_home), str(account_home))
+
+    result = json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))
+    assert result["userID"] == "device-b"
+    assert result["numStartups"] == 3
+    assert "projects" not in result
+    assert "lastSessionId" not in result
+    assert "lastCost" not in result
+
+
 def test_apply_runtime_network_profile_sets_proxy_and_timezone():
     from mms_launchers import _apply_runtime_network_profile
 
