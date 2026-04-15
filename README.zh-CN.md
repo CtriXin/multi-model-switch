@@ -77,6 +77,14 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 如果本机没有 `jq`，安装器也会尝试补装，因为 token monitor hook 依赖它。
 
+默认会锁定到经过 MMS 验证的 `MindKeeper v2.2.0`。
+如果你要覆盖版本，可以显式传 `--mindkeeper-ref`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref v2.2.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref main
+```
+
 边界说明：
 
 - 这是 `Claude` 优先的 context 可选包，不包含 Hive compact/restore
