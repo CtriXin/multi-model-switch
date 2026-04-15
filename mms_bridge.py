@@ -2716,6 +2716,7 @@ def gateway_claude_bridge(
     slot_configs=None,
     openai_url=None,
     strip_upstream_user_agent=False,
+    reasoning_effort="medium",
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -2746,6 +2747,7 @@ def gateway_claude_bridge(
     server.slot_configs = slot_configs or {}
     server.openai_url = openai_url
     server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
+    server.reasoning_effort = reasoning_effort
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

@@ -3040,7 +3040,9 @@ def launch_claude(model_info, runtime, once=False):
             #   → 用 OpenAI URL 起 bridge，bridge 内部走 Responses API 转发
             openai_url = _gpt_openai_url
             api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
-            console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API[/dim]")
+            from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
+            reasoning_effort = _sel_effort_claude(default="medium")
+            console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API (reasoning: {reasoning_effort})[/dim]")
             cleanup_ctx = _gateway_claude_bridge_context(openai_url, api_key,
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
@@ -3050,7 +3052,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
                                                 openai_url=openai_url,
-                                                strip_upstream_user_agent=strip_upstream_user_agent)
+                                                strip_upstream_user_agent=strip_upstream_user_agent,
+                                                reasoning_effort=reasoning_effort)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
