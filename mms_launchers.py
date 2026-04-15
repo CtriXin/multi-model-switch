@@ -197,10 +197,8 @@ def _runtime_locale_env(runtime=None):
 
 
 def _apply_runtime_locale_profile(env, runtime=None):
-    env = env if isinstance(env, dict) else {}
-    for key, value in _runtime_locale_env(runtime).items():
-        env[key] = value
-    return env
+    # 止血：暂时不再把 runtime locale/lang 绑定注入到 CLI 进程环境。
+    return env if isinstance(env, dict) else {}
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
@@ -1233,49 +1231,8 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
 
 
 def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
-    _apply_runtime_locale_profile(env, runtime)
-    proxy_url = str(runtime.get("proxy") or "").strip()
-    no_proxy = str(runtime.get("no_proxy") or "").strip()
-    timezone_name = _validate_timezone_or_exit(
-        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
-        label=str(runtime.get("id") or runtime.get("name") or "runtime"),
-    )
-    if timezone_name:
-        env["TZ"] = timezone_name
-    _apply_runtime_ip_stack_profile(env, runtime)
-    if _fake_upstream_enabled():
-        try:
-            fake_proxy = _ensure_fake_upstream_proxy()
-        except Exception as exc:
-            console.print(
-                "[red]fake upstream 已开启，但本地 fake proxy 初始化失败，已阻止启动[/red]"
-                + f"\n[dim]{str(exc).strip() or 'unknown error'}[/dim]"
-            )
-            sys.exit(1)
-        fake_proxy_url = str(fake_proxy.get("proxy_url") or "").strip()
-        fake_ca_cert_path = str(fake_proxy.get("ca_cert_path") or "").strip()
-        if not fake_proxy_url:
-            console.print("[red]fake upstream 已开启，但本地 fake proxy 启动失败[/red]")
-            sys.exit(1)
-        env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
-        env["MMS_FAKE_UPSTREAM_PROXY"] = fake_proxy_url
-        env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = _proxy_fingerprint(proxy_url)
-        env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
-        if fake_ca_cert_path:
-            env["NODE_EXTRA_CA_CERTS"] = fake_ca_cert_path
-            env["SSL_CERT_FILE"] = fake_ca_cert_path
-        _apply_proxy_env(env, fake_proxy_url, no_proxy="127.0.0.1,localhost,::1")
-        return env
-    if proxy_url:
-        if validate_proxy:
-            _check_proxy_connectivity_or_exit(
-                proxy_url,
-                no_proxy=no_proxy,
-                label=str(runtime.get("id") or runtime.get("name") or "runtime"),
-                force_ipv4=_runtime_force_ipv4(runtime),
-            )
-        _apply_proxy_env(env, proxy_url, no_proxy=no_proxy)
-    return env
+    # 止血：暂时不再把 runtime proxy/timezone/fake-upstream 绑定注入到 CLI 进程环境。
+    return env if isinstance(env, dict) else {}
 
 
 def _apply_runtime_ip_stack_profile(env, runtime):
@@ -2040,11 +1997,29 @@ def _sanitize_account_claude_settings_payload(settings_data):
     return settings_data
 
 
-def _strip_claude_restore_state(data):
+_CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
+    "oauthAccount",
+    "provider",
+    "api_key",
+    "userID",
+    "cachedExtraUsageDisabledReason",
+    "customApiKeyResponses",
+    "passesEligibilityCache",
+    "s1mAccessCache",
+    "hasAvailableSubscription",
+    "penguinModeOrgEnabled",
+    "subscriptionNoticeCount",
+)
+
+
+def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     payload = dict(data) if isinstance(data, dict) else {}
     payload.pop("projects", None)
     payload.pop("lastSessionId", None)
     payload.pop("lastCost", None)
+    if strip_sensitive_auth:
+        for key in _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS:
+            payload.pop(key, None)
     return payload
 
 
@@ -2837,6 +2812,9 @@ def launch_claude(model_info, runtime, once=False):
     lb_medium = model_info.get("lb_medium") if isinstance(model_info, dict) else None
     lb_light = lb_light if lb_light and lb_light.strip() else None
     lb_medium = lb_medium if lb_medium and lb_medium.strip() else None
+    if auth_mode == "oauth_bridge":
+        console.print("[red]官方桥接已临时禁用，避免 Gemini/Codex 请求进入 Claude session。[/red]")
+        sys.exit(1)
     if auth_mode == "oauth":
         env = _account_env(runtime)
         _prepare_oauth_home_context(runtime, env, "claude")
@@ -2859,22 +2837,6 @@ def launch_claude(model_info, runtime, once=False):
         env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
         state_home = None  # per-PID HOME 已隔离，不需要 swap .claude.json
         cleanup_ctx = None
-    elif auth_mode == "oauth_bridge":
-        bridge_model = runtime.get("bridge_model") or _resolve_model(model_info)
-        advertised_models = [bridge_model] if bridge_model else []
-        if runtime.get("bridge_source_cli") == "gemini":
-            cleanup_ctx = gemini_claude_bridge(runtime, bridge_model)
-        else:
-            cleanup_ctx = codex_claude_bridge(runtime, bridge_model)
-        bridge_cfg = cleanup_ctx.__enter__()
-        env = _prepare_claude_env_with_status(
-            runtime,
-            base_url=bridge_cfg["base_url"],
-            auth_token=bridge_cfg["api_key"],
-            heavy_model=bridge_model,
-            selected_model=bridge_model,
-        )
-        state_home = None
     else:
         provider_id = runtime.get("id", "default")
         if runtime.get("skip_gateway_health_check"):
@@ -3546,14 +3508,14 @@ def _claude_gateway_env(
                 data = _json.load(f)
         except Exception:
             data = {}
-    data = _strip_claude_restore_state(data)
+    data = _strip_claude_restore_state(data, strip_sensitive_auth=True)
     # 保留 per-session 里用户已确认的状态（如 bypass permissions accept）
     _GW_PRESERVE_KEYS = ("bypassPermissionsModeAccepted",)
     if os.path.exists(gw_json):
         try:
             with open(gw_json, encoding="utf-8") as f:
                 gw_existing = _json.load(f)
-            gw_existing = _strip_claude_restore_state(gw_existing)
+            gw_existing = _strip_claude_restore_state(gw_existing, strip_sensitive_auth=True)
             for k in _GW_PRESERVE_KEYS:
                 if k in gw_existing and k not in data:
                     data[k] = gw_existing[k]

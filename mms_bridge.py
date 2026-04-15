@@ -2744,7 +2744,8 @@ def gateway_claude_bridge(
     server.advertised_models = list(advertised_models or [])
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
-    server.slot_configs = slot_configs or {}
+    # 止血：暂时禁用 bridge 层跨 provider slot 切换，避免实际 provider/account 漂移。
+    server.slot_configs = {}
     server.openai_url = openai_url
     server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
     server.reasoning_effort = reasoning_effort

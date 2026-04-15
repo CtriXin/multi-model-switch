@@ -181,10 +181,10 @@ def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path
     assert "lastCost" not in result
 
 
-def test_apply_runtime_network_profile_sets_proxy_and_timezone():
+def test_apply_runtime_network_profile_is_noop_in_stopgap_mode():
     from mms_launchers import _apply_runtime_network_profile
 
-    env = {}
+    env = {"KEEP": "1"}
     runtime = {
         "id": "claude-b",
         "proxy": "http://127.0.0.1:7890",
@@ -195,13 +195,8 @@ def test_apply_runtime_network_profile_sets_proxy_and_timezone():
     with patch("mms_launchers._check_proxy_connectivity_or_exit") as check_proxy:
         result = _apply_runtime_network_profile(env, runtime, validate_proxy=True)
 
-    check_proxy.assert_called_once()
-    assert result["HTTP_PROXY"] == "http://127.0.0.1:7890"
-    assert result["HTTPS_PROXY"] == "http://127.0.0.1:7890"
-    assert result["NO_PROXY"] == "localhost,127.0.0.1"
-    assert result["TZ"] == "Asia/Singapore"
-    assert result["LANG"] == "en_US.UTF-8"
-    assert result["LC_ALL"] == "en_US.UTF-8"
+    check_proxy.assert_not_called()
+    assert result == {"KEEP": "1"}
 
 
 def test_normalize_account_keeps_proxy_and_timezone():
@@ -683,9 +678,11 @@ def test_runtime_locale_env_defaults_to_en_us():
     assert result["LC_ALL"] == "en_US.UTF-8"
 
 
-def test_runtime_locale_env_supports_zh_language():
+def test_runtime_locale_env_supports_zh_language(monkeypatch):
     from mms_launchers import _runtime_locale_env
 
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LANG", raising=False)
     result = _runtime_locale_env({"language": "zh"})
 
     assert result["LANG"] == "zh_CN.UTF-8"
@@ -844,6 +841,88 @@ def test_strip_claude_restore_state_removes_project_resume_noise():
     assert result["alwaysThinkingEnabled"] is True
 
 
+def test_strip_claude_restore_state_drops_gateway_sensitive_auth_state():
+    from mms_launchers import _strip_claude_restore_state
+
+    result = _strip_claude_restore_state(
+        {
+            "userID": "device-b",
+            "oauthAccount": {"emailAddress": "demo@example.com"},
+            "provider": "minimax",
+            "api_key": "sk-demo",
+            "cachedExtraUsageDisabledReason": "org_level_disabled",
+            "passesEligibilityCache": {"org-a": {"eligible": False}},
+            "s1mAccessCache": {"org-a": {"hasAccess": False}},
+            "hasAvailableSubscription": False,
+            "penguinModeOrgEnabled": False,
+            "customApiKeyResponses": {"demo": "x"},
+            "subscriptionNoticeCount": 3,
+            "bypassPermissionsModeAccepted": True,
+        },
+        strip_sensitive_auth=True,
+    )
+
+    for key in (
+        "userID",
+        "oauthAccount",
+        "provider",
+        "api_key",
+        "cachedExtraUsageDisabledReason",
+        "passesEligibilityCache",
+        "s1mAccessCache",
+        "hasAvailableSubscription",
+        "penguinModeOrgEnabled",
+        "customApiKeyResponses",
+        "subscriptionNoticeCount",
+    ):
+        assert key not in result
+    assert result["bypassPermissionsModeAccepted"] is True
+
+
+def test_claude_source_list_hides_cross_cli_oauth_bridge():
+    from mms_core import _account_options_for_model
+
+    cfg = {
+        "accounts": [
+            {
+                "id": "gemini-a",
+                "name": "gemini-a",
+                "cli": "gemini",
+                "enabled": True,
+                "home_dir": "/tmp/gemini-a",
+            }
+        ],
+        "account": {"defaults": {}},
+    }
+
+    options = _account_options_for_model(
+        cfg,
+        "claude",
+        [],
+        model_info={"model": "gemini-3.1-pro-preview"},
+        allow_selected_model=True,
+    )
+
+    assert options == []
+
+
+def test_claude_source_list_hides_broker_options():
+    from mms_core import _broker_options_for_cli
+
+    cfg = {
+        "broker_profiles": [
+            {
+                "id": "broker-a",
+                "name": "broker-a",
+                "enabled": True,
+                "broker_base_url": "https://broker.example.com",
+            }
+        ]
+    }
+
+    assert _broker_options_for_cli(cfg, "claude", {"model": "claude-sonnet-4-6"}) == []
+
+
 def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path):
     import json as _json
     from mms_launchers import inspect_runtime_exposure
@@ -878,7 +957,8 @@ def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path
     assert env_map["TZ"] == "America/Los_Angeles"
     assert payload["settings"]["statusline"] is True
     assert "PreToolUse" in payload["settings"]["hook_events"]
-    assert "LANG" in payload["settings"]["env_keys"]
+    assert "HTTP_PROXY" not in payload["settings"]["env_keys"]
+    assert "TZ" in payload["settings"]["env_keys"]
 
 
 def test_gateway_claude_bridge_context_drops_unknown_kwargs(monkeypatch, capsys):
