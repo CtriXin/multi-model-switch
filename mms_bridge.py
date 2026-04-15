@@ -644,7 +644,7 @@ def _build_gemini_payload(request_payload, model_name):
     }
 
 
-def _build_codex_payload(request_payload, model_name, incremental_messages=None):
+def _build_codex_payload(request_payload, model_name, incremental_messages=None, reasoning_effort="medium"):
     messages = incremental_messages if incremental_messages is not None else (request_payload.get("messages") or [])
     payload = {
         "model": model_name,
@@ -652,7 +652,7 @@ def _build_codex_payload(request_payload, model_name, incremental_messages=None)
         "input": _anthropic_messages_to_responses_input(messages),
         "store": False,
         "stream": True,
-        "reasoning": {"effort": "medium"},
+        "reasoning": {"effort": reasoning_effort},
     }
     tools = _anthropic_tools_to_responses(request_payload.get("tools"))
     if tools:
@@ -1754,6 +1754,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             any(b.get("type") == "tool_result" for b in _normalize_message_content(m.get("content")))
             for m in messages if m.get("role") == "user"
         )
+        reasoning_effort = getattr(self.server, "reasoning_effort", "medium")
         if last_response_id and not has_tool_result:
             # 取最后一个 assistant 消息之后的所有消息作为增量 input
             last_assistant_idx = -1
@@ -1761,10 +1762,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 if m.get("role") == "assistant":
                     last_assistant_idx = i
             incremental = messages[last_assistant_idx + 1:] if last_assistant_idx >= 0 else messages
-            responses_payload = _build_codex_payload(anthropic_payload, model_name, incremental_messages=incremental)
+            responses_payload = _build_codex_payload(anthropic_payload, model_name, incremental_messages=incremental, reasoning_effort=reasoning_effort)
             responses_payload["previous_response_id"] = last_response_id
         else:
-            responses_payload = _build_codex_payload(anthropic_payload, model_name)
+            responses_payload = _build_codex_payload(anthropic_payload, model_name, reasoning_effort=reasoning_effort)
         # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
         orig_instructions = responses_payload.get("instructions", "")
         if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
@@ -2669,6 +2670,7 @@ def codex_responses_bridge(
     speed_scope=None,
     route_status_paths=None,
     provider_id="",
+    reasoning_effort="medium",
 ):
     _ensure_httpx()
     if httpx is None:
@@ -2684,6 +2686,7 @@ def codex_responses_bridge(
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
     server.provider_id = provider_id
+    server.reasoning_effort = reasoning_effort
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
