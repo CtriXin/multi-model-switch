@@ -644,13 +644,15 @@ def _build_gemini_payload(request_payload, model_name):
     }
 
 
-def _build_codex_payload(request_payload, model_name):
+def _build_codex_payload(request_payload, model_name, incremental_messages=None):
+    messages = incremental_messages if incremental_messages is not None else (request_payload.get("messages") or [])
     payload = {
         "model": model_name,
         "instructions": _system_to_instructions(request_payload.get("system")) or "You are a helpful assistant.",
-        "input": _anthropic_messages_to_responses_input(request_payload.get("messages") or []),
+        "input": _anthropic_messages_to_responses_input(messages),
         "store": False,
         "stream": True,
+        "reasoning": {"effort": "medium"},
     }
     tools = _anthropic_tools_to_responses(request_payload.get("tools"))
     if tools:
@@ -682,6 +684,7 @@ class _AnthropicTranslator:
         self.text_item_to_index = {}
         self.seen_tool_use = False
         self.response_id = None  # 从 response.completed 提取，用于 previous_response_id
+        self.reasoning_item_to_index = {}  # reasoning item_id → block index
 
     def _message_start(self):
         return ("message_start", {
@@ -704,7 +707,16 @@ class _AnthropicTranslator:
             outgoing.append(self._message_start())
         elif event_type == "response.output_item.added":
             item = payload.get("item", {})
-            if item.get("type") == "function_call":
+            if item.get("type") == "reasoning":
+                index = len(self.blocks)
+                self.reasoning_item_to_index[item["id"]] = index
+                self.blocks.append({"type": "thinking", "thinking": ""})
+                outgoing.append(("content_block_start", {
+                    "type": "content_block_start",
+                    "index": index,
+                    "content_block": {"type": "thinking", "thinking": ""},
+                }))
+            elif item.get("type") == "function_call":
                 index = len(self.blocks)
                 self.item_to_index[item["id"]] = index
                 self.blocks.append({
@@ -748,6 +760,17 @@ class _AnthropicTranslator:
                     "index": index,
                     "delta": {"type": "text_delta", "text": delta},
                 }))
+        elif event_type == "response.reasoning_summary_text.delta":
+            item_id = payload.get("item_id")
+            index = self.reasoning_item_to_index.get(item_id)
+            if index is not None:
+                delta = payload.get("delta", "")
+                self.blocks[index]["thinking"] += delta
+                outgoing.append(("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {"type": "thinking_delta", "thinking": delta},
+                }))
         elif event_type == "response.function_call_arguments.delta":
             item_id = payload.get("item_id")
             index = self.item_to_index.get(item_id)
@@ -773,6 +796,13 @@ class _AnthropicTranslator:
                         parsed = {}
                     self.blocks[index]["input"] = parsed
                     self.blocks[index].pop("_partial_json", None)
+                    outgoing.append(("content_block_stop", {
+                        "type": "content_block_stop",
+                        "index": index,
+                    }))
+            elif item_type == "reasoning":
+                index = self.reasoning_item_to_index.get(item_id)
+                if index is not None:
                     outgoing.append(("content_block_stop", {
                         "type": "content_block_stop",
                         "index": index,
@@ -1713,13 +1743,25 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         5. 收到 Responses SSE → _AnthropicTranslator 转回 Anthropic SSE → 返回 Claude Code
         6. 从 response.completed 提取 response_id → 存入 server._gpt_last_response_id
         """
-        responses_payload = _build_codex_payload(anthropic_payload, model_name)
+        # previous_response_id 续接：只发增量 input，命中服务端缓存
+        last_response_id = getattr(self.server, "_gpt_last_response_id", None)
+        if last_response_id:
+            messages = anthropic_payload.get("messages") or []
+            # 取最后一个 assistant 消息之后的所有消息作为增量 input
+            last_assistant_idx = -1
+            for i, m in enumerate(messages):
+                if m.get("role") == "assistant":
+                    last_assistant_idx = i
+            incremental = messages[last_assistant_idx + 1:] if last_assistant_idx >= 0 else messages
+            responses_payload = _build_codex_payload(anthropic_payload, model_name, incremental_messages=incremental)
+            responses_payload["previous_response_id"] = last_response_id
+        else:
+            responses_payload = _build_codex_payload(anthropic_payload, model_name)
         # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
         orig_instructions = responses_payload.get("instructions", "")
         if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
             responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
         responses_payload["stream"] = True
-        # CRS 上游不支持 max_output_tokens / previous_response_id
         responses_payload.pop("max_output_tokens", None)
 
         # 构造 target URL
@@ -1789,6 +1831,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(body_out)
 
+            # 存回 response_id 供下轮续接
+            if translator.response_id:
+                self.server._gpt_last_response_id = translator.response_id
             if should_record_speed and first_byte_ms:
                 _record_bridge_speed(
                     metrics_model,
@@ -1801,6 +1846,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             return
         except Exception as exc:
+            # 续接失败时清除 response_id，下轮重新全量发送
+            self.server._gpt_last_response_id = None
             try:
                 self._json(502, {"type": "error", "error": {"type": "api_error", "message": f"GPT bridge error: {exc}"}})
             except BrokenPipeError:
