@@ -754,10 +754,13 @@ class _AnthropicTranslator:
             index = self.text_item_to_index.get(item_id)
             if index is not None:
                 delta = payload.get("delta", "")
-                # On first text delta, prepend thinking summary if any reasoning happened
+                # Only surface the thinking prefix when the upstream emitted
+                # actual reasoning summary text; a bare reasoning item alone
+                # should not render a misleading "[thinking: 0chars]".
                 if not self.blocks[index]["text"] and self.reasoning_item_to_index:
                     thinking_chars = sum(len(b["thinking"]) for b in self.blocks if b.get("type") == "thinking")
-                    delta = f"[thinking: {thinking_chars}chars]\n\n" + delta
+                    if thinking_chars > 0:
+                        delta = f"[thinking: {thinking_chars}chars]\n\n" + delta
                 self.blocks[index]["text"] += delta
                 outgoing.append(("content_block_delta", {
                     "type": "content_block_delta",

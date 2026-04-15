@@ -3199,10 +3199,11 @@ _EFFORT_OPTIONS = [
     ("low",    "Low    — 快速，适合简单任务"),
     ("medium", "Medium — 均衡，默认推荐"),
     ("high",   "High   — 深度思考，慢但更准"),
+    ("xhigh",  "XHigh  — 更深推理，最慢但更稳"),
 ]
 
-def select_reasoning_effort_tui(default="medium"):
-    """选择 GPT reasoning effort。返回 'low' / 'medium' / 'high'，Esc 返回 default。"""
+def select_reasoning_effort_tui(default="high"):
+    """选择 GPT reasoning effort。返回 'low' / 'medium' / 'high' / 'xhigh'，Esc 返回 default。"""
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -3229,7 +3230,7 @@ def select_reasoning_effort_tui(default="medium"):
                 else:
                     stdscr.addstr(row, 2, f"  {label}", curses.color_pair(2))
 
-            hint = "↑↓ 选择  Enter 确认  Esc 默认(medium)"
+            hint = f"↑↓ 选择  Enter 确认  Esc 默认({default})"
             if max_y > 9:
                 stdscr.addstr(min(8, max_y - 1), 2, hint, curses.color_pair(2) | curses.A_DIM)
             stdscr.refresh()
