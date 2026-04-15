@@ -755,7 +755,7 @@ def _runtime_httpx_kwargs(runtime):
 
 
 def _runtime_force_ipv4(runtime):
-    raw = True if not isinstance(runtime, dict) else runtime.get("force_ipv4", True)
+    raw = False if not isinstance(runtime, dict) else runtime.get("force_ipv4", False)
     if isinstance(raw, bool):
         return raw
     value = str(raw or "").strip().lower()
@@ -763,7 +763,7 @@ def _runtime_force_ipv4(runtime):
         return False
     if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
         return True
-    return True
+    return False
 
 
 def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False, **kwargs):
@@ -5990,16 +5990,13 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None, a
         account_cli = account_def.get("cli")
         if account_cli not in OAUTH_CAPABLE_CLIS:
             continue
-        bridgeable_to_claude = (
-            bool(selected_model)
-            and cli_name == "claude"
-            and account_cli in {"codex", "gemini"}
-        )
+        # 止血：临时禁用 Gemini/Codex 官方账号经由 Claude session 的桥接入口。
+        bridgeable_to_claude = False
+        if account_cli != cli_name and not bridgeable_to_claude:
+            continue
         if selected_model and not allow_selected_model and not bridgeable_to_claude:
             continue
         if selected_model and not _model_matches_account_cli(account_cli, selected_model):
-            continue
-        if not selected_model and account_cli != cli_name:
             continue
         runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=account_cli)
         launch_cli = account_cli
@@ -6033,49 +6030,8 @@ def _account_options_for_model(cfg, cli_name, default_models, model_info=None, a
 
 
 def _broker_options_for_cli(cfg, cli_name, model_info=None):
-    if cli_name != "claude":
-        return []
-
-    selected_model = _resolve_model_name(model_info) if model_info else ""
-    if selected_model == "official-default":
-        selected_model = ""
-    if selected_model and not _model_matches_account_cli("claude", selected_model):
-        return []
-
-    options = []
-    for profile in list_broker_profiles(cfg, enabled_only=True):
-        profile_id = str(profile.get("id", "")).strip()
-        if not profile_id:
-            continue
-        runtime = {
-            "runtime_kind": "broker",
-            "auth_mode": "broker_profile",
-            "id": profile_id,
-            "name": profile.get("name", profile_id),
-            "broker_profile_id": profile_id,
-            "broker_base_url": profile.get("broker_base_url", ""),
-            "device_id": profile.get("device_id", ""),
-            "workspace_id": profile.get("workspace_id", ""),
-            "entry_mode": profile.get("entry_mode", "shell"),
-            "remote_service_label": profile.get("remote_service_label", ""),
-            "remote_service_base_url": profile.get("remote_service_base_url", ""),
-            "remote_service_endpoint": profile.get("remote_service_endpoint", ""),
-            "remote_service_model": selected_model or profile.get("remote_service_model", ""),
-        }
-        options.append({
-            "kind": "broker",
-            "id": profile_id,
-            "runtime": runtime,
-            "models": [selected_model] if selected_model else [],
-            "label": _runtime_choice_label(runtime),
-            "title": profile.get("name", profile_id),
-            "desc": "Broker / remote official cc",
-            "icon": "B",
-            "priority": DEFAULT_PRIORITY - 10,
-            "is_default": False,
-            "launch_cli": cli_name,
-        })
-    return options
+    # 止血：broker 先退出默认入口，只保留显式 mms broker 命令链。
+    return []
 
 
 def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
@@ -6689,9 +6645,8 @@ def _infer_preset_auth_mode(preset):
 
 
 def _available_broker_profiles_for_cli(cfg, cli_name):
-    if cli_name != "claude":
-        return []
-    return list_broker_profiles(cfg, enabled_only=True)
+    # 止血：TUI 暂时不再暴露 broker profile。
+    return []
 
 
 def _broker_enabled_by_cli(cfg, cli_names):
@@ -6853,33 +6808,6 @@ def _build_provider_options_map(cfg, cli_name, default_provider, default_models,
                 "priority_family": option.get("priority_family", selected_family),
                 "provider_ctx": runtime,
             })
-        if cli_name == "claude":
-            for profile in list_broker_profiles(cfg, enabled_only=True):
-                profile_id = str(profile.get("id", "")).strip()
-                if not profile_id:
-                    continue
-                if model_name and not _model_matches_account_cli("claude", model_name):
-                    continue
-                options.append({
-                    "provider_name": f"{profile.get('name', profile_id)} Broker",
-                    "provider_id": profile_id,
-                    "provider_ctx": {
-                        "runtime_kind": "broker",
-                        "auth_mode": "broker_profile",
-                        "id": profile_id,
-                        "name": profile.get("name", profile_id),
-                        "broker_profile_id": profile_id,
-                        "broker_base_url": profile.get("broker_base_url", ""),
-                        "device_id": profile.get("device_id", ""),
-                        "workspace_id": profile.get("workspace_id", ""),
-                        "entry_mode": profile.get("entry_mode", "shell"),
-                        "remote_service_label": profile.get("remote_service_label", ""),
-                        "remote_service_base_url": profile.get("remote_service_base_url", ""),
-                        "remote_service_endpoint": profile.get("remote_service_endpoint", ""),
-                        "remote_service_model": model_name,
-                        "priority": 10,
-                    },
-                })
         if len(options) > 1:
             result[model_name] = options
     return result
@@ -7165,42 +7093,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if runtime_from_best_provider:
                 _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
 
-            # 构建跨 provider slot_configs：为 medium/light 找各自的最优 provider
-            slot_configs = {}
-            slot_error = ""
-            for slot_name, slot_model in [("medium", lb_result.get("lb_medium")),
-                                          ("light", lb_result.get("lb_light"))]:
-                if not slot_model or not slot_model.strip():
-                    continue
-                fixed_provider_id = slot_provider_ids.get(slot_name)
-                if fixed_provider_id:
-                    slot_prov, slot_error = _resolve_lb_slot_provider(
-                        current_cfg, cli, slot_model, fixed_provider_id
-                    )
-                    if slot_error:
-                        break
-                else:
-                    slot_prov, _ = _resolve_best_provider(
-                        current_cfg, slot_model, current_provider, default_models, cli_name=cli
-                    )
-                if slot_prov and slot_prov.get("id") != runtime_runtime.get("id"):
-                    # 不同 provider：记录独立 url/key
-                    slot_url = (slot_prov.get("anthropic_base_url") or
-                                slot_prov.get("base_url") or
-                                slot_prov.get("openai_base_url") or "")
-                    if slot_url:
-                        slot_url = slot_url.rstrip("/")
-                        if not slot_url.endswith("/v1"):
-                            slot_url += "/v1"
-                        slot_configs[slot_name] = {
-                            "url": slot_url,
-                            "key": slot_prov.get("api_key", ""),
-                        }
-            if slot_error:
-                console.print(f"[yellow]{slot_error}[/yellow]")
-                continue
-            if slot_configs:
-                model_info["lb_slot_configs"] = slot_configs
+            # 止血：暂时禁用跨 provider slot 切换，避免展示层和执行层 provider 漂移。
             # fall through to confirm below
 
         # ── 设置 ──
