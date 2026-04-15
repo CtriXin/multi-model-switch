@@ -5,6 +5,7 @@
 #   或: bash install.sh --ref v1.2.0
 
 set -e
+set -o pipefail
 
 REPO_OWNER="CtriXin"
 REPO_NAME="multi-model-switch"
@@ -22,6 +23,9 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
 MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
+NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
+MIN_PYTHON_MAJOR=3
+MIN_PYTHON_MINOR=11
 INSTALL_LANG="zh"
 INSTALL_LANG_EXPLICIT=0
 WRITE_SHELL_RC=0
@@ -38,6 +42,8 @@ INSTALL_READ_ONCE=0
 INSTALL_READ_ONCE_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
+CHECK_ONLY=0
+PRINT_ONLY_VERSION=0
 
 REAL_HOME="$HOME"
 if [[ "$HOME" =~ ^(/Users/[^/]+)/\.config/mms/ ]]; then
@@ -108,10 +114,14 @@ $(t "用法:" "Usage:")
   bash install.sh --main
   bash install.sh --latest-tag
   bash install.sh --latest-release
+  bash install.sh --version
+  bash install.sh --check
 
 $(t "说明:" "Notes:")
   - $(t "默认远程安装/升级使用最新 semver tag" "By default, remote install/upgrade uses the latest semver tag")
   - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main" "--ref can pin a specific version or branch, for example v1.2.0 / main")
+  - $(t "--version 仅显示当前脚本将安装的版本，不执行安装" "--version prints the version/ref this script would install without installing")
+  - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
   - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook")
@@ -394,8 +404,14 @@ download_remote_source() {
     fi
 
     echo "$(t "正在下载源码归档" "Downloading source archive"): $archive_url"
-    curl -fsSL "$archive_url" -o "$tarball"
-    tar -xzf "$tarball" -C "$SOURCE_TMP_DIR"
+    if ! curl --retry 3 --retry-delay 2 --connect-timeout 10 -fsSL "$archive_url" -o "$tarball"; then
+        echo "❌ $(t "下载源码归档失败，请检查网络后重试；中国网络环境下建议稍后再试或改用 --ref main" "Failed to download the source archive. Please check your network and retry; in China, try again later or use --ref main")"
+        return 1
+    fi
+    if ! tar -xzf "$tarball" -C "$SOURCE_TMP_DIR"; then
+        echo "❌ $(t "源码归档解压失败，下载内容可能不完整" "Failed to extract the source archive; the download may be incomplete")"
+        return 1
+    fi
 
     SOURCE_DIR="$(find "$SOURCE_TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
     if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
@@ -485,6 +501,11 @@ prepare_source_dir() {
 
     SOURCE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mms-install.XXXXXX")"
 
+    resolve_requested_ref
+    download_remote_source "$RESOLVED_INSTALL_REF"
+}
+
+resolve_requested_ref() {
     local ref="$INSTALL_REF"
     if [ -z "$ref" ] && [ "$INSTALL_CHANNEL" = "latest-release" ]; then
         ref="$(resolve_latest_release_tag || true)"
@@ -508,8 +529,6 @@ prepare_source_dir() {
         ref="main"
     fi
     RESOLVED_INSTALL_REF="$ref"
-
-    download_remote_source "$ref"
 }
 
 detect_node_major() {
@@ -563,7 +582,7 @@ ensure_node22() {
         fi
     else
         echo "$(t "未检测到 nvm，开始安装..." "nvm not found, installing...")"
-        curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | bash
     fi
 
     # shellcheck disable=SC1090
@@ -576,15 +595,25 @@ ensure_node22() {
 
 run_optional_command() {
     local label="$1"
-    local cmd="$2"
     local status=0
+    local rendered_cmd=""
+
+    shift
+
+    if [ "$#" -eq 0 ]; then
+        echo "⚠ $(t "缺少可执行命令，跳过" "Missing command, skipping"): $label"
+        return 1
+    fi
+
+    printf -v rendered_cmd '%q ' "$@"
+    rendered_cmd="${rendered_cmd% }"
 
     echo ""
     echo "→ $(t "正在处理" "Processing") $label"
-    echo "  $cmd"
+    echo "  $rendered_cmd"
 
     set +e
-    eval "$cmd"
+    "$@"
     status=$?
     set -e
 
@@ -612,7 +641,7 @@ ensure_brew_package() {
         return 1
     fi
 
-    run_optional_command "$label" "brew install $package_name"
+    run_optional_command "$label" brew install "$package_name"
 }
 
 install_named_cli() {
@@ -624,7 +653,7 @@ install_named_cli() {
                 echo "✓ Claude Code"
                 return 0
             fi
-            run_optional_command "Claude Code" "curl -fsSL https://claude.ai/install.sh | sh"
+            run_optional_command "Claude Code" bash -lc 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | sh'
             ;;
         codex)
             ensure_brew_package "codex" "codex" "Codex CLI"
@@ -913,7 +942,223 @@ repair_managed_claude_settings() {
     merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
 }
 
-repair_managed_claude_settings
+python_version_string() {
+    python3 - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+PY
+}
+
+python_meets_min_version() {
+    python3 - "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR" <<'PY'
+import sys
+
+major = int(sys.argv[1])
+minor = int(sys.argv[2])
+sys.exit(0 if sys.version_info >= (major, minor) else 1)
+PY
+}
+
+ensure_supported_python() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "❌ $(t "未找到 python3" "python3 not found")"
+        if command -v brew >/dev/null 2>&1; then
+            echo "   $(t "正在通过 brew 安装..." "Installing via brew...")"
+            brew install python3
+        else
+            echo "   $(t "请先安装 Python 3.11+" "Please install Python 3.11+ first"): https://www.python.org/downloads/"
+            exit 1
+        fi
+    fi
+
+    if ! python_meets_min_version; then
+        echo "❌ $(t "MMS 需要 Python 3.11 或更高版本" "MMS requires Python 3.11 or newer")"
+        echo "   $(t "当前版本" "Current version"): $(python3 --version 2>/dev/null || python_version_string)"
+        if command -v brew >/dev/null 2>&1; then
+            echo "   $(t "可尝试" "Try"): brew install python@3.11"
+        elif command -v apt-get >/dev/null 2>&1; then
+            echo "   $(t "Debian/Ubuntu 可先安装" "On Debian/Ubuntu, install"): sudo apt-get install python3.11 python3.11-venv"
+        fi
+        exit 1
+    fi
+
+    echo "✓ Python3: $(python3 --version)"
+}
+
+create_python_venv() {
+    mkdir -p "$MMS_HOME"
+
+    if ! python3 -m venv "$VENV_DIR"; then
+        echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
+        if command -v apt-get >/dev/null 2>&1; then
+            echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
+        fi
+        exit 1
+    fi
+
+    if ! "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip; then
+        echo "❌ $(t "虚拟环境中的 pip 初始化失败" "Failed to initialize pip inside the virtual environment")"
+        exit 1
+    fi
+
+    if ! "$VENV_DIR/bin/pip" install --quiet rich httpx tomli-w; then
+        echo "❌ $(t "安装 Python 依赖失败" "Failed to install Python dependencies")"
+        exit 1
+    fi
+}
+
+copy_hooks_dir_safely() {
+    local source_hooks="$1"
+    local target_hooks="$2"
+    local temp_hooks="${target_hooks}.new.$$"
+    local backup_hooks="${target_hooks}.bak.$$"
+
+    if [ ! -d "$source_hooks" ]; then
+        return 0
+    fi
+
+    rm -rf "$temp_hooks" "$backup_hooks"
+    if ! cp -R "$source_hooks" "$temp_hooks"; then
+        echo "❌ $(t "复制 hooks 目录失败" "Failed to copy the hooks directory")"
+        rm -rf "$temp_hooks"
+        return 1
+    fi
+
+    if [ -e "$target_hooks" ]; then
+        if ! mv "$target_hooks" "$backup_hooks"; then
+            echo "❌ $(t "备份旧 hooks 目录失败" "Failed to back up the existing hooks directory")"
+            rm -rf "$temp_hooks"
+            return 1
+        fi
+    fi
+
+    if mv "$temp_hooks" "$target_hooks"; then
+        rm -rf "$backup_hooks"
+        return 0
+    fi
+
+    echo "❌ $(t "替换 hooks 目录失败，已尝试恢复旧版本" "Failed to replace the hooks directory; attempted to restore the previous version")"
+    rm -rf "$temp_hooks" "$target_hooks"
+    if [ -e "$backup_hooks" ]; then
+        mv "$backup_hooks" "$target_hooks" || true
+    fi
+    return 1
+}
+
+rewrite_shebang() {
+    local target="$1"
+    local python_path="$2"
+
+    python3 - "$target" "$python_path" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+python_path = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines(True)
+
+if lines and lines[0].startswith("#!"):
+    lines[0] = f"#!{python_path}\n"
+else:
+    lines.insert(0, f"#!{python_path}\n")
+
+path.write_text("".join(lines), encoding="utf-8")
+PY
+}
+
+current_installed_ref() {
+    local installed_ref=""
+
+    if [ ! -f "$VERSION_META_PATH" ]; then
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        installed_ref="$(python3 - "$VERSION_META_PATH" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    sys.exit(1)
+
+print(str(data.get("installed_ref") or "").strip())
+PY
+)"
+        printf "%s" "$installed_ref"
+        return 0
+    fi
+
+    sed -n 's/.*"installed_ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_META_PATH" | head -n 1
+}
+
+print_planned_version() {
+    local planned_ref=""
+    local planned_channel="$INSTALL_CHANNEL"
+
+    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
+        planned_channel="local-source"
+        if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            planned_ref="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true)"
+        fi
+        planned_ref="${planned_ref:-local-source}"
+    else
+        resolve_requested_ref
+        planned_ref="$RESOLVED_INSTALL_REF"
+        planned_channel="$INSTALL_CHANNEL"
+    fi
+
+    echo "$(t "计划安装版本" "Planned install ref"): ${planned_ref}"
+    echo "$(t "安装通道" "Install channel"): ${planned_channel}"
+}
+
+run_install_check() {
+    local node_label=""
+    local installed_ref=""
+
+    print_planned_version
+    installed_ref="$(current_installed_ref || true)"
+    echo "$(t "当前已安装版本" "Currently installed ref"): ${installed_ref:-none}"
+
+    if command -v python3 >/dev/null 2>&1; then
+        if python_meets_min_version; then
+            echo "✓ $(t "Python 版本满足要求" "Python version is supported"): $(python3 --version)"
+        else
+            echo "✗ $(t "Python 版本过低，需要 3.11+" "Python version is too old; 3.11+ is required"): $(python3 --version)"
+        fi
+    else
+        echo "✗ $(t "未检测到 python3" "python3 not found")"
+    fi
+
+    node_label="$(node_version_label || true)"
+    if [ -n "$node_label" ]; then
+        echo "✓ Node.js: $node_label"
+    else
+        echo "• $(t "未检测到 Node.js（仅影响可选 Map/Node 安装路径）" "Node.js not found (only affects optional Map/Node install paths)")"
+    fi
+
+    if [ -x "$VENV_DIR/bin/python" ]; then
+        echo "✓ $(t "已存在虚拟环境" "Virtual environment present"): $VENV_DIR"
+    else
+        echo "• $(t "虚拟环境尚未创建" "Virtual environment not created yet"): $VENV_DIR"
+    fi
+
+    if [ -L "$BIN_DIR/mms" ]; then
+        echo "✓ $(t "已存在 mms 命令链接" "mms symlink present"): $BIN_DIR/mms"
+    else
+        echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
+    fi
+
+    if [ -L "$BIN_DIR/ccs" ]; then
+        echo "✓ $(t "已存在 ccs 命令链接" "ccs symlink present"): $BIN_DIR/ccs"
+    else
+        echo "• $(t "ccs 命令链接尚未创建" "ccs symlink not created yet"): $BIN_DIR/ccs"
+    fi
+}
 
 
 enable_rtk_rewrite_hook() {
@@ -1032,7 +1277,7 @@ enable_rtk_codex_integration() {
 
     run_optional_command \
         "$(t "Codex RTK 全局初始化" "Codex RTK global init")" \
-        "rtk init --codex --global"
+        rtk init --codex --global
 }
 
 install_optional_rtk() {
@@ -1058,13 +1303,13 @@ run_mindkeeper_installer() {
     if [ -f "$local_installer" ]; then
         run_optional_command \
             "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-            "bash \"$local_installer\""
+            bash "$local_installer"
         return 0
     fi
 
     run_optional_command \
         "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-        "curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash"
+        bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash'
 }
 
 write_mindkeeper_distill_command() {
@@ -1531,25 +1776,17 @@ install_optional_mindkeeper_context() {
 run_map_installer() {
     local local_installer=""
     local effective_map_ref="${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
-    local quoted_home=""
-    local quoted_map_ref=""
-    local quoted_local_installer=""
-
-    quoted_home="$(printf '%q' "$REAL_HOME")"
-    quoted_map_ref="$(printf '%q' "$effective_map_ref")"
-
     local_installer="$(dirname "$SOURCE_DIR")/folder-graphy/bin/install.sh"
     if [ -f "$local_installer" ]; then
-        quoted_local_installer="$(printf '%q' "$local_installer")"
         run_optional_command \
             "$(t "Map 安装" "Map install")" \
-            "env HOME=$quoted_home MAP_INSTALL_REF=$quoted_map_ref bash $quoted_local_installer --ref $quoted_map_ref"
+            env HOME="$REAL_HOME" MAP_INSTALL_REF="$effective_map_ref" bash "$local_installer" --ref "$effective_map_ref"
         return 0
     fi
 
     run_optional_command \
         "$(t "Map 安装" "Map install")" \
-        "env HOME=$quoted_home MAP_INSTALL_REF=$quoted_map_ref bash -lc 'curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash -s -- --ref \"\$MAP_INSTALL_REF\"'"
+        env HOME="$REAL_HOME" MAP_INSTALL_REF="$effective_map_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/folder-graphy/main/bin/install.sh | bash -s -- --ref "$MAP_INSTALL_REF"'
 }
 
 install_optional_map() {
@@ -1723,6 +1960,12 @@ while [[ $# -gt 0 ]]; do
             INSTALL_REF=""
             INSTALL_CHANNEL="latest-tag"
             ;;
+        --version)
+            PRINT_ONLY_VERSION=1
+            ;;
+        --check)
+            CHECK_ONLY=1
+            ;;
         --lang)
             shift
             if [[ -z "${1:-}" ]] || [[ "$1" != "zh" && "$1" != "en" ]]; then
@@ -1745,6 +1988,16 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+if [ "$PRINT_ONLY_VERSION" -eq 1 ]; then
+    print_planned_version
+    exit 0
+fi
+
+if [ "$CHECK_ONLY" -eq 1 ]; then
+    run_install_check
+    exit 0
+fi
 
 prompt_install_language
 prompt_optional_install_choices
@@ -1784,17 +2037,7 @@ if [ "$ENSURE_NODE22" -eq 1 ]; then
 fi
 
 # ── 1. 检查 Python3 ──
-if ! command -v python3 &>/dev/null; then
-    echo "❌ $(t "未找到 python3" "python3 not found")"
-    if command -v brew &>/dev/null; then
-        echo "   $(t "正在通过 brew 安装..." "Installing via brew...")"
-        brew install python3
-    else
-        echo "   $(t "请先安装 Python 3" "Please install Python 3 first"): https://www.python.org/downloads/"
-        exit 1
-    fi
-fi
-echo "✓ Python3: $(python3 --version)"
+ensure_supported_python
 
 if [ "$ENSURE_NODE22" -eq 1 ]; then
     ensure_node22
@@ -1803,10 +2046,7 @@ fi
 # ── 2. 创建隔离的 Python 环境 ──
 echo ""
 echo "$(t "正在创建隔离环境..." "Creating isolated environment...")"
-mkdir -p "$MMS_HOME"
-python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-"$VENV_DIR/bin/pip" install --quiet rich httpx tomli-w
+create_python_venv
 echo "✓ $(t "依赖已安装到" "Dependencies installed to") $VENV_DIR"
 
 # ── 3. 复制文件到 ~/.mms ──
@@ -1826,7 +2066,7 @@ cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
-[ -d "$SOURCE_DIR/hooks" ] && rm -rf "$MMS_HOME/hooks" && cp -R "$SOURCE_DIR"/hooks "$MMS_HOME/"
+copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 # 复制所有 mms_*.py 确保完整
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
@@ -1834,6 +2074,7 @@ done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
 write_version_metadata
+repair_managed_claude_settings
 write_language_config
 
 chmod +x "$MMS_HOME/ccs"
@@ -1844,8 +2085,8 @@ chmod +x "$MMS_HOME/mms"
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
-sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$MMS_HOME/ccs" && rm -f "$MMS_HOME/ccs.bak"
-sed -i.bak "1s|^#!.*|#!${PYTHON_PATH}|" "$MMS_HOME/mms" && rm -f "$MMS_HOME/mms.bak"
+rewrite_shebang "$MMS_HOME/ccs" "$PYTHON_PATH"
+rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
 install_requested_clis
@@ -1869,7 +2110,9 @@ mkdir -p "$BIN_DIR"
 # 创建 symlink
 ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
-ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
+if [ -e "$MMS_HOME/mmslogs" ]; then
+    ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
+fi
 echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms $(t "和" "and") $BIN_DIR/ccs"
 
 # 检查 PATH 是否包含 ~/.local/bin
