@@ -2023,6 +2023,35 @@ def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     return payload
 
 
+def _ensure_claude_project_trust(data, project_path, project_state=None):
+    payload = dict(data) if isinstance(data, dict) else {}
+    project_path = os.path.realpath(str(project_path or "").strip())
+    projects = payload.get("projects")
+    if not isinstance(projects, dict):
+        projects = {}
+
+    entry = {}
+    if isinstance(project_state, dict):
+        entry.update(project_state)
+    elif isinstance(projects.get(project_path), dict):
+        entry.update(projects[project_path])
+
+    entry.setdefault("allowedTools", [])
+    entry.setdefault("mcpContextUris", [])
+    entry.setdefault("mcpServers", {})
+    entry.setdefault("enabledMcpjsonServers", [])
+    entry.setdefault("disabledMcpjsonServers", [])
+    entry["hasTrustDialogAccepted"] = True
+    entry.setdefault("projectOnboardingSeenCount", 0)
+    entry.setdefault("hasClaudeMdExternalIncludesApproved", False)
+    entry.setdefault("hasClaudeMdExternalIncludesWarningShown", False)
+    entry.setdefault("lastGracefulShutdown", False)
+
+    projects[project_path] = entry
+    payload["projects"] = projects
+    return payload
+
+
 def _copy_claude_state_json(src, dst):
     import json as _json
 
@@ -2919,10 +2948,10 @@ def launch_claude(model_info, runtime, once=False):
         # GPT 模型走 Responses API，提前询问 reasoning effort（所有分支共用）
         if _gpt_openai_url and _is_gpt_model(probe_model):
             from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
-            _reasoning_effort = _sel_effort_claude(default="medium")
+            _reasoning_effort = _sel_effort_claude(default="high")
             console.print(f"[dim]reasoning effort: {_reasoning_effort}[/dim]")
         else:
-            _reasoning_effort = "medium"
+            _reasoning_effort = "high"
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -3502,10 +3531,16 @@ def _claude_gateway_env(
     real_json = _real_user_path(".claude.json")
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
+    current_project = os.path.realpath(os.getcwd())
+    current_project_state = None
     if os.path.exists(real_json):
         try:
             with open(real_json, encoding="utf-8") as f:
                 data = _json.load(f)
+            if isinstance(data, dict):
+                projects = data.get("projects")
+                if isinstance(projects, dict):
+                    current_project_state = projects.get(current_project)
         except Exception:
             data = {}
     data = _strip_claude_restore_state(data, strip_sensitive_auth=True)
@@ -3528,6 +3563,11 @@ def _claude_gateway_env(
     data.pop("sonnet1m45MigrationComplete", None)
     data.pop("opusProMigrationComplete", None)
     data["alwaysThinkingEnabled"] = True
+    data = _ensure_claude_project_trust(
+        data,
+        current_project,
+        project_state=current_project_state,
+    )
     with open(gw_json, "w", encoding="utf-8") as f:
         _json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
@@ -3748,6 +3788,39 @@ def _codex_gateway_env(runtime, base_url):
             block += f'base_url = {_toml_literal(value)}\n'
         return text[:block_start] + block + text[block_end:]
 
+    def _set_project_scalar(text, project_path, key, value):
+        import re
+        escaped_path = re.escape(project_path)
+        header_pattern = rf'^\[projects\."{escaped_path}"\]\s*$'
+        match = re.search(header_pattern, text, flags=re.MULTILINE)
+        if not match:
+            block = (
+                f'\n[projects."{project_path}"]\n'
+                f'{key} = {_toml_literal(value)}\n'
+            )
+            return text.rstrip() + block + "\n"
+
+        block_start = match.end()
+        next_header = re.search(r'^\[', text[block_start:], flags=re.MULTILINE)
+        block_end = block_start + next_header.start() if next_header else len(text)
+        block = text[block_start:block_end]
+        key_pattern = rf'^\s*{re.escape(key)}\s*=\s*.+$'
+        if re.search(key_pattern, block, flags=re.MULTILINE):
+            block = re.sub(
+                key_pattern,
+                f'{key} = {_toml_literal(value)}',
+                block,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            if not block.startswith("\n"):
+                block = "\n" + block
+            if block and not block.endswith("\n"):
+                block += "\n"
+            block += f'{key} = {_toml_literal(value)}\n'
+        return text[:block_start] + block + text[block_end:]
+
     def _set_table_scalar(text, table_header, key, value):
         import re
         escaped_header = re.escape(table_header)
@@ -3816,6 +3889,7 @@ def _codex_gateway_env(runtime, base_url):
                 config_text = f.read()
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
             config_text = _set_project_base_url(config_text, os.getcwd(), base_url)
+            config_text = _set_project_scalar(config_text, os.getcwd(), "trust_level", "trusted")
             config_text = _rewrite_table_block(
                 config_text,
                 "model_providers.custom",
@@ -3842,6 +3916,7 @@ def _codex_gateway_env(runtime, base_url):
             f.write(f'base_url = "{base_url}"\n')
             f.write(f'\n[projects."{os.getcwd()}"]\n')
             f.write(f'base_url = "{base_url}"\n')
+            f.write('trust_level = "trusted"\n')
         try:
             with open(gateway_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
@@ -3952,7 +4027,7 @@ def launch_codex(model_info, runtime, once=False):
 
     provider_id = runtime.get("id", "")
     from mms_tui import select_reasoning_effort_tui as _sel_effort
-    reasoning_effort = _sel_effort(default="medium")
+    reasoning_effort = _sel_effort(default="high")
     console.print(f"[dim]reasoning effort: {reasoning_effort}[/dim]")
     with codex_responses_bridge(
         gateway_url,
@@ -3969,6 +4044,7 @@ def launch_codex(model_info, runtime, once=False):
         env["OPENAI_BASE_URL"] = bridge_base_url
         cmd = ["codex"]
         cmd += ["-c", 'model_provider="custom"']
+        cmd += ["-c", f'model_reasoning_effort="{reasoning_effort}"']
         cmd += ["-c", f'openai_base_url="{bridge_base_url}"']
         cmd += ["-c", f'model_providers.custom.base_url="{bridge_base_url}"']
         cmd += ["-c", "features.responses_websockets=false"]

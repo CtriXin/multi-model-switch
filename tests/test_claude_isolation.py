@@ -147,6 +147,21 @@ def test_copy_claude_state_json_strips_restore_state(tmp_path):
     assert result["alwaysThinkingEnabled"] is True
 
 
+def test_ensure_claude_project_trust_marks_current_project_accepted(tmp_path):
+    from mms_launchers import _ensure_claude_project_trust
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+
+    result = _ensure_claude_project_trust({"numStartups": 1}, str(project_dir))
+    entry = result["projects"][str(project_dir.resolve())]
+
+    assert entry["hasTrustDialogAccepted"] is True
+    assert entry["allowedTools"] == []
+    assert entry["enabledMcpjsonServers"] == []
+    assert entry["projectOnboardingSeenCount"] == 0
+
+
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):
     from mms_launchers import _sync_claude_session_state_to_account_home
 
