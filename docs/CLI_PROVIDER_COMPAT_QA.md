@@ -1,6 +1,6 @@
 # CLI / Provider Compatibility Notes
 
-> 更新时间：2026-04-12
+> 更新时间：2026-04-15
 > 范围：`claude` / `codex` / `qwen` / `kimi` 与公开仓库内可见的通用兼容性规则。
 
 ## 为什么这份文档被改成精简版
@@ -56,6 +56,7 @@
 - 同账号可 resume
 - 不从真实 global 目录偷偷 seed 私有状态
 - 不因 launcher 混用状态目录而串号
+- `.claude.json` 在 copy-in / sync-back 时都应剥离 `projects`、`lastSessionId`、`lastCost` 这类 restore-state 噪声，避免“第一窗口正常、第二窗口继承旧恢复状态”
 
 ### 5. Proxy / timezone / IPv4-first 现在是 runtime profile 的一部分
 
