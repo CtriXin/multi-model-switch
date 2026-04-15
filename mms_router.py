@@ -558,7 +558,8 @@ def _route_cli_modes_for_export(model_name, route_entry, base_modes):
     """
     modes = dict(base_modes(model_name))
     anthropic_url = str((route_entry or {}).get("anthropic_base_url") or "").strip()
-    if anthropic_url and modes.get("claude") == "bridge":
+    claude_native_compatible = bool((route_entry or {}).get("_claude_native_compatible"))
+    if anthropic_url and claude_native_compatible and modes.get("claude") == "bridge":
         modes["claude"] = "native"
     return modes
 
@@ -599,7 +600,7 @@ def export_model_routes(cfg=None, force=False):
         _provider_label, _probe_models, _normalize_priority, _normalize_role,
         _provider_effective_models, _runtime_priority_for_model,
         ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
-        _model_cli_modes,
+        _model_cli_modes, _provider_supports_model_for_cli,
         _load_usage_stats, _active_usage_path,
     )
 
@@ -697,8 +698,8 @@ def export_model_routes(cfg=None, force=False):
     except Exception:
         pass
 
-    # Model-CLI compatibility: GPT/Gemini/O-series need codex-capable provider,
-    # Claude needs claude-capable. Matches MMS TUI's supported_clis filtering.
+    # Model-CLI compatibility: keep the coarse family filter aligned with current
+    # export behavior, then rely on route-scoped compatibility for Claude directness.
     def _model_cli_compatible(model_name, supported_clis):
         if not supported_clis:
             return True  # no restriction
@@ -707,7 +708,6 @@ def export_model_routes(cfg=None, force=False):
             return "codex" in supported_clis
         if lower.startswith("claude-"):
             return "claude" in supported_clis
-        # Domestic models: usually work with any CLI
         return True
 
     _MAX_FALLBACKS = 3
@@ -728,6 +728,12 @@ def export_model_routes(cfg=None, force=False):
                 continue
 
             effective_priority = _runtime_priority_for_model(pinfo, normalized)
+            base_cli_modes = _model_cli_modes(normalized)
+            claude_prefers_direct = base_cli_modes.get("claude") == "bridge"
+            claude_native_compatible = bool(
+                pinfo.get("anthropic_base_url")
+                and _provider_supports_model_for_cli(pinfo, "claude", normalized)
+            )
             candidate = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
                 "api_key": pinfo["api_key"],
@@ -735,7 +741,9 @@ def export_model_routes(cfg=None, force=False):
                 "provider_name": pinfo["provider_name"],
                 "priority": effective_priority,
                 "role": pinfo["role"],
+                "_claude_native_compatible": claude_native_compatible,
                 "sort_key": (
+                    0 if (not claude_prefers_direct or claude_native_compatible) else 1,
                     ROLE_WEIGHTS.get(pinfo["role"], 1),
                     0 if pinfo.get("is_default") else 1,
                     -effective_priority,
@@ -756,6 +764,7 @@ def export_model_routes(cfg=None, force=False):
         primary.pop("provider_name", None)
         primary.pop("sort_key", None)
         cli_modes = _route_cli_modes_for_export(normalized, primary, _model_cli_modes)
+        primary.pop("_claude_native_compatible", None)
         native_clis, bridge_clis = _route_cli_lists_for_export(cli_modes)
         primary.update({
             "capabilities": _route_capabilities_for_export(normalized, cli_modes, _model_capability_tags),
@@ -769,6 +778,7 @@ def export_model_routes(cfg=None, force=False):
             fallback_entry = dict(item)
             fallback_entry.pop("provider_name", None)
             fallback_entry.pop("sort_key", None)
+            fallback_entry.pop("_claude_native_compatible", None)
             fallback_routes.append(fallback_entry)
         if fallback_routes:
             primary["fallback_routes"] = fallback_routes

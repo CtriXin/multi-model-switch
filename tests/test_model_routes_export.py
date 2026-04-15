@@ -111,3 +111,61 @@ def test_export_model_routes_keeps_openai_only_domestic_route_as_claude_bridge(m
     assert info["cli_modes"]["claude"] == "bridge"
     assert "claude" in info["bridge_clis"]
     assert "bridge_required" in info["capabilities"]
+
+
+def test_export_model_routes_prefers_claude_compatible_kimi_route_over_higher_priority_bridge_only_route(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "openai-relay-high-priority": {
+                "id": "openai-relay-high-priority",
+                "provider_name": "OpenAI Relay",
+                "anthropic_base_url": "https://crs.example.com/openai",
+                "openai_base_url": "https://crs.example.com/openai",
+                "api_key": "sk-relay",
+                "models": ["kimi-k2.5"],
+            },
+            "kimi-direct-compatible": {
+                "id": "kimi-direct-compatible",
+                "provider_name": "Kimi Direct",
+                "anthropic_base_url": "https://kimi.example.com/anthropic",
+                "openai_base_url": "https://kimi.example.com/v1",
+                "api_key": "sk-kimi",
+                "models": ["kimi-k2.5"],
+            },
+        },
+    )
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+
+    cfg = {
+        "provider": {"default": "openai-relay-high-priority"},
+        "providers": [
+            {
+                "id": "openai-relay-high-priority",
+                "role": "auto",
+                "priority": 110,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models": ["kimi-k2.5"],
+            },
+            {
+                "id": "kimi-direct-compatible",
+                "role": "auto",
+                "priority": 100,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["kimi"],
+                "models": ["kimi-k2.5"],
+            },
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    info = routes["kimi-k2.5"]
+    assert info["provider_id"] == "kimi-direct-compatible"
+    assert info["cli_modes"]["claude"] == "native"
+    assert info["fallback_routes"][0]["provider_id"] == "openai-relay-high-priority"
