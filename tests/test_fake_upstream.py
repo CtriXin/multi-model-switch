@@ -72,11 +72,19 @@ def test_fake_upstream_local_proxy_intercepts_https(monkeypatch, tmp_path):
     assert any(row["kind"] == "upstream" and row["host"] == "api.anthropic.com" and row["path"] == "/v1/messages" for row in rows)
 
 
-def test_apply_runtime_network_profile_remains_noop_under_fake_upstream(monkeypatch, tmp_path):
+def test_apply_runtime_network_profile_uses_fake_upstream_proxy_under_fake_upstream(monkeypatch, tmp_path):
     import mms_launchers
 
     monkeypatch.setenv("MMS_FAKE_UPSTREAM", "1")
     monkeypatch.setenv("MMS_REAL_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_fake_upstream_status_payload",
+        lambda: {
+            "proxy_url": "http://127.0.0.1:8899",
+            "ca_cert_path": "/tmp/mms-ca.pem",
+        },
+    )
 
     env = {"KEEP": "1"}
     result = mms_launchers._apply_runtime_network_profile(
@@ -90,7 +98,17 @@ def test_apply_runtime_network_profile_remains_noop_under_fake_upstream(monkeypa
         validate_proxy=False,
     )
 
-    assert result == {"KEEP": "1"}
+    assert result["KEEP"] == "1"
+    assert result["HTTP_PROXY"] == "http://127.0.0.1:8899"
+    assert result["HTTPS_PROXY"] == "http://127.0.0.1:8899"
+    assert result["NO_PROXY"] == "127.0.0.1,localhost,::1"
+    assert result["TZ"] == "America/Los_Angeles"
+    assert result["MMS_FAKE_UPSTREAM_MODE"] == "upstream-proxy"
+    assert result["MMS_FAKE_UPSTREAM_PROXY"] == "http://127.0.0.1:8899"
+    assert result["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] == "http://198.51.100.24:6394+auth"
+    assert result["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] == "claude.ai"
+    assert result["NODE_EXTRA_CA_CERTS"] == "/tmp/mms-ca.pem"
+    assert result["SSL_CERT_FILE"] == "/tmp/mms-ca.pem"
 
 
 def test_fake_upstream_patch_httpx_module(monkeypatch, tmp_path):

@@ -208,7 +208,54 @@ def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path
     assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8")) == {}
 
 
-def test_apply_runtime_network_profile_is_noop_in_stopgap_mode():
+def test_sync_claude_session_state_back_to_account_keeps_newer_oauth_token(tmp_path):
+    from mms_launchers import _sync_claude_session_state_to_account_home
+
+    session_home = tmp_path / "session"
+    account_home = tmp_path / "account"
+    (session_home / ".claude").mkdir(parents=True)
+    (account_home / ".claude").mkdir(parents=True)
+
+    (account_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "userID": "device-a",
+                "numStartups": 5,
+                "claudeAiOauth": {
+                    "accessToken": "tok-fresh",
+                    "refreshToken": "refresh-fresh",
+                    "expiresAt": "2026-04-20T10:00:00Z",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "userID": "device-b",
+                "numStartups": 3,
+                "claudeAiOauth": {
+                    "accessToken": "tok-old",
+                    "refreshToken": "refresh-old",
+                    "expiresAt": "2026-04-16T10:00:00Z",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude" / "settings.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _sync_claude_session_state_to_account_home(str(session_home), str(account_home))
+
+    result = json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))
+    assert result["userID"] == "device-b"
+    assert result["numStartups"] == 5
+    assert result["claudeAiOauth"]["accessToken"] == "tok-fresh"
+    assert result["claudeAiOauth"]["refreshToken"] == "refresh-fresh"
+
+
+def test_apply_runtime_network_profile_injects_proxy_timezone_locale_and_ipv4():
     from mms_launchers import _apply_runtime_network_profile
 
     env = {"KEEP": "1"}
@@ -217,13 +264,46 @@ def test_apply_runtime_network_profile_is_noop_in_stopgap_mode():
         "proxy": "http://127.0.0.1:7890",
         "no_proxy": "localhost,127.0.0.1",
         "timezone": "Asia/Singapore",
+        "force_ipv4": True,
     }
 
     with patch("mms_launchers._check_proxy_connectivity_or_exit") as check_proxy:
         result = _apply_runtime_network_profile(env, runtime, validate_proxy=True)
 
-    check_proxy.assert_not_called()
-    assert result == {"KEEP": "1"}
+    check_proxy.assert_called_once_with(
+        "http://127.0.0.1:7890",
+        "localhost,127.0.0.1",
+        label="claude-b",
+        force_ipv4=True,
+    )
+    assert result["KEEP"] == "1"
+    assert result["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert result["HTTPS_PROXY"] == "http://127.0.0.1:7890"
+    assert result["NO_PROXY"] == "localhost,127.0.0.1"
+    assert result["TZ"] == "Asia/Singapore"
+    assert result["LANG"] == "en_US.UTF-8"
+    assert result["MMS_FORCE_IPV4"] == "1"
+    assert "--dns-result-order=ipv4first" in result["NODE_OPTIONS"]
+
+
+def test_apply_runtime_network_profile_clears_inherited_proxy_when_runtime_is_direct(monkeypatch):
+    from mms_launchers import _apply_runtime_network_profile
+
+    env = {
+        "HTTP_PROXY": "http://127.0.0.1:7890",
+        "HTTPS_PROXY": "http://127.0.0.1:7890",
+        "NO_PROXY": "localhost",
+        "MMS_FAKE_UPSTREAM_MODE": "upstream-proxy",
+        "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
+    }
+
+    result = _apply_runtime_network_profile(env, {"id": "direct-runtime"}, validate_proxy=False)
+
+    assert "HTTP_PROXY" not in result
+    assert "HTTPS_PROXY" not in result
+    assert "NO_PROXY" not in result
+    assert "MMS_FAKE_UPSTREAM_MODE" not in result
+    assert "NODE_EXTRA_CA_CERTS" not in result
 
 
 def test_normalize_account_keeps_proxy_and_timezone():
@@ -1061,7 +1141,7 @@ def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path
     assert env_map["TZ"] == "America/Los_Angeles"
     assert payload["settings"]["statusline"] is True
     assert "PreToolUse" in payload["settings"]["hook_events"]
-    assert "HTTP_PROXY" not in payload["settings"]["env_keys"]
+    assert "HTTP_PROXY" in payload["settings"]["env_keys"]
     assert "TZ" in payload["settings"]["env_keys"]
 
 

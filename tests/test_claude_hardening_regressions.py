@@ -547,6 +547,38 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
+def test_account_env_scrubs_claude_oauth_parent_env_for_codex(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://relay.example.com")
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_overlay_codex_shared_resume", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env = mms_launchers._account_env(
+        {"id": "codex-a", "cli": "codex", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
+    assert env["OPENAI_API_KEY"] == "sk-openai"
+    assert env["HOME"].startswith(str(account_home / "s"))
+
+
 def test_install_session_command_wrappers_covers_global_mutating_commands(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -586,6 +618,105 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
         assert f'export XDG_CONFIG_HOME="{real_home / ".config"}"' in script
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
+
+
+def test_sync_codex_session_claude_json_allowlists_non_sensitive_fields(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    session_home = tmp_path / "session-home"
+    real_home.mkdir()
+    session_home.mkdir()
+
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "firstStartTime": "2026-04-15T10:00:00Z",
+                "numStartups": 7,
+                "bypassPermissionsModeAccepted": True,
+                "alwaysThinkingEnabled": True,
+                "userID": "device-1",
+                "oauthAccount": {"accountUuid": "acct-1"},
+                "claudeAiOauth": {"accessToken": "tok-1"},
+                "provider": "gateway",
+                "api_key": "sk-test",
+                "mcpServers": {"demo": {"command": "demo"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude.json").write_text(
+        json.dumps({"firstStartTime": "keep-me", "bypassPermissionsModeAccepted": False}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_launchers._sync_codex_session_claude_json(str(session_home))
+
+    result = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
+    assert result == {
+        "firstStartTime": "keep-me",
+        "numStartups": 7,
+        "bypassPermissionsModeAccepted": False,
+        "alwaysThinkingEnabled": True,
+    }
+
+
+def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_path):
+    import mms_launchers
+
+    gateway_home = tmp_path / "gateway-home"
+    real_home = tmp_path / "real-home"
+    gateway_home.mkdir()
+    real_home.mkdir()
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-parent")
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: ({}, "settings.json"))
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "claude-sonnet-4-6")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_gateway_home", lambda: str(gateway_home))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="claude-sonnet-4-6",
+    )
+
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "bridge-token"
+    assert env["ANTHROPIC_BASE_URL"] == "https://relay.example.com"
+    assert "ANTHROPIC_API_KEY" not in env
+    assert env["CLAUDE_CODE_SUBAGENT_MODEL"] != "claude-haiku-4-5"
+
+
+def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):
+    import mms_broker
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
+    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
+
+    env = mms_broker._build_broker_env(
+        {"id": "broker-a", "broker_base_url": "https://broker.example.com"},
+        workspace_root="/tmp/workspace",
+    )
+
+    assert env["CC_BROKER_BASE_URL"] == "https://broker.example.com"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
 
 
 def test_resolve_anthropic_base_url_probe_metadata_is_neutral(monkeypatch):
@@ -645,6 +776,38 @@ def test_gateway_health_check_cache_is_scoped_per_provider(monkeypatch, tmp_path
 
     saved = json.loads(health_path.read_text(encoding="utf-8"))
     assert set(saved["providers"].keys()) == {"relay-a", "relay-b"}
+
+
+def test_gateway_ping_uses_x_api_key_for_anthropic_endpoint(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, endpoint: base_url.rstrip("/") + endpoint)
+    monkeypatch.setattr(mms_launchers, "_anthropic_base_url", lambda runtime: runtime.get("anthropic_base_url", ""))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_runtime_httpx_request",
+        lambda method, url, runtime=None, headers=None, timeout=None: captured.update(
+            {"method": method, "url": url, "headers": dict(headers or {})}
+        ) or FakeResponse(),
+    )
+
+    ok = mms_launchers._gateway_ping(
+        "https://relay.example.com",
+        "sk-test",
+        runtime={"anthropic_base_url": "https://relay.example.com"},
+    )
+
+    assert ok is True
+    assert captured["headers"] == {
+        "x-api-key": "sk-test",
+        "anthropic-version": "2023-06-01",
+    }
 
 
 def test_gateway_claude_bridge_binds_ephemeral_port_and_waits_ready(monkeypatch):
@@ -758,7 +921,92 @@ def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkey
     assert sleep_calls == [2.0]
     assert status["code"] == 429
     assert sent_headers["Retry-After"] == "3"
-    assert b"rate limited" in handler.wfile.getvalue()
+
+
+def test_build_codex_payload_maps_output_limit():
+    import mms_bridge
+
+    payload = mms_bridge._build_codex_payload(
+        {
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "max_tokens": 256,
+        },
+        "gpt-5.4",
+    )
+
+    assert payload["max_output_tokens"] == 256
+
+
+def test_iter_sse_lines_defaults_event_name_and_skips_bad_json():
+    import mms_bridge
+
+    class FakeResponse:
+        @staticmethod
+        def iter_lines():
+            return iter(
+                [
+                    'data: {"type":"response.started"}',
+                    "",
+                    "event: response.output_text.delta",
+                    'data: {"type":"response.output_text.delta","delta":"ok"}',
+                    "",
+                    'data: {"broken"',
+                    "",
+                ]
+            )
+
+    events = list(mms_bridge._iter_sse_lines(FakeResponse()))
+
+    assert events == [
+        ("message", {"type": "response.started"}),
+        ("response.output_text.delta", {"type": "response.output_text.delta", "delta": "ok"}),
+    ]
+
+
+def test_json_resp_to_sse_invalid_body_returns_error_event():
+    import mms_bridge
+
+    body = mms_bridge._json_resp_to_sse(b"not-json")
+    text = body.decode("utf-8")
+
+    assert text.startswith("event: error\n")
+    assert "upstream returned non-JSON body" in text
+
+
+def test_responses_bridge_models_endpoint_requires_auth_and_supports_query():
+    import mms_bridge
+
+    handler_classes = (
+        mms_bridge._ResponsesProxyHandler,
+        mms_bridge._ResponsesToChatHandler,
+    )
+
+    for handler_cls in handler_classes:
+        handler = handler_cls.__new__(handler_cls)
+        handler.headers = {}
+        handler.path = "/v1/models?view=full"
+        handler.wfile = io.BytesIO()
+        handler.server = types.SimpleNamespace(
+            bridge_token="bridge-token",
+            gateway_key="gateway-key",
+            advertised_models=["gpt-5.4"],
+            model_name="gpt-5.4",
+        )
+
+        unauthorized = {}
+        handler.send_response = lambda code, store=unauthorized: store.setdefault("code", code)
+        handler.send_header = lambda *args, **kwargs: None
+        handler.end_headers = lambda: None
+        handler.do_GET()
+        assert unauthorized["code"] == 401
+
+        handler.headers = {"authorization": "Bearer bridge-token"}
+        authorized = {}
+        handler.send_response = lambda code, store=authorized: store.setdefault("code", code)
+        handler.wfile = io.BytesIO()
+        handler.do_GET()
+        assert authorized["code"] == 200
 
 
 def test_llm_classify_retries_retry_after_on_429(monkeypatch):

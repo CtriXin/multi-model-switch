@@ -32,6 +32,7 @@ from mms_fake_upstream import (
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, record_claude_session_start
+from mms_state_io import atomic_write_json, locked_state_file
 
 _build_gateway_url = None
 codex_claude_bridge = None
@@ -198,8 +199,9 @@ def _runtime_locale_env(runtime=None):
 
 
 def _apply_runtime_locale_profile(env, runtime=None):
-    # 止血：暂时不再把 runtime locale/lang 绑定注入到 CLI 进程环境。
-    return env if isinstance(env, dict) else {}
+    env = env if isinstance(env, dict) else {}
+    env.update(_runtime_locale_env(runtime))
+    return env
 
 # ── 已知模型的 context window（tokens）──
 # 用于设置 CLAUDE_CODE_AUTO_COMPACT_WINDOW，使 Claude Code 按实际模型 context 触发 compact。
@@ -459,8 +461,7 @@ def _account_guard_state_path():
     return _real_user_path(".config", "mms", "account-guard-state.json")
 
 
-def _read_account_guard_state():
-    path = _account_guard_state_path()
+def _load_json_dict_unlocked(path):
     if not os.path.exists(path):
         return {}
     try:
@@ -471,16 +472,16 @@ def _read_account_guard_state():
         return {}
 
 
+def _read_account_guard_state():
+    path = _account_guard_state_path()
+    with locked_state_file(path):
+        return _load_json_dict_unlocked(path)
+
+
 def _write_account_guard_state(payload):
     path = _account_guard_state_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    with locked_state_file(path):
+        atomic_write_json(path, payload, mode=0o600)
 
 
 def _claude_account_guard_entry(state, account_id):
@@ -647,46 +648,50 @@ def _format_account_guard_summary(report):
 
 
 def _persist_account_guard_launch(account_id, report, *, session_home=""):
-    state = _read_account_guard_state()
-    _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
-    launch_count = 0
-    try:
-        launch_count = int(entry.get("launch_count", 0) or 0)
-    except Exception:
+    path = _account_guard_state_path()
+    with locked_state_file(path):
+        state = _load_json_dict_unlocked(path)
+        _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
         launch_count = 0
-    entry.update(
-        {
-            "launch_count": launch_count + 1,
-            "last_launch_at": _guard_utc_now(),
-            "last_profile": dict((report or {}).get("profile") or {}),
-            "last_score": int((report or {}).get("score", 0) or 0),
-            "last_status": str((report or {}).get("status") or ""),
-            "last_drift_fields": list((report or {}).get("drift_fields") or []),
-            "last_active_sessions": int((report or {}).get("active_sessions_after", 0) or 0),
-            "last_session_home": str(session_home or ""),
-        }
-    )
-    _write_account_guard_state(state)
+        try:
+            launch_count = int(entry.get("launch_count", 0) or 0)
+        except Exception:
+            launch_count = 0
+        entry.update(
+            {
+                "launch_count": launch_count + 1,
+                "last_launch_at": _guard_utc_now(),
+                "last_profile": dict((report or {}).get("profile") or {}),
+                "last_score": int((report or {}).get("score", 0) or 0),
+                "last_status": str((report or {}).get("status") or ""),
+                "last_drift_fields": list((report or {}).get("drift_fields") or []),
+                "last_active_sessions": int((report or {}).get("active_sessions_after", 0) or 0),
+                "last_session_home": str(session_home or ""),
+            }
+        )
+        atomic_write_json(path, state, mode=0o600)
 
 
 def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=False):
     account_id = str(account_id or "").strip()
     if not account_id:
         return
-    state = _read_account_guard_state()
-    _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
-    entry["last_exit_at"] = _guard_utc_now()
-    entry["last_exit_code"] = exit_code
-    if stale_cleanup or exit_code is None:
-        _write_account_guard_state(state)
-        return
-    failures = 0
-    try:
-        failures = int(entry.get("consecutive_failures", 0) or 0)
-    except Exception:
+    path = _account_guard_state_path()
+    with locked_state_file(path):
+        state = _load_json_dict_unlocked(path)
+        _accounts, _key, entry = _claude_account_guard_entry(state, account_id)
+        entry["last_exit_at"] = _guard_utc_now()
+        entry["last_exit_code"] = exit_code
+        if stale_cleanup or exit_code is None:
+            atomic_write_json(path, state, mode=0o600)
+            return
         failures = 0
-    entry["consecutive_failures"] = 0 if int(exit_code) == 0 else max(0, failures) + 1
-    _write_account_guard_state(state)
+        try:
+            failures = int(entry.get("consecutive_failures", 0) or 0)
+        except Exception:
+            failures = 0
+        entry["consecutive_failures"] = 0 if int(exit_code) == 0 else max(0, failures) + 1
+        atomic_write_json(path, state, mode=0o600)
 
 
 _MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
@@ -1255,8 +1260,92 @@ def _check_proxy_connectivity_or_exit(proxy_url, no_proxy="", *, label="account"
 
 
 def _apply_runtime_network_profile(env, runtime, *, validate_proxy=True):
-    # 止血：暂时不再把 runtime proxy/timezone/fake-upstream 绑定注入到 CLI 进程环境。
-    return env if isinstance(env, dict) else {}
+    env = env if isinstance(env, dict) else {}
+    runtime = runtime if isinstance(runtime, dict) else {}
+
+    timezone_name = _validate_timezone_or_exit(
+        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+        label=str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "runtime"),
+    )
+    if timezone_name:
+        env["TZ"] = timezone_name
+    else:
+        env.pop("TZ", None)
+
+    _apply_runtime_locale_profile(env, runtime)
+    _apply_runtime_ip_stack_profile(env, runtime)
+
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    runtime_label = str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "runtime")
+    proxy_keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
+    no_proxy_keys = ("NO_PROXY", "no_proxy")
+    fake_state_keys = (
+        "MMS_FAKE_UPSTREAM_MODE",
+        "MMS_FAKE_UPSTREAM_PROXY",
+        "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
+        "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
+    )
+    ca_keys = ("NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE")
+
+    if proxy_url and validate_proxy:
+        _check_proxy_connectivity_or_exit(
+            proxy_url,
+            no_proxy,
+            label=runtime_label,
+            force_ipv4=bool(_runtime_force_ipv4(runtime)),
+        )
+
+    if _fake_upstream_enabled():
+        fake_payload = _fake_upstream_status_payload()
+        fake_proxy_url = str(fake_payload.get("proxy_url") or "").strip()
+        if fake_proxy_url:
+            for key in proxy_keys:
+                env[key] = fake_proxy_url
+            env["MMS_FAKE_UPSTREAM_PROXY"] = fake_proxy_url
+        else:
+            for key in proxy_keys:
+                env.pop(key, None)
+            env.pop("MMS_FAKE_UPSTREAM_PROXY", None)
+        env["MMS_FAKE_UPSTREAM_MODE"] = "upstream-proxy"
+        for key in no_proxy_keys:
+            env[key] = "127.0.0.1,localhost,::1"
+        if proxy_url:
+            env["MMS_FAKE_UPSTREAM_ORIGINAL_PROXY"] = _proxy_fingerprint(proxy_url)
+        else:
+            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_PROXY", None)
+        if no_proxy:
+            env["MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY"] = no_proxy
+        else:
+            env.pop("MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY", None)
+        ca_cert_path = str(fake_payload.get("ca_cert_path") or "").strip()
+        for key in ca_keys:
+            if ca_cert_path:
+                env[key] = ca_cert_path
+            else:
+                env.pop(key, None)
+        return env
+
+    for key in fake_state_keys:
+        env.pop(key, None)
+    for key in ca_keys:
+        env.pop(key, None)
+
+    if proxy_url:
+        for key in proxy_keys:
+            env[key] = proxy_url
+    else:
+        for key in proxy_keys:
+            env.pop(key, None)
+
+    if no_proxy:
+        for key in no_proxy_keys:
+            env[key] = no_proxy
+    else:
+        for key in no_proxy_keys:
+            env.pop(key, None)
+
+    return env
 
 
 def _apply_runtime_ip_stack_profile(env, runtime):
@@ -1373,6 +1462,15 @@ _CLAUDE_AI_OAUTH_ALLOWLIST = (
     "emailAddress",
     "accountUuid",
     "organizationUuid",
+)
+_CLAUDE_CODEX_STATE_TOP_LEVEL_ALLOWLIST = (
+    "firstStartTime",
+    "numStartups",
+    "bypassPermissionsModeAccepted",
+    "alwaysThinkingEnabled",
+    "hasCompletedOnboarding",
+    "lastOnboardingVersion",
+    "installMethod",
 )
 _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST = (
     "ANTHROPIC_",
@@ -1781,13 +1879,9 @@ def _load_global_claude_snapshot():
 
 
 def _write_global_claude_snapshot(snapshot_data):
-    import json as _json
-
     snapshot_path = _global_claude_snapshot_path()
-    os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
-    with open(snapshot_path, "w", encoding="utf-8") as f:
-        _json.dump(snapshot_data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(snapshot_path):
+        atomic_write_json(snapshot_path, snapshot_data, mode=0o600)
 
 
 def _merge_claude_settings(base_settings, template_settings):
@@ -1849,9 +1943,8 @@ def _repair_real_claude_settings():
         or not os.path.exists(settings_path)
     )
     if should_write:
-        with open(settings_path, "w", encoding="utf-8") as f:
-            _json.dump(repaired, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+        with locked_state_file(settings_path):
+            atomic_write_json(settings_path, repaired, mode=0o600)
     _write_global_claude_snapshot(repaired_snapshot)
     return repaired
 
@@ -1883,9 +1976,8 @@ def repair_current_session_claude_settings(session_claude_dir):
         except Exception:
             current = {}
     repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
-    with open(session_path, "w", encoding="utf-8") as f:
-        _json.dump(repaired, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(session_path):
+        atomic_write_json(session_path, repaired, mode=0o600)
     return repaired
 
 
@@ -1894,23 +1986,20 @@ def repair_real_claude_settings_for_startup():
 
 
 def repair_current_session_claude_settings(session_claude_dir):
-    import json as _json
-
     os.makedirs(session_claude_dir, exist_ok=True)
     session_path = os.path.join(session_claude_dir, "settings.json")
     current = {}
     if os.path.exists(session_path):
         try:
             with open(session_path, encoding="utf-8") as f:
-                loaded = _json.load(f)
+                loaded = json.load(f)
             if isinstance(loaded, dict):
                 current = loaded
         except Exception:
             current = {}
     repaired = _merge_claude_settings(current, _load_mms_claude_settings_template())
-    with open(session_path, "w", encoding="utf-8") as f:
-        _json.dump(repaired, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(session_path):
+        atomic_write_json(session_path, repaired, mode=0o600)
     return repaired
 
 
@@ -2108,6 +2197,11 @@ def _sanitize_oauth_claude_state_payload(data):
     return cleaned
 
 
+def _sanitize_codex_claude_state_payload(data):
+    payload = _strip_claude_restore_state(data, strip_sensitive_auth=True)
+    return _copy_allowed_scalar_fields(payload, _CLAUDE_CODEX_STATE_TOP_LEVEL_ALLOWLIST)
+
+
 _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS = (
     "oauthAccount",
     "provider",
@@ -2179,10 +2273,82 @@ def _copy_claude_state_json(src, dst, *, mode="restore"):
         payload = _sanitize_oauth_claude_state_payload(payload)
     else:
         payload = _strip_claude_restore_state(payload)
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with open(dst, "w", encoding="utf-8") as f:
-        _json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(dst):
+        atomic_write_json(dst, payload, mode=0o600)
+
+
+def _parse_iso8601_utc(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _merge_oauth_token_state(existing_payload, incoming_payload):
+    existing_payload = existing_payload if isinstance(existing_payload, dict) else {}
+    incoming_payload = incoming_payload if isinstance(incoming_payload, dict) else {}
+    existing_expiry = _parse_iso8601_utc(existing_payload.get("expiresAt"))
+    incoming_expiry = _parse_iso8601_utc(incoming_payload.get("expiresAt"))
+    if existing_expiry and incoming_expiry:
+        return copy.deepcopy(incoming_payload if incoming_expiry >= existing_expiry else existing_payload)
+    if incoming_expiry:
+        return copy.deepcopy(incoming_payload)
+    if existing_expiry:
+        return copy.deepcopy(existing_payload)
+    incoming_has_tokens = any(
+        str(incoming_payload.get(key) or "").strip()
+        for key in ("accessToken", "refreshToken", "tokenType", "token_type")
+    )
+    if incoming_has_tokens:
+        return copy.deepcopy(incoming_payload)
+    return copy.deepcopy(existing_payload or incoming_payload)
+
+
+def _merge_oauth_claude_state_payload(existing_data, incoming_data):
+    existing = _sanitize_oauth_claude_state_payload(existing_data)
+    incoming = _sanitize_oauth_claude_state_payload(incoming_data)
+    merged = copy.deepcopy(existing)
+
+    for key in _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST:
+        incoming_value = incoming.get(key)
+        existing_value = existing.get(key)
+        if key == "firstStartTime":
+            chosen = existing_value or incoming_value
+            if isinstance(chosen, (str, int, float, bool)):
+                merged[key] = copy.deepcopy(chosen)
+            continue
+        if key == "numStartups":
+            numeric_values = [value for value in (existing_value, incoming_value) if isinstance(value, (int, float))]
+            if numeric_values:
+                merged[key] = max(numeric_values)
+            continue
+        if key in {"bypassPermissionsModeAccepted", "alwaysThinkingEnabled", "hasCompletedOnboarding"}:
+            if existing_value or incoming_value:
+                merged[key] = bool(existing_value or incoming_value)
+            elif key in merged:
+                merged[key] = bool(merged.get(key))
+            continue
+        if isinstance(incoming_value, (str, int, float, bool)):
+            merged[key] = copy.deepcopy(incoming_value)
+
+    merged_account = copy.deepcopy(existing.get("oauthAccount") or {})
+    if isinstance(incoming.get("oauthAccount"), dict):
+        merged_account.update(copy.deepcopy(incoming["oauthAccount"]))
+    if merged_account:
+        merged["oauthAccount"] = merged_account
+
+    merged_token = _merge_oauth_token_state(existing.get("claudeAiOauth"), incoming.get("claudeAiOauth"))
+    if merged_token:
+        merged["claudeAiOauth"] = merged_token
+
+    return merged
 
 
 def _masked_exposure_env_value(key, value):
@@ -2408,9 +2574,8 @@ def _write_claude_session_settings(
         default_env=default_env,
     )
     settings_path = os.path.join(session_claude_dir, "settings.json")
-    with open(settings_path, "w", encoding="utf-8") as f:
-        _json.dump(settings_data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(settings_path):
+        atomic_write_json(settings_path, settings_data, mode=0o600)
     return settings_data, settings_path
 
 
@@ -2424,12 +2589,19 @@ def _gateway_ping(base_url, api_key, runtime=None):
     if not base_url or not api_key:
         return None
     models_url = _build_gateway_url(base_url, "/models")
+    headers = {"Authorization": f"Bearer {api_key}"}
+    anthropic_base = str(_anthropic_base_url(runtime or {}) or "").strip().rstrip("/")
+    if anthropic_base and anthropic_base == str(base_url or "").strip().rstrip("/"):
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+        }
     try:
         r = _runtime_httpx_request(
             "GET",
             models_url,
             runtime=runtime,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers=headers,
             timeout=8,
         )
         return 200 <= int(getattr(r, "status_code", 0) or 0) < 300
@@ -2577,6 +2749,7 @@ def _scrub_claude_oauth_env(env):
 
 def _account_env(account, *, validate_proxy=True):
     env = os.environ.copy()
+    _scrub_claude_oauth_env(env)
     _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     if not home_dir:
@@ -2626,6 +2799,7 @@ def _account_env(account, *, validate_proxy=True):
         _install_session_command_wrappers(session_home, env)
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
+        _scrub_claude_oauth_env(env)
         env["GEMINI_CLI_HOME"] = home_dir
     else:
         # codex 等其他 CLI：per-PID 会话隔离
@@ -2648,6 +2822,7 @@ def _account_env(account, *, validate_proxy=True):
             os.symlink(real_library, session_library)
         _link_shared_dotfiles(session_home)
         if cli_name == "codex":
+            _scrub_claude_oauth_env(env)
             _sync_codex_session_claude_json(session_home)
             _overlay_codex_shared_resume(home_dir, session_home)
         xdg_config_home = os.path.join(session_home, ".config")
@@ -2821,7 +2996,7 @@ def _sync_codex_session_claude_json(session_home):
             loaded = _json.load(f)
         if not isinstance(loaded, dict):
             return
-        data = loaded
+        data = _sanitize_codex_claude_state_payload(loaded)
     except Exception:
         return
 
@@ -2838,9 +3013,8 @@ def _sync_codex_session_claude_json(session_home):
         except Exception:
             pass
 
-    with open(session_json, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(session_json):
+        atomic_write_json(session_json, data, mode=0o600)
 
 
 def _toml_quote(value):
@@ -3688,17 +3862,20 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
     for src, dst in sync_pairs:
         if not os.path.exists(src):
             continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
             if os.path.basename(dst) == "settings.json":
                 with open(src, "r", encoding="utf-8") as f:
                     loaded = _json.load(f)
                 cleaned = _sanitize_account_claude_settings_payload(loaded)
-                with open(dst, "w", encoding="utf-8") as f:
-                    _json.dump(cleaned, f, ensure_ascii=False, indent=2)
-                    f.write("\n")
+                with locked_state_file(dst):
+                    atomic_write_json(dst, cleaned, mode=0o600)
             elif os.path.basename(dst) == ".claude.json":
-                _copy_claude_state_json(src, dst, mode="oauth")
+                with open(src, "r", encoding="utf-8") as f:
+                    incoming = _json.load(f)
+                with locked_state_file(dst):
+                    existing = _load_json_dict_unlocked(dst)
+                    merged = _merge_oauth_claude_state_payload(existing, incoming)
+                    atomic_write_json(dst, merged, mode=0o600)
             else:
                 shutil.copy2(src, dst)
         except Exception:
@@ -3813,9 +3990,8 @@ def _claude_gateway_env(
         current_project,
         project_state=current_project_state,
     )
-    with open(gw_json, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    with locked_state_file(gw_json):
+        atomic_write_json(gw_json, data, mode=0o600)
 
     # ── .local symlink：Claude Code 检测 $HOME/.local/bin/claude（installMethod=native）──
     real_local = _real_user_path(".local")
@@ -3896,6 +4072,7 @@ def _claude_gateway_env(
     )
 
     env = os.environ.copy()
+    _scrub_claude_oauth_env(env)
     _inject_real_home_hints(env)
     env["HOME"] = gateway_home
     _set_session_home_hint(env, gateway_home)
@@ -4193,6 +4370,7 @@ def _codex_gateway_env(runtime, base_url):
     _set_session_home_hint(env, session_home)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url
+    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
     _apply_runtime_locale_profile(env, runtime)
     _apply_runtime_ip_stack_profile(env, runtime)
     _install_session_command_wrappers(session_home, env)
@@ -4319,6 +4497,7 @@ def launch_qwen(model_info, provider, once=False):
         cmd += ["-m", model]
 
     env = os.environ.copy()
+    _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
     _exec_or_run(cmd, env, once)
@@ -4329,6 +4508,7 @@ def launch_kimi(model_info, provider, once=False):
     api_key = provider["api_key"]
     model = _resolve_model(model_info)
     env = os.environ.copy()
+    _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
     cmd = ["kimi"]

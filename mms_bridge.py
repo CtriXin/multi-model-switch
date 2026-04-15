@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from mms_speed_stats import record_model_speed
+from mms_state_io import atomic_write_json, locked_state_file
 
 try:
     from mms_events import emit_event as _emit_event
@@ -136,6 +137,7 @@ _BRIDGE_MODE_CACHE_DIR = os.path.join(
 _BRIDGE_MODE_CACHE_FILE = os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_mode_cache.json")
 _bridge_mode_cache_memory = {}  # 内存缓存，避免重复读文件
 _BRIDGE_MODE_CACHE_TTL = 6 * 3600
+_BRIDGE_MODE_CACHE_LOCK = threading.RLock()
 
 _bridge_error_logger = logging.getLogger("bridge_error")
 _bridge_error_logger.setLevel(logging.DEBUG)
@@ -149,15 +151,15 @@ if not _bridge_error_logger.handlers:
     _bridge_error_logger.addHandler(_beh)
 
 
-def _load_bridge_mode_cache():
-    """加载 bridge mode 缓存。返回 dict: {\"provider:model\": \"chatcompletions\"}"""
+def _load_bridge_mode_cache_unlocked():
     global _bridge_mode_cache_memory
     if _bridge_mode_cache_memory:
         return _bridge_mode_cache_memory
     try:
         if os.path.exists(_BRIDGE_MODE_CACHE_FILE):
-            with open(_BRIDGE_MODE_CACHE_FILE, "r") as f:
-                _bridge_mode_cache_memory = json.load(f)
+            with open(_BRIDGE_MODE_CACHE_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            _bridge_mode_cache_memory = loaded if isinstance(loaded, dict) else {}
         else:
             _bridge_mode_cache_memory = {}
     except (OSError, json.JSONDecodeError):
@@ -165,14 +167,26 @@ def _load_bridge_mode_cache():
     return _bridge_mode_cache_memory
 
 
+def _load_bridge_mode_cache():
+    """加载 bridge mode 缓存。返回 dict: {\"provider:model\": \"chatcompletions\"}"""
+    global _bridge_mode_cache_memory
+    with _BRIDGE_MODE_CACHE_LOCK:
+        with locked_state_file(_BRIDGE_MODE_CACHE_FILE):
+            return _load_bridge_mode_cache_unlocked()
+
+
+def _save_bridge_mode_cache_unlocked(cache):
+    global _bridge_mode_cache_memory
+    _bridge_mode_cache_memory = dict(cache) if isinstance(cache, dict) else {}
+    atomic_write_json(_BRIDGE_MODE_CACHE_FILE, _bridge_mode_cache_memory)
+
+
 def _save_bridge_mode_cache(cache):
     """持久化 bridge mode 缓存到文件。"""
-    global _bridge_mode_cache_memory
-    _bridge_mode_cache_memory = cache
     try:
-        os.makedirs(_BRIDGE_MODE_CACHE_DIR, exist_ok=True)
-        with open(_BRIDGE_MODE_CACHE_FILE, "w") as f:
-            json.dump(cache, f, indent=2, ensure_ascii=False)
+        with _BRIDGE_MODE_CACHE_LOCK:
+            with locked_state_file(_BRIDGE_MODE_CACHE_FILE):
+                _save_bridge_mode_cache_unlocked(cache)
     except OSError:
         pass
 
@@ -186,12 +200,14 @@ def _bridge_fallback_cache_key(provider_id, model_name, gateway_url=None):
 
 def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
     """记录 (provider, gateway_url, model) 需要走 chatcompletions bridge。"""
-    cache = _load_bridge_mode_cache()
     key = _bridge_fallback_cache_key(provider_id, model_name, gateway_url)
-    entry = cache.get(key)
-    if not isinstance(entry, dict) or entry.get("mode") != "chatcompletions":
-        cache[key] = {"mode": "chatcompletions", "ts": time.time()}
-        _save_bridge_mode_cache(cache)
+    with _BRIDGE_MODE_CACHE_LOCK:
+        with locked_state_file(_BRIDGE_MODE_CACHE_FILE):
+            cache = _load_bridge_mode_cache_unlocked()
+            entry = cache.get(key)
+            if not isinstance(entry, dict) or entry.get("mode") != "chatcompletions":
+                cache[key] = {"mode": "chatcompletions", "ts": time.time()}
+                _save_bridge_mode_cache_unlocked(cache)
 
 
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
@@ -248,11 +264,13 @@ def _needs_chatcompletions_bridge(provider_id, model_name, gateway_url=None):
 
 
 def _clear_bridge_fallback(provider_id, model_name, gateway_url=None):
-    cache = _load_bridge_mode_cache()
     key = _bridge_fallback_cache_key(provider_id, model_name, gateway_url)
-    if key in cache:
-        cache.pop(key, None)
-        _save_bridge_mode_cache(cache)
+    with _BRIDGE_MODE_CACHE_LOCK:
+        with locked_state_file(_BRIDGE_MODE_CACHE_FILE):
+            cache = _load_bridge_mode_cache_unlocked()
+            if key in cache:
+                cache.pop(key, None)
+                _save_bridge_mode_cache_unlocked(cache)
 
 
 def _build_gateway_candidate_urls(base_url, endpoint):
@@ -700,6 +718,11 @@ def _build_codex_payload(request_payload, model_name, incremental_messages=None,
     tools = _anthropic_tools_to_responses(request_payload.get("tools"))
     if tools:
         payload["tools"] = tools
+    max_output_tokens = request_payload.get("max_output_tokens")
+    if max_output_tokens is None:
+        max_output_tokens = request_payload.get("max_tokens")
+    if isinstance(max_output_tokens, (int, float)) and max_output_tokens > 0:
+        payload["max_output_tokens"] = int(max_output_tokens)
     return payload
 
 
@@ -716,6 +739,17 @@ def _count_tokens_approx(payload):
                 total_text.append(_tool_result_text(block.get("content")))
     text = "\n".join(part for part in total_text if part)
     return max(1, len(text) // 4)
+
+
+def _responses_max_output_tokens(payload):
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("max_output_tokens")
+    if value is None:
+        value = payload.get("max_tokens")
+    if isinstance(value, (int, float)) and value > 0:
+        return int(value)
+    return None
 
 
 class _AnthropicTranslator:
@@ -1002,19 +1036,35 @@ def _iter_sse_lines(response):
     current_event = None
     data_lines = []
     for raw_line in response.iter_lines():
-        line = raw_line.strip()
+        line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else str(raw_line)
+        line = line.rstrip("\r")
         if not line:
-            if current_event and data_lines:
+            if data_lines:
                 payload_text = "\n".join(data_lines)
-                yield current_event, json.loads(payload_text)
+                try:
+                    payload = json.loads(payload_text)
+                except json.JSONDecodeError:
+                    payload = None
+                if payload is not None:
+                    yield current_event or "message", payload
             current_event = None
             data_lines = []
             continue
+        if line.startswith(":"):
+            continue
         if line.startswith("event:"):
-            current_event = line[6:].strip()
+            current_event = line[6:].strip() or "message"
             continue
         if line.startswith("data:"):
-            data_lines.append(line[5:].strip())
+            data_lines.append(line[5:].lstrip())
+    if data_lines:
+        payload_text = "\n".join(data_lines)
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            payload = None
+        if payload is not None:
+            yield current_event or "message", payload
 
 
 def _bridge_request_to_codex(account, model_name, request_payload, stream_response):
@@ -1237,7 +1287,21 @@ def _json_resp_to_sse(body: bytes) -> bytes:
     try:
         data = json.loads(body)
     except Exception:
-        return body
+        return (
+            "event: error\n"
+            "data: "
+            + json.dumps(
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "api_error",
+                        "message": "upstream returned non-JSON body",
+                    },
+                },
+                ensure_ascii=False,
+            )
+            + "\n\n"
+        ).encode("utf-8")
 
     events: list[str] = []
 
@@ -1665,7 +1729,6 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         fwd_headers = {
             "Content-Type": "application/json",
             "x-api-key": gateway_key,
-            "Authorization": f"Bearer {gateway_key}",
         }
         claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server)
         fwd_headers.update(
@@ -1808,7 +1871,6 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
             responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
         responses_payload["stream"] = True
-        responses_payload.pop("max_output_tokens", None)
 
         # 构造 target URL
         _oai = openai_url.rstrip("/")
@@ -2277,7 +2339,10 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def do_GET(self):
-        if self.path == "/v1/models":
+        if not self._authorized():
+            self._json(401, {"error": {"message": "invalid token"}})
+            return
+        if self.path.split("?", 1)[0] == "/v1/models":
             advertised_models = list(getattr(self.server, "advertised_models", []) or [])
             model = getattr(self.server, "model_name", "unknown")
             if not advertised_models:
@@ -2446,6 +2511,9 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             "messages": chat_messages,
             "stream": True,
         }
+        max_output_tokens = _responses_max_output_tokens(payload)
+        if max_output_tokens is not None:
+            chat_payload["max_tokens"] = max_output_tokens
         chat_tools = _responses_tools_to_chat(payload.get("tools"))
         if chat_tools:
             chat_payload["tools"] = chat_tools
@@ -2577,7 +2645,10 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         """Handle /v1/models for Codex model metadata queries."""
-        if self.path == "/v1/models":
+        if not self._authorized():
+            self._json(401, {"error": {"message": "invalid token"}})
+            return
+        if self.path.split("?", 1)[0] == "/v1/models":
             advertised_models = list(getattr(self.server, "advertised_models", []) or [])
             model = getattr(self.server, "model_name", "unknown")
             if not advertised_models:
@@ -2625,6 +2696,9 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             "messages": chat_messages,
             "stream": True,
         }
+        max_output_tokens = _responses_max_output_tokens(payload)
+        if max_output_tokens is not None:
+            chat_payload["max_tokens"] = max_output_tokens
         chat_tools = _responses_tools_to_chat(payload.get("tools"))
         if chat_tools:
             chat_payload["tools"] = chat_tools

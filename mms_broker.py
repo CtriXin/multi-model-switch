@@ -40,6 +40,10 @@ DEFAULT_BROKER_REPO = _default_broker_repo()
 PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")
 LEGACY_CREDENTIALS_PATH = os.path.expanduser("~/.config/ccs/credentials.sh")
 BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")
+_BROKER_PARENT_ENV_PREFIX_BLOCKLIST = (
+    "ANTHROPIC_",
+    "CLAUDE_CODE_",
+)
 
 
 def _normalize_broker_profile_id(profile_id: str) -> str:
@@ -52,6 +56,15 @@ def _normalize_broker_profile_id(profile_id: str) -> str:
 
 def _normalize_optional_str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _scrub_inherited_ai_env(env: dict[str, str]) -> dict[str, str]:
+    env = env if isinstance(env, dict) else {}
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if any(normalized.startswith(prefix) for prefix in _BROKER_PARENT_ENV_PREFIX_BLOCKLIST):
+            env.pop(key, None)
+    return env
 
 
 @lru_cache(maxsize=2)
@@ -198,6 +211,7 @@ def _broker_entry_path(profile: dict[str, Any]) -> str:
 
 def _build_broker_env(profile: dict[str, Any], *, workspace_root: str, model_override: str = "") -> dict[str, str]:
     env = os.environ.copy()
+    _scrub_inherited_ai_env(env)
     env["CC_BROKER_BASE_URL"] = profile.get("broker_base_url", "")
     env["CC_BROKER_DEVICE_KEY"] = _resolve_secret_value(profile, "device_key", "device_key_env")
     env["CC_BROKER_OWNER_USER_ID"] = profile.get("owner_user_id", "default-user")

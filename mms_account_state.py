@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 
+from mms_state_io import atomic_write_json, locked_state_file
+
 # Directory where mms caches per-account OAuth tokens for mms usage
 _MMS_TOKEN_CACHE_DIR = os.path.expanduser("~/.mms/token_cache")
 
@@ -60,9 +62,8 @@ def cache_current_claude_token() -> str | None:
     os.makedirs(_MMS_TOKEN_CACHE_DIR, exist_ok=True)
     path = os.path.join(_MMS_TOKEN_CACHE_DIR, f"{account_id}.json")
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(oauth, f, ensure_ascii=False)
-        os.chmod(path, 0o600)
+        with locked_state_file(path):
+            atomic_write_json(path, oauth, mode=0o600, indent=None)
         return account_id
     except Exception:
         return None
@@ -78,7 +79,11 @@ def load_cached_claude_tokens() -> list[dict]:
             continue
         path = os.path.join(_MMS_TOKEN_CACHE_DIR, fname)
         try:
-            results.append(json.loads(open(path).read()))
+            with locked_state_file(path):
+                with open(path, encoding="utf-8") as handle:
+                    loaded = json.load(handle)
+            if isinstance(loaded, dict):
+                results.append(loaded)
         except Exception:
             pass
     return results
@@ -94,10 +99,10 @@ def seed_claude_state(home_dir):
     os.makedirs(os.path.join(home_dir, ".claude"), exist_ok=True)
     if os.path.exists(target_path):
         return
-    with open(target_path, "w", encoding="utf-8") as f:
-        json.dump({}, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    os.chmod(target_path, 0o600)
+    with locked_state_file(target_path):
+        if os.path.exists(target_path):
+            return
+        atomic_write_json(target_path, {}, mode=0o600)
 
 
 def seed_gemini_state(home_dir):
