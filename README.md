@@ -50,6 +50,14 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 This optional path installs `MindKeeper MCP`, Claude `/distill`, Claude `/cz`, and the Claude `UserPromptSubmit` token monitor hook. If `jq` is missing, the installer also attempts to install it because the hook depends on it.
 
+By default, MMS pins this pack to the tested `MindKeeper v2.2.0`.
+Override it when needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref v2.2.0
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref main
+```
+
 Scope notes:
 
 - This pack is `Claude`-first; it does not add Hive compact/restore features

@@ -21,6 +21,8 @@ SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
+MINDKEEPER_DEFAULT_REF="${MINDKEEPER_DEFAULT_REF:-v2.2.0}"
+MINDKEEPER_INSTALL_REF="${MINDKEEPER_INSTALL_REF:-}"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
 MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
@@ -109,7 +111,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -124,7 +126,8 @@ $(t "说明:" "Notes:")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
-  - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook")
+  - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook；默认锁定到经过 MMS 验证的 MindKeeper tag" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook; by default it pins the MMS-tested MindKeeper tag")
+  - $(t "--mindkeeper-ref 可覆盖 MindKeeper 安装版本，例如 v2.2.0 / main" "--mindkeeper-ref overrides the MindKeeper install ref, for example v2.2.0 / main")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
@@ -247,12 +250,14 @@ prompt_optional_install_choices() {
         if [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
             echo "  MindKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
+            echo "  By default MMS pins MindKeeper to ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}."
             if confirm_from_tty "Install MindKeeper context pack for Claude? [y/N]: " "n"; then
                 INSTALL_MINDKEEPER_CONTEXT=1
             fi
         else
             echo "可选上下文工具"
             echo "  MindKeeper context pack 会安装 Claude 的 /distill、/cz 和 token monitor hook。"
+            echo "  默认会锁定到 ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}。"
             if confirm_from_tty "是否安装 MindKeeper context pack（Claude）？[y/N]: " "n"; then
                 INSTALL_MINDKEEPER_CONTEXT=1
             fi
@@ -1298,18 +1303,19 @@ install_optional_rtk() {
 
 run_mindkeeper_installer() {
     local local_installer=""
+    local effective_mindkeeper_ref="${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}"
 
     local_installer="$(dirname "$SOURCE_DIR")/mindkeeper/install.sh"
     if [ -f "$local_installer" ]; then
         run_optional_command \
             "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-            bash "$local_installer"
+            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_mindkeeper_ref"
         return 0
     fi
 
     run_optional_command \
         "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-        bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash'
+        env HOME="$REAL_HOME" MINDKEEPER_INSTALL_REF="$effective_mindkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash -s -- --ref "$MINDKEEPER_INSTALL_REF"'
 }
 
 write_mindkeeper_distill_command() {
@@ -1917,6 +1923,15 @@ while [[ $# -gt 0 ]]; do
             INSTALL_MINDKEEPER_CONTEXT=1
             INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=1
             ;;
+        --mindkeeper-ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--mindkeeper-ref 需要一个版本号或分支名" "--mindkeeper-ref requires a tag or branch name")"
+                usage
+                exit 1
+            fi
+            MINDKEEPER_INSTALL_REF="$1"
+            ;;
         --install-map)
             INSTALL_MAP=1
             INSTALL_MAP_EXPLICIT=1
@@ -2018,6 +2033,7 @@ fi
 if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
     echo "• $(t "附带安装 MindKeeper context pack" "Optional MindKeeper context pack"): on"
     echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，不包含 Hive 能力。" "This writes Claude MCP / command / hook config and does not include Hive features.")"
+    echo "  $(t "MindKeeper 版本" "MindKeeper ref"): ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}"
 fi
 
 if [ "$INSTALL_MAP" -eq 1 ]; then
