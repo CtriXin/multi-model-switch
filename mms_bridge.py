@@ -1743,10 +1743,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         5. 收到 Responses SSE → _AnthropicTranslator 转回 Anthropic SSE → 返回 Claude Code
         6. 从 response.completed 提取 response_id → 存入 server._gpt_last_response_id
         """
-        # previous_response_id 续接：只发增量 input，命中服务端缓存
+        # previous_response_id 续接：只在纯文本对话轮中使用（tool call 轮跳过，避免上游配对失败）
         last_response_id = getattr(self.server, "_gpt_last_response_id", None)
-        if last_response_id:
-            messages = anthropic_payload.get("messages") or []
+        messages = anthropic_payload.get("messages") or []
+        has_tool_result = any(
+            any(b.get("type") == "tool_result" for b in _normalize_message_content(m.get("content")))
+            for m in messages if m.get("role") == "user"
+        )
+        if last_response_id and not has_tool_result:
             # 取最后一个 assistant 消息之后的所有消息作为增量 input
             last_assistant_idx = -1
             for i, m in enumerate(messages):
