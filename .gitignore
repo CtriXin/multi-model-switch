@@ -65,6 +65,10 @@ apps/worktree-app-store-launch/
 # local AI context / scratch files
 EOF
 DESIGN_V3_SPEC.md
+AGENTS.md
+CLAUDE.md
+AI_BOOTSTRAP.md
+docs/MMS_ROUTING_SYSTEM.md
 apps/web-v2/GEMINI.md
 apps/web-v2/*-worktree/
 findings.md
