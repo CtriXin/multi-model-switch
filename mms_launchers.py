@@ -2432,18 +2432,55 @@ def _gateway_ping(base_url, api_key, runtime=None):
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=8,
         )
-        return r.status_code < 500
+        return 200 <= int(getattr(r, "status_code", 0) or 0) < 300
     except Exception:
         return False
 
 
+def _load_gateway_health_cache():
+    try:
+        with open(HEALTH_CHECK_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    providers = data.get("providers")
+    if isinstance(providers, dict):
+        return providers
+    provider_id = str(data.get("provider_id") or "").strip()
+    timestamp = str(data.get("timestamp") or "").strip()
+    if provider_id and timestamp:
+        return {
+            provider_id: {
+                "timestamp": timestamp,
+                "ok": bool(data.get("ok")),
+            }
+        }
+    return {}
+
+
+def _save_gateway_health_cache(providers):
+    if not isinstance(providers, dict):
+        return
+    try:
+        os.makedirs(os.path.dirname(HEALTH_CHECK_PATH), exist_ok=True)
+        tmp_path = HEALTH_CHECK_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump({"providers": providers}, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, HEALTH_CHECK_PATH)
+    except OSError:
+        pass
+
+
 def _health_check_due(provider_id):
     try:
-        with open(HEALTH_CHECK_PATH) as f:
-            data = json.load(f)
-        if data.get("provider_id") != provider_id:
+        providers = _load_gateway_health_cache()
+        entry = providers.get(str(provider_id or "").strip())
+        if not isinstance(entry, dict):
             return True
-        last = datetime.fromisoformat(data["timestamp"])
+        last = datetime.fromisoformat(str(entry.get("timestamp") or ""))
         return (datetime.now() - last).total_seconds() > 86400
     except Exception:
         return True
@@ -2461,12 +2498,12 @@ def gateway_health_check(provider):
     ok = _gateway_ping(base_url, api_key, runtime=provider)
     if ok is None:
         return
-    try:
-        os.makedirs(os.path.dirname(HEALTH_CHECK_PATH), exist_ok=True)
-        with open(HEALTH_CHECK_PATH, "w") as f:
-            json.dump({"timestamp": datetime.now().isoformat(), "provider_id": provider_id, "ok": ok}, f)
-    except OSError:
-        pass
+    providers = _load_gateway_health_cache()
+    providers[provider_id] = {
+        "timestamp": datetime.now().isoformat(),
+        "ok": bool(ok),
+    }
+    _save_gateway_health_cache(providers)
     if ok:
         console.print(f"[dim]✓ gateway {base_url} 可达[/dim]")
     else:
@@ -3474,7 +3511,6 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
         "metadata": {
             "user_id": json.dumps({
                 "device_id": f"device-{probe_nonce}",
-                "account_uuid": str(runtime.get("id", "")),
                 "session_id": f"session-{probe_nonce}",
             }, ensure_ascii=False),
         },

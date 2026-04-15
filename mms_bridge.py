@@ -425,11 +425,17 @@ def _write_route_status(tier, model, reason, *, status_paths=None):
         pass
 
 
-def _find_free_port():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return sock.getsockname()[1]
+def _wait_local_server_ready(port, attempts=50, delay=0.1):
+    for _ in range(max(1, int(attempts))):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(delay)
+                if sock.connect_ex(("127.0.0.1", int(port))) == 0:
+                    return True
+        except Exception:
+            pass
+        time.sleep(delay)
+    return False
 
 
 def _load_codex_auth(account):
@@ -1167,27 +1173,18 @@ class _BridgeHandler(BaseHTTPRequestHandler):
 
 @contextmanager
 def codex_claude_bridge(account, model_name):
-    port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = _SilentHTTPServer(("127.0.0.1", port), _BridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", 0), _BridgeHandler)
+    port = int(server.server_address[1])
     server.account = account
     server.model_name = model_name
     server.bridge_token = bridge_token
     server.bridge_source_cli = "codex"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    for _ in range(50):
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            result = sock.connect_ex(("127.0.0.1", port))
-            sock.close()
-            if result == 0:
-                break
-        except Exception:
-            pass
-        time.sleep(0.1)
     try:
+        if not _wait_local_server_ready(port):
+            raise RuntimeError(f"codex_claude_bridge 未能在本地端口 {port} 就绪")
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
@@ -1203,9 +1200,9 @@ def codex_claude_bridge(account, model_name):
 
 @contextmanager
 def gemini_claude_bridge(account, model_name):
-    port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = _SilentHTTPServer(("127.0.0.1", port), _BridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", 0), _BridgeHandler)
+    port = int(server.server_address[1])
     server.account = account
     server.model_name = model_name
     server.bridge_token = bridge_token
@@ -1213,6 +1210,8 @@ def gemini_claude_bridge(account, model_name):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        if not _wait_local_server_ready(port):
+            raise RuntimeError(f"gemini_claude_bridge 未能在本地端口 {port} 就绪")
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
@@ -2706,9 +2705,9 @@ def codex_chatcompletions_bridge(
     _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex Chat Completions bridge")
-    port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = _SilentHTTPServer(("127.0.0.1", port), _ResponsesToChatHandler)
+    server = _SilentHTTPServer(("127.0.0.1", 0), _ResponsesToChatHandler)
+    port = int(server.server_address[1])
     server.gateway_url = gateway_url
     server.gateway_key = gateway_key
     server.model_name = model_name
@@ -2723,6 +2722,8 @@ def codex_chatcompletions_bridge(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        if not _wait_local_server_ready(port):
+            raise RuntimeError(f"codex_chatcompletions_bridge 未能在本地端口 {port} 就绪")
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
@@ -2750,9 +2751,9 @@ def codex_responses_bridge(
     _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 Codex responses bridge")
-    port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = _SilentHTTPServer(("127.0.0.1", port), _ResponsesProxyHandler)
+    server = _SilentHTTPServer(("127.0.0.1", 0), _ResponsesProxyHandler)
+    port = int(server.server_address[1])
     server.gateway_url = gateway_url
     server.gateway_key = gateway_key
     server.model_name = model_name
@@ -2765,6 +2766,8 @@ def codex_responses_bridge(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        if not _wait_local_server_ready(port):
+            raise RuntimeError(f"codex_responses_bridge 未能在本地端口 {port} 就绪")
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,
@@ -2808,9 +2811,9 @@ def gateway_claude_bridge(
     _ensure_httpx()
     if httpx is None:
         raise RuntimeError("缺少 httpx，无法启动 gateway bridge")
-    port = _find_free_port()
     bridge_token = f"mms-bridge-{uuid.uuid4().hex}"
-    server = _SilentHTTPServer(("127.0.0.1", port), _GatewayBridgeHandler)
+    server = _SilentHTTPServer(("127.0.0.1", 0), _GatewayBridgeHandler)
+    port = int(server.server_address[1])
     server.gateway_url = gateway_url
     server.gateway_key = gateway_key
     server.bridge_token = bridge_token
@@ -2837,6 +2840,8 @@ def gateway_claude_bridge(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        if not _wait_local_server_ready(port):
+            raise RuntimeError(f"gateway_claude_bridge 未能在本地端口 {port} 就绪")
         yield {
             "base_url": f"http://127.0.0.1:{port}",
             "api_key": bridge_token,

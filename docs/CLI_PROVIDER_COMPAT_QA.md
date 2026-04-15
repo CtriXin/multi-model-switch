@@ -85,9 +85,12 @@
   - 普通 `api_key/gateway provider` 仍应走 network guard，但不应因为“没配 proxy”被一刀切误拦
 - 隔离 session 里会修改 global state 的命令（如 `claude update`、`pm2`、`npm/pnpm/yarn/corepack`）应通过 wrapper 强制回到 real `HOME/XDG/PM2_HOME`；找不到 real binary 时宁可 fail-closed，也不要掉回隔离态安装/更新
 - stale OAuth session cleanup 不应把旧 session state 再回写到账户目录
+- gateway / proxy 健康检查应按 provider scope 独立记录，并且只把真实成功的 `2xx` 当作可用；`401/403/404/5xx` 不应被当成“线路健康”
+- 本地 bridge 不应先探测空闲端口再二次 bind；应直接 `bind(127.0.0.1, 0)` 取内核分配端口，并在 yield 前完成 ready wait，避免首请求 `connection refused`
 - `Responses -> Chat Completions fallback` 只在明确“不支持 Responses API”时才写 cache；`empty body / empty stream / content-length=0` 这类模糊失败不能持久化成 fallback 结论
 - Anthropic-facing probe / classify / bridge fallback 遇到 `429` 时应优先 respect `Retry-After` 并对同一目标做最小 backoff，不要立刻横扫其它 candidate URL
-- probe metadata 不应带固定可识别前缀；如果必须带 session identity，默认使用中性/随机值
+- probe metadata 不应带固定可识别前缀，也不应带 runtime/account identity；如果必须带 session identity，默认使用中性/随机值
+- `load_config()` 这类 read path 不应在仅做 normalize/migrate 时自动落盘真实 config；显式写配置必须保持为单独动作
 - stale probe cache 可以用于“提示后台刷新”，但不能静默主导 provider 选择；缓存里的 `error / error_kind` 也不应被洗白
 
 ## 最小验证清单
@@ -104,6 +107,8 @@
 8. stale cache / fallback cache 不会把错误结论跨 provider、跨 URL、跨 session 固化下来
 9. 隔离 session 内执行 `claude/pm2/npm/pnpm/npx/yarn/corepack` 时，会明确落到 real `HOME`，不会把 global 安装/更新写进 session HOME
 10. Anthropic `429` 时不会继续 fanout 到其它 candidate URL，OAuth 路径也不会继承父进程里的 `ANTHROPIC_*` 认证环境
+11. gateway/proxy 健康检查不会把 `401/403/404` 误判成“线路可用”，多 provider 之间也不会共享同一条 health 记录
+12. local bridge 在 yield 前已经 listen，首请求不会因为端口竞争或未 ready 而偶发 `connection refused`
 
 ## 本地私有文档建议
 

@@ -548,6 +548,25 @@ def test_gateway_ping_uses_runtime_proxy(monkeypatch):
     assert calls["kwargs"]["runtime"]["proxy"] == "http://127.0.0.1:7890"
 
 
+def test_gateway_ping_rejects_401(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_runtime_httpx_request",
+        lambda *args, **kwargs: types.SimpleNamespace(status_code=401),
+    )
+    monkeypatch.setattr(mms_launchers, "_build_gateway_url", lambda base_url, path: f"{base_url.rstrip('/')}{path}")
+
+    ok = mms_launchers._gateway_ping(
+        "https://gateway.example.com/v1",
+        "sk-test",
+        runtime={"proxy": "http://127.0.0.1:7890"},
+    )
+
+    assert ok is False
+
+
 def test_validate_proxy_url_accepts_mainstream_formats():
     from mms_core import _validate_proxy_url
 
@@ -619,7 +638,7 @@ def test_apply_runtime_ip_stack_profile_sets_ipv4first():
     assert "--dns-result-order=ipv4first" in result["NODE_OPTIONS"]
 
 
-def test_test_proxy_connectivity_accepts_http_404(monkeypatch):
+def test_test_proxy_connectivity_rejects_http_404(monkeypatch):
     import mms_core
 
     monkeypatch.setattr(
@@ -630,8 +649,62 @@ def test_test_proxy_connectivity_accepts_http_404(monkeypatch):
 
     ok, detail = mms_core._test_proxy_connectivity("http://127.0.0.1:7890")
 
-    assert ok is True
+    assert ok is False
     assert "HTTP 404" in detail
+
+
+def test_load_config_does_not_persist_normalization_by_default(monkeypatch, tmp_path):
+    import mms_core
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "_ensure_mms_config_guard_files", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_core, "_migrate_legacy_api_config", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_merge_base_user_broker_profiles", lambda cfg, path: (cfg, False))
+    monkeypatch.setattr(mms_core, "_ensure_provider_config", lambda cfg: ({**cfg, "providers": []}, True))
+    monkeypatch.setattr(mms_core, "_ensure_account_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "ensure_broker_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_presets_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_user_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_cache_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_load_balance_config", lambda cfg: (cfg, False))
+
+    saved = []
+    monkeypatch.setattr(mms_core, "save_config", lambda cfg, reason=None: saved.append((cfg, reason)))
+
+    loaded = mms_core.load_config()
+
+    assert loaded["providers"] == []
+    assert saved == []
+
+
+def test_load_config_persists_when_requested(monkeypatch, tmp_path):
+    import mms_core
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "_ensure_mms_config_guard_files", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_core, "_migrate_legacy_api_config", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_merge_base_user_broker_profiles", lambda cfg, path: (cfg, False))
+    monkeypatch.setattr(mms_core, "_ensure_provider_config", lambda cfg: ({**cfg, "providers": []}, True))
+    monkeypatch.setattr(mms_core, "_ensure_account_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "ensure_broker_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_presets_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_user_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_cache_config", lambda cfg: (cfg, False))
+    monkeypatch.setattr(mms_core, "_normalize_load_balance_config", lambda cfg: (cfg, False))
+
+    saved = []
+    monkeypatch.setattr(mms_core, "save_config", lambda cfg, reason=None: saved.append((cfg, reason)))
+
+    loaded = mms_core.load_config(persist=True)
+
+    assert loaded["providers"] == []
+    assert saved and saved[0][1] == "auto:load_config_normalize"
 
 
 def test_runtime_network_summary_masks_proxy_secret():

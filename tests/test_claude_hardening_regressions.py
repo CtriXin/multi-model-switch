@@ -620,8 +620,76 @@ def test_resolve_anthropic_base_url_probe_metadata_is_neutral(monkeypatch):
     assert method == "probed"
     assert metadata_user_id["device_id"].startswith("device-")
     assert metadata_user_id["session_id"].startswith("session-")
+    assert "account_uuid" not in metadata_user_id
     assert "mms-probe-" not in metadata_user_id["device_id"]
     assert "mms-probe-" not in metadata_user_id["session_id"]
+
+
+def test_gateway_health_check_cache_is_scoped_per_provider(monkeypatch, tmp_path):
+    import mms_launchers
+
+    health_path = tmp_path / "health_check.json"
+    monkeypatch.setattr(mms_launchers, "HEALTH_CHECK_PATH", str(health_path))
+    monkeypatch.setattr(mms_launchers, "_gateway_ping", lambda *args, **kwargs: True)
+    monkeypatch.setattr(mms_launchers, "_openai_base_url", lambda provider: provider.get("base_url"))
+    monkeypatch.setattr(mms_launchers, "_anthropic_base_url", lambda provider: "")
+
+    provider_a = {"id": "relay-a", "base_url": "https://relay-a.example.com", "api_key": "sk-a"}
+    provider_b = {"id": "relay-b", "base_url": "https://relay-b.example.com", "api_key": "sk-b"}
+
+    mms_launchers.gateway_health_check(provider_a)
+    mms_launchers.gateway_health_check(provider_b)
+
+    assert mms_launchers._health_check_due("relay-a") is False
+    assert mms_launchers._health_check_due("relay-b") is False
+
+    saved = json.loads(health_path.read_text(encoding="utf-8"))
+    assert set(saved["providers"].keys()) == {"relay-a", "relay-b"}
+
+
+def test_gateway_claude_bridge_binds_ephemeral_port_and_waits_ready(monkeypatch):
+    import mms_bridge
+
+    calls = {"wait": [], "closed": 0}
+
+    class FakeServer:
+        def __init__(self, addr, handler):
+            calls["addr"] = addr
+            calls["handler"] = handler
+            self.server_address = ("127.0.0.1", 54321)
+
+        def serve_forever(self):
+            return None
+
+        def server_close(self):
+            calls["closed"] += 1
+
+    class FakeThread:
+        def __init__(self, target=None, daemon=None):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            calls["started"] = True
+
+        def join(self, timeout=None):
+            calls["joined"] = timeout
+
+    monkeypatch.setattr(mms_bridge, "_SilentHTTPServer", FakeServer)
+    monkeypatch.setattr(mms_bridge.threading, "Thread", FakeThread)
+    monkeypatch.setattr(
+        mms_bridge,
+        "_wait_local_server_ready",
+        lambda port, attempts=50, delay=0.1: calls["wait"].append((port, attempts, delay)) or True,
+    )
+
+    with mms_bridge.gateway_claude_bridge("https://relay.example.com/v1", "sk-test") as bridge_cfg:
+        assert bridge_cfg["base_url"] == "http://127.0.0.1:54321"
+        assert bridge_cfg["api_key"].startswith("mms-bridge-")
+
+    assert calls["addr"] == ("127.0.0.1", 0)
+    assert calls["wait"] == [(54321, 50, 0.1)]
+    assert calls["closed"] == 1
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):

@@ -68,6 +68,9 @@ class _LazyConsole:
 console = _LazyConsole()
 
 # rich 组件：首次使用时加载（通过模块级 __getattr__）
+
+
+_STATE_FILE_PROCESS_LOCK = threading.RLock()
 Panel = Table = Prompt = IntPrompt = Confirm = Text = None
 
 
@@ -271,6 +274,14 @@ def _save_json_file(path, payload):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
     os.chmod(path, 0o600)
+
+
+def _http_status_is_success(value):
+    try:
+        status_code = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return False
+    return 200 <= status_code < 300
 
 
 def _load_version_meta():
@@ -834,7 +845,7 @@ def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.ant
         cmd.extend(["--noproxy", str(no_proxy).strip()])
     result = subprocess.run(cmd, capture_output=True, text=True)
     http_code = str(result.stdout or "").strip()
-    if result.returncode == 0 and http_code and http_code not in {"000", "407"}:
+    if result.returncode == 0 and _http_status_is_success(http_code):
         return True, f"代理连通性测试通过：{target_url} (HTTP {http_code})"
     detail = (result.stderr or "").strip()
     if http_code and http_code not in {"000"}:
@@ -2310,7 +2321,7 @@ def _ensure_startup_snapshot_guard(cfg, *, enforce=True):
     )
     sys.exit(CONFIG_GUARD_EXIT_CODE)
 
-def load_config():
+def load_config(*, persist=False):
     config_path = _config_write_target_path()
     _ensure_mms_config_guard_files(config_path)
     if not os.path.exists(config_path):
@@ -2327,8 +2338,8 @@ def load_config():
     cfg, cache_changed = _normalize_cache_config(cfg)
     cfg, lb_changed = _normalize_load_balance_config(cfg)
     changed = changed or gateway_broker_changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
-    if changed:
-        save_config(cfg)
+    if changed and persist:
+        save_config(cfg, reason="auto:load_config_normalize")
     return cfg
 
 
@@ -2394,6 +2405,21 @@ def _locked_config_write(config_path):
     lock_path = _config_lock_path(config_path)
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     with _CONFIG_WRITE_PROCESS_LOCK:
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _locked_state_file(path):
+    lock_path = os.path.abspath(str(path or "")) + ".lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with _STATE_FILE_PROCESS_LOCK:
         with open(lock_path, "a+", encoding="utf-8") as lock_file:
             if fcntl is not None:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -2547,6 +2573,10 @@ def _local_now_slug():
 
 def _load_usage_stats():
     usage_path = _active_usage_path()
+    return _load_usage_stats_from_path(usage_path)
+
+
+def _load_usage_stats_from_path(usage_path):
     if not os.path.exists(usage_path):
         return {"sources": {}}
     try:
@@ -2560,14 +2590,32 @@ def _load_usage_stats():
     return {"sources": {}}
 
 
-def _save_usage_stats(data):
+def _write_usage_stats_locked(usage_path, data):
     _ensure_mms_config_guard_files(_config_write_target_path())
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(USAGE_PATH, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(usage_path), exist_ok=True)
+    tmp_path = usage_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    os.chmod(USAGE_PATH, 0o600)
+    os.replace(tmp_path, usage_path)
+    os.chmod(usage_path, 0o600)
+
+
+def _save_usage_stats(data):
+    usage_path = _active_usage_path()
+    with _locked_state_file(usage_path):
+        _write_usage_stats_locked(usage_path, data)
     _trigger_routes_export_after_usage_write()
+
+
+def _update_usage_stats(mutator):
+    usage_path = _active_usage_path()
+    with _locked_state_file(usage_path):
+        stats = _load_usage_stats_from_path(usage_path)
+        result = mutator(stats)
+        _write_usage_stats_locked(usage_path, stats)
+    _trigger_routes_export_after_usage_write()
+    return result
 
 
 _USAGE_ROUTES_EXPORT_LOCK = threading.Lock()
@@ -2668,56 +2716,56 @@ def _runtime_hint_from_runtime(runtime):
 
 
 def _record_usage(runtime, cli_name, model_info):
-    stats = _load_usage_stats()
-    sources = stats.setdefault("sources", {})
-    key = _runtime_usage_key(runtime, cli_name)
-    model_name = _resolve_model_name(model_info)
-    entry = sources.setdefault(key, {
-        "runtime_kind": runtime.get("runtime_kind", "provider"),
-        "id": runtime.get("id", "default"),
-        "name": runtime.get("name", runtime.get("id", "default")),
-        "cli": cli_name,
-        "launches": 0,
-        "last_used_at": "",
-        "last_model": "",
-        "models": {},
-    })
-    entry["launches"] += 1
-    entry["last_used_at"] = _iso_now()
-    entry["last_model"] = model_name
-    models = entry.setdefault("models", {})
-    models[model_name] = int(models.get(model_name, 0)) + 1
-    # 全局最后一次使用（按 CLI 分桶，供 TUI "上次使用" 展示）
-    last_by_cli = stats.setdefault("last_by_cli", {})
-    last_by_cli[cli_name] = {
-        "cli": cli_name,
-        "model": model_name,
-        "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
-        "runtime_hint": _runtime_hint_from_runtime(runtime),
-        "last_used_at": _iso_now(),
-    }
-    _save_usage_stats(stats)
+    def _mutate(stats):
+        sources = stats.setdefault("sources", {})
+        key = _runtime_usage_key(runtime, cli_name)
+        model_name = _resolve_model_name(model_info)
+        entry = sources.setdefault(key, {
+            "runtime_kind": runtime.get("runtime_kind", "provider"),
+            "id": runtime.get("id", "default"),
+            "name": runtime.get("name", runtime.get("id", "default")),
+            "cli": cli_name,
+            "launches": 0,
+            "last_used_at": "",
+            "last_model": "",
+            "models": {},
+        })
+        entry["launches"] += 1
+        entry["last_used_at"] = _iso_now()
+        entry["last_model"] = model_name
+        models = entry.setdefault("models", {})
+        models[model_name] = int(models.get(model_name, 0)) + 1
+        last_by_cli = stats.setdefault("last_by_cli", {})
+        last_by_cli[cli_name] = {
+            "cli": cli_name,
+            "model": model_name,
+            "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
+            "runtime_hint": _runtime_hint_from_runtime(runtime),
+            "last_used_at": _iso_now(),
+        }
+
+    _update_usage_stats(_mutate)
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
     """记录场景级启动统计（用于 TUI 启动次数排名）"""
     if not scene_name or scene_name.startswith("__"):
         return
-    stats = _load_usage_stats()
-    scene_stats = stats.setdefault("scenes", {})
-    model_name = _resolve_model_name(model_info)
-    entry = scene_stats.setdefault(scene_name, {
-        "launches": 0,
-        "last_used_at": "",
-        "last_cli": "",
-        "last_model": "",
-    })
-    entry["launches"] += 1
-    entry["last_used_at"] = _iso_now()
-    entry["last_cli"] = cli_name
-    entry["last_model"] = model_name
-    # 全局 last_* 已由 _record_usage 写入，此处不再重复
-    _save_usage_stats(stats)
+    def _mutate(stats):
+        scene_stats = stats.setdefault("scenes", {})
+        model_name = _resolve_model_name(model_info)
+        entry = scene_stats.setdefault(scene_name, {
+            "launches": 0,
+            "last_used_at": "",
+            "last_cli": "",
+            "last_model": "",
+        })
+        entry["launches"] += 1
+        entry["last_used_at"] = _iso_now()
+        entry["last_cli"] = cli_name
+        entry["last_model"] = model_name
+
+    _update_usage_stats(_mutate)
 
 
 def _get_scene_usage():
@@ -8019,42 +8067,44 @@ def _rename_usage_account(old_id, new_id, new_name, cli_name):
     usage_path = _active_usage_path()
     if not os.path.exists(usage_path):
         return False
-    stats = _load_usage_stats()
-    sources = stats.get("sources", {})
-    old_key = _usage_key("account", cli_name, old_id)
-    entry = sources.pop(old_key, None)
-    if entry is None:
-        return False
-    entry["id"] = new_id
-    entry["name"] = new_name
-    sources[_usage_key("account", cli_name, new_id)] = entry
-    _save_usage_stats(stats)
-    return True
+
+    def _mutate(stats):
+        sources = stats.get("sources", {})
+        old_key = _usage_key("account", cli_name, old_id)
+        entry = sources.pop(old_key, None)
+        if entry is None:
+            return False
+        entry["id"] = new_id
+        entry["name"] = new_name
+        sources[_usage_key("account", cli_name, new_id)] = entry
+        return True
+
+    return bool(_update_usage_stats(_mutate))
 
 
 def _rename_usage_provider(old_id, new_id, new_name):
     usage_path = _active_usage_path()
     if not os.path.exists(usage_path):
         return False
-    stats = _load_usage_stats()
-    sources = stats.get("sources", {})
-    changed = False
-    rewritten = {}
-    for key, entry in list(sources.items()):
-        if entry.get("runtime_kind") != "provider" or entry.get("id") != old_id:
-            continue
-        sources.pop(key, None)
-        updated = dict(entry)
-        updated["id"] = new_id
-        updated["name"] = new_name
-        cli_name = str(updated.get("cli", "default")).strip() or "default"
-        rewritten[_usage_key("provider", cli_name, new_id)] = updated
-        changed = True
-    sources.update(rewritten)
-    if not changed:
-        return False
-    _save_usage_stats(stats)
-    return True
+
+    def _mutate(stats):
+        sources = stats.get("sources", {})
+        changed = False
+        rewritten = {}
+        for key, entry in list(sources.items()):
+            if entry.get("runtime_kind") != "provider" or entry.get("id") != old_id:
+                continue
+            sources.pop(key, None)
+            updated = dict(entry)
+            updated["id"] = new_id
+            updated["name"] = new_name
+            cli_name = str(updated.get("cli", "default")).strip() or "default"
+            rewritten[_usage_key("provider", cli_name, new_id)] = updated
+            changed = True
+        sources.update(rewritten)
+        return changed
+
+    return bool(_update_usage_stats(_mutate))
 
 
 def _target_account_home(old_home, new_id):
