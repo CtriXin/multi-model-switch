@@ -470,13 +470,15 @@ mms routes export   # 强制重新生成
    - `gpt-* / gemini-* / o*` 只从 `supported_clis` 含 `codex` 的 provider claim
    - `claude-*` 只从 `supported_clis` 含 `claude` 的 provider claim
    - 国产模型当前默认放宽
-3. 每个模型被最高优先级 provider claim（primary > auto > fallback × priority 高到低）
+3. 每个模型默认按最高优先级 provider claim（`primary > auto > fallback × priority` 高到低）
+   - 但如果某个 non-Claude 模型存在真正可 direct 打 `Anthropic Messages` 的 route，会优先把这类 Claude-compatible route 提升为 primary
+   - 这样可避免把只适合 OpenAI-style `/openai` 的高优先级 relay 导成 Hive / Claude executor 的主路由
 4. 同一模型不重复，先 claim 先得
 5. 每个模型除主路由外，最多附带 3 条 `fallback_routes`，按优先级顺序保留备选通道
 6. `use_count` 会被写入导出结果，来自 `usage.json` 聚合，供展示层和消费端做模糊解析排序；它不会反向驱动 runtime 选路
 7. `capabilities / native_clis / bridge_clis / cli_modes` 是导出层元数据，用于展示层和 Hive 消费，不改变实际启动决策
    - 对 `claude` 来说，导出语义看的是“这条已 claim 的 route 能不能 direct 打 Anthropic Messages”
-   - 如果某个 non-Claude 模型的 claimed route 带有可用的 `anthropic_base_url`，则 `cli_modes.claude = "native"`，表示对 Hive / Claude executor 是 direct-compatible
+   - 只有当某个 non-Claude 模型的 claimed route 同时具备可用 `anthropic_base_url` 且满足该模型族的 runtime compatibility 时，才会导出 `cli_modes.claude = "native"`
    - 只有当该 route 对 Claude 仍然只能走 bridge 时，才会保留 `bridge_required`
 8. mtime 缓存：`config.toml` 与 `usage.json` 都未更新时直接读缓存
 
