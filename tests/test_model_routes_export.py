@@ -26,7 +26,7 @@ def _patch_export_dependencies(monkeypatch, *, contexts):
     monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
 
 
-def test_export_model_routes_marks_anthropic_domestic_route_as_claude_native(monkeypatch, tmp_path):
+def test_export_model_routes_strips_claude_executor_from_hive_metadata(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -62,17 +62,18 @@ def test_export_model_routes_marks_anthropic_domestic_route_as_claude_native(mon
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["kimi-k2.5"]
-    assert info["cli_modes"]["claude"] == "native"
-    assert "claude" in info["native_clis"]
+    assert "claude" not in info["cli_modes"]
+    assert "claude" not in info["native_clis"]
     assert "claude" not in info["bridge_clis"]
     assert "bridge_required" not in info["capabilities"]
 
     written = json.loads((tmp_path / "model-routes.json").read_text(encoding="utf-8"))
-    assert written["routes"]["kimi-k2.5"]["cli_modes"]["claude"] == "native"
+    assert written["_meta"]["disabled_executor_clis"] == ["claude"]
+    assert "claude" not in written["routes"]["kimi-k2.5"]["cli_modes"]
     assert stat.S_IMODE((tmp_path / "model-routes.json").stat().st_mode) == 0o600
 
 
-def test_export_model_routes_keeps_openai_only_domestic_route_as_claude_bridge(monkeypatch, tmp_path):
+def test_export_model_routes_does_not_advertise_claude_bridge_to_hive(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -108,12 +109,12 @@ def test_export_model_routes_keeps_openai_only_domestic_route_as_claude_bridge(m
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["qwen3.5-plus"]
-    assert info["cli_modes"]["claude"] == "bridge"
-    assert "claude" in info["bridge_clis"]
-    assert "bridge_required" in info["capabilities"]
+    assert "claude" not in info["cli_modes"]
+    assert "claude" not in info["bridge_clis"]
+    assert "bridge_required" not in info["capabilities"]
 
 
-def test_export_model_routes_prefers_claude_compatible_kimi_route_over_higher_priority_bridge_only_route(monkeypatch, tmp_path):
+def test_export_model_routes_stops_preferring_claude_compatible_route_when_hive_disables_claude(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -166,6 +167,6 @@ def test_export_model_routes_prefers_claude_compatible_kimi_route_over_higher_pr
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["kimi-k2.5"]
-    assert info["provider_id"] == "kimi-direct-compatible"
-    assert info["cli_modes"]["claude"] == "native"
-    assert info["fallback_routes"][0]["provider_id"] == "openai-relay-high-priority"
+    assert info["provider_id"] == "openai-relay-high-priority"
+    assert "claude" not in info["cli_modes"]
+    assert info["fallback_routes"][0]["provider_id"] == "kimi-direct-compatible"

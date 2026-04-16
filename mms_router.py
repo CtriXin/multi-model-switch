@@ -581,20 +581,23 @@ import time as _time
 MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
 _MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
 _EXPORTED_CLI_ORDER = ("claude", "codex", "gemini", "qwen", "kimi")
+_HIVE_DISABLED_EXECUTOR_CLIS = {"claude"}
 
 
 def _route_cli_modes_for_export(model_name, route_entry, base_modes):
     """Route-scoped CLI modes for exported model-routes metadata.
 
-    `cli_modes` is consumed by Hive as executor compatibility metadata. For the
-    Claude executor, what matters is whether the claimed route exposes a direct
-    Anthropic-compatible endpoint, not whether the model family is "Claude".
+    `cli_modes` is consumed by Hive as executor compatibility metadata.
+    Hive-side Claude execution is now hard-disabled, so exported metadata must
+    not advertise any Claude executor mode.
     """
     modes = dict(base_modes(model_name))
     anthropic_url = str((route_entry or {}).get("anthropic_base_url") or "").strip()
     claude_native_compatible = bool((route_entry or {}).get("_claude_native_compatible"))
     if anthropic_url and claude_native_compatible and modes.get("claude") == "bridge":
         modes["claude"] = "native"
+    for cli_name in _HIVE_DISABLED_EXECUTOR_CLIS:
+        modes.pop(cli_name, None)
     return modes
 
 
@@ -602,6 +605,8 @@ def _route_cli_lists_for_export(cli_modes):
     native_clis = []
     bridge_clis = []
     for cli_name in _EXPORTED_CLI_ORDER:
+        if cli_name in _HIVE_DISABLED_EXECUTOR_CLIS:
+            continue
         mode = cli_modes.get(cli_name)
         if mode == "native":
             native_clis.append(cli_name)
@@ -763,9 +768,11 @@ def export_model_routes(cfg=None, force=False):
 
             effective_priority = _runtime_priority_for_model(pinfo, normalized)
             base_cli_modes = _model_cli_modes(normalized)
-            claude_prefers_direct = base_cli_modes.get("claude") == "bridge"
+            claude_executor_enabled = "claude" not in _HIVE_DISABLED_EXECUTOR_CLIS
+            claude_prefers_direct = claude_executor_enabled and base_cli_modes.get("claude") == "bridge"
             claude_native_compatible = bool(
-                pinfo.get("anthropic_base_url")
+                claude_executor_enabled
+                and pinfo.get("anthropic_base_url")
                 and _provider_supports_model_for_cli(pinfo, "claude", normalized)
             )
             candidate = {
@@ -823,6 +830,7 @@ def export_model_routes(cfg=None, force=False):
         "_meta": {
             "generated_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
             "generator": "mms",
+            "disabled_executor_clis": sorted(_HIVE_DISABLED_EXECUTOR_CLIS),
         },
         "routes": routes,
     }
