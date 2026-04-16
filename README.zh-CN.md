@@ -126,6 +126,18 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 效果是避免重复全文读取文件，并在文件变化后优先提供 diff。若本机没有 `jq`，安装器也会尝试补装；如果仍然缺失，hook 会保持 fail-open 静默模式，不阻塞 Claude 正常使用。
 
+`MMC` 的 `OAuth Claude` 隔离路径也只会内建一组 repo-owned allowlist hooks：
+
+- `PreToolUse:Bash -> rtk-rewrite.sh`
+- `PreToolUse:Read -> read-once-hook.sh`
+- `PostCompact -> read-once-compact.sh`
+
+边界说明：
+
+- 不继承 global/source `hooks`
+- 不带 `Hive` / `Map` / `Feishu` / `agentim` hooks
+- `top-level mcpServers` 仍保持隔离，不通过 `MMC` 自动回流
+
 ### 安装 MMS 时顺手补齐常用 CLI
 
 ```bash

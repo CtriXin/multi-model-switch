@@ -8,6 +8,8 @@ import types
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 
 def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatch):
     import mms_launchers
@@ -36,7 +38,7 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
 
-def test_prepare_claude_session_tree_removes_legacy_source_symlink(monkeypatch, tmp_path):
+def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
     import mms_launchers
 
     repo_dir = tmp_path / "repo"
@@ -63,6 +65,12 @@ def test_prepare_claude_session_tree_removes_legacy_source_symlink(monkeypatch, 
 
     source_claude_dir = tmp_path / "source-claude"
     source_claude_dir.mkdir()
+    (source_claude_dir / ".mcp.json").write_text('{"mcpServers":{"demo":{}}}\n', encoding="utf-8")
+    (source_claude_dir / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")
+    (source_claude_dir / "RTK.md").write_text("# RTK\n", encoding="utf-8")
+    (source_claude_dir / "commands").mkdir()
+    (source_claude_dir / "hooks").mkdir()
+    (source_claude_dir / "skills").mkdir()
     (source_claude_dir / "agents").mkdir()
 
     session_claude_dir = tmp_path / "session" / ".claude"
@@ -78,6 +86,8 @@ def test_prepare_claude_session_tree_removes_legacy_source_symlink(monkeypatch, 
 
     assert not (session_claude_dir / "agents").exists()
     assert not os.path.islink(session_claude_dir / "agents")
+    for entry in mms_launchers._CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST:
+        assert os.path.islink(session_claude_dir / entry)
     for entry in mms_launchers.CLAUDE_PERSISTENT_ENTRIES:
         assert os.path.islink(session_claude_dir / entry)
 
@@ -623,6 +633,12 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
                     "theme-command": 508,
                     "terminal-setup": 515,
                 },
+                "mcpServers": {
+                    "mindkeeper": {
+                        "command": "mindkeeper",
+                        "args": ["stdio"],
+                    }
+                },
                 "projects": {
                     str(repo_dir.resolve()): {
                         "hasCompletedProjectOnboarding": False,
@@ -663,6 +679,7 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
     assert session_state["numStartups"] == 9
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
+    assert session_state["mcpServers"]["mindkeeper"]["command"] == "mindkeeper"
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["hasTrustDialogAccepted"] is True
     assert project_state["hasCompletedProjectOnboarding"] is True
@@ -832,7 +849,7 @@ def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
     assert "HTTP_PROXY" not in captured["env"]
 
 
-def test_launch_claude_bypass_adds_current_workspace_to_allowed_dirs(monkeypatch, tmp_path):
+def test_launch_claude_oauth_delegates_to_mmc_with_bypass(monkeypatch, tmp_path):
     import mms_launchers
 
     repo_dir = tmp_path / "repo"
@@ -840,17 +857,25 @@ def test_launch_claude_bypass_adds_current_workspace_to_allowed_dirs(monkeypatch
     monkeypatch.chdir(repo_dir)
 
     captured = {}
+    monkeypatch.setenv("ANTHROPIC_MODEL", "ambient-should-drop")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-parent")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9999")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/python")
     monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
     monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
     monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home")})
-    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
-    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
-    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
     monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: "claude")
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_assert_safe_mmc_delegate_binary",
+        lambda path_value, label="": str(path_value),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
+    )
     monkeypatch.setattr(
         mms_launchers,
         "_exec_or_run",
@@ -863,15 +888,34 @@ def test_launch_claude_bypass_adds_current_workspace_to_allowed_dirs(monkeypatch
         once=True,
     )
 
-    assert captured["cmd"][:4] == [
-        "claude",
-        "--add-dir",
+    assert captured["cmd"][1].endswith("/mmc")
+    assert captured["cmd"][2:10] == [
+        "run",
+        "--workspace",
         os.path.realpath(str(repo_dir)),
-        "--dangerously-skip-permissions",
+        "--claude-bin",
+        str(tmp_path / "real-bin" / "claude"),
+        "--node-bin",
+        str(tmp_path / "real-bin" / "node"),
+        "--lang",
     ]
+    assert "--allow-dir" in captured["cmd"]
+    allow_dir_index = captured["cmd"].index("--allow-dir")
+    assert captured["cmd"][allow_dir_index + 1] == os.path.realpath(str(repo_dir))
+    assert "--bypass" in captured["cmd"]
+    assert "--set-env" in captured["cmd"]
+    assert "ANTHROPIC_MODEL=claude-sonnet-4-6" in captured["cmd"]
+    assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" in captured["cmd"]
+    assert "OPENAI_API_KEY" not in captured["env"]
+    assert "HTTP_PROXY" not in captured["env"]
+    assert "ANTHROPIC_MODEL" not in captured["env"]
+    assert "PYTHONPATH" not in captured["env"]
+    assert "HOME" not in captured["env"]
+    assert captured["env"]["MMC_REAL_HOME"] == str(tmp_path / "real-home")
+    assert captured["env"]["PATH"].startswith("/usr/bin")
 
 
-def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypatch, tmp_path):
+def test_launch_claude_oauth_delegate_without_bypass_does_not_add_workspace_allowlist(monkeypatch, tmp_path):
     import mms_launchers
 
     repo_dir = tmp_path / "repo"
@@ -882,14 +926,18 @@ def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypat
     monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
     monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
     monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home")})
-    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
-    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
-    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
     monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: "claude")
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_assert_safe_mmc_delegate_binary",
+        lambda path_value, label="": str(path_value),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
+    )
     monkeypatch.setattr(
         mms_launchers,
         "_exec_or_run",
@@ -902,10 +950,12 @@ def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypat
         once=True,
     )
 
-    assert captured["cmd"] == ["claude"]
+    assert captured["cmd"][1].endswith("/mmc")
+    assert "--allow-dir" not in captured["cmd"]
+    assert "--bypass" not in captured["cmd"]
 
 
-def test_launch_claude_uses_real_binary_path_not_session_wrapper(monkeypatch, tmp_path):
+def test_launch_claude_oauth_delegate_uses_mmc_entry_not_claude_binary(monkeypatch, tmp_path):
     import mms_launchers
 
     repo_dir = tmp_path / "repo"
@@ -913,18 +963,21 @@ def test_launch_claude_uses_real_binary_path_not_session_wrapper(monkeypatch, tm
     monkeypatch.chdir(repo_dir)
 
     captured = {}
-    real_claude_bin = str(tmp_path / "real-bin" / "claude")
     monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
     monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
     monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home"), "PATH": "/fake/session/.mms/bin:/usr/local/bin"})
-    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
-    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
-    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
     monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
-    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: real_claude_bin)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_assert_safe_mmc_delegate_binary",
+        lambda path_value, label="": str(path_value),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
+    )
     monkeypatch.setattr(
         mms_launchers,
         "_exec_or_run",
@@ -937,7 +990,34 @@ def test_launch_claude_uses_real_binary_path_not_session_wrapper(monkeypatch, tm
         once=True,
     )
 
-    assert captured["cmd"] == [real_claude_bin]
+    assert captured["cmd"][0] == os.sys.executable
+    assert captured["cmd"][1].endswith("/mmc")
+    assert captured["cmd"][2] == "run"
+
+
+def test_launch_claude_oauth_delegate_blocks_force_ipv4(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
+    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_assert_safe_mmc_delegate_binary",
+        lambda path_value, label="": str(path_value),
+    )
+
+    with pytest.raises(SystemExit):
+        mms_launchers.launch_claude(
+            {"model": "claude-sonnet-4-6"},
+            {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "force_ipv4": True},
+            once=True,
+        )
 
 
 def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypatch):
@@ -1099,6 +1179,7 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_gateway_home", lambda: str(gateway_home))
     monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     env = mms_launchers._claude_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -1175,6 +1256,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     mms_launchers._claude_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
@@ -1197,6 +1279,94 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert project_state["hasClaudeMdExternalIncludesWarningShown"] is True
     assert project_state["projectOnboardingSeenCount"] == 1
     assert "lastSessionId" not in project_state
+
+
+def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "projects": {
+                    str(repo_dir.resolve()): {
+                        "hasCompletedProjectOnboarding": True,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: ({}, "settings.json"))
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "claude-sonnet-4-6")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(other_repo.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "session_id": "session-other-project",
+                "last_active_at": "2026-04-16T16:00:00+00:00",
+            },
+            {
+                "project_path": str(repo_dir.resolve()),
+                "account_id": "relay-b",
+                "runtime_kind": "api_key",
+                "session_id": "session-other-account",
+                "last_active_at": "2026-04-16T17:00:00+00:00",
+            },
+            {
+                "project_path": str(repo_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "oauth",
+                "session_id": "session-other-runtime",
+                "last_active_at": "2026-04-16T18:00:00+00:00",
+            },
+            {
+                "project_path": str(repo_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "session_id": "session-match",
+                "last_active_at": "2026-04-16T19:00:00+00:00",
+            },
+        ],
+    )
+
+    mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="claude-sonnet-4-6",
+    )
+
+    session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
+    project_state = session_state["projects"][str(repo_dir.resolve())]
+    assert project_state["lastSessionId"] == "session-match"
 
 
 def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):

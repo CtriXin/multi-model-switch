@@ -31,7 +31,7 @@ from mms_fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
-from mms_session_index import finalize_claude_session, record_claude_session_start
+from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_state_io import atomic_write_json, locked_state_file
 
 _build_gateway_url = None
@@ -1574,7 +1574,14 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
     "permissions",
 )
 _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
-_CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = ()
+_CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = (
+    ".mcp.json",
+    "CLAUDE.md",
+    "RTK.md",
+    "commands",
+    "hooks",
+    "skills",
+)
 _CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST = ("Keychains",)
 _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
     "gh",
@@ -2412,6 +2419,9 @@ def _sanitize_claude_ui_state_seed_payload(payload):
     payload = payload if isinstance(payload, dict) else {}
     seed = _copy_allowed_scalar_fields(payload, _CLAUDE_OAUTH_UI_STATE_SEED_KEYS)
     seed.update(_copy_allowed_scalar_dict_fields(payload, _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST))
+    mcp_servers = payload.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        seed["mcpServers"] = copy.deepcopy(mcp_servers)
     return seed
 
 
@@ -2451,6 +2461,13 @@ def _merge_claude_ui_state_seed(target_payload, seed_payload):
                 value,
                 prefer_max_numeric=(key == "tipsHistory"),
             )
+            continue
+        if key == "mcpServers" and isinstance(value, dict):
+            merged_servers = copy.deepcopy(value)
+            existing_servers = target_payload.get(key)
+            if isinstance(existing_servers, dict):
+                merged_servers.update(copy.deepcopy(existing_servers))
+            target_payload[key] = merged_servers
             continue
         target_payload.setdefault(key, copy.deepcopy(value))
     return target_payload
@@ -2588,6 +2605,65 @@ def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     if strip_sensitive_auth:
         for key in _CLAUDE_GATEWAY_SENSITIVE_STATE_KEYS:
             payload.pop(key, None)
+    return payload
+
+
+def _load_project_scoped_claude_resume_session_id(project_path, *, account_id="", runtime_kind=""):
+    normalized_project = os.path.realpath(str(project_path or "").strip())
+    normalized_account_id = str(account_id or "").strip()
+    normalized_runtime_kind = str(runtime_kind or "").strip()
+    if not normalized_project or not normalized_account_id:
+        return None
+    try:
+        sessions = list_indexed_sessions("claude")
+    except Exception:
+        return None
+
+    candidates: list[tuple[str, str]] = []
+    for session in sessions:
+        if str(session.get("account_id") or "").strip() != normalized_account_id:
+            continue
+        session_project = os.path.realpath(
+            str(session.get("project_path") or session.get("cwd") or "").strip()
+        )
+        if session_project != normalized_project:
+            continue
+        session_runtime_kind = str(session.get("runtime_kind") or "").strip()
+        if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
+            continue
+        session_id = str(session.get("session_id") or "").strip()
+        if not session_id or session_id.startswith("pid-"):
+            continue
+        sort_key = str(session.get("last_active_at") or session.get("started_at") or "").strip()
+        candidates.append((sort_key, session_id))
+
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _overlay_project_scoped_claude_resume_state(data, project_path, *, account_id="", runtime_kind=""):
+    payload = dict(data) if isinstance(data, dict) else {}
+    normalized_project = os.path.realpath(str(project_path or "").strip())
+    if not normalized_project:
+        return payload
+    session_id = _load_project_scoped_claude_resume_session_id(
+        normalized_project,
+        account_id=account_id,
+        runtime_kind=runtime_kind,
+    )
+    if not session_id:
+        return payload
+
+    projects = payload.get("projects")
+    if not isinstance(projects, dict):
+        projects = {}
+    entry = projects.get(normalized_project)
+    next_entry = dict(entry) if isinstance(entry, dict) else {}
+    next_entry["lastSessionId"] = session_id
+    projects[normalized_project] = next_entry
+    payload["projects"] = projects
     return payload
 
 
@@ -3428,6 +3504,141 @@ def _resolve_real_home_command_path(command_name, env=None):
     return shutil.which(command_name, path=filtered_path) or ""
 
 
+def _mmc_entry_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "mmc")
+
+
+def _assert_safe_mmc_delegate_binary(path_value, *, label):
+    normalized = os.path.realpath(str(path_value or "").strip())
+    if not normalized:
+        console.print(f"[red]缺少 {label} binary[/red]")
+        sys.exit(1)
+    forbidden_parts = ("/.mms/", "/.config/mms/", "/ccswitch", "/hive")
+    lowered = normalized.lower()
+    for token in forbidden_parts:
+        if token.lower() in lowered:
+            console.print(f"[red]{label} binary 命中禁止路径: {normalized}[/red]")
+            sys.exit(1)
+    if not os.path.isabs(normalized) or not os.path.exists(normalized):
+        console.print(f"[red]{label} binary 非法: {normalized}[/red]")
+        sys.exit(1)
+    return normalized
+
+
+def _build_mmc_delegate_env():
+    env = {}
+    for key in ("TERM", "COLORTERM"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            env[key] = value
+    env["PATH"] = os.pathsep.join(
+        (
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+        )
+    )
+    env["MMC_REAL_HOME"] = _real_user_home()
+    return env
+
+
+def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
+    if isinstance(model_info, dict):
+        if model_info.get("lb_light") or model_info.get("lb_medium"):
+            console.print("[red]OAuth Claude 已切到 MMC 隔离模式，不再支持 load-balance / bridge 路线[/red]")
+            sys.exit(1)
+        resolved_model = _resolve_model(model_info)
+    else:
+        resolved_model = _resolve_model(model_info)
+
+    resolved_model = str(resolved_model or "claude-sonnet-4-6").strip() or "claude-sonnet-4-6"
+    resolved_lower = resolved_model.lower()
+    if not any(token in resolved_lower for token in ("claude", "opus", "sonnet", "haiku")):
+        console.print(f"[red]OAuth Claude 仅支持 Claude family 模型，当前选择不允许: {resolved_model}[/red]")
+        sys.exit(1)
+
+    env = {
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "API_TIMEOUT_MS": "3000000",
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+        "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    }
+    _apply_claude_model_overrides(env, model_info or resolved_model, enable_1m=enable_claude_1m)
+    if isinstance(model_info, dict):
+        env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
+        env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "5"
+
+    ctx_window = _effective_context_window(
+        resolved_model,
+        enable_claude_1m=enable_claude_1m,
+        provider_id=(runtime or {}).get("id"),
+    )
+    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
+    env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
+    return env
+
+
+def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_claude_1m=True):
+    mmc_entry = _mmc_entry_path()
+    if not os.path.exists(mmc_entry):
+        console.print(f"[red]未找到 MMC 入口: {mmc_entry}[/red]")
+        sys.exit(1)
+
+    workspace = os.path.realpath(os.getcwd())
+    locale_env = _runtime_locale_env(runtime)
+    timezone_name = _validate_timezone_or_exit(
+        runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
+        label=str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "claude-oauth"),
+    )
+    launch_env = _mmc_launch_env_overrides(
+        model_info,
+        runtime,
+        enable_claude_1m=enable_claude_1m,
+    )
+    if _runtime_force_ipv4(runtime):
+        console.print("[red]OAuth Claude / MMC 路线已禁用 force_ipv4 注入；请改系统网络层，不再透传 NODE_OPTIONS[/red]")
+        sys.exit(1)
+    claude_bin = _assert_safe_mmc_delegate_binary(
+        _resolve_real_home_command_path("claude"),
+        label="claude",
+    )
+    node_bin = _assert_safe_mmc_delegate_binary(
+        _resolve_real_home_command_path("node"),
+        label="node",
+    )
+
+    cmd = [sys.executable, mmc_entry, "run", "--workspace", workspace]
+    cmd.extend(["--claude-bin", claude_bin, "--node-bin", node_bin])
+    proxy_url = str(runtime.get("proxy") or "").strip()
+    if proxy_url:
+        cmd.extend(["--proxy", proxy_url])
+    no_proxy = str(runtime.get("no_proxy") or "").strip()
+    if no_proxy:
+        cmd.extend(["--no-proxy", no_proxy])
+    for flag, value in (
+        ("--lang", locale_env.get("LANG")),
+        ("--lc-all", locale_env.get("LC_ALL")),
+        ("--lc-ctype", locale_env.get("LC_CTYPE")),
+        ("--lc-messages", locale_env.get("LC_MESSAGES")),
+        ("--tz", timezone_name),
+    ):
+        if str(value or "").strip():
+            cmd.extend([flag, str(value).strip()])
+    if runtime.get("bypass"):
+        cmd.extend(["--allow-dir", workspace, "--bypass"])
+    for key, value in launch_env.items():
+        if str(value or "").strip():
+            cmd.extend(["--set-env", f"{key}={value}"])
+
+    env = _build_mmc_delegate_env()
+
+    console.print("[dim]⏳ OAuth Claude 已委托给 MMC 隔离启动...[/dim]")
+    _exec_or_run(cmd, env, once)
+
+
 def _sync_codex_session_claude_json(session_home):
     """Seed isolated Codex HOME with the real user's MCP-capable .claude.json."""
     import json as _json
@@ -3687,27 +3898,13 @@ def launch_claude(model_info, runtime, once=False):
         console.print("[red]官方桥接已临时禁用，避免 Gemini/Codex 请求进入 Claude session。[/red]")
         sys.exit(1)
     if auth_mode == "oauth":
-        env = _account_env(runtime)
-        _prepare_oauth_home_context(runtime, env, "claude")
-        session_required_env = _session_required_env_from_runtime_env(env)
-        session_claude_dir = os.path.join(env.get("HOME", ""), ".claude")
-        account_claude_dir = os.path.join(
-            os.path.expanduser(str(runtime.get("home_dir", "")).strip()),
-            ".claude",
+        _launch_claude_oauth_via_mmc(
+            model_info,
+            runtime,
+            once=once,
+            enable_claude_1m=enable_claude_1m,
         )
-        _write_claude_session_settings(
-            session_claude_dir,
-            required_env=session_required_env,
-            default_env={
-                "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
-                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-            },
-            base_settings=_load_claude_settings_from_dir(account_claude_dir),
-        )
-        env.setdefault("CLAUDE_CODE_ATTRIBUTION_HEADER", "0")
-        env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
-        state_home = None  # per-PID HOME 已隔离，不需要 swap .claude.json
-        cleanup_ctx = None
+        return
     else:
         provider_id = runtime.get("id", "default")
         if runtime.get("skip_gateway_health_check"):
@@ -4446,6 +4643,12 @@ def _claude_gateway_env(
         current_project,
         project_state=current_project_state,
     )
+    data = _overlay_project_scoped_claude_resume_state(
+        data,
+        current_project,
+        account_id=str(runtime.get("id", "")),
+        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+    )
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
 
@@ -5143,11 +5346,8 @@ def launch_cli(cli, model_info, runtime, once=False):
         source_kind = "模型源"
 
     if cli == "claude" and auth_mode == "oauth":
-        report = _build_account_guard_report(_claude_guard_runtime(runtime))
-        runtime["_account_guard_report"] = report
-        if report.get("status") == "blocked":
-            console.print(f"[red]{report.get('blocked_reason') or '账号守护已阻止启动'}[/red]")
-            sys.exit(1)
+        # OAuth Claude 已委托给 MMC 管理 session/state；MMS 不再读取或判定其并发 state。
+        runtime.pop("_account_guard_report", None)
     if cli == "claude" and auth_mode in {"oauth", "api_key"} and runtime.get("bypass"):
         _enforce_claude_network_guard_or_exit(
             runtime,
