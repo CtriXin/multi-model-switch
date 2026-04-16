@@ -633,6 +633,77 @@ def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
     assert "HTTP_PROXY" not in captured["env"]
 
 
+def test_launch_claude_bypass_adds_current_workspace_to_allowed_dirs(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    captured = {}
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
+    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home")})
+    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
+    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
+    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
+    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
+    )
+
+    mms_launchers.launch_claude(
+        {"model": "claude-sonnet-4-6"},
+        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": True},
+        once=True,
+    )
+
+    assert captured["cmd"][:4] == [
+        "claude",
+        "--add-dir",
+        os.path.realpath(str(repo_dir)),
+        "--dangerously-skip-permissions",
+    ]
+
+
+def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    captured = {}
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
+    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home")})
+    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
+    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
+    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
+    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
+    )
+
+    mms_launchers.launch_claude(
+        {"model": "claude-sonnet-4-6"},
+        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": False},
+        once=True,
+    )
+
+    assert captured["cmd"] == ["claude"]
+
+
 def test_install_session_command_wrappers_covers_global_mutating_commands(monkeypatch, tmp_path):
     import mms_launchers
 

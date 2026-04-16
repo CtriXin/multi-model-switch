@@ -3635,6 +3635,7 @@ def launch_claude(model_info, runtime, once=False):
 
     cmd = ["claude"]
     if runtime.get("bypass"):
+        cmd += ["--add-dir", os.path.realpath(os.getcwd())]
         cmd.append("--dangerously-skip-permissions")
     console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
     session_home = env.get("HOME")
