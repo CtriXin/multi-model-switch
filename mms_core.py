@@ -427,6 +427,60 @@ def _infer_model_family(model_name):
                 return entry["family"], entry["category"]
     return "其他", "其他"
 
+
+_MMS_HIDDEN_MODEL_FAMILIES = {"Claude"}
+
+
+def _mms_model_visible(model_name):
+    normalized = str(model_name or "").strip()
+    if not normalized:
+        return True
+    family, _ = _infer_model_family(normalized)
+    return family not in _MMS_HIDDEN_MODEL_FAMILIES
+
+
+def _filter_visible_models(models):
+    return [
+        str(model_name).strip()
+        for model_name in (models or [])
+        if str(model_name or "").strip() and _mms_model_visible(model_name)
+    ]
+
+
+def _model_info_has_visible_models(model_info):
+    if isinstance(model_info, str):
+        return _mms_model_visible(model_info)
+    if not isinstance(model_info, dict):
+        return True
+    model_like_keys = ("model", "opus", "sonnet", "haiku", "subagent", "lb_light", "lb_medium")
+    found_model = False
+    for key in model_like_keys:
+        value = str(model_info.get(key) or "").strip()
+        if not value:
+            continue
+        found_model = True
+        if _mms_model_visible(value):
+            return True
+    return not found_model
+
+
+def _scene_visible_variants(scene):
+    variants = scene.get("variants")
+    if not isinstance(variants, list):
+        return []
+    return [variant for variant in variants if _model_info_has_visible_models((variant or {}).get("model_info", {}))]
+
+
+def _scene_has_visible_model_options(scene):
+    variants = scene.get("variants")
+    if isinstance(variants, list):
+        return bool(_scene_visible_variants(scene))
+    return _model_info_has_visible_models(_scene_model_info(scene))
+
+
+def _preset_has_visible_model_options(preset):
+    return _model_info_has_visible_models(_preset_model_info(preset))
+
 SCENES = {
     "常规任务": {
         "emoji": "⚡",
@@ -5641,7 +5695,7 @@ def ensure_models_ready(cfg, provider):
 
 def categorize_models(models):
     categorized = {}
-    for m in models:
+    for m in _filter_visible_models(models):
         _, category = _infer_model_family(m)
         categorized.setdefault(category, []).append(m)
     return categorized
@@ -5990,6 +6044,8 @@ def _all_provider_models_for_cli(cfg, cli_name, default_provider, default_models
             normalized = str(model_name or "").strip()
             if not normalized or normalized in seen:
                 continue
+            if not _mms_model_visible(normalized):
+                continue
             if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
             seen.add(normalized)
@@ -6015,6 +6071,8 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
         for model_name in models:
             normalized = str(model_name or "").strip()
             if not normalized:
+                continue
+            if not _mms_model_visible(normalized):
                 continue
             if not _provider_supports_model_for_cli(provider, cli_name, normalized):
                 continue
@@ -6157,6 +6215,8 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
     family_order = []
 
     for model_name, (_, provider_ctx, pname, pid) in model_best.items():
+        if not _mms_model_visible(model_name):
+            continue
         family, _ = _infer_model_family(model_name)
         if family not in family_map:
             family_map[family] = []
@@ -6558,14 +6618,16 @@ def _filter_scenes_by_visible_clis(cli_names):
     visible = set(cli_names)
     return {
         name: scene for name, scene in SCENES.items()
-        if scene.get("cli") in visible and scene.get("cli") not in DIRECT_CLI_MODES
+        if scene.get("cli") in visible
+        and scene.get("cli") not in DIRECT_CLI_MODES
+        and _scene_has_visible_model_options(scene)
     }
 
 
 def _builtin_scene_catalog():
     return {
         name: scene for name, scene in SCENES.items()
-        if scene.get("cli") not in DIRECT_CLI_MODES
+        if scene.get("cli") not in DIRECT_CLI_MODES and _scene_has_visible_model_options(scene)
     }
 
 
@@ -6617,9 +6679,10 @@ def _variant_line(variant):
 
 
 def _select_scene_model_info(scene_name, scene, use_tui=False):
-    variants = scene.get("variants")
+    variants = _scene_visible_variants(scene)
     if not variants:
-        return _scene_model_info(scene)
+        model_info = _scene_model_info(scene)
+        return model_info if _model_info_has_visible_models(model_info) else None
 
     option_lines = [_variant_line(variant) for variant in variants]
     if use_tui:
@@ -7268,7 +7331,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             # 获取该 provider 的完整上下文和模型列表
             selected_prov = resolve_provider_context(current_cfg, selected_pid)
             selected_probe = _probe_models(selected_prov, emit_output=False)
-            prov_models = list(selected_probe.get("models") or [])
+            prov_models = _filter_visible_models(selected_probe.get("models") or [])
             if not prov_models:
                 console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
                 continue
@@ -9485,7 +9548,11 @@ def main():
     if args.presets:
         _ensure_rich()
         presets = cfg.get("presets", {})
-        if presets:
+        visible_presets = {
+            name: p for name, p in presets.items()
+            if _preset_has_visible_model_options(p)
+        }
+        if visible_presets:
             table = Table(title="已保存预设")
             table.add_column("名称", style="cyan")
             table.add_column("CLI", style="green")
@@ -9493,7 +9560,7 @@ def main():
             table.add_column("模型", style="yellow")
             table.add_column("描述", style="dim")
             table.add_column("模式", style="blue")
-            for name, p in presets.items():
+            for name, p in visible_presets.items():
                 model_str = p.get("model", f"opus={p.get('opus','')}, sonnet={p.get('sonnet','')}")
                 desc = p.get("description", "")
                 auth = _infer_preset_auth_mode(p) or "—"
