@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
+import subprocess
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -196,6 +199,48 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     assert "PYTHONPATH" not in env
 
 
+def test_build_process_env_applies_proxy_override(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+
+    claude_bin = tmp_path / "bin" / "claude"
+    node_bin = tmp_path / "bin" / "node"
+    claude_bin.parent.mkdir(parents=True)
+    claude_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    node_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    claude_bin.chmod(0o755)
+    node_bin.chmod(0o755)
+
+    args = argparse.Namespace(
+        proxy="http://107.0.0.1:7890",
+        no_proxy="api.anthropic.com",
+        lang="",
+        lc_all="",
+        lc_ctype="",
+        lc_messages="",
+        tz="",
+        force_ipv4=False,
+        allow_dir=[],
+        bypass=False,
+        set_env=[],
+        claude_bin=str(claude_bin),
+        node_bin=str(node_bin),
+    )
+
+    env = mmc_core._build_process_env(
+        args,
+        tmp_path / "session-home",
+        proxy_url_override="http://127.0.0.1:18080",
+        no_proxy_override="127.0.0.1,localhost",
+    )
+
+    assert env["HTTP_PROXY"] == "http://127.0.0.1:18080"
+    assert env["HTTPS_PROXY"] == "http://127.0.0.1:18080"
+    assert env["NO_PROXY"] == "127.0.0.1,localhost"
+
+
 def test_build_process_env_blocks_force_ipv4_injection(monkeypatch, tmp_path):
     import mmc_core
 
@@ -254,6 +299,139 @@ def test_local_proxy_guard_blocks_socks5_local_dns():
 
     assert guard["status"] == "blocked"
     assert "DNS" in guard["block_reason"]
+
+
+def test_local_proxy_guard_blocks_no_proxy_wildcard():
+    import mmc_core
+
+    guard = mmc_core._build_local_proxy_guard("http://127.0.0.1:7890", "*")
+
+    assert guard["status"] == "blocked"
+    assert "*" in guard["no_proxy_conflicts"]
+
+
+def test_proxy_guard_rejects_pid_reuse_when_start_fingerprint_changes(monkeypatch, tmp_path):
+    import mmc_core
+
+    session_home = tmp_path / "session-home"
+    session_home.mkdir()
+    mmc_core._write_json(
+        mmc_core._session_pid_stamp_path(session_home),
+        {
+            "pid": 4321,
+            "lstart": "Thu Apr 16 12:00:00 2026",
+            "command": "python mmc_core.py run",
+        },
+    )
+
+    monkeypatch.setattr(mmc_core, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        mmc_core,
+        "_read_pid_ps_value",
+        lambda _pid, field: {
+            "lstart": "Thu Apr 16 12:05:00 2026",
+            "command": "/usr/bin/python3 unrelated.py",
+        }[field],
+    )
+
+    assert mmc_core._slot_pid_is_active(session_home, 4321) is False
+
+
+def test_overlay_project_scoped_resume_state_only_uses_owned_sessions(monkeypatch, tmp_path):
+    import mmc_core
+
+    config_root = tmp_path / "mmc-config"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    mmc_core._bootstrap_account_state()
+    mmc_core._write_json(
+        mmc_core._account_state_path(),
+        {
+            "userID": "device-1",
+            "oauthAccount": {
+                "accountUuid": "acct-1",
+                "emailAddress": "demo@example.com",
+            },
+        },
+    )
+
+    account_home = str(mmc_core._account_home())
+    monkeypatch.setattr(
+        mmc_core,
+        "list_indexed_sessions",
+        lambda: [
+            {
+                "session_id": "session-foreign",
+                "project_path": str(workspace.resolve()),
+                "last_active_at": "2026-04-16T10:00:00+00:00",
+                "account_home": account_home,
+                "owner_account_uuid": "acct-2",
+            },
+            {
+                "session_id": "session-owned",
+                "project_path": str(workspace.resolve()),
+                "last_active_at": "2026-04-16T09:00:00+00:00",
+                "account_home": account_home,
+                "owner_account_uuid": "acct-1",
+            },
+        ],
+    )
+
+    payload = mmc_core._overlay_project_scoped_resume_state({}, str(workspace))
+
+    assert payload["projects"][str(workspace.resolve())]["lastSessionId"] == "session-owned"
+
+
+def test_run_resume_rejects_foreign_owner_session(monkeypatch, tmp_path):
+    import mmc_core
+
+    config_root = tmp_path / "mmc-config"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    mmc_core._bootstrap_account_state()
+    mmc_core._write_json(
+        mmc_core._account_state_path(),
+        {
+            "userID": "device-1",
+            "oauthAccount": {
+                "accountUuid": "acct-1",
+                "emailAddress": "demo@example.com",
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        mmc_core,
+        "list_indexed_sessions",
+        lambda: [
+            {
+                "session_id": "session-foreign",
+                "project_path": str(workspace.resolve()),
+                "last_active_at": "2026-04-16T10:00:00+00:00",
+                "account_home": str(mmc_core._account_home()),
+                "owner_account_uuid": "acct-2",
+            }
+        ],
+    )
+
+    called = []
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_claude",
+        lambda *_args, **_kwargs: called.append(True) or 0,
+    )
+
+    args = argparse.Namespace(session_ref="1", workspace="")
+    exit_code = mmc_core._run_resume(args)
+
+    assert exit_code == 1
+    assert called == []
 
 
 def test_session_index_reconciles_by_child_pid(monkeypatch, tmp_path):
@@ -364,6 +542,49 @@ def test_cleanup_stale_session_slots_removes_matching_tmpdir(monkeypatch, tmp_pa
     assert not stale_tmp.exists()
 
 
+def test_project_store_metadata_and_slot_marker_use_locked_atomic_write(monkeypatch, tmp_path):
+    import mmc_project_store
+
+    seen = []
+
+    @contextmanager
+    def _fake_lock(path):
+        seen.append(("lock", Path(path)))
+        yield
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    monkeypatch.setattr(mmc_project_store, "locked_state_file", _fake_lock)
+    monkeypatch.setattr(
+        mmc_project_store,
+        "atomic_write_json",
+        lambda path, payload, mode=None, indent=2: seen.append(
+            ("write", Path(path), sorted(payload.keys()), mode, indent)
+        ),
+    )
+
+    session_home = tmp_path / "session-home"
+    workspace = tmp_path / "repo"
+    session_home.mkdir()
+    workspace.mkdir()
+
+    mmc_project_store.write_slot_marker(
+        session_home,
+        cwd=str(workspace),
+        project_key_value="demo",
+        account_home=str(tmp_path / "account"),
+    )
+    mmc_project_store.ensure_claude_project_store(str(workspace))
+
+    slot_marker_path = mmc_project_store.slot_marker_path(session_home)
+    meta_path = mmc_project_store.claude_project_metadata_path(str(workspace))
+
+    assert ("lock", slot_marker_path) in seen
+    assert ("write", slot_marker_path, ["account_home", "cwd", "project_key", "runtime_kind", "written_at"], 0o600, 2) in seen
+    assert ("lock", meta_path) in seen
+    assert ("write", meta_path, ["canonical_path", "created_at", "display_name", "project_key"], 0o600, 2) in seen
+
+
 def test_sync_session_state_persists_project_scoped_state_without_top_level_mcp_servers(monkeypatch, tmp_path):
     import mmc_core
 
@@ -460,6 +681,7 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
     workspace.mkdir()
     session_home = tmp_path / "session-home"
     finalized = []
+    stopped = []
 
     monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
     monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
@@ -471,6 +693,7 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
     monkeypatch.setattr(mmc_core, "_build_session_state", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mmc_core, "_build_session_settings", lambda: {})
     monkeypatch.setattr(mmc_core, "_write_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy: _FakeGuard(stopped))
     monkeypatch.setattr(mmc_core, "_build_process_env", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mmc_core, "_build_claude_cmd", lambda *_args, **_kwargs: ["claude"])
     monkeypatch.setattr(
@@ -493,7 +716,7 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
         def send_signal(self, _signum):
             return None
 
-        def wait(self):
+        def wait(self, timeout=None):
             raise KeyboardInterrupt
 
     monkeypatch.setattr(mmc_core.subprocess, "Popen", lambda *_args, **_kwargs: _FakeChild())
@@ -519,6 +742,98 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
 
     assert exit_code == 130
     assert finalized == [(session_home, 130, False)]
+    assert stopped == [True]
+
+
+def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_path):
+    import mmc_core
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    session_home = tmp_path / "session-home"
+    finalized = []
+    stopped = []
+    env_call = {}
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    monkeypatch.setattr(mmc_core, "_enforce_proxy_guard_or_exit", lambda _args: None)
+    monkeypatch.setattr(mmc_core, "_bootstrap_account_state", lambda: None)
+    monkeypatch.setattr(mmc_core, "_reserve_session_home", lambda: (session_home, 0, 1))
+    monkeypatch.setattr(mmc_core, "_prepare_session_tree", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mmc_core, "_link_keychains_only", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mmc_core, "_build_session_state", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(mmc_core, "_build_session_settings", lambda: {})
+    monkeypatch.setattr(mmc_core, "_write_json", lambda *_args, **_kwargs: None)
+    fake_guard = _FakeGuard(stopped, failure_reason="proxy heartbeat failed for claude: HTTP 000")
+    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy: fake_guard)
+    monkeypatch.setattr(
+        mmc_core,
+        "_build_process_env",
+        lambda *_args, **kwargs: env_call.update(kwargs) or {},
+    )
+    monkeypatch.setattr(mmc_core, "_build_claude_cmd", lambda *_args, **_kwargs: ["claude"])
+    monkeypatch.setattr(
+        mmc_core,
+        "_finalize_session",
+        lambda session_path, *, exit_code, stale_cleanup=False: finalized.append(
+            (session_path, exit_code, stale_cleanup)
+        ),
+    )
+    monkeypatch.setattr(mmc_core, "bind_claude_session_process", lambda **_kwargs: None)
+    monkeypatch.setattr(mmc_core.signal, "getsignal", lambda _signum: None)
+    monkeypatch.setattr(mmc_core.signal, "signal", lambda _signum, _handler: None)
+
+    class _FakeChild:
+        pid = 9876
+
+        def __init__(self):
+            self.returncode = None
+            self.signals = []
+            self.wait_calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def send_signal(self, signum):
+            self.signals.append(signum)
+            self.returncode = 143 if signum == signal.SIGTERM else 137
+
+        def wait(self, timeout=None):
+            if self.returncode is not None:
+                return self.returncode
+            self.wait_calls += 1
+            fake_guard.failed_event.set()
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout)
+
+    child = _FakeChild()
+    monkeypatch.setattr(mmc_core.subprocess, "Popen", lambda *_args, **_kwargs: child)
+
+    args = argparse.Namespace(
+        workspace=str(workspace),
+        proxy="http://107.0.0.1:7890",
+        no_proxy="",
+        lang="",
+        lc_all="",
+        lc_ctype="",
+        lc_messages="",
+        tz="",
+        force_ipv4=False,
+        allow_dir=[],
+        bypass=False,
+        set_env=[],
+        claude_bin="",
+        node_bin="",
+    )
+
+    exit_code = mmc_core._run_claude(args)
+
+    assert exit_code != 0
+    assert signal.SIGTERM in child.signals
+    assert env_call["proxy_url_override"] == fake_guard.local_proxy_url
+    assert env_call["no_proxy_override"] == "127.0.0.1,localhost"
+    assert finalized == [(session_home, exit_code, False)]
+    assert stopped == [True]
 
 
 def test_reserve_session_home_uses_reservation_lock(monkeypatch, tmp_path):
@@ -542,7 +857,8 @@ def test_reserve_session_home_uses_reservation_lock(monkeypatch, tmp_path):
     assert active_before == 0
     assert active_after == 1
     assert session_home is not None and session_home.exists()
-    assert seen == [mmc_core._session_slots_lock_path()]
+    assert seen[0] == mmc_core._session_slots_lock_path()
+    assert seen[1] == mmc_core._session_pid_stamp_path(session_home)
 
 
 def test_reserve_session_home_blocks_after_max_live_sessions(monkeypatch, tmp_path):
@@ -560,3 +876,29 @@ def test_reserve_session_home_blocks_after_max_live_sessions(monkeypatch, tmp_pa
     assert session_home is None
     assert active_before == 4
     assert active_after == 5
+
+
+class _FakeGuard:
+    def __init__(self, stopped, *, failure_reason=""):
+        self.local_proxy_url = "http://127.0.0.1:18080"
+        self.failure_reason = failure_reason
+        self.failed_event = threading.Event()
+        self._stopped = stopped
+
+    def stop(self):
+        self._stopped.append(True)
+
+
+def test_inject_upstream_proxy_auth_adds_and_replaces_header():
+    from mmc_proxy_guard import inject_upstream_proxy_auth
+
+    request = b"CONNECT claude.ai:443 HTTP/1.1\r\nHost: claude.ai:443\r\n\r\n"
+    injected = inject_upstream_proxy_auth(request, "Basic abc")
+    replaced = inject_upstream_proxy_auth(
+        b"CONNECT claude.ai:443 HTTP/1.1\r\nHost: claude.ai:443\r\nProxy-Authorization: Basic old\r\n\r\n",
+        "Basic new",
+    )
+
+    assert b"Proxy-Authorization: Basic abc\r\n" in injected
+    assert b"Proxy-Authorization: Basic new\r\n" in replaced
+    assert b"Basic old" not in replaced

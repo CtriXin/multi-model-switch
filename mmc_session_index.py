@@ -141,7 +141,16 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
     return updated, target
 
 
-def record_claude_session_start(*, cwd: str, pid: int, slot_home: str) -> dict:
+def record_claude_session_start(
+    *,
+    cwd: str,
+    pid: int,
+    slot_home: str,
+    account_home: str = "",
+    owner_user_id: str = "",
+    owner_account_uuid: str = "",
+    owner_email: str = "",
+) -> dict:
     store = ensure_claude_project_store(cwd)
     payload = {
         "session_id": None,
@@ -156,6 +165,10 @@ def record_claude_session_start(*, cwd: str, pid: int, slot_home: str) -> dict:
         "cli": "claude",
         "runtime_kind": "oauth",
         "slot_home": slot_home,
+        "account_home": os.path.realpath(str(account_home or "").strip()) if str(account_home or "").strip() else "",
+        "owner_user_id": str(owner_user_id or "").strip(),
+        "owner_account_uuid": str(owner_account_uuid or "").strip(),
+        "owner_email": str(owner_email or "").strip().lower(),
         "exit_code": None,
         "stale_cleanup": False,
     }

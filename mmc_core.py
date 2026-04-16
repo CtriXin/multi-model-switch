@@ -12,8 +12,10 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 
+from mmc_proxy_guard import LocalProxyGuard, loopback_only_no_proxy
 from mmc_project_store import (
     CLAUDE_PERSISTENT_ENTRIES,
     claude_raw_entry_path,
@@ -27,7 +29,6 @@ from mmc_session_index import (
     finalize_claude_session,
     list_indexed_sessions,
     record_claude_session_start,
-    resolve_session_ref,
 )
 from mms_state_io import atomic_write_json, locked_state_file
 
@@ -149,6 +150,8 @@ _ALLOWED_SESSION_HOOK_FILES = (
     ("PreToolUse", "Read", "read-once-hook.sh", "READ_ONCE_DIFF=1 "),
     ("PostCompact", "", "read-once-compact.sh", ""),
 )
+_SESSION_PID_STAMP_NAME = ".mmc_pid.json"
+_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 5.0
 
 
 def _real_user_home() -> Path:
@@ -207,6 +210,45 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _session_pid_stamp_path(session_home: Path) -> Path:
+    return Path(session_home) / _SESSION_PID_STAMP_NAME
+
+
+def _read_pid_ps_value(pid: int, field: str) -> str:
+    ps_bin = shutil.which("ps", path=os.defpath) or shutil.which("ps")
+    if not ps_bin:
+        return ""
+    try:
+        result = subprocess.run(
+            [ps_bin, "-p", str(int(pid)), "-o", f"{field}="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _pid_command_looks_like_mmc(command_line: str) -> bool:
+    normalized = " ".join(str(command_line or "").strip().lower().split())
+    if not normalized:
+        return False
+    repo_root = str(_repo_root()).lower()
+    if repo_root and repo_root in normalized:
+        return True
+    if "mmc_core.py" in normalized or " -m mmc_core" in normalized:
+        return True
+    for token in normalized.split():
+        token = token.strip("'\"")
+        if token == "mmc" or token.endswith(f"{os.sep}mmc"):
+            return True
+    return False
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(int(pid), 0)
@@ -215,6 +257,39 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def _write_session_pid_stamp(session_home: Path, *, pid: int) -> None:
+    payload = {
+        "pid": int(pid),
+        "lstart": _read_pid_ps_value(pid, "lstart"),
+        "command": _read_pid_ps_value(pid, "command"),
+        "written_at": _utc_now(),
+    }
+    try:
+        _write_json(_session_pid_stamp_path(session_home), payload)
+    except Exception:
+        pass
+
+
+def _slot_pid_is_active(session_home: Path, pid: int) -> bool:
+    if not _pid_alive(pid):
+        return False
+
+    expected = _load_json_dict(_session_pid_stamp_path(session_home))
+    current_lstart = _read_pid_ps_value(pid, "lstart")
+    if current_lstart:
+        expected_lstart = str(expected.get("lstart") or "").strip()
+        if expected_lstart:
+            return current_lstart == expected_lstart
+
+    current_command = _read_pid_ps_value(pid, "command")
+    expected_command = str(expected.get("command") or "").strip()
+    if current_command and expected_command:
+        return current_command == expected_command
+    if current_command:
+        return _pid_command_looks_like_mmc(current_command)
+    return False
 
 
 def _remove_path_tree(path: Path) -> None:
@@ -245,7 +320,7 @@ def _cleanup_stale_session_slots(sessions_dir: Path) -> list[Path]:
         except ValueError:
             _cleanup_session_runtime_artifacts(entry)
             continue
-        if _pid_alive(pid):
+        if _slot_pid_is_active(entry, pid):
             active_slots.append(entry)
             continue
         _cleanup_session_runtime_artifacts(entry)
@@ -266,6 +341,7 @@ def _reserve_session_home() -> tuple[Path | None, int, int]:
             suffix += 1
             session_home = sessions_dir / f"{os.getpid()}-{int(time.time() * 1000)}-{suffix}"
         session_home.mkdir(parents=True, exist_ok=False)
+        _write_session_pid_stamp(session_home, pid=os.getpid())
         return session_home, active_before, active_after
 
 
@@ -501,6 +577,110 @@ def _write_json(path: Path, payload: dict) -> None:
         atomic_write_json(str(path), payload, mode=0o600)
 
 
+def _normalize_owner_value(value, *, lower: bool = False) -> str:
+    normalized = str(value or "").strip()
+    return normalized.lower() if lower else normalized
+
+
+def _current_account_owner_metadata() -> dict[str, str]:
+    state = _load_json_dict(_account_state_path())
+    oauth_account = state.get("oauthAccount")
+    oauth_account = oauth_account if isinstance(oauth_account, dict) else {}
+    oauth_tokens = state.get("claudeAiOauth")
+    oauth_tokens = oauth_tokens if isinstance(oauth_tokens, dict) else {}
+    return {
+        "account_home": os.path.realpath(str(_account_home())),
+        "owner_user_id": _normalize_owner_value(state.get("userID")),
+        "owner_account_uuid": _normalize_owner_value(
+            oauth_account.get("accountUuid") or oauth_tokens.get("accountUuid")
+        ),
+        "owner_email": _normalize_owner_value(
+            oauth_account.get("emailAddress") or oauth_tokens.get("emailAddress"),
+            lower=True,
+        ),
+    }
+
+
+def _session_account_home(session: dict) -> str:
+    raw_account_home = str(session.get("account_home") or "").strip()
+    account_home = os.path.realpath(raw_account_home) if raw_account_home else ""
+    if account_home:
+        return account_home
+    raw_slot_home = str(session.get("slot_home") or "").strip()
+    slot_home = os.path.realpath(raw_slot_home) if raw_slot_home else ""
+    if not slot_home:
+        return ""
+    slot_path = Path(slot_home)
+    if len(slot_path.parts) >= 2 and slot_path.parent.name == "s":
+        return str(slot_path.parent.parent)
+    return ""
+
+
+def _session_owned_by_current_account(session: dict, owner: dict[str, str] | None = None) -> tuple[bool, str]:
+    owner = dict(owner or _current_account_owner_metadata())
+    raw_expected_home = str(owner.get("account_home") or "").strip()
+    expected_home = os.path.realpath(raw_expected_home) if raw_expected_home else ""
+    session_home = _session_account_home(session)
+    if not expected_home or not session_home or session_home != expected_home:
+        return False, "session account_home 与当前 MMC account 不一致"
+
+    owner_checks = (
+        ("owner_account_uuid", False, "accountUuid"),
+        ("owner_user_id", False, "userID"),
+        ("owner_email", True, "email"),
+    )
+    for field, lower, label in owner_checks:
+        session_value = _normalize_owner_value(session.get(field), lower=lower)
+        if not session_value:
+            continue
+        current_value = _normalize_owner_value(owner.get(field), lower=lower)
+        if not current_value:
+            return False, f"当前 MMC account 缺少 {label}，无法安全恢复旧 session"
+        if current_value != session_value:
+            return False, f"session {label} 与当前 MMC account 不一致"
+        return True, ""
+    return False, "session 缺少 owner fingerprint，按安全策略拒绝恢复"
+
+
+def _list_owned_indexed_sessions() -> list[dict]:
+    owner = _current_account_owner_metadata()
+    return [
+        item
+        for item in list_indexed_sessions()
+        if _session_owned_by_current_account(item, owner)[0]
+    ]
+
+
+def _resolve_owned_session_ref(session_ref: str) -> tuple[str | None, str | None]:
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, "session_ref 不能为空"
+    sessions = _list_owned_indexed_sessions()
+    if not sessions:
+        return None, "暂无当前 MMC account 可恢复 session"
+
+    if ref.isdigit():
+        index = int(ref)
+        if 1 <= index <= len(sessions):
+            return str(sessions[index - 1].get("session_id") or "").strip() or None, None
+        return None, f"找不到第 {index} 条 session"
+
+    exact = [item for item in sessions if str(item.get("session_id") or "").strip() == ref]
+    if exact:
+        return ref, None
+
+    matches = [
+        str(item.get("session_id") or "").strip()
+        for item in sessions
+        if str(item.get("session_id") or "").strip().startswith(ref)
+    ]
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) > 1:
+        return None, f"session 前缀不唯一: {ref}"
+    return None, f"找不到当前 MMC account 的 session: {ref}"
+
+
 def _load_source_settings_theme(source_home: Path) -> str:
     settings_path = source_home / ".claude" / "settings.json"
     loaded = _load_json_dict(settings_path)
@@ -583,7 +763,7 @@ def _overlay_project_scoped_resume_state(data, project_path: str, explicit_sessi
     session_id = str(explicit_session_id or "").strip()
     if not session_id:
         candidates = []
-        for session in list_indexed_sessions():
+        for session in _list_owned_indexed_sessions():
             session_project = os.path.realpath(
                 str(session.get("project_path") or session.get("cwd") or "").strip()
             )
@@ -664,6 +844,7 @@ def _build_session_settings():
 def _prepare_session_tree(session_home: Path, workspace: str):
     workspace = os.path.realpath(workspace)
     store = ensure_claude_project_store(workspace)
+    owner = _current_account_owner_metadata()
     session_claude_dir = session_home / ".claude"
     session_claude_dir.mkdir(parents=True, exist_ok=True)
     for entry in list(session_claude_dir.iterdir()):
@@ -678,7 +859,15 @@ def _prepare_session_tree(session_home: Path, workspace: str):
         target = claude_raw_entry_path(entry_name, workspace)
         if not dst.exists() and not dst.is_symlink():
             os.symlink(target, dst)
-    record_claude_session_start(cwd=workspace, pid=os.getpid(), slot_home=str(session_home))
+    record_claude_session_start(
+        cwd=workspace,
+        pid=os.getpid(),
+        slot_home=str(session_home),
+        account_home=owner.get("account_home", ""),
+        owner_user_id=owner.get("owner_user_id", ""),
+        owner_account_uuid=owner.get("owner_account_uuid", ""),
+        owner_email=owner.get("owner_email", ""),
+    )
     write_slot_marker(
         session_home,
         cwd=workspace,
@@ -977,7 +1166,13 @@ def _ensure_private_tool_bin(session_home: Path, *, claude_bin: str, node_bin: s
     return str(private_bin)
 
 
-def _build_process_env(args, session_home: Path) -> dict[str, str]:
+def _build_process_env(
+    args,
+    session_home: Path,
+    *,
+    proxy_url_override: str | None = None,
+    no_proxy_override: str | None = None,
+) -> dict[str, str]:
     env = {}
     for key in _SAFE_PARENT_ENV_KEYS:
         value = str(os.environ.get(key) or "").strip()
@@ -1009,8 +1204,10 @@ def _build_process_env(args, session_home: Path) -> dict[str, str]:
         )
     )
 
-    if args.proxy:
-        _apply_proxy_env(env, args.proxy, args.no_proxy)
+    proxy_url = args.proxy if proxy_url_override is None else proxy_url_override
+    no_proxy = args.no_proxy if no_proxy_override is None else no_proxy_override
+    if proxy_url:
+        _apply_proxy_env(env, proxy_url, no_proxy)
     if args.lang:
         env["LANG"] = args.lang
     if args.lc_all:
@@ -1036,6 +1233,73 @@ def _build_process_env(args, session_home: Path) -> dict[str, str]:
             env.pop(key, None)
 
     return env
+
+
+def _build_runtime_proxy_probe() -> Callable[[str, str], dict]:
+    return lambda upstream_proxy_url, target_url: _run_proxy_probe(
+        upstream_proxy_url,
+        target_url,
+        no_proxy="",
+        force_ipv4=True,
+    )
+
+
+def _start_session_proxy_guard(proxy_url: str) -> LocalProxyGuard:
+    guard = LocalProxyGuard(
+        proxy_url,
+        probe_targets=_CLAUDE_PROXY_GUARD_TARGETS,
+        probe_interval_sec=_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC,
+        probe_fn=_build_runtime_proxy_probe(),
+    )
+    guard.start()
+    return guard
+
+
+def _signal_child_process(child, signum: int) -> None:
+    sender = getattr(child, "send_signal", None)
+    if callable(sender):
+        sender(signum)
+        return
+    if signum == signal.SIGTERM:
+        terminator = getattr(child, "terminate", None)
+        if callable(terminator):
+            terminator()
+            return
+    if signum == signal.SIGKILL:
+        killer = getattr(child, "kill", None)
+        if callable(killer):
+            killer()
+
+
+def _terminate_child_process(child, *, grace_timeout_sec: float = 3.0) -> None:
+    if child is None or child.poll() is not None:
+        return
+    try:
+        _signal_child_process(child, signal.SIGTERM)
+    except Exception:
+        pass
+    deadline = time.monotonic() + max(float(grace_timeout_sec), 0.2)
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            return
+        try:
+            child.wait(timeout=min(0.2, max(deadline - time.monotonic(), 0.05)))
+            return
+        except subprocess.TimeoutExpired:
+            continue
+        except TypeError:
+            time.sleep(0.05)
+        except Exception:
+            return
+    if child.poll() is None:
+        try:
+            _signal_child_process(child, signal.SIGKILL)
+        except Exception:
+            pass
+        try:
+            child.wait(timeout=1.0)
+        except Exception:
+            pass
 
 
 def _resolve_claude_binary(env: dict[str, str]) -> str:
@@ -1101,12 +1365,10 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
     _write_json(session_home / ".claude.json", session_state)
     _write_json(session_home / ".claude" / "settings.json", _build_session_settings())
 
-    env = _build_process_env(args, session_home)
-    cmd = _build_claude_cmd(args, env)
-
     print(f"mmc: launching Claude in isolated HOME {session_home}", flush=True)
     exit_code = 130
     child = None
+    proxy_guard = None
     handled_signals = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     previous_handlers = {}
 
@@ -1119,6 +1381,21 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
                 pass
 
     try:
+        proxy_guard = _start_session_proxy_guard(args.proxy)
+    except Exception as exc:
+        print(f"mmc: 启动本地 proxy guard 失败: {exc}", file=sys.stderr)
+        _finalize_session(session_home, exit_code=1)
+        return 1
+
+    env = _build_process_env(
+        args,
+        session_home,
+        proxy_url_override=proxy_guard.local_proxy_url,
+        no_proxy_override=loopback_only_no_proxy(),
+    )
+    cmd = _build_claude_cmd(args, env)
+
+    try:
         for signum in handled_signals:
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, _forward_signal)
@@ -1129,10 +1406,25 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
             child_pid=child.pid,
             launch_nonce=session_home.name,
         )
-        exit_code = int(child.wait() or 0)
+        while True:
+            if proxy_guard.failed_event.is_set():
+                reason = proxy_guard.failure_reason or "local proxy guard failed"
+                print(f"mmc: {reason}; 已终止 Claude 子进程", file=sys.stderr, flush=True)
+                _terminate_child_process(child)
+                exit_code = int(child.poll() or 1) if child is not None else 1
+                if exit_code == 0:
+                    exit_code = 1
+                break
+            try:
+                exit_code = int(child.wait(timeout=1.0) or 0)
+                break
+            except subprocess.TimeoutExpired:
+                continue
     except KeyboardInterrupt:
         exit_code = 130
     finally:
+        if proxy_guard is not None:
+            proxy_guard.stop()
         for signum, handler in previous_handlers.items():
             try:
                 signal.signal(signum, handler)
@@ -1143,11 +1435,11 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
 
 
 def _run_resume(args) -> int:
-    session_id, error = resolve_session_ref(args.session_ref)
+    session_id, error = _resolve_owned_session_ref(args.session_ref)
     if not session_id:
         print(f"mmc: {error or '找不到 session'}", file=sys.stderr)
         return 1
-    sessions = list_indexed_sessions()
+    sessions = _list_owned_indexed_sessions()
     matched = next((item for item in sessions if str(item.get("session_id") or "").strip() == session_id), None)
     if matched and not args.workspace:
         args.workspace = str(matched.get("project_path") or matched.get("cwd") or "").strip()
@@ -1155,7 +1447,7 @@ def _run_resume(args) -> int:
 
 
 def _handle_session_ls() -> int:
-    sessions = list_indexed_sessions()
+    sessions = _list_owned_indexed_sessions()
     if not sessions:
         print("暂无 MMC session")
         return 0

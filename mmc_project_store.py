@@ -9,6 +9,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mms_state_io import atomic_write_json, locked_state_file
+
 DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mmc"))
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
 DEFAULT_PROJECTS_DIR = DEFAULT_PRIMARY_CONFIG_DIR / "projects"
@@ -58,6 +60,12 @@ def get_projects_dir() -> Path:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with locked_state_file(path):
+        atomic_write_json(str(path), payload, mode=0o600)
 
 
 def canonical_project_path(cwd: str | None = None) -> str:
@@ -138,7 +146,7 @@ def write_slot_marker(
         "runtime_kind": "oauth",
         "written_at": _utc_now(),
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json(path, payload)
     return path
 
 
@@ -171,7 +179,7 @@ def ensure_claude_project_store(cwd: str | None = None) -> dict:
             "display_name": os.path.basename(canonical.rstrip(os.sep)) or canonical,
             "created_at": _utc_now(),
         }
-        meta_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_json(meta_path, payload)
 
     return {
         "project_key": key,
