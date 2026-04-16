@@ -1,6 +1,6 @@
 # CLI / Provider Compatibility Notes
 
-> 更新时间：2026-04-15
+> 更新时间：2026-04-16
 > 范围：`claude` / `codex` / `qwen` / `kimi` 与公开仓库内可见的通用兼容性规则。
 
 ## 为什么这份文档被改成精简版
@@ -59,6 +59,7 @@
 - `.claude.json` 在 copy-in / sync-back 时都应剥离 `projects`、`lastSessionId`、`lastCost` 这类 restore-state 噪声，避免“第一窗口正常、第二窗口继承旧恢复状态”
 - OAuth `.claude.json` 不应继续走 blacklist strip；应改成 allowlist，只保留 account-scoped OAuth 持久态（如 `userID` / `oauthAccount` / `claudeAiOauth` 的明确字段）
 - OAuth 启动前要清理父进程残留的 `ANTHROPIC_*` / `CLAUDE_CODE_*` 覆盖环境，避免 gateway/api_key session 把认证和模型槽位带进官方账号路径
+- 非 Claude CLI 与 gateway/bridge 路径也要清理 inherited `OPENAI_* / proxy / fake-upstream / CA env`，避免上一条 session 或全局 shell 环境把 data plane 静默带偏
 
 ### 5. Proxy / timezone / IPv4-first 现在是 runtime profile 的一部分
 
@@ -70,6 +71,12 @@
 - `force_ipv4`
 
 不要把这些网络/环境参数混进展示层状态，也不要让它们只在最终子进程生效、但前置 probe 漂移到别的网络路径。
+
+另外，`accept-only` 只解决 config/state 继承问题，不等于 data plane 已经隔离。对于本地 bridge / gateway 上游请求，默认还应满足：
+
+- bridge 上游 `httpx` 请求默认 `trust_env=False`
+- 只有 MMS 显式传入的 `runtime.proxy / runtime.no_proxy` 可以影响 bridge 实际出口
+- 不能让 ambient/global proxy（例如系统 proxy、其他工具注入的 `HTTP_PROXY`、本机 `cc-switch`）静默覆盖掉用户在 MMS 里选中的 channel / provider
 
 ### 6. Claude hardening 默认要走 allowlist + fail-closed
 

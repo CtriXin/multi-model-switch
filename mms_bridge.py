@@ -44,6 +44,48 @@ def _ensure_httpx():
     return httpx
 
 
+def _split_no_proxy_values(no_proxy):
+    raw = str(no_proxy or "").strip()
+    if not raw:
+        return []
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
+
+
+def _target_matches_no_proxy(target_url, no_proxy):
+    target_url = str(target_url or "").strip()
+    if not target_url:
+        return False
+    try:
+        host = (urlsplit(target_url).hostname or "").strip().lower()
+    except Exception:
+        host = ""
+    if not host:
+        return False
+    for token in _split_no_proxy_values(no_proxy):
+        normalized = token.lstrip(".")
+        if not normalized:
+            continue
+        if token == "*" or host == normalized or host.endswith("." + normalized):
+            return True
+    return False
+
+
+def _bridge_httpx_kwargs(*, target_url="", proxy_url="", no_proxy=""):
+    kwargs = {"trust_env": False}
+    normalized_proxy = str(proxy_url or "").strip()
+    if normalized_proxy and not _target_matches_no_proxy(target_url, no_proxy):
+        kwargs["proxy"] = normalized_proxy
+    return kwargs
+
+
+def _server_bridge_httpx_kwargs(server, target_url=""):
+    return _bridge_httpx_kwargs(
+        target_url=target_url,
+        proxy_url=getattr(server, "proxy_url", ""),
+        no_proxy=getattr(server, "no_proxy", ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 公共 URL 构造：仅对裸域名补 /v1
 # ---------------------------------------------------------------------------
@@ -1083,7 +1125,18 @@ def _bridge_request_to_codex(account, model_name, request_payload, stream_respon
     payload = _build_codex_payload(request_payload, model_name)
     url = f"https://chatgpt.com/backend-api/codex/responses?client_version={client_version}"
     translator = _AnthropicTranslator(model_name)
-    with httpx.stream("POST", url, headers=headers, json=payload, timeout=300) as response:
+    with httpx.stream(
+        "POST",
+        url,
+        headers=headers,
+        json=payload,
+        timeout=300,
+        **_bridge_httpx_kwargs(
+            target_url=url,
+            proxy_url=account.get("proxy"),
+            no_proxy=account.get("no_proxy"),
+        ),
+    ) as response:
         if response.status_code >= 400:
             body = response.read().decode("utf-8", errors="replace")
             raise RuntimeError(body or f"Codex bridge upstream failed: {response.status_code}")
@@ -1756,7 +1809,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
 
         try:
             if stream:
-                with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
+                with httpx.stream(
+                    "POST",
+                    target_url,
+                    headers=fwd_headers,
+                    json=payload,
+                    timeout=300,
+                    **_server_bridge_httpx_kwargs(self.server, target_url),
+                ) as response:
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
                     self.send_header("Cache-Control", "no-cache")
@@ -1796,7 +1856,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         server=self.server,
                     )
             else:
-                response = httpx.post(target_url, headers=fwd_headers, json=payload, timeout=300)
+                response = httpx.post(
+                    target_url,
+                    headers=fwd_headers,
+                    json=payload,
+                    timeout=300,
+                    **_server_bridge_httpx_kwargs(self.server, target_url),
+                )
                 first_byte_ms = _now_ms()
                 body_out = response.content
                 if body_out:
@@ -1900,7 +1966,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         translator = _AnthropicTranslator(model_name)
 
         try:
-            with httpx.stream("POST", target_url, headers=fwd_headers, json=responses_payload, timeout=300) as response:
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=responses_payload,
+                timeout=300,
+                **_server_bridge_httpx_kwargs(self.server, target_url),
+            ) as response:
                 if response.status_code >= 400:
                     body = response.read().decode("utf-8", errors="replace")
                     try:
@@ -2398,7 +2471,14 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            with httpx.stream("POST", target_url, headers=fwd_headers, json=payload, timeout=300) as response:
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=payload,
+                timeout=300,
+                **_server_bridge_httpx_kwargs(self.server, target_url),
+            ) as response:
                 content_type = response.headers.get("content-type", "application/json")
                 is_stream = "text/event-stream" in content_type.lower()
 
@@ -2537,7 +2617,12 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                 retry_remaining = 1
                 while True:
                     with httpx.stream(
-                        "POST", target_url, headers=fwd_headers, json=chat_payload, timeout=300
+                        "POST",
+                        target_url,
+                        headers=fwd_headers,
+                        json=chat_payload,
+                        timeout=300,
+                        **_server_bridge_httpx_kwargs(self.server, target_url),
                     ) as response:
                         if response.status_code == 429:
                             last_status = response.status_code
@@ -2716,8 +2801,14 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
         first_byte_ms = None
         output_tokens = None
         try:
-            with httpx.stream("POST", target_url, headers=fwd_headers,
-                              json=chat_payload, timeout=300) as response:
+            with httpx.stream(
+                "POST",
+                target_url,
+                headers=fwd_headers,
+                json=chat_payload,
+                timeout=300,
+                **_server_bridge_httpx_kwargs(self.server, target_url),
+            ) as response:
                 if response.status_code >= 400:
                     body = response.read().decode("utf-8", errors="replace")
                     self._json(response.status_code, {"error": {"message": body}})
@@ -2770,6 +2861,8 @@ def codex_chatcompletions_bridge(
     advertised_models=None,
     speed_scope=None,
     route_status_paths=None,
+    proxy_url="",
+    no_proxy="",
 ):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
@@ -2789,6 +2882,8 @@ def codex_chatcompletions_bridge(
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
+    server.proxy_url = str(proxy_url or "").strip()
+    server.no_proxy = str(no_proxy or "").strip()
     server.session_input_tokens = 0
     server.session_output_tokens = 0
     server.session_request_count = 0
@@ -2821,6 +2916,8 @@ def codex_responses_bridge(
     route_status_paths=None,
     provider_id="",
     reasoning_effort="medium",
+    proxy_url="",
+    no_proxy="",
 ):
     _ensure_httpx()
     if httpx is None:
@@ -2837,6 +2934,8 @@ def codex_responses_bridge(
     server.bridge_token = bridge_token
     server.provider_id = provider_id
     server.reasoning_effort = reasoning_effort
+    server.proxy_url = str(proxy_url or "").strip()
+    server.no_proxy = str(no_proxy or "").strip()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -2870,6 +2969,8 @@ def gateway_claude_bridge(
     strip_upstream_user_agent=False,
     minimal_claude_header_passthrough=False,
     reasoning_effort="medium",
+    proxy_url="",
+    no_proxy="",
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -2903,6 +3004,8 @@ def gateway_claude_bridge(
     server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
     server.minimal_claude_header_passthrough = bool(minimal_claude_header_passthrough)
     server.reasoning_effort = reasoning_effort
+    server.proxy_url = str(proxy_url or "").strip()
+    server.no_proxy = str(no_proxy or "").strip()
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

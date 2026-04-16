@@ -543,7 +543,7 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert "ANTHROPIC_MODEL" not in env
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
     assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
-    assert env["HTTP_PROXY"] == "http://127.0.0.1:7890"
+    assert "HTTP_PROXY" not in env
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
@@ -575,8 +575,62 @@ def test_account_env_scrubs_claude_oauth_parent_env_for_codex(monkeypatch, tmp_p
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "ANTHROPIC_BASE_URL" not in env
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
-    assert env["OPENAI_API_KEY"] == "sk-openai"
+    assert "OPENAI_API_KEY" not in env
     assert env["HOME"].startswith(str(account_home / "s"))
+
+
+def test_account_env_scrubs_inherited_openai_and_proxy_parent_env_for_gemini(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:15721/v1")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:15721")
+
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env = mms_launchers._account_env(
+        {"id": "gemini-a", "cli": "gemini", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    assert "OPENAI_API_KEY" not in env
+    assert "OPENAI_BASE_URL" not in env
+    assert "HTTP_PROXY" not in env
+    assert env["GEMINI_CLI_HOME"] == str(account_home)
+
+
+def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-parent")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:15721/v1")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:15721")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime=None: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env)}),
+    )
+
+    mms_launchers.launch_qwen(
+        "qwen3.5-plus",
+        {"id": "qwen-a", "api_key": "sk-runtime", "openai_base_url": "https://api.example.com/v1"},
+        once=True,
+    )
+
+    assert captured["cmd"][:3] == ["qwen", "--openai-base-url", "https://api.example.com/v1"]
+    assert "OPENAI_API_KEY" not in captured["env"]
+    assert "OPENAI_BASE_URL" not in captured["env"]
+    assert "HTTP_PROXY" not in captured["env"]
 
 
 def test_install_session_command_wrappers_covers_global_mutating_commands(monkeypatch, tmp_path):
@@ -853,6 +907,75 @@ def test_gateway_claude_bridge_binds_ephemeral_port_and_waits_ready(monkeypatch)
     assert calls["addr"] == ("127.0.0.1", 0)
     assert calls["wait"] == [(54321, 50, 0.1)]
     assert calls["closed"] == 1
+
+
+def test_bridge_httpx_kwargs_disable_ambient_proxy_by_default():
+    import mms_bridge
+
+    kwargs = mms_bridge._bridge_httpx_kwargs(target_url="https://relay.example.com/v1/messages")
+
+    assert kwargs == {"trust_env": False}
+
+
+def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        content = b'{"ok": true}'
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["kwargs"] = dict(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(post=fake_post))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps(
+        {
+            "model": "claude-sonnet-4-6",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        }
+    ).encode("utf-8")
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.path = "/v1/messages"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "x-api-key": "bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["claude-sonnet-4-6"],
+        heavy_model="claude-sonnet-4-6",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="http://127.0.0.1:15721",
+        no_proxy="",
+    )
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["status"] == 200
+    assert captured["url"] == "https://relay.example.com/v1/messages"
+    assert captured["kwargs"]["trust_env"] is False
+    assert captured["kwargs"]["proxy"] == "http://127.0.0.1:15721"
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):

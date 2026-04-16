@@ -1476,6 +1476,30 @@ _CLAUDE_OAUTH_ENV_PREFIX_BLOCKLIST = (
     "ANTHROPIC_",
     "CLAUDE_CODE_",
 )
+_OPENAI_ENV_PREFIX_BLOCKLIST = (
+    "OPENAI_",
+)
+_RUNTIME_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+)
+_RUNTIME_FAKE_ENV_KEYS = (
+    "MMS_FAKE_UPSTREAM_MODE",
+    "MMS_FAKE_UPSTREAM_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
+)
+_RUNTIME_CA_ENV_KEYS = (
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+)
 
 _CLAUDE_MAILBOX_PREFIX = os.path.join(_real_user_path(".claude"), "mailbox")
 
@@ -2747,9 +2771,22 @@ def _scrub_claude_oauth_env(env):
     return env
 
 
+def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
+    env = _scrub_claude_oauth_env(env)
+    if strip_openai:
+        for key in list(env.keys()):
+            normalized = str(key or "").strip()
+            if any(normalized.startswith(prefix) for prefix in _OPENAI_ENV_PREFIX_BLOCKLIST):
+                env.pop(key, None)
+    if strip_proxy:
+        for key in (*_RUNTIME_PROXY_ENV_KEYS, *_RUNTIME_FAKE_ENV_KEYS, *_RUNTIME_CA_ENV_KEYS):
+            env.pop(key, None)
+    return env
+
+
 def _account_env(account, *, validate_proxy=True):
     env = os.environ.copy()
-    _scrub_claude_oauth_env(env)
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     if not home_dir:
@@ -3362,6 +3399,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
                                                     openai_url=_gpt_openai_url,
+                                                    proxy_url=runtime.get("proxy"),
+                                                    no_proxy=runtime.get("no_proxy"),
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     reasoning_effort=_reasoning_effort)
@@ -3394,6 +3433,8 @@ def launch_claude(model_info, runtime, once=False):
                     speed_scope=speed_scope,
                     route_status_paths=route_status_paths,
                     openai_url=_gpt_openai_url,
+                    proxy_url=runtime.get("proxy"),
+                    no_proxy=runtime.get("no_proxy"),
                     strip_upstream_user_agent=strip_upstream_user_agent,
                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                     reasoning_effort=_reasoning_effort,
@@ -3447,6 +3488,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
                                                 openai_url=openai_url,
+                                                proxy_url=runtime.get("proxy"),
+                                                no_proxy=runtime.get("no_proxy"),
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 reasoning_effort=_reasoning_effort)
@@ -3479,6 +3522,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
                                                 openai_url=openai_url,
+                                                proxy_url=runtime.get("proxy"),
+                                                no_proxy=runtime.get("no_proxy"),
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough)
             bridge_cfg = cleanup_ctx.__enter__()
@@ -3517,6 +3562,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
                                                     openai_url=openai_url,
+                                                    proxy_url=runtime.get("proxy"),
+                                                    no_proxy=runtime.get("no_proxy"),
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough)
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -4072,7 +4119,7 @@ def _claude_gateway_env(
     )
 
     env = os.environ.copy()
-    _scrub_claude_oauth_env(env)
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env)
     env["HOME"] = gateway_home
     _set_session_home_hint(env, gateway_home)
@@ -4365,6 +4412,7 @@ def _codex_gateway_env(runtime, base_url):
                 os.symlink(src, dst)
 
     env = os.environ.copy()
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = session_home
     _set_session_home_hint(env, session_home)
@@ -4429,6 +4477,8 @@ def launch_codex(model_info, runtime, once=False):
             model_name=model or "unknown",
             advertised_models=advertised_models,
             speed_scope=speed_scope,
+            proxy_url=runtime.get("proxy"),
+            no_proxy=runtime.get("no_proxy"),
         ) as bridge_cfg:
             bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
             env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
@@ -4463,6 +4513,8 @@ def launch_codex(model_info, runtime, once=False):
         speed_scope=speed_scope,
         provider_id=provider_id,
         reasoning_effort=reasoning_effort,
+        proxy_url=runtime.get("proxy"),
+        no_proxy=runtime.get("no_proxy"),
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
@@ -4497,6 +4549,7 @@ def launch_qwen(model_info, provider, once=False):
         cmd += ["-m", model]
 
     env = os.environ.copy()
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
@@ -4508,6 +4561,7 @@ def launch_kimi(model_info, provider, once=False):
     api_key = provider["api_key"]
     model = _resolve_model(model_info)
     env = os.environ.copy()
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
