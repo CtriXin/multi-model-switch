@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import types
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ def scoped_store(tmp_path):
     with patch("mms_project_store.PRIMARY_CONFIG_DIR", config_root), patch(
         "mms_project_store.PROJECTS_DIR",
         projects_root,
-    ), patch("mms_session_index.PRIMARY_CONFIG_DIR", config_root):
+    ), patch("mms_session_index.get_projects_dir", lambda: projects_root):
         yield config_root, projects_root
 
 
@@ -95,6 +96,54 @@ def test_session_index_isolated_by_account(tmp_path, scoped_store):
 
     assert {"claude-a", "claude-b"} <= accounts
     assert {101, 202} <= pids
+
+
+def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monkeypatch, tmp_path):
+    import mms_launchers
+    from mms_project_store import claude_raw_entry_path
+    from mms_session_index import record_claude_session_start
+
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "16593"
+    gateway_home.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+
+    payload = record_claude_session_start(
+        cwd=str(project_dir),
+        account_id="relay-a",
+        pid=101,
+        runtime_kind="api_key",
+        slot_home=str(tmp_path / "slot"),
+    )
+    started_at_ms = int(datetime.fromisoformat(payload["started_at"]).timestamp() * 1000)
+    raw_sessions = claude_raw_entry_path("sessions", str(project_dir), account_id="relay-a")
+    (raw_sessions / "session-1.json").write_text(
+        json.dumps(
+            {
+                "pid": 202,
+                "sessionId": "session-match",
+                "cwd": str(project_dir.resolve()),
+                "startedAt": started_at_ms + 321,
+                "kind": "interactive",
+                "entrypoint": "cli",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = mms_launchers._load_project_scoped_claude_resume_session_id(
+        str(project_dir),
+        account_id="relay-a",
+        runtime_kind="api_key",
+    )
+
+    assert result == "session-match"
 
 
 def test_sync_claude_session_state_back_to_account(tmp_path):
@@ -174,6 +223,65 @@ def test_ensure_claude_project_trust_marks_current_project_accepted(tmp_path):
     assert entry["hasClaudeMdExternalIncludesApproved"] is True
     assert entry["hasClaudeMdExternalIncludesWarningShown"] is True
     assert entry["projectOnboardingSeenCount"] == 1
+
+
+def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp_path):
+    import mms_launchers
+
+    project_dir = tmp_path / "repo"
+    other_project = tmp_path / "other"
+    project_dir.mkdir()
+    other_project.mkdir()
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(other_project.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "session_id": "session-other-project",
+                "last_active_at": "2026-04-16T11:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-b",
+                "runtime_kind": "api_key",
+                "session_id": "session-other-account",
+                "last_active_at": "2026-04-16T12:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "oauth",
+                "session_id": "session-other-runtime",
+                "last_active_at": "2026-04-16T13:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "session_id": "pid-9999",
+                "last_active_at": "2026-04-16T14:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "session_id": "session-match",
+                "last_active_at": "2026-04-16T15:00:00+00:00",
+            },
+        ],
+    )
+
+    result = mms_launchers._load_project_scoped_claude_resume_session_id(
+        str(project_dir),
+        account_id="relay-a",
+        runtime_kind="api_key",
+    )
+
+    assert result == "session-match"
 
 
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):

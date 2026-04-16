@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mms_project_store import (
-    PRIMARY_CONFIG_DIR,
     claude_raw_entry_path,
     claude_state_sessions_root,
     ensure_claude_project_store,
+    get_projects_dir,
 )
 
 
@@ -167,7 +167,7 @@ def finalize_claude_session(*, cwd: str, pid: int, account_id: str = "", exit_co
 def list_indexed_sessions(cli_name: str = "claude") -> list[dict]:
     if cli_name != "claude":
         return []
-    root = PRIMARY_CONFIG_DIR / "projects"
+    root = get_projects_dir()
     if not root.exists():
         return []
 

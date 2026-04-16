@@ -10,8 +10,10 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
-PROJECTS_DIR = PRIMARY_CONFIG_DIR / "projects"
+DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
+PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
+DEFAULT_PROJECTS_DIR = DEFAULT_PRIMARY_CONFIG_DIR / "projects"
+PROJECTS_DIR = DEFAULT_PROJECTS_DIR
 CLAUDE_PERSISTENT_ENTRIES = (
     "history.jsonl",
     "sessions",
@@ -19,6 +21,37 @@ CLAUDE_PERSISTENT_ENTRIES = (
     "file-history",
 )
 SLOT_MARKER_NAME = ".mms_slot.json"
+
+
+def _real_user_home() -> Path:
+    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return Path(os.path.abspath(os.path.expanduser(value)))
+
+    home = os.path.abspath(os.path.expanduser("~"))
+    gateway_markers = (
+        f"{os.sep}.config{os.sep}mms{os.sep}codex-gateway{os.sep}",
+        f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}",
+    )
+    for marker in gateway_markers:
+        if marker in home:
+            return Path(home.split(marker, 1)[0])
+    return Path(home)
+
+
+def get_primary_config_dir() -> Path:
+    if PRIMARY_CONFIG_DIR != DEFAULT_PRIMARY_CONFIG_DIR:
+        return PRIMARY_CONFIG_DIR
+    return _real_user_home() / ".config" / "mms"
+
+
+def get_projects_dir() -> Path:
+    if PROJECTS_DIR != DEFAULT_PROJECTS_DIR:
+        return PROJECTS_DIR
+    if PRIMARY_CONFIG_DIR != DEFAULT_PRIMARY_CONFIG_DIR:
+        return PRIMARY_CONFIG_DIR / "projects"
+    return get_primary_config_dir() / "projects"
 
 
 def _utc_now() -> str:
@@ -55,7 +88,7 @@ def project_key(cwd: str | None = None, account_id: str | None = None) -> str:
 
 
 def project_root(cwd: str | None = None, account_id: str | None = None) -> Path:
-    return PROJECTS_DIR / project_key(cwd, account_id=account_id)
+    return get_projects_dir() / project_key(cwd, account_id=account_id)
 
 
 def claude_project_root(cwd: str | None = None, account_id: str | None = None) -> Path:
@@ -131,6 +164,7 @@ def ensure_claude_project_store(cwd: str | None = None, *, account_id: str | Non
     canonical = canonical_project_path(cwd)
     normalized_account_id = _normalize_account_id(account_id)
     key = project_key(canonical, account_id=normalized_account_id)
+    projects_dir = get_projects_dir()
     root = claude_project_root(canonical, account_id=normalized_account_id)
     raw_root = claude_raw_root(canonical, account_id=normalized_account_id)
     state_root = claude_state_root(canonical, account_id=normalized_account_id)
@@ -139,7 +173,7 @@ def ensure_claude_project_store(cwd: str | None = None, *, account_id: str | Non
         account_id=normalized_account_id,
     )
 
-    for path in (PROJECTS_DIR, root, raw_root, state_root, state_sessions):
+    for path in (projects_dir, root, raw_root, state_root, state_sessions):
         path.mkdir(parents=True, exist_ok=True)
 
     for entry in CLAUDE_PERSISTENT_ENTRIES:
