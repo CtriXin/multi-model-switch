@@ -758,6 +758,32 @@ _ANTHROPIC_OFFICIAL_HOSTS = (
     "claude.ai",
     "anthropic.auth0.com",
 )
+_ACCOUNT_ENV_PREFIX_BLOCKLIST = (
+    "ANTHROPIC_",
+    "CLAUDE_CODE_",
+    "OPENAI_",
+)
+_ACCOUNT_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+)
+_ACCOUNT_FAKE_ENV_KEYS = (
+    "MMS_FAKE_UPSTREAM_MODE",
+    "MMS_FAKE_UPSTREAM_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_PROXY",
+    "MMS_FAKE_UPSTREAM_ORIGINAL_NO_PROXY",
+)
+_ACCOUNT_CA_ENV_KEYS = (
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+)
 
 
 def _url_matches_host_suffix(url, host_suffixes):
@@ -786,6 +812,20 @@ def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
     # 只对官方 Anthropic 目标 fail-closed，避免把普通 provider 的既有 ambient proxy
     # 行为一刀切打掉。
     return _url_matches_host_suffix(target_url, _ANTHROPIC_OFFICIAL_HOSTS)
+
+
+def _scrub_account_command_env(env):
+    env = env if isinstance(env, dict) else {}
+    for key in list(env.keys()):
+        normalized = str(key or "").strip()
+        if not normalized:
+            continue
+        if any(normalized.startswith(prefix) for prefix in _ACCOUNT_ENV_PREFIX_BLOCKLIST):
+            env.pop(key, None)
+            continue
+        if normalized in _ACCOUNT_PROXY_ENV_KEYS or normalized in _ACCOUNT_FAKE_ENV_KEYS or normalized in _ACCOUNT_CA_ENV_KEYS:
+            env.pop(key, None)
+    return env
 
 
 def _runtime_httpx_kwargs(runtime, *, target_url=""):
@@ -3290,6 +3330,7 @@ def _account_env(account):
     if cli_name == "claude":
         seed_claude_state(home_dir)
     env = os.environ.copy()
+    _scrub_account_command_env(env)
     if cli_name == "gemini":
         seed_gemini_state(home_dir)
         env["GEMINI_CLI_HOME"] = home_dir

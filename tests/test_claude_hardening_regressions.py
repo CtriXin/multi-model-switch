@@ -548,6 +548,29 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
+def test_account_env_fail_closed_when_guarded_limit_reached(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_count_live_session_dirs", lambda _path: 4)
+    monkeypatch.setattr(mms_launchers, "_session_home_is_active", lambda _path: False)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    try:
+        mms_launchers._account_env(
+            {"id": "claude-a", "cli": "claude", "home_dir": str(account_home)},
+            validate_proxy=False,
+        )
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("expected _account_env to fail-closed at guard limit")
+
+
 def test_account_env_scrubs_claude_oauth_parent_env_for_codex(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -604,6 +627,57 @@ def test_account_env_scrubs_inherited_openai_and_proxy_parent_env_for_gemini(mon
     assert "OPENAI_BASE_URL" not in env
     assert "HTTP_PROXY" not in env
     assert env["GEMINI_CLI_HOME"] == str(account_home)
+
+
+def test_core_account_env_scrubs_inherited_ai_and_proxy_env(monkeypatch, tmp_path):
+    import mms_core
+
+    account_home = tmp_path / "account-home"
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
+    monkeypatch.setenv("CLAUDE_CODE_ATTRIBUTION_HEADER", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", "/tmp/test-ca.pem")
+    monkeypatch.setattr(mms_core, "seed_claude_state", lambda *_args, **_kwargs: None)
+
+    env = mms_core._account_env(
+        {"id": "claude-a", "cli": "claude", "home_dir": str(account_home)}
+    )
+
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert "HTTP_PROXY" not in env
+    assert "NODE_EXTRA_CA_CERTS" not in env
+    assert env["HOME"] == str(account_home)
+
+
+def test_count_live_session_dirs_keeps_child_pid_backed_session_alive(monkeypatch, tmp_path):
+    import mms_launchers
+
+    sessions_dir = tmp_path / "sessions"
+    session_home = sessions_dir / "1234"
+    session_home.mkdir(parents=True)
+    marker_path = session_home / mms_launchers._SESSION_GUARD_MARKER_NAME
+    marker_path.write_text(
+        json.dumps(
+            {
+                "launcher_pid": 1234,
+                "launcher_identity": "python old",
+                "child_pid": 5678,
+                "child_identity": "claude child",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_guard_pid_alive",
+        lambda pid, identity="": int(pid or 0) == 5678 and identity == "claude child",
+    )
+
+    assert mms_launchers._count_live_session_dirs(str(sessions_dir)) == 1
 
 
 def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
@@ -788,6 +862,8 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
         assert str(isolated_home / ".local" / "bin") not in script
         assert f'export HOME="{real_home}"' in script
         assert f'export XDG_CONFIG_HOME="{real_home / ".config"}"' in script
+        assert 'ANTHROPIC_*|CLAUDE_CODE_*|OPENAI_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY' in script
+        assert 'unset "$_mms_var"' in script
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
 

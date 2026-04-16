@@ -501,13 +501,10 @@ def _count_live_session_dirs(sessions_dir):
         return 0
     alive = 0
     for name in os.listdir(sessions_dir):
-        try:
-            pid = int(str(name))
-            os.kill(pid, 0)
-            alive += 1
-        except (TypeError, ValueError, ProcessLookupError, FileNotFoundError):
+        session_home = os.path.join(sessions_dir, str(name))
+        if not os.path.isdir(session_home):
             continue
-        except PermissionError:
+        if _session_home_is_active(session_home):
             alive += 1
     return alive
 
@@ -698,6 +695,8 @@ _MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context
 _MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
 _CLAUDE_NETWORK_GUARD_CACHE: dict = {}
 _CLAUDE_NETWORK_GUARD_TTL_SEC = 20.0
+_SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
+_SESSION_GUARD_LOCK_NAME = ".mms-session-guard.lock"
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
@@ -715,6 +714,165 @@ def _set_session_home_hint(env, session_home):
     if session_home:
         env["MMS_SESSION_HOME"] = session_home
     return env
+
+
+def _session_guard_marker_path(session_home):
+    return os.path.join(str(session_home or "").strip(), _SESSION_GUARD_MARKER_NAME)
+
+
+def _session_guard_lock_path(sessions_dir):
+    return os.path.join(str(sessions_dir or "").strip(), _SESSION_GUARD_LOCK_NAME)
+
+
+def _session_guard_process_identity(pid):
+    try:
+        normalized_pid = int(pid)
+    except (TypeError, ValueError):
+        return ""
+    if normalized_pid <= 0:
+        return ""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(normalized_pid), "-o", "comm=,lstart="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _session_guard_pid_alive(pid, *, identity=""):
+    try:
+        normalized_pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if normalized_pid <= 0:
+        return False
+    try:
+        os.kill(normalized_pid, 0)
+    except (ProcessLookupError, FileNotFoundError):
+        return False
+    except PermissionError:
+        return True
+    if identity:
+        return _session_guard_process_identity(normalized_pid) == str(identity or "").strip()
+    return True
+
+
+def _read_session_guard_marker(session_home):
+    marker_path = _session_guard_marker_path(session_home)
+    if not marker_path:
+        return {}
+    return _load_json_dict_unlocked(marker_path)
+
+
+def _write_session_guard_marker(session_home, *, account_id="", runtime_kind="", child_pid=None):
+    marker_path = _session_guard_marker_path(session_home)
+    if not marker_path:
+        return
+    os.makedirs(os.path.dirname(marker_path), exist_ok=True)
+    with locked_state_file(marker_path):
+        marker = _load_json_dict_unlocked(marker_path)
+        launcher_pid = int(marker.get("launcher_pid") or os.getpid())
+        marker.update(
+            {
+                "account_id": str(account_id or marker.get("account_id") or "").strip(),
+                "runtime_kind": str(runtime_kind or marker.get("runtime_kind") or "").strip(),
+                "session_home": str(session_home or ""),
+                "launcher_pid": launcher_pid,
+                "launcher_identity": str(
+                    marker.get("launcher_identity")
+                    or _session_guard_process_identity(launcher_pid)
+                    or ""
+                ).strip(),
+                "updated_at": _guard_utc_now(),
+            }
+        )
+        if "created_at" not in marker:
+            marker["created_at"] = marker["updated_at"]
+        if child_pid is not None:
+            try:
+                normalized_child_pid = int(child_pid)
+            except (TypeError, ValueError):
+                normalized_child_pid = 0
+            if normalized_child_pid > 0:
+                marker["child_pid"] = normalized_child_pid
+                marker["child_identity"] = _session_guard_process_identity(normalized_child_pid)
+        atomic_write_json(marker_path, marker, mode=0o600)
+
+
+def _record_session_child_pid(session_home, child_pid):
+    _write_session_guard_marker(session_home, child_pid=child_pid)
+
+
+def _session_home_is_active(session_home):
+    session_home = str(session_home or "").strip()
+    if not session_home or not os.path.isdir(session_home):
+        return False
+    marker = _read_session_guard_marker(session_home)
+    if marker:
+        if _session_guard_pid_alive(
+            marker.get("child_pid"),
+            identity=marker.get("child_identity"),
+        ):
+            return True
+        if _session_guard_pid_alive(
+            marker.get("launcher_pid"),
+            identity=marker.get("launcher_identity"),
+        ):
+            return True
+        return False
+    try:
+        pid = int(os.path.basename(session_home))
+    except (TypeError, ValueError):
+        return False
+    return _session_guard_pid_alive(pid)
+
+
+def _reserve_session_home(
+    sessions_dir,
+    *,
+    account_id="",
+    runtime_kind="",
+    stale_callback=None,
+    max_live_sessions=None,
+):
+    sessions_dir = str(sessions_dir or "").strip()
+    if not sessions_dir:
+        return "", 0, 0
+    os.makedirs(sessions_dir, exist_ok=True)
+    session_home = os.path.join(sessions_dir, str(os.getpid()))
+    with locked_state_file(_session_guard_lock_path(sessions_dir)):
+        _cleanup_stale_sessions(sessions_dir, stale_callback=stale_callback)
+        active_before = _count_live_session_dirs(sessions_dir)
+        if _session_home_is_active(session_home):
+            active_before = max(0, active_before - 1)
+        active_after = active_before + 1
+        if max_live_sessions is not None and active_after > int(max_live_sessions):
+            return "", active_before, active_after
+        os.makedirs(session_home, exist_ok=True)
+        _write_session_guard_marker(
+            session_home,
+            account_id=account_id,
+            runtime_kind=runtime_kind,
+        )
+        return session_home, active_before, active_after
+
+
+def _real_home_wrapper_scrub_lines():
+    return [
+        'for _mms_var in $(env | cut -d= -f1); do',
+        '  case "$_mms_var" in',
+        '    ANTHROPIC_*|CLAUDE_CODE_*|OPENAI_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|all_proxy|no_proxy|MMS_FAKE_UPSTREAM_*|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|REQUESTS_CA_BUNDLE)',
+        '      unset "$_mms_var" ;;',
+        '  esac',
+        'done',
+        'unset _mms_var',
+    ]
 
 
 def _normalize_path(value):
@@ -2799,9 +2957,20 @@ def _account_env(account, *, validate_proxy=True):
         os.makedirs(account_claude_dir, exist_ok=True)
         # per-PID 会话隔离：每个窗口独立 HOME，避免多窗口 race ~/.claude.json
         sessions_dir = os.path.join(home_dir, "s")
-        session_home = os.path.join(sessions_dir, str(os.getpid()))
-        os.makedirs(session_home, exist_ok=True)
-        _cleanup_stale_sessions(sessions_dir, stale_callback=_finalize_claude_slot)
+        session_home, active_before, active_after = _reserve_session_home(
+            sessions_dir,
+            account_id=account.get("id", ""),
+            runtime_kind="oauth",
+            stale_callback=_finalize_claude_slot,
+            max_live_sessions=4,
+        )
+        if not session_home:
+            console.print(f"[red]该账号当前将达到 {active_after} 个并发会话，已超过安全上限 4[/red]")
+            sys.exit(1)
+        report = account.get("_account_guard_report")
+        if isinstance(report, dict):
+            report["active_sessions_before"] = active_before
+            report["active_sessions_after"] = active_after
         # 复制账号的 .claude.json 到 per-session 目录
         import json as _json
         account_json = os.path.join(home_dir, ".claude.json")
@@ -2998,6 +3167,7 @@ def _install_session_command_wrappers(session_home, env):
                 f"export XDG_CACHE_HOME={xdg_cache_home}",
                 f"export XDG_DATA_HOME={xdg_data_home}",
                 f"export XDG_STATE_HOME={xdg_state_home}",
+                *_real_home_wrapper_scrub_lines(),
                 *extra_exports,
                 f'real_bin="$(command -v {json.dumps(command_name)} 2>/dev/null || true)"',
                 'if [ -z "$real_bin" ]; then',
@@ -3795,20 +3965,17 @@ def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
     if not os.path.isdir(sessions_dir):
         return
     for name in os.listdir(sessions_dir):
-        try:
-            pid = int(name)
-            os.kill(pid, 0)  # 检查进程是否存活
-        except (ValueError, ProcessLookupError):
-            # PID 无效或进程已死 → 清理
-            stale = os.path.join(sessions_dir, name)
-            if stale_callback is not None:
-                try:
-                    stale_callback(stale, stale_cleanup=True)
-                except Exception:
-                    pass
-            shutil.rmtree(stale, ignore_errors=True)
-        except PermissionError:
-            pass  # 进程存在但无权限发信号，跳过
+        stale = os.path.join(sessions_dir, name)
+        if not os.path.isdir(stale):
+            continue
+        if _session_home_is_active(stale):
+            continue
+        if stale_callback is not None:
+            try:
+                stale_callback(stale, stale_cleanup=True)
+            except Exception:
+                pass
+        shutil.rmtree(stale, ignore_errors=True)
 
 
 def _prepare_claude_session_tree(
@@ -3984,12 +4151,14 @@ def _claude_gateway_env(
     import json as _json
     gateway_base = _real_user_path(".config", "mms", "claude-gateway")
     sessions_dir = os.path.join(gateway_base, "s")
-    gateway_home = _claude_gateway_home()
+    gateway_home, _active_before, _active_after = _reserve_session_home(
+        sessions_dir,
+        account_id=str(runtime.get("id", "")),
+        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+        stale_callback=_finalize_claude_slot,
+    )
     route_status_path = _claude_route_status_paths()[0]
     os.makedirs(gateway_home, exist_ok=True)
-
-    # 清理 stale sessions（PID 已不存在的目录）
-    _cleanup_stale_sessions(sessions_dir, stale_callback=_finalize_claude_slot)
 
     # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
     # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
@@ -4838,18 +5007,31 @@ def _exec_or_run(
     if not exe:
         console.print(f"[red]{cmd[0]} 未找到，请先安装[/red]")
         sys.exit(1)
+    session_home = str((env or {}).get("MMS_SESSION_HOME") or "").strip()
 
     if once or cleanup_path or state_home or cleanup_context or exit_callback or force_subprocess:
         exit_code = None
+        child = None
         try:
             if state_home:
                 with activated_claude_account_state(state_home):
-                    result = subprocess.run(cmd, env=env)
+                    child = subprocess.Popen(cmd, env=env)
+                    if session_home:
+                        _record_session_child_pid(session_home, child.pid)
+                    exit_code = child.wait()
             else:
-                result = subprocess.run(cmd, env=env)
-            exit_code = result.returncode
+                child = subprocess.Popen(cmd, env=env)
+                if session_home:
+                    _record_session_child_pid(session_home, child.pid)
+                exit_code = child.wait()
         except KeyboardInterrupt:
-            exit_code = 130
+            if child is not None:
+                try:
+                    exit_code = child.wait(timeout=5)
+                except Exception:
+                    exit_code = 130
+            if exit_code is None:
+                exit_code = 130
         finally:
             if exit_callback is not None:
                 try:
