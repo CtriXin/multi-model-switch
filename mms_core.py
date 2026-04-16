@@ -753,12 +753,47 @@ def _normalize_timezone_name(value, default=DEFAULT_ACCOUNT_TIMEZONE):
     return timezone_name
 
 
-def _runtime_httpx_kwargs(runtime):
+_ANTHROPIC_OFFICIAL_HOSTS = (
+    "api.anthropic.com",
+    "claude.ai",
+    "anthropic.auth0.com",
+)
+
+
+def _url_matches_host_suffix(url, host_suffixes):
+    raw = str(url or "").strip()
+    if not raw:
+        return False
+    try:
+        host = (urlparse(raw).hostname or "").strip().lower()
+    except Exception:
+        host = ""
+    if not host:
+        return False
+    for suffix in host_suffixes:
+        normalized = str(suffix or "").strip().lower().lstrip(".")
+        if not normalized:
+            continue
+        if host == normalized or host.endswith("." + normalized):
+            return True
+    return False
+
+
+def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if str(runtime.get("proxy") or "").strip():
+        return True
+    # 只对官方 Anthropic 目标 fail-closed，避免把普通 provider 的既有 ambient proxy
+    # 行为一刀切打掉。
+    return _url_matches_host_suffix(target_url, _ANTHROPIC_OFFICIAL_HOSTS)
+
+
+def _runtime_httpx_kwargs(runtime, *, target_url=""):
     transport_kwargs = {}
     proxy_url = str((runtime or {}).get("proxy") or "").strip()
     if proxy_url:
-        # 只在显式配置时覆盖，避免预探测漂移到全局 proxy。
         transport_kwargs["proxy"] = proxy_url
+    if _runtime_should_disable_ambient_env(runtime, target_url=target_url):
         transport_kwargs["trust_env"] = False
     if _runtime_force_ipv4(runtime):
         transport_kwargs["local_address"] = "0.0.0.0"
@@ -783,7 +818,7 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
         raise RuntimeError("missing httpx")
     if _fake_upstream_enabled() and not _fake_upstream_is_local_url(url):
         return _fake_httpx_response(httpx, method, url, **kwargs)
-    transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime))
+    transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime, target_url=url))
     with httpx.Client(transport=transport, follow_redirects=follow_redirects) as client:
         return client.request(method, url, **kwargs)
 

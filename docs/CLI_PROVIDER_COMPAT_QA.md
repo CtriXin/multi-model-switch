@@ -77,6 +77,7 @@
 - bridge 上游 `httpx` 请求默认 `trust_env=False`
 - 只有 MMS 显式传入的 `runtime.proxy / runtime.no_proxy` 可以影响 bridge 实际出口
 - 不能让 ambient/global proxy（例如系统 proxy、其他工具注入的 `HTTP_PROXY`、本机 `cc-switch`）静默覆盖掉用户在 MMS 里选中的 channel / provider
+- 官方 Anthropic control-plane 请求（例如 usage / warmup / direct probe）也应优先忽略 ambient proxy；需要代理时只认账号或 runtime 显式配置
 
 ### 6. Claude hardening 默认要走 allowlist + fail-closed
 

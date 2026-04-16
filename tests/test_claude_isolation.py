@@ -706,6 +706,89 @@ def test_runtime_httpx_request_prefers_ipv4(monkeypatch):
     assert calls["transport_kwargs"]["local_address"] == "0.0.0.0"
 
 
+def test_runtime_httpx_request_disables_ambient_env_for_official_anthropic(monkeypatch):
+    import mms_core
+
+    calls = {}
+
+    class FakeTransport:
+        def __init__(self, **kwargs):
+            calls["transport_kwargs"] = kwargs
+
+    class FakeClient:
+        def __init__(self, *, transport=None, follow_redirects=False):
+            calls["transport"] = transport
+            calls["follow_redirects"] = follow_redirects
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def request(self, method, url, **kwargs):
+            calls["method"] = method
+            calls["url"] = url
+            calls["request_kwargs"] = kwargs
+            return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(
+        mms_core,
+        "httpx",
+        types.SimpleNamespace(HTTPTransport=FakeTransport, Client=FakeClient),
+    )
+
+    response = mms_core._runtime_httpx_request(
+        "GET",
+        "https://api.anthropic.com/api/oauth/usage",
+        runtime={},
+        timeout=8,
+    )
+
+    assert response.status_code == 200
+    assert calls["transport_kwargs"]["trust_env"] is False
+    assert "proxy" not in calls["transport_kwargs"]
+
+
+def test_runtime_httpx_request_keeps_existing_env_behavior_for_non_anthropic_direct_runtime(monkeypatch):
+    import mms_core
+
+    calls = {}
+
+    class FakeTransport:
+        def __init__(self, **kwargs):
+            calls["transport_kwargs"] = kwargs
+
+    class FakeClient:
+        def __init__(self, *, transport=None, follow_redirects=False):
+            calls["transport"] = transport
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def request(self, method, url, **kwargs):
+            return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(
+        mms_core,
+        "httpx",
+        types.SimpleNamespace(HTTPTransport=FakeTransport, Client=FakeClient),
+    )
+
+    response = mms_core._runtime_httpx_request(
+        "GET",
+        "https://gateway.example.com/models",
+        runtime={},
+        timeout=8,
+    )
+
+    assert response.status_code == 200
+    assert calls["transport_kwargs"] == {}
+
+
 def test_apply_runtime_ip_stack_profile_sets_ipv4first():
     from mms_launchers import _apply_runtime_ip_stack_profile
 

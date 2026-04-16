@@ -237,11 +237,35 @@ def _codex_auth_data(home_dir: str | None) -> dict | None:
 
 # ─── API calls ────────────────────────────────────────────────────────────────
 
-async def _anthropic_usage(token: str) -> dict | None:
+def _usage_force_ipv4(account: dict | None) -> bool:
+    raw = False if not isinstance(account, dict) else account.get("force_ipv4", False)
+    if isinstance(raw, bool):
+        return raw
+    value = str(raw or "").strip().lower()
+    if value in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if value in {"1", "true", "yes", "on", "enable", "enabled", ""}:
+        return True
+    return False
+
+
+def _anthropic_usage_httpx_kwargs(account: dict | None) -> dict:
+    account = account if isinstance(account, dict) else {}
+    transport_kwargs = {"trust_env": False}
+    proxy_url = str(account.get("proxy") or "").strip()
+    if proxy_url:
+        transport_kwargs["proxy"] = proxy_url
+    if _usage_force_ipv4(account):
+        transport_kwargs["local_address"] = "0.0.0.0"
+    return transport_kwargs
+
+
+async def _anthropic_usage(token: str, account: dict | None = None) -> dict | None:
     if not _httpx:
         return None
     try:
-        async with _httpx.AsyncClient(timeout=10) as c:
+        transport = _httpx.AsyncHTTPTransport(**_anthropic_usage_httpx_kwargs(account))
+        async with _httpx.AsyncClient(transport=transport, timeout=10) as c:
             r = await c.get(
                 "https://api.anthropic.com/api/oauth/usage",
                 headers={"Authorization": f"Bearer {token}",
@@ -355,7 +379,7 @@ async def _section_claude(accounts: list[dict]) -> None:
         if not token:
             return (name, "—", "—", "—", "—", "—", "—", "[dim]无 token[/dim]")
 
-        usage = await _anthropic_usage(token)
+        usage = await _anthropic_usage(token, acc)
         if usage is None:
             return (name, email or "—", "—", "—", "—", "—", "—", "[red]API 失败[/red]")
 

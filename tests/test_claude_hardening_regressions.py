@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -702,6 +703,52 @@ def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypat
     )
 
     assert captured["cmd"] == ["claude"]
+
+
+def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypatch):
+    import mms_usage
+
+    captured = {}
+
+    class FakeTransport:
+        def __init__(self, **kwargs):
+            captured["transport_kwargs"] = dict(kwargs)
+
+    class FakeClient:
+        def __init__(self, *, transport=None, timeout=None):
+            captured["transport"] = transport
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            captured["url"] = url
+            captured["headers"] = dict(headers or {})
+            return types.SimpleNamespace(status_code=200, json=lambda: {"ok": True})
+
+    monkeypatch.setattr(
+        mms_usage,
+        "_httpx",
+        types.SimpleNamespace(AsyncHTTPTransport=FakeTransport, AsyncClient=FakeClient),
+    )
+
+    result = asyncio.run(
+        mms_usage._anthropic_usage(
+            "tok-test",
+            {"proxy": "http://127.0.0.1:7890", "force_ipv4": True},
+        )
+    )
+
+    assert result == {"ok": True}
+    assert captured["url"] == "https://api.anthropic.com/api/oauth/usage"
+    assert captured["headers"]["Authorization"] == "Bearer tok-test"
+    assert captured["transport_kwargs"]["trust_env"] is False
+    assert captured["transport_kwargs"]["proxy"] == "http://127.0.0.1:7890"
+    assert captured["transport_kwargs"]["local_address"] == "0.0.0.0"
 
 
 def test_install_session_command_wrappers_covers_global_mutating_commands(monkeypatch, tmp_path):
