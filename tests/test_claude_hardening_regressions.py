@@ -27,7 +27,7 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
         default_env={"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"},
     )
 
-    assert "theme" not in result
+    assert result["theme"] == "dark"
     assert result["hooks"]["preToolUse"][0]["matcher"] == "*"
     assert result["statusLine"]["type"] == "command"
     assert "statusline-command.sh" in result["statusLine"]["command"]
@@ -457,7 +457,16 @@ def test_copy_claude_state_json_oauth_mode_allowlists_auth_state(tmp_path):
                 "alwaysThinkingEnabled": True,
                 "hasCompletedOnboarding": True,
                 "lastOnboardingVersion": "1.2.3",
+                "lastReleaseNotesSeen": "2.1.110",
                 "installMethod": "native",
+                "effortCalloutV2Dismissed": True,
+                "migrationVersion": 11,
+                "officialMarketplaceAutoInstallAttempted": True,
+                "officialMarketplaceAutoInstalled": True,
+                "tipsHistory": {
+                    "theme-command": 2,
+                    "terminal-setup": 1,
+                },
                 "oauthAccount": {
                     "accountUuid": "acct-1",
                     "emailAddress": "u@example.com",
@@ -475,7 +484,15 @@ def test_copy_claude_state_json_oauth_mode_allowlists_auth_state(tmp_path):
                 },
                 "provider": "gateway",
                 "api_key": "sk-test",
-                "projects": {"/tmp/repo": {"lastSessionId": "abc"}},
+                "projects": {
+                    "/tmp/repo": {
+                        "hasCompletedProjectOnboarding": True,
+                        "hasClaudeMdExternalIncludesApproved": True,
+                        "hasClaudeMdExternalIncludesWarningShown": True,
+                        "projectOnboardingSeenCount": 2,
+                        "lastSessionId": "abc",
+                    }
+                },
                 "customApiKeyResponses": {"demo": "x"},
                 "anonymousId": "anon-1",
             }
@@ -494,7 +511,16 @@ def test_copy_claude_state_json_oauth_mode_allowlists_auth_state(tmp_path):
         "alwaysThinkingEnabled": True,
         "hasCompletedOnboarding": True,
         "lastOnboardingVersion": "1.2.3",
+        "lastReleaseNotesSeen": "2.1.110",
         "installMethod": "native",
+        "effortCalloutV2Dismissed": True,
+        "migrationVersion": 11,
+        "officialMarketplaceAutoInstallAttempted": True,
+        "officialMarketplaceAutoInstalled": True,
+        "tipsHistory": {
+            "theme-command": 2,
+            "terminal-setup": 1,
+        },
         "oauthAccount": {
             "accountUuid": "acct-1",
             "emailAddress": "u@example.com",
@@ -507,6 +533,14 @@ def test_copy_claude_state_json_oauth_mode_allowlists_auth_state(tmp_path):
             "refreshToken": "refresh-1",
             "expiresAt": "2026-04-16T10:00:00Z",
             "emailAddress": "u@example.com",
+        },
+        "projects": {
+            str(Path("/tmp/repo").resolve()): {
+                "hasCompletedProjectOnboarding": True,
+                "hasClaudeMdExternalIncludesApproved": True,
+                "hasClaudeMdExternalIncludesWarningShown": True,
+                "projectOnboardingSeenCount": 2,
+            }
         },
     }
 
@@ -546,6 +580,96 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
     assert "HTTP_PROXY" not in env
     assert env["HOME"].startswith(str(account_home / "s"))
+
+
+def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    account_home.mkdir()
+    session_home = account_home / "s" / "1234"
+    session_home.mkdir(parents=True)
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    (account_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "bypassPermissionsModeAccepted": True,
+                "projects": {
+                    str(repo_dir.resolve()): {
+                        "hasClaudeMdExternalIncludesApproved": False,
+                        "projectOnboardingSeenCount": 0,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "firstStartTime": "2026-04-15T10:00:00Z",
+                "numStartups": 9,
+                "hasCompletedOnboarding": True,
+                "lastOnboardingVersion": "1.2.3",
+                "lastReleaseNotesSeen": "2.1.110",
+                "installMethod": "native",
+                "migrationVersion": 11,
+                "tipsHistory": {
+                    "theme-command": 508,
+                    "terminal-setup": 515,
+                },
+                "projects": {
+                    str(repo_dir.resolve()): {
+                        "hasCompletedProjectOnboarding": False,
+                        "hasClaudeMdExternalIncludesApproved": False,
+                        "hasClaudeMdExternalIncludesWarningShown": False,
+                        "projectOnboardingSeenCount": 0,
+                        "lastSessionId": "session-abc",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mms_launchers, "seed_claude_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_persist_account_guard_launch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env = mms_launchers._account_env(
+        {"id": "claude-a", "cli": "claude", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    session_state = json.loads((Path(env["HOME"]) / ".claude.json").read_text(encoding="utf-8"))
+    assert "bypassPermissionsModeAccepted" not in session_state
+    assert session_state["lastReleaseNotesSeen"] == "2.1.110"
+    assert session_state["migrationVersion"] == 11
+    assert session_state["numStartups"] == 9
+    assert session_state["tipsHistory"]["theme-command"] == 508
+    assert session_state["tipsHistory"]["terminal-setup"] == 515
+    project_state = session_state["projects"][str(repo_dir.resolve())]
+    assert project_state["hasTrustDialogAccepted"] is True
+    assert project_state["hasCompletedProjectOnboarding"] is True
+    assert project_state["hasClaudeMdExternalIncludesApproved"] is True
+    assert project_state["hasClaudeMdExternalIncludesWarningShown"] is True
+    assert project_state["projectOnboardingSeenCount"] == 1
+    assert "lastSessionId" not in project_state
 
 
 def test_account_env_fail_closed_when_guarded_limit_reached(monkeypatch, tmp_path):
@@ -726,6 +850,7 @@ def test_launch_claude_bypass_adds_current_workspace_to_allowed_dirs(monkeypatch
     monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
     monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
     monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: "claude")
     monkeypatch.setattr(
         mms_launchers,
         "_exec_or_run",
@@ -764,6 +889,7 @@ def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypat
     monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
     monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
     monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: "claude")
     monkeypatch.setattr(
         mms_launchers,
         "_exec_or_run",
@@ -777,6 +903,41 @@ def test_launch_claude_without_bypass_does_not_add_workspace_allowlist(monkeypat
     )
 
     assert captured["cmd"] == ["claude"]
+
+
+def test_launch_claude_uses_real_binary_path_not_session_wrapper(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    captured = {}
+    real_claude_bin = str(tmp_path / "real-bin" / "claude")
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
+    monkeypatch.setattr(mms_launchers, "_account_env", lambda runtime: {"HOME": str(tmp_path / "session-home"), "PATH": "/fake/session/.mms/bin:/usr/local/bin"})
+    monkeypatch.setattr(mms_launchers, "_prepare_oauth_home_context", lambda runtime, env, cli: None)
+    monkeypatch.setattr(mms_launchers, "_session_required_env_from_runtime_env", lambda env: {})
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_load_claude_settings_from_dir", lambda path: {})
+    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
+    monkeypatch.setattr(mms_launchers, "_apply_claude_model_overrides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda command_name, env=None: real_claude_bin)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
+    )
+
+    mms_launchers.launch_claude(
+        {"model": "claude-sonnet-4-6"},
+        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": False},
+        once=True,
+    )
+
+    assert captured["cmd"] == [real_claude_bin]
 
 
 def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypatch):
@@ -853,7 +1014,7 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
     mms_launchers._install_session_command_wrappers(str(session_home), env)
 
     wrapper_dir = session_home / ".mms" / "bin"
-    for command_name in ("pm2", "claude", "npm", "pnpm", "npx", "yarn", "corepack"):
+    for command_name in ("pm2", "npm", "pnpm", "npx", "yarn", "corepack"):
         wrapper_path = wrapper_dir / command_name
         assert wrapper_path.exists()
         script = wrapper_path.read_text(encoding="utf-8")
@@ -865,6 +1026,7 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
         assert 'ANTHROPIC_*|CLAUDE_CODE_*|OPENAI_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY' in script
         assert 'unset "$_mms_var"' in script
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
+    assert not (wrapper_dir / "claude").exists()
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
 
 
@@ -949,6 +1111,92 @@ def test_claude_gateway_env_scrubs_inherited_claude_auth_env(monkeypatch, tmp_pa
     assert env["ANTHROPIC_BASE_URL"] == "https://relay.example.com"
     assert "ANTHROPIC_API_KEY" not in env
     assert env["CLAUDE_CODE_SUBAGENT_MODEL"] != "claude-haiku-4-5"
+
+
+def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "firstStartTime": "2026-04-15T10:00:00Z",
+                "numStartups": 9,
+                "hasCompletedOnboarding": True,
+                "lastOnboardingVersion": "1.2.3",
+                "lastReleaseNotesSeen": "2.1.110",
+                "migrationVersion": 11,
+                "tipsHistory": {
+                    "theme-command": 508,
+                    "terminal-setup": 515,
+                },
+                "projects": {
+                    str(repo_dir.resolve()): {
+                        "hasCompletedProjectOnboarding": False,
+                        "hasClaudeMdExternalIncludesApproved": False,
+                        "hasClaudeMdExternalIncludesWarningShown": False,
+                        "projectOnboardingSeenCount": 0,
+                        "lastSessionId": "session-abc",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "numStartups": 2,
+                "tipsHistory": {"theme-command": 3},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: ({}, "settings.json"))
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "claude-sonnet-4-6")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+
+    mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
+    assert session_state["lastReleaseNotesSeen"] == "2.1.110"
+    assert session_state["migrationVersion"] == 11
+    assert session_state["numStartups"] == 9
+    assert session_state["tipsHistory"]["theme-command"] == 508
+    assert session_state["tipsHistory"]["terminal-setup"] == 515
+    project_state = session_state["projects"][str(repo_dir.resolve())]
+    assert project_state["hasTrustDialogAccepted"] is True
+    assert project_state["hasCompletedProjectOnboarding"] is True
+    assert project_state["hasClaudeMdExternalIncludesApproved"] is True
+    assert project_state["hasClaudeMdExternalIncludesWarningShown"] is True
+    assert project_state["projectOnboardingSeenCount"] == 1
+    assert "lastSessionId" not in project_state
 
 
 def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):

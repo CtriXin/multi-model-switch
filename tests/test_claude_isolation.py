@@ -124,7 +124,7 @@ def test_sync_claude_session_state_back_to_account(tmp_path):
 
     assert json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))["userID"] == "device-b"
     settings = json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert "theme" not in settings
+    assert settings["theme"] == "dark"
     assert settings["hooks"]["preToolUse"][0]["matcher"] == "*"
     assert settings["statusLine"]["command"] == "/tmp/status.sh"
     assert settings["permissions"]["allow"] == ["Read"]
@@ -168,9 +168,12 @@ def test_ensure_claude_project_trust_marks_current_project_accepted(tmp_path):
     entry = result["projects"][str(project_dir.resolve())]
 
     assert entry["hasTrustDialogAccepted"] is True
+    assert entry["hasCompletedProjectOnboarding"] is True
     assert entry["allowedTools"] == []
     assert entry["enabledMcpjsonServers"] == []
-    assert entry["projectOnboardingSeenCount"] == 0
+    assert entry["hasClaudeMdExternalIncludesApproved"] is True
+    assert entry["hasClaudeMdExternalIncludesWarningShown"] is True
+    assert entry["projectOnboardingSeenCount"] == 1
 
 
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):
@@ -205,7 +208,87 @@ def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path
     assert "projects" not in result
     assert "lastSessionId" not in result
     assert "lastCost" not in result
-    assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8")) == {}
+    assert json.loads((account_home / ".claude" / "settings.json").read_text(encoding="utf-8")) == {"theme": "dark"}
+
+
+def test_sync_claude_session_state_back_to_account_keeps_safe_project_state(tmp_path):
+    from mms_launchers import _sync_claude_session_state_to_account_home
+
+    session_home = tmp_path / "session"
+    account_home = tmp_path / "account"
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+    (session_home / ".claude").mkdir(parents=True)
+
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "userID": "device-b",
+                "projects": {
+                    str(project_dir.resolve()): {
+                        "hasCompletedProjectOnboarding": True,
+                        "hasClaudeMdExternalIncludesApproved": True,
+                        "hasClaudeMdExternalIncludesWarningShown": True,
+                        "projectOnboardingSeenCount": 2,
+                        "lastSessionId": "global-session",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude" / "settings.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _sync_claude_session_state_to_account_home(str(session_home), str(account_home))
+
+    result = json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))
+    project_state = result["projects"][str(project_dir.resolve())]
+    assert project_state["hasCompletedProjectOnboarding"] is True
+    assert project_state["hasClaudeMdExternalIncludesApproved"] is True
+    assert project_state["hasClaudeMdExternalIncludesWarningShown"] is True
+    assert project_state["projectOnboardingSeenCount"] == 2
+    assert "lastSessionId" not in project_state
+
+
+def test_sync_claude_session_state_back_to_account_merges_tips_history(tmp_path):
+    from mms_launchers import _sync_claude_session_state_to_account_home
+
+    session_home = tmp_path / "session"
+    account_home = tmp_path / "account"
+    (session_home / ".claude").mkdir(parents=True)
+    account_home.mkdir()
+
+    (account_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "tipsHistory": {
+                    "theme-command": 4,
+                    "terminal-setup": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "tipsHistory": {
+                    "theme-command": 2,
+                    "terminal-setup": 3,
+                    "memory-command": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude" / "settings.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _sync_claude_session_state_to_account_home(str(session_home), str(account_home))
+
+    result = json.loads((account_home / ".claude.json").read_text(encoding="utf-8"))
+    assert result["tipsHistory"]["theme-command"] == 4
+    assert result["tipsHistory"]["terminal-setup"] == 3
+    assert result["tipsHistory"]["memory-command"] == 1
 
 
 def test_sync_claude_session_state_back_to_account_keeps_newer_oauth_token(tmp_path):
@@ -1069,6 +1152,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
 
     result = _sanitize_account_claude_settings_payload(
         {
+            "theme": "dark",
             "env": {
                 "HTTP_PROXY": "http://127.0.0.1:7890",
                 "NODE_EXTRA_CA_CERTS": "/tmp/mms-ca.pem",
@@ -1083,6 +1167,7 @@ def test_sanitize_account_claude_settings_payload_strips_session_env():
     )
 
     assert "env" not in result
+    assert result["theme"] == "dark"
     assert result["hooks"]["preToolUse"][0]["matcher"] == "*"
     assert result["statusLine"]["command"] == "/tmp/status.sh"
     assert result["permissions"]["allow"] == ["Read"]

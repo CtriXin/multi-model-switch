@@ -1573,6 +1573,7 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
     "statusLine",
     "permissions",
 )
+_CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
 _CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = ()
 _CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST = ("Keychains",)
 _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
@@ -1580,7 +1581,6 @@ _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
     "lark-cli",
     "hive",
     "pm2",
-    "claude",
     "npm",
     "pnpm",
     "npx",
@@ -1595,8 +1595,38 @@ _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST = (
     "alwaysThinkingEnabled",
     "hasCompletedOnboarding",
     "lastOnboardingVersion",
+    "lastReleaseNotesSeen",
     "installMethod",
+    "deepLinkTerminal",
+    "effortCalloutDismissed",
+    "effortCalloutV2Dismissed",
+    "migrationVersion",
+    "officialMarketplaceAutoInstallAttempted",
+    "officialMarketplaceAutoInstalled",
+    "opus1mMergeNoticeSeenCount",
+    "opusProMigrationComplete",
+    "sonnet1m45MigrationComplete",
+    "voiceNoticeSeenCount",
 )
+_CLAUDE_OAUTH_UI_STATE_SEED_KEYS = (
+    "firstStartTime",
+    "numStartups",
+    "hasCompletedOnboarding",
+    "lastOnboardingVersion",
+    "lastReleaseNotesSeen",
+    "installMethod",
+    "deepLinkTerminal",
+    "effortCalloutDismissed",
+    "effortCalloutV2Dismissed",
+    "migrationVersion",
+    "officialMarketplaceAutoInstallAttempted",
+    "officialMarketplaceAutoInstalled",
+    "opus1mMergeNoticeSeenCount",
+    "opusProMigrationComplete",
+    "sonnet1m45MigrationComplete",
+    "voiceNoticeSeenCount",
+)
+_CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST = ("tipsHistory",)
 _CLAUDE_OAUTH_ACCOUNT_ALLOWLIST = (
     "accountCreatedAt",
     "accountUuid",
@@ -2341,6 +2371,10 @@ def _sanitize_claude_inherited_settings_payload(settings_data):
         value = settings_data.get(key)
         if isinstance(value, dict):
             inherited[key] = copy.deepcopy(value)
+    for key in _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS:
+        value = settings_data.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            inherited[key] = copy.deepcopy(value)
     return inherited
 
 
@@ -2358,9 +2392,152 @@ def _copy_allowed_scalar_fields(payload, allowed_keys):
     return copied
 
 
+def _copy_allowed_scalar_dict_fields(payload, allowed_keys):
+    payload = payload if isinstance(payload, dict) else {}
+    copied = {}
+    for key in allowed_keys:
+        value = payload.get(key)
+        if not isinstance(value, dict):
+            continue
+        child = {}
+        for child_key, child_value in value.items():
+            if isinstance(child_value, (str, int, float, bool)):
+                child[str(child_key)] = copy.deepcopy(child_value)
+        if child:
+            copied[key] = child
+    return copied
+
+
+def _sanitize_claude_ui_state_seed_payload(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    seed = _copy_allowed_scalar_fields(payload, _CLAUDE_OAUTH_UI_STATE_SEED_KEYS)
+    seed.update(_copy_allowed_scalar_dict_fields(payload, _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST))
+    return seed
+
+
+def _merge_scalar_dict_entries(existing_payload, incoming_payload, *, prefer_max_numeric=False):
+    existing_payload = existing_payload if isinstance(existing_payload, dict) else {}
+    incoming_payload = incoming_payload if isinstance(incoming_payload, dict) else {}
+    merged = copy.deepcopy(existing_payload)
+    for key, incoming_value in incoming_payload.items():
+        existing_value = existing_payload.get(key)
+        if (
+            prefer_max_numeric
+            and isinstance(existing_value, (int, float))
+            and not isinstance(existing_value, bool)
+            and isinstance(incoming_value, (int, float))
+            and not isinstance(incoming_value, bool)
+        ):
+            merged[key] = max(existing_value, incoming_value)
+        else:
+            merged[key] = copy.deepcopy(incoming_value)
+    return merged
+
+
+def _merge_claude_ui_state_seed(target_payload, seed_payload):
+    target_payload = dict(target_payload) if isinstance(target_payload, dict) else {}
+    seed_payload = seed_payload if isinstance(seed_payload, dict) else {}
+    for key, value in seed_payload.items():
+        if key == "numStartups" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            existing_value = target_payload.get(key)
+            if isinstance(existing_value, (int, float)) and not isinstance(existing_value, bool):
+                target_payload[key] = max(existing_value, value)
+            else:
+                target_payload[key] = value
+            continue
+        if key in _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST and isinstance(value, dict):
+            target_payload[key] = _merge_scalar_dict_entries(
+                target_payload.get(key),
+                value,
+                prefer_max_numeric=(key == "tipsHistory"),
+            )
+            continue
+        target_payload.setdefault(key, copy.deepcopy(value))
+    return target_payload
+
+
+def _sanitize_claude_project_state_entry(entry):
+    entry = entry if isinstance(entry, dict) else {}
+    cleaned = _copy_allowed_scalar_fields(
+        entry,
+        (
+            "hasTrustDialogAccepted",
+            "hasCompletedProjectOnboarding",
+            "hasClaudeMdExternalIncludesApproved",
+            "hasClaudeMdExternalIncludesWarningShown",
+            "projectOnboardingSeenCount",
+            "lastGracefulShutdown",
+        ),
+    )
+    for key in ("allowedTools", "mcpContextUris", "enabledMcpjsonServers", "disabledMcpjsonServers"):
+        value = entry.get(key)
+        if isinstance(value, list):
+            cleaned[key] = copy.deepcopy(value)
+    mcp_servers = entry.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        cleaned["mcpServers"] = copy.deepcopy(mcp_servers)
+    return cleaned
+
+
+def _sanitize_claude_project_state_map(projects_data):
+    projects = {}
+    if not isinstance(projects_data, dict):
+        return projects
+    for project_path, entry in projects_data.items():
+        normalized_path = os.path.realpath(str(project_path or "").strip())
+        if not normalized_path:
+            continue
+        cleaned_entry = _sanitize_claude_project_state_entry(entry)
+        if cleaned_entry:
+            projects[normalized_path] = cleaned_entry
+    return projects
+
+
+def _load_real_claude_ui_state_seed():
+    import json as _json
+
+    real_json = _real_user_path(".claude.json")
+    if not os.path.exists(real_json):
+        return {}
+    try:
+        with open(real_json, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        if not isinstance(loaded, dict):
+            return {}
+        return _sanitize_claude_ui_state_seed_payload(loaded)
+    except Exception:
+        return {}
+
+
+def _load_real_claude_project_state(project_path):
+    import json as _json
+
+    real_json = _real_user_path(".claude.json")
+    normalized_project = os.path.realpath(str(project_path or "").strip())
+    if not normalized_project or not os.path.exists(real_json):
+        return None
+    try:
+        with open(real_json, encoding="utf-8") as f:
+            loaded = _json.load(f)
+        if not isinstance(loaded, dict):
+            return None
+        projects = loaded.get("projects")
+        if not isinstance(projects, dict):
+            return None
+        project_state = projects.get(normalized_project)
+        if not isinstance(project_state, dict):
+            return None
+        cleaned = _sanitize_claude_project_state_entry(project_state)
+        return cleaned or None
+    except Exception:
+        return None
+
+
 def _sanitize_oauth_claude_state_payload(data):
-    payload = _strip_claude_restore_state(data)
+    raw_data = data if isinstance(data, dict) else {}
+    payload = _strip_claude_restore_state(raw_data)
     cleaned = _copy_allowed_scalar_fields(payload, _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST)
+    cleaned.update(_copy_allowed_scalar_dict_fields(raw_data, _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST))
 
     oauth_account = _copy_allowed_scalar_fields(
         payload.get("oauthAccount"),
@@ -2375,6 +2552,10 @@ def _sanitize_oauth_claude_state_payload(data):
     )
     if claude_ai_oauth:
         cleaned["claudeAiOauth"] = claude_ai_oauth
+
+    projects = _sanitize_claude_project_state_map(raw_data.get("projects"))
+    if projects:
+        cleaned["projects"] = projects
 
     return cleaned
 
@@ -2429,9 +2610,14 @@ def _ensure_claude_project_trust(data, project_path, project_state=None):
     entry.setdefault("enabledMcpjsonServers", [])
     entry.setdefault("disabledMcpjsonServers", [])
     entry["hasTrustDialogAccepted"] = True
-    entry.setdefault("projectOnboardingSeenCount", 0)
-    entry.setdefault("hasClaudeMdExternalIncludesApproved", False)
-    entry.setdefault("hasClaudeMdExternalIncludesWarningShown", False)
+    entry["hasCompletedProjectOnboarding"] = True
+    entry["hasClaudeMdExternalIncludesApproved"] = True
+    entry["hasClaudeMdExternalIncludesWarningShown"] = True
+    seen_count = entry.get("projectOnboardingSeenCount")
+    if isinstance(seen_count, (int, float)) and not isinstance(seen_count, bool):
+        entry["projectOnboardingSeenCount"] = max(int(seen_count), 1)
+    else:
+        entry["projectOnboardingSeenCount"] = 1
     entry.setdefault("lastGracefulShutdown", False)
 
     projects[project_path] = entry
@@ -2520,6 +2706,15 @@ def _merge_oauth_claude_state_payload(existing_data, incoming_data):
         if isinstance(incoming_value, (str, int, float, bool)):
             merged[key] = copy.deepcopy(incoming_value)
 
+    for key in _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST:
+        merged_dict = _merge_scalar_dict_entries(
+            existing.get(key),
+            incoming.get(key),
+            prefer_max_numeric=(key == "tipsHistory"),
+        )
+        if merged_dict:
+            merged[key] = merged_dict
+
     merged_account = copy.deepcopy(existing.get("oauthAccount") or {})
     if isinstance(incoming.get("oauthAccount"), dict):
         merged_account.update(copy.deepcopy(incoming["oauthAccount"]))
@@ -2529,6 +2724,17 @@ def _merge_oauth_claude_state_payload(existing_data, incoming_data):
     merged_token = _merge_oauth_token_state(existing.get("claudeAiOauth"), incoming.get("claudeAiOauth"))
     if merged_token:
         merged["claudeAiOauth"] = merged_token
+
+    merged_projects = copy.deepcopy(existing.get("projects") or {})
+    for project_path, entry in (incoming.get("projects") or {}).items():
+        current_entry = merged_projects.get(project_path)
+        next_entry = dict(current_entry) if isinstance(current_entry, dict) else {}
+        if isinstance(entry, dict):
+            next_entry.update(copy.deepcopy(entry))
+        if next_entry:
+            merged_projects[project_path] = next_entry
+    if merged_projects:
+        merged["projects"] = merged_projects
 
     return merged
 
@@ -2980,6 +3186,29 @@ def _account_env(account, *, validate_proxy=True):
                 _copy_claude_state_json(account_json, session_json, mode="oauth")
             except Exception:
                 pass
+        current_project = os.path.realpath(os.getcwd())
+        current_project_state = _load_real_claude_project_state(current_project)
+        session_state = {}
+        if os.path.exists(session_json):
+            try:
+                with open(session_json, encoding="utf-8") as f:
+                    loaded = _json.load(f)
+                if isinstance(loaded, dict):
+                    session_state = loaded
+            except Exception:
+                session_state = {}
+        session_state = _merge_claude_ui_state_seed(session_state, _load_real_claude_ui_state_seed())
+        if account.get("bypass"):
+            session_state["bypassPermissionsModeAccepted"] = True
+        else:
+            session_state.pop("bypassPermissionsModeAccepted", None)
+        session_state = _ensure_claude_project_trust(
+            session_state,
+            current_project,
+            project_state=current_project_state,
+        )
+        with locked_state_file(session_json):
+            atomic_write_json(session_json, session_state, mode=0o600)
         # symlink .local
         real_local = _real_user_path(".local")
         gw_local = os.path.join(session_home, ".local")
@@ -3184,6 +3413,19 @@ def _install_session_command_wrappers(session_home, env):
 
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
+
+
+def _resolve_real_home_command_path(command_name, env=None):
+    command_name = str(command_name or "").strip()
+    if not command_name:
+        return ""
+    path_value = ""
+    if isinstance(env, dict):
+        path_value = str(env.get("PATH") or "").strip()
+    if not path_value:
+        path_value = os.environ.get("PATH", "")
+    filtered_path = _filter_real_home_wrapper_path(path_value) or os.defpath
+    return shutil.which(command_name, path=filtered_path) or ""
 
 
 def _sync_codex_session_claude_json(session_home):
@@ -3803,7 +4045,8 @@ def launch_claude(model_info, runtime, once=False):
     env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(ctx_window)
     env["CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE"] = str(max(ctx_window - 3000, 10000))
 
-    cmd = ["claude"]
+    claude_bin = _resolve_real_home_command_path("claude", env) or "claude"
+    cmd = [claude_bin]
     if runtime.get("bypass"):
         cmd += ["--add-dir", os.path.realpath(os.getcwd())]
         cmd.append("--dangerously-skip-permissions")
@@ -4172,22 +4415,15 @@ def _claude_gateway_env(
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
     current_project = os.path.realpath(os.getcwd())
-    current_project_state = None
-    if os.path.exists(real_json):
-        try:
-            with open(real_json, encoding="utf-8") as f:
-                loaded = _json.load(f)
-            if isinstance(loaded, dict):
-                projects = loaded.get("projects")
-                if isinstance(projects, dict):
-                    current_project_state = projects.get(current_project)
-        except Exception:
-            current_project_state = None
+    current_project_state = _load_real_claude_project_state(current_project)
+    gw_existing = {}
 
     if os.path.exists(gw_json):
         try:
             with open(gw_json, encoding="utf-8") as f:
-                gw_existing = _json.load(f)
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                gw_existing = loaded
             if (
                 runtime.get("bypass")
                 and isinstance(gw_existing, dict)
@@ -4196,6 +4432,9 @@ def _claude_gateway_env(
                 data["bypassPermissionsModeAccepted"] = True
         except Exception:
             pass
+
+    data = _merge_claude_ui_state_seed(data, _sanitize_claude_ui_state_seed_payload(gw_existing))
+    data = _merge_claude_ui_state_seed(data, _load_real_claude_ui_state_seed())
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
