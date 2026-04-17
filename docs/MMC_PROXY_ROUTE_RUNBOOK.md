@@ -81,6 +81,7 @@ python3 mmc run --proxy http://127.0.0.1:31001
 ```bash
 python3 mmc doctor --route-id claude-route-a --routes-file ~/.config/mmc/proxy-routes.json
 python3 mmc doctor --proxy http://127.0.0.1:31001
+python3 mmc doctor --strict --route-id claude-route-a --routes-file ~/.config/mmc/proxy-routes.json
 ```
 
 `doctor` 会检查：
@@ -91,6 +92,29 @@ python3 mmc doctor --proxy http://127.0.0.1:31001
 - 当前出口 IP 是否能测出
 - 如果配置了 `expected_exit_ip`，是否与预期一致
 - inherited env 里是否有高风险代理变量
+- 当前 shell 是否已经在 MMC session 内
+- 当前是否通过 `sudo/root` 运行，是否存在把 `~/.config/mmc` 写成 root 所有的风险
+- `launcher/account` 关键 state 文件是否可写
+- 当前终端是否是 TTY；若不是，Claude 交互能力可能退化
+
+补充：
+
+- `--strict` 会把 warning 也当成失败，适合真正启动前做“必须干净”的检查
+- 默认 `doctor` 仍然允许带 warning 通过，适合日常排查
+
+## Session Janitor
+
+清理 stale slot 与 orphan tmp：
+
+```bash
+python3 mmc session prune
+```
+
+说明：
+
+- 这个命令不会动真实 Claude/MMS 配置
+- 只清理 MMC 自己的 `accounts/default/s/*` stale slot 和 `tmp/*` orphan runtime
+- 适合在崩过、强杀过、或者怀疑有残留时手动跑一次
 
 ## MMS 最小接入点
 

@@ -277,6 +277,23 @@ def _session_tmp_path(session_home: Path) -> Path:
     return _tmp_root() / session_home.name
 
 
+def _nested_session_home() -> str:
+    nested_home = str(os.environ.get("MMC_SESSION_HOME") or "").strip()
+    if not nested_home:
+        return ""
+    return os.path.realpath(os.path.abspath(os.path.expanduser(nested_home)))
+
+
+def _ensure_not_nested_session(action: str) -> None:
+    nested_home = _nested_session_home()
+    if not nested_home:
+        return
+    raise SystemExit(
+        "mmc: 当前已在隔离 session 内 "
+        f"({nested_home})；拒绝在同一 shell 里再次执行 `{action}`，请新开 Terminal/tab。"
+    )
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent
 
@@ -385,6 +402,19 @@ def _remove_path_tree(path: Path) -> None:
 def _cleanup_session_runtime_artifacts(session_home: Path) -> None:
     _remove_path_tree(_session_tmp_path(session_home))
     _remove_path_tree(session_home)
+
+
+def _cleanup_orphan_tmp_entries(active_slot_names: set[str]) -> int:
+    tmp_root = _tmp_root()
+    if not tmp_root.exists():
+        return 0
+    removed = 0
+    for entry in tmp_root.iterdir():
+        if entry.name in active_slot_names:
+            continue
+        _remove_path_tree(entry)
+        removed += 1
+    return removed
 
 
 def _cleanup_stale_session_slots(sessions_dir: Path) -> list[Path]:
@@ -899,6 +929,52 @@ def _doctor_check_binary(label: str, explicit_path: str = "") -> tuple[bool, str
     return True, binary_path
 
 
+def _doctor_check_tty() -> tuple[bool, str]:
+    try:
+        stdin_tty = bool(sys.stdin.isatty())
+        stdout_tty = bool(sys.stdout.isatty())
+    except Exception as exc:
+        return False, f"TTY 检查失败: {exc}"
+    if stdin_tty and stdout_tty:
+        return True, "stdin/stdout 均为 TTY"
+    missing = []
+    if not stdin_tty:
+        missing.append("stdin")
+    if not stdout_tty:
+        missing.append("stdout")
+    return False, f"{'/'.join(missing)} 不是 TTY；交互式 Claude 会话可能退化"
+
+
+def _doctor_check_runtime_identity() -> tuple[bool, str]:
+    sudo_user = str(os.environ.get("SUDO_USER") or "").strip()
+    sudo_uid = str(os.environ.get("SUDO_UID") or "").strip()
+    try:
+        is_root = bool(hasattr(os, "geteuid") and os.geteuid() == 0)
+    except Exception:
+        is_root = False
+    if is_root or sudo_user or sudo_uid:
+        detail = "当前通过 root/sudo 运行，可能把 ~/.config/mmc 写成 root 所有"
+        if sudo_user:
+            detail = f"{detail}（sudo_user={sudo_user}）"
+        return False, detail
+    return True, "当前以普通用户身份运行"
+
+
+def _doctor_check_state_path_writable(path: Path) -> tuple[bool, str]:
+    target = Path(path)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, f"{target.parent}: {exc}"
+    if target.exists():
+        if os.access(target, os.W_OK):
+            return True, str(target.resolve())
+        return False, f"{target}: 不可写"
+    if os.access(target.parent, os.W_OK):
+        return True, f"{target} (parent writable)"
+    return False, f"{target.parent}: 不可写"
+
+
 def _proxy_routes_config_path() -> Path:
     return _config_root() / "proxy-routes.json"
 
@@ -1078,6 +1154,27 @@ def _run_doctor(args) -> int:
         failures += 1
         _doctor_emit("FAIL", f"{label} binary", detail)
 
+    tty_ok, tty_detail = _doctor_check_tty()
+    if tty_ok:
+        _doctor_emit("PASS", "tty", tty_detail)
+    else:
+        warnings += 1
+        _doctor_emit("WARN", "tty", tty_detail)
+
+    identity_ok, identity_detail = _doctor_check_runtime_identity()
+    if identity_ok:
+        _doctor_emit("PASS", "runtime identity", identity_detail)
+    else:
+        warnings += 1
+        _doctor_emit("WARN", "runtime identity", identity_detail)
+
+    nested_home = _nested_session_home()
+    if nested_home:
+        warnings += 1
+        _doctor_emit("WARN", "nested session", f"当前 shell 已在 MMC session 内: {nested_home}")
+    else:
+        _doctor_emit("PASS", "nested session", "当前 shell 不在 MMC session 内")
+
     route_plan = None
     try:
         route_plan = _resolve_proxy_launch_target(args)
@@ -1155,8 +1252,23 @@ def _run_doctor(args) -> int:
         failures += 1
         _doctor_emit("FAIL", label, detail)
 
+    for label, path in (
+        ("launcher state", _launcher_config_path()),
+        ("account state", _account_state_path()),
+        ("account settings", _account_settings_path()),
+    ):
+        ok, detail = _doctor_check_state_path_writable(path)
+        if ok:
+            _doctor_emit("PASS", label, detail)
+            continue
+        failures += 1
+        _doctor_emit("FAIL", label, detail)
+
     summary = f"doctor completed: {failures} fail, {warnings} warn"
-    if failures:
+    strict_mode = bool(getattr(args, "strict", False))
+    if failures or (strict_mode and warnings):
+        if strict_mode and not failures and warnings:
+            summary = f"{summary} (strict mode blocked on warnings)"
         _doctor_emit("FAIL", "summary", summary)
         return 1
     _doctor_emit("PASS", "summary", summary)
@@ -1606,7 +1718,13 @@ def _run_proxy_probe(proxy_url: str, target_url: str, *, no_proxy: str = "", for
     ]
     if str(no_proxy or "").strip():
         cmd.extend(["--noproxy", str(no_proxy).strip()])
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        if len(detail) > 200:
+            detail = detail[:200] + "..."
+        return {"ok": False, "detail": detail, "http_code": ""}
     http_code = str(result.stdout or "").strip()
     ok = result.returncode == 0 and bool(http_code) and http_code not in {"000", "407"}
     detail = str(result.stderr or "").strip()
@@ -1648,7 +1766,13 @@ def _run_exit_ip_probe(proxy_url: str, *, force_ipv4: bool = True) -> dict:
             str(proxy_url).strip(),
             target_url,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        except Exception as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+            if len(detail) > 200:
+                detail = detail[:200] + "..."
+            return {"ok": False, "detail": detail, "exit_ip": ""}
         exit_ip = _extract_exit_ip(result.stdout)
         if result.returncode == 0 and exit_ip:
             return {"ok": True, "detail": "", "exit_ip": exit_ip}
@@ -2000,6 +2124,27 @@ def _signal_child_process(child, signum: int) -> None:
             killer()
 
 
+def _restore_tty_state() -> None:
+    try:
+        if not sys.stdin.isatty():
+            return
+    except Exception:
+        return
+    stty_bin = shutil.which("stty", path=os.defpath) or shutil.which("stty")
+    if not stty_bin:
+        return
+    try:
+        subprocess.run(
+            [stty_bin, "sane"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=2.0,
+        )
+    except Exception:
+        pass
+
+
 def _terminate_child_process(child, *, grace_timeout_sec: float = 3.0) -> None:
     if child is None or child.poll() is not None:
         return
@@ -2029,6 +2174,7 @@ def _terminate_child_process(child, *, grace_timeout_sec: float = 3.0) -> None:
             child.wait(timeout=1.0)
         except Exception:
             pass
+        _restore_tty_state()
 
 
 def _attach_child_process_group(child) -> None:
@@ -2214,6 +2360,23 @@ def _handle_session_ls() -> int:
     return 0
 
 
+def _handle_session_prune() -> int:
+    sessions_dir = _session_slots_dir()
+    with locked_state_file(_session_slots_lock_path()):
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        before_slots = [entry for entry in sessions_dir.iterdir() if entry.is_dir()]
+        active_slots = _cleanup_stale_session_slots(sessions_dir)
+        active_names = {entry.name for entry in active_slots}
+        orphan_tmp_removed = _cleanup_orphan_tmp_entries(active_names)
+    removed_slots = max(len(before_slots) - len(active_slots), 0)
+    print(
+        "mmc: session prune 完成，"
+        f"移除 {removed_slots} 个 stale slot，保留 {len(active_slots)} 个活动 slot，"
+        f"清理 {orphan_tmp_removed} 个 orphan tmp"
+    )
+    return 0
+
+
 def _handle_import_auth(source_home: str) -> int:
     _import_legacy_auth_state(source_home)
     print("mmc: legacy OAuth state 已导入到 MMC account home")
@@ -2229,12 +2392,14 @@ def _handle_setup() -> int:
 
 
 def _run_default_entry() -> int:
+    _ensure_not_nested_session("mmc")
     args = _build_launch_namespace(workspace=os.getcwd())
     _apply_launcher_defaults(args, _ensure_launcher_defaults())
     return _run_claude(args)
 
 
 def _run_resume_latest() -> int:
+    _ensure_not_nested_session("mmc resume-last")
     session_ref = _latest_owned_session_ref()
     if not session_ref:
         print("mmc: 暂无可恢复 session", file=sys.stderr)
@@ -2271,28 +2436,36 @@ def main(argv: list[str] | None = None) -> None:
     session_parser = subparsers.add_parser("session", help="查看 MMC session")
     session_subparsers = session_parser.add_subparsers(dest="session_subcommand")
     session_subparsers.add_parser("ls", help="列出 session")
+    session_subparsers.add_parser("prune", help="清理 stale session slot 与 orphan tmp")
 
     doctor_parser = subparsers.add_parser("doctor", help="检查 MMC binary / proxy / env / state")
     _add_common_launch_args(doctor_parser)
+    doctor_parser.add_argument("--strict", action="store_true", help="将 warning 也视为失败")
 
     subparsers.add_parser("setup", help="交互式保存默认启动配置")
 
     args = parser.parse_args(argv)
 
     if args.subcommand == "run":
+        _ensure_not_nested_session("mmc run")
         _apply_launcher_defaults(args)
         sys.exit(_run_claude(args))
     if args.subcommand == "resume":
+        _ensure_not_nested_session("mmc resume")
         _apply_launcher_defaults(args)
         sys.exit(_run_resume(args))
     if args.subcommand == "import-auth":
+        _ensure_not_nested_session("mmc import-auth")
         sys.exit(_handle_import_auth(args.from_home))
     if args.subcommand == "session" and args.session_subcommand == "ls":
         sys.exit(_handle_session_ls())
+    if args.subcommand == "session" and args.session_subcommand == "prune":
+        sys.exit(_handle_session_prune())
     if args.subcommand == "doctor":
         _apply_launcher_defaults(args)
         sys.exit(_run_doctor(args))
     if args.subcommand == "setup":
+        _ensure_not_nested_session("mmc setup")
         sys.exit(_handle_setup())
 
     parser.print_help()

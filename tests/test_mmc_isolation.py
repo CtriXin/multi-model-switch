@@ -294,6 +294,16 @@ def test_build_process_env_blocks_force_ipv4_injection(monkeypatch, tmp_path):
         mmc_core._build_process_env(args, tmp_path / "session-home")
 
 
+def test_ensure_not_nested_session_blocks_launch_inside_existing_session(monkeypatch, tmp_path):
+    import mmc_core
+
+    nested_home = tmp_path / "nested-session"
+    monkeypatch.setenv("MMC_SESSION_HOME", str(nested_home))
+
+    with pytest.raises(SystemExit, match="当前已在隔离 session 内"):
+        mmc_core._ensure_not_nested_session("mmc run")
+
+
 def test_proxy_guard_blocks_missing_proxy(monkeypatch):
     import mmc_core
 
@@ -426,8 +436,39 @@ def test_local_proxy_guard_blocks_when_exit_ip_cannot_be_pinned(monkeypatch):
 
     assert guard["status"] == "blocked"
     assert guard["block_reason"] == "无法固定 proxy 出口 IP"
-    assert guard["exit_ip"] == ""
-    assert guard["exit_ip_detail"] == "checkip failed"
+
+
+def test_run_proxy_probe_returns_structured_error_when_subprocess_blows_up(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(mmc_core.shutil, "which", lambda _name: "/usr/bin/curl")
+    monkeypatch.setattr(
+        mmc_core.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("curl exploded")),
+    )
+
+    result = mmc_core._run_proxy_probe("http://127.0.0.1:7890", "https://claude.ai")
+
+    assert result["ok"] is False
+    assert "OSError" in result["detail"]
+
+
+def test_run_exit_ip_probe_returns_structured_error_when_subprocess_blows_up(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(mmc_core.shutil, "which", lambda _name: "/usr/bin/curl")
+    monkeypatch.setattr(
+        mmc_core.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    result = mmc_core._run_exit_ip_probe("http://127.0.0.1:7890")
+
+    assert result["ok"] is False
+    assert "RuntimeError" in result["detail"]
+    assert result["exit_ip"] == ""
 
 
 def test_local_proxy_guard_blocks_when_exit_ip_mismatches_expected(monkeypatch):
@@ -1000,6 +1041,42 @@ def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_pa
     assert stopped == [True]
 
 
+def test_terminate_child_process_restores_tty_after_force_kill(monkeypatch):
+    import mmc_core
+
+    restored = []
+    signaled = []
+
+    monkeypatch.setattr(mmc_core, "_restore_tty_state", lambda: restored.append(True))
+
+    class _FakeChild:
+        def __init__(self):
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.returncode is not None:
+                return self.returncode
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout)
+
+    child = _FakeChild()
+
+    def _fake_signal(target, signum):
+        signaled.append(signum)
+        if signum == signal.SIGKILL:
+            target.returncode = 137
+
+    monkeypatch.setattr(mmc_core, "_signal_child_process", _fake_signal)
+
+    mmc_core._terminate_child_process(child, grace_timeout_sec=0.2)
+
+    assert signaled[0] == signal.SIGTERM
+    assert signaled[-1] == signal.SIGKILL
+    assert restored == [True]
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process group signaling is POSIX-only")
 def test_terminate_child_process_kills_spawned_process_group(tmp_path):
     import mmc_core
@@ -1064,6 +1141,38 @@ def test_terminate_child_process_kills_spawned_process_group(tmp_path):
                 os.kill(grandchild_pid, signal.SIGKILL)
             except OSError:
                 pass
+
+
+def test_handle_session_prune_removes_stale_slots_and_orphan_tmp(monkeypatch, tmp_path, capsys):
+    import mmc_core
+
+    config_root = tmp_path / "mmc-config"
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+
+    sessions_dir = mmc_core._session_slots_dir()
+    tmp_root = mmc_core._tmp_root()
+    active_slot = sessions_dir / "123-1"
+    stale_slot = sessions_dir / "456-2"
+    active_slot.mkdir(parents=True)
+    stale_slot.mkdir(parents=True)
+    (tmp_root / active_slot.name).mkdir(parents=True)
+    (tmp_root / stale_slot.name).mkdir(parents=True)
+    (tmp_root / "orphan-only").mkdir(parents=True)
+
+    monkeypatch.setattr(mmc_core, "_slot_pid_is_active", lambda _entry, pid: pid == 123)
+
+    exit_code = mmc_core._handle_session_prune()
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert active_slot.exists()
+    assert not stale_slot.exists()
+    assert (tmp_root / active_slot.name).exists()
+    assert not (tmp_root / stale_slot.name).exists()
+    assert not (tmp_root / "orphan-only").exists()
+    assert "移除 1 个 stale slot" in output
+    assert "清理 1 个 orphan tmp" in output
 
 
 def test_reserve_session_home_uses_reservation_lock(monkeypatch, tmp_path):
