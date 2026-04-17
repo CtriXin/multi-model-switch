@@ -5,6 +5,7 @@ import copy
 import ipaddress
 import json
 import os
+import socket
 import shlex
 import shutil
 import signal
@@ -161,6 +162,37 @@ _DEFAULT_LAUNCH_ENV = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "API_TIMEOUT_MS": "3000000",
 }
+_DANGEROUS_PARENT_ENV_KEYS = (
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "PYTHONPATH",
+    "SSH_AUTH_SOCK",
+    "TMPDIR",
+)
+_DANGEROUS_PARENT_ENV_PREFIXES = (
+    "ANTHROPIC_",
+    "CLAUDE_CODE_",
+    "OPENAI_",
+    "MMS_",
+    "DYLD_",
+    "LD_",
+)
 _DEFAULT_SETUP_LANG = "en_US.UTF-8"
 _DEFAULT_SETUP_TZ = "America/Los_Angeles"
 _LAUNCHER_CONFIG_KEYS = (
@@ -768,6 +800,156 @@ def _ensure_launcher_defaults() -> dict:
     if not _interactive_stdio_available():
         raise SystemExit("mmc: 尚未配置默认 proxy，请先执行 `mmc setup` 或显式传 `--proxy`。")
     return _run_setup_interactive(save=True)
+
+
+def _doctor_emit(status: str, label: str, detail: str) -> None:
+    print(f"{status:<4} {label}: {detail}")
+
+
+def _doctor_collect_parent_env_findings() -> list[str]:
+    findings = []
+    for key in sorted(os.environ):
+        normalized = str(key or "").strip()
+        upper = normalized.upper()
+        if (
+            normalized in _DANGEROUS_PARENT_ENV_KEYS
+            or upper in _DANGEROUS_PARENT_ENV_KEYS
+            or any(upper.startswith(prefix) for prefix in _DANGEROUS_PARENT_ENV_PREFIXES)
+        ):
+            findings.append(normalized)
+    return findings
+
+
+def _doctor_check_directory_writable(path: Path) -> tuple[bool, str]:
+    target = Path(path)
+    probe_path = target / ".mmc-doctor-write-test"
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        probe_path.write_text("ok", encoding="utf-8")
+        probe_path.unlink()
+        return True, str(target.resolve())
+    except OSError as exc:
+        try:
+            if probe_path.exists():
+                probe_path.unlink()
+        except OSError:
+            pass
+        return False, f"{target}: {exc}"
+
+
+def _doctor_check_binary(label: str, explicit_path: str = "") -> tuple[bool, str]:
+    try:
+        binary_path = (
+            _assert_safe_binary_path(explicit_path, label=label)
+            if str(explicit_path or "").strip()
+            else _resolve_safe_binary(label)
+        )
+    except SystemExit as exc:
+        return False, str(exc)
+    return True, binary_path
+
+
+def _doctor_parse_proxy_endpoint(proxy_url: str) -> dict[str, str | int | bool]:
+    raw = str(proxy_url or "").strip()
+    if not raw:
+        return {"ok": False, "detail": "未配置 proxy", "host": "", "port": 0, "scheme": ""}
+    try:
+        parsed = urlsplit(raw)
+        host = str(parsed.hostname or "").strip()
+        port = int(parsed.port or 0)
+        scheme = str(parsed.scheme or "").strip().lower()
+    except ValueError as exc:
+        return {"ok": False, "detail": f"proxy URL 非法: {exc}", "host": "", "port": 0, "scheme": ""}
+    if not host or not port:
+        return {"ok": False, "detail": "proxy URL 缺少 host 或 port", "host": host, "port": port, "scheme": scheme}
+    return {"ok": True, "detail": "", "host": host, "port": port, "scheme": scheme}
+
+
+def _doctor_probe_tcp_endpoint(host: str, port: int, *, timeout_sec: float = 4.0) -> tuple[bool, str]:
+    try:
+        with socket.create_connection((str(host), int(port)), timeout=max(float(timeout_sec), 0.5)):
+            return True, f"{host}:{port}"
+    except OSError as exc:
+        return False, f"{host}:{port} ({exc})"
+
+
+def _run_doctor(args) -> int:
+    failures = 0
+    warnings = 0
+
+    launcher_path = _launcher_config_path()
+    if launcher_path.exists():
+        _doctor_emit("PASS", "launcher defaults", str(launcher_path))
+    else:
+        warnings += 1
+        _doctor_emit("WARN", "launcher defaults", f"未找到 {launcher_path}；只能依赖命令行参数")
+
+    for label, explicit_path in (("claude", args.claude_bin), ("node", args.node_bin)):
+        ok, detail = _doctor_check_binary(label, explicit_path)
+        if ok:
+            _doctor_emit("PASS", f"{label} binary", detail)
+            continue
+        failures += 1
+        _doctor_emit("FAIL", f"{label} binary", detail)
+
+    proxy_url = str(args.proxy or "").strip()
+    no_proxy = str(args.no_proxy or "").strip()
+    if not proxy_url:
+        failures += 1
+        _doctor_emit("FAIL", "proxy config", "未配置 proxy；先执行 `mmc setup` 或传 `--proxy`")
+    else:
+        endpoint = _doctor_parse_proxy_endpoint(proxy_url)
+        if endpoint.get("ok"):
+            _doctor_emit(
+                "PASS",
+                "proxy endpoint",
+                f"{endpoint['scheme']}://{endpoint['host']}:{endpoint['port']} (dns={_proxy_dns_mode(proxy_url)})",
+            )
+            tcp_ok, tcp_detail = _doctor_probe_tcp_endpoint(
+                str(endpoint["host"]),
+                int(endpoint["port"]),
+            )
+            if tcp_ok:
+                _doctor_emit("PASS", "proxy reachability", f"当前网络可直达 {tcp_detail}")
+            else:
+                failures += 1
+                _doctor_emit("FAIL", "proxy reachability", f"当前网络无法直达 {tcp_detail}")
+        else:
+            failures += 1
+            _doctor_emit("FAIL", "proxy endpoint", str(endpoint.get("detail") or "proxy URL 非法"))
+
+        guard = _build_local_proxy_guard(proxy_url, no_proxy)
+        if guard.get("status") == "ok":
+            _doctor_emit("PASS", "proxy guard", f"Claude upstream reachable; exit_ip={guard.get('exit_ip') or '-'}")
+        else:
+            failures += 1
+            _doctor_emit("FAIL", "proxy guard", str(guard.get("block_reason") or "proxy guard blocked"))
+
+    env_findings = _doctor_collect_parent_env_findings()
+    if env_findings:
+        warnings += 1
+        _doctor_emit("WARN", "parent env", ", ".join(env_findings[:12]) + (" ..." if len(env_findings) > 12 else ""))
+    else:
+        _doctor_emit("PASS", "parent env", "未发现高风险 inherited env")
+
+    for label, path in (
+        ("config root", _config_root()),
+        ("account home", _account_home()),
+        ("tmp root", _tmp_root()),
+    ):
+        ok, detail = _doctor_check_directory_writable(path)
+        if ok:
+            _doctor_emit("PASS", label, detail)
+            continue
+        failures += 1
+        _doctor_emit("FAIL", label, detail)
+
+    summary = f"doctor completed: {failures} fail, {warnings} warn"
+    if failures:
+        _doctor_emit("FAIL", "summary", summary)
+        return 1
+    _doctor_emit("PASS", "summary", summary)
+    return 0
 
 
 def _latest_owned_session_ref() -> str | None:
@@ -1785,6 +1967,9 @@ def main(argv: list[str] | None = None) -> None:
     session_subparsers = session_parser.add_subparsers(dest="session_subcommand")
     session_subparsers.add_parser("ls", help="列出 session")
 
+    doctor_parser = subparsers.add_parser("doctor", help="检查 MMC binary / proxy / env / state")
+    _add_common_launch_args(doctor_parser)
+
     subparsers.add_parser("setup", help="交互式保存默认启动配置")
 
     args = parser.parse_args(argv)
@@ -1799,6 +1984,9 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(_handle_import_auth(args.from_home))
     if args.subcommand == "session" and args.session_subcommand == "ls":
         sys.exit(_handle_session_ls())
+    if args.subcommand == "doctor":
+        _apply_launcher_defaults(args)
+        sys.exit(_run_doctor(args))
     if args.subcommand == "setup":
         sys.exit(_handle_setup())
 

@@ -227,6 +227,8 @@ DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 DEFAULT_ACCOUNT_TIMEZONE = "America/Los_Angeles"
 VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
 OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
+MMS_MANAGED_OAUTH_CLIS = ("codex", "gemini")
+MMC_DELEGATED_OAUTH_CLIS = ("claude",)
 DEFAULT_PRIORITY = 100
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
@@ -3418,6 +3420,11 @@ def _account_status_command(cli_name):
 
 def _probe_account_status(account):
     cli_name = account.get("cli")
+    if cli_name == "claude":
+        return {
+            "state": "delegated",
+            "summary": "Claude OAuth 已迁移到 mmc；MMS 不再探测或登录这个账号",
+        }
     if cli_name == "gemini":
         home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
         gemini_dir = os.path.join(home_dir, ".gemini")
@@ -3468,11 +3475,12 @@ def _probe_account_status(account):
 
 def _run_account_login(account):
     cli_name = account.get("cli")
+    if cli_name == "claude":
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 登录和恢复 session。[/yellow]")
+        return
     env = _account_env(account)
     os.makedirs(account.get("home_dir", ""), exist_ok=True)
-    if cli_name == "claude":
-        command = ["claude", "auth", "login"]
-    elif cli_name == "codex":
+    if cli_name == "codex":
         command = ["codex", "login"]
     elif cli_name == "gemini":
         command = ["gemini"]
@@ -3696,7 +3704,9 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         account_id = _normalize_account_id(Prompt.ask("文件夹名（用于目录和命令）", default=account_id))
     cli_name = preset_cli or current.get("cli", "claude")
     if not preset_cli:
-        cli_name = Prompt.ask("绑定的 CLI", choices=list(OAUTH_CAPABLE_CLIS), default=cli_name)
+        if cli_name not in MMS_MANAGED_OAUTH_CLIS:
+            cli_name = MMS_MANAGED_OAUTH_CLIS[0]
+        cli_name = Prompt.ask("绑定的 CLI", choices=list(MMS_MANAGED_OAUTH_CLIS), default=cli_name)
     name = Prompt.ask("显示名", default=current.get("name") or account_id).strip() or account_id
     home_dir = current.get("home_dir") or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
@@ -3888,15 +3898,16 @@ def _quick_connect_official(cfg, preset_cli=None):
     ))
     choices = {
         "1": ("codex", "ChatGPT / Codex"),
-        "2": ("claude", "Claude"),
-        "3": ("gemini", "Gemini"),
+        "2": ("gemini", "Gemini"),
     }
-    if preset_cli in OAUTH_CAPABLE_CLIS:
+    if preset_cli in MMC_DELEGATED_OAUTH_CLIS:
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再新增 Claude 官方账号。[/yellow]")
+        return cfg, False
+    if preset_cli in MMS_MANAGED_OAUTH_CLIS:
         cli_name = preset_cli
     else:
         console.print("  1. ChatGPT / Codex")
-        console.print("  2. Claude")
-        console.print("  3. Gemini")
+        console.print("  2. Gemini")
         try:
             selected = _wizard_prompt(_L("选择官方通道类型", "Select official channel type"), default="1")
         except WizardBack:
@@ -3906,7 +3917,7 @@ def _quick_connect_official(cfg, preset_cli=None):
             console.print(f"[yellow]{_L('已退出接入', 'Setup cancelled')}[/yellow]")
             return cfg, False
         if selected not in choices:
-            console.print(f"[red]{_L('请输入 1-3', 'Please enter 1-3')}[/red]")
+            console.print(f"[red]{_L('请输入 1-2', 'Please enter 1-2')}[/red]")
             return cfg, False
         cli_name = choices[selected][0]
 
@@ -6391,7 +6402,7 @@ def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, acc
     if provider_id:
         provider = resolve_provider_context(cfg, provider_id)
         return _resolve_provider_for_cli(cfg, cli_name, provider, _probe_models(provider, emit_output=False).get("models"))
-    if cli_name in OAUTH_CAPABLE_CLIS:
+    if cli_name in MMS_MANAGED_OAUTH_CLIS:
         account = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
         if account_id and account is not None:
             return account, list(default_models or [])
@@ -6462,7 +6473,7 @@ def _choose_runtime_source(
     model_info=None,
     allow_selected_model_accounts=False,
 ):
-    if account_id or provider_id or cli_name not in OAUTH_CAPABLE_CLIS:
+    if account_id or provider_id or cli_name not in MMS_MANAGED_OAUTH_CLIS:
         runtime, models = _resolve_launch_runtime(
             cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
         )
@@ -6601,7 +6612,7 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
     for cli_name in CLI_NAMES:
-        if cli_name in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, cli_name):
+        if cli_name in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, cli_name):
             visible.append(cli_name)
             continue
         provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
@@ -7481,10 +7492,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     )
             elif settings_action == "routes_export":
                 try:
-                    from mms_router import export_model_routes
-                    path = export_model_routes(current_cfg, force=True)
-                    if path:
-                        console.print(f"[green]✓ 已导出 {path}[/green]")
+                    from mms_router import MODEL_ROUTES_PATH, export_model_routes
+
+                    export_model_routes(current_cfg, force=True)
+                    console.print(f"[green]✓ 已导出 {MODEL_ROUTES_PATH}[/green]")
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "about":
@@ -8101,15 +8112,19 @@ def _handle_provider_credentials_config(cfg, args_rest):
 def _handle_account_default_config(cfg, args_rest):
     defaults = cfg.get("account", {}).get("defaults", {})
     if not args_rest:
-        for cli_name in OAUTH_CAPABLE_CLIS:
+        for cli_name in MMS_MANAGED_OAUTH_CLIS:
             value = defaults.get(cli_name, "(未设置)")
             console.print(f"[cyan]account.default.{cli_name}[/cyan] = {value}")
+        console.print("[dim]Claude OAuth 已迁移到 mmc，不再支持 account.default.claude。[/dim]")
         return
     if len(args_rest) < 2:
         console.print(f"[red]用法: {current_command()} config account.default <cli> <account_id>[/red]")
         return
     cli_name, account_id = args_rest[0].strip(), args_rest[1].strip()
-    if cli_name not in OAUTH_CAPABLE_CLIS:
+    if cli_name in MMC_DELEGATED_OAUTH_CLIS:
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再支持设置 account.default.claude。[/yellow]")
+        return
+    if cli_name not in MMS_MANAGED_OAUTH_CLIS:
         console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
         return
     accounts = _account_map(cfg)
@@ -8127,7 +8142,11 @@ def _handle_account_default_config(cfg, args_rest):
 
 
 def _handle_account_add_config(cfg, args_rest):
-    preset_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() in OAUTH_CAPABLE_CLIS else None
+    requested_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() else None
+    if requested_cli in MMC_DELEGATED_OAUTH_CLIS:
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 管理 Claude 官方登录。[/yellow]")
+        return
+    preset_cli = requested_cli if requested_cli in MMS_MANAGED_OAUTH_CLIS else None
     _quick_connect_official(cfg, preset_cli=preset_cli)
 
 
@@ -8139,6 +8158,9 @@ def _handle_account_edit_config(cfg, args_rest):
     accounts = _account_map(cfg)
     if account_id not in accounts:
         console.print(f"[red]未找到账号档案: {account_id}[/red]")
+        return
+    if accounts[account_id].get("cli") in MMC_DELEGATED_OAUTH_CLIS:
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再编辑 Claude 官方账号。[/yellow]")
         return
     account = _prompt_account_metadata(existing=accounts[account_id], preset_id=account_id)
     updated_cfg = dict(cfg)
@@ -8195,6 +8217,9 @@ def _handle_account_login_config(cfg, args_rest):
         console.print(f"[red]用法: {current_command()} config account.login <id>[/red]")
         return
     account = resolve_account_context(cfg, account_id=args_rest[0].strip())
+    if account and account.get("cli") in MMC_DELEGATED_OAUTH_CLIS:
+        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 登录和恢复 Claude session。[/yellow]")
+        return
     _run_account_login(account)
 
 
@@ -8499,6 +8524,7 @@ def _display_accounts(cfg):
         f"[dim]提示: 可用 {current_command()} config account.default <cli> <id> 设置默认账号，"
         f"{current_command()} config account.login <id> 进入官方登录。[/dim]"
     )
+    console.print("[dim]注: Claude OAuth 已迁移到 mmc，这里仅保留旧配置只读兼容。[/dim]")
 
 
 def _display_config_help():
@@ -8529,12 +8555,13 @@ def _display_config_help():
     console.print(f"  {command} config provider.credentials [id]")
     console.print("\n[bold]Account:[/bold]")
     console.print(f"  {command} config account.list")
-    console.print(f"  {command} config account.add [claude|codex|gemini]")
+    console.print(f"  {command} config account.add [codex|gemini]")
     console.print(f"  {command} config account.edit <id>")
     console.print(f"  {command} config account.remove <id>")
     console.print(f"  {command} config account.status [id]")
     console.print(f"  {command} config account.login <id>")
     console.print(f"  {command} config account.default <cli> <id>")
+    console.print("  [dim]Claude OAuth 已迁移到 mmc，不再从 MMS 新增/登录/设默认。[/dim]")
     console.print("\n[bold]其他:[/bold]")
     console.print(f"  {command} config stats")
     console.print(f"  {command} config api.edit")
@@ -8989,6 +9016,7 @@ def _handle_session_info(session_id, cli_name):
 
 
 def handle_session_command(argv):
+    _ensure_rich()
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} session",
         description="查看 MMS 托管 session，或恢复已保存的 chat session",
@@ -9699,7 +9727,7 @@ def main():
                 save_preset_interactive(user_cfg, cli, model_info)
             _launch_with_tracking(cli, {} if _uses_managed_entry(runtime, cli) else {"model": model}, runtime, once=once)
             return
-        if target in OAUTH_CAPABLE_CLIS and _accounts_for_cli(cfg, target):
+        if target in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, target):
             cli = target
             _trace_record("CLI target", cli=cli)
             if args.account or args.provider:
