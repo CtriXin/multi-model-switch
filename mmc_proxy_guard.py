@@ -145,6 +145,7 @@ class LocalProxyGuard:
         exit_ip_probe_fn: Callable[[str], dict] | None = None,
         exit_ip_check_interval_sec: float = 30.0,
         expected_exit_ip: str = "",
+        passthrough_proxy_url: str = "",
     ) -> None:
         self.upstream = parse_upstream_proxy(upstream_proxy_url)
         self._probe_targets = tuple(probe_targets)
@@ -152,6 +153,7 @@ class LocalProxyGuard:
         self._probe_fn = probe_fn
         self._exit_ip_probe_fn = exit_ip_probe_fn
         self._exit_ip_check_interval_sec = max(float(exit_ip_check_interval_sec), self._probe_interval_sec)
+        self._passthrough_proxy_url = str(passthrough_proxy_url or "").strip()
         self._server = None
         self._server_thread = None
         self._heartbeat_thread = None
@@ -176,6 +178,15 @@ class LocalProxyGuard:
                 self._next_exit_ip_check_at = time.monotonic() + self._exit_ip_check_interval_sec
             else:
                 self._pin_initial_exit_ip()
+        if self._passthrough_proxy_url:
+            self.local_proxy_url = self._passthrough_proxy_url
+            self._heartbeat_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name="mmc-local-proxy-heartbeat",
+                daemon=True,
+            )
+            self._heartbeat_thread.start()
+            return
         server = _ThreadingTCPServer(("127.0.0.1", 0), _ProxyRelayHandler)
         server.controller = self
         self._server = server

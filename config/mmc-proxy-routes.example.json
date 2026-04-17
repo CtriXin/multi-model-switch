@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "routes": [
+    {
+      "id": "claude-route-a",
+      "purpose": "oauth_claude",
+      "local_proxy_url": "http://127.0.0.1:31001",
+      "sticky_account_binding": {
+        "account_uuid": "replace-with-oauth-account-uuid",
+        "email": "claude-a@example.com"
+      },
+      "expected_exit_ip": "203.0.113.10",
+      "health_targets": [
+        {
+          "label": "anthropic",
+          "url": "https://api.anthropic.com"
+        },
+        {
+          "label": "claude",
+          "url": "https://claude.ai"
+        }
+      ]
+    },
+    {
+      "id": "claude-route-b",
+      "purpose": "oauth_claude",
+      "local_proxy_url": "http://127.0.0.1:31002",
+      "sticky_account_binding": {
+        "account_uuid": "replace-with-second-account-uuid",
+        "email": "claude-b@example.com"
+      },
+      "expected_exit_ip": "203.0.113.11",
+      "health_targets": [
+        {
+          "label": "anthropic",
+          "url": "https://api.anthropic.com"
+        },
+        {
+          "label": "claude",
+          "url": "https://claude.ai"
+        }
+      ]
+    },
+    {
+      "id": "claude-route-c",
+      "purpose": "oauth_claude",
+      "local_proxy_url": "http://127.0.0.1:31003",
+      "sticky_account_binding": {
+        "account_uuid": "replace-with-third-account-uuid",
+        "email": "claude-c@example.com"
+      },
+      "expected_exit_ip": "203.0.113.12",
+      "health_targets": [
+        {
+          "label": "anthropic",
+          "url": "https://api.anthropic.com"
+        },
+        {
+          "label": "claude",
+          "url": "https://claude.ai"
+        }
+      ]
+    }
+  ]
+}
