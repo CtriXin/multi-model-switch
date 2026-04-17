@@ -26,8 +26,10 @@ try:
 except ImportError:
     _httpx = None
 
+from mms_state_io import resolve_mms_config_dir
+
 # ── 路径 ──
-_CONFIG_DIR = os.path.expanduser("~/.config/mms")
+_CONFIG_DIR = resolve_mms_config_dir()
 _LOG_PATH = os.path.join(_CONFIG_DIR, "lb_route.log")
 _KEYWORDS_PATH = os.path.join(_CONFIG_DIR, "route_keywords.json")
 _LEARNED_PATH = os.path.join(_CONFIG_DIR, "route_learned.json")

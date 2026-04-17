@@ -13,6 +13,55 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 
 _STATE_FILE_PROCESS_LOCK = threading.RLock()
+_GATEWAY_SESSION_MARKERS = (
+    os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
+    os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+)
+
+
+def resolve_real_user_home(env=None):
+    env = env or os.environ
+    for key in ("MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME"):
+        raw = str(env.get(key) or "").strip()
+        if raw:
+            return os.path.abspath(os.path.expanduser(raw))
+
+    home = os.path.abspath(os.path.expanduser(str(env.get("HOME") or "~")))
+    normalized_home = os.path.normpath(home)
+    for marker in _GATEWAY_SESSION_MARKERS:
+        idx = normalized_home.find(marker)
+        if idx == -1:
+            continue
+        base_home = normalized_home[:idx]
+        if base_home:
+            return base_home
+    return home
+
+
+def resolve_mms_config_dir(env=None):
+    env = env or os.environ
+    explicit = str(env.get("MMS_CONFIG_DIR") or env.get("CCS_CONFIG_DIR") or "").strip()
+    if explicit:
+        return os.path.abspath(os.path.expanduser(explicit))
+
+    xdg_config_home = str(env.get("XDG_CONFIG_HOME") or "").strip()
+    if xdg_config_home:
+        normalized_xdg = os.path.abspath(os.path.expanduser(xdg_config_home))
+        for marker in _GATEWAY_SESSION_MARKERS:
+            idx = normalized_xdg.find(marker)
+            if idx == -1:
+                continue
+            base_home = normalized_xdg[:idx]
+            if base_home:
+                return os.path.join(base_home, ".config", "mms")
+        return os.path.join(normalized_xdg, "mms")
+
+    return os.path.join(resolve_real_user_home(env), ".config", "mms")
+
+
+def resolve_legacy_config_dir(env=None):
+    env = env or os.environ
+    return os.path.join(resolve_real_user_home(env), ".config", "ccs")
 
 
 @contextmanager

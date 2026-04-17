@@ -146,6 +146,13 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 支持的名字只保留：`claude`、`codex`。
 
+公开版说明：
+
+- 这里安装 `claude`，表示安装本地 `Claude Code` binary 作为前端 CLI。
+- 公开版会保留 `claude` tab 和 `mms claude` 入口。
+- 如果当前 route 支持，会同时展示原生 `claude-*` 模型，以及可经 `Claude CLI` bridge 的非 `claude-*` 模型。
+- 公开文档不包含 `Claude OAuth account.add/login` 流程。
+
 ### 安装指定版本
 
 ```bash
@@ -222,19 +229,15 @@ mms --preset sonnet-for-coding   # 启动 Claude Sonnet
 mms --preset gpt-for-review      # 启动 GPT 做 Code Review
 ```
 
-### 场景 2：多账号管理
+### 场景 2：`claude` 作为 bridge 前端
 
-公司和个人的 AI 账号需要分开：
+如果你希望继续用 `Claude CLI` 的交互习惯，但实际模型走 GPT / Gemini / 兼容国产模型：
 
 ```bash
-# 配置多个账号
-mms config account.add claude    # 添加个人号
-mms config account.add claude    # 添加工作号
-
-# 启动时切换
-mms claude --account personal    # 个人项目
-mms claude --account work        # 工作项目
+mms claude --provider openrouter
 ```
+
+此时公开版会在 `claude` tab 里展示当前 route 支持的原生 `claude-*` 模型，也会展示可 bridge 的非 `claude-*` 模型。
 
 ### 场景 3：团队协作
 
@@ -443,7 +446,7 @@ mms session resume <id>               # 恢复会话
 
 | CLI | 协议 | 特性 |
 |-----|------|------|
-| `claude` | Anthropic Messages | 支持 bridge 模式挂 GPT/Gemini |
+| `claude` | Anthropic Messages | 公开版保留 `claude` tab 和 `mms claude`；当前 route 支持时，可同时展示原生 `claude-*` 与 bridge 非 `claude-*` 模型 |
 | `codex` | OpenAI Responses | 自动降级到 Chat Completions |
 | `qwen` | OpenAI compatible | 直接启动 |
 | `kimi` | OpenAI compatible | 默认 kimi-k2.5 |
@@ -462,7 +465,7 @@ mms session resume <id>               # 恢复会话
 ├── override.toml        # 本地/团队覆盖配置
 ├── usage.json           # 本地启动统计
 ├── speed-stats.json     # 模型测速结果
-└── accounts/            # OAuth 账号目录
+└── accounts/            # 公开版支持的 OAuth 账号目录（不包含 Claude OAuth）
     ├── personal/
     └── work/
 ```

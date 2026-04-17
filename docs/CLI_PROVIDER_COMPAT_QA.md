@@ -4,6 +4,7 @@
 > 范围：`claude` / `codex` / `qwen` / `kimi` 与公开仓库内可见的通用兼容性规则。
 
 > 2026-04-16 stopgap：`MMS` 当前保留 `Claude CLI` 启动能力，但默认隐藏 `Claude family model` 的展示与候选选择；这是 surface 收口，不是 runtime 下线。
+> 公开版口径：保留 `claude` tab 和 `mms claude`；当 route 支持时，同时展示原生 `claude-*` 与可经 `Claude CLI` bridge 的非 `claude-*` 模型；公开文档不包含 `Claude OAuth account.add/login`。
 
 ## 为什么这份文档被改成精简版
 
@@ -87,7 +88,8 @@
 
 - `settings.json` 只继承 `hooks` / `statusLine` / `permissions`；不要从真实 global state 宽拷贝 `env`、主题或未知字段
 - gateway `.claude.json` 只按 schema-based allowlist 写当前 session 需要的字段；未知 global 字段默认丢弃
-- Claude session `~/.claude/` 不再大面积继承真实目录；只保留 project-scoped 持久项
+- `gateway/provider/api_key` 新 session 若要支持 shared resume，只能回填当前 `project + runtime/account` 的安全 resume pointer（如 `projects[project].lastSessionId`）；不要把 global `projects / lastSessionId / lastCost` restore-state 整体放回来
+- Claude session `~/.claude/` 不再大面积继承真实目录；默认只保留 project-scoped 持久项，再额外 allowlist 静态 tooling surface（如 `skills` / `.mcp.json` / `CLAUDE.md` / `RTK.md` / `commands` / `hooks`）
 - Claude session `~/Library/` 只暴露 `Keychains` 这类最小必要依赖；不要把整个 `Library` symlink 进去
 - Claude bypass 应区分路径：
   - 官方 `Claude` account 的 bypass 继续要求 proxy 并 fail-closed

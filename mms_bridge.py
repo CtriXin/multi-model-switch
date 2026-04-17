@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from mms_speed_stats import record_model_speed
-from mms_state_io import atomic_write_json, locked_state_file
+from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
 
 try:
     from mms_events import emit_event as _emit_event
@@ -173,7 +173,7 @@ def _claude_passthrough_rules(server):
 # ---------------------------------------------------------------------------
 
 _BRIDGE_MODE_CACHE_DIR = os.path.join(
-    os.environ.get("MMS_CONFIG_DIR") or os.environ.get("CCS_CONFIG_DIR") or os.path.expanduser("~/.config/mms"),
+    resolve_mms_config_dir(),
     "cache",
 )
 _BRIDGE_MODE_CACHE_FILE = os.path.join(_BRIDGE_MODE_CACHE_DIR, "bridge_mode_cache.json")
@@ -456,7 +456,7 @@ def _record_bridge_speed(model_name, *, started_ms, first_byte_ms, output_tokens
 
 
 def _current_route_status_path():
-    return os.path.join(os.path.expanduser("~/.config/mms"), "route_status.json")
+    return os.path.join(resolve_mms_config_dir(), "route_status.json")
 
 
 def _dedupe_status_paths(paths):
@@ -1542,7 +1542,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             path = "/v1/messages" + path[len("/v1/responses"):]
 
         # ── debug: 记录每次 bridge 收到的请求 ──
-        _lb_debug_paths = [os.path.expanduser("~/.config/mms/lb_debug.log")]
+        _lb_debug_paths = [os.path.join(resolve_mms_config_dir(), "lb_debug.log")]
         _real_home = os.environ.get("HOME", "")
         _gateway_marker = f"{os.sep}.config{os.sep}mms{os.sep}claude-gateway{os.sep}"
         if _gateway_marker in _real_home:

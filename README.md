@@ -28,6 +28,13 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 By default, the installer pulls the latest semver tag.
 When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, and `read-once`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 
+Public surface note:
+
+- Installing `claude` here means installing the local `Claude Code` binary as a frontend CLI.
+- The public build keeps the `claude` tab and `mms claude`.
+- It can show both native `claude-*` models and bridge-capable GPT / Gemini / compatible domestic models when the current routes support them.
+- Public docs do not include `Claude OAuth account.add/login`.
+
 ### Default English UI on install
 
 ```bash
@@ -168,11 +175,11 @@ mms --trace --preset coding
 ## Core features
 
 - Unified TUI for model-family-first navigation
-- Gateway providers and OAuth accounts in one config surface
+- Gateway providers and supported OAuth accounts in one config surface
 - Provider/account priority with bridge-aware routing
 - Presets and load-balance profiles
 - Usage tracking, route export, and diagnostics
-- Per-account isolation for OAuth login state
+- Per-account isolation for supported OAuth login state
 - `doctor`, `test`, `warm`, `routes`, and `session` utilities
 
 ## Screenshots
@@ -190,7 +197,7 @@ mms --trace --preset coding
 
 | CLI | Primary protocol | Notes |
 |-----|------------------|------|
-| `claude` | Anthropic Messages | Can bridge GPT / Gemini / domestic models |
+| `claude` | Anthropic Messages | Public build keeps the tab and `mms claude`; it can expose both native `claude-*` models and bridge-capable non-Claude models when routes support them |
 | `codex` | OpenAI Responses | Falls back to chat-completions bridge when needed |
 | `qwen` | OpenAI compatible | Direct launch |
 | `kimi` | OpenAI compatible | Defaults to `kimi-k2.5` |
@@ -201,7 +208,6 @@ mms --trace --preset coding
 ```bash
 mms config connect
 mms config provider.list
-mms config account.add claude
 
 mms ls
 mms warm
@@ -232,6 +238,13 @@ Key docs:
 - [Routing system](./docs/MMS_ROUTING_SYSTEM.md)
 - [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
 - [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
+
+## What the `claude` tab shows in the public build
+
+- The `claude` tab is still visible.
+- It can list native `claude-*` models when the current routes expose them.
+- It can also list bridge-capable non-Claude models, such as GPT / Gemini / compatible domestic families, when a route supports `claude` bridge mode.
+- Public docs and commands do not include `Claude OAuth account.add/login`.
 
 ## Notes
 

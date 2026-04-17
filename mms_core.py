@@ -103,10 +103,11 @@ from mms_fake_upstream import (
     tail_log as _fake_upstream_tail_log,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
+from mms_state_io import resolve_legacy_config_dir, resolve_mms_config_dir, resolve_real_user_home
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
-    os.environ.get("MMS_CONFIG_DIR") or os.environ.get("CCS_CONFIG_DIR") or os.path.expanduser("~/.config/mms"),
+    resolve_mms_config_dir(),
     "cache",
 )
 _probe_debug_logger = logging.getLogger("probe_debug")
@@ -124,8 +125,8 @@ APP_NAME = "Multi-Model Switch"
 LEGACY_COMMAND = "ccs"
 PRIMARY_COMMAND = "mms"
 
-PRIMARY_CONFIG_DIR = os.path.expanduser("~/.config/mms")
-LEGACY_CONFIG_DIR = os.path.expanduser("~/.config/ccs")
+PRIMARY_CONFIG_DIR = resolve_mms_config_dir()
+LEGACY_CONFIG_DIR = resolve_legacy_config_dir()
 CONFIG_DIR = PRIMARY_CONFIG_DIR
 CONFIG_PATH = os.path.join(PRIMARY_CONFIG_DIR, "config.toml")
 CREDENTIALS_PATH = os.path.join(PRIMARY_CONFIG_DIR, "credentials.sh")
@@ -430,7 +431,7 @@ def _infer_model_family(model_name):
     return "其他", "其他"
 
 
-_MMS_HIDDEN_MODEL_FAMILIES = {"Claude"}
+_MMS_HIDDEN_MODEL_FAMILIES = set()
 
 
 def _mms_model_visible(model_name):
@@ -2796,7 +2797,7 @@ def _trigger_routes_export_after_usage_write():
 
 
 def _backup_config_tree(label):
-    backup_root = os.path.expanduser("~/.config/mms-backups")
+    backup_root = os.path.join(resolve_real_user_home(), ".config", "mms-backups")
     os.makedirs(backup_root, exist_ok=True)
     backup_dir = os.path.join(backup_root, f"{label}-{_local_now_slug()}")
     os.makedirs(backup_dir, exist_ok=True)

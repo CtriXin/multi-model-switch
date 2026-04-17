@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import types
 from contextlib import contextmanager
@@ -144,6 +145,37 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
     )
 
     assert result == "session-match"
+
+
+def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp_path):
+    import mms_core
+    import mms_router
+
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(real_home / ".config"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+
+    reloaded_core = importlib.reload(mms_core)
+    reloaded_router = importlib.reload(mms_router)
+    try:
+        assert reloaded_core.CONFIG_PATH == str(real_home / ".config" / "mms" / "config.toml")
+        assert reloaded_core.CREDENTIALS_PATH == str(real_home / ".config" / "mms" / "credentials.sh")
+        assert reloaded_core._config_write_target_path() == str(real_home / ".config" / "mms" / "config.toml")
+        assert reloaded_router.MODEL_ROUTES_PATH == str(real_home / ".config" / "mms" / "model-routes.json")
+    finally:
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_router)
+        importlib.reload(mms_core)
 
 
 def test_sync_claude_session_state_back_to_account(tmp_path):
