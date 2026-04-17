@@ -195,6 +195,7 @@ _DANGEROUS_PARENT_ENV_PREFIXES = (
 )
 _DEFAULT_SETUP_LANG = "en_US.UTF-8"
 _DEFAULT_SETUP_TZ = "America/Los_Angeles"
+_DEFAULT_LOOPBACK_NO_PROXY = "127.0.0.1,localhost"
 _LAUNCHER_CONFIG_KEYS = (
     "proxy",
     "no_proxy",
@@ -648,6 +649,8 @@ def _normalize_launcher_defaults(data) -> dict:
     for key in ("proxy", "no_proxy", "lang", "lc_all", "lc_ctype", "lc_messages", "tz", "claude_bin", "node_bin"):
         value = payload.get(key)
         normalized[key] = str(value or "").strip()
+    if not normalized["no_proxy"]:
+        normalized["no_proxy"] = _DEFAULT_LOOPBACK_NO_PROXY
     normalized["bypass"] = bool(payload.get("bypass", False))
     normalized["allow_dir"] = [
         os.path.realpath(str(item or "").strip())
@@ -677,7 +680,7 @@ def _build_launch_namespace(**overrides):
     data = {
         "workspace": "",
         "proxy": "",
-        "no_proxy": "",
+        "no_proxy": _DEFAULT_LOOPBACK_NO_PROXY,
         "lang": "",
         "lc_all": "",
         "lc_ctype": "",
@@ -753,7 +756,7 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
     env_tz = str(os.environ.get("TZ") or "").strip()
     defaults = {
         "proxy": existing.get("proxy") or "",
-        "no_proxy": existing.get("no_proxy") or "",
+        "no_proxy": existing.get("no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY,
         "lang": existing.get("lang") or env_lang or _DEFAULT_SETUP_LANG,
         "lc_all": existing.get("lc_all") or env_lc_all,
         "lc_ctype": existing.get("lc_ctype") or env_lc_ctype,

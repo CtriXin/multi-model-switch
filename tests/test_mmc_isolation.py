@@ -962,6 +962,23 @@ def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path
     assert args.bypass is True
 
 
+def test_normalize_launcher_defaults_fills_loopback_no_proxy_when_missing(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+
+    normalized = mmc_core._normalize_launcher_defaults(
+        {
+            "proxy": "http://127.0.0.1:7890",
+            "no_proxy": "",
+        }
+    )
+    args = mmc_core._build_launch_namespace()
+
+    assert normalized["no_proxy"] == "127.0.0.1,localhost"
+    assert args.no_proxy == "127.0.0.1,localhost"
+
+
 def test_run_default_entry_uses_saved_launcher_defaults(monkeypatch, tmp_path):
     import mmc_core
 
@@ -1050,6 +1067,7 @@ def test_run_setup_interactive_uses_default_lang_and_tz_on_empty_input(monkeypat
     payload = mmc_core._run_setup_interactive(save=False)
 
     assert payload["proxy"] == "http://127.0.0.1:7890"
+    assert payload["no_proxy"] == "127.0.0.1,localhost"
     assert payload["tz"] == "America/Los_Angeles"
     assert payload["lang"] == "en_US.UTF-8"
     assert payload["bypass"] is False
