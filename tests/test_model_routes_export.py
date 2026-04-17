@@ -170,3 +170,60 @@ def test_export_model_routes_stops_preferring_claude_compatible_route_when_hive_
     assert info["provider_id"] == "openai-relay-high-priority"
     assert "claude" not in info["cli_modes"]
     assert info["fallback_routes"][0]["provider_id"] == "kimi-direct-compatible"
+
+
+def test_export_model_routes_prefers_higher_priority_before_default_provider(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "default-low-priority": {
+                "id": "default-low-priority",
+                "provider_name": "Default Low",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://default.example.com/v1",
+                "api_key": "sk-default",
+                "models": ["qwen3-coder-plus"],
+            },
+            "high-priority": {
+                "id": "high-priority",
+                "provider_name": "High Priority",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://high.example.com/v1",
+                "api_key": "sk-high",
+                "models": ["qwen3-coder-plus"],
+            },
+        },
+    )
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+
+    cfg = {
+        "provider": {"default": "default-low-priority"},
+        "providers": [
+            {
+                "id": "default-low-priority",
+                "role": "auto",
+                "priority": 10,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3-coder-plus"],
+            },
+            {
+                "id": "high-priority",
+                "role": "auto",
+                "priority": 90,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3-coder-plus"],
+            },
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    info = routes["qwen3-coder-plus"]
+    assert info["provider_id"] == "high-priority"
+    assert info["fallback_routes"][0]["provider_id"] == "default-low-priority"

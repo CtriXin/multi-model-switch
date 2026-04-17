@@ -717,6 +717,7 @@ def usage_main(cfg: dict, argv: list[str] | None = None) -> None:
     import sys
     args = argv if argv is not None else sys.argv[2:]
     refresh = "--refresh" in args or "-r" in args
+    _ensure_rich()
 
     # Always cache the currently-active keychain token on each run,
     # so it's available for future runs even after account switching.

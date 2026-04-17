@@ -2066,18 +2066,6 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
         return None
 
 
-# ── 统一设置面板 TUI ──────────────────────────────────────
-
-def _settings_menu():
-    return [
-        {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
-        {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
-        {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
-        {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
-        {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
-    ]
-
-
 def _settings_menu():
     current_lang = _get_language()
     language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")

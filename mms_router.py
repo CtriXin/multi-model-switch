@@ -786,8 +786,8 @@ def export_model_routes(cfg=None, force=False):
                 "sort_key": (
                     0 if (not claude_prefers_direct or claude_native_compatible) else 1,
                     ROLE_WEIGHTS.get(pinfo["role"], 1),
-                    0 if pinfo.get("is_default") else 1,
                     -effective_priority,
+                    0 if pinfo.get("is_default") else 1,
                     pinfo["provider_name"],
                     pinfo["provider_id"],
                 ),

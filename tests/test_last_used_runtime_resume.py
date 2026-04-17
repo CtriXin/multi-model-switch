@@ -6,8 +6,12 @@ def test_record_usage_persists_runtime_hint(monkeypatch):
 
     saved = {}
 
-    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}, "last_by_cli": {}})
-    monkeypatch.setattr(mms_core, "_save_usage_stats", lambda data: saved.update(data))
+    def _fake_update_usage_stats(mutator):
+        stats = {"sources": {}, "last_by_cli": {}}
+        mutator(stats)
+        saved.update(stats)
+
+    monkeypatch.setattr(mms_core, "_update_usage_stats", _fake_update_usage_stats)
     monkeypatch.setattr(mms_core, "_iso_now", lambda: "2026-04-15T18:00:00Z")
 
     runtime = {
