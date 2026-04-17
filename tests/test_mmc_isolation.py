@@ -1688,6 +1688,7 @@ def test_main_shortcuts_route_to_expected_handlers(monkeypatch):
     monkeypatch.setattr(mmc_core, "_run_default_entry", lambda: seen.append("run") or 0)
     monkeypatch.setattr(mmc_core, "_run_resume_latest", lambda: seen.append("resume-latest") or 0)
     monkeypatch.setattr(mmc_core, "_handle_session_ls", lambda: seen.append("session-ls") or 0)
+    monkeypatch.setattr(mmc_core, "_guarded_human_only_command", lambda _label: None)
 
     with pytest.raises(SystemExit) as exc:
         mmc_core.main(["1"])
