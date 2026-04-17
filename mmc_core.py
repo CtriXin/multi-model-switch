@@ -161,6 +161,22 @@ _DEFAULT_LAUNCH_ENV = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "API_TIMEOUT_MS": "3000000",
 }
+_DEFAULT_SETUP_LANG = "en_US.UTF-8"
+_DEFAULT_SETUP_TZ = "America/Los_Angeles"
+_LAUNCHER_CONFIG_KEYS = (
+    "proxy",
+    "no_proxy",
+    "lang",
+    "lc_all",
+    "lc_ctype",
+    "lc_messages",
+    "tz",
+    "bypass",
+    "allow_dir",
+    "set_env",
+    "claude_bin",
+    "node_bin",
+)
 _LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 2.0
 _LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC = 30.0
 _CHILD_WAIT_POLL_INTERVAL_SEC = 0.25
@@ -192,6 +208,10 @@ def _account_state_path() -> Path:
 
 def _account_settings_path() -> Path:
     return _account_claude_dir() / "settings.json"
+
+
+def _launcher_config_path() -> Path:
+    return _config_root() / "launcher.json"
 
 
 def _tmp_root() -> Path:
@@ -585,8 +605,176 @@ def _load_json_dict(path: Path) -> dict:
 
 
 def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with locked_state_file(path):
         atomic_write_json(str(path), payload, mode=0o600)
+
+
+def _normalize_launcher_defaults(data) -> dict:
+    payload = data if isinstance(data, dict) else {}
+    normalized = {}
+    for key in ("proxy", "no_proxy", "lang", "lc_all", "lc_ctype", "lc_messages", "tz", "claude_bin", "node_bin"):
+        value = payload.get(key)
+        normalized[key] = str(value or "").strip()
+    normalized["bypass"] = bool(payload.get("bypass", False))
+    normalized["allow_dir"] = [
+        os.path.realpath(str(item or "").strip())
+        for item in payload.get("allow_dir") or []
+        if str(item or "").strip()
+    ]
+    normalized["set_env"] = [
+        str(item or "").strip()
+        for item in payload.get("set_env") or []
+        if str(item or "").strip()
+    ]
+    return normalized
+
+
+def _load_launcher_defaults() -> dict:
+    return _normalize_launcher_defaults(_load_json_dict(_launcher_config_path()))
+
+
+def _save_launcher_defaults(data) -> dict:
+    normalized = _normalize_launcher_defaults(data)
+    payload = {key: copy.deepcopy(normalized[key]) for key in _LAUNCHER_CONFIG_KEYS}
+    _write_json(_launcher_config_path(), payload)
+    return normalized
+
+
+def _build_launch_namespace(**overrides):
+    data = {
+        "workspace": "",
+        "proxy": "",
+        "no_proxy": "",
+        "lang": "",
+        "lc_all": "",
+        "lc_ctype": "",
+        "lc_messages": "",
+        "tz": "",
+        "allow_dir": [],
+        "bypass": False,
+        "force_ipv4": False,
+        "set_env": [],
+        "claude_bin": "",
+        "node_bin": "",
+    }
+    data.update(overrides)
+    return argparse.Namespace(**data)
+
+
+def _apply_launcher_defaults(args, defaults: dict | None = None):
+    defaults = _normalize_launcher_defaults(defaults or _load_launcher_defaults())
+    for key in ("proxy", "no_proxy", "lang", "lc_all", "lc_ctype", "lc_messages", "tz", "claude_bin", "node_bin"):
+        if not str(getattr(args, key, "") or "").strip():
+            setattr(args, key, defaults.get(key, ""))
+    if not list(getattr(args, "allow_dir", []) or []):
+        args.allow_dir = copy.deepcopy(defaults.get("allow_dir") or [])
+    if not list(getattr(args, "set_env", []) or []):
+        args.set_env = copy.deepcopy(defaults.get("set_env") or [])
+    if not bool(getattr(args, "bypass", False)):
+        args.bypass = bool(defaults.get("bypass", False))
+    return args
+
+
+def _interactive_stdio_available() -> bool:
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+def _prompt_text(label: str, *, default: str = "", required: bool = False) -> str:
+    prompt = f"{label}"
+    if default:
+        prompt = f"{prompt} [{default}]"
+    prompt = prompt + ": "
+    while True:
+        value = input(prompt).strip()
+        if value:
+            return value
+        if default:
+            return default
+        if not required:
+            return ""
+        print("mmc: 这个字段不能为空，请重新输入。", file=sys.stderr)
+
+
+def _prompt_yes_no(label: str, *, default: bool = False) -> bool:
+    default_text = "Y/n" if default else "y/N"
+    while True:
+        value = input(f"{label} [{default_text}]: ").strip().lower()
+        if not value:
+            return default
+        if value in {"y", "yes", "1"}:
+            return True
+        if value in {"n", "no", "0"}:
+            return False
+        print("mmc: 请输入 y 或 n。", file=sys.stderr)
+
+
+def _run_setup_interactive(*, save: bool = True) -> dict:
+    existing = _load_launcher_defaults()
+    env_lang = str(os.environ.get("LANG") or "").strip()
+    env_lc_all = str(os.environ.get("LC_ALL") or "").strip()
+    env_lc_ctype = str(os.environ.get("LC_CTYPE") or "").strip()
+    env_lc_messages = str(os.environ.get("LC_MESSAGES") or "").strip()
+    env_tz = str(os.environ.get("TZ") or "").strip()
+    defaults = {
+        "proxy": existing.get("proxy") or "",
+        "no_proxy": existing.get("no_proxy") or "",
+        "lang": existing.get("lang") or env_lang or _DEFAULT_SETUP_LANG,
+        "lc_all": existing.get("lc_all") or env_lc_all,
+        "lc_ctype": existing.get("lc_ctype") or env_lc_ctype,
+        "lc_messages": existing.get("lc_messages") or env_lc_messages,
+        "tz": existing.get("tz") or env_tz or _DEFAULT_SETUP_TZ,
+        "bypass": bool(existing.get("bypass", False)),
+        "allow_dir": copy.deepcopy(existing.get("allow_dir") or []),
+        "set_env": copy.deepcopy(existing.get("set_env") or []),
+        "claude_bin": existing.get("claude_bin") or "",
+        "node_bin": existing.get("node_bin") or "",
+    }
+    print("mmc: 首次设置，只保存启动 Claude 必要的默认项。", flush=True)
+    proxy = _prompt_text("Proxy", default=defaults["proxy"], required=True)
+    no_proxy = _prompt_text("NO_PROXY", default=defaults["no_proxy"])
+    tz = _prompt_text("TZ", default=defaults["tz"])
+    lang = _prompt_text("LANG", default=defaults["lang"])
+    bypass = _prompt_yes_no("默认启用 bypassPermissions", default=defaults["bypass"])
+    payload = _normalize_launcher_defaults(
+        {
+            "proxy": proxy,
+            "no_proxy": no_proxy,
+            "lang": lang,
+            "lc_all": defaults["lc_all"],
+            "lc_ctype": defaults["lc_ctype"],
+            "lc_messages": defaults["lc_messages"],
+            "tz": tz,
+            "bypass": bypass,
+            "allow_dir": defaults["allow_dir"],
+            "set_env": defaults["set_env"],
+            "claude_bin": defaults["claude_bin"],
+            "node_bin": defaults["node_bin"],
+        }
+    )
+    if save:
+        _save_launcher_defaults(payload)
+        print(f"mmc: 已保存默认启动配置到 {_launcher_config_path()}", flush=True)
+    return payload
+
+
+def _ensure_launcher_defaults() -> dict:
+    defaults = _load_launcher_defaults()
+    if defaults.get("proxy"):
+        return defaults
+    if not _interactive_stdio_available():
+        raise SystemExit("mmc: 尚未配置默认 proxy，请先执行 `mmc setup` 或显式传 `--proxy`。")
+    return _run_setup_interactive(save=True)
+
+
+def _latest_owned_session_ref() -> str | None:
+    sessions = _list_owned_indexed_sessions()
+    if not sessions:
+        return None
+    return str(sessions[0].get("session_id") or "").strip() or None
 
 
 def _normalize_owner_value(value, *, lower: bool = False) -> str:
@@ -1545,7 +1733,41 @@ def _handle_import_auth(source_home: str) -> int:
     return 0
 
 
+def _handle_setup() -> int:
+    if not _interactive_stdio_available():
+        print("mmc: 当前不是交互终端，无法进入 setup。", file=sys.stderr)
+        return 1
+    _run_setup_interactive(save=True)
+    return 0
+
+
+def _run_default_entry() -> int:
+    args = _build_launch_namespace(workspace=os.getcwd())
+    _apply_launcher_defaults(args, _ensure_launcher_defaults())
+    return _run_claude(args)
+
+
+def _run_resume_latest() -> int:
+    session_ref = _latest_owned_session_ref()
+    if not session_ref:
+        print("mmc: 暂无可恢复 session", file=sys.stderr)
+        return 1
+    args = _build_launch_namespace(workspace=os.getcwd(), session_ref=session_ref)
+    _apply_launcher_defaults(args, _ensure_launcher_defaults())
+    return _run_resume(args)
+
+
 def main(argv: list[str] | None = None) -> None:
+    argv = list(argv if argv is not None else sys.argv[1:])
+    if not argv:
+        sys.exit(_run_default_entry())
+    if len(argv) == 1 and argv[0] in {"1", "new"}:
+        sys.exit(_run_default_entry())
+    if len(argv) == 1 and argv[0] in {"2", "last", "resume-last"}:
+        sys.exit(_run_resume_latest())
+    if len(argv) == 1 and argv[0] in {"3", "ls"}:
+        sys.exit(_handle_session_ls())
+
     parser = argparse.ArgumentParser(prog="mmc", description="MMC - isolated OAuth Claude launcher")
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -1563,16 +1785,22 @@ def main(argv: list[str] | None = None) -> None:
     session_subparsers = session_parser.add_subparsers(dest="session_subcommand")
     session_subparsers.add_parser("ls", help="列出 session")
 
+    subparsers.add_parser("setup", help="交互式保存默认启动配置")
+
     args = parser.parse_args(argv)
 
     if args.subcommand == "run":
+        _apply_launcher_defaults(args)
         sys.exit(_run_claude(args))
     if args.subcommand == "resume":
+        _apply_launcher_defaults(args)
         sys.exit(_run_resume(args))
     if args.subcommand == "import-auth":
         sys.exit(_handle_import_auth(args.from_home))
     if args.subcommand == "session" and args.session_subcommand == "ls":
         sys.exit(_handle_session_ls())
+    if args.subcommand == "setup":
+        sys.exit(_handle_setup())
 
     parser.print_help()
 

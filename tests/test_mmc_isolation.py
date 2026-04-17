@@ -938,6 +938,185 @@ def test_local_proxy_guard_detects_exit_ip_drift():
     assert "1.1.1.1 -> 2.2.2.2" in guard.failure_reason
 
 
+def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    defaults = mmc_core._save_launcher_defaults(
+        {
+            "proxy": "http://127.0.0.1:7890",
+            "no_proxy": "127.0.0.1,localhost",
+            "lang": "zh_CN.UTF-8",
+            "tz": "America/Los_Angeles",
+            "bypass": True,
+        }
+    )
+    args = mmc_core._build_launch_namespace(workspace="/tmp/workspace")
+
+    mmc_core._apply_launcher_defaults(args, defaults)
+
+    assert args.proxy == "http://127.0.0.1:7890"
+    assert args.no_proxy == "127.0.0.1,localhost"
+    assert args.lang == "zh_CN.UTF-8"
+    assert args.tz == "America/Los_Angeles"
+    assert args.bypass is True
+
+
+def test_run_default_entry_uses_saved_launcher_defaults(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    monkeypatch.setattr(mmc_core.os, "getcwd", lambda: str(tmp_path / "repo"))
+    mmc_core._save_launcher_defaults(
+        {
+            "proxy": "http://127.0.0.1:7890",
+            "lang": "zh_CN.UTF-8",
+            "tz": "America/Los_Angeles",
+        }
+    )
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_claude",
+        lambda args, explicit_session_id="": captured.update(
+            {
+                "workspace": args.workspace,
+                "proxy": args.proxy,
+                "lang": args.lang,
+                "tz": args.tz,
+                "explicit_session_id": explicit_session_id,
+            }
+        )
+        or 0,
+    )
+
+    exit_code = mmc_core._run_default_entry()
+
+    assert exit_code == 0
+    assert captured["workspace"] == str(tmp_path / "repo")
+    assert captured["proxy"] == "http://127.0.0.1:7890"
+    assert captured["lang"] == "zh_CN.UTF-8"
+    assert captured["tz"] == "America/Los_Angeles"
+    assert captured["explicit_session_id"] == ""
+
+
+def test_run_default_entry_prompts_and_saves_defaults_when_missing(monkeypatch, tmp_path):
+    import mmc_core
+
+    config_root = tmp_path / "mmc-config"
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    monkeypatch.setattr(mmc_core.os, "getcwd", lambda: str(repo_dir))
+    monkeypatch.setattr(mmc_core, "_interactive_stdio_available", lambda: True)
+    answers = iter(["http://127.0.0.1:7890", "", "America/Los_Angeles", "zh_CN.UTF-8", "n"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_claude",
+        lambda args, explicit_session_id="": captured.update({"proxy": args.proxy, "workspace": args.workspace}) or 0,
+    )
+
+    exit_code = mmc_core._run_default_entry()
+    saved = json.loads((config_root / "launcher.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert captured == {"proxy": "http://127.0.0.1:7890", "workspace": str(repo_dir)}
+    assert saved["proxy"] == "http://127.0.0.1:7890"
+    assert saved["tz"] == "America/Los_Angeles"
+    assert saved["lang"] == "zh_CN.UTF-8"
+    assert saved["bypass"] is False
+
+
+def test_run_setup_interactive_uses_default_lang_and_tz_on_empty_input(monkeypatch, tmp_path):
+    import mmc_core
+
+    config_root = tmp_path / "mmc-config"
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+    monkeypatch.delenv("LANG", raising=False)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LC_CTYPE", raising=False)
+    monkeypatch.delenv("LC_MESSAGES", raising=False)
+    monkeypatch.delenv("TZ", raising=False)
+    answers = iter(["http://127.0.0.1:7890", "", "", "", "n"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+
+    payload = mmc_core._run_setup_interactive(save=False)
+
+    assert payload["proxy"] == "http://127.0.0.1:7890"
+    assert payload["tz"] == "America/Los_Angeles"
+    assert payload["lang"] == "en_US.UTF-8"
+    assert payload["bypass"] is False
+
+
+def test_run_resume_latest_uses_saved_defaults(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    mmc_core._save_launcher_defaults({"proxy": "http://127.0.0.1:7890"})
+    monkeypatch.setattr(
+        mmc_core,
+        "_list_owned_indexed_sessions",
+        lambda: [
+            {"session_id": "session-latest", "last_active_at": "2026-04-16T01:00:00+00:00"},
+        ],
+    )
+    monkeypatch.setattr(mmc_core.os, "getcwd", lambda: str(tmp_path / "repo"))
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_resume",
+        lambda args: captured.update(
+            {
+                "session_ref": args.session_ref,
+                "proxy": args.proxy,
+                "workspace": args.workspace,
+            }
+        )
+        or 0,
+    )
+
+    exit_code = mmc_core._run_resume_latest()
+
+    assert exit_code == 0
+    assert captured["session_ref"] == "session-latest"
+    assert captured["proxy"] == "http://127.0.0.1:7890"
+    assert captured["workspace"] == str(tmp_path / "repo")
+
+
+def test_main_shortcuts_route_to_expected_handlers(monkeypatch):
+    import mmc_core
+
+    seen = []
+    monkeypatch.setattr(mmc_core, "_run_default_entry", lambda: seen.append("run") or 0)
+    monkeypatch.setattr(mmc_core, "_run_resume_latest", lambda: seen.append("resume-latest") or 0)
+    monkeypatch.setattr(mmc_core, "_handle_session_ls", lambda: seen.append("session-ls") or 0)
+
+    with pytest.raises(SystemExit) as exc:
+        mmc_core.main(["1"])
+    assert exc.value.code == 0
+
+    with pytest.raises(SystemExit) as exc:
+        mmc_core.main(["2"])
+    assert exc.value.code == 0
+
+    with pytest.raises(SystemExit) as exc:
+        mmc_core.main(["3"])
+    assert exc.value.code == 0
+
+    with pytest.raises(SystemExit) as exc:
+        mmc_core.main([])
+    assert exc.value.code == 0
+    assert seen == ["run", "resume-latest", "session-ls", "run"]
+
+
 def test_inject_upstream_proxy_auth_adds_and_replaces_header():
     from mmc_proxy_guard import inject_upstream_proxy_auth
 
