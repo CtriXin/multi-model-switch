@@ -42,6 +42,8 @@ INSTALL_MAP=0
 INSTALL_MAP_EXPLICIT=0
 INSTALL_READ_ONCE=0
 INSTALL_READ_ONCE_EXPLICIT=0
+INSTALL_OPS_ENV_SAFE=0
+INSTALL_OPS_ENV_SAFE_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
@@ -111,7 +113,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-ops-env-safe] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -131,6 +133,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
+  - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -296,6 +299,25 @@ prompt_optional_install_choices() {
             echo "  Read token saver（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
             if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
                 INSTALL_READ_ONCE=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_OPS_ENV_SAFE_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional isolated host path hints"
+            echo "  ops-env-safe installs a path-only Codex skill, a Claude /ops-env-safe command, and a local path-map template."
+            echo "  It does not inject real HOME/XDG or export auth secrets."
+            if confirm_from_tty "Install ops-env-safe path-only host hints? [y/N]: " "n"; then
+                INSTALL_OPS_ENV_SAFE=1
+            fi
+        else
+            echo "可选隔离路径提示"
+            echo "  ops-env-safe 会安装 path-only 的 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板。"
+            echo "  它不会注入真实 HOME/XDG，也不会导出认证 secret。"
+            if confirm_from_tty "是否安装 ops-env-safe path-only host hints？[y/N]: " "n"; then
+                INSTALL_OPS_ENV_SAFE=1
             fi
         fi
     fi
@@ -1901,6 +1923,144 @@ install_optional_read_once() {
     return 0
 }
 
+write_ops_env_safe_config() {
+    local template_path="$SOURCE_DIR/config/ops-env-safe.template.toml"
+    local target_path="$REAL_HOME/.config/mms/ops-env-safe.toml"
+
+    if [ ! -f "$template_path" ]; then
+        echo "⚠ $(t "找不到 ops-env-safe 配置模板，跳过" "ops-env-safe config template not found, skipping"): $template_path"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_path")"
+    if [ -f "$target_path" ]; then
+        echo "✓ $(t "保留现有 ops-env-safe 路径映射" "Keeping existing ops-env-safe path map"): $target_path"
+        return 0
+    fi
+
+    python3 - "$template_path" "$target_path" "$REAL_HOME" <<'PY'
+from pathlib import Path
+import sys
+
+template_path = Path(sys.argv[1])
+target_path = Path(sys.argv[2])
+real_home = sys.argv[3]
+
+text = template_path.read_text(encoding="utf-8").replace("__REAL_HOME__", real_home)
+target_path.write_text(text, encoding="utf-8")
+PY
+
+    echo "✓ $(t "已写入 ops-env-safe 路径映射模板" "Wrote ops-env-safe path-map template"): $target_path"
+    return 0
+}
+
+install_ops_env_safe_codex_skill() {
+    local source_skill_dir="$SOURCE_DIR/assets/optional-packs/ops-env-safe"
+    local target_skill_dir="$REAL_HOME/.codex/skills/ops-env-safe"
+    local temp_skill_dir="${target_skill_dir}.new.$$"
+    local backup_skill_dir="${target_skill_dir}.bak.$$"
+    local marker="name: ops-env-safe"
+
+    if [ ! -d "$source_skill_dir" ]; then
+        echo "⚠ $(t "找不到 ops-env-safe skill 模板，跳过" "ops-env-safe skill template not found, skipping"): $source_skill_dir"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_skill_dir")"
+
+    if [ -f "$target_skill_dir/SKILL.md" ] && ! grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
+        echo "⚠ $(t "检测到已有自定义 Codex ops-env-safe skill，跳过覆盖" "Detected custom Codex ops-env-safe skill, skipping overwrite")"
+        return 1
+    fi
+
+    rm -rf "$temp_skill_dir" "$backup_skill_dir"
+    cp -R "$source_skill_dir" "$temp_skill_dir"
+    if [ -e "$target_skill_dir" ]; then
+        mv "$target_skill_dir" "$backup_skill_dir"
+    fi
+    if mv "$temp_skill_dir" "$target_skill_dir"; then
+        rm -rf "$backup_skill_dir"
+        echo "✓ $(t "已安装 Codex skill" "Installed Codex skill"): $target_skill_dir"
+        return 0
+    fi
+
+    rm -rf "$temp_skill_dir" "$target_skill_dir"
+    if [ -e "$backup_skill_dir" ]; then
+        mv "$backup_skill_dir" "$target_skill_dir" || true
+    fi
+    echo "⚠ $(t "安装 Codex ops-env-safe skill 失败" "Failed to install Codex ops-env-safe skill")"
+    return 1
+}
+
+write_ops_env_safe_claude_command() {
+    local command_dir="$REAL_HOME/.claude/commands"
+    local target="$command_dir/ops-env-safe.md"
+    local marker="Managed by MMS optional ops-env-safe pack"
+    local tmp_file=""
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-ops-env-safe.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+---
+name: ops-env-safe
+description: '在隔离会话里只读查看 host path hints，不注入真实 HOME/XDG。'
+argument-hint: [entry-name]
+---
+
+<!-- Managed by MMS optional ops-env-safe pack -->
+# /ops-env-safe — path-only host hints
+
+## 执行步骤
+
+1. 读取 `~/.config/mms/ops-env-safe.toml`。
+2. 如果 `$ARGUMENTS` 非空：
+   - 优先匹配 `[paths]` 里的同名 key
+   - 输出该条目的绝对路径和用途
+3. 如果 `$ARGUMENTS` 为空：
+   - 列出已配置的可用 key
+   - 简要说明每个 key 的 path 和 purpose
+
+## 允许的检查
+
+- `test -e`
+- `ls`
+- `stat`
+- `readlink`
+- `command -v`
+
+## 红线
+
+- 不要设置真实 `HOME`
+- 不要设置任何真实 `XDG_*`
+- 不要导出 token / auth env
+- 不要把 path lookup 伪装成“已经可直接执行”
+- 如果真正要执行 host 命令，必须明确提示切到单独的非隔离 shell
+EOF
+
+    mkdir -p "$command_dir"
+    if [ -f "$target" ] && ! grep -Fq "$marker" "$target"; then
+        echo "⚠ $(t "检测到已有自定义 Claude /ops-env-safe，跳过覆盖" "Detected custom Claude /ops-env-safe, skipping overwrite")"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    cp "$tmp_file" "$target"
+    chmod 644 "$target"
+    rm -f "$tmp_file"
+    echo "✓ $(t "已安装 Claude 命令" "Installed Claude command"): /ops-env-safe"
+    return 0
+}
+
+install_optional_ops_env_safe() {
+    echo ""
+    echo "$(t "正在安装 ops-env-safe..." "Installing ops-env-safe...")"
+    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/ops-env-safe、~/.claude/commands/ops-env-safe.md 和 ~/.config/mms/ops-env-safe.toml。" "This optional pack writes ~/.codex/skills/ops-env-safe, ~/.claude/commands/ops-env-safe.md, and ~/.config/mms/ops-env-safe.toml.")"
+    echo "  $(t "它只提供 path-only host hints，不会注入真实 HOME/XDG，也不会导出 auth secrets。" "It only provides path-only host hints; it does not inject real HOME/XDG or export auth secrets.")"
+
+    write_ops_env_safe_config || true
+    install_ops_env_safe_codex_skill || true
+    write_ops_env_safe_claude_command || true
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
@@ -1948,6 +2108,10 @@ while [[ $# -gt 0 ]]; do
         --install-read-once)
             INSTALL_READ_ONCE=1
             INSTALL_READ_ONCE_EXPLICIT=1
+            ;;
+        --install-ops-env-safe)
+            INSTALL_OPS_ENV_SAFE=1
+            INSTALL_OPS_ENV_SAFE_EXPLICIT=1
             ;;
         --install-cli)
             shift
@@ -2048,6 +2212,11 @@ if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
 fi
 
+if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
+    echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
+    echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
+fi
+
 if [ "$ENSURE_NODE22" -eq 1 ]; then
     echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
 fi
@@ -2117,6 +2286,9 @@ if [ "$INSTALL_MAP" -eq 1 ]; then
 fi
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     install_optional_read_once || true
+fi
+if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
+    install_optional_ops_env_safe || true
 fi
 
 # ── 5. 建立命令入口 ──
@@ -2194,6 +2366,12 @@ if [ -x "$BIN_DIR/mms" ]; then
     if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
         echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, and the token monitor hook.")"
         echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
+        echo "  $(t "ops-env-safe 已安装：Codex skill、Claude /ops-env-safe 和 path-only 路径映射模板。" "ops-env-safe installed: Codex skill, Claude /ops-env-safe, and a path-only path-map template.")"
+        echo "  $(t "如需自定义宿主路径，请编辑 ~/.config/mms/ops-env-safe.toml；它不会注入真实 HOME/XDG。" "To customize host paths, edit ~/.config/mms/ops-env-safe.toml; it will not inject real HOME/XDG.")"
         echo ""
     fi
 

@@ -1,0 +1,38 @@
+---
+name: ops-env-safe
+description: "Use when an isolated `mms/mmc/Codex` session needs host path hints for tools or configs without inheriting real `HOME/XDG` or secrets. Trigger on requests like 配置在哪, path 在哪, gh config path, playwright cache path, shared bin path, isolated session 找不到工具, or wanting read-only host path lookup."
+---
+
+# Ops Env Safe
+
+Use this skill when an isolated session only needs to know where stable host paths live.
+
+## Default workflow
+
+1. Read `~/.config/mms/ops-env-safe.toml` if it exists.
+2. Treat it as a path map only, not as permission to inherit the host environment.
+3. Answer with concrete paths and, when needed, run only read-only checks.
+
+## Allowed checks
+
+- `test -e`
+- `ls`
+- `stat`
+- `readlink`
+- `command -v`
+- reading the configured map file itself
+
+## Hard red lines
+
+- never set real `HOME`
+- never set any real `XDG_*`
+- never export tokens or auth env
+- never bootstrap `bash -lc` / `zsh -lc` just to make host tools visible
+- never claim a path lookup is equivalent to a logged-in command execution
+
+## Response pattern
+
+- real path: `<absolute path>`
+- purpose: `<what this path is for>`
+- boundary: `path-only, no host env injection`
+- when execution is needed: `switch to a separate non-isolated host shell`

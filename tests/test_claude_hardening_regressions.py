@@ -1352,6 +1352,7 @@ def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, 
                 "project_path": str(repo_dir.resolve()),
                 "account_id": "relay-a",
                 "runtime_kind": "api_key",
+                "resume_model": "claude-sonnet-4-6",
                 "session_id": "session-match",
                 "last_active_at": "2026-04-16T19:00:00+00:00",
             },
@@ -1368,6 +1369,73 @@ def test_claude_gateway_env_restores_project_scoped_resume_pointer(monkeypatch, 
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["lastSessionId"] == "session-match"
+
+
+def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "projects": {
+                    str(repo_dir.resolve()): {
+                        "hasCompletedProjectOnboarding": True,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_session_tree", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_write_claude_session_settings", lambda *args, **kwargs: ({}, "settings.json"))
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "claude-sonnet-4-6")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(repo_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "resume_model": "qwen3-coder-plus",
+                "session_id": "session-qwen",
+                "last_active_at": "2026-04-16T19:00:00+00:00",
+            },
+        ],
+    )
+
+    mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="claude-sonnet-4-6",
+        display_model="gpt-5.4",
+    )
+
+    session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
+    project_state = session_state["projects"][str(repo_dir.resolve())]
+    assert "lastSessionId" not in project_state
 
 
 def test_build_broker_env_scrubs_inherited_claude_auth_env(monkeypatch):

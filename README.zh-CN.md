@@ -39,7 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 默认会安装最新发布的 semver tag。
-如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
+如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`、`ops-env-safe`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 
 ### 一键升级
@@ -137,6 +137,30 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 不继承 global/source `hooks`
 - 不带 `Hive` / `Map` / `Feishu` / `agentim` hooks
 - `top-level mcpServers` 仍保持隔离，不通过 `MMC` 自动回流
+
+### 安装 MMS 时顺手加上 ops-env-safe
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-ops-env-safe
+```
+
+这条可选路径会安装一个给隔离会话用的 path-only host integration pack：
+
+- Codex skill：`~/.codex/skills/ops-env-safe`
+- Claude 命令：`~/.claude/commands/ops-env-safe.md`
+- 本地路径映射模板：`~/.config/mms/ops-env-safe.toml`
+
+边界说明：
+
+- 它只提供 path hints，不会注入真实 `HOME/XDG`
+- 不会导出 auth secret，也不会偷偷 bootstrap 成 host shell
+- 安装后请按需编辑 `~/.config/mms/ops-env-safe.toml`，补你自己的稳定宿主路径
+- 适合 `mms/mmc` 隔离 session 只需要“知道路径在哪”，但不想破坏隔离语义的场景
+
+安装后用法：
+
+- 在 Claude 里用 `/ops-env-safe <entry-name>`
+- 在 Codex 里让 `ops-env-safe` skill 按路径查询需求自动触发
 
 ### 安装 MMS 时顺手补齐常用 CLI
 

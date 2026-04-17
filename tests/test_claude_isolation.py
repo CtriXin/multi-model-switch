@@ -82,6 +82,7 @@ def test_session_index_isolated_by_account(tmp_path, scoped_store):
         pid=101,
         runtime_kind="oauth",
         slot_home="/tmp/slot-a",
+        resume_model="claude-sonnet-4-6",
     )
     record_claude_session_start(
         cwd=str(project_dir),
@@ -89,14 +90,17 @@ def test_session_index_isolated_by_account(tmp_path, scoped_store):
         pid=202,
         runtime_kind="oauth",
         slot_home="/tmp/slot-b",
+        resume_model="gpt-5.4",
     )
 
     rows = list_indexed_sessions("claude")
     accounts = {item["account_id"] for item in rows}
     pids = {item["pid"] for item in rows}
+    resume_models = {item["resume_model"] for item in rows}
 
     assert {"claude-a", "claude-b"} <= accounts
     assert {101, 202} <= pids
+    assert {"claude-sonnet-4-6", "gpt-5.4"} <= resume_models
 
 
 def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monkeypatch, tmp_path):
@@ -294,6 +298,7 @@ def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp
                 "project_path": str(project_dir.resolve()),
                 "account_id": "relay-a",
                 "runtime_kind": "api_key",
+                "resume_model": "qwen3-coder-plus",
                 "session_id": "pid-9999",
                 "last_active_at": "2026-04-16T14:00:00+00:00",
             },
@@ -301,6 +306,7 @@ def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp
                 "project_path": str(project_dir.resolve()),
                 "account_id": "relay-a",
                 "runtime_kind": "api_key",
+                "resume_model": "claude-sonnet-4-6",
                 "session_id": "session-match",
                 "last_active_at": "2026-04-16T15:00:00+00:00",
             },
@@ -311,9 +317,49 @@ def test_load_project_scoped_claude_resume_session_id_is_scoped(monkeypatch, tmp
         str(project_dir),
         account_id="relay-a",
         runtime_kind="api_key",
+        resume_model="claude-sonnet-4-6",
     )
 
     assert result == "session-match"
+
+
+def test_load_project_scoped_claude_resume_session_id_requires_matching_model(monkeypatch, tmp_path):
+    import mms_launchers
+
+    project_dir = tmp_path / "repo"
+    project_dir.mkdir()
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "list_indexed_sessions",
+        lambda _cli="claude": [
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "resume_model": "qwen3-coder-plus",
+                "session_id": "session-qwen",
+                "last_active_at": "2026-04-16T12:00:00+00:00",
+            },
+            {
+                "project_path": str(project_dir.resolve()),
+                "account_id": "relay-a",
+                "runtime_kind": "api_key",
+                "resume_model": "gpt-5.4",
+                "session_id": "session-gpt",
+                "last_active_at": "2026-04-16T13:00:00+00:00",
+            },
+        ],
+    )
+
+    result = mms_launchers._load_project_scoped_claude_resume_session_id(
+        str(project_dir),
+        account_id="relay-a",
+        runtime_kind="api_key",
+        resume_model="claude-sonnet-4-6",
+    )
+
+    assert result is None
 
 
 def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path):

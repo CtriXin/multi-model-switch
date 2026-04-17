@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 By default, the installer pulls the latest semver tag.
-When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, and `read-once`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
+When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, `read-once`, and `ops-env-safe`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 
 Public surface note:
 
@@ -105,6 +105,30 @@ This optional path installs `read-once` and wires two Claude hooks:
 - `PostCompact` cache reset hook
 
 It avoids redundant full-file rereads and prefers diffs after file changes. If `jq` is missing, the installer attempts to install it; if it is still unavailable, the hooks stay fail-open and do not block Claude.
+
+### Install with optional ops-env-safe
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-ops-env-safe
+```
+
+This optional path installs a path-only host integration pack for isolated sessions:
+
+- a Codex skill: `~/.codex/skills/ops-env-safe`
+- a Claude command: `~/.claude/commands/ops-env-safe.md`
+- a local path-map template: `~/.config/mms/ops-env-safe.toml`
+
+Scope notes:
+
+- It is `path-only`; it does not inject real `HOME/XDG`
+- It does not export auth secrets or bootstrap a host shell
+- Edit `~/.config/mms/ops-env-safe.toml` to add your own stable host paths after install
+- Use this when isolated `mms/mmc` sessions need to know where configs, caches, or shared bins live without breaking isolation
+
+After install:
+
+- in Claude, use `/ops-env-safe <entry-name>`
+- in Codex, let the `ops-env-safe` skill trigger on path lookup requests
 
 ### Install MMS plus selected CLIs
 

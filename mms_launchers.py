@@ -2608,10 +2608,17 @@ def _strip_claude_restore_state(data, *, strip_sensitive_auth=False):
     return payload
 
 
-def _load_project_scoped_claude_resume_session_id(project_path, *, account_id="", runtime_kind=""):
+def _load_project_scoped_claude_resume_session_id(
+    project_path,
+    *,
+    account_id="",
+    runtime_kind="",
+    resume_model="",
+):
     normalized_project = os.path.realpath(str(project_path or "").strip())
     normalized_account_id = str(account_id or "").strip()
     normalized_runtime_kind = str(runtime_kind or "").strip()
+    normalized_resume_model = _claude_resume_model_name(resume_model)
     if not normalized_project or not normalized_account_id:
         return None
     try:
@@ -2631,6 +2638,14 @@ def _load_project_scoped_claude_resume_session_id(project_path, *, account_id=""
         session_runtime_kind = str(session.get("runtime_kind") or "").strip()
         if normalized_runtime_kind and session_runtime_kind and session_runtime_kind != normalized_runtime_kind:
             continue
+        if normalized_resume_model:
+            session_resume_model = _claude_resume_model_name(
+                session.get("resume_model"),
+                session.get("display_model"),
+                session.get("selected_model"),
+            )
+            if session_resume_model != normalized_resume_model:
+                continue
         session_id = str(session.get("session_id") or "").strip()
         if not session_id or session_id.startswith("pid-"):
             continue
@@ -2643,7 +2658,14 @@ def _load_project_scoped_claude_resume_session_id(project_path, *, account_id=""
     return candidates[0][1]
 
 
-def _overlay_project_scoped_claude_resume_state(data, project_path, *, account_id="", runtime_kind=""):
+def _overlay_project_scoped_claude_resume_state(
+    data,
+    project_path,
+    *,
+    account_id="",
+    runtime_kind="",
+    resume_model="",
+):
     payload = dict(data) if isinstance(data, dict) else {}
     normalized_project = os.path.realpath(str(project_path or "").strip())
     if not normalized_project:
@@ -2652,6 +2674,7 @@ def _overlay_project_scoped_claude_resume_state(data, project_path, *, account_i
         normalized_project,
         account_id=account_id,
         runtime_kind=runtime_kind,
+        resume_model=resume_model,
     )
     if not session_id:
         return payload
@@ -3817,6 +3840,14 @@ def _normalized_model_name(model_name):
     return model_name.strip()
 
 
+def _claude_resume_model_name(*candidates):
+    for candidate in candidates:
+        normalized = _normalized_model_name(candidate)
+        if normalized:
+            return normalized
+    return ""
+
+
 def _primary_claude_model(model_info):
     if isinstance(model_info, dict):
         for key in ("model", "sonnet", "opus", "haiku"):
@@ -4424,6 +4455,7 @@ def _prepare_claude_session_tree(
     account_id="",
     account_home="",
     runtime_kind="api_key",
+    resume_model="",
     skip_real_entries=None,
     source_claude_dir=None,
     allowed_source_entries=None,
@@ -4481,6 +4513,7 @@ def _prepare_claude_session_tree(
         pid=os.getpid(),
         runtime_kind=runtime_kind,
         slot_home=session_home,
+        resume_model=resume_model,
     )
     write_slot_marker(
         session_home,
@@ -4612,6 +4645,7 @@ def _claude_gateway_env(
     data: dict = {}
     current_project = os.path.realpath(os.getcwd())
     current_project_state = _load_real_claude_project_state(current_project)
+    resume_model = _claude_resume_model_name(display_model, selected_model, heavy_model)
     gw_existing = {}
 
     if os.path.exists(gw_json):
@@ -4647,6 +4681,7 @@ def _claude_gateway_env(
         current_project,
         account_id=str(runtime.get("id", "")),
         runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+        resume_model=resume_model,
     )
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
@@ -4669,6 +4704,7 @@ def _claude_gateway_env(
         gw_claude_dir,
         account_id=str(runtime.get("id", "")),
         runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+        resume_model=resume_model,
         skip_real_entries={"settings.json"},
     )
     report = runtime.get("_account_guard_report")

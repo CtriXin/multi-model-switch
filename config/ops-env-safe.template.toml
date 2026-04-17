@@ -1,0 +1,21 @@
+# Managed by MMS optional ops-env-safe pack
+# This file is path-only. It is not an auth bootstrap file.
+
+mode = "path-only"
+host_root = "__REAL_HOME__"
+
+[paths]
+shared_bin = "__REAL_HOME__/.local/bin"
+codex_home = "__REAL_HOME__/.codex"
+gh_config = "__REAL_HOME__/.config/gh"
+playwright_browsers = "__REAL_HOME__/Library/Caches/ms-playwright"
+custom_1 = ""
+custom_2 = ""
+
+[purposes]
+shared_bin = "stable user bin"
+codex_home = "Codex config root"
+gh_config = "GitHub CLI config/auth"
+playwright_browsers = "shared Playwright browser cache"
+custom_1 = ""
+custom_2 = ""

@@ -54,6 +54,10 @@ def _payload_started_at_ms(payload: dict) -> int | None:
         return None
 
 
+def _normalize_resume_model(value: object) -> str:
+    return str(value or "").strip()
+
+
 def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
     account_id = str(payload.get("account_id") or "").strip()
     sessions_root = claude_raw_entry_path("sessions", cwd, account_id=account_id)
@@ -122,7 +126,15 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
     return updated, target
 
 
-def record_claude_session_start(*, cwd: str, account_id: str, pid: int, runtime_kind: str, slot_home: str) -> dict:
+def record_claude_session_start(
+    *,
+    cwd: str,
+    account_id: str,
+    pid: int,
+    runtime_kind: str,
+    slot_home: str,
+    resume_model: str = "",
+) -> dict:
     store = ensure_claude_project_store(cwd, account_id=account_id)
     payload = {
         "session_id": None,
@@ -135,6 +147,7 @@ def record_claude_session_start(*, cwd: str, account_id: str, pid: int, runtime_
         "pid": pid,
         "cli": "claude",
         "runtime_kind": runtime_kind,
+        "resume_model": _normalize_resume_model(resume_model),
         "slot_home": slot_home,
         "exit_code": None,
         "stale_cleanup": False,
