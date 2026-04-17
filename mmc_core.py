@@ -17,7 +17,16 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from mmc_proxy_guard import LocalProxyGuard, loopback_only_no_proxy
+from mmc_proxy_guard import LocalProxyGuard
+from mmc_proxy_routes import (
+    DEFAULT_CLAUDE_HEALTH_TARGETS,
+    binding_matches_owner,
+    find_route_by_id,
+    find_route_by_local_proxy_url,
+    find_routes_for_owner,
+    load_proxy_routes_file,
+    validate_loopback_proxy_url,
+)
 from mmc_project_store import (
     CLAUDE_PERSISTENT_ENTRIES,
     claude_raw_entry_path,
@@ -168,6 +177,7 @@ _DANGEROUS_PARENT_ENV_KEYS = (
     "XDG_CACHE_HOME",
     "XDG_DATA_HOME",
     "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "ALL_PROXY",
@@ -181,6 +191,8 @@ _DANGEROUS_PARENT_ENV_KEYS = (
     "NODE_EXTRA_CA_CERTS",
     "NODE_OPTIONS",
     "NODE_PATH",
+    "NPM_CONFIG_CACHE",
+    "NODE_GYP_DIR",
     "PYTHONPATH",
     "SSH_AUTH_SOCK",
     "TMPDIR",
@@ -197,6 +209,8 @@ _DEFAULT_SETUP_LANG = "en_US.UTF-8"
 _DEFAULT_SETUP_TZ = "America/Los_Angeles"
 _DEFAULT_LOOPBACK_NO_PROXY = "127.0.0.1,localhost"
 _LAUNCHER_CONFIG_KEYS = (
+    "route_id",
+    "routes_file",
     "proxy",
     "no_proxy",
     "lang",
@@ -646,7 +660,19 @@ def _write_json(path: Path, payload: dict) -> None:
 def _normalize_launcher_defaults(data) -> dict:
     payload = data if isinstance(data, dict) else {}
     normalized = {}
-    for key in ("proxy", "no_proxy", "lang", "lc_all", "lc_ctype", "lc_messages", "tz", "claude_bin", "node_bin"):
+    for key in (
+        "route_id",
+        "routes_file",
+        "proxy",
+        "no_proxy",
+        "lang",
+        "lc_all",
+        "lc_ctype",
+        "lc_messages",
+        "tz",
+        "claude_bin",
+        "node_bin",
+    ):
         value = payload.get(key)
         normalized[key] = str(value or "").strip()
     if not normalized["no_proxy"]:
@@ -679,6 +705,8 @@ def _save_launcher_defaults(data) -> dict:
 def _build_launch_namespace(**overrides):
     data = {
         "workspace": "",
+        "route_id": "",
+        "routes_file": "",
         "proxy": "",
         "no_proxy": _DEFAULT_LOOPBACK_NO_PROXY,
         "lang": "",
@@ -699,7 +727,19 @@ def _build_launch_namespace(**overrides):
 
 def _apply_launcher_defaults(args, defaults: dict | None = None):
     defaults = _normalize_launcher_defaults(defaults or _load_launcher_defaults())
-    for key in ("proxy", "no_proxy", "lang", "lc_all", "lc_ctype", "lc_messages", "tz", "claude_bin", "node_bin"):
+    for key in (
+        "route_id",
+        "routes_file",
+        "proxy",
+        "no_proxy",
+        "lang",
+        "lc_all",
+        "lc_ctype",
+        "lc_messages",
+        "tz",
+        "claude_bin",
+        "node_bin",
+    ):
         if not str(getattr(args, key, "") or "").strip():
             setattr(args, key, defaults.get(key, ""))
     if not list(getattr(args, "allow_dir", []) or []):
@@ -755,6 +795,8 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
     env_lc_messages = str(os.environ.get("LC_MESSAGES") or "").strip()
     env_tz = str(os.environ.get("TZ") or "").strip()
     defaults = {
+        "route_id": existing.get("route_id") or "",
+        "routes_file": existing.get("routes_file") or "",
         "proxy": existing.get("proxy") or "",
         "no_proxy": existing.get("no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY,
         "lang": existing.get("lang") or env_lang or _DEFAULT_SETUP_LANG,
@@ -768,14 +810,19 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
         "claude_bin": existing.get("claude_bin") or "",
         "node_bin": existing.get("node_bin") or "",
     }
-    print("mmc: 首次设置，只保存启动 Claude 必要的默认项。", flush=True)
-    proxy = _prompt_text("Proxy", default=defaults["proxy"], required=True)
+    print("mmc: 首次设置，只保存启动 Claude 必要的默认项；proxy 必须是本地 loopback route。", flush=True)
+    proxy = _prompt_text("Loopback proxy", default=defaults["proxy"], required=True)
+    proxy_check = validate_loopback_proxy_url(proxy)
+    if not proxy_check.get("ok"):
+        raise SystemExit(f"mmc: {proxy_check.get('detail')}")
     no_proxy = _prompt_text("NO_PROXY", default=defaults["no_proxy"])
     tz = _prompt_text("TZ", default=defaults["tz"])
     lang = _prompt_text("LANG", default=defaults["lang"])
     bypass = _prompt_yes_no("默认启用 bypassPermissions", default=defaults["bypass"])
     payload = _normalize_launcher_defaults(
         {
+            "route_id": defaults["route_id"],
+            "routes_file": defaults["routes_file"],
             "proxy": proxy,
             "no_proxy": no_proxy,
             "lang": lang,
@@ -798,10 +845,10 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
 
 def _ensure_launcher_defaults() -> dict:
     defaults = _load_launcher_defaults()
-    if defaults.get("proxy"):
+    if defaults.get("route_id") or defaults.get("proxy"):
         return defaults
     if not _interactive_stdio_available():
-        raise SystemExit("mmc: 尚未配置默认 proxy，请先执行 `mmc setup` 或显式传 `--proxy`。")
+        raise SystemExit("mmc: 尚未配置默认 loopback proxy route，请先执行 `mmc setup` 或显式传 `--route-id` / `--proxy`。")
     return _run_setup_interactive(save=True)
 
 
@@ -852,6 +899,142 @@ def _doctor_check_binary(label: str, explicit_path: str = "") -> tuple[bool, str
     return True, binary_path
 
 
+def _proxy_routes_config_path() -> Path:
+    return _config_root() / "proxy-routes.json"
+
+
+def _resolve_proxy_routes_file_arg(args) -> str:
+    explicit_path = str(
+        getattr(args, "routes_file", "")
+        or os.environ.get("MMC_PROXY_ROUTES_FILE")
+        or ""
+    ).strip()
+    if explicit_path:
+        return os.path.realpath(os.path.abspath(os.path.expanduser(explicit_path)))
+    default_path = _proxy_routes_config_path()
+    if default_path.exists():
+        return str(default_path.resolve())
+    return ""
+
+
+def _empty_proxy_route_catalog() -> dict:
+    return {
+        "schema_version": 1,
+        "source_path": "",
+        "routes": [],
+        "routes_by_id": {},
+        "routes_by_proxy_key": {},
+    }
+
+
+def _load_proxy_route_catalog(args, *, required: bool = False) -> dict:
+    route_file = _resolve_proxy_routes_file_arg(args)
+    if not route_file:
+        if required:
+            raise SystemExit(
+                "mmc: 未找到 proxy route 文件；请传 `--routes-file`、设置 `MMC_PROXY_ROUTES_FILE`，或放到 ~/.config/mmc/proxy-routes.json"
+            )
+        return _empty_proxy_route_catalog()
+    try:
+        return load_proxy_routes_file(route_file)
+    except ValueError as exc:
+        raise SystemExit(f"mmc: proxy route 配置无效: {exc}") from exc
+
+
+def _ad_hoc_loopback_proxy_route(endpoint: dict) -> dict:
+    return {
+        "id": "",
+        "purpose": "oauth_claude",
+        "local_proxy_url": str(endpoint.get("url") or ""),
+        "proxy_key": str(endpoint.get("proxy_key") or ""),
+        "expected_exit_ip": "",
+        "sticky_account_binding": {},
+        "health_targets": [copy.deepcopy(item) for item in DEFAULT_CLAUDE_HEALTH_TARGETS],
+        "source_path": "",
+        "endpoint": copy.deepcopy(endpoint),
+    }
+
+
+def _resolve_proxy_launch_target(args) -> dict:
+    route_id = str(getattr(args, "route_id", "") or "").strip()
+    explicit_proxy = str(getattr(args, "proxy", "") or "").strip()
+    catalog = _load_proxy_route_catalog(args, required=bool(route_id))
+    selected_route = None
+    selected_via = ""
+
+    if route_id:
+        selected_route = find_route_by_id(catalog, route_id)
+        if selected_route is None:
+            raise SystemExit(f"mmc: 找不到 proxy route: {route_id}")
+        selected_via = "route_id"
+        if explicit_proxy:
+            endpoint = validate_loopback_proxy_url(explicit_proxy)
+            if not endpoint.get("ok"):
+                raise SystemExit(f"mmc: {endpoint.get('detail')}")
+            if str(endpoint.get("proxy_key") or "") != str(selected_route.get("proxy_key") or ""):
+                raise SystemExit(
+                    f"mmc: `--proxy` 与 route `{route_id}` 不一致；期望 {selected_route.get('local_proxy_url')}"
+                )
+    elif explicit_proxy:
+        endpoint = validate_loopback_proxy_url(explicit_proxy)
+        if not endpoint.get("ok"):
+            raise SystemExit(f"mmc: {endpoint.get('detail')}")
+        selected_route = find_route_by_local_proxy_url(catalog, explicit_proxy)
+        if selected_route is None:
+            selected_route = _ad_hoc_loopback_proxy_route(endpoint)
+            selected_via = "proxy_url"
+        else:
+            selected_via = "proxy_url+catalog"
+    else:
+        raise SystemExit("mmc: 未配置 loopback proxy route；请传 `--route-id` 或 `--proxy http://127.0.0.1:31xxx`")
+
+    owner = _current_account_owner_metadata()
+    bound_routes = find_routes_for_owner(catalog, owner, purpose="oauth_claude")
+    if len(bound_routes) > 1:
+        raise SystemExit("mmc: 当前 MMC account 命中了多个 proxy route 绑定，配置有歧义")
+    bound_route = bound_routes[0] if bound_routes else None
+
+    if bound_route is not None and str(bound_route.get("proxy_key") or "") != str(selected_route.get("proxy_key") or ""):
+        raise SystemExit(
+            "mmc: 当前 OAuth account 已固定到 route "
+            f"`{bound_route.get('id') or bound_route.get('local_proxy_url')}`，"
+            f"不允许切到 `{selected_route.get('id') or selected_route.get('local_proxy_url')}`"
+        )
+
+    route_match, route_reason = binding_matches_owner(selected_route, owner)
+    route_binding = selected_route.get("sticky_account_binding") if isinstance(selected_route, dict) else {}
+    route_binding = route_binding if isinstance(route_binding, dict) else {}
+    if any(str(route_binding.get(key) or "").strip() for key in ("account_uuid", "email", "user_id")):
+        if not route_match:
+            raise SystemExit(f"mmc: {route_reason}")
+
+    endpoint = selected_route.get("endpoint") if isinstance(selected_route, dict) else {}
+    endpoint = (
+        endpoint
+        if isinstance(endpoint, dict) and endpoint.get("ok")
+        else validate_loopback_proxy_url(str(selected_route.get("local_proxy_url") or ""))
+    )
+    health_targets = tuple(
+        (str(item.get("label") or "").strip(), str(item.get("url") or "").strip())
+        for item in (selected_route.get("health_targets") or [])
+        if str(item.get("url") or "").strip()
+    ) or _CLAUDE_PROXY_GUARD_TARGETS
+    return {
+        "id": str(selected_route.get("id") or "").strip(),
+        "purpose": str(selected_route.get("purpose") or "oauth_claude").strip() or "oauth_claude",
+        "proxy_url": str(selected_route.get("local_proxy_url") or "").strip(),
+        "proxy_key": str(selected_route.get("proxy_key") or "").strip(),
+        "expected_exit_ip": str(selected_route.get("expected_exit_ip") or "").strip(),
+        "health_targets": health_targets,
+        "route_file": str(catalog.get("source_path") or "").strip(),
+        "selected_via": selected_via,
+        "binding": copy.deepcopy(route_binding),
+        "display_name": str(selected_route.get("id") or selected_route.get("local_proxy_url") or "loopback-proxy").strip(),
+        "endpoint": endpoint,
+        "effective_no_proxy": _DEFAULT_LOOPBACK_NO_PROXY,
+    }
+
+
 def _doctor_parse_proxy_endpoint(proxy_url: str) -> dict[str, str | int | bool]:
     raw = str(proxy_url or "").strip()
     if not raw:
@@ -895,18 +1078,28 @@ def _run_doctor(args) -> int:
         failures += 1
         _doctor_emit("FAIL", f"{label} binary", detail)
 
-    proxy_url = str(args.proxy or "").strip()
-    no_proxy = str(args.no_proxy or "").strip()
-    if not proxy_url:
+    route_plan = None
+    try:
+        route_plan = _resolve_proxy_launch_target(args)
+        route_detail = str(route_plan.get("display_name") or route_plan.get("proxy_url") or "-")
+        route_file = str(route_plan.get("route_file") or "").strip()
+        if route_file:
+            route_detail = f"{route_detail} ({route_file})"
+        _doctor_emit("PASS", "proxy route", route_detail)
+    except SystemExit as exc:
         failures += 1
-        _doctor_emit("FAIL", "proxy config", "未配置 proxy；先执行 `mmc setup` 或传 `--proxy`")
-    else:
-        endpoint = _doctor_parse_proxy_endpoint(proxy_url)
+        _doctor_emit("FAIL", "proxy route", str(exc))
+
+    if route_plan is not None:
+        endpoint = route_plan.get("endpoint") if isinstance(route_plan, dict) else {}
+        endpoint = endpoint if isinstance(endpoint, dict) and endpoint.get("ok") else _doctor_parse_proxy_endpoint(
+            str(route_plan.get("proxy_url") or "")
+        )
         if endpoint.get("ok"):
             _doctor_emit(
                 "PASS",
                 "proxy endpoint",
-                f"{endpoint['scheme']}://{endpoint['host']}:{endpoint['port']} (dns={_proxy_dns_mode(proxy_url)})",
+                f"{endpoint['scheme']}://{endpoint['host']}:{endpoint['port']} (dns={_proxy_dns_mode(str(route_plan.get('proxy_url') or ''))})",
             )
             tcp_ok, tcp_detail = _doctor_probe_tcp_endpoint(
                 str(endpoint["host"]),
@@ -921,9 +1114,24 @@ def _run_doctor(args) -> int:
             failures += 1
             _doctor_emit("FAIL", "proxy endpoint", str(endpoint.get("detail") or "proxy URL 非法"))
 
-        guard = _build_local_proxy_guard(proxy_url, no_proxy)
+        guard = _build_local_proxy_guard(
+            str(route_plan.get("proxy_url") or ""),
+            str(route_plan.get("effective_no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY),
+            expected_exit_ip=str(route_plan.get("expected_exit_ip") or ""),
+            probe_targets=tuple(route_plan.get("health_targets") or _CLAUDE_PROXY_GUARD_TARGETS),
+        )
         if guard.get("status") == "ok":
             _doctor_emit("PASS", "proxy guard", f"Claude upstream reachable; exit_ip={guard.get('exit_ip') or '-'}")
+            expected_exit_ip = str(route_plan.get("expected_exit_ip") or "").strip()
+            if expected_exit_ip:
+                _doctor_emit("PASS", "exit IP pin", f"{guard.get('exit_ip')} matches expected")
+            else:
+                warnings += 1
+                _doctor_emit(
+                    "WARN",
+                    "exit IP pin",
+                    f"未配置 expected_exit_ip；当前检测为 {guard.get('exit_ip') or '-'}，运行时会按当前值 fail-closed",
+                )
         else:
             failures += 1
             _doctor_emit("FAIL", "proxy guard", str(guard.get("block_reason") or "proxy guard blocked"))
@@ -1453,9 +1661,16 @@ def _run_exit_ip_probe(proxy_url: str, *, force_ipv4: bool = True) -> dict:
     return {"ok": False, "detail": last_detail, "exit_ip": ""}
 
 
-def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
+def _build_local_proxy_guard(
+    proxy_url: str,
+    no_proxy: str,
+    *,
+    expected_exit_ip: str = "",
+    probe_targets: tuple[tuple[str, str], ...] | None = None,
+) -> dict:
     proxy_url = str(proxy_url or "").strip()
     no_proxy = str(no_proxy or "").strip()
+    endpoint = validate_loopback_proxy_url(proxy_url)
     guard = {
         "status": "ok",
         "block_reason": "",
@@ -1464,10 +1679,16 @@ def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
         "targets": [],
         "exit_ip": "",
         "exit_ip_detail": "",
+        "expected_exit_ip": str(expected_exit_ip or "").strip(),
+        "endpoint": endpoint,
     }
     if not proxy_url:
         guard["status"] = "blocked"
-        guard["block_reason"] = "OAuth Claude / MMC 路线强制要求 proxy"
+        guard["block_reason"] = "OAuth Claude / MMC 路线强制要求 local loopback proxy"
+        return guard
+    if not endpoint.get("ok"):
+        guard["status"] = "blocked"
+        guard["block_reason"] = str(endpoint.get("detail") or "local loopback proxy 非法")
         return guard
     if guard["no_proxy_conflicts"]:
         guard["status"] = "blocked"
@@ -1478,7 +1699,7 @@ def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
         guard["block_reason"] = "当前 proxy 为 socks5，本地 DNS 解析有风险；MMC 仅接受 remote DNS proxy"
         return guard
     failed_targets = []
-    for label, url in _CLAUDE_PROXY_GUARD_TARGETS:
+    for label, url in tuple(probe_targets or _CLAUDE_PROXY_GUARD_TARGETS):
         probe = _run_proxy_probe(proxy_url, url, no_proxy=no_proxy, force_ipv4=True)
         guard["targets"].append(
             {
@@ -1500,11 +1721,25 @@ def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
     if not exit_ip_probe.get("ok") or not guard["exit_ip"]:
         guard["status"] = "blocked"
         guard["block_reason"] = "无法固定 proxy 出口 IP"
+        return guard
+    if guard["expected_exit_ip"] and guard["exit_ip"] != guard["expected_exit_ip"]:
+        guard["status"] = "blocked"
+        guard["block_reason"] = (
+            f"proxy 出口 IP 不符合预期: expected {guard['expected_exit_ip']}, got {guard['exit_ip']}"
+        )
     return guard
 
 
-def _enforce_proxy_guard_or_exit(args) -> dict:
-    guard = _build_local_proxy_guard(args.proxy, args.no_proxy)
+def _enforce_proxy_guard_or_exit(proxy_source) -> dict:
+    route_plan = proxy_source
+    if not isinstance(route_plan, dict) or "proxy_url" not in route_plan:
+        route_plan = _resolve_proxy_launch_target(proxy_source)
+    guard = _build_local_proxy_guard(
+        str(route_plan.get("proxy_url") or ""),
+        str(route_plan.get("effective_no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY),
+        expected_exit_ip=str(route_plan.get("expected_exit_ip") or ""),
+        probe_targets=tuple(route_plan.get("health_targets") or _CLAUDE_PROXY_GUARD_TARGETS),
+    )
     if guard.get("status") == "ok":
         return guard
 
@@ -1624,16 +1859,40 @@ def _build_process_env(
     tmp_root.mkdir(parents=True, exist_ok=True)
     session_tmp = _session_tmp_path(session_home)
     session_tmp.mkdir(parents=True, exist_ok=True)
+    session_xdg_config = session_home / ".config"
+    session_xdg_cache = session_home / ".cache"
+    session_xdg_data = session_home / ".local" / "share"
+    session_xdg_state = session_home / ".local" / "state"
+    session_xdg_runtime = session_home / ".runtime"
+    npm_cache_dir = session_xdg_cache / "npm"
+    node_gyp_dir = session_xdg_cache / "node-gyp"
+    for path in (
+        session_xdg_config,
+        session_xdg_cache,
+        session_xdg_data,
+        session_xdg_state,
+        session_xdg_runtime,
+        npm_cache_dir,
+        node_gyp_dir,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    try:
+        session_xdg_runtime.chmod(0o700)
+    except OSError:
+        pass
 
     env["HOME"] = str(session_home)
-    env["XDG_CONFIG_HOME"] = str(session_home / ".config")
-    env["XDG_CACHE_HOME"] = str(session_home / ".cache")
-    env["XDG_DATA_HOME"] = str(session_home / ".local" / "share")
-    env["XDG_STATE_HOME"] = str(session_home / ".local" / "state")
+    env["XDG_CONFIG_HOME"] = str(session_xdg_config)
+    env["XDG_CACHE_HOME"] = str(session_xdg_cache)
+    env["XDG_DATA_HOME"] = str(session_xdg_data)
+    env["XDG_STATE_HOME"] = str(session_xdg_state)
+    env["XDG_RUNTIME_DIR"] = str(session_xdg_runtime)
     env["MMC_SESSION_HOME"] = str(session_home)
     env["MMC_CONFIG_HOME"] = str(_config_root())
     env["MMC_REAL_HOME"] = str(_real_user_home())
     env["TMPDIR"] = str(session_tmp)
+    env["NPM_CONFIG_CACHE"] = str(npm_cache_dir)
+    env["NODE_GYP_DIR"] = str(node_gyp_dir)
     env["PATH"] = os.pathsep.join(
         (
             private_tool_path,
@@ -1700,12 +1959,32 @@ def _start_session_proxy_guard(proxy_url: str, *, pinned_exit_ip: str = "") -> L
         exit_ip_probe_fn=_build_runtime_exit_ip_probe(),
         exit_ip_check_interval_sec=_LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC,
         expected_exit_ip=pinned_exit_ip,
+        passthrough_proxy_url=proxy_url,
     )
     guard.start()
     return guard
 
 
+def _signal_child_process_group(child, signum: int) -> bool:
+    if os.name != "posix":
+        return False
+    pgid = getattr(child, "_mmc_process_group_id", None)
+    try:
+        normalized_pgid = int(pgid)
+    except (TypeError, ValueError):
+        return False
+    if normalized_pgid <= 0:
+        return False
+    try:
+        os.killpg(normalized_pgid, signum)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+
+
 def _signal_child_process(child, signum: int) -> None:
+    if _signal_child_process_group(child, signum):
+        return
     sender = getattr(child, "send_signal", None)
     if callable(sender):
         sender(signum)
@@ -1752,6 +2031,20 @@ def _terminate_child_process(child, *, grace_timeout_sec: float = 3.0) -> None:
             pass
 
 
+def _attach_child_process_group(child) -> None:
+    if os.name != "posix":
+        return
+    pid = getattr(child, "pid", None)
+    try:
+        pgid = os.getpgid(int(pid))
+    except (AttributeError, ProcessLookupError, PermissionError, OSError, TypeError, ValueError):
+        return
+    try:
+        setattr(child, "_mmc_process_group_id", int(pgid))
+    except Exception:
+        pass
+
+
 def _resolve_claude_binary(env: dict[str, str]) -> str:
     path_value = str(env.get("PATH") or os.defpath)
     binary = shutil.which("claude", path=path_value)
@@ -1776,7 +2069,9 @@ def _build_claude_cmd(args, env: dict[str, str]) -> list[str]:
 
 def _add_common_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", default="", help="workspace 根目录；默认当前 cwd")
-    parser.add_argument("--proxy", default="", help="显式 proxy")
+    parser.add_argument("--route-id", default="", help="显式 proxy route id")
+    parser.add_argument("--routes-file", default="", help="proxy route JSON 文件；默认读取 ~/.config/mmc/proxy-routes.json")
+    parser.add_argument("--proxy", default="", help="显式 local loopback proxy URL；只接受 127.0.0.1/localhost")
     parser.add_argument("--no-proxy", default="", help="显式 no_proxy")
     parser.add_argument("--lang", default="", help="LANG")
     parser.add_argument("--lc-all", default="", help="LC_ALL")
@@ -1796,8 +2091,9 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
     if not os.path.isdir(workspace):
         print(f"mmc: workspace 不存在或不是目录: {workspace}", file=sys.stderr)
         return 1
-    guard_report = _enforce_proxy_guard_or_exit(args) or {}
     _bootstrap_account_state()
+    route_plan = _resolve_proxy_launch_target(args)
+    guard_report = _enforce_proxy_guard_or_exit(route_plan) or {}
 
     session_home, _active_before, active_after = _reserve_session_home()
     if session_home is None:
@@ -1826,14 +2122,14 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
         nonlocal child
         if child is not None and child.poll() is None:
             try:
-                child.send_signal(signum)
+                _signal_child_process(child, signum)
             except Exception:
                 pass
 
     try:
         proxy_guard = _start_session_proxy_guard(
-            args.proxy,
-            pinned_exit_ip=str(guard_report.get("exit_ip") or "").strip(),
+            str(route_plan.get("proxy_url") or ""),
+            pinned_exit_ip=str(route_plan.get("expected_exit_ip") or guard_report.get("exit_ip") or "").strip(),
         )
     except Exception as exc:
         print(f"mmc: 启动本地 proxy guard 失败: {exc}", file=sys.stderr)
@@ -1844,7 +2140,7 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
         args,
         session_home,
         proxy_url_override=proxy_guard.local_proxy_url,
-        no_proxy_override=loopback_only_no_proxy(),
+        no_proxy_override=str(route_plan.get("effective_no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY),
     )
     cmd = _build_claude_cmd(args, env)
 
@@ -1852,7 +2148,13 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
         for signum in handled_signals:
             previous_handlers[signum] = signal.getsignal(signum)
             signal.signal(signum, _forward_signal)
-        child = subprocess.Popen(cmd, env=env, cwd=workspace)
+        child = subprocess.Popen(
+            cmd,
+            env=env,
+            cwd=workspace,
+            start_new_session=(os.name == "posix"),
+        )
+        _attach_child_process_group(child)
         bind_claude_session_process(
             cwd=workspace,
             pid=os.getpid(),

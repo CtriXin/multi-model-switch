@@ -5,11 +5,21 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+
+
+def _write_proxy_routes(path: Path, routes: list[dict]) -> Path:
+    path.write_text(
+        json.dumps({"schema_version": 1, "routes": routes}),
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_bootstrap_account_state_starts_clean_without_legacy_import(monkeypatch, tmp_path):
@@ -191,10 +201,16 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     assert env["HOME"] == str(session_home)
     assert env["MMC_REAL_HOME"] == str((tmp_path / "real-home").resolve())
     assert env["TMPDIR"].startswith(str((tmp_path / "mmc-config" / "tmp").resolve()))
+    assert env["XDG_RUNTIME_DIR"] == str((session_home / ".runtime").resolve())
+    assert env["NPM_CONFIG_CACHE"] == str((session_home / ".cache" / "npm").resolve())
+    assert env["NODE_GYP_DIR"] == str((session_home / ".cache" / "node-gyp").resolve())
     assert path_parts[0] == str((session_home / ".mmc" / "bin").resolve())
     assert path_parts[1:3] == ["/opt/homebrew/bin", "/Users/demo/.cargo/bin"]
     assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
     assert env["API_TIMEOUT_MS"] == "3000000"
+    assert Path(env["XDG_RUNTIME_DIR"]).is_dir()
+    assert Path(env["NPM_CONFIG_CACHE"]).is_dir()
+    assert Path(env["NODE_GYP_DIR"]).is_dir()
     assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
     assert "OPENAI_API_KEY" not in env
     assert "BAD" not in env
@@ -281,9 +297,92 @@ def test_build_process_env_blocks_force_ipv4_injection(monkeypatch, tmp_path):
 def test_proxy_guard_blocks_missing_proxy(monkeypatch):
     import mmc_core
 
-    args = argparse.Namespace(proxy="", no_proxy="")
-    with pytest.raises(SystemExit, match="proxy guard"):
+    args = argparse.Namespace(proxy="", route_id="", routes_file="")
+    with pytest.raises(SystemExit, match="loopback proxy route"):
         mmc_core._enforce_proxy_guard_or_exit(args)
+
+
+def test_resolve_proxy_launch_target_rejects_non_loopback_proxy(monkeypatch):
+    import mmc_core
+
+    args = argparse.Namespace(proxy="http://10.0.0.8:8080", route_id="", routes_file="")
+    with pytest.raises(SystemExit, match="loopback"):
+        mmc_core._resolve_proxy_launch_target(args)
+
+
+def test_resolve_proxy_launch_target_uses_route_file_and_binding(monkeypatch, tmp_path):
+    import mmc_core
+
+    routes_file = _write_proxy_routes(
+        tmp_path / "proxy-routes.json",
+        [
+            {
+                "id": "route-a",
+                "purpose": "oauth_claude",
+                "local_proxy_url": "http://127.0.0.1:31001",
+                "sticky_account_binding": {"account_uuid": "acc-1", "email": "demo@example.com"},
+                "expected_exit_ip": "1.2.3.4",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        mmc_core,
+        "_current_account_owner_metadata",
+        lambda: {
+            "account_home": "/tmp/mmc",
+            "owner_user_id": "",
+            "owner_account_uuid": "acc-1",
+            "owner_email": "demo@example.com",
+        },
+    )
+
+    resolved = mmc_core._resolve_proxy_launch_target(
+        argparse.Namespace(proxy="", route_id="route-a", routes_file=str(routes_file))
+    )
+
+    assert resolved["id"] == "route-a"
+    assert resolved["proxy_url"] == "http://127.0.0.1:31001"
+    assert resolved["expected_exit_ip"] == "1.2.3.4"
+    assert resolved["effective_no_proxy"] == "127.0.0.1,localhost"
+
+
+def test_resolve_proxy_launch_target_blocks_route_drift_for_bound_account(monkeypatch, tmp_path):
+    import mmc_core
+
+    routes_file = _write_proxy_routes(
+        tmp_path / "proxy-routes.json",
+        [
+            {
+                "id": "route-a",
+                "purpose": "oauth_claude",
+                "local_proxy_url": "http://127.0.0.1:31001",
+                "sticky_account_binding": {"email": "demo@example.com"},
+                "expected_exit_ip": "1.2.3.4",
+            },
+            {
+                "id": "route-b",
+                "purpose": "oauth_claude",
+                "local_proxy_url": "http://127.0.0.1:31002",
+                "sticky_account_binding": {"email": "other@example.com"},
+                "expected_exit_ip": "2.2.2.2",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        mmc_core,
+        "_current_account_owner_metadata",
+        lambda: {
+            "account_home": "/tmp/mmc",
+            "owner_user_id": "",
+            "owner_account_uuid": "",
+            "owner_email": "demo@example.com",
+        },
+    )
+
+    with pytest.raises(SystemExit, match="已固定到 route `route-a`"):
+        mmc_core._resolve_proxy_launch_target(
+            argparse.Namespace(proxy="http://127.0.0.1:31002", route_id="", routes_file=str(routes_file))
+        )
 
 
 def test_local_proxy_guard_blocks_no_proxy_conflict():
@@ -329,6 +428,26 @@ def test_local_proxy_guard_blocks_when_exit_ip_cannot_be_pinned(monkeypatch):
     assert guard["block_reason"] == "无法固定 proxy 出口 IP"
     assert guard["exit_ip"] == ""
     assert guard["exit_ip_detail"] == "checkip failed"
+
+
+def test_local_proxy_guard_blocks_when_exit_ip_mismatches_expected(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(mmc_core, "_run_proxy_probe", lambda *_args, **_kwargs: {"ok": True, "detail": ""})
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_exit_ip_probe",
+        lambda *_args, **_kwargs: {"ok": True, "detail": "", "exit_ip": "2.2.2.2"},
+    )
+
+    guard = mmc_core._build_local_proxy_guard(
+        "http://127.0.0.1:7890",
+        "127.0.0.1,localhost",
+        expected_exit_ip="1.1.1.1",
+    )
+
+    assert guard["status"] == "blocked"
+    assert "expected 1.1.1.1, got 2.2.2.2" in guard["block_reason"]
 
 
 def test_proxy_guard_rejects_pid_reuse_when_start_fingerprint_changes(monkeypatch, tmp_path):
@@ -706,8 +825,17 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
 
     monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
     monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
-    monkeypatch.setattr(mmc_core, "_enforce_proxy_guard_or_exit", lambda _args: None)
     monkeypatch.setattr(mmc_core, "_bootstrap_account_state", lambda: None)
+    monkeypatch.setattr(
+        mmc_core,
+        "_resolve_proxy_launch_target",
+        lambda _args: {
+            "proxy_url": "http://127.0.0.1:31001",
+            "expected_exit_ip": "",
+            "effective_no_proxy": "127.0.0.1,localhost",
+        },
+    )
+    monkeypatch.setattr(mmc_core, "_enforce_proxy_guard_or_exit", lambda _plan: None)
     monkeypatch.setattr(mmc_core, "_reserve_session_home", lambda: (session_home, 0, 1))
     monkeypatch.setattr(mmc_core, "_prepare_session_tree", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mmc_core, "_link_keychains_only", lambda *_args, **_kwargs: None)
@@ -775,11 +903,21 @@ def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_pa
     finalized = []
     stopped = []
     env_call = {}
+    popen_kwargs = {}
 
     monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
     monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
-    monkeypatch.setattr(mmc_core, "_enforce_proxy_guard_or_exit", lambda _args: None)
     monkeypatch.setattr(mmc_core, "_bootstrap_account_state", lambda: None)
+    monkeypatch.setattr(
+        mmc_core,
+        "_resolve_proxy_launch_target",
+        lambda _args: {
+            "proxy_url": "http://127.0.0.1:31001",
+            "expected_exit_ip": "",
+            "effective_no_proxy": "127.0.0.1,localhost",
+        },
+    )
+    monkeypatch.setattr(mmc_core, "_enforce_proxy_guard_or_exit", lambda _plan: None)
     monkeypatch.setattr(mmc_core, "_reserve_session_home", lambda: (session_home, 0, 1))
     monkeypatch.setattr(mmc_core, "_prepare_session_tree", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mmc_core, "_link_keychains_only", lambda *_args, **_kwargs: None)
@@ -828,11 +966,15 @@ def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_pa
             raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout)
 
     child = _FakeChild()
-    monkeypatch.setattr(mmc_core.subprocess, "Popen", lambda *_args, **_kwargs: child)
+    monkeypatch.setattr(
+        mmc_core.subprocess,
+        "Popen",
+        lambda *_args, **kwargs: popen_kwargs.update(kwargs) or child,
+    )
 
     args = argparse.Namespace(
         workspace=str(workspace),
-        proxy="http://107.0.0.1:7890",
+        proxy="http://127.0.0.1:31001",
         no_proxy="",
         lang="",
         lc_all="",
@@ -853,8 +995,75 @@ def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_pa
     assert signal.SIGTERM in child.signals
     assert env_call["proxy_url_override"] == fake_guard.local_proxy_url
     assert env_call["no_proxy_override"] == "127.0.0.1,localhost"
+    assert popen_kwargs["start_new_session"] is (os.name == "posix")
     assert finalized == [(session_home, exit_code, False)]
     assert stopped == [True]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process group signaling is POSIX-only")
+def test_terminate_child_process_kills_spawned_process_group(tmp_path):
+    import mmc_core
+
+    grandchild_pid_file = tmp_path / "grandchild.pid"
+    launcher_script = tmp_path / "spawn_group.py"
+    launcher_script.write_text(
+        "\n".join(
+            [
+                "import pathlib",
+                "import subprocess",
+                "import sys",
+                "import time",
+                "",
+                "pid_file = pathlib.Path(sys.argv[1])",
+                "grandchild = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])",
+                "pid_file.write_text(str(grandchild.pid), encoding='utf-8')",
+                "time.sleep(120)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    child = subprocess.Popen(
+        [sys.executable, str(launcher_script), str(grandchild_pid_file)],
+        start_new_session=True,
+    )
+    grandchild_pid = None
+    try:
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if grandchild_pid_file.exists():
+                grandchild_pid = int(grandchild_pid_file.read_text(encoding="utf-8").strip())
+                break
+            time.sleep(0.05)
+        assert grandchild_pid is not None
+        setattr(child, "_mmc_process_group_id", os.getpgid(child.pid))
+
+        mmc_core._terminate_child_process(child, grace_timeout_sec=0.2)
+
+        assert child.poll() is not None
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            stat = mmc_core._read_pid_ps_value(grandchild_pid, "stat")
+            if not stat or stat.startswith("Z"):
+                break
+            time.sleep(0.05)
+        stat = mmc_core._read_pid_ps_value(grandchild_pid, "stat")
+        assert not stat or stat.startswith("Z")
+    finally:
+        if child.poll() is None:
+            try:
+                os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                child.wait(timeout=1.0)
+            except Exception:
+                pass
+        if grandchild_pid:
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except OSError:
+                pass
 
 
 def test_reserve_session_home_uses_reservation_lock(monkeypatch, tmp_path):
