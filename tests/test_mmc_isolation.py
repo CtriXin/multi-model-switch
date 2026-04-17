@@ -193,6 +193,9 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     assert env["TMPDIR"].startswith(str((tmp_path / "mmc-config" / "tmp").resolve()))
     assert path_parts[0] == str((session_home / ".mmc" / "bin").resolve())
     assert path_parts[1:3] == ["/opt/homebrew/bin", "/Users/demo/.cargo/bin"]
+    assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
+    assert env["API_TIMEOUT_MS"] == "3000000"
+    assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
     assert "OPENAI_API_KEY" not in env
     assert "BAD" not in env
     assert "SSH_AUTH_SOCK" not in env
@@ -308,6 +311,24 @@ def test_local_proxy_guard_blocks_no_proxy_wildcard():
 
     assert guard["status"] == "blocked"
     assert "*" in guard["no_proxy_conflicts"]
+
+
+def test_local_proxy_guard_blocks_when_exit_ip_cannot_be_pinned(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(mmc_core, "_run_proxy_probe", lambda *_args, **_kwargs: {"ok": True, "detail": ""})
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_exit_ip_probe",
+        lambda *_args, **_kwargs: {"ok": False, "detail": "checkip failed", "exit_ip": ""},
+    )
+
+    guard = mmc_core._build_local_proxy_guard("http://127.0.0.1:7890", "")
+
+    assert guard["status"] == "blocked"
+    assert guard["block_reason"] == "无法固定 proxy 出口 IP"
+    assert guard["exit_ip"] == ""
+    assert guard["exit_ip_detail"] == "checkip failed"
 
 
 def test_proxy_guard_rejects_pid_reuse_when_start_fingerprint_changes(monkeypatch, tmp_path):
@@ -693,7 +714,7 @@ def test_run_claude_finalizes_session_on_keyboard_interrupt(monkeypatch, tmp_pat
     monkeypatch.setattr(mmc_core, "_build_session_state", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mmc_core, "_build_session_settings", lambda: {})
     monkeypatch.setattr(mmc_core, "_write_json", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy: _FakeGuard(stopped))
+    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy, **_kwargs: _FakeGuard(stopped))
     monkeypatch.setattr(mmc_core, "_build_process_env", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mmc_core, "_build_claude_cmd", lambda *_args, **_kwargs: ["claude"])
     monkeypatch.setattr(
@@ -766,7 +787,7 @@ def test_run_claude_kills_child_when_local_proxy_guard_fails(monkeypatch, tmp_pa
     monkeypatch.setattr(mmc_core, "_build_session_settings", lambda: {})
     monkeypatch.setattr(mmc_core, "_write_json", lambda *_args, **_kwargs: None)
     fake_guard = _FakeGuard(stopped, failure_reason="proxy heartbeat failed for claude: HTTP 000")
-    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy: fake_guard)
+    monkeypatch.setattr(mmc_core, "_start_session_proxy_guard", lambda _proxy, **_kwargs: fake_guard)
     monkeypatch.setattr(
         mmc_core,
         "_build_process_env",
@@ -887,6 +908,34 @@ class _FakeGuard:
 
     def stop(self):
         self._stopped.append(True)
+
+
+def test_local_proxy_guard_detects_exit_ip_drift():
+    from mmc_proxy_guard import LocalProxyGuard
+
+    observed = iter(
+        [
+            {"ok": True, "detail": "", "exit_ip": "1.1.1.1"},
+            {"ok": True, "detail": "", "exit_ip": "2.2.2.2"},
+        ]
+    )
+
+    guard = LocalProxyGuard(
+        "http://127.0.0.1:7890",
+        probe_targets=(),
+        probe_interval_sec=0.5,
+        probe_fn=lambda *_args, **_kwargs: {"ok": True, "detail": ""},
+        exit_ip_probe_fn=lambda _proxy: next(observed),
+        exit_ip_check_interval_sec=0.5,
+    )
+
+    guard._pin_initial_exit_ip()
+    guard._next_exit_ip_check_at = 0.0
+
+    assert guard.pinned_exit_ip == "1.1.1.1"
+    assert guard._check_pinned_exit_ip() is False
+    assert guard.failed_event.is_set() is True
+    assert "1.1.1.1 -> 2.2.2.2" in guard.failure_reason
 
 
 def test_inject_upstream_proxy_auth_adds_and_replaces_header():

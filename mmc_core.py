@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import ipaddress
 import json
 import os
 import shlex
@@ -144,6 +145,11 @@ _CLAUDE_PROXY_GUARD_TARGETS = (
     ("anthropic", "https://api.anthropic.com"),
     ("claude", "https://claude.ai"),
 )
+_CLAUDE_PROXY_EXIT_IP_URLS = (
+    "https://checkip.amazonaws.com",
+    "https://api.ipify.org",
+    "https://ipv4.icanhazip.com",
+)
 _HOOK_DEPENDENCY_TOOL_NAMES = ("jq", "rtk")
 _ALLOWED_SESSION_HOOK_FILES = (
     ("PreToolUse", "Bash", "rtk-rewrite.sh", ""),
@@ -151,7 +157,13 @@ _ALLOWED_SESSION_HOOK_FILES = (
     ("PostCompact", "", "read-once-compact.sh", ""),
 )
 _SESSION_PID_STAMP_NAME = ".mmc_pid.json"
-_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 5.0
+_DEFAULT_LAUNCH_ENV = {
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "API_TIMEOUT_MS": "3000000",
+}
+_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 2.0
+_LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC = 30.0
+_CHILD_WAIT_POLL_INTERVAL_SEC = 0.25
 
 
 def _real_user_home() -> Path:
@@ -1024,6 +1036,50 @@ def _run_proxy_probe(proxy_url: str, target_url: str, *, no_proxy: str = "", for
     return {"ok": ok, "detail": detail, "http_code": http_code}
 
 
+def _extract_exit_ip(text: str) -> str:
+    for line in str(text or "").splitlines():
+        candidate = line.strip().strip("[]")
+        if not candidate:
+            continue
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            continue
+    return ""
+
+
+def _run_exit_ip_probe(proxy_url: str, *, force_ipv4: bool = True) -> dict:
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return {"ok": False, "detail": "curl missing", "exit_ip": ""}
+
+    last_detail = "exit ip probe failed"
+    for target_url in _CLAUDE_PROXY_EXIT_IP_URLS:
+        cmd = [
+            curl_bin,
+            *(["-4"] if force_ipv4 else []),
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            "8",
+            "--proxy",
+            str(proxy_url).strip(),
+            target_url,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        exit_ip = _extract_exit_ip(result.stdout)
+        if result.returncode == 0 and exit_ip:
+            return {"ok": True, "detail": "", "exit_ip": exit_ip}
+        stderr = str(result.stderr or "").strip()
+        host = urlsplit(target_url).netloc or target_url
+        if result.returncode == 0:
+            last_detail = f"{host} 返回了无法解析的出口 IP"
+        else:
+            last_detail = stderr or f"{host} 检测失败"
+    return {"ok": False, "detail": last_detail, "exit_ip": ""}
+
+
 def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
     proxy_url = str(proxy_url or "").strip()
     no_proxy = str(no_proxy or "").strip()
@@ -1033,6 +1089,8 @@ def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
         "dns_mode": _proxy_dns_mode(proxy_url),
         "no_proxy_conflicts": _claude_no_proxy_conflicts(no_proxy),
         "targets": [],
+        "exit_ip": "",
+        "exit_ip_detail": "",
     }
     if not proxy_url:
         guard["status"] = "blocked"
@@ -1062,13 +1120,20 @@ def _build_local_proxy_guard(proxy_url: str, no_proxy: str) -> dict:
     if failed_targets:
         guard["status"] = "blocked"
         guard["block_reason"] = f"Claude 关键域名代理检测失败: {', '.join(failed_targets)}"
+        return guard
+    exit_ip_probe = _run_exit_ip_probe(proxy_url, force_ipv4=True)
+    guard["exit_ip"] = str(exit_ip_probe.get("exit_ip") or "").strip()
+    guard["exit_ip_detail"] = str(exit_ip_probe.get("detail") or "").strip()
+    if not exit_ip_probe.get("ok") or not guard["exit_ip"]:
+        guard["status"] = "blocked"
+        guard["block_reason"] = "无法固定 proxy 出口 IP"
     return guard
 
 
-def _enforce_proxy_guard_or_exit(args) -> None:
+def _enforce_proxy_guard_or_exit(args) -> dict:
     guard = _build_local_proxy_guard(args.proxy, args.no_proxy)
     if guard.get("status") == "ok":
-        return
+        return guard
 
     details = []
     if guard.get("block_reason"):
@@ -1203,6 +1268,8 @@ def _build_process_env(
             *_SYSTEM_FALLBACK_PATH_DIRS,
         )
     )
+    for key, value in _DEFAULT_LAUNCH_ENV.items():
+        env[key] = value
 
     proxy_url = args.proxy if proxy_url_override is None else proxy_url_override
     no_proxy = args.no_proxy if no_proxy_override is None else no_proxy_override
@@ -1244,12 +1311,22 @@ def _build_runtime_proxy_probe() -> Callable[[str, str], dict]:
     )
 
 
-def _start_session_proxy_guard(proxy_url: str) -> LocalProxyGuard:
+def _build_runtime_exit_ip_probe() -> Callable[[str], dict]:
+    return lambda upstream_proxy_url: _run_exit_ip_probe(
+        upstream_proxy_url,
+        force_ipv4=True,
+    )
+
+
+def _start_session_proxy_guard(proxy_url: str, *, pinned_exit_ip: str = "") -> LocalProxyGuard:
     guard = LocalProxyGuard(
         proxy_url,
         probe_targets=_CLAUDE_PROXY_GUARD_TARGETS,
         probe_interval_sec=_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC,
         probe_fn=_build_runtime_proxy_probe(),
+        exit_ip_probe_fn=_build_runtime_exit_ip_probe(),
+        exit_ip_check_interval_sec=_LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC,
+        expected_exit_ip=pinned_exit_ip,
     )
     guard.start()
     return guard
@@ -1346,7 +1423,7 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
     if not os.path.isdir(workspace):
         print(f"mmc: workspace 不存在或不是目录: {workspace}", file=sys.stderr)
         return 1
-    _enforce_proxy_guard_or_exit(args)
+    guard_report = _enforce_proxy_guard_or_exit(args) or {}
     _bootstrap_account_state()
 
     session_home, _active_before, active_after = _reserve_session_home()
@@ -1381,7 +1458,10 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
                 pass
 
     try:
-        proxy_guard = _start_session_proxy_guard(args.proxy)
+        proxy_guard = _start_session_proxy_guard(
+            args.proxy,
+            pinned_exit_ip=str(guard_report.get("exit_ip") or "").strip(),
+        )
     except Exception as exc:
         print(f"mmc: 启动本地 proxy guard 失败: {exc}", file=sys.stderr)
         _finalize_session(session_home, exit_code=1)
@@ -1416,7 +1496,7 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
                     exit_code = 1
                 break
             try:
-                exit_code = int(child.wait(timeout=1.0) or 0)
+                exit_code = int(child.wait(timeout=_CHILD_WAIT_POLL_INTERVAL_SEC) or 0)
                 break
             except subprocess.TimeoutExpired:
                 continue

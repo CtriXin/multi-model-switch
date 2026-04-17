@@ -6,6 +6,7 @@ import socket
 import socketserver
 import ssl
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -141,24 +142,40 @@ class LocalProxyGuard:
         probe_targets: tuple[tuple[str, str], ...],
         probe_interval_sec: float,
         probe_fn: Callable[[str, str], dict],
+        exit_ip_probe_fn: Callable[[str], dict] | None = None,
+        exit_ip_check_interval_sec: float = 30.0,
+        expected_exit_ip: str = "",
     ) -> None:
         self.upstream = parse_upstream_proxy(upstream_proxy_url)
         self._probe_targets = tuple(probe_targets)
-        self._probe_interval_sec = max(float(probe_interval_sec), 2.0)
+        self._probe_interval_sec = max(float(probe_interval_sec), 0.5)
         self._probe_fn = probe_fn
+        self._exit_ip_probe_fn = exit_ip_probe_fn
+        self._exit_ip_check_interval_sec = max(float(exit_ip_check_interval_sec), self._probe_interval_sec)
         self._server = None
         self._server_thread = None
         self._heartbeat_thread = None
         self._stop_event = threading.Event()
         self.failed_event = threading.Event()
         self._failure_reason = ""
+        self._pinned_exit_ip = str(expected_exit_ip or "").strip()
+        self._next_exit_ip_check_at = 0.0
         self.local_proxy_url = ""
 
     @property
     def failure_reason(self) -> str:
         return str(self._failure_reason or "").strip()
 
+    @property
+    def pinned_exit_ip(self) -> str:
+        return str(self._pinned_exit_ip or "").strip()
+
     def start(self) -> None:
+        if self._exit_ip_probe_fn is not None:
+            if self._pinned_exit_ip:
+                self._next_exit_ip_check_at = time.monotonic() + self._exit_ip_check_interval_sec
+            else:
+                self._pin_initial_exit_ip()
         server = _ThreadingTCPServer(("127.0.0.1", 0), _ProxyRelayHandler)
         server.controller = self
         self._server = server
@@ -200,6 +217,39 @@ class LocalProxyGuard:
         self.failed_event.set()
         self._stop_event.set()
 
+    def _probe_exit_ip(self) -> dict:
+        if self._exit_ip_probe_fn is None:
+            return {"ok": True, "exit_ip": self._pinned_exit_ip, "detail": ""}
+        result = self._exit_ip_probe_fn(self.upstream.raw_url)
+        return result if isinstance(result, dict) else {"ok": False, "detail": "exit ip probe returned invalid payload"}
+
+    def _pin_initial_exit_ip(self) -> None:
+        result = self._probe_exit_ip()
+        exit_ip = str(result.get("exit_ip") or "").strip()
+        if not result.get("ok") or not exit_ip:
+            detail = str(result.get("detail") or "missing exit IP").strip()
+            raise RuntimeError(f"proxy exit IP pin failed: {detail}")
+        self._pinned_exit_ip = exit_ip
+        self._next_exit_ip_check_at = time.monotonic() + self._exit_ip_check_interval_sec
+
+    def _check_pinned_exit_ip(self) -> bool:
+        if self._exit_ip_probe_fn is None or not self._pinned_exit_ip:
+            return True
+        now = time.monotonic()
+        if now < self._next_exit_ip_check_at:
+            return True
+        result = self._probe_exit_ip()
+        self._next_exit_ip_check_at = now + self._exit_ip_check_interval_sec
+        exit_ip = str(result.get("exit_ip") or "").strip()
+        if not result.get("ok") or not exit_ip:
+            detail = str(result.get("detail") or "missing exit IP").strip()
+            self.fail(f"proxy exit IP check failed: {detail}")
+            return False
+        if exit_ip != self._pinned_exit_ip:
+            self.fail(f"proxy exit IP changed: {self._pinned_exit_ip} -> {exit_ip}")
+            return False
+        return True
+
     def _heartbeat_loop(self) -> None:
         while not self._stop_event.wait(self._probe_interval_sec):
             for label, target_url in self._probe_targets:
@@ -211,6 +261,8 @@ class LocalProxyGuard:
                 if detail:
                     reason = f"{reason}: {detail}"
                 self.fail(reason)
+                return
+            if not self._check_pinned_exit_ip():
                 return
 
     def _connect_upstream(self) -> socket.socket:

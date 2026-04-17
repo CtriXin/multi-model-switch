@@ -906,6 +906,7 @@ def test_launch_claude_oauth_delegates_to_mmc_with_bypass(monkeypatch, tmp_path)
     assert "--set-env" in captured["cmd"]
     assert "ANTHROPIC_MODEL=claude-sonnet-4-6" in captured["cmd"]
     assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" in captured["cmd"]
+    assert not any(item.startswith("CLAUDE_CODE_ATTRIBUTION_HEADER=") for item in captured["cmd"])
     assert "OPENAI_API_KEY" not in captured["env"]
     assert "HTTP_PROXY" not in captured["env"]
     assert "ANTHROPIC_MODEL" not in captured["env"]

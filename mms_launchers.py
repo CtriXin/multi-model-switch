@@ -3563,7 +3563,6 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
     env = {
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         "API_TIMEOUT_MS": "3000000",
-        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     }
     _apply_claude_model_overrides(env, model_info or resolved_model, enable_1m=enable_claude_1m)
