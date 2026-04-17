@@ -24,8 +24,6 @@ def test_run_doctor_reports_parent_env_warning_and_proxy_guard_pass(monkeypatch,
 
     monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
     monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
-    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/501")
     monkeypatch.setattr(mmc_core, "_doctor_check_binary", lambda *_args, **_kwargs: (True, "/usr/bin/fake"))
     monkeypatch.setattr(
         mmc_core,
@@ -41,6 +39,11 @@ def test_run_doctor_reports_parent_env_warning_and_proxy_guard_pass(monkeypatch,
     monkeypatch.setattr(mmc_core, "_doctor_check_state_path_writable", lambda _path: (True, "/tmp/ok"))
     monkeypatch.setattr(mmc_core, "_doctor_check_tty", lambda: (True, "stdin/stdout 均为 TTY"))
     monkeypatch.setattr(mmc_core, "_doctor_check_runtime_identity", lambda: (True, "当前以普通用户身份运行"))
+    monkeypatch.setattr(
+        mmc_core,
+        "_doctor_collect_parent_env_findings",
+        lambda: ["ANTHROPIC_API_KEY", "XDG_RUNTIME_DIR"],
+    )
 
     args = mmc_core._build_launch_namespace(proxy="http://127.0.0.1:7890")
     exit_code = mmc_core._run_doctor(args)

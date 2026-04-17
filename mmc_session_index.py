@@ -58,8 +58,6 @@ def _payload_started_at_ms(payload: dict) -> int | None:
 
 def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
     sessions_root = claude_raw_entry_path("sessions", cwd)
-    if not sessions_root.is_dir():
-        return None
 
     expected_cwd = os.path.realpath(str(payload.get("cwd") or cwd))
     expected_started_at_ms = _payload_started_at_ms(payload)
@@ -69,34 +67,38 @@ def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
         return None
     candidates: list[tuple[int, int, dict]] = []
 
-    for path in sessions_root.glob("*.json"):
-        data = _read_json(path)
-        if not data:
-            continue
-        session_id = str(data.get("sessionId") or "").strip()
-        started_at_ms = data.get("startedAt")
-        if not session_id or not isinstance(started_at_ms, (int, float)):
-            continue
-        session_cwd = os.path.realpath(str(data.get("cwd") or cwd))
-        if expected_cwd and session_cwd and expected_cwd != session_cwd:
-            continue
-        raw_pid = data.get("pid")
-        if isinstance(expected_child_pid, int) and expected_child_pid > 0:
-            if raw_pid != expected_child_pid:
+    if sessions_root.is_dir():
+        for path in sessions_root.glob("*.json"):
+            data = _read_json(path)
+            if not data:
                 continue
-            score = 0
-            candidates.append((score, -int(started_at_ms), data))
-            continue
-        raw_nonce = str(data.get("launchNonce") or data.get("launch_nonce") or "").strip()
-        if expected_nonce and raw_nonce:
-            if raw_nonce != expected_nonce:
+            session_id = str(data.get("sessionId") or "").strip()
+            started_at_ms = data.get("startedAt")
+            if not session_id or not isinstance(started_at_ms, (int, float)):
                 continue
-            score = 0
-            candidates.append((score, -int(started_at_ms), data))
+            session_cwd = os.path.realpath(str(data.get("cwd") or cwd))
+            if expected_cwd and session_cwd and expected_cwd != session_cwd:
+                continue
+            raw_pid = data.get("pid")
+            if isinstance(expected_child_pid, int) and expected_child_pid > 0:
+                if raw_pid != expected_child_pid:
+                    continue
+                score = 0
+                candidates.append((score, -int(started_at_ms), data))
+                continue
+            raw_nonce = str(data.get("launchNonce") or data.get("launch_nonce") or "").strip()
+            if expected_nonce and raw_nonce:
+                if raw_nonce != expected_nonce:
+                    continue
+                score = 0
+                candidates.append((score, -int(started_at_ms), data))
+                continue
             continue
-        continue
 
     if not candidates:
+        history_match = _load_matching_history_session(cwd, expected_cwd, expected_started_at_ms)
+        if history_match is not None:
+            return history_match
         return None
 
     candidates.sort(key=lambda item: (item[0], item[1]))
@@ -106,6 +108,50 @@ def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
     if expected_nonce:
         return best
     return None
+
+
+def _load_matching_history_session(cwd: str, expected_cwd: str, expected_started_at_ms: int | None) -> dict | None:
+    if not expected_started_at_ms:
+        return None
+    history_path = claude_raw_entry_path("history.jsonl", cwd)
+    if not history_path.is_file():
+        return None
+
+    candidates: list[tuple[int, int, str]] = []
+    try:
+        with history_path.open("r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except Exception:
+                    continue
+                session_id = str(data.get("sessionId") or "").strip()
+                timestamp = data.get("timestamp")
+                project = os.path.realpath(str(data.get("project") or cwd))
+                if not session_id or not isinstance(timestamp, (int, float)):
+                    continue
+                if expected_cwd and project and project != expected_cwd:
+                    continue
+                if int(timestamp) < int(expected_started_at_ms):
+                    continue
+                delta = int(timestamp) - int(expected_started_at_ms)
+                candidates.append((delta, int(timestamp), session_id))
+    except OSError:
+        return None
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    _delta, matched_timestamp, matched_session_id = candidates[0]
+    return {
+        "sessionId": matched_session_id,
+        "cwd": expected_cwd or os.path.realpath(cwd),
+        "startedAt": matched_timestamp,
+    }
 
 
 def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
@@ -201,12 +247,14 @@ def finalize_claude_session(*, cwd: str, pid: int, exit_code: int | None, stale_
     payload, target = _reconcile_session_state(slot_state, payload)
     if target == slot_state:
         session_id = str(payload.get("session_id") or "").strip() or f"pid-{pid}"
+        payload["session_id"] = session_id
         target = _session_state_path(cwd, session_id)
         _write_json(target, payload)
-    try:
-        slot_state.unlink()
-    except OSError:
-        pass
+    if slot_state != target:
+        try:
+            slot_state.unlink()
+        except OSError:
+            pass
     return payload
 
 

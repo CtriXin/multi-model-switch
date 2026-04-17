@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
@@ -224,6 +224,19 @@ _LAUNCHER_CONFIG_KEYS = (
     "claude_bin",
     "node_bin",
 )
+_HUMAN_GUARD_STATE_KEYS = (
+    "enabled",
+    "allow_until",
+    "remaining_uses",
+    "last_allow_at",
+    "last_allow_reason",
+    "last_enable_at",
+    "last_disable_at",
+    "last_consumed_at",
+    "last_consumed_command",
+)
+_HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC = 600
+_HUMAN_GUARD_DEFAULT_ALLOW_USES = 1
 _LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 2.0
 _LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC = 30.0
 _CHILD_WAIT_POLL_INTERVAL_SEC = 0.25
@@ -259,6 +272,10 @@ def _account_settings_path() -> Path:
 
 def _launcher_config_path() -> Path:
     return _config_root() / "launcher.json"
+
+
+def _human_guard_state_path() -> Path:
+    return _config_root() / "human-only-guard.json"
 
 
 def _tmp_root() -> Path:
@@ -685,6 +702,150 @@ def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with locked_state_file(path):
         atomic_write_json(str(path), payload, mode=0o600)
+
+
+def _normalize_human_guard_state(data) -> dict:
+    payload = data if isinstance(data, dict) else {}
+    normalized = {key: "" for key in _HUMAN_GUARD_STATE_KEYS}
+    normalized["enabled"] = bool(payload.get("enabled", False))
+    for key in (
+        "allow_until",
+        "last_allow_at",
+        "last_allow_reason",
+        "last_enable_at",
+        "last_disable_at",
+        "last_consumed_at",
+        "last_consumed_command",
+    ):
+        normalized[key] = str(payload.get(key) or "").strip()
+    raw_remaining = payload.get("remaining_uses")
+    try:
+        normalized["remaining_uses"] = max(int(raw_remaining or 0), 0)
+    except (TypeError, ValueError):
+        normalized["remaining_uses"] = 0
+    return normalized
+
+
+def _load_human_guard_state() -> dict:
+    return _normalize_human_guard_state(_load_json_dict(_human_guard_state_path()))
+
+
+def _save_human_guard_state(data) -> dict:
+    normalized = _normalize_human_guard_state(data)
+    _write_json(_human_guard_state_path(), normalized)
+    return normalized
+
+
+def _human_guard_allow_active(state: dict | None = None, *, now: datetime | None = None) -> bool:
+    state = _normalize_human_guard_state(state)
+    if not state.get("enabled"):
+        return False
+    remaining_uses = int(state.get("remaining_uses") or 0)
+    if remaining_uses <= 0:
+        return False
+    allow_until = _parse_iso8601_utc(state.get("allow_until"))
+    if allow_until is None:
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    return allow_until >= current_time
+
+
+def _human_guard_rejection_message(command_label: str) -> str:
+    return (
+        "mmc: human-only guard 拒绝执行 "
+        f"`{command_label}`；请先在真实终端手动运行 "
+        "`mmc guard allow` 放行一次"
+    )
+
+
+def _human_guard_confirm_interactive(action_label: str) -> None:
+    if not _interactive_stdio_available():
+        raise SystemExit("mmc: human-only guard 操作要求在真实交互终端里执行")
+    phrase = "ALLOW MMC"
+    entered = _prompt_text(
+        f"{action_label} 前请输入 `{phrase}` 确认",
+        required=True,
+    )
+    if entered != phrase:
+        raise SystemExit("mmc: human-only guard 校验失败，未执行任何更改")
+
+
+def _consume_human_guard_allowance_or_exit(command_label: str) -> None:
+    state = _load_human_guard_state()
+    if not state.get("enabled"):
+        return
+    if not _human_guard_allow_active(state):
+        raise SystemExit(_human_guard_rejection_message(command_label))
+    state["remaining_uses"] = max(int(state.get("remaining_uses") or 0) - 1, 0)
+    state["last_consumed_at"] = _utc_now()
+    state["last_consumed_command"] = str(command_label or "").strip()
+    if state["remaining_uses"] <= 0:
+        state["allow_until"] = ""
+        state["last_allow_reason"] = ""
+    _save_human_guard_state(state)
+
+
+def _guarded_human_only_command(command_label: str) -> None:
+    _consume_human_guard_allowance_or_exit(command_label)
+
+
+def _handle_guard_status() -> int:
+    state = _load_human_guard_state()
+    print(f"enabled: {'yes' if state.get('enabled') else 'no'}")
+    print(f"allow_active: {'yes' if _human_guard_allow_active(state) else 'no'}")
+    print(f"remaining_uses: {int(state.get('remaining_uses') or 0)}")
+    print(f"allow_until: {state.get('allow_until') or '-'}")
+    print(f"last_allow_at: {state.get('last_allow_at') or '-'}")
+    print(f"last_allow_reason: {state.get('last_allow_reason') or '-'}")
+    print(f"last_consumed_at: {state.get('last_consumed_at') or '-'}")
+    print(f"last_consumed_command: {state.get('last_consumed_command') or '-'}")
+    return 0
+
+
+def _handle_guard_enable() -> int:
+    _human_guard_confirm_interactive("启用 human-only guard")
+    state = _load_human_guard_state()
+    state["enabled"] = True
+    state["allow_until"] = ""
+    state["remaining_uses"] = 0
+    state["last_allow_reason"] = ""
+    state["last_enable_at"] = _utc_now()
+    _save_human_guard_state(state)
+    print("mmc: human-only guard 已启用；live 命令默认拒绝，需先运行 `mmc guard allow`")
+    return 0
+
+
+def _handle_guard_disable() -> int:
+    _human_guard_confirm_interactive("关闭 human-only guard")
+    state = _load_human_guard_state()
+    state["enabled"] = False
+    state["allow_until"] = ""
+    state["remaining_uses"] = 0
+    state["last_allow_reason"] = ""
+    state["last_disable_at"] = _utc_now()
+    _save_human_guard_state(state)
+    print("mmc: human-only guard 已关闭")
+    return 0
+
+
+def _handle_guard_allow(*, ttl_sec: int, uses: int, reason: str = "") -> int:
+    state = _load_human_guard_state()
+    if not state.get("enabled"):
+        raise SystemExit("mmc: human-only guard 尚未启用；请先运行 `mmc guard enable`")
+    _human_guard_confirm_interactive("放行一次 live MMC 命令")
+    normalized_ttl = max(int(ttl_sec or _HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC), 30)
+    normalized_uses = max(int(uses or _HUMAN_GUARD_DEFAULT_ALLOW_USES), 1)
+    state["allow_until"] = (datetime.now(timezone.utc) + timedelta(seconds=normalized_ttl)).isoformat()
+    state["remaining_uses"] = normalized_uses
+    state["last_allow_at"] = _utc_now()
+    state["last_allow_reason"] = str(reason or "").strip() or "manual"
+    _save_human_guard_state(state)
+    print(
+        "mmc: 已放行 "
+        f"{normalized_uses} 次 live 命令，TTL {normalized_ttl}s，"
+        f"到期时间 {state['allow_until']}"
+    )
+    return 0
 
 
 def _normalize_launcher_defaults(data) -> dict:
@@ -1279,7 +1440,11 @@ def _latest_owned_session_ref() -> str | None:
     sessions = _list_owned_indexed_sessions()
     if not sessions:
         return None
-    return str(sessions[0].get("session_id") or "").strip() or None
+    for session in sessions:
+        session_id = _resumable_session_id(session)
+        if session_id:
+            return session_id
+    return None
 
 
 def _normalize_owner_value(value, *, lower: bool = False) -> str:
@@ -1356,28 +1521,39 @@ def _list_owned_indexed_sessions() -> list[dict]:
     ]
 
 
+def _resumable_session_id(session: dict) -> str | None:
+    session_id = str((session or {}).get("session_id") or "").strip()
+    if not session_id or session_id.startswith("pid-"):
+        return None
+    return session_id
+
+
 def _resolve_owned_session_ref(session_ref: str) -> tuple[str | None, str | None]:
     ref = str(session_ref or "").strip()
     if not ref:
         return None, "session_ref 不能为空"
-    sessions = _list_owned_indexed_sessions()
+    sessions = [
+        item
+        for item in _list_owned_indexed_sessions()
+        if _resumable_session_id(item)
+    ]
     if not sessions:
         return None, "暂无当前 MMC account 可恢复 session"
 
     if ref.isdigit():
         index = int(ref)
         if 1 <= index <= len(sessions):
-            return str(sessions[index - 1].get("session_id") or "").strip() or None, None
+            return _resumable_session_id(sessions[index - 1]), None
         return None, f"找不到第 {index} 条 session"
 
-    exact = [item for item in sessions if str(item.get("session_id") or "").strip() == ref]
+    exact = [item for item in sessions if _resumable_session_id(item) == ref]
     if exact:
         return ref, None
 
     matches = [
-        str(item.get("session_id") or "").strip()
+        str(_resumable_session_id(item) or "").strip()
         for item in sessions
-        if str(item.get("session_id") or "").strip().startswith(ref)
+        if str(_resumable_session_id(item) or "").strip().startswith(ref)
     ]
     if len(matches) == 1:
         return matches[0], None
@@ -2412,10 +2588,13 @@ def _run_resume_latest() -> int:
 def main(argv: list[str] | None = None) -> None:
     argv = list(argv if argv is not None else sys.argv[1:])
     if not argv:
+        _guarded_human_only_command("mmc")
         sys.exit(_run_default_entry())
     if len(argv) == 1 and argv[0] in {"1", "new"}:
+        _guarded_human_only_command("mmc")
         sys.exit(_run_default_entry())
     if len(argv) == 1 and argv[0] in {"2", "last", "resume-last"}:
+        _guarded_human_only_command("mmc resume-last")
         sys.exit(_run_resume_latest())
     if len(argv) == 1 and argv[0] in {"3", "ls"}:
         sys.exit(_handle_session_ls())
@@ -2444,29 +2623,66 @@ def main(argv: list[str] | None = None) -> None:
 
     subparsers.add_parser("setup", help="交互式保存默认启动配置")
 
+    guard_parser = subparsers.add_parser("guard", help="human-only guard")
+    guard_subparsers = guard_parser.add_subparsers(dest="guard_subcommand")
+    guard_subparsers.add_parser("status", help="查看 guard 状态")
+    guard_subparsers.add_parser("enable", help="启用 live 命令 human-only guard")
+    guard_subparsers.add_parser("disable", help="关闭 live 命令 human-only guard")
+    guard_allow_parser = guard_subparsers.add_parser("allow", help="手动放行一次或多次 live 命令")
+    guard_allow_parser.add_argument(
+        "--ttl-sec",
+        type=int,
+        default=_HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC,
+        help="放行 TTL，默认 600 秒",
+    )
+    guard_allow_parser.add_argument(
+        "--uses",
+        type=int,
+        default=_HUMAN_GUARD_DEFAULT_ALLOW_USES,
+        help="放行可用次数，默认 1",
+    )
+    guard_allow_parser.add_argument(
+        "--reason",
+        default="",
+        help="记录本次放行原因",
+    )
+
     args = parser.parse_args(argv)
 
     if args.subcommand == "run":
         _ensure_not_nested_session("mmc run")
+        _guarded_human_only_command("mmc run")
         _apply_launcher_defaults(args)
         sys.exit(_run_claude(args))
     if args.subcommand == "resume":
         _ensure_not_nested_session("mmc resume")
+        _guarded_human_only_command("mmc resume")
         _apply_launcher_defaults(args)
         sys.exit(_run_resume(args))
     if args.subcommand == "import-auth":
         _ensure_not_nested_session("mmc import-auth")
+        _guarded_human_only_command("mmc import-auth")
         sys.exit(_handle_import_auth(args.from_home))
     if args.subcommand == "session" and args.session_subcommand == "ls":
         sys.exit(_handle_session_ls())
     if args.subcommand == "session" and args.session_subcommand == "prune":
+        _guarded_human_only_command("mmc session prune")
         sys.exit(_handle_session_prune())
     if args.subcommand == "doctor":
         _apply_launcher_defaults(args)
         sys.exit(_run_doctor(args))
     if args.subcommand == "setup":
         _ensure_not_nested_session("mmc setup")
+        _guarded_human_only_command("mmc setup")
         sys.exit(_handle_setup())
+    if args.subcommand == "guard" and args.guard_subcommand == "status":
+        sys.exit(_handle_guard_status())
+    if args.subcommand == "guard" and args.guard_subcommand == "enable":
+        sys.exit(_handle_guard_enable())
+    if args.subcommand == "guard" and args.guard_subcommand == "disable":
+        sys.exit(_handle_guard_disable())
+    if args.subcommand == "guard" and args.guard_subcommand == "allow":
+        sys.exit(_handle_guard_allow(ttl_sec=args.ttl_sec, uses=args.uses, reason=args.reason))
 
     parser.print_help()
 

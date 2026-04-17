@@ -146,6 +146,7 @@ class LocalProxyGuard:
         exit_ip_check_interval_sec: float = 30.0,
         expected_exit_ip: str = "",
         passthrough_proxy_url: str = "",
+        heartbeat_failures_before_kill: int = 2,
     ) -> None:
         self.upstream = parse_upstream_proxy(upstream_proxy_url)
         self._probe_targets = tuple(probe_targets)
@@ -163,6 +164,8 @@ class LocalProxyGuard:
         self._pinned_exit_ip = str(expected_exit_ip or "").strip()
         self._next_exit_ip_check_at = 0.0
         self.local_proxy_url = ""
+        self._heartbeat_failures_before_kill = max(int(heartbeat_failures_before_kill or 1), 1)
+        self._heartbeat_failure_streak = 0
 
     @property
     def failure_reason(self) -> str:
@@ -228,6 +231,21 @@ class LocalProxyGuard:
         self.failed_event.set()
         self._stop_event.set()
 
+    def _record_heartbeat_failure(self, reason: str) -> bool:
+        self._heartbeat_failure_streak += 1
+        if self._heartbeat_failure_streak < self._heartbeat_failures_before_kill:
+            return False
+        if self._heartbeat_failures_before_kill > 1:
+            reason = (
+                f"{str(reason or '').strip()} "
+                f"(consecutive {self._heartbeat_failure_streak}/{self._heartbeat_failures_before_kill})"
+            ).strip()
+        self.fail(reason)
+        return True
+
+    def _clear_heartbeat_failures(self) -> None:
+        self._heartbeat_failure_streak = 0
+
     def _probe_exit_ip(self) -> dict:
         if self._exit_ip_probe_fn is None:
             return {"ok": True, "exit_ip": self._pinned_exit_ip, "detail": ""}
@@ -263,6 +281,7 @@ class LocalProxyGuard:
 
     def _heartbeat_loop(self) -> None:
         while not self._stop_event.wait(self._probe_interval_sec):
+            round_failure_reason = ""
             for label, target_url in self._probe_targets:
                 result = self._probe_fn(self.upstream.raw_url, target_url)
                 if result.get("ok"):
@@ -271,8 +290,13 @@ class LocalProxyGuard:
                 reason = f"proxy heartbeat failed for {label}"
                 if detail:
                     reason = f"{reason}: {detail}"
-                self.fail(reason)
-                return
+                round_failure_reason = reason
+                break
+            if round_failure_reason:
+                if self._record_heartbeat_failure(round_failure_reason):
+                    return
+                continue
+            self._clear_heartbeat_failures()
             if not self._check_pinned_exit_ip():
                 return
 

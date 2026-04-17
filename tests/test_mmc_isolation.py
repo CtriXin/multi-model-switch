@@ -672,6 +672,101 @@ def test_session_index_reconciles_by_child_pid(monkeypatch, tmp_path):
     assert result["session_id"] == "session-match"
 
 
+def test_finalize_session_index_keeps_pid_placeholder_when_raw_session_missing(monkeypatch, tmp_path):
+    import mmc_session_index
+
+    config_root = tmp_path / "mmc-config"
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    mmc_session_index.record_claude_session_start(
+        cwd=str(workspace),
+        pid=404,
+        slot_home=str(tmp_path / "slot"),
+    )
+
+    result = mmc_session_index.finalize_claude_session(
+        cwd=str(workspace),
+        pid=404,
+        exit_code=0,
+    )
+
+    target = mmc_session_index._session_state_path(str(workspace), "pid-404")
+    assert result["session_id"] == "pid-404"
+    assert target.exists() is True
+    stored = json.loads(target.read_text(encoding="utf-8"))
+    assert stored["session_id"] == "pid-404"
+    assert stored["exit_code"] == 0
+    assert stored["last_active_at"]
+
+
+def test_finalize_session_index_recovers_session_id_from_history_when_raw_session_missing(monkeypatch, tmp_path):
+    import mmc_session_index
+    from mmc_project_store import claude_raw_entry_path
+
+    config_root = tmp_path / "mmc-config"
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(config_root))
+    monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+
+    payload = mmc_session_index.record_claude_session_start(
+        cwd=str(workspace),
+        pid=505,
+        slot_home=str(tmp_path / "slot"),
+    )
+    mmc_session_index.bind_claude_session_process(
+        cwd=str(workspace),
+        pid=505,
+        child_pid=9505,
+        launch_nonce="slot-505",
+    )
+    started_at_ms = int(mmc_session_index._payload_started_at_ms(payload) or 0)
+    history_path = claude_raw_entry_path("history.jsonl", str(workspace))
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "display": "/login",
+                        "timestamp": started_at_ms + 10,
+                        "project": str(workspace.resolve()),
+                        "sessionId": "session-from-history",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "display": "hi",
+                        "timestamp": started_at_ms + 20,
+                        "project": str(workspace.resolve()),
+                        "sessionId": "session-from-history",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = mmc_session_index.finalize_claude_session(
+        cwd=str(workspace),
+        pid=505,
+        exit_code=0,
+    )
+
+    target = mmc_session_index._session_state_path(str(workspace), "session-from-history")
+    assert result["session_id"] == "session-from-history"
+    assert target.exists() is True
+    stored = json.loads(target.read_text(encoding="utf-8"))
+    assert stored["session_id"] == "session-from-history"
+    assert stored["exit_code"] == 0
+
+
 def test_session_index_write_json_uses_locked_atomic_write(monkeypatch, tmp_path):
     import mmc_session_index
 
@@ -1256,6 +1351,45 @@ def test_local_proxy_guard_detects_exit_ip_drift():
     assert "1.1.1.1 -> 2.2.2.2" in guard.failure_reason
 
 
+def test_local_proxy_guard_tolerates_single_transient_probe_failure():
+    from mmc_proxy_guard import LocalProxyGuard
+
+    guard = LocalProxyGuard(
+        "http://127.0.0.1:7890",
+        probe_targets=(("anthropic", "https://api.anthropic.com"),),
+        probe_interval_sec=0.5,
+        probe_fn=lambda *_args, **_kwargs: {"ok": True, "detail": ""},
+        heartbeat_failures_before_kill=2,
+    )
+
+    assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is False
+    assert guard.failed_event.is_set() is False
+
+    guard._clear_heartbeat_failures()
+
+    assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is False
+    assert guard.failed_event.is_set() is False
+
+
+def test_local_proxy_guard_requires_consecutive_probe_failures_before_fail():
+    from mmc_proxy_guard import LocalProxyGuard
+
+    guard = LocalProxyGuard(
+        "http://127.0.0.1:7890",
+        probe_targets=(("anthropic", "https://api.anthropic.com"),),
+        probe_interval_sec=0.5,
+        probe_fn=lambda *_args, **_kwargs: {"ok": True, "detail": ""},
+        heartbeat_failures_before_kill=2,
+    )
+
+    assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is False
+    assert guard.failed_event.is_set() is False
+
+    assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is True
+    assert guard.failed_event.is_set() is True
+    assert "consecutive 2/2" in guard.failure_reason
+
+
 def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path):
     import mmc_core
 
@@ -1391,6 +1525,71 @@ def test_run_setup_interactive_uses_default_lang_and_tz_on_empty_input(monkeypat
     assert payload["bypass"] is False
 
 
+def test_human_guard_blocks_live_command_without_manual_allow(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+
+    mmc_core._save_human_guard_state(
+        {
+            "enabled": True,
+            "allow_until": "",
+            "remaining_uses": 0,
+        }
+    )
+
+    with pytest.raises(SystemExit, match="human-only guard 拒绝执行"):
+        mmc_core._guarded_human_only_command("mmc run")
+
+
+def test_human_guard_allow_consumes_single_live_command(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    mmc_core._save_human_guard_state({"enabled": True})
+    monkeypatch.setattr(mmc_core, "_interactive_stdio_available", lambda: True)
+    monkeypatch.setattr(mmc_core, "_prompt_text", lambda *_args, **_kwargs: "ALLOW MMC")
+
+    exit_code = mmc_core._handle_guard_allow(ttl_sec=120, uses=1, reason="manual smoke")
+
+    assert exit_code == 0
+    active_state = mmc_core._load_human_guard_state()
+    assert active_state["enabled"] is True
+    assert active_state["remaining_uses"] == 1
+    assert active_state["last_allow_reason"] == "manual smoke"
+    assert active_state["allow_until"]
+
+    mmc_core._guarded_human_only_command("mmc run")
+
+    consumed_state = mmc_core._load_human_guard_state()
+    assert consumed_state["remaining_uses"] == 0
+    assert consumed_state["allow_until"] == ""
+    assert consumed_state["last_consumed_command"] == "mmc run"
+
+    with pytest.raises(SystemExit, match="human-only guard 拒绝执行"):
+        mmc_core._guarded_human_only_command("mmc run")
+
+
+def test_human_guard_enable_and_disable_persist_state(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    monkeypatch.setattr(mmc_core, "_interactive_stdio_available", lambda: True)
+    monkeypatch.setattr(mmc_core, "_prompt_text", lambda *_args, **_kwargs: "ALLOW MMC")
+
+    assert mmc_core._handle_guard_enable() == 0
+    enabled_state = mmc_core._load_human_guard_state()
+    assert enabled_state["enabled"] is True
+    assert enabled_state["last_enable_at"]
+
+    assert mmc_core._handle_guard_disable() == 0
+    disabled_state = mmc_core._load_human_guard_state()
+    assert disabled_state["enabled"] is False
+    assert disabled_state["remaining_uses"] == 0
+    assert disabled_state["allow_until"] == ""
+    assert disabled_state["last_disable_at"]
+
+
 def test_run_resume_latest_uses_saved_defaults(monkeypatch, tmp_path):
     import mmc_core
 
@@ -1425,6 +1624,61 @@ def test_run_resume_latest_uses_saved_defaults(monkeypatch, tmp_path):
     assert captured["session_ref"] == "session-latest"
     assert captured["proxy"] == "http://127.0.0.1:7890"
     assert captured["workspace"] == str(tmp_path / "repo")
+
+
+def test_run_resume_latest_skips_non_resumable_placeholder_sessions(monkeypatch, tmp_path):
+    import mmc_core
+
+    monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
+    mmc_core._save_launcher_defaults({"proxy": "http://127.0.0.1:7890"})
+    monkeypatch.setattr(
+        mmc_core,
+        "_list_owned_indexed_sessions",
+        lambda: [
+            {"session_id": "", "last_active_at": "2026-04-16T03:00:00+00:00"},
+            {"session_id": "pid-999", "last_active_at": "2026-04-16T02:00:00+00:00"},
+            {"session_id": "session-good", "last_active_at": "2026-04-16T01:00:00+00:00"},
+        ],
+    )
+    monkeypatch.setattr(mmc_core.os, "getcwd", lambda: str(tmp_path / "repo"))
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_resume",
+        lambda args: captured.update(
+            {
+                "session_ref": args.session_ref,
+                "proxy": args.proxy,
+                "workspace": args.workspace,
+            }
+        )
+        or 0,
+    )
+
+    exit_code = mmc_core._run_resume_latest()
+
+    assert exit_code == 0
+    assert captured["session_ref"] == "session-good"
+
+
+def test_resolve_owned_session_ref_ignores_non_resumable_placeholders(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(
+        mmc_core,
+        "_list_owned_indexed_sessions",
+        lambda: [
+            {"session_id": "", "last_active_at": "2026-04-16T03:00:00+00:00"},
+            {"session_id": "pid-999", "last_active_at": "2026-04-16T02:00:00+00:00"},
+            {"session_id": "session-good", "last_active_at": "2026-04-16T01:00:00+00:00"},
+        ],
+    )
+
+    resolved, error = mmc_core._resolve_owned_session_ref("1")
+
+    assert resolved == "session-good"
+    assert error is None
 
 
 def test_main_shortcuts_route_to_expected_handlers(monkeypatch):
