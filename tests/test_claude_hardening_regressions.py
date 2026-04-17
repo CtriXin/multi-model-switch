@@ -1674,6 +1674,99 @@ def test_build_codex_payload_maps_output_limit():
     assert payload["max_output_tokens"] == 256
 
 
+def test_build_codex_payload_can_skip_output_limit_mapping():
+    import mms_bridge
+
+    payload = mms_bridge._build_codex_payload(
+        {
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "max_tokens": 256,
+        },
+        "gpt-5.4",
+        include_max_output_tokens=False,
+    )
+
+    assert "max_output_tokens" not in payload
+
+
+def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstream(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    def fake_build_codex_payload(
+        request_payload,
+        model_name,
+        incremental_messages=None,
+        reasoning_effort="medium",
+        *,
+        include_max_output_tokens=True,
+    ):
+        captured["include_max_output_tokens"] = include_max_output_tokens
+        payload = {
+            "model": model_name,
+            "input": [],
+            "stream": True,
+            "reasoning": {"effort": reasoning_effort},
+        }
+        if include_max_output_tokens:
+            payload["max_output_tokens"] = 256
+        return payload
+
+    class FakeResponse:
+        status_code = 400
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def read():
+            return b'{"detail":"Unsupported parameter: max_output_tokens"}'
+
+    def fake_stream(method, url, **kwargs):
+        captured["url"] = url
+        captured["json"] = dict(kwargs.get("json") or {})
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "_build_codex_payload", fake_build_codex_payload)
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.server = types.SimpleNamespace(
+        _gpt_last_response_id=None,
+        reasoning_effort="high",
+        bridge_token="bridge-token",
+        proxy_url="",
+        no_proxy="",
+    )
+    status = {}
+    handler._json = lambda code, payload: status.update({"code": code, "payload": payload})
+
+    handler._forward_as_responses(
+        {
+            "model": "gpt-5.4",
+            "stream": False,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+            "max_tokens": 256,
+        },
+        "gpt-5.4",
+        "https://crs.example.com/v1",
+        "sk-test",
+        False,
+    )
+
+    assert captured["include_max_output_tokens"] is False
+    assert "max_output_tokens" not in captured["json"]
+    assert captured["url"] == "https://crs.example.com/v1/responses"
+    assert status["code"] == 400
+
+
 def test_iter_sse_lines_defaults_event_name_and_skips_bad_json():
     import mms_bridge
 

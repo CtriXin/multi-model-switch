@@ -247,7 +247,11 @@ def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
         with locked_state_file(_BRIDGE_MODE_CACHE_FILE):
             cache = _load_bridge_mode_cache_unlocked()
             entry = cache.get(key)
-            if not isinstance(entry, dict) or entry.get("mode") != "chatcompletions":
+            should_refresh = not isinstance(entry, dict) or entry.get("mode") != "chatcompletions"
+            if not should_refresh:
+                ts = entry.get("ts")
+                should_refresh = not isinstance(ts, (int, float)) or time.time() - ts > _BRIDGE_MODE_CACHE_TTL
+            if should_refresh:
                 cache[key] = {"mode": "chatcompletions", "ts": time.time()}
                 _save_bridge_mode_cache_unlocked(cache)
 
@@ -747,7 +751,14 @@ def _build_gemini_payload(request_payload, model_name):
     }
 
 
-def _build_codex_payload(request_payload, model_name, incremental_messages=None, reasoning_effort="medium"):
+def _build_codex_payload(
+    request_payload,
+    model_name,
+    incremental_messages=None,
+    reasoning_effort="medium",
+    *,
+    include_max_output_tokens=True,
+):
     messages = incremental_messages if incremental_messages is not None else (request_payload.get("messages") or [])
     payload = {
         "model": model_name,
@@ -760,11 +771,12 @@ def _build_codex_payload(request_payload, model_name, incremental_messages=None,
     tools = _anthropic_tools_to_responses(request_payload.get("tools"))
     if tools:
         payload["tools"] = tools
-    max_output_tokens = request_payload.get("max_output_tokens")
-    if max_output_tokens is None:
-        max_output_tokens = request_payload.get("max_tokens")
-    if isinstance(max_output_tokens, (int, float)) and max_output_tokens > 0:
-        payload["max_output_tokens"] = int(max_output_tokens)
+    if include_max_output_tokens:
+        max_output_tokens = request_payload.get("max_output_tokens")
+        if max_output_tokens is None:
+            max_output_tokens = request_payload.get("max_tokens")
+        if isinstance(max_output_tokens, (int, float)) and max_output_tokens > 0:
+            payload["max_output_tokens"] = int(max_output_tokens)
     return payload
 
 
@@ -1928,10 +1940,21 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 if m.get("role") == "assistant":
                     last_assistant_idx = i
             incremental = messages[last_assistant_idx + 1:] if last_assistant_idx >= 0 else messages
-            responses_payload = _build_codex_payload(anthropic_payload, model_name, incremental_messages=incremental, reasoning_effort=reasoning_effort)
+            responses_payload = _build_codex_payload(
+                anthropic_payload,
+                model_name,
+                incremental_messages=incremental,
+                reasoning_effort=reasoning_effort,
+                include_max_output_tokens=False,
+            )
             responses_payload["previous_response_id"] = last_response_id
         else:
-            responses_payload = _build_codex_payload(anthropic_payload, model_name, reasoning_effort=reasoning_effort)
+            responses_payload = _build_codex_payload(
+                anthropic_payload,
+                model_name,
+                reasoning_effort=reasoning_effort,
+                include_max_output_tokens=False,
+            )
         # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
         orig_instructions = responses_payload.get("instructions", "")
         if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
