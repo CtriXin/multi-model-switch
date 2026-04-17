@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
@@ -237,6 +238,8 @@ _HUMAN_GUARD_STATE_KEYS = (
 )
 _HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC = 600
 _HUMAN_GUARD_DEFAULT_ALLOW_USES = 1
+_LOCAL_PROXY_GUARD_STARTUP_GRACE_SEC = 45.0
+_LOCAL_PROXY_GUARD_HEARTBEAT_FAILURES_BEFORE_KILL = 3
 _LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC = 2.0
 _LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC = 30.0
 _CHILD_WAIT_POLL_INTERVAL_SEC = 0.25
@@ -754,7 +757,7 @@ def _human_guard_rejection_message(command_label: str) -> str:
     return (
         "mmc: human-only guard 拒绝执行 "
         f"`{command_label}`；请先在真实终端手动运行 "
-        "`mmc guard allow` 放行一次"
+        "`mmc allow` 放行一次"
     )
 
 
@@ -768,6 +771,16 @@ def _human_guard_confirm_interactive(action_label: str) -> None:
     )
     if entered != phrase:
         raise SystemExit("mmc: human-only guard 校验失败，未执行任何更改")
+
+
+def _human_guard_confirm_allow_interactive(action_label: str) -> None:
+    if not _interactive_stdio_available():
+        raise SystemExit("mmc: human-only guard 操作要求在真实交互终端里执行")
+    _prompt_text(
+        f"{action_label}，按回车确认",
+        default="",
+        required=False,
+    )
 
 
 def _consume_human_guard_allowance_or_exit(command_label: str) -> None:
@@ -811,7 +824,7 @@ def _handle_guard_enable() -> int:
     state["last_allow_reason"] = ""
     state["last_enable_at"] = _utc_now()
     _save_human_guard_state(state)
-    print("mmc: human-only guard 已启用；live 命令默认拒绝，需先运行 `mmc guard allow`")
+    print("mmc: human-only guard 已启用；live 命令默认拒绝，需先运行 `mmc allow`")
     return 0
 
 
@@ -832,7 +845,7 @@ def _handle_guard_allow(*, ttl_sec: int, uses: int, reason: str = "") -> int:
     state = _load_human_guard_state()
     if not state.get("enabled"):
         raise SystemExit("mmc: human-only guard 尚未启用；请先运行 `mmc guard enable`")
-    _human_guard_confirm_interactive("放行一次 live MMC 命令")
+    _human_guard_confirm_allow_interactive("放行一次 live MMC 命令")
     normalized_ttl = max(int(ttl_sec or _HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC), 30)
     normalized_uses = max(int(uses or _HUMAN_GUARD_DEFAULT_ALLOW_USES), 1)
     state["allow_until"] = (datetime.now(timezone.utc) + timedelta(seconds=normalized_ttl)).isoformat()
@@ -1562,6 +1575,17 @@ def _resolve_owned_session_ref(session_ref: str) -> tuple[str | None, str | None
     return None, f"找不到当前 MMC account 的 session: {ref}"
 
 
+def _looks_like_explicit_claude_session_id(session_ref: str) -> bool:
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return False
+    try:
+        uuid.UUID(ref)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return True
+
+
 def _load_source_settings_theme(source_home: Path) -> str:
     settings_path = source_home / ".claude" / "settings.json"
     loaded = _load_json_dict(settings_path)
@@ -2260,6 +2284,8 @@ def _start_session_proxy_guard(proxy_url: str, *, pinned_exit_ip: str = "") -> L
         exit_ip_check_interval_sec=_LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC,
         expected_exit_ip=pinned_exit_ip,
         passthrough_proxy_url=proxy_url,
+        heartbeat_failures_before_kill=_LOCAL_PROXY_GUARD_HEARTBEAT_FAILURES_BEFORE_KILL,
+        startup_grace_sec=_LOCAL_PROXY_GUARD_STARTUP_GRACE_SEC,
     )
     guard.start()
     return guard
@@ -2513,6 +2539,14 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
 
 def _run_resume(args) -> int:
     session_id, error = _resolve_owned_session_ref(args.session_ref)
+    explicit_fallback = False
+    if not session_id and _looks_like_explicit_claude_session_id(args.session_ref):
+        session_id = str(args.session_ref or "").strip()
+        explicit_fallback = True
+        print(
+            "mmc: 本地 session index 未命中；按显式 Claude session id 继续尝试恢复",
+            file=sys.stderr,
+        )
     if not session_id:
         print(f"mmc: {error or '找不到 session'}", file=sys.stderr)
         return 1
@@ -2520,6 +2554,8 @@ def _run_resume(args) -> int:
     matched = next((item for item in sessions if str(item.get("session_id") or "").strip() == session_id), None)
     if matched and not args.workspace:
         args.workspace = str(matched.get("project_path") or matched.get("cwd") or "").strip()
+    if explicit_fallback and not args.workspace:
+        args.workspace = os.getcwd()
     return _run_claude(args, explicit_session_id=session_id)
 
 
@@ -2647,6 +2683,25 @@ def main(argv: list[str] | None = None) -> None:
         help="记录本次放行原因",
     )
 
+    allow_parser = subparsers.add_parser("allow", help="shortcut for `mmc guard allow`")
+    allow_parser.add_argument(
+        "--ttl-sec",
+        type=int,
+        default=_HUMAN_GUARD_DEFAULT_ALLOW_TTL_SEC,
+        help="放行 TTL，默认 600 秒",
+    )
+    allow_parser.add_argument(
+        "--uses",
+        type=int,
+        default=_HUMAN_GUARD_DEFAULT_ALLOW_USES,
+        help="放行可用次数，默认 1",
+    )
+    allow_parser.add_argument(
+        "--reason",
+        default="",
+        help="记录本次放行原因",
+    )
+
     args = parser.parse_args(argv)
 
     if args.subcommand == "run":
@@ -2682,6 +2737,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.subcommand == "guard" and args.guard_subcommand == "disable":
         sys.exit(_handle_guard_disable())
     if args.subcommand == "guard" and args.guard_subcommand == "allow":
+        sys.exit(_handle_guard_allow(ttl_sec=args.ttl_sec, uses=args.uses, reason=args.reason))
+    if args.subcommand == "allow":
         sys.exit(_handle_guard_allow(ttl_sec=args.ttl_sec, uses=args.uses, reason=args.reason))
 
     parser.print_help()

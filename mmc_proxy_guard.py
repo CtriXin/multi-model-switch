@@ -147,6 +147,7 @@ class LocalProxyGuard:
         expected_exit_ip: str = "",
         passthrough_proxy_url: str = "",
         heartbeat_failures_before_kill: int = 2,
+        startup_grace_sec: float = 0.0,
     ) -> None:
         self.upstream = parse_upstream_proxy(upstream_proxy_url)
         self._probe_targets = tuple(probe_targets)
@@ -166,6 +167,8 @@ class LocalProxyGuard:
         self.local_proxy_url = ""
         self._heartbeat_failures_before_kill = max(int(heartbeat_failures_before_kill or 1), 1)
         self._heartbeat_failure_streak = 0
+        self._startup_grace_sec = max(float(startup_grace_sec or 0.0), 0.0)
+        self._startup_grace_deadline = 0.0
 
     @property
     def failure_reason(self) -> str:
@@ -176,6 +179,7 @@ class LocalProxyGuard:
         return str(self._pinned_exit_ip or "").strip()
 
     def start(self) -> None:
+        self._startup_grace_deadline = time.monotonic() + self._startup_grace_sec
         if self._exit_ip_probe_fn is not None:
             if self._pinned_exit_ip:
                 self._next_exit_ip_check_at = time.monotonic() + self._exit_ip_check_interval_sec
@@ -232,6 +236,9 @@ class LocalProxyGuard:
         self._stop_event.set()
 
     def _record_heartbeat_failure(self, reason: str) -> bool:
+        if self._startup_grace_deadline and time.monotonic() < self._startup_grace_deadline:
+            self._heartbeat_failure_streak = 0
+            return False
         self._heartbeat_failure_streak += 1
         if self._heartbeat_failure_streak < self._heartbeat_failures_before_kill:
             return False

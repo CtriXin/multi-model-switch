@@ -1371,6 +1371,26 @@ def test_local_proxy_guard_tolerates_single_transient_probe_failure():
     assert guard.failed_event.is_set() is False
 
 
+def test_local_proxy_guard_ignores_failures_during_startup_grace(monkeypatch):
+    import mmc_proxy_guard
+    from mmc_proxy_guard import LocalProxyGuard
+
+    monkeypatch.setattr(mmc_proxy_guard.time, "monotonic", lambda: 100.0)
+    guard = LocalProxyGuard(
+        "http://127.0.0.1:7890",
+        probe_targets=(("anthropic", "https://api.anthropic.com"),),
+        probe_interval_sec=0.5,
+        probe_fn=lambda *_args, **_kwargs: {"ok": True, "detail": ""},
+        heartbeat_failures_before_kill=2,
+        startup_grace_sec=30,
+    )
+    guard._startup_grace_deadline = 120.0
+
+    assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is False
+    assert guard.failed_event.is_set() is False
+    assert guard._heartbeat_failure_streak == 0
+
+
 def test_local_proxy_guard_requires_consecutive_probe_failures_before_fail():
     from mmc_proxy_guard import LocalProxyGuard
 
@@ -1388,6 +1408,31 @@ def test_local_proxy_guard_requires_consecutive_probe_failures_before_fail():
     assert guard._record_heartbeat_failure("proxy heartbeat failed for anthropic: curl: (28) timeout") is True
     assert guard.failed_event.is_set() is True
     assert "consecutive 2/2" in guard.failure_reason
+
+
+def test_start_session_proxy_guard_uses_runtime_grace_and_failure_threshold(monkeypatch):
+    import mmc_core
+
+    captured = {}
+
+    class _FakeGuard:
+        def __init__(self, proxy_url, **kwargs):
+            captured["proxy_url"] = proxy_url
+            captured.update(kwargs)
+            self.local_proxy_url = proxy_url
+
+        def start(self):
+            captured["started"] = True
+
+    monkeypatch.setattr(mmc_core, "LocalProxyGuard", _FakeGuard)
+
+    guard = mmc_core._start_session_proxy_guard("http://127.0.0.1:7890", pinned_exit_ip="1.2.3.4")
+
+    assert guard.local_proxy_url == "http://127.0.0.1:7890"
+    assert captured["started"] is True
+    assert captured["heartbeat_failures_before_kill"] == mmc_core._LOCAL_PROXY_GUARD_HEARTBEAT_FAILURES_BEFORE_KILL
+    assert captured["startup_grace_sec"] == mmc_core._LOCAL_PROXY_GUARD_STARTUP_GRACE_SEC
+    assert captured["expected_exit_ip"] == "1.2.3.4"
 
 
 def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path):
@@ -1548,7 +1593,7 @@ def test_human_guard_allow_consumes_single_live_command(monkeypatch, tmp_path):
     monkeypatch.setenv("MMC_CONFIG_HOME", str(tmp_path / "mmc-config"))
     mmc_core._save_human_guard_state({"enabled": True})
     monkeypatch.setattr(mmc_core, "_interactive_stdio_available", lambda: True)
-    monkeypatch.setattr(mmc_core, "_prompt_text", lambda *_args, **_kwargs: "ALLOW MMC")
+    monkeypatch.setattr(mmc_core, "_prompt_text", lambda *_args, **_kwargs: "")
 
     exit_code = mmc_core._handle_guard_allow(ttl_sec=120, uses=1, reason="manual smoke")
 
@@ -1624,6 +1669,40 @@ def test_run_resume_latest_uses_saved_defaults(monkeypatch, tmp_path):
     assert captured["session_ref"] == "session-latest"
     assert captured["proxy"] == "http://127.0.0.1:7890"
     assert captured["workspace"] == str(tmp_path / "repo")
+
+
+def test_run_resume_accepts_explicit_uuid_when_index_missing(monkeypatch, tmp_path, capsys):
+    import mmc_core
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    session_id = "02c0ed3d-bd33-4c64-93e3-fa58a60d9d6c"
+    args = mmc_core._build_launch_namespace(workspace=str(workspace))
+    args.session_ref = session_id
+
+    monkeypatch.setattr(mmc_core, "_resolve_owned_session_ref", lambda _ref: (None, "not found"))
+    monkeypatch.setattr(mmc_core, "_list_owned_indexed_sessions", lambda: [])
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_run_claude",
+        lambda launch_args, explicit_session_id="": captured.update(
+            {
+                "workspace": launch_args.workspace,
+                "explicit_session_id": explicit_session_id,
+            }
+        )
+        or 0,
+    )
+
+    exit_code = mmc_core._run_resume(args)
+    stderr = capsys.readouterr().err
+
+    assert exit_code == 0
+    assert captured["workspace"] == str(workspace)
+    assert captured["explicit_session_id"] == session_id
+    assert "显式 Claude session id" in stderr
 
 
 def test_run_resume_latest_skips_non_resumable_placeholder_sessions(monkeypatch, tmp_path):
@@ -1706,6 +1785,23 @@ def test_main_shortcuts_route_to_expected_handlers(monkeypatch):
         mmc_core.main([])
     assert exc.value.code == 0
     assert seen == ["run", "resume-latest", "session-ls", "run"]
+
+
+def test_main_allow_shortcut_routes_to_guard_allow(monkeypatch):
+    import mmc_core
+
+    captured = {}
+    monkeypatch.setattr(
+        mmc_core,
+        "_handle_guard_allow",
+        lambda ttl_sec, uses, reason="": captured.update({"ttl_sec": ttl_sec, "uses": uses, "reason": reason}) or 0,
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        mmc_core.main(["allow", "--ttl-sec", "120", "--uses", "2", "--reason", "manual"])
+
+    assert exc.value.code == 0
+    assert captured == {"ttl_sec": 120, "uses": 2, "reason": "manual"}
 
 
 def test_inject_upstream_proxy_auth_adds_and_replaces_header():
