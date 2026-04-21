@@ -274,6 +274,7 @@ mms discuss "design a protocol"
 - Each route entry only includes `provider_id`, `anthropic_base_url`, `openai_base_url`, and `api_key`
 - Snapshot dedupe uses a canonical content hash over `version + routes`; `generated_at` is excluded from the hash
 - If the canonical content is unchanged, MMS reuses the existing snapshot and mirrors that snapshot back to `model-routes.json` instead of creating a new snapshot
+- Starting the `mms` CLI now forces a synchronous Hive routes refresh before command dispatch so in-session Hive reads the latest usable routes sooner
 
 Key docs:
 

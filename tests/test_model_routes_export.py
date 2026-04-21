@@ -327,3 +327,141 @@ def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path)
     assert calls == [
         ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True)
     ]
+
+
+def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False: calls.append((cfg, force)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True)
+    ]
+
+
+def test_handle_provider_default_config_triggers_routes_refresh(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [{"id": "demo-a"}, {"id": "demo-b"}],
+    }
+    calls = []
+    monkeypatch.setattr(mms_core, "save_config", lambda updated_cfg: calls.append(("save", updated_cfg["provider"]["default"])))
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda *args, **kwargs: calls.append(("refresh", kwargs.get("force"), kwargs.get("quiet"))) or True,
+    )
+
+    mms_core._handle_provider_default_config(cfg, ["demo-b"])
+
+    assert cfg["provider"]["default"] == "demo-b"
+    assert calls == [
+        ("save", "demo-b"),
+        ("refresh", True, False),
+    ]
+
+
+def test_handle_provider_remove_config_triggers_routes_refresh(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [{"id": "demo-a"}, {"id": "demo-b"}],
+    }
+    calls = []
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core.Confirm, "ask", staticmethod(lambda *_args, **_kwargs: True))
+    monkeypatch.setattr(mms_core, "save_config", lambda updated_cfg: calls.append(("save", [item["id"] for item in updated_cfg["providers"]])))
+    monkeypatch.setattr(mms_core, "_delete_provider_credentials", lambda provider_id: calls.append(("delete_creds", provider_id)))
+    monkeypatch.setattr(mms_core, "_invalidate_probe_cache", lambda provider_id: calls.append(("invalidate", provider_id)))
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda *args, **kwargs: calls.append(("refresh", kwargs.get("force"), kwargs.get("quiet"))) or True,
+    )
+
+    mms_core._handle_provider_remove_config(cfg, ["demo-a"])
+
+    assert calls == [
+        ("save", ["demo-b"]),
+        ("delete_creds", "demo-a"),
+        ("invalidate", "demo-a"),
+        ("refresh", True, False),
+    ]
+
+
+def test_handle_provider_edit_config_triggers_routes_refresh(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [{"id": "demo", "name": "Demo"}],
+    }
+    updated_cfg = {
+        "provider": {"default": "demo"},
+        "providers": [{"id": "demo", "name": "Renamed Demo"}],
+    }
+    calls = []
+    monkeypatch.setattr(mms_core, "_prompt_provider_metadata", lambda **_kwargs: {"id": "demo", "name": "Renamed Demo"})
+    monkeypatch.setattr(mms_core, "_upsert_provider", lambda _cfg, _provider: updated_cfg)
+    monkeypatch.setattr(mms_core, "save_config", lambda saved_cfg: calls.append(("save", saved_cfg["providers"][0]["name"])))
+    monkeypatch.setattr(mms_core, "_invalidate_probe_cache", lambda provider_id: calls.append(("invalidate", provider_id)))
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda *args, **kwargs: calls.append(("refresh", kwargs.get("force"), kwargs.get("quiet"))) or True,
+    )
+
+    mms_core._handle_provider_edit_config(cfg, ["demo"])
+
+    assert calls == [
+        ("save", "Renamed Demo"),
+        ("invalidate", "demo"),
+        ("refresh", True, False),
+    ]
+
+
+def test_main_refreshes_routes_snapshot_before_subcommand_dispatch(monkeypatch):
+    import mms_core
+
+    cfg = {"provider": {"default": "demo"}, "providers": []}
+    events = []
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "ls"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda current_cfg=None, **kwargs: events.append(("refresh", current_cfg, kwargs.get("force"))) or True,
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "handle_models_command",
+        lambda current_cfg, args: events.append(("models", current_cfg, list(args))),
+    )
+
+    mms_core.main()
+
+    assert events == [
+        ("refresh", cfg, True),
+        ("models", cfg, []),
+    ]

@@ -512,6 +512,7 @@ mms session resume <id>               # 恢复会话
 - 每条 route 只包含 `provider_id`、`anthropic_base_url`、`openai_base_url`、`api_key`
 - 去重 hash 基于 canonical `version + routes` 内容，`generated_at` 不参与 hash
 - 如果 canonical 内容没变，就复用已有 snapshot，并把该 snapshot 内容回写到固定 latest 文件，而不是新建快照
+- 现在每次启动 `mms` CLI 都会在命令分发前同步刷新一次 Hive routes，尽量保证 session 内 Hive 读到的是最新可用通道
 
 ### config.toml 示例
 

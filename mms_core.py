@@ -2776,13 +2776,7 @@ def _trigger_routes_export_after_usage_write():
     def _run():
         global _USAGE_ROUTES_EXPORT_RUNNING
         try:
-            from mms_router import export_model_routes
-
-            cfg = load_config()
-            if cfg is None:
-                return
-            cfg = apply_local_overrides(cfg)
-            export_model_routes(cfg, force=True)
+            _refresh_routes_export_for_hive(force=True, quiet=True)
         except Exception:
             pass
         finally:
@@ -2796,18 +2790,28 @@ def _trigger_routes_export_after_usage_write():
     ).start()
 
 
-def _trigger_routes_export_after_credentials_write():
-    """Best-effort routes export after provider key / URL changes."""
+def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False):
+    """Synchronously refresh the Hive-facing routes export from current config."""
     try:
         from mms_router import export_model_routes
 
-        cfg = load_config()
-        if cfg is None:
-            return
-        cfg = apply_local_overrides(cfg)
-        export_model_routes(cfg, force=True)
-    except Exception:
-        pass
+        current_cfg = cfg
+        if current_cfg is None:
+            current_cfg = load_config()
+            if current_cfg is None:
+                return False
+            current_cfg = apply_local_overrides(current_cfg)
+        export_model_routes(current_cfg, force=force)
+        return True
+    except Exception as exc:
+        if not quiet:
+            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
+        return False
+
+
+def _trigger_routes_export_after_credentials_write():
+    """Best-effort routes export after provider key / URL changes."""
+    _refresh_routes_export_for_hive(force=True, quiet=True)
 
 
 def _backup_config_tree(label):
@@ -8054,6 +8058,7 @@ def _handle_provider_default_config(cfg, args_rest):
     cfg.setdefault("provider", {})
     cfg["provider"]["default"] = requested_id
     save_config(cfg)
+    _refresh_routes_export_for_hive(force=True, quiet=False)
     console.print(f"[green]✓ provider.default = {requested_id}[/green]")
     console.print("[dim]默认模型源已更新[/dim]")
 
@@ -8076,6 +8081,7 @@ def _handle_provider_edit_config(cfg, args_rest):
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
     _invalidate_probe_cache(provider_id)
+    _refresh_routes_export_for_hive(force=True, quiet=False)
     console.print(f"[green]✓ 已更新模型源: {provider_id}[/green]")
 
 
@@ -8107,6 +8113,7 @@ def _handle_provider_remove_config(cfg, args_rest):
     save_config(updated_cfg)
     _delete_provider_credentials(provider_id)
     _invalidate_probe_cache(provider_id)
+    _refresh_routes_export_for_hive(force=True, quiet=False)
     console.print(f"[green]✓ 已删除模型源: {provider_id}[/green]")
 
 
@@ -8341,6 +8348,7 @@ def _handle_provider_rename_config(cfg, args_rest):
     _rename_usage_provider(old_id, new_id, new_name)
     _invalidate_probe_cache(old_id)
     _invalidate_probe_cache(new_id)
+    _refresh_routes_export_for_hive(force=True, quiet=False)
     console.print(f"[green]✓ 已重命名模型源: {old_id} -> {new_id}[/green]")
     console.print(f"[dim]显示名: {new_name}[/dim]")
     console.print(f"[dim]备份目录: {backup_dir}[/dim]")
@@ -9435,6 +9443,13 @@ def main():
         enforce=not _snapshot_prompt_allowed(),
     )
 
+    preloaded_command_cfg = None
+    if len(argv) >= 1:
+        command = argv[0]
+        if command not in {"guard", "logs", "fake-upstream", "exposure"}:
+            preloaded_command_cfg = _load_command_config()
+            _refresh_routes_export_for_hive(preloaded_command_cfg, force=True, quiet=False)
+
     if len(argv) >= 1:
         command = argv[0]
         if command == "config":
@@ -9447,23 +9462,23 @@ def main():
         if command == "chat":
             from mms_chat import chat_main
 
-            chat_main(_load_command_config(), argv[1:])
+            chat_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "discuss":
             from mms_discuss import discuss_main
 
-            discuss_main(_load_command_config(), argv[1:])
+            discuss_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "usage":
             from mms_usage import usage_main
 
-            usage_main(_load_command_config(), argv[1:])
+            usage_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command in {"models", "ls"}:
-            handle_models_command(_load_command_config(), argv[1:])
+            handle_models_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "warm":
-            handle_warm_command(_load_command_config(), argv[1:])
+            handle_warm_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "session":
             handle_session_command(argv[1:])
@@ -9474,19 +9489,19 @@ def main():
         if command == "routes":
             from mms_router import routes_main
 
-            routes_main(_load_command_config(), argv[1:])
+            routes_main(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "broker":
-            raise SystemExit(handle_broker_command(_load_command_config(), argv[1:], command_name=current_command()))
+            raise SystemExit(handle_broker_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:], command_name=current_command()))
         if command == "doctor":
             raise SystemExit(handle_doctor_command(argv[1:]))
         if command in {"test", "smoke"}:
             raise SystemExit(handle_test_command(argv[1:], subcommand_name=command))
         if command == "env":
-            handle_env_command(_load_command_config(), argv[1:])
+            handle_env_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
         if command == "activate":
-            handle_activate_command(_load_command_config(), argv[1:])
+            handle_activate_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
 
     if len(argv) >= 1 and argv[0] == "discuss":
@@ -9582,6 +9597,7 @@ def main():
 
     cfg = apply_local_overrides(user_cfg)
     set_language(_resolve_ui_language(cfg, args.lang or lang_override))
+    _refresh_routes_export_for_hive(cfg, force=True, quiet=False)
 
     default_provider = ensure_provider_credentials(cfg)
     _trace_record("config default", provider=default_provider.get("id") if isinstance(default_provider, dict) else None)
