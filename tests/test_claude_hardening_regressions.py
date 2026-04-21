@@ -92,6 +92,69 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
     assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
 
 
+def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
+    import mms_launchers
+
+    hive_compact = os.path.join(mms_launchers._LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_mms_claude_settings_template",
+        lambda: {
+            "hooks": {
+                "PreCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": f"bash {hive_compact}"},
+                        ],
+                    }
+                ],
+                "PostCompact": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": f"bash {hive_compact}"},
+                        ],
+                    }
+                ],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_global_claude_settings_template",
+        lambda: {
+            "statusLine": {"type": "command", "command": "/tmp/status.sh"},
+            "permissions": {"allow": ["Read"]},
+        },
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_session_mcp_servers",
+        lambda: {
+            "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
+            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+        },
+    )
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "theme": "dark",
+            "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/tmp/demo.sh"}]}]},
+            "statusLine": {"type": "command", "command": "/tmp/account-status.sh"},
+            "permissions": {"allow": ["Bash(*)"]},
+            "mcpServers": {"demo": {"command": "demo"}},
+        },
+        allow_execution_surfaces=False,
+    )
+
+    assert result["theme"] == "dark"
+    assert "hooks" not in result
+    assert "statusLine" not in result
+    assert "permissions" not in result
+    assert "mcpServers" not in result
+
+
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -733,13 +796,15 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
     assert session_state["numStartups"] == 9
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
-    assert session_state["mcpServers"]["mindkeeper"]["command"] == "mindkeeper"
+    assert "mcpServers" not in session_state
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["hasTrustDialogAccepted"] is True
     assert project_state["hasCompletedProjectOnboarding"] is True
     assert project_state["hasClaudeMdExternalIncludesApproved"] is True
     assert project_state["hasClaudeMdExternalIncludesWarningShown"] is True
     assert project_state["projectOnboardingSeenCount"] == 1
+    assert project_state["enabledMcpjsonServers"] == []
+    assert project_state["disabledMcpjsonServers"] == []
     assert "lastSessionId" not in project_state
 
 
@@ -903,151 +968,31 @@ def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
     assert "HTTP_PROXY" not in captured["env"]
 
 
-def test_launch_claude_oauth_delegates_to_mmc_with_bypass(monkeypatch, tmp_path):
+def test_launch_claude_oauth_is_manual_only(monkeypatch, tmp_path, capsys):
     import mms_launchers
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     monkeypatch.chdir(repo_dir)
 
-    captured = {}
-    monkeypatch.setenv("ANTHROPIC_MODEL", "ambient-should-drop")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-parent")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-parent")
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9999")
     monkeypatch.setenv("PYTHONPATH", "/tmp/python")
     monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
     monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
     monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_assert_safe_mmc_delegate_binary",
-        lambda path_value, label="": str(path_value),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_resolve_real_home_command_path",
-        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_exec_or_run",
-        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
-    )
+    with pytest.raises(SystemExit) as exc:
+        mms_launchers.launch_claude(
+            {"model": "claude-sonnet-4-6"},
+            {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": True},
+            once=True,
+        )
 
-    mms_launchers.launch_claude(
-        {"model": "claude-sonnet-4-6"},
-        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": True},
-        once=True,
-    )
-
-    assert captured["cmd"][1].endswith("/mmc")
-    assert captured["cmd"][2:10] == [
-        "run",
-        "--workspace",
-        os.path.realpath(str(repo_dir)),
-        "--claude-bin",
-        str(tmp_path / "real-bin" / "claude"),
-        "--node-bin",
-        str(tmp_path / "real-bin" / "node"),
-        "--lang",
-    ]
-    assert "--allow-dir" in captured["cmd"]
-    allow_dir_index = captured["cmd"].index("--allow-dir")
-    assert captured["cmd"][allow_dir_index + 1] == os.path.realpath(str(repo_dir))
-    assert "--bypass" in captured["cmd"]
-    assert "--set-env" in captured["cmd"]
-    assert "ANTHROPIC_MODEL=claude-sonnet-4-6" in captured["cmd"]
-    assert "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" in captured["cmd"]
-    assert not any(item.startswith("CLAUDE_CODE_ATTRIBUTION_HEADER=") for item in captured["cmd"])
-    assert "OPENAI_API_KEY" not in captured["env"]
-    assert "HTTP_PROXY" not in captured["env"]
-    assert "ANTHROPIC_MODEL" not in captured["env"]
-    assert "PYTHONPATH" not in captured["env"]
-    assert "HOME" not in captured["env"]
-    assert captured["env"]["MMC_REAL_HOME"] == str(tmp_path / "real-home")
-    assert captured["env"]["PATH"].startswith("/usr/bin")
-
-
-def test_launch_claude_oauth_delegate_without_bypass_does_not_add_workspace_allowlist(monkeypatch, tmp_path):
-    import mms_launchers
-
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    monkeypatch.chdir(repo_dir)
-
-    captured = {}
-    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
-    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
-    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_assert_safe_mmc_delegate_binary",
-        lambda path_value, label="": str(path_value),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_resolve_real_home_command_path",
-        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_exec_or_run",
-        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
-    )
-
-    mms_launchers.launch_claude(
-        {"model": "claude-sonnet-4-6"},
-        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": False},
-        once=True,
-    )
-
-    assert captured["cmd"][1].endswith("/mmc")
-    assert "--allow-dir" not in captured["cmd"]
-    assert "--bypass" not in captured["cmd"]
-
-
-def test_launch_claude_oauth_delegate_uses_mmc_entry_not_claude_binary(monkeypatch, tmp_path):
-    import mms_launchers
-
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    monkeypatch.chdir(repo_dir)
-
-    captured = {}
-    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
-    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
-    monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_assert_safe_mmc_delegate_binary",
-        lambda path_value, label="": str(path_value),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_resolve_real_home_command_path",
-        lambda command_name, env=None: str(tmp_path / "real-bin" / command_name),
-    )
-    monkeypatch.setattr(
-        mms_launchers,
-        "_exec_or_run",
-        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env), "kwargs": dict(kwargs)}),
-    )
-
-    mms_launchers.launch_claude(
-        {"model": "claude-sonnet-4-6"},
-        {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "bypass": False},
-        once=True,
-    )
-
-    assert captured["cmd"][0] == os.sys.executable
-    assert captured["cmd"][1].endswith("/mmc")
-    assert captured["cmd"][2] == "run"
+    assert exc.value.code == mms_launchers._CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE
+    captured = capsys.readouterr()
+    assert "manual-only" in captured.out
+    assert "不能自动启动它" in captured.out
 
 
 def test_launch_claude_oauth_delegate_blocks_force_ipv4(monkeypatch, tmp_path):
@@ -1059,21 +1004,14 @@ def test_launch_claude_oauth_delegate_blocks_force_ipv4(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
     monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
     monkeypatch.setattr(mms_launchers, "_runtime_supports_claude_1m", lambda runtime: False)
-    monkeypatch.setattr(mms_launchers, "_effective_context_window", lambda *args, **kwargs: 200000)
-    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(tmp_path / "real-home"))
-    monkeypatch.setattr(
-        mms_launchers,
-        "_assert_safe_mmc_delegate_binary",
-        lambda path_value, label="": str(path_value),
-    )
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc:
         mms_launchers.launch_claude(
             {"model": "claude-sonnet-4-6"},
             {"auth_mode": "oauth", "cli": "claude", "home_dir": str(tmp_path / "account-home"), "force_ipv4": True},
             once=True,
         )
-
+    assert exc.value.code == mms_launchers._CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE
 
 def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypatch):
     import mms_usage
@@ -1163,6 +1101,68 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
     assert not (wrapper_dir / "claude").exists()
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
+
+
+def test_account_env_oauth_claude_fail_closes_execution_surfaces(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    account_home = tmp_path / "account-home"
+    session_home = tmp_path / "session-home"
+    repo_dir = tmp_path / "repo"
+    isolated_home = tmp_path / "isolated-home"
+    real_home.mkdir()
+    account_home.mkdir()
+    session_home.mkdir()
+    repo_dir.mkdir()
+    isolated_home.mkdir()
+    (real_home / ".local").mkdir(parents=True)
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("HOME", str(isolated_home))
+    captured = {}
+    monkeypatch.setattr(mms_launchers, "seed_claude_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _session_home, session_claude_dir, **kwargs: (
+            captured.update({"allowed_source_entries": tuple(kwargs.get("allowed_source_entries") or ())}),
+            Path(session_claude_dir).mkdir(parents=True, exist_ok=True),
+        )[-1],
+    )
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_persist_account_guard_launch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_install_session_command_wrappers",
+        lambda *args, **kwargs: captured.setdefault("wrapper_called", True),
+    )
+
+    env = mms_launchers._account_env(
+        {"id": "claude-a", "cli": "claude", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
+    assert "mcpServers" not in session_state
+    project_state = session_state["projects"][str(repo_dir.resolve())]
+    assert project_state["enabledMcpjsonServers"] == []
+    assert project_state["disabledMcpjsonServers"] == []
+    assert project_state["mcpServers"] == {}
+    assert captured["allowed_source_entries"] == mms_launchers._CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST
+    assert "wrapper_called" not in captured
+    assert not (session_home / ".claude" / "settings.json").exists()
+    assert env["HOME"] == str(session_home)
 
 
 def test_sync_codex_session_claude_json_allowlists_non_sensitive_fields(monkeypatch, tmp_path):
@@ -1314,7 +1314,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     monkeypatch.setattr(
         mms_launchers,
         "_session_managed_mcp_servers",
-        lambda _settings=None: {
+        lambda _settings=None, **_kwargs: {
             "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
             "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper/dist/server.js"], "type": "stdio"},
         },
@@ -1923,6 +1923,96 @@ def test_iter_sse_lines_defaults_event_name_and_skips_bad_json():
         ("message", {"type": "response.started"}),
         ("response.output_text.delta", {"type": "response.output_text.delta", "delta": "ok"}),
     ]
+
+
+def test_forward_as_responses_retries_without_previous_response_id(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    def fake_build_codex_payload(*_args, incremental_messages=None, **_kwargs):
+        return {
+            "model": "gpt-5.4",
+            "input": list(incremental_messages or []),
+            "instructions": "hello",
+            "stream": True,
+        }
+
+    class FakeResponse:
+        headers = {}
+
+        def __init__(self, status_code, body=""):
+            self.status_code = status_code
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body.encode("utf-8")
+
+    responses = [
+        FakeResponse(400, '{"detail":"Unsupported parameter: previous_response_id"}'),
+        FakeResponse(200),
+    ]
+
+    def fake_stream(method, url, **kwargs):
+        calls.append({"url": url, "json": dict(kwargs.get("json") or {})})
+        return responses.pop(0)
+
+    class FakeTranslator:
+        def __init__(self, _model_name):
+            self.response_id = "resp-new"
+
+        def process(self, event_type, event_data):
+            return []
+
+        def final_message(self):
+            return {"type": "message", "content": []}
+
+    monkeypatch.setattr(mms_bridge, "_build_codex_payload", fake_build_codex_payload)
+    monkeypatch.setattr(mms_bridge, "_AnthropicTranslator", FakeTranslator)
+    monkeypatch.setattr(
+        mms_bridge,
+        "_iter_sse_lines",
+        lambda _response: [("response.completed", {"id": "resp-new"})],
+    )
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.server = types.SimpleNamespace(
+        _gpt_last_response_id="resp-old",
+        reasoning_effort="high",
+        bridge_token="bridge-token",
+        proxy_url="",
+        no_proxy="",
+    )
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda _code: None
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+    handler._json = lambda code, payload: (_ for _ in ()).throw(AssertionError((code, payload)))
+
+    handler._forward_as_responses(
+        {
+            "model": "gpt-5.4",
+            "stream": False,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        },
+        "gpt-5.4",
+        "https://crs.example.com/v1",
+        "sk-test",
+        False,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["json"]["previous_response_id"] == "resp-old"
+    assert "previous_response_id" not in calls[1]["json"]
+    assert handler.server._gpt_last_response_id == "resp-new"
 
 
 def test_json_resp_to_sse_invalid_body_returns_error_event():

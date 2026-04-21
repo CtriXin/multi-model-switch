@@ -1933,6 +1933,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             for m in messages if m.get("role") == "user"
         )
         reasoning_effort = getattr(self.server, "reasoning_effort", "medium")
+        full_responses_payload = _build_codex_payload(
+            anthropic_payload,
+            model_name,
+            reasoning_effort=reasoning_effort,
+            include_max_output_tokens=False,
+        )
         if last_response_id and not has_tool_result:
             # 取最后一个 assistant 消息之后的所有消息作为增量 input
             last_assistant_idx = -1
@@ -1949,17 +1955,13 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             )
             responses_payload["previous_response_id"] = last_response_id
         else:
-            responses_payload = _build_codex_payload(
-                anthropic_payload,
-                model_name,
-                reasoning_effort=reasoning_effort,
-                include_max_output_tokens=False,
-            )
+            responses_payload = dict(full_responses_payload)
         # 确保 instructions 以 Codex 前缀开头（CRS 验证要求）
-        orig_instructions = responses_payload.get("instructions", "")
-        if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
-            responses_payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
-        responses_payload["stream"] = True
+        for payload in (full_responses_payload, responses_payload):
+            orig_instructions = payload.get("instructions", "")
+            if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
+                payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
+            payload["stream"] = True
 
         # 构造 target URL
         _oai = openai_url.rstrip("/")
@@ -1989,51 +1991,71 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         translator = _AnthropicTranslator(model_name)
 
         try:
-            with httpx.stream(
-                "POST",
-                target_url,
-                headers=fwd_headers,
-                json=responses_payload,
-                timeout=300,
-                **_server_bridge_httpx_kwargs(self.server, target_url),
-            ) as response:
-                if response.status_code >= 400:
-                    body = response.read().decode("utf-8", errors="replace")
-                    try:
-                        err = json.loads(body)
-                    except (json.JSONDecodeError, ValueError):
-                        err = {"type": "error", "error": {"type": "api_error", "message": body or f"GPT bridge upstream: {response.status_code}"}}
-                    self._json(response.status_code, err)
-                    return
+            retried_without_previous_response_id = False
+            while True:
+                with httpx.stream(
+                    "POST",
+                    target_url,
+                    headers=fwd_headers,
+                    json=responses_payload,
+                    timeout=300,
+                    **_server_bridge_httpx_kwargs(self.server, target_url),
+                ) as response:
+                    if response.status_code >= 400:
+                        body = response.read().decode("utf-8", errors="replace")
+                        try:
+                            err = json.loads(body)
+                        except (json.JSONDecodeError, ValueError):
+                            err = {"type": "error", "error": {"type": "api_error", "message": body or f"GPT bridge upstream: {response.status_code}"}}
+                        error_text = " ".join(
+                            part.lower()
+                            for part in (
+                                body,
+                                json.dumps(err, ensure_ascii=False) if isinstance(err, dict) else "",
+                            )
+                            if part
+                        )
+                        if (
+                            not retried_without_previous_response_id
+                            and responses_payload.get("previous_response_id")
+                            and "previous_response_id" in error_text
+                        ):
+                            self.server._gpt_last_response_id = None
+                            responses_payload = dict(full_responses_payload)
+                            retried_without_previous_response_id = True
+                            continue
+                        self._json(response.status_code, err)
+                        return
 
-                if client_wants_stream:
-                    # 流式：Responses SSE → Anthropic SSE → Claude Code
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    for event_type, event_data in _iter_sse_lines(response):
-                        if first_byte_ms is None:
-                            first_byte_ms = _now_ms()
-                        for ant_event_name, ant_event_payload in translator.process(event_type, event_data):
-                            line = f"event: {ant_event_name}\ndata: {json.dumps(ant_event_payload, ensure_ascii=False)}\n\n"
-                            self.wfile.write(line.encode("utf-8"))
-                            self.wfile.flush()
-                    self.close_connection = True
-                else:
-                    # 非流式：收集完整 Responses SSE → 合成 Anthropic JSON
-                    for event_type, event_data in _iter_sse_lines(response):
-                        if first_byte_ms is None:
-                            first_byte_ms = _now_ms()
-                        translator.process(event_type, event_data)
-                    final = translator.final_message()
-                    body_out = json.dumps(final, ensure_ascii=False).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body_out)))
-                    self.end_headers()
-                    self.wfile.write(body_out)
+                    if client_wants_stream:
+                        # 流式：Responses SSE → Anthropic SSE → Claude Code
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        for event_type, event_data in _iter_sse_lines(response):
+                            if first_byte_ms is None:
+                                first_byte_ms = _now_ms()
+                            for ant_event_name, ant_event_payload in translator.process(event_type, event_data):
+                                line = f"event: {ant_event_name}\ndata: {json.dumps(ant_event_payload, ensure_ascii=False)}\n\n"
+                                self.wfile.write(line.encode("utf-8"))
+                                self.wfile.flush()
+                        self.close_connection = True
+                    else:
+                        # 非流式：收集完整 Responses SSE → 合成 Anthropic JSON
+                        for event_type, event_data in _iter_sse_lines(response):
+                            if first_byte_ms is None:
+                                first_byte_ms = _now_ms()
+                            translator.process(event_type, event_data)
+                        final = translator.final_message()
+                        body_out = json.dumps(final, ensure_ascii=False).encode("utf-8")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(body_out)))
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                break
 
             # 存回 response_id 供下轮续接
             if translator.response_id:

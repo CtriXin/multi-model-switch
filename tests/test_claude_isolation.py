@@ -1493,8 +1493,8 @@ def test_inspect_runtime_exposure_reports_claude_oauth_env(monkeypatch, tmp_path
     assert env_map["HTTP_PROXY"] == "http://127.0.0.1:7890"
     assert env_map["LANG"] == "en_US.UTF-8"
     assert env_map["TZ"] == "America/Los_Angeles"
-    assert payload["settings"]["statusline"] is True
-    assert "PreToolUse" in payload["settings"]["hook_events"]
+    assert payload["settings"]["statusline"] is False
+    assert payload["settings"]["hook_events"] == []
     assert "HTTP_PROXY" in payload["settings"]["env_keys"]
     assert "TZ" in payload["settings"]["env_keys"]
 

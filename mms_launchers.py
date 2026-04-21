@@ -1586,7 +1586,13 @@ _CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = (
     "hooks",
     "skills",
 )
+_CLAUDE_FAIL_CLOSED_SOURCE_ENTRY_ALLOWLIST = (
+    "CLAUDE.md",
+    "RTK.md",
+)
+_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST = _CLAUDE_FAIL_CLOSED_SOURCE_ENTRY_ALLOWLIST
 _CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST = ("Keychains",)
+_CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE = 86
 _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
     "gh",
     "lark-cli",
@@ -2365,6 +2371,13 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     return hooks_data
 
 
+def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
+    hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
+    if not allow_execution_surfaces:
+        return {}
+    return hooks_data
+
+
 def _session_required_env_from_runtime_env(env):
     env = env if isinstance(env, dict) else {}
     required = {}
@@ -2375,13 +2388,14 @@ def _session_required_env_from_runtime_env(env):
     return required
 
 
-def _sanitize_claude_inherited_settings_payload(settings_data):
+def _sanitize_claude_inherited_settings_payload(settings_data, *, allow_execution_surfaces=True):
     settings_data = settings_data if isinstance(settings_data, dict) else {}
     inherited = {}
-    for key in _CLAUDE_SETTINGS_INHERIT_KEYS:
-        value = settings_data.get(key)
-        if isinstance(value, dict):
-            inherited[key] = copy.deepcopy(value)
+    if allow_execution_surfaces:
+        for key in _CLAUDE_SETTINGS_INHERIT_KEYS:
+            value = settings_data.get(key)
+            if isinstance(value, dict):
+                inherited[key] = copy.deepcopy(value)
     for key in _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS:
         value = settings_data.get(key)
         if isinstance(value, (str, int, float, bool)):
@@ -2417,35 +2431,57 @@ def _default_session_mcp_servers():
     return servers
 
 
-def _session_managed_mcp_servers(settings_data):
+def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
+    if allow_execution_surfaces:
+        return _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST
+    return ()
+
+
+def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True):
     settings_data = settings_data if isinstance(settings_data, dict) else {}
     inherited = {}
+    allowlist = _session_managed_mcp_server_allowlist(
+        allow_execution_surfaces=allow_execution_surfaces
+    )
     mcp_servers = settings_data.get("mcpServers")
     if isinstance(mcp_servers, dict):
-        for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+        for name in allowlist:
             spec = mcp_servers.get(name)
             if isinstance(spec, dict) and str(spec.get("command") or "").strip():
                 inherited[name] = copy.deepcopy(spec)
 
     fallback = _default_session_mcp_servers()
-    for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+    for name in allowlist:
         if name not in inherited and isinstance(fallback.get(name), dict):
             inherited[name] = copy.deepcopy(fallback[name])
     return inherited
 
 
-def _inject_managed_mcp_servers_into_claude_state(payload, settings_data=None):
+def _inject_managed_mcp_servers_into_claude_state(
+    payload,
+    settings_data=None,
+    *,
+    allow_execution_surfaces=True,
+):
     state = dict(payload) if isinstance(payload, dict) else {}
-    managed = _session_managed_mcp_servers(settings_data if isinstance(settings_data, dict) else _load_real_claude_settings())
+    managed = _session_managed_mcp_servers(
+        settings_data if isinstance(settings_data, dict) else _load_real_claude_settings(),
+        allow_execution_surfaces=allow_execution_surfaces,
+    )
     existing = state.get("mcpServers")
     merged = copy.deepcopy(managed)
+    allowlist = _session_managed_mcp_server_allowlist(
+        allow_execution_surfaces=allow_execution_surfaces
+    )
     if isinstance(existing, dict):
-        for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+        for name in allowlist:
             spec = existing.get(name)
             if isinstance(spec, dict) and str(spec.get("command") or "").strip():
                 merged[name] = copy.deepcopy(spec)
     if merged:
         state["mcpServers"] = merged
+    else:
+        state.pop("mcpServers", None)
     return state
 
 
@@ -2531,6 +2567,24 @@ def _merge_claude_ui_state_seed(target_payload, seed_payload):
             continue
         target_payload.setdefault(key, copy.deepcopy(value))
     return target_payload
+
+
+def _strip_claude_state_execution_surfaces(payload):
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    payload.pop("mcpServers", None)
+    projects = payload.get("projects")
+    if isinstance(projects, dict):
+        stripped_projects = {}
+        for project_path, entry in projects.items():
+            if not isinstance(entry, dict):
+                continue
+            next_entry = dict(entry)
+            next_entry.pop("mcpServers", None)
+            next_entry["enabledMcpjsonServers"] = []
+            next_entry["disabledMcpjsonServers"] = []
+            stripped_projects[project_path] = next_entry
+        payload["projects"] = stripped_projects
+    return payload
 
 
 def _sanitize_claude_project_state_entry(entry):
@@ -2750,7 +2804,13 @@ def _overlay_project_scoped_claude_resume_state(
     return payload
 
 
-def _ensure_claude_project_trust(data, project_path, project_state=None):
+def _ensure_claude_project_trust(
+    data,
+    project_path,
+    project_state=None,
+    *,
+    allow_execution_surfaces=True,
+):
     payload = dict(data) if isinstance(data, dict) else {}
     project_path = os.path.realpath(str(project_path or "").strip())
     projects = payload.get("projects")
@@ -2768,6 +2828,10 @@ def _ensure_claude_project_trust(data, project_path, project_state=None):
     entry.setdefault("mcpServers", {})
     entry.setdefault("enabledMcpjsonServers", [])
     entry.setdefault("disabledMcpjsonServers", [])
+    if not allow_execution_surfaces:
+        entry["mcpServers"] = {}
+        entry["enabledMcpjsonServers"] = []
+        entry["disabledMcpjsonServers"] = []
     entry["hasTrustDialogAccepted"] = True
     entry["hasCompletedProjectOnboarding"] = True
     entry["hasClaudeMdExternalIncludesApproved"] = True
@@ -2964,6 +3028,7 @@ def inspect_runtime_exposure(cli, runtime):
                 "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
             },
+            allow_execution_surfaces=False,
         )
         settings_info = {
             "path": home_info["settings_path"],
@@ -2971,7 +3036,7 @@ def inspect_runtime_exposure(cli, runtime):
             "hook_events": sorted((session_settings.get("hooks") or {}).keys()),
             "env_keys": sorted((session_settings.get("env") or {}).keys()),
         }
-        notes.append("Claude OAuth 还会从 session settings.json 读取 statusLine / hooks / env。")
+        notes.append("Claude OAuth session 采用 fail-closed 隔离策略：不注入 MMS 管理的 hooks / statusLine / MCP / wrapper。")
     elif cli == "claude":
         gateway_home = _claude_gateway_home()
         home_info["session_home"] = gateway_home
@@ -3052,16 +3117,34 @@ def inspect_runtime_exposure(cli, runtime):
     }
 
 
-def _build_claude_session_settings(base_settings=None, *, required_env=None, default_env=None):
+def _build_claude_session_settings(
+    base_settings=None,
+    *,
+    required_env=None,
+    default_env=None,
+    allow_execution_surfaces=True,
+):
     template_settings = _load_mms_claude_settings_template()
-    inherited_settings = _sanitize_claude_inherited_settings_payload(base_settings)
-    settings_data = _merge_claude_settings(inherited_settings, _load_global_claude_settings_template())
-    managed_mcp_servers = _session_managed_mcp_servers(base_settings)
+    inherited_settings = _sanitize_claude_inherited_settings_payload(
+        base_settings,
+        allow_execution_surfaces=allow_execution_surfaces,
+    )
+    settings_data = _merge_claude_settings(
+        inherited_settings,
+        _load_global_claude_settings_template(),
+    )
+    managed_mcp_servers = _session_managed_mcp_servers(
+        base_settings,
+        allow_execution_surfaces=allow_execution_surfaces,
+    )
 
     template_hooks = template_settings.get("hooks")
-    hooks = _merge_mms_session_hooks(
-        _strip_agent_im_hooks(settings_data.get("hooks")),
-        template_hooks,
+    hooks = _filter_claude_session_hooks(
+        _merge_mms_session_hooks(
+            _strip_agent_im_hooks(settings_data.get("hooks")),
+            template_hooks,
+        ),
+        allow_execution_surfaces=allow_execution_surfaces,
     )
     if hooks:
         settings_data["hooks"] = hooks
@@ -3083,6 +3166,8 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
 
     if managed_mcp_servers:
         settings_data["mcpServers"] = managed_mcp_servers
+    else:
+        settings_data.pop("mcpServers", None)
 
     settings_data.setdefault(
         "includeCoAuthoredBy",
@@ -3101,8 +3186,12 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
     settings_data["skipDangerousModePermissionPrompt"] = bool(
         template_settings.get("skipDangerousModePermissionPrompt", True)
     )
-    settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
-    settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
+    if allow_execution_surfaces:
+        settings_data["statusLine"] = _merge_claude_statusline(settings_data.get("statusLine"))
+        settings_data["permissions"] = _merge_claude_permissions(settings_data.get("permissions"))
+    else:
+        settings_data.pop("statusLine", None)
+        settings_data.pop("permissions", None)
     return settings_data
 
 
@@ -3112,6 +3201,7 @@ def _write_claude_session_settings(
     required_env=None,
     default_env=None,
     base_settings=None,
+    allow_execution_surfaces=True,
 ):
     import json as _json
 
@@ -3123,6 +3213,7 @@ def _write_claude_session_settings(
         source_settings,
         required_env=required_env,
         default_env=default_env,
+        allow_execution_surfaces=allow_execution_surfaces,
     )
     settings_path = os.path.join(session_claude_dir, "settings.json")
     with locked_state_file(settings_path):
@@ -3361,7 +3452,7 @@ def _account_env(account, *, validate_proxy=True):
             except Exception:
                 session_state = {}
         session_state = _merge_claude_ui_state_seed(session_state, _load_real_claude_ui_state_seed())
-        session_state = _inject_managed_mcp_servers_into_claude_state(session_state)
+        session_state = _strip_claude_state_execution_surfaces(session_state)
         if account.get("bypass"):
             session_state["bypassPermissionsModeAccepted"] = True
         else:
@@ -3370,6 +3461,7 @@ def _account_env(account, *, validate_proxy=True):
             session_state,
             current_project,
             project_state=current_project_state,
+            allow_execution_surfaces=False,
         )
         with locked_state_file(session_json):
             atomic_write_json(session_json, session_state, mode=0o600)
@@ -3391,11 +3483,11 @@ def _account_env(account, *, validate_proxy=True):
             runtime_kind="oauth",
             skip_real_entries={"settings.json"},
             source_claude_dir=account_claude_dir,
+            allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
         )
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
-        _install_session_command_wrappers(session_home, env)
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
         _scrub_claude_oauth_env(env)
@@ -3668,7 +3760,25 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
     return env
 
 
+def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS"):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    runtime_label = (
+        str(runtime.get("id") or runtime.get("name") or runtime.get("cli") or "claude-oauth").strip()
+        or "claude-oauth"
+    )
+    model_name = _resolve_model(model_info) if model_info else ""
+    model_name = str(model_name or "").strip() or "claude-sonnet-4-6"
+    console.print("[red]已阻止 OAuth Claude 自动进入。[/red]")
+    console.print(
+        "[yellow]OAuth Claude 现在是 manual-only 保护面：MMS / MMC / Hive / fallback / 子进程都不能自动启动它。[/yellow]"
+    )
+    console.print(f"[dim]入口: {caller} · runtime={runtime_label} · model={model_name}[/dim]")
+    console.print("[dim]允许的唯一入口：你自己在 real/global shell 手动输入 `claude`，并先跑你的验证脚本。[/dim]")
+    raise SystemExit(_CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE)
+
+
 def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_claude_1m=True):
+    _exit_oauth_claude_manual_only(runtime, model_info, caller="MMS->MMC")
     mmc_entry = _mmc_entry_path()
     if not os.path.exists(mmc_entry):
         console.print(f"[red]未找到 MMC 入口: {mmc_entry}[/red]")
@@ -3993,13 +4103,7 @@ def launch_claude(model_info, runtime, once=False):
         console.print("[red]官方桥接已临时禁用，避免 Gemini/Codex 请求进入 Claude session。[/red]")
         sys.exit(1)
     if auth_mode == "oauth":
-        _launch_claude_oauth_via_mmc(
-            model_info,
-            runtime,
-            once=once,
-            enable_claude_1m=enable_claude_1m,
-        )
-        return
+        _exit_oauth_claude_manual_only(runtime, model_info, caller="launch_claude")
     else:
         provider_id = runtime.get("id", "default")
         if runtime.get("skip_gateway_health_check"):
@@ -5458,6 +5562,8 @@ def launch_cli(cli, model_info, runtime, once=False):
     model_display = _resolve_model(model_info) if not isinstance(model_info, dict) else \
         model_info.get("model", model_info.get("sonnet", "多模型配置"))
 
+    if cli == "claude" and auth_mode == "oauth":
+        _exit_oauth_claude_manual_only(runtime, model_info, caller="launch_cli")
     if cli == "claude" and auth_mode == "api_key":
         prefetched_probe = None
         try:
