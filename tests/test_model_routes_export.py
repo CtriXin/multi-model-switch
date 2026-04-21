@@ -302,6 +302,45 @@ def test_export_model_routes_prefers_higher_priority_before_default_provider(mon
     assert info["fallbacks"][0]["provider_id"] == "default-low-priority"
 
 
+def test_export_model_routes_keeps_gemini_models_for_gemini_provider(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "us-cpa-local-gemini": {
+                "id": "us-cpa-local-gemini",
+                "provider_name": "US CPA Gemini",
+                "anthropic_base_url": "http://127.0.0.1:18417/v1",
+                "openai_base_url": "http://127.0.0.1:18417/v1",
+                "api_key": "sk-gemini",
+                "models": ["gemini-3.1-pro-preview"],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    cfg = {
+        "provider": {"default": "us-cpa-local-gemini"},
+        "providers": [
+            {
+                "id": "us-cpa-local-gemini",
+                "role": "auto",
+                "priority": 80,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["gemini"],
+                "models": ["gemini-3.1-pro-preview"],
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    assert routes["gemini-3.1-pro-preview"]["primary"]["provider_id"] == "us-cpa-local-gemini"
+    assert routes["gemini-3.1-pro-preview"]["fallbacks"] == []
+
+
 def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path):
     import mms_core
     import mms_router

@@ -800,8 +800,10 @@ def export_model_routes(cfg=None, force=False):
         if not supported_clis:
             return True  # no restriction
         lower = model_name.lower()
-        if lower.startswith(("gpt-", "gemini-", "o1-", "o3-", "o4-")):
+        if lower.startswith(("gpt-", "o1-", "o3-", "o4-")):
             return "codex" in supported_clis
+        if lower.startswith("gemini-"):
+            return "gemini" in supported_clis
         if lower.startswith("claude-"):
             return "claude" in supported_clis
         return True
