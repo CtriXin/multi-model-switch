@@ -2258,31 +2258,31 @@ def _build_process_env(
     return env
 
 
+def _run_local_loopback_proxy_probe(proxy_url: str) -> dict:
+    endpoint = validate_loopback_proxy_url(str(proxy_url or "").strip())
+    if not endpoint.get("ok"):
+        return {"ok": False, "detail": str(endpoint.get("detail") or "local loopback proxy 非法")}
+    ok, detail = _doctor_probe_tcp_endpoint(
+        str(endpoint.get("host") or ""),
+        int(endpoint.get("port") or 0),
+        timeout_sec=2.0,
+    )
+    return {"ok": ok, "detail": "" if ok else detail}
+
+
 def _build_runtime_proxy_probe() -> Callable[[str, str], dict]:
-    return lambda upstream_proxy_url, target_url: _run_proxy_probe(
-        upstream_proxy_url,
-        target_url,
-        no_proxy="",
-        force_ipv4=True,
-    )
-
-
-def _build_runtime_exit_ip_probe() -> Callable[[str], dict]:
-    return lambda upstream_proxy_url: _run_exit_ip_probe(
-        upstream_proxy_url,
-        force_ipv4=True,
-    )
+    return lambda upstream_proxy_url, _target_url: _run_local_loopback_proxy_probe(upstream_proxy_url)
 
 
 def _start_session_proxy_guard(proxy_url: str, *, pinned_exit_ip: str = "") -> LocalProxyGuard:
     guard = LocalProxyGuard(
         proxy_url,
-        probe_targets=_CLAUDE_PROXY_GUARD_TARGETS,
+        probe_targets=(("loopback", proxy_url),),
         probe_interval_sec=_LOCAL_PROXY_GUARD_PROBE_INTERVAL_SEC,
         probe_fn=_build_runtime_proxy_probe(),
-        exit_ip_probe_fn=_build_runtime_exit_ip_probe(),
+        exit_ip_probe_fn=None,
         exit_ip_check_interval_sec=_LOCAL_PROXY_GUARD_EXIT_IP_INTERVAL_SEC,
-        expected_exit_ip=pinned_exit_ip,
+        expected_exit_ip="",
         passthrough_proxy_url=proxy_url,
         heartbeat_failures_before_kill=_LOCAL_PROXY_GUARD_HEARTBEAT_FAILURES_BEFORE_KILL,
         startup_grace_sec=_LOCAL_PROXY_GUARD_STARTUP_GRACE_SEC,
@@ -2401,8 +2401,11 @@ def _resolve_claude_binary(env: dict[str, str]) -> str:
     raise SystemExit("mmc: 未找到 claude 可执行文件")
 
 
-def _build_claude_cmd(args, env: dict[str, str]) -> list[str]:
+def _build_claude_cmd(args, env: dict[str, str], *, explicit_session_id: str = "") -> list[str]:
     cmd = [_resolve_claude_binary(env)]
+    session_id = str(explicit_session_id or "").strip()
+    if session_id:
+        cmd.extend(["--resume", session_id])
     seen_dirs = set()
     for path in args.allow_dir or []:
         normalized = os.path.realpath(str(path or "").strip())
@@ -2490,7 +2493,7 @@ def _run_claude(args, *, explicit_session_id: str = "") -> int:
         proxy_url_override=proxy_guard.local_proxy_url,
         no_proxy_override=str(route_plan.get("effective_no_proxy") or _DEFAULT_LOOPBACK_NO_PROXY),
     )
-    cmd = _build_claude_cmd(args, env)
+    cmd = _build_claude_cmd(args, env, explicit_session_id=explicit_session_id)
 
     try:
         for signum in handled_signals:

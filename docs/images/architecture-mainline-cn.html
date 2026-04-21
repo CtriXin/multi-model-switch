@@ -1,0 +1,91 @@
+        <!doctype html>
+        <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>MMS 运行时流程</title>
+            <link rel="stylesheet" href="./architecture-mainline-shared.css" />
+          </head>
+          <body>
+            <main class="frame">
+              <section class="hero">
+                <div class="eyebrow">一个 launcher surface，多种模型，显式 routing 与 isolation</div>
+                <h1>MMS 运行时流程</h1>
+                <p class="subtitle">当前 reality：MMS 先加载配置，再解析 adapters 与 route policy，最后从同一个 control plane 启动隔离的 Claude/Codex 会话，或导出 routes 与 diagnostics。</p>
+              </section>
+
+              <section class="section entry">
+                <h2 class="section-title">Entry Surfaces <span class="section-note">操作者真实能看到的公开入口</span></h2>
+                <div class="cards entry-grid">
+                  <article class="card">
+  <div class="card-title">Install & Packs</div>
+  <div class="card-copy"><code>install.sh</code> 负责安装 MMS 本体，也能顺手装 RTK、MindKeeper context、Map、read-once、ops-env-safe 等 optional packs。</div>
+  <div class="meta"><span class="chip green">bootstrap</span></div>
+</article>
+<article class="card">
+  <div class="card-title">TUI & CLI</div>
+  <div class="card-copy"><code>mms</code>、<code>mms claude</code>、<code>mms codex</code>、<code>mmc</code> 等命令提供统一的本地 launcher surface。</div>
+  <div class="meta"><span class="chip">human operator</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Web / Runtime API</div>
+  <div class="card-copy"><code>apps/web</code> 与 <code>apps/runtime-api</code> 提供额外的 operator / integration surface。</div>
+  <div class="meta"><span class="chip violet">optional surface</span></div>
+</article>
+                </div>
+              </section>
+
+              <section class="section runtime">
+                <h2 class="section-title">Core Runtime / Workflow <span class="section-note">配置如何变成实际 launch 与 routing 决策</span></h2>
+                <div class="pipeline">
+                  <article class="card">
+  <div class="card-title">Load Config & State</div>
+  <div class="card-copy">从真实的 MMS config tree 读取 <code>config.toml</code>、overrides、accounts、env files、usage 与 gateway session 上下文。</div>
+  <div class="meta"><span class="chip orange">human-only config guard</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Resolve Adapters</div>
+  <div class="card-copy">通过 adapter registry 与 family 规则，把 model families、CLI capabilities、provider/account 元数据拼到一起。</div>
+  <div class="meta"><span class="chip green">family-first</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Route & Classify</div>
+  <div class="card-copy">把 keyword guardrails、LLM classification、sticky escalation、role、priority 合并成最终 provider / lane 选择。</div>
+  <div class="meta"><span class="chip violet">light / medium / heavy</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Launch or Bridge</div>
+  <div class="card-copy">按解析出的 env 与 route selection 启动隔离的 Claude/Codex sessions、gateway bridges 或 API-facing flow。</div>
+  <div class="meta"><span class="chip">gateway sessions</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Export & Diagnose</div>
+  <div class="card-copy">把 route exports、usage、speed stats、diagnostics 写出来，让 operator 看清 MMS 下一步会怎么跑。</div>
+  <div class="meta"><span class="chip orange">routes / doctor / test</span></div>
+</article>
+                </div>
+              </section>
+
+              <section class="section artifacts">
+                <h2 class="section-title">Artifacts / Operator Surfaces <span class="section-note">持久配置、导出路由与 operator 工具面</span></h2>
+                <div class="cards artifacts-grid">
+                  <article class="card">
+  <div class="card-title">Config Tree</div>
+  <div class="card-copy"><code>~/.config/mms/</code> 保存 <code>config.toml</code>、<code>override.toml</code>、<code>accounts/</code>、<code>env/</code> 与 usage/session state。</div>
+  <div class="meta"><span class="chip green">persistent truth</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Routing Artifacts</div>
+  <div class="card-copy"><code>model-routes.json</code>、route keyword 文件、gateway slots、speed stats 共同暴露当前 runtime picture。</div>
+  <div class="meta"><span class="chip violet">route export</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Operator Surfaces</div>
+  <div class="card-copy"><code>mms routes</code>、<code>doctor</code>、<code>test</code>、<code>warm</code> 与 TUI 让操作者能观察并干预系统。</div>
+  <div class="meta"><span class="chip">observe / steer</span></div>
+</article>
+                </div>
+                <div class="footer-note">
+                  <div class="footer-pill">MMS 是 control plane，不只是 launcher alias。</div>
+                  <div class="footer-pill">routing 依赖显式 role / priority 数据，而不是模糊的 hidden defaults。</div>
+                </div>
+              </section>
+            </main>
+          </body>
+        </html>

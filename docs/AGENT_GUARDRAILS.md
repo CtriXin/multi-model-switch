@@ -111,6 +111,22 @@
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明
 
+## Global OAuth Hard Cut
+
+这条规则高于一般“方便复用”的实现倾向：
+
+- `real HOME` / global OAuth / global account state 不是 runtime fallback pool
+- model / provider / account 失败时，必须留在当前 runtime 里 fail-closed；不允许静默切到 global/default OAuth
+- 不允许把 real-home 的 auth-bearing state 当作重试、恢复、自动补救来源，包括但不限于：
+  - `~/.claude.json`
+  - macOS Keychain 里的 OAuth state
+  - `~/.codex/auth.json`
+  - `~/.gemini`
+  - 其他真实用户 home 下的 token / account / owner identity cache
+- 显式 human 动作（例如 `login`、`import-auth`、手动重选 runtime）是唯一允许进入 OAuth 的路径；普通 launch / probe / retry / bridge / resume 逻辑不得自动这样做
+- 如果确实要继承 global 的非认证状态，必须走 schema/allowlist，并明确排除 token、account identity、owner fingerprint、account 选择提示和请求 credential
+- 任何可能把隔离 session auth state 回写到 real/global HOME 的设计都默认禁止；除非任务明确要求一次性人工导入，而且边界和验证都写清楚
+
 ## 必须先停下来确认的情况
 
 遇到以下情况，agent 应先停止扩散改动范围，必要时直接向用户确认：
@@ -140,6 +156,7 @@
 - 当前任务是否会影响 `mms` 主入口的默认路径
 - 当前任务是否会影响任何已有场景、预设、provider、account 的兼容行为
 - 当前数据结构有没有被多个模块共享，如果有，是否会引入隐式耦合
+- 当前改动会不会让失败路径读到 real HOME / global OAuth，并把它当成 fallback 或恢复来源
 
 ## 改动后最低验证
 
@@ -150,6 +167,7 @@
 - 回归验证：确认未改动的默认路径仍可继续工作
 - 如果涉及 bridge：确认请求目标协议、模型名和鉴权信息没有被静默改写错位
 - 如果涉及配置或账号隔离：确认不会误写真实用户全局目录或破坏现有登录态
+- 如果涉及 fallback / resume / auth 恢复：确认失败路径不会静默切到 global OAuth，也不会把 global auth-bearing state 当作自动补救输入
 
 ## 迭代与提交隔离
 

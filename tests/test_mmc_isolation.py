@@ -1430,9 +1430,31 @@ def test_start_session_proxy_guard_uses_runtime_grace_and_failure_threshold(monk
 
     assert guard.local_proxy_url == "http://127.0.0.1:7890"
     assert captured["started"] is True
+    assert captured["probe_targets"] == (("loopback", "http://127.0.0.1:7890"),)
     assert captured["heartbeat_failures_before_kill"] == mmc_core._LOCAL_PROXY_GUARD_HEARTBEAT_FAILURES_BEFORE_KILL
     assert captured["startup_grace_sec"] == mmc_core._LOCAL_PROXY_GUARD_STARTUP_GRACE_SEC
-    assert captured["expected_exit_ip"] == "1.2.3.4"
+    assert captured["expected_exit_ip"] == ""
+    assert captured["exit_ip_probe_fn"] is None
+
+
+def test_runtime_proxy_probe_only_checks_local_loopback(monkeypatch):
+    import mmc_core
+
+    monkeypatch.setattr(
+        mmc_core,
+        "validate_loopback_proxy_url",
+        lambda _url: {"ok": True, "host": "127.0.0.1", "port": 31001},
+    )
+    monkeypatch.setattr(
+        mmc_core,
+        "_doctor_probe_tcp_endpoint",
+        lambda host, port, timeout_sec=4.0: (True, f"{host}:{port}"),
+    )
+
+    probe = mmc_core._build_runtime_proxy_probe()
+    result = probe("http://127.0.0.1:31001", "https://api.anthropic.com")
+
+    assert result == {"ok": True, "detail": ""}
 
 
 def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path):
@@ -1457,6 +1479,25 @@ def test_apply_launcher_defaults_fills_missing_launch_args(monkeypatch, tmp_path
     assert args.lang == "zh_CN.UTF-8"
     assert args.tz == "America/Los_Angeles"
     assert args.bypass is True
+
+
+def test_build_claude_cmd_appends_resume_id_before_dirs(monkeypatch, tmp_path):
+    import mmc_core
+
+    env = {"PATH": str(tmp_path)}
+    monkeypatch.setattr(mmc_core, "_resolve_claude_binary", lambda _env: "/tmp/claude")
+
+    args = mmc_core._build_launch_namespace()
+    args.allow_dir = ["/tmp/workspace"]
+
+    cmd = mmc_core._build_claude_cmd(
+        args,
+        env,
+        explicit_session_id="02c0ed3d-bd33-4c64-93e3-fa58a60d9d6c",
+    )
+
+    assert cmd[:3] == ["/tmp/claude", "--resume", "02c0ed3d-bd33-4c64-93e3-fa58a60d9d6c"]
+    assert cmd[3:] == ["--add-dir", os.path.realpath("/tmp/workspace")]
 
 
 def test_normalize_launcher_defaults_fills_loopback_no_proxy_when_missing(monkeypatch, tmp_path):

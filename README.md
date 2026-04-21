@@ -17,6 +17,14 @@
 - One way to export env vars or presets for scripts and automation
 - One routing layer for provider priority, bridge compatibility, and diagnostics
 
+<!-- repo-graphics:runtime-start -->
+## Runtime Flow
+
+![MMS runtime flow](docs/images/architecture-mainline-en.png)
+
+This diagram compresses the current MMS mainline into one picture: config and routing first, then isolated launch, export, and diagnostics.
+<!-- repo-graphics:runtime-end -->
+
 ## Install
 
 ### Quick install

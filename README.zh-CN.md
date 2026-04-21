@@ -30,6 +30,14 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 ---
 
+<!-- repo-graphics:runtime-start -->
+## 运行时流程
+
+![MMS 运行时流程图](docs/images/architecture-mainline-cn.png)
+
+这张图把当前 MMS 主链路压缩成一屏：先做配置与路由决策，再启动隔离 session，并导出 routes / diagnostics。
+<!-- repo-graphics:runtime-end -->
+
 ## 📦 安装
 
 ### 一键安装（推荐）

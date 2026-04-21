@@ -1,0 +1,91 @@
+        <!doctype html>
+        <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>MMS Runtime Flow</title>
+            <link rel="stylesheet" href="./architecture-mainline-shared.css" />
+          </head>
+          <body>
+            <main class="frame">
+              <section class="hero">
+                <div class="eyebrow">One launcher surface, many models, explicit routing and isolation</div>
+                <h1>MMS Runtime Flow</h1>
+                <p class="subtitle">Current reality: MMS loads config, resolves adapters and route policy, then launches isolated Claude/Codex sessions or exports routes and diagnostics from one control plane.</p>
+              </section>
+
+              <section class="section entry">
+                <h2 class="section-title">Entry Surfaces <span class="section-note">public surfaces the operator actually sees</span></h2>
+                <div class="cards entry-grid">
+                  <article class="card">
+  <div class="card-title">Install & Packs</div>
+  <div class="card-copy"><code>install.sh</code> bootstraps MMS itself and optional packs like RTK, MindKeeper context, Map, read-once, and ops-env-safe.</div>
+  <div class="meta"><span class="chip green">bootstrap</span></div>
+</article>
+<article class="card">
+  <div class="card-title">TUI & CLI</div>
+  <div class="card-copy"><code>mms</code>, <code>mms claude</code>, <code>mms codex</code>, <code>mmc</code>, and related commands expose one local launcher surface.</div>
+  <div class="meta"><span class="chip">human operator</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Web / Runtime API</div>
+  <div class="card-copy">Workspace apps under <code>apps/web</code> and <code>apps/runtime-api</code> offer an additional operator and integration surface.</div>
+  <div class="meta"><span class="chip violet">optional surface</span></div>
+</article>
+                </div>
+              </section>
+
+              <section class="section runtime">
+                <h2 class="section-title">Core Runtime / Workflow <span class="section-note">how config becomes launch and routing decisions</span></h2>
+                <div class="pipeline">
+                  <article class="card">
+  <div class="card-title">Load Config & State</div>
+  <div class="card-copy">Read <code>config.toml</code>, overrides, accounts, env files, usage, and gateway session context from the real MMS config tree.</div>
+  <div class="meta"><span class="chip orange">human-only config guard</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Resolve Adapters</div>
+  <div class="card-copy">Map model families, CLI capabilities, and provider/account metadata through the adapter registry and family rules.</div>
+  <div class="meta"><span class="chip green">family-first</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Route & Classify</div>
+  <div class="card-copy">Combine keyword guardrails, LLM classification, sticky escalation, role, and priority to choose the right provider or lane.</div>
+  <div class="meta"><span class="chip violet">light / medium / heavy</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Launch or Bridge</div>
+  <div class="card-copy">Spawn isolated Claude/Codex sessions, gateway bridges, or API-facing flows with the resolved env and route selection.</div>
+  <div class="meta"><span class="chip">gateway sessions</span></div>
+</article><div class="arrow">→</div><article class="card">
+  <div class="card-title">Export & Diagnose</div>
+  <div class="card-copy">Write route exports, usage, speed stats, and diagnostics so operators can inspect what MMS will actually do next.</div>
+  <div class="meta"><span class="chip orange">routes / doctor / test</span></div>
+</article>
+                </div>
+              </section>
+
+              <section class="section artifacts">
+                <h2 class="section-title">Artifacts / Operator Surfaces <span class="section-note">persistent config, exported routes, and operator tools</span></h2>
+                <div class="cards artifacts-grid">
+                  <article class="card">
+  <div class="card-title">Config Tree</div>
+  <div class="card-copy"><code>~/.config/mms/</code> holds <code>config.toml</code>, <code>override.toml</code>, <code>accounts/</code>, <code>env/</code>, and usage/session state.</div>
+  <div class="meta"><span class="chip green">persistent truth</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Routing Artifacts</div>
+  <div class="card-copy"><code>model-routes.json</code>, route keyword files, gateway slots, and speed stats expose the current runtime picture.</div>
+  <div class="meta"><span class="chip violet">route export</span></div>
+</article>
+<article class="card">
+  <div class="card-title">Operator Surfaces</div>
+  <div class="card-copy"><code>mms routes</code>, <code>doctor</code>, <code>test</code>, <code>warm</code>, and the TUI let the operator steer or debug the system.</div>
+  <div class="meta"><span class="chip">observe / steer</span></div>
+</article>
+                </div>
+                <div class="footer-note">
+                  <div class="footer-pill">MMS is a control plane, not just a launcher alias.</div>
+                  <div class="footer-pill">Routing depends on explicit role and priority data, not fuzzy hidden defaults.</div>
+                </div>
+              </section>
+            </main>
+          </body>
+        </html>

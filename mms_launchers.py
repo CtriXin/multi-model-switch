@@ -1573,6 +1573,10 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
     "statusLine",
     "permissions",
 )
+_CLAUDE_SESSION_MCP_SERVER_ALLOWLIST = (
+    "hive",
+    "mindkeeper",
+)
 _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
 _CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = (
     ".mcp.json",
@@ -2389,6 +2393,62 @@ def _sanitize_account_claude_settings_payload(settings_data):
     return _sanitize_claude_inherited_settings_payload(settings_data)
 
 
+def _default_session_mcp_servers():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    servers = {}
+
+    hive_command = os.path.join(repo_root, "hive", "bin", "mcp-server.sh")
+    if os.path.isfile(hive_command):
+        servers["hive"] = {
+            "args": [],
+            "command": hive_command,
+            "env": {"HOME": _real_user_home()},
+            "type": "stdio",
+        }
+
+    mindkeeper_server = os.path.join(repo_root, "mindkeeper", "dist", "server.js")
+    if os.path.isfile(mindkeeper_server):
+        servers["mindkeeper"] = {
+            "args": [mindkeeper_server],
+            "command": "node",
+            "type": "stdio",
+        }
+
+    return servers
+
+
+def _session_managed_mcp_servers(settings_data):
+    settings_data = settings_data if isinstance(settings_data, dict) else {}
+    inherited = {}
+    mcp_servers = settings_data.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+            spec = mcp_servers.get(name)
+            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+                inherited[name] = copy.deepcopy(spec)
+
+    fallback = _default_session_mcp_servers()
+    for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+        if name not in inherited and isinstance(fallback.get(name), dict):
+            inherited[name] = copy.deepcopy(fallback[name])
+    return inherited
+
+
+def _inject_managed_mcp_servers_into_claude_state(payload, settings_data=None):
+    state = dict(payload) if isinstance(payload, dict) else {}
+    managed = _session_managed_mcp_servers(settings_data if isinstance(settings_data, dict) else _load_real_claude_settings())
+    existing = state.get("mcpServers")
+    merged = copy.deepcopy(managed)
+    if isinstance(existing, dict):
+        for name in _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST:
+            spec = existing.get(name)
+            if isinstance(spec, dict) and str(spec.get("command") or "").strip():
+                merged[name] = copy.deepcopy(spec)
+    if merged:
+        state["mcpServers"] = merged
+    return state
+
+
 def _copy_allowed_scalar_fields(payload, allowed_keys):
     payload = payload if isinstance(payload, dict) else {}
     copied = {}
@@ -2996,6 +3056,7 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
     template_settings = _load_mms_claude_settings_template()
     inherited_settings = _sanitize_claude_inherited_settings_payload(base_settings)
     settings_data = _merge_claude_settings(inherited_settings, _load_global_claude_settings_template())
+    managed_mcp_servers = _session_managed_mcp_servers(base_settings)
 
     template_hooks = template_settings.get("hooks")
     hooks = _merge_mms_session_hooks(
@@ -3019,6 +3080,9 @@ def _build_claude_session_settings(base_settings=None, *, required_env=None, def
     if isinstance(required_env, dict):
         merged_env.update(required_env)
     settings_data["env"] = merged_env
+
+    if managed_mcp_servers:
+        settings_data["mcpServers"] = managed_mcp_servers
 
     settings_data.setdefault(
         "includeCoAuthoredBy",
@@ -3297,6 +3361,7 @@ def _account_env(account, *, validate_proxy=True):
             except Exception:
                 session_state = {}
         session_state = _merge_claude_ui_state_seed(session_state, _load_real_claude_ui_state_seed())
+        session_state = _inject_managed_mcp_servers_into_claude_state(session_state)
         if account.get("bypass"):
             session_state["bypassPermissionsModeAccepted"] = True
         else:
@@ -4665,6 +4730,7 @@ def _claude_gateway_env(
 
     data = _merge_claude_ui_state_seed(data, _sanitize_claude_ui_state_seed_payload(gw_existing))
     data = _merge_claude_ui_state_seed(data, _load_real_claude_ui_state_seed())
+    data = _inject_managed_mcp_servers_into_claude_state(data)
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass

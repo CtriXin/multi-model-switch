@@ -16,6 +16,7 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
 
     result = mms_launchers._build_claude_session_settings(
         {
@@ -36,6 +37,59 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert "Read" in result["permissions"]["allow"]
     assert result["env"]["HTTP_PROXY"] == "http://127.0.0.1:7890"
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
+
+
+def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_servers(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "mcpServers": {
+                "demo": {"command": "demo"},
+                "hive": {"command": "/tmp/hive-mcp.sh", "args": [], "type": "stdio"},
+                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+            },
+        }
+    )
+
+    assert result["mcpServers"] == {
+        "hive": {"command": "/tmp/hive-mcp.sh", "args": [], "type": "stdio"},
+        "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+    }
+
+
+def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_mcp_servers(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_session_mcp_servers",
+        lambda: {
+            "hive": {
+                "command": "/tmp/hive/bin/mcp-server.sh",
+                "args": [],
+                "env": {"HOME": "/tmp/real-home"},
+                "type": "stdio",
+            },
+            "mindkeeper": {
+                "command": "node",
+                "args": ["/tmp/mindkeeper/dist/server.js"],
+                "type": "stdio",
+            },
+        },
+    )
+
+    result = mms_launchers._build_claude_session_settings({})
+
+    assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
+    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
 
 
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
@@ -1257,6 +1311,14 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(
+        mms_launchers,
+        "_session_managed_mcp_servers",
+        lambda _settings=None: {
+            "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
+            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper/dist/server.js"], "type": "stdio"},
+        },
+    )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
 
     mms_launchers._claude_gateway_env(
@@ -1273,6 +1335,8 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert session_state["numStartups"] == 9
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
+    assert session_state["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert session_state["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["hasTrustDialogAccepted"] is True
     assert project_state["hasCompletedProjectOnboarding"] is True

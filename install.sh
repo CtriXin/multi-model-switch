@@ -1193,7 +1193,6 @@ enable_rtk_rewrite_hook() {
     local claude_dir="$HOME/.claude"
     local hook_dir="$claude_dir/hooks"
     local hook_target="$hook_dir/rtk-rewrite.sh"
-    local py_output=""
 
     if [ ! -f "$hook_source" ]; then
         echo "⚠ $(t "找不到 RTK hook 模板，跳过" "RTK hook template not found, skipping"): $hook_source"
@@ -1204,88 +1203,14 @@ enable_rtk_rewrite_hook() {
     cp "$hook_source" "$hook_target"
     chmod +x "$hook_target"
 
-    py_output="$(python3 - "$claude_dir/settings.json" "$hook_target" <<'PY'
-import json
-import shutil
-import sys
-from datetime import datetime
-from pathlib import Path
-
-settings_path = Path(sys.argv[1])
-hook_path = sys.argv[2]
-settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-data = {}
-backup_path = None
-
-if settings_path.exists():
-    try:
-        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            data = loaded
-    except Exception:
-        backup_path = settings_path.with_name(
-            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-        )
-        shutil.copy2(settings_path, backup_path)
-        data = {}
-
-hooks = data.get("hooks")
-if not isinstance(hooks, dict):
-    hooks = {}
-data["hooks"] = hooks
-
-pre = hooks.get("PreToolUse")
-if not isinstance(pre, list):
-    pre = []
-
-exists = False
-for entry in pre:
-    if not isinstance(entry, dict):
-        continue
-    matcher = str(entry.get("matcher") or "")
-    hook_items = entry.get("hooks")
-    if matcher != "Bash" or not isinstance(hook_items, list):
-        continue
-    for hook in hook_items:
-        if not isinstance(hook, dict):
-            continue
-        if str(hook.get("command") or "").strip() == hook_path:
-            exists = True
-            break
-    if exists:
-        break
-
-if not exists:
-    pre.append(
-        {
-            "matcher": "Bash",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": hook_path,
-                }
-            ],
-        }
-    )
-
-hooks["PreToolUse"] = pre
-settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-if backup_path is not None:
-    print(f"BACKUP:{backup_path}")
-PY
-)"
-
-    if [ -n "$py_output" ]; then
-        echo "$py_output" | while IFS= read -r line; do
-            case "$line" in
-                BACKUP:*)
-                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
-                    ;;
-            esac
-        done
-    fi
+    append_claude_hook_command \
+        "$claude_dir/settings.json" \
+        "PreToolUse" \
+        "Bash" \
+        "/bin/bash $hook_target" \
+        "$hook_target" \
+        "bash $hook_target" \
+        "/bin/bash $hook_target"
 
     echo "✓ $(t "已启用 Claude RTK rewrite hook" "Claude RTK rewrite hook enabled")"
     return 0

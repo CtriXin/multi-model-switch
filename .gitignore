@@ -107,3 +107,4 @@ tsconfig.json
 docs/CLI_PROVIDER_COMPAT_QA.local.md
 docs/QA_REGRESSION_RUNBOOK.md
 issue/
+.ai/agent-release-notes.md
