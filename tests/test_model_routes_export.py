@@ -465,3 +465,16 @@ def test_main_refreshes_routes_snapshot_before_subcommand_dispatch(monkeypatch):
         ("refresh", cfg, True),
         ("models", cfg, []),
     ]
+
+
+def test_select_provider_template_always_defaults_to_generic(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core.Prompt,
+        "ask",
+        staticmethod(lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Prompt.ask should not be called"))),
+    )
+
+    assert mms_core._select_provider_template() == "generic"
+    assert mms_core._select_provider_template("qwen") == "generic"

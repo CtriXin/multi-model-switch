@@ -3662,21 +3662,6 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     })
 
 
-def _provider_template_names():
-    return {
-        "1": "generic",
-        "2": "qwen",
-        "3": "bailian-codingplan",
-        "4": "kimi",
-        "5": "kimi-codingplan",
-        "6": "glm-cn",
-        "7": "glm-en",
-        "8": "minimax-cn",
-        "9": "minimax-codingplan",
-        "10": "minimax-en",
-    }
-
-
 def _provider_template_payload(template_key):
     template = PROVIDER_TEMPLATES.get(template_key) or PROVIDER_TEMPLATES["generic"]
     payload = {
@@ -3700,20 +3685,9 @@ def _provider_template_payload(template_key):
 
 
 def _select_provider_template(preset_id=None):
-    if preset_id in PROVIDER_TEMPLATES:
-        return preset_id
-    console.print("  1. 通用兼容网关")
-    console.print("  2. Qwen")
-    console.print("  3. 百炼 CodingPlan (sk-sp-*)")
-    console.print("  4. Kimi")
-    console.print("  5. Kimi CodingPlan (sk-kimi-*)")
-    console.print("  6. GLM CN (智谱 BigModel)")
-    console.print("  7. GLM EN (Z.ai)")
-    console.print("  8. MiniMax CN")
-    console.print("  9. MiniMax CodingPlan")
-    console.print("  10. MiniMax EN")
-    selected = Prompt.ask(_L("选择网关通道类型", "Select gateway type"), choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], default="1")
-    return _provider_template_names()[selected]
+    if preset_id and preset_id != "generic":
+        console.print("[yellow]已统一收敛为“通用兼容网关”，将直接进入通用网关配置。[/yellow]")
+    return "generic"
 
 
 def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):

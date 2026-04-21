@@ -334,6 +334,8 @@ mms config account.login <id>         # 登录账号
 mms config account.status [id]        # 查看登录状态
 ```
 
+现在 `mms config provider.add` 会直接进入“通用兼容网关”配置，不再弹出 Qwen / Kimi / GLM / MiniMax 等预设模板选择。
+
 ### 模型管理
 
 ```bash
