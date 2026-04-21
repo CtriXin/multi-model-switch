@@ -9,12 +9,6 @@ set -o pipefail
 
 REPO_OWNER="CtriXin"
 REPO_NAME="multi-model-switch"
-MMS_HOME="$HOME/.mms"
-BIN_DIR="$HOME/.local/bin"
-VENV_DIR="$MMS_HOME/.venv"
-CREDENTIALS_PATH="$HOME/.config/mms/credentials.sh"
-CONFIG_PATH="$HOME/.config/mms/config.toml"
-VERSION_META_PATH="$HOME/.config/mms/version.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
 SOURCE_DIR=""
 SOURCE_TMP_DIR=""
@@ -49,10 +43,21 @@ INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
 PRINT_ONLY_VERSION=0
 
-REAL_HOME="$HOME"
-if [[ "$HOME" =~ ^(/Users/[^/]+)/\.config/mms/ ]]; then
-    REAL_HOME="${BASH_REMATCH[1]}"
+REAL_HOME_CANDIDATE="${REAL_HOME:-${MMS_REAL_HOME:-${ORIGINAL_HOME:-}}}"
+REAL_HOME="${REAL_HOME_CANDIDATE:-$HOME}"
+if [[ "$REAL_HOME" == */.config/mms/* ]]; then
+    REAL_HOME="${REAL_HOME%%/.config/mms/*}"
 fi
+if [ -z "$REAL_HOME_CANDIDATE" ] && [[ "$HOME" == */.config/mms/* ]]; then
+    REAL_HOME="${HOME%%/.config/mms/*}"
+fi
+
+MMS_HOME="$REAL_HOME/.mms"
+BIN_DIR="$REAL_HOME/.local/bin"
+VENV_DIR="$MMS_HOME/.venv"
+CREDENTIALS_PATH="$REAL_HOME/.config/mms/credentials.sh"
+CONFIG_PATH="$REAL_HOME/.config/mms/config.toml"
+VERSION_META_PATH="$REAL_HOME/.config/mms/version.json"
 
 cleanup() {
     if [ -n "$SOURCE_TMP_DIR" ] && [ -d "$SOURCE_TMP_DIR" ]; then
@@ -596,7 +601,7 @@ ensure_node22() {
 
     echo ""
     echo "$(t "未检测到可直接复用的 Node.js 22，开始准备 Node.js 22（通过 nvm）..." "No reusable Node.js 22 detected; preparing Node.js 22 (via nvm)...")"
-    export NVM_DIR="$HOME/.nvm"
+    export NVM_DIR="$REAL_HOME/.nvm"
 
     if [ -s "$NVM_DIR/nvm.sh" ]; then
         # shellcheck disable=SC1090
@@ -1190,7 +1195,7 @@ run_install_check() {
 
 enable_rtk_rewrite_hook() {
     local hook_source="$SOURCE_DIR/hooks/rtk-rewrite.sh"
-    local claude_dir="$HOME/.claude"
+    local claude_dir="$REAL_HOME/.claude"
     local hook_dir="$claude_dir/hooks"
     local hook_target="$hook_dir/rtk-rewrite.sh"
 
@@ -2234,12 +2239,12 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
 
     if [ "$WRITE_SHELL_RC" -eq 1 ]; then
         SHELL_RC=""
-        if [ -f "$HOME/.zshrc" ]; then
-            SHELL_RC="$HOME/.zshrc"
-        elif [ -f "$HOME/.bashrc" ]; then
-            SHELL_RC="$HOME/.bashrc"
-        elif [ -f "$HOME/.bash_profile" ]; then
-            SHELL_RC="$HOME/.bash_profile"
+        if [ -f "$REAL_HOME/.zshrc" ]; then
+            SHELL_RC="$REAL_HOME/.zshrc"
+        elif [ -f "$REAL_HOME/.bashrc" ]; then
+            SHELL_RC="$REAL_HOME/.bashrc"
+        elif [ -f "$REAL_HOME/.bash_profile" ]; then
+            SHELL_RC="$REAL_HOME/.bash_profile"
         fi
 
         MARKER="# Added by MMS"
