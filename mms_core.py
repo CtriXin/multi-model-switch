@@ -9501,7 +9501,7 @@ def main():
             f"  {current_command()} session ...     查看托管 session\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
-            f"  {current_command()} doctor ...      诊断 provider / model / Claude 兼容性\n"
+            f"  {current_command()} doctor [full]   诊断 provider / model / Claude 兼容性（默认 lite）\n"
             f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"

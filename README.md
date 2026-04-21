@@ -246,8 +246,9 @@ mms warm
 mms routes
 mms routes export
 
-mms doctor
-mms test --provider <id> --cli <name>
+mms doctor                      # default lite: route / auth / protocol only
+mms doctor full                 # full: also runs real Claude CLI smoke
+mms test --provider <id> --cli <name>  # minimal end-to-end message path smoke
 
 mms chat "explain recursion"
 mms discuss "design a protocol"

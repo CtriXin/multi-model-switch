@@ -303,7 +303,7 @@ Provider 连不上或模型异常：
 
 ```bash
 # 快速诊断所有 provider
-mms doctor --skip-claude-cli
+mms doctor
 
 # 测试特定 provider
 mms test --provider openrouter --cli claude
@@ -347,10 +347,10 @@ mms cache                             # 查看/调整缓存策略
 ### 诊断工具
 
 ```bash
-mms doctor                            # 全面诊断
+mms doctor                            # 默认 lite：诊断 route / auth / protocol
+mms doctor full                       # 全量：额外包含真实 Claude CLI smoke
 mms doctor --provider <id>            # 诊断指定 provider
-mms doctor --skip-claude-cli          # 跳过 CLI 层，只测协议
-mms test --provider <id> --cli <name> # 最小闭环测试
+mms test --provider <id> --cli <name> # 最小闭环测试，验证实际链路
 ```
 
 ### Broker 实验入口

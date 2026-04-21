@@ -2313,6 +2313,20 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo "    bash install.sh --run-setup"
     fi
 
+    echo ""
+    if [ ! -f "$CONFIG_PATH" ] || [ ! -f "$CREDENTIALS_PATH" ]; then
+        echo "  $(t "完成配置后，建议先做预检，再正式启动 CLI:" "After setup, run these preflight checks before launching the real CLI:")"
+    else
+        echo "  $(t "正式启动 CLI 前，建议先做这组预检:" "Before launching the real CLI, run this preflight sequence:")"
+    fi
+    echo "    bash install.sh --check"
+    echo "    mms doctor"
+    echo "    mms doctor full"
+    echo "    mms test --provider <id> --cli claude"
+    echo "    mms test --provider <id> --cli codex"
+    echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。"
+        "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
+
     if [ "$LAUNCH_AFTER_INSTALL" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ]; then
         echo ""
         echo "$(t "启动 MMS..." "Launching MMS...")"

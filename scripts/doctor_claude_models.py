@@ -672,20 +672,30 @@ def main() -> int:
         description="Diagnose provider/account/model/Claude compatibility.",
         epilog=(
             "Modes:\n"
-            "  default(report)  只输出兼容性结果，不改本地配置\n"
+            "  doctor / lite    默认轻量诊断：只测 provider / route / protocol，不起真实 Claude CLI\n"
+            "  full             全量诊断：额外包含真实 Claude CLI smoke\n"
             "  --apply-hide     预留安全开关，计划把不兼容模型写入 hidden_models\n"
             "                   当前未实现，因为现有 hidden_models 是 provider 级，不是 per-CLI 级\n"
             "\n"
             "Examples:\n"
-            "  mms doctor --provider private --skip-claude-cli --max-models 5\n"
-            "  mms doctor --include-oauth --skip-claude-cli\n"
+            "  mms doctor\n"
+            "  mms doctor full --provider private --max-models 5\n"
+            "  mms doctor --include-oauth\n"
             "  mms doctor --apply-hide   # 当前会明确提示未实现原因"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        choices=["lite", "full"],
+        default="lite",
+        help="诊断模式：lite（默认）跳过真实 Claude CLI；full 包含真实 Claude CLI smoke。",
+    )
     parser.add_argument("--provider", action="append", help="Only check specific provider id (repeatable).")
     parser.add_argument("--account", action="append", help="Only check specific account id (repeatable).")
-    parser.add_argument("--skip-claude-cli", action="store_true", help="Skip real Claude CLI smoke tests.")
+    parser.add_argument("--full", action="store_true", help="Run full diagnostics including real Claude CLI smoke.")
+    parser.add_argument("--skip-claude-cli", action="store_true", help="Skip real Claude CLI smoke tests (default in lite mode).")
     parser.add_argument("--include-oauth", action="store_true", help="Also probe OAuth account status.")
     parser.add_argument("--max-models", type=int, default=0, help="Limit models checked per provider (0 = all).")
     parser.add_argument("--parallelism", type=int, default=DEFAULT_PARALLELISM, help="How many providers to probe in parallel.")
@@ -697,6 +707,10 @@ def main() -> int:
     )
     parser.add_argument("--json", action="store_true", help="Print JSON instead of rich tables.")
     args = parser.parse_args()
+    run_full = bool(args.full or args.mode == "full")
+    if run_full and args.skip_claude_cli:
+        parser.error("`full` / `--full` 与 `--skip-claude-cli` 不能同时使用。")
+    skip_claude_cli = bool(args.skip_claude_cli or not run_full)
 
     if args.apply_hide:
         console.print(
@@ -747,7 +761,7 @@ def main() -> int:
                 cfg,
                 provider_id,
                 args.max_models,
-                args.skip_claude_cli,
+                skip_claude_cli,
                 args.route_probe_timeout,
             ): provider_id
             for provider_id in provider_ids
@@ -766,12 +780,20 @@ def main() -> int:
     all_results = provider_results + account_results + model_results + claude_results
     if args.json:
         payload = {
-            "summary": [item.__dict__ for item in _build_provider_summaries(model_results, claude_results, include_cli=not args.skip_claude_cli)],
+            "mode": "full" if run_full else "lite",
+            "summary": [item.__dict__ for item in _build_provider_summaries(model_results, claude_results, include_cli=not skip_claude_cli)],
             "results": [item.__dict__ for item in all_results],
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        _render_summary_table(_build_provider_summaries(model_results, claude_results, include_cli=not args.skip_claude_cli))
+        mode_label = "full" if run_full else "lite"
+        mode_hint = (
+            "包含真实 Claude CLI smoke"
+            if run_full
+            else "默认跳过真实 Claude CLI smoke；如需全量请运行 `mms doctor full`"
+        )
+        console.print(f"[dim]doctor mode: {mode_label} · {mode_hint}[/dim]")
+        _render_summary_table(_build_provider_summaries(model_results, claude_results, include_cli=not skip_claude_cli))
         _render_table("Provider / OAuth Connectivity", provider_results + account_results)
         _render_table("Model Chat Availability", model_results)
         _render_table("Claude Compatibility", claude_results)
