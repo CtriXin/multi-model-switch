@@ -14,12 +14,13 @@
 - 自动学习：LLM 连续 N 次对相似 pattern 给出相同高置信分类 → 自动 promote 为关键词
 """
 
+import hashlib
 import json
 import os
 import re
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import httpx as _httpx
@@ -578,71 +579,143 @@ def route_model(user_message: str, heavy_model: str, light_model: str,
 # ── Model Routes Export（供 Hive MCP / 外部消费） ──────────────────
 
 import stat
-import time as _time
 
+MODEL_ROUTES_VERSION = 1
 MODEL_ROUTES_PATH = os.path.join(_CONFIG_DIR, "model-routes.json")
-_MMS_CONFIG_PATH = os.path.join(_CONFIG_DIR, "config.toml")
-_EXPORTED_CLI_ORDER = ("claude", "codex", "gemini", "qwen", "kimi")
-_HIVE_DISABLED_EXECUTOR_CLIS = {"claude"}
+MODEL_ROUTES_SNAPSHOTS_DIR = os.path.join(_CONFIG_DIR, "model-routes.snapshots")
 
 
-def _route_cli_modes_for_export(model_name, route_entry, base_modes):
-    """Route-scoped CLI modes for exported model-routes metadata.
-
-    `cli_modes` is consumed by Hive as executor compatibility metadata.
-    Hive-side Claude execution is now hard-disabled, so exported metadata must
-    not advertise any Claude executor mode.
-    """
-    modes = dict(base_modes(model_name))
-    anthropic_url = str((route_entry or {}).get("anthropic_base_url") or "").strip()
-    claude_native_compatible = bool((route_entry or {}).get("_claude_native_compatible"))
-    if anthropic_url and claude_native_compatible and modes.get("claude") == "bridge":
-        modes["claude"] = "native"
-    for cli_name in _HIVE_DISABLED_EXECUTOR_CLIS:
-        modes.pop(cli_name, None)
-    return modes
+def _route_endpoint_payload(route_entry):
+    route = route_entry or {}
+    return {
+        "provider_id": str(route.get("provider_id") or "").strip(),
+        "anthropic_base_url": str(route.get("anthropic_base_url") or "").strip(),
+        "openai_base_url": str(route.get("openai_base_url") or "").strip(),
+        "api_key": str(route.get("api_key") or ""),
+    }
 
 
-def _route_cli_lists_for_export(cli_modes):
-    native_clis = []
-    bridge_clis = []
-    for cli_name in _EXPORTED_CLI_ORDER:
-        if cli_name in _HIVE_DISABLED_EXECUTOR_CLIS:
-            continue
-        mode = cli_modes.get(cli_name)
-        if mode == "native":
-            native_clis.append(cli_name)
-        elif mode == "bridge":
-            bridge_clis.append(cli_name)
-    return native_clis, bridge_clis
+def _canonical_routes_payload(routes):
+    ordered_routes = {}
+    for model_name in sorted(routes):
+        info = routes.get(model_name) or {}
+        ordered_routes[model_name] = {
+            "primary": _route_endpoint_payload(info.get("primary")),
+            "fallbacks": [
+                _route_endpoint_payload(item)
+                for item in (info.get("fallbacks") or [])
+            ],
+        }
+    return {
+        "version": MODEL_ROUTES_VERSION,
+        "routes": ordered_routes,
+    }
 
 
-def _route_capabilities_for_export(model_name, cli_modes, base_tags):
-    tags = [tag for tag in base_tags(model_name) if tag != "bridge_required"]
-    if cli_modes.get("claude") == "bridge":
-        tags.append("bridge_required")
-    return tags
+def _canonical_json_bytes(payload):
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=False,
+    ).encode("utf-8")
 
-# role 权重复用 mms_core 的定义
-_EXPORT_ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
+
+def _pretty_json_text(payload):
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=False,
+    ) + "\n"
+
+
+def _routes_generated_at():
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _read_json_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _read_text_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _write_secure_text_file(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+    os.replace(tmp_path, path)
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _write_snapshot_if_missing(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path, "x", encoding="utf-8") as f:
+            f.write(text)
+    except FileExistsError:
+        return False
+    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    return True
+
+
+def _routes_dependency_paths():
+    from mms_core import CONFIG_PATH, CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH, OVERRIDE_PATHS
+
+    return [CONFIG_PATH, CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH, *OVERRIDE_PATHS]
+
+
+def _latest_routes_is_fresh():
+    if not os.path.exists(MODEL_ROUTES_PATH):
+        return False
+    try:
+        latest_mtime = os.path.getmtime(MODEL_ROUTES_PATH)
+        dependency_mtime = max(
+            (
+                os.path.getmtime(path)
+                for path in _routes_dependency_paths()
+                if path and os.path.exists(path)
+            ),
+            default=0,
+        )
+    except OSError:
+        return False
+    return latest_mtime >= dependency_mtime
+
+
+def _persist_routes_export(routes):
+    canonical_payload = _canonical_routes_payload(routes)
+    payload_hash = hashlib.sha256(_canonical_json_bytes(canonical_payload)).hexdigest()
+    snapshot_path = os.path.join(MODEL_ROUTES_SNAPSHOTS_DIR, f"{payload_hash}.json")
+
+    if not os.path.exists(snapshot_path):
+        snapshot_payload = {
+            "version": MODEL_ROUTES_VERSION,
+            "generated_at": _routes_generated_at(),
+            "routes": canonical_payload["routes"],
+        }
+        _write_snapshot_if_missing(snapshot_path, _pretty_json_text(snapshot_payload))
+
+    snapshot_text = _read_text_file(snapshot_path)
+    if (not os.path.exists(MODEL_ROUTES_PATH)) or _read_text_file(MODEL_ROUTES_PATH) != snapshot_text:
+        _write_secure_text_file(MODEL_ROUTES_PATH, snapshot_text)
+
+    return _read_json_file(MODEL_ROUTES_PATH)
 
 
 def export_model_routes(cfg=None, force=False):
-    """遍历 role=primary/auto/fallback 的 provider，按优先级生成 model→endpoint 映射。
-
-    只收录支持 anthropic_messages 协议且有 anthropic_base_url 的 provider。
-    写入 ~/.config/mms/model-routes.json（权限 0o600）。
-
-    Returns:
-        dict: {model_name: {anthropic_base_url, api_key, provider_id, priority, role}}
-    """
+    """导出 Hive 可直接消费的最小路由契约，并做 snapshot 去重。"""
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
-        _provider_label, _probe_models, _normalize_priority, _normalize_role,
+        _probe_models, _normalize_priority, _normalize_role,
         _provider_effective_models, _runtime_priority_for_model,
-        ROLE_WEIGHTS, DEFAULT_PRIORITY, _model_capability_tags,
-        _model_cli_modes, _provider_supports_model_for_cli,
-        _load_usage_stats, _active_usage_path,
+        ROLE_WEIGHTS, DEFAULT_PRIORITY,
     )
 
     if cfg is None:
@@ -651,16 +724,10 @@ def export_model_routes(cfg=None, force=False):
             return {}
         cfg = apply_local_overrides(cfg)
 
-    # mtime 检查：config / usage 未变且 routes 已存在 → 直接返回缓存
-    if not force and os.path.exists(MODEL_ROUTES_PATH) and os.path.exists(_MMS_CONFIG_PATH):
+    # latest 新于 config / override / credentials 时，直接读固定 latest 文件。
+    if not force and _latest_routes_is_fresh():
         try:
-            config_mtime = os.path.getmtime(_MMS_CONFIG_PATH)
-            routes_mtime = os.path.getmtime(MODEL_ROUTES_PATH)
-            usage_path = _active_usage_path()
-            usage_mtime = os.path.getmtime(usage_path) if os.path.exists(usage_path) else 0
-            if routes_mtime >= config_mtime and routes_mtime >= usage_mtime:
-                with open(MODEL_ROUTES_PATH, "r", encoding="utf-8") as f:
-                    return json.load(f).get("routes", {})
+            return _read_json_file(MODEL_ROUTES_PATH).get("routes", {})
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -703,11 +770,9 @@ def export_model_routes(cfg=None, force=False):
         models = list(_provider_effective_models(provider_def, cached_models, cfg))
 
         openai_url = openai_url_early
-        pname = _provider_label(ctx)
         supported_clis = provider_def.get("supported_clis", [])
         providers_info.append({
             "provider_id": pid,
-            "provider_name": pname,
             "anthropic_base_url": anthropic_url,
             "openai_base_url": openai_url,
             "api_key": ctx["api_key"],
@@ -729,18 +794,8 @@ def export_model_routes(cfg=None, force=False):
         "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
     }
-    # Aggregate use_count from usage.json for fuzzy-resolve ranking
-    _use_counts = {}
-    try:
-        _usage_stats = _load_usage_stats()
-        for _src in _usage_stats.get("sources", {}).values():
-            for _mname, _cnt in (_src.get("models") or {}).items():
-                _use_counts[_mname] = _use_counts.get(_mname, 0) + _cnt
-    except Exception:
-        pass
-
     # Model-CLI compatibility: keep the coarse family filter aligned with current
-    # export behavior, then rely on route-scoped compatibility for Claude directness.
+    # runtime routing, but do not expose executor metadata to Hive.
     def _model_cli_compatible(model_name, supported_clis):
         if not supported_clis:
             return True  # no restriction
@@ -769,33 +824,20 @@ def export_model_routes(cfg=None, force=False):
                 continue
 
             effective_priority = _runtime_priority_for_model(pinfo, normalized)
-            base_cli_modes = _model_cli_modes(normalized)
-            claude_executor_enabled = "claude" not in _HIVE_DISABLED_EXECUTOR_CLIS
-            claude_prefers_direct = claude_executor_enabled and base_cli_modes.get("claude") == "bridge"
-            claude_native_compatible = bool(
-                claude_executor_enabled
-                and pinfo.get("anthropic_base_url")
-                and _provider_supports_model_for_cli(pinfo, "claude", normalized)
-            )
             candidate = {
                 "anthropic_base_url": pinfo["anthropic_base_url"],
+                "openai_base_url": pinfo["openai_base_url"],
                 "api_key": pinfo["api_key"],
                 "provider_id": pinfo["provider_id"],
-                "provider_name": pinfo["provider_name"],
-                "priority": effective_priority,
-                "role": pinfo["role"],
-                "_claude_native_compatible": claude_native_compatible,
                 "sort_key": (
-                    0 if (not claude_prefers_direct or claude_native_compatible) else 1,
                     ROLE_WEIGHTS.get(pinfo["role"], 1),
                     -effective_priority,
                     0 if pinfo.get("is_default") else 1,
-                    pinfo["provider_name"],
                     pinfo["provider_id"],
+                    pinfo["anthropic_base_url"],
+                    pinfo["openai_base_url"],
                 ),
             }
-            if pinfo.get("openai_base_url"):
-                candidate["openai_base_url"] = pinfo["openai_base_url"]
             candidates_by_model[normalized].append(candidate)
 
     routes = {}
@@ -803,46 +845,17 @@ def export_model_routes(cfg=None, force=False):
         ordered = sorted(candidates, key=lambda item: item["sort_key"])
         if not ordered:
             continue
-        primary = dict(ordered[0])
-        primary.pop("provider_name", None)
-        primary.pop("sort_key", None)
-        cli_modes = _route_cli_modes_for_export(normalized, primary, _model_cli_modes)
-        primary.pop("_claude_native_compatible", None)
-        native_clis, bridge_clis = _route_cli_lists_for_export(cli_modes)
-        primary.update({
-            "capabilities": _route_capabilities_for_export(normalized, cli_modes, _model_capability_tags),
-            "native_clis": native_clis,
-            "bridge_clis": bridge_clis,
-            "cli_modes": cli_modes,
-            "use_count": _use_counts.get(normalized, 0),
-        })
-        fallback_routes = []
+        primary = _route_endpoint_payload(ordered[0])
+        fallbacks = []
         for item in ordered[1:1 + _MAX_FALLBACKS]:
-            fallback_entry = dict(item)
-            fallback_entry.pop("provider_name", None)
-            fallback_entry.pop("sort_key", None)
-            fallback_entry.pop("_claude_native_compatible", None)
-            fallback_routes.append(fallback_entry)
-        if fallback_routes:
-            primary["fallback_routes"] = fallback_routes
-        routes[normalized] = primary
+            fallbacks.append(_route_endpoint_payload(item))
+        routes[normalized] = {
+            "primary": primary,
+            "fallbacks": fallbacks,
+        }
 
-    # 写入文件
-    output = {
-        "_meta": {
-            "generated_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
-            "generator": "mms",
-            "disabled_executor_clis": sorted(_HIVE_DISABLED_EXECUTOR_CLIS),
-        },
-        "routes": routes,
-    }
-
-    os.makedirs(os.path.dirname(MODEL_ROUTES_PATH), exist_ok=True)
-    with open(MODEL_ROUTES_PATH, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
-    os.chmod(MODEL_ROUTES_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-
-    return routes
+    persisted = _persist_routes_export(routes)
+    return persisted.get("routes", {})
 
 
 def routes_main(cfg, args):
@@ -877,27 +890,23 @@ def routes_main(cfg, args):
             table = _RT(title=f"Model Routes ({len(routes)} models)")
             table.add_column("Model", style="cyan")
             table.add_column("Provider", style="green")
-            table.add_column("Role", style="magenta")
-            table.add_column("Priority", style="yellow", justify="right")
-            table.add_column("Capabilities", style="white")
-            table.add_column("CLI", style="dim")
             table.add_column("Anthropic Base URL", style="dim")
+            table.add_column("OpenAI Base URL", style="dim")
+            table.add_column("Fallbacks", style="white")
 
             for model_name, info in sorted(routes.items()):
-                cli_modes = info.get("cli_modes", {})
-                cli_summary = ", ".join(
-                    f"{cli}:{mode}"
-                    for cli, mode in cli_modes.items()
-                    if mode in {"native", "bridge"}
+                primary = info.get("primary") or {}
+                fallback_summary = ", ".join(
+                    item.get("provider_id", "")
+                    for item in (info.get("fallbacks") or [])
+                    if item.get("provider_id")
                 ) or "-"
                 table.add_row(
                     model_name,
-                    info.get("provider_id", ""),
-                    info.get("role", "auto"),
-                    str(info.get("priority", "")),
-                    ", ".join(info.get("capabilities", [])) or "-",
-                    cli_summary,
-                    (info.get("anthropic_base_url") or "")[:50],
+                    primary.get("provider_id", ""),
+                    (primary.get("anthropic_base_url") or "")[:50],
+                    (primary.get("openai_base_url") or "")[:50],
+                    fallback_summary,
                 )
             _console.print(table)
             _console.print(f"\n[dim]文件: {MODEL_ROUTES_PATH}[/dim]")

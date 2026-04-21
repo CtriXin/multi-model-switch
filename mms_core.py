@@ -2796,6 +2796,20 @@ def _trigger_routes_export_after_usage_write():
     ).start()
 
 
+def _trigger_routes_export_after_credentials_write():
+    """Best-effort routes export after provider key / URL changes."""
+    try:
+        from mms_router import export_model_routes
+
+        cfg = load_config()
+        if cfg is None:
+            return
+        cfg = apply_local_overrides(cfg)
+        export_model_routes(cfg, force=True)
+    except Exception:
+        pass
+
+
 def _backup_config_tree(label):
     backup_root = os.path.join(resolve_real_user_home(), ".config", "mms-backups")
     os.makedirs(backup_root, exist_ok=True)
@@ -3246,6 +3260,7 @@ def save_provider_credentials(provider_id, base_url, api_key, openai_base_url=""
     with open(CREDENTIALS_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     os.chmod(CREDENTIALS_PATH, 0o600)
+    _trigger_routes_export_after_credentials_write()
 
 
 def load_api_credentials():

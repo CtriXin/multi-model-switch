@@ -261,9 +261,19 @@ mms discuss "design a protocol"
 ├── credentials.sh
 ├── usage.json
 ├── model-routes.json
+├── model-routes.snapshots/
 ├── env/
 └── accounts/
 ```
+
+## Hive routes export
+
+- Fixed latest path: `~/.config/mms/model-routes.json`
+- Snapshot history: `~/.config/mms/model-routes.snapshots/`
+- Export shape is minimal: `version`, `generated_at`, and per-model `primary` / `fallbacks`
+- Each route entry only includes `provider_id`, `anthropic_base_url`, `openai_base_url`, and `api_key`
+- Snapshot dedupe uses a canonical content hash over `version + routes`; `generated_at` is excluded from the hash
+- If the canonical content is unchanged, MMS reuses the existing snapshot and mirrors that snapshot back to `model-routes.json` instead of creating a new snapshot
 
 Key docs:
 
@@ -283,7 +293,8 @@ Key docs:
 - `priority` is runtime-level, not per-model
 - Higher numeric `priority` means higher precedence
 - `role` still outranks `priority`: `primary > auto > fallback`
-- `use_count` affects display/export ranking, not the main runtime routing decision
+- `use_count` still affects MMS display/ranking metadata, but it is no longer exported to Hive
+- Hive reads the ordered `primary` + `fallbacks` contract and does not need MMS internal priority / ranking fields
 
 ## License
 

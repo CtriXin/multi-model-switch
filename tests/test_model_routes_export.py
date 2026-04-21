@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import stat
 
 
@@ -23,10 +24,16 @@ def _patch_export_dependencies(monkeypatch, *, contexts):
         lambda provider_def, cached_models, _cfg: list(cached_models or provider_def.get("models", [])),
     )
     monkeypatch.setattr(mms_core, "_provider_label", lambda ctx: str(ctx.get("provider_name") or ctx.get("id") or "provider"))
-    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
 
 
-def test_export_model_routes_strips_claude_executor_from_hive_metadata(monkeypatch, tmp_path):
+def _patch_export_paths(monkeypatch, tmp_path):
+    import mms_router
+
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_SNAPSHOTS_DIR", str(tmp_path / "model-routes.snapshots"))
+
+
+def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -42,7 +49,7 @@ def test_export_model_routes_strips_claude_executor_from_hive_metadata(monkeypat
             }
         },
     )
-    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    _patch_export_paths(monkeypatch, tmp_path)
 
     cfg = {
         "provider": {"default": "kimi-direct"},
@@ -62,18 +69,37 @@ def test_export_model_routes_strips_claude_executor_from_hive_metadata(monkeypat
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["kimi-k2.5"]
-    assert "claude" not in info["cli_modes"]
-    assert "claude" not in info["native_clis"]
-    assert "claude" not in info["bridge_clis"]
-    assert "bridge_required" not in info["capabilities"]
+    assert list(info) == ["primary", "fallbacks"]
+    assert info["primary"] == {
+        "provider_id": "kimi-direct",
+        "anthropic_base_url": "https://kimi.example.com/anthropic",
+        "openai_base_url": "",
+        "api_key": "sk-kimi",
+    }
+    assert info["fallbacks"] == []
 
-    written = json.loads((tmp_path / "model-routes.json").read_text(encoding="utf-8"))
-    assert written["_meta"]["disabled_executor_clis"] == ["claude"]
-    assert "claude" not in written["routes"]["kimi-k2.5"]["cli_modes"]
-    assert stat.S_IMODE((tmp_path / "model-routes.json").stat().st_mode) == 0o600
+    latest_path = tmp_path / "model-routes.json"
+    written = json.loads(latest_path.read_text(encoding="utf-8"))
+    assert list(written) == ["version", "generated_at", "routes"]
+    assert written["version"] == 1
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", written["generated_at"])
+    assert list(written["routes"]["kimi-k2.5"]) == ["primary", "fallbacks"]
+    assert list(written["routes"]["kimi-k2.5"]["primary"]) == [
+        "provider_id",
+        "anthropic_base_url",
+        "openai_base_url",
+        "api_key",
+    ]
+
+    snapshots = sorted((tmp_path / "model-routes.snapshots").glob("*.json"))
+    assert len(snapshots) == 1
+    assert re.fullmatch(r"[0-9a-f]{64}", snapshots[0].stem)
+    assert json.loads(snapshots[0].read_text(encoding="utf-8")) == written
+    assert stat.S_IMODE(latest_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(snapshots[0].stat().st_mode) == 0o600
 
 
-def test_export_model_routes_does_not_advertise_claude_bridge_to_hive(monkeypatch, tmp_path):
+def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -89,7 +115,7 @@ def test_export_model_routes_does_not_advertise_claude_bridge_to_hive(monkeypatc
             }
         },
     )
-    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    _patch_export_paths(monkeypatch, tmp_path)
 
     cfg = {
         "provider": {"default": "qwen-openai"},
@@ -106,15 +132,60 @@ def test_export_model_routes_does_not_advertise_claude_bridge_to_hive(monkeypatc
         ],
     }
 
-    routes = mms_router.export_model_routes(cfg, force=True)
+    first_routes = mms_router.export_model_routes(cfg, force=True)
+    first_written = json.loads((tmp_path / "model-routes.json").read_text(encoding="utf-8"))
 
-    info = routes["qwen3.5-plus"]
-    assert "claude" not in info["cli_modes"]
-    assert "claude" not in info["bridge_clis"]
-    assert "bridge_required" not in info["capabilities"]
+    second_routes = mms_router.export_model_routes(cfg, force=True)
+    second_written = json.loads((tmp_path / "model-routes.json").read_text(encoding="utf-8"))
+
+    assert second_routes == first_routes
+    assert second_written["generated_at"] == first_written["generated_at"]
+    assert len(list((tmp_path / "model-routes.snapshots").glob("*.json"))) == 1
 
 
-def test_export_model_routes_stops_preferring_claude_compatible_route_when_hive_disables_claude(monkeypatch, tmp_path):
+def test_export_model_routes_creates_new_snapshot_when_key_changes(monkeypatch, tmp_path):
+    import mms_router
+
+    contexts = {
+        "qwen-openai": {
+            "id": "qwen-openai",
+            "provider_name": "Qwen OpenAI",
+            "anthropic_base_url": "",
+            "openai_base_url": "https://qwen.example.com/v1",
+            "api_key": "sk-qwen-old",
+            "models": ["qwen3.5-plus"],
+        }
+    }
+    _patch_export_dependencies(monkeypatch, contexts=contexts)
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    cfg = {
+        "provider": {"default": "qwen-openai"},
+        "providers": [
+            {
+                "id": "qwen-openai",
+                "role": "auto",
+                "priority": 60,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3.5-plus"],
+            }
+        ],
+    }
+
+    mms_router.export_model_routes(cfg, force=True)
+    contexts["qwen-openai"]["api_key"] = "sk-qwen-new"
+    mms_router.export_model_routes(cfg, force=True)
+
+    latest = json.loads((tmp_path / "model-routes.json").read_text(encoding="utf-8"))
+    snapshots = sorted((tmp_path / "model-routes.snapshots").glob("*.json"))
+
+    assert latest["routes"]["qwen3.5-plus"]["primary"]["api_key"] == "sk-qwen-new"
+    assert len(snapshots) == 2
+
+
+def test_export_model_routes_keeps_only_minimal_fields_for_hive(monkeypatch, tmp_path):
     import mms_router
 
     _patch_export_dependencies(
@@ -138,7 +209,7 @@ def test_export_model_routes_stops_preferring_claude_compatible_route_when_hive_
             },
         },
     )
-    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    _patch_export_paths(monkeypatch, tmp_path)
 
     cfg = {
         "provider": {"default": "openai-relay-high-priority"},
@@ -167,9 +238,11 @@ def test_export_model_routes_stops_preferring_claude_compatible_route_when_hive_
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["kimi-k2.5"]
-    assert info["provider_id"] == "openai-relay-high-priority"
-    assert "claude" not in info["cli_modes"]
-    assert info["fallback_routes"][0]["provider_id"] == "kimi-direct-compatible"
+    assert list(info["primary"]) == ["provider_id", "anthropic_base_url", "openai_base_url", "api_key"]
+    assert info["primary"]["provider_id"] == "openai-relay-high-priority"
+    assert info["fallbacks"][0]["provider_id"] == "kimi-direct-compatible"
+    assert "priority" not in info["primary"]
+    assert "role" not in info["primary"]
 
 
 def test_export_model_routes_prefers_higher_priority_before_default_provider(monkeypatch, tmp_path):
@@ -196,7 +269,7 @@ def test_export_model_routes_prefers_higher_priority_before_default_provider(mon
             },
         },
     )
-    monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    _patch_export_paths(monkeypatch, tmp_path)
 
     cfg = {
         "provider": {"default": "default-low-priority"},
@@ -225,5 +298,32 @@ def test_export_model_routes_prefers_higher_priority_before_default_provider(mon
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["qwen3-coder-plus"]
-    assert info["provider_id"] == "high-priority"
-    assert info["fallback_routes"][0]["provider_id"] == "default-low-priority"
+    assert info["primary"]["provider_id"] == "high-priority"
+    assert info["fallbacks"][0]["provider_id"] == "default-low-priority"
+
+
+def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(tmp_path / "credentials.sh"))
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False: calls.append((cfg, force)) or {},
+    )
+
+    mms_core.save_provider_credentials("demo", "https://demo.example.com/v1", "sk-demo")
+
+    assert (tmp_path / "credentials.sh").exists()
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True)
+    ]

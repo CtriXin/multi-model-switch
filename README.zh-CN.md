@@ -496,11 +496,22 @@ mms session resume <id>               # 恢复会话
 ├── credentials.sh       # API Key（加密存储）
 ├── override.toml        # 本地/团队覆盖配置
 ├── usage.json           # 本地启动统计
+├── model-routes.json    # Hive 读取的固定 latest export
+├── model-routes.snapshots/ # 按 content hash 去重的历史快照
 ├── speed-stats.json     # 模型测速结果
 └── accounts/            # 公开版支持的 OAuth 账号目录（不包含 Claude OAuth）
     ├── personal/
     └── work/
 ```
+
+### Hive routes export
+
+- 固定 latest 路径：`~/.config/mms/model-routes.json`
+- snapshot 目录：`~/.config/mms/model-routes.snapshots/`
+- 导出只保留最小契约：`version`、`generated_at`、每个 model 的 `primary` / `fallbacks`
+- 每条 route 只包含 `provider_id`、`anthropic_base_url`、`openai_base_url`、`api_key`
+- 去重 hash 基于 canonical `version + routes` 内容，`generated_at` 不参与 hash
+- 如果 canonical 内容没变，就复用已有 snapshot，并把该 snapshot 内容回写到固定 latest 文件，而不是新建快照
 
 ### config.toml 示例
 
