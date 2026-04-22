@@ -104,6 +104,36 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scr
 
 如果你要在 `main` 更新前先拿某个 hotfix 版本的清理脚本，把上面的 `main` 换成对应 tag 即可，例如 `v1.16.3`。
 
+### 彻底重装前先做 full reset
+
+如果一台机器上积累了太多历史 MMS 状态，想彻底从头安装，先跑官方 full reset 脚本的 `dry-run`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
+```
+
+确认输出路径没问题，再执行真正清理：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
+```
+
+默认只会清 MMS 自己的安装面：
+
+- `~/.mms`
+- `~/.config/mms`
+- `~/.local/bin/mms`
+- `~/.local/bin/ccs`
+- `~/.local/bin/mmslogs`
+
+它不会默认碰共享的 `~/.claude`、共享的 `~/.codex`，也不会碰任何 global OAuth 登录态。
+
+如果你以前用过 `install.sh --write-shell-rc`，还想顺手删掉 shell rc 里那段精确的 `# Added by MMS` PATH block，再加：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply --include-shell-rc
+```
+
 ### 一键升级
 
 ```bash

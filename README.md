@@ -94,6 +94,36 @@ The script only targets obvious leaked artifacts from dirty installs:
 
 If you need a hotfix-specific cleanup script before `main` is updated, replace `main` with the released tag, for example `v1.16.3`.
 
+### Full reset before reinstall
+
+If a machine has too much historical MMS state and you want to reinstall from scratch, use the full reset script in `dry-run` mode first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
+```
+
+Apply it only after confirming the reported paths are correct:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
+```
+
+By default it only removes MMS-owned surfaces:
+
+- `~/.mms`
+- `~/.config/mms`
+- `~/.local/bin/mms`
+- `~/.local/bin/ccs`
+- `~/.local/bin/mmslogs`
+
+It intentionally does not touch shared `~/.claude`, shared `~/.codex`, or any global OAuth state.
+
+If you previously used `install.sh --write-shell-rc` and also want to remove the exact `# Added by MMS` PATH block from your shell rc, add:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply --include-shell-rc
+```
+
 ### Default English UI on install
 
 ```bash
