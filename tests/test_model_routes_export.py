@@ -20,6 +20,11 @@ def _patch_export_dependencies(monkeypatch, *, contexts):
     )
     monkeypatch.setattr(
         mms_core,
+        "_probe_models_for_startup",
+        lambda _cfg, ctx, emit_output=False: {"models": list(ctx.get("models", []))},
+    )
+    monkeypatch.setattr(
+        mms_core,
         "_provider_effective_models",
         lambda provider_def, cached_models, _cfg: list(cached_models or provider_def.get("models", [])),
     )
@@ -341,6 +346,121 @@ def test_export_model_routes_keeps_gemini_models_for_gemini_provider(monkeypatch
     assert routes["gemini-3.1-pro-preview"]["fallbacks"] == []
 
 
+def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch, tmp_path):
+    import mms_core
+    import mms_router
+
+    calls = []
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "startup-safe-provider": {
+                "id": "startup-safe-provider",
+                "provider_name": "Startup Safe Provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://startup.example.com/v1",
+                "api_key": "sk-startup",
+                "models": ["qwen3-coder-plus"],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        mms_core,
+        "_probe_models",
+        lambda ctx, emit_output=False: calls.append(("live", ctx["id"])) or {"models": ["should-not-be-used"]},
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_probe_models_for_startup",
+        lambda _cfg, ctx, emit_output=False: calls.append(("startup", ctx["id"])) or {"models": list(ctx.get("models", []))},
+    )
+
+    cfg = {
+        "provider": {"default": "startup-safe-provider"},
+        "providers": [
+            {
+                "id": "startup-safe-provider",
+                "role": "auto",
+                "priority": 80,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3-coder-plus"],
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True, startup_safe=True)
+
+    assert routes["qwen3-coder-plus"]["primary"]["provider_id"] == "startup-safe-provider"
+    assert calls == [("startup", "startup-safe-provider")]
+
+
+def test_export_model_routes_skips_provider_when_startup_probe_raises(monkeypatch, tmp_path):
+    import mms_core
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "broken-provider": {
+                "id": "broken-provider",
+                "provider_name": "Broken Provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://broken.example.com/v1",
+                "api_key": "sk-broken",
+                "models": ["qwen3-coder-plus"],
+            },
+            "healthy-provider": {
+                "id": "healthy-provider",
+                "provider_name": "Healthy Provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://healthy.example.com/v1",
+                "api_key": "sk-healthy",
+                "models": ["qwen3-coder-plus"],
+            },
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    def _startup_probe(_cfg, ctx, emit_output=False):
+        if ctx["id"] == "broken-provider":
+            raise RuntimeError("boom")
+        return {"models": list(ctx.get("models", []))}
+
+    monkeypatch.setattr(mms_core, "_probe_models_for_startup", _startup_probe)
+
+    cfg = {
+        "provider": {"default": "broken-provider"},
+        "providers": [
+            {
+                "id": "broken-provider",
+                "role": "auto",
+                "priority": 100,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3-coder-plus"],
+            },
+            {
+                "id": "healthy-provider",
+                "role": "auto",
+                "priority": 90,
+                "enabled": True,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["qwen"],
+                "models": ["qwen3-coder-plus"],
+            },
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True, startup_safe=True)
+
+    assert routes["qwen3-coder-plus"]["primary"]["provider_id"] == "healthy-provider"
+    assert routes["qwen3-coder-plus"]["fallbacks"] == []
+
+
 def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path):
     import mms_core
     import mms_router
@@ -357,14 +477,14 @@ def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path)
     monkeypatch.setattr(
         mms_router,
         "export_model_routes",
-        lambda cfg, force=False: calls.append((cfg, force)) or {},
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
     )
 
     mms_core.save_provider_credentials("demo", "https://demo.example.com/v1", "sk-demo")
 
     assert (tmp_path / "credentials.sh").exists()
     assert calls == [
-        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True)
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, False)
     ]
 
 
@@ -382,12 +502,35 @@ def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
     monkeypatch.setattr(
         mms_router,
         "export_model_routes",
-        lambda cfg, force=False: calls.append((cfg, force)) or {},
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
     )
 
     assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True) is True
     assert calls == [
-        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True)
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, False)
+    ]
+
+
+def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
     ]
 
 

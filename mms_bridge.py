@@ -269,6 +269,27 @@ def _is_openai_model(model_name):
     return isinstance(model_name, str) and model_name.lower().startswith(_OPENAI_MODEL_PREFIXES)
 
 
+def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):
+    """仅在 continuation 可疑失败时，退回到全量 transcript 重试一次。"""
+    if not isinstance(responses_payload, dict) or not responses_payload.get("previous_response_id"):
+        return False
+    lowered = str(error_text or "").lower()
+    if "previous_response_id" in lowered:
+        return True
+    if status_code not in (401, 403):
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "permission denied",
+            "please run /login",
+            "run /login",
+            '"type":"<nil>"',
+            '"type": "<nil>"',
+        )
+    )
+
+
 def _strip_cache_control(payload):
     """非 Claude 模型不支持 prompt caching，剥离 payload 中所有 cache_control 字段。"""
     # 顶层 cache_control
@@ -2017,10 +2038,20 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         )
                         if (
                             not retried_without_previous_response_id
-                            and responses_payload.get("previous_response_id")
-                            and "previous_response_id" in error_text
+                            and _should_retry_gpt_bridge_without_previous_response_id(
+                                response.status_code,
+                                responses_payload,
+                                error_text,
+                            )
                         ):
                             self.server._gpt_last_response_id = None
+                            _bridge_error_logger.warning(
+                                "gpt bridge continuation rejected; retrying without previous_response_id: "
+                                "status=%s model=%s url=%s",
+                                response.status_code,
+                                model_name,
+                                target_url,
+                            )
                             responses_payload = dict(full_responses_payload)
                             retried_without_previous_response_id = True
                             continue

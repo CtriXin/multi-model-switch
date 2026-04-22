@@ -2790,7 +2790,7 @@ def _trigger_routes_export_after_usage_write():
     ).start()
 
 
-def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False):
+def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
     """Synchronously refresh the Hive-facing routes export from current config."""
     try:
         from mms_router import export_model_routes
@@ -2801,7 +2801,7 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False):
             if current_cfg is None:
                 return False
             current_cfg = apply_local_overrides(current_cfg)
-        export_model_routes(current_cfg, force=force)
+        export_model_routes(current_cfg, force=force, startup_safe=startup_safe)
         return True
     except Exception as exc:
         if not quiet:
@@ -9422,7 +9422,12 @@ def main():
         command = argv[0]
         if command not in {"guard", "logs", "fake-upstream", "exposure"}:
             preloaded_command_cfg = _load_command_config()
-            _refresh_routes_export_for_hive(preloaded_command_cfg, force=True, quiet=False)
+            _refresh_routes_export_for_hive(
+                preloaded_command_cfg,
+                force=True,
+                quiet=False,
+                startup_safe=True,
+            )
 
     if len(argv) >= 1:
         command = argv[0]
@@ -9571,7 +9576,7 @@ def main():
 
     cfg = apply_local_overrides(user_cfg)
     set_language(_resolve_ui_language(cfg, args.lang or lang_override))
-    _refresh_routes_export_for_hive(cfg, force=True, quiet=False)
+    _refresh_routes_export_for_hive(cfg, force=True, quiet=False, startup_safe=True)
 
     default_provider = ensure_provider_credentials(cfg)
     _trace_record("config default", provider=default_provider.get("id") if isinstance(default_provider, dict) else None)

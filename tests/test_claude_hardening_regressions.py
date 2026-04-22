@@ -2015,6 +2015,99 @@ def test_forward_as_responses_retries_without_previous_response_id(monkeypatch):
     assert handler.server._gpt_last_response_id == "resp-new"
 
 
+def test_forward_as_responses_retries_on_generic_403_permission_denied(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    def fake_build_codex_payload(*_args, incremental_messages=None, **_kwargs):
+        return {
+            "model": "gpt-5.4",
+            "input": list(incremental_messages or []),
+            "instructions": "hello",
+            "stream": True,
+        }
+
+    class FakeResponse:
+        headers = {}
+
+        def __init__(self, status_code, body=""):
+            self.status_code = status_code
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body.encode("utf-8")
+
+    responses = [
+        FakeResponse(
+            403,
+            '{"error":{"type":"<nil>","message":"Permission denied","request_id":"req-1"}}',
+        ),
+        FakeResponse(200),
+    ]
+
+    def fake_stream(method, url, **kwargs):
+        calls.append({"url": url, "json": dict(kwargs.get("json") or {})})
+        return responses.pop(0)
+
+    class FakeTranslator:
+        def __init__(self, _model_name):
+            self.response_id = "resp-new"
+
+        def process(self, event_type, event_data):
+            return []
+
+        def final_message(self):
+            return {"type": "message", "content": []}
+
+    monkeypatch.setattr(mms_bridge, "_build_codex_payload", fake_build_codex_payload)
+    monkeypatch.setattr(mms_bridge, "_AnthropicTranslator", FakeTranslator)
+    monkeypatch.setattr(
+        mms_bridge,
+        "_iter_sse_lines",
+        lambda _response: [("response.completed", {"id": "resp-new"})],
+    )
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.server = types.SimpleNamespace(
+        _gpt_last_response_id="resp-old",
+        reasoning_effort="high",
+        bridge_token="bridge-token",
+        proxy_url="",
+        no_proxy="",
+    )
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda _code: None
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+    handler._json = lambda code, payload: (_ for _ in ()).throw(AssertionError((code, payload)))
+
+    handler._forward_as_responses(
+        {
+            "model": "gpt-5.4",
+            "stream": False,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        },
+        "gpt-5.4",
+        "https://crs.example.com/v1",
+        "sk-test",
+        False,
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["json"]["previous_response_id"] == "resp-old"
+    assert "previous_response_id" not in calls[1]["json"]
+    assert handler.server._gpt_last_response_id == "resp-new"
+
+
 def test_json_resp_to_sse_invalid_body_returns_error_event():
     import mms_bridge
 

@@ -709,11 +709,11 @@ def _persist_routes_export(routes):
     return _read_json_file(MODEL_ROUTES_PATH)
 
 
-def export_model_routes(cfg=None, force=False):
+def export_model_routes(cfg=None, force=False, startup_safe=False):
     """导出 Hive 可直接消费的最小路由契约，并做 snapshot 去重。"""
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
-        _probe_models, _normalize_priority, _normalize_role,
+        _probe_models, _probe_models_for_startup, _normalize_priority, _normalize_role,
         _provider_effective_models, _runtime_priority_for_model,
         ROLE_WEIGHTS, DEFAULT_PRIORITY,
     )
@@ -765,9 +765,17 @@ def export_model_routes(cfg=None, force=False):
         priority = _normalize_priority(provider_def.get("priority", DEFAULT_PRIORITY))
         is_default = (pid == default_provider_id)
 
-        # 获取模型列表（probe + extra_models + fallback_models，与 TUI 一致）
-        cached_models = _probe_models(ctx, emit_output=False).get("models")
-        models = list(_provider_effective_models(provider_def, cached_models, cfg))
+        # 启动期 routes export 优先走 startup-safe probe，避免单个坏 provider 阻塞整个 CLI。
+        try:
+            probe_result = (
+                _probe_models_for_startup(cfg, ctx, emit_output=False)
+                if startup_safe
+                else _probe_models(ctx, emit_output=False)
+            )
+            cached_models = probe_result.get("models")
+            models = list(_provider_effective_models(provider_def, cached_models, cfg))
+        except Exception:
+            continue
 
         openai_url = openai_url_early
         supported_clis = provider_def.get("supported_clis", [])
