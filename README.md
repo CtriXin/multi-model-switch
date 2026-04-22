@@ -43,6 +43,57 @@ Public surface note:
 - It can show both native `claude-*` models and bridge-capable GPT / Gemini / compatible domestic models when the current routes support them.
 - Public docs do not include `Claude OAuth account.add/login`.
 
+### Install policy
+
+- Use `main/install.sh` for normal installs and upgrades after a fix has landed on `main`.
+- Use a `tag-pinned installer` for an urgent hotfix that has been released but not merged to `main` yet:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.16.3/install.sh | bash
+```
+
+- Reason: installer fixes live in `install.sh` itself; a stale `main/install.sh` can still miss a hotfix even if the tag already exists.
+
+### Verify right after install
+
+```bash
+bash install.sh --check
+mms doctor
+mms test --provider <id> --cli claude
+mms test --provider <id> --cli codex
+```
+
+Meaning:
+
+- `--check`: verify install landing paths
+- `doctor`: verify route / auth / protocol reachability
+- `test`: verify the real message path for one provider / CLI pair
+
+### Clean up a previously dirty install
+
+If you installed from an older broken installer that may have written into a gateway session home, run the cleanup script first in `dry-run` mode:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
+```
+
+Then apply it only if the reported paths look correct:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
+```
+
+The script only targets obvious leaked artifacts from dirty installs:
+
+- `<session-home>/.mms`
+- `<session-home>/.nvm`
+- `<session-home>/.config/mms`
+- `<session-home>/.local/bin/mms`
+- `<session-home>/.local/bin/ccs`
+- `~/.local/bin/mms` / `~/.local/bin/ccs` when they still point into a gateway session path
+
+If you need a hotfix-specific cleanup script before `main` is updated, replace `main` with the released tag, for example `v1.16.3`.
+
 ### Default English UI on install
 
 ```bash

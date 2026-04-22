@@ -50,6 +50,60 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`、`ops-env-safe`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 
+### 安装策略
+
+- 正常安装 / 升级：用 `main/install.sh`
+- 紧急 hotfix 已发 tag、但还没 merge 到 `main`：改用 `tag-pinned installer`
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.16.3/install.sh | bash
+```
+
+原因很简单：
+
+- 安装器修复落在 `install.sh` 本身
+- 如果 `main/install.sh` 还没更新，即使新 tag 已经发了，旧安装器逻辑也可能漏掉 hotfix
+
+### 安装后立刻自检
+
+```bash
+bash install.sh --check
+mms doctor
+mms test --provider <id> --cli claude
+mms test --provider <id> --cli codex
+```
+
+含义：
+
+- `--check`：看安装是不是落到正确路径
+- `doctor`：看 route / auth / protocol 通不通
+- `test`：看指定 provider / CLI 的真实消息链路通不通
+
+### 清理之前装过的脏版本
+
+如果之前装过有问题的 installer，怀疑它把文件写进了 gateway session home，先跑 `dry-run`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
+```
+
+确认输出路径没问题，再执行真正清理：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
+```
+
+这个脚本只会清明显属于脏安装残留的目标：
+
+- `<session-home>/.mms`
+- `<session-home>/.nvm`
+- `<session-home>/.config/mms`
+- `<session-home>/.local/bin/mms`
+- `<session-home>/.local/bin/ccs`
+- `~/.local/bin/mms` / `~/.local/bin/ccs` 里仍然指向 gateway session 路径的旧链接
+
+如果你要在 `main` 更新前先拿某个 hotfix 版本的清理脚本，把上面的 `main` 换成对应 tag 即可，例如 `v1.16.3`。
+
 ### 一键升级
 
 ```bash
