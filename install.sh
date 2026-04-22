@@ -2285,6 +2285,14 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
     echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
     echo ""
+    echo "  $(t "简单上手示例:" "Quick examples:")"
+    echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
+    echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
+    echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
+    echo "    mms ls                              $(t "查看可见模型" "list visible models")"
+    echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
+    echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
+    echo ""
 
     if [ "$INSTALL_RTK" -eq 1 ]; then
         echo "  $(t "RTK rewrite 已配置到 Claude 的 PreToolUse:Bash。" "RTK rewrite has been wired into Claude PreToolUse:Bash.")"
