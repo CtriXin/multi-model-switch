@@ -61,3 +61,30 @@ def test_install_check_derives_real_home_from_session_home(tmp_path):
     assert str(real_home / ".mms" / ".venv") in output
     assert str(real_home / ".local" / "bin" / "mms") in output
     assert str(session_home / ".mms" / ".venv") not in output
+
+
+def test_piped_version_check_does_not_misclassify_repo_cwd_as_local_source():
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--ref", "v1.16.4", "--version"],
+        cwd=ROOT_DIR,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Planned install ref: v1.16.4" in completed.stdout
+    assert "Install channel: latest-tag" in completed.stdout
+    assert "local-source" not in completed.stdout
+
+
+def test_local_install_version_check_reports_local_source_channel():
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--version"],
+        cwd=ROOT_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Install channel: local-source" in completed.stdout

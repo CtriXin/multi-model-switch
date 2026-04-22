@@ -4,6 +4,8 @@ import json
 import re
 import stat
 
+import pytest
+
 
 def _patch_export_dependencies(monkeypatch, *, contexts):
     import mms_core
@@ -647,6 +649,32 @@ def test_main_refreshes_routes_snapshot_before_subcommand_dispatch(monkeypatch):
         ("refresh", cfg, True),
         ("models", cfg, []),
     ]
+
+
+def test_main_help_bypasses_snapshot_guard_and_routes_refresh(monkeypatch):
+    import mms_core
+
+    events = []
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "--help"])
+    monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(mms_core, "set_language", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_ui_language", lambda *_args, **_kwargs: "zh")
+    monkeypatch.setattr(
+        mms_core,
+        "_ensure_startup_snapshot_guard",
+        lambda *_args, **_kwargs: events.append("guard"),
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_refresh_routes_export_for_hive",
+        lambda *_args, **_kwargs: events.append("refresh"),
+    )
+
+    with pytest.raises(SystemExit):
+        mms_core.main()
+
+    assert events == []
 
 
 def test_select_provider_template_always_defaults_to_generic(monkeypatch):

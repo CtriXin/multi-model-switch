@@ -9392,8 +9392,17 @@ def handle_test_command(argv, subcommand_name="test"):
     return _run_script_subcommand("smoke_cli_channels.py", argv, subcommand_name)
 
 
+def _is_help_request(argv):
+    if not argv:
+        return False
+    if argv[0] == "help":
+        return True
+    return any(str(arg).strip() in {"-h", "--help"} for arg in argv)
+
+
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    help_request = _is_help_request(argv)
     bootstrap_cfg = load_config()
     set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
 
@@ -9412,13 +9421,14 @@ def main():
             handle_exposure_command(argv[1:])
             return
 
-    _ensure_startup_snapshot_guard(
-        bootstrap_cfg or _default_config(),
-        enforce=not _snapshot_prompt_allowed(),
-    )
+    if not help_request:
+        _ensure_startup_snapshot_guard(
+            bootstrap_cfg or _default_config(),
+            enforce=not _snapshot_prompt_allowed(),
+        )
 
     preloaded_command_cfg = None
-    if len(argv) >= 1:
+    if not help_request and len(argv) >= 1:
         command = argv[0]
         if command not in {"guard", "logs", "fake-upstream", "exposure"}:
             preloaded_command_cfg = _load_command_config()

@@ -9,7 +9,18 @@ set -o pipefail
 
 REPO_OWNER="CtriXin"
 REPO_NAME="multi-model-switch"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" 2>/dev/null)" && pwd 2>/dev/null || echo "")"
+SCRIPT_SOURCE_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+case "$SCRIPT_SOURCE_PATH" in
+    ""|stdin|/dev/fd/*|/proc/*/fd/*)
+        SCRIPT_DIR=""
+        ;;
+    *)
+        if [ -f "$SCRIPT_SOURCE_PATH" ]; then
+            SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE_PATH")" 2>/dev/null && pwd 2>/dev/null || echo "")"
+        fi
+        ;;
+esac
 SOURCE_DIR=""
 SOURCE_TMP_DIR=""
 INSTALL_REF=""
@@ -74,6 +85,67 @@ t() {
         printf "%s" "$en"
     else
         printf "%s" "$zh"
+    fi
+}
+
+is_local_source_install() {
+    [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]
+}
+
+resolve_local_source_ref() {
+    if ! is_local_source_install; then
+        return 1
+    fi
+    if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true
+        return 0
+    fi
+    echo "local-source"
+}
+
+ensure_install_ref_resolved() {
+    if is_local_source_install; then
+        INSTALL_CHANNEL="local-source"
+        RESOLVED_INSTALL_REF="$(resolve_local_source_ref || true)"
+        RESOLVED_INSTALL_REF="${RESOLVED_INSTALL_REF:-local-source}"
+        return
+    fi
+    if [ -z "$RESOLVED_INSTALL_REF" ]; then
+        resolve_requested_ref
+    fi
+}
+
+optional_rtk_installed() {
+    [ -x "$REAL_HOME/.claude/hooks/rtk-rewrite.sh" ]
+}
+
+optional_mindkeeper_context_installed() {
+    [ -f "$REAL_HOME/.claude/commands/distill.md" ] \
+        && [ -f "$REAL_HOME/.claude/commands/cz.md" ] \
+        && [ -x "$REAL_HOME/.claude/hooks/token-monitor-hook.sh" ]
+}
+
+optional_map_installed() {
+    [ -x "$REAL_HOME/.claude/hooks/map-auto-index.sh" ]
+}
+
+optional_read_once_installed() {
+    [ -x "$REAL_HOME/.claude/read-once/hook.sh" ] \
+        && [ -x "$REAL_HOME/.claude/read-once/compact.sh" ]
+}
+
+optional_ops_env_safe_installed() {
+    [ -f "$REAL_HOME/.codex/skills/ops-env-safe/SKILL.md" ] \
+        && [ -f "$REAL_HOME/.claude/commands/ops-env-safe.md" ]
+}
+
+note_optional_pack_detected() {
+    local zh_label="$1"
+    local en_label="$2"
+    if [ "$INSTALL_LANG" = "en" ]; then
+        echo "  ✓ Detected existing ${en_label}; keeping current setup (pass the explicit install flag to reinstall)"
+    else
+        echo "  ✓ 已检测到现有${zh_label}，保留当前配置（如需重装请显式传对应 --install-* 参数）"
     fi
 }
 
@@ -238,7 +310,14 @@ prompt_optional_install_choices() {
 
     if [ "$INSTALL_RTK_EXPLICIT" -eq 0 ]; then
         echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
+        if optional_rtk_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional enhancement"
+            else
+                echo "可选增强"
+            fi
+            note_optional_pack_detected " RTK rewrite" "RTK rewrite"
+        elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional enhancement"
             echo "  RTK rewrite reduces token-heavy Bash commands in Claude sessions."
             if confirm_from_tty "Install jq + rtk and enable Claude RTK rewrite hook? [y/N]: " "n"; then
@@ -255,7 +334,14 @@ prompt_optional_install_choices() {
 
     if [ "$INSTALL_MINDKEEPER_CONTEXT_EXPLICIT" -eq 0 ]; then
         echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
+        if optional_mindkeeper_context_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional context tools"
+            else
+                echo "可选上下文工具"
+            fi
+            note_optional_pack_detected " MindKeeper context pack" "MindKeeper context pack"
+        elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
             echo "  MindKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
             echo "  By default MMS pins MindKeeper to ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}."
@@ -274,7 +360,14 @@ prompt_optional_install_choices() {
 
     if [ "$INSTALL_MAP_EXPLICIT" -eq 0 ]; then
         echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
+        if optional_map_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional Claude hook"
+            else
+                echo "可选 Claude hook"
+            fi
+            note_optional_pack_detected " Map auto-index" "Map auto-index"
+        elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Project map auto-index installs Map and refreshes the project structure index on session start."
             echo "  By default MMS reuses an existing Node.js 18+ runtime when available; otherwise Map is skipped unless you explicitly ask for --ensure-node22."
@@ -293,7 +386,14 @@ prompt_optional_install_choices() {
 
     if [ "$INSTALL_READ_ONCE_EXPLICIT" -eq 0 ]; then
         echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
+        if optional_read_once_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional Claude hook"
+            else
+                echo "可选 Claude hook"
+            fi
+            note_optional_pack_detected " read-once" "read-once"
+        elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Read token saver (read-once) avoids redundant full-file rereads and prefers diffs after edits."
             if confirm_from_tty "Install read-once for Claude Read token saving? [y/N]: " "n"; then
@@ -310,7 +410,14 @@ prompt_optional_install_choices() {
 
     if [ "$INSTALL_OPS_ENV_SAFE_EXPLICIT" -eq 0 ]; then
         echo ""
-        if [ "$INSTALL_LANG" = "en" ]; then
+        if optional_ops_env_safe_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional isolated host path hints"
+            else
+                echo "可选隔离路径提示"
+            fi
+            note_optional_pack_detected " ops-env-safe" "ops-env-safe"
+        elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional isolated host path hints"
             echo "  ops-env-safe installs a path-only Codex skill, a Claude /ops-env-safe command, and a local path-map template."
             echo "  It does not inject real HOME/XDG or export auth secrets."
@@ -454,6 +561,7 @@ download_remote_source() {
 }
 
 write_version_metadata() {
+    ensure_install_ref_resolved
     mkdir -p "$(dirname "$VERSION_META_PATH")"
     python3 - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
 import json
@@ -525,15 +633,14 @@ PY
 }
 
 prepare_source_dir() {
-    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
+    ensure_install_ref_resolved
+    if is_local_source_install; then
         SOURCE_DIR="$SCRIPT_DIR"
         echo "✓ $(t "使用本地源码" "Using local source tree"): $SOURCE_DIR"
         return
     fi
 
     SOURCE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mms-install.XXXXXX")"
-
-    resolve_requested_ref
     download_remote_source "$RESOLVED_INSTALL_REF"
 }
 
@@ -1018,22 +1125,40 @@ ensure_supported_python() {
 }
 
 create_python_venv() {
+    local venv_python="$VENV_DIR/bin/python"
+    local broken_backup=""
+
     mkdir -p "$MMS_HOME"
 
-    if ! python3 -m venv "$VENV_DIR"; then
-        echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
-        if command -v apt-get >/dev/null 2>&1; then
-            echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
+    if [ -d "$VENV_DIR" ]; then
+        if [ -x "$venv_python" ] && "$venv_python" -m pip --version >/dev/null 2>&1; then
+            echo "✓ $(t "复用现有虚拟环境" "Reusing existing virtual environment"): $VENV_DIR"
+        else
+            broken_backup="${VENV_DIR}.broken-$(date -u +%Y%m%d%H%M%S)"
+            if ! mv "$VENV_DIR" "$broken_backup"; then
+                echo "❌ $(t "检测到损坏的虚拟环境，但备份旧目录失败" "Detected a broken virtual environment, but failed to back it up")"
+                exit 1
+            fi
+            echo "⚠ $(t "检测到损坏的虚拟环境，已备份后重建" "Detected a broken virtual environment; backed it up before rebuilding"): $broken_backup"
         fi
-        exit 1
     fi
 
-    if ! "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip; then
+    if [ ! -x "$venv_python" ]; then
+        if ! python3 -m venv "$VENV_DIR"; then
+            echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
+            if command -v apt-get >/dev/null 2>&1; then
+                echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
+            fi
+            exit 1
+        fi
+    fi
+
+    if ! "$venv_python" -m pip install --quiet --upgrade pip; then
         echo "❌ $(t "虚拟环境中的 pip 初始化失败" "Failed to initialize pip inside the virtual environment")"
         exit 1
     fi
 
-    if ! "$VENV_DIR/bin/pip" install --quiet rich httpx tomli-w; then
+    if ! "$venv_python" -m pip install --quiet rich httpx tomli-w; then
         echo "❌ $(t "安装 Python 依赖失败" "Failed to install Python dependencies")"
         exit 1
     fi
@@ -1129,23 +1254,9 @@ PY
 }
 
 print_planned_version() {
-    local planned_ref=""
-    local planned_channel="$INSTALL_CHANNEL"
-
-    if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/mms_core.py" ]; then
-        planned_channel="local-source"
-        if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            planned_ref="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || true)"
-        fi
-        planned_ref="${planned_ref:-local-source}"
-    else
-        resolve_requested_ref
-        planned_ref="$RESOLVED_INSTALL_REF"
-        planned_channel="$INSTALL_CHANNEL"
-    fi
-
-    echo "$(t "计划安装版本" "Planned install ref"): ${planned_ref}"
-    echo "$(t "安装通道" "Install channel"): ${planned_channel}"
+    ensure_install_ref_resolved
+    echo "$(t "计划安装版本" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
+    echo "$(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
 }
 
 run_install_check() {
@@ -2337,8 +2448,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms doctor full"
     echo "    mms test --provider <id> --cli claude"
     echo "    mms test --provider <id> --cli codex"
-    echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。"
-        "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
+    echo "  $(t "含义：--check 看安装是否落好；doctor 看 route/auth/protocol 通不通；test 看实际消息链路。" "Meaning: --check verifies install landing; doctor checks route/auth/protocol reachability; test checks the real message path.")"
 
     if [ "$LAUNCH_AFTER_INSTALL" -eq 1 ] && [ "$DID_LAUNCH" -eq 0 ]; then
         echo ""
