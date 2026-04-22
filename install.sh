@@ -26,6 +26,8 @@ SOURCE_TMP_DIR=""
 INSTALL_REF=""
 RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
+LATEST_TAG_CACHE=""
+LATEST_RELEASE_TAG_CACHE=""
 MINDKEEPER_DEFAULT_REF="${MINDKEEPER_DEFAULT_REF:-v2.2.0}"
 MINDKEEPER_INSTALL_REF="${MINDKEEPER_INSTALL_REF:-}"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
@@ -471,7 +473,16 @@ prompt_optional_install_choices() {
 }
 
 resolve_latest_tag() {
-    python3 - <<'PY'
+    if [ -n "${MMS_INSTALL_LATEST_TAG_OVERRIDE:-}" ]; then
+        printf "%s" "$MMS_INSTALL_LATEST_TAG_OVERRIDE"
+        return 0
+    fi
+    if [ -n "$LATEST_TAG_CACHE" ]; then
+        printf "%s" "$LATEST_TAG_CACHE"
+        return 0
+    fi
+    local resolved_tag=""
+    resolved_tag="$(python3 - <<'PY'
 import json
 import re
 import sys
@@ -504,10 +515,22 @@ if not semver:
 semver.sort(reverse=True)
 print(semver[0][1])
 PY
+)" || return 1
+    LATEST_TAG_CACHE="$resolved_tag"
+    printf "%s" "$resolved_tag"
 }
 
 resolve_latest_release_tag() {
-    python3 - <<'PY'
+    if [ -n "${MMS_INSTALL_LATEST_RELEASE_OVERRIDE:-}" ]; then
+        printf "%s" "$MMS_INSTALL_LATEST_RELEASE_OVERRIDE"
+        return 0
+    fi
+    if [ -n "$LATEST_RELEASE_TAG_CACHE" ]; then
+        printf "%s" "$LATEST_RELEASE_TAG_CACHE"
+        return 0
+    fi
+    local resolved_release_tag=""
+    resolved_release_tag="$(python3 - <<'PY'
 import json
 import sys
 from urllib.request import Request, urlopen
@@ -525,6 +548,9 @@ if not tag:
     sys.exit(1)
 print(tag)
 PY
+)" || return 1
+    LATEST_RELEASE_TAG_CACHE="$resolved_release_tag"
+    printf "%s" "$resolved_release_tag"
 }
 
 download_remote_source() {
@@ -1259,13 +1285,28 @@ print_planned_version() {
     echo "$(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
 }
 
+print_version_overview() {
+    local installed_ref=""
+    local stable_ref=""
+    local latest_tag_ref=""
+
+    ensure_install_ref_resolved
+    installed_ref="$(current_installed_ref || true)"
+    stable_ref="$(resolve_latest_release_tag || true)"
+    latest_tag_ref="$(resolve_latest_tag || true)"
+
+    echo "$(t "版本概览" "Version overview")"
+    echo "  $(t "当前已安装" "Currently installed"): ${installed_ref:-$(t "未安装" "none")}"
+    echo "  $(t "稳定版（latest release）" "Stable release (latest release)"): ${stable_ref:-$(t "未获取" "unavailable")}"
+    echo "  $(t "线上最新（latest tag）" "Latest upstream tag (latest tag)"): ${latest_tag_ref:-$(t "未获取" "unavailable")}"
+    echo "  $(t "本次准备安装" "Planned install ref"): ${RESOLVED_INSTALL_REF:-local-source}"
+    echo "  $(t "安装通道" "Install channel"): ${INSTALL_CHANNEL}"
+}
+
 run_install_check() {
     local node_label=""
-    local installed_ref=""
 
-    print_planned_version
-    installed_ref="$(current_installed_ref || true)"
-    echo "$(t "当前已安装版本" "Currently installed ref"): ${installed_ref:-none}"
+    print_version_overview
 
     if command -v python3 >/dev/null 2>&1; then
         if python_meets_min_version; then
@@ -2210,7 +2251,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ "$PRINT_ONLY_VERSION" -eq 1 ]; then
-    print_planned_version
+    print_version_overview
     exit 0
 fi
 
@@ -2225,6 +2266,8 @@ prompt_optional_install_choices
 echo "===================================="
 echo "  $(t "MMS 一键安装" "MMS one-line installer")"
 echo "===================================="
+echo ""
+print_version_overview
 echo ""
 
 if [ -n "$INSTALL_CLI_LIST" ]; then
