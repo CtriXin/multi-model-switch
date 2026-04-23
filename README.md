@@ -219,6 +219,18 @@ After install:
 - in Claude, use `/ops-env-safe <entry-name>`
 - in Codex, let the `ops-env-safe` skill trigger on path lookup requests
 
+### Bundled Caveman mode
+
+`MMS` now ships a pinned `vendor/caveman` session asset by default. There is no separate `--install-caveman` path because this integration is intentionally session-scoped instead of global-hook install.
+
+After install:
+
+- `MMS`-launched `Claude` and `Codex` can toggle `Caveman` from the launch confirm page
+- the integration uses the bundled `vendor/caveman` asset first, then falls back to explicit `MMS_CAVEMAN_ROOT` or legacy host paths
+- the installer does **not** run Caveman's standalone global hook installer or modify your host `Claude/Codex` config on your behalf
+
+This keeps the shipped behavior reproducible while preserving the existing `Caveman` session toggle inside `MMS`.
+
 ### Install MMS plus selected CLIs
 
 ```bash

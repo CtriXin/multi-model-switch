@@ -158,3 +158,10 @@ def test_install_script_copies_vendor_directory():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert 'copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor"' in text
+
+
+def test_install_script_mentions_bundled_caveman_mode():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "Bundled Caveman session asset" in text
+    assert "Bundled Caveman mode" in text

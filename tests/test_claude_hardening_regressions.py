@@ -217,6 +217,28 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
 
 
+def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypatch, tmp_path):
+    import mms_launchers
+
+    bundled_root = tmp_path / "mms-install" / "vendor" / "caveman"
+    legacy_root = tmp_path / "real-home" / "caveman"
+    for root in (bundled_root, legacy_root):
+        hooks_dir = root / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+        (hooks_dir / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_CAVEMAN_ROOT", raising=False)
+    monkeypatch.setattr(mms_launchers, "__file__", str(tmp_path / "mms-install" / "mms_launchers.py"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str((tmp_path / "real-home").joinpath(*parts)),
+    )
+
+    assert mms_launchers._resolve_caveman_root() == str(bundled_root)
+
+
 def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, tmp_path):
     import mms_launchers
 

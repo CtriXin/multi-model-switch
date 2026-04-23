@@ -2447,7 +2447,12 @@ def _resolve_caveman_root():
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    candidates.append(_real_user_path("caveman"))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
+        _real_user_path("auto-skills", "vendor", "caveman"),
+        _real_user_path("vendor", "caveman"),
+        _real_user_path("caveman"),
+    ])
 
     seen = set()
     for candidate in candidates:

@@ -213,6 +213,7 @@ $(t "说明:" "Notes:")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
   - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
+  - $(t "Caveman mode 现在作为 MMS 内建 session asset 随安装一起提供；MMS 启动的 Claude/Codex 可在确认页切换，无需额外全局安装" "Caveman mode now ships as a bundled MMS session asset; MMS-launched Claude/Codex can toggle it from the confirm page without a separate global install")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -434,6 +435,17 @@ prompt_optional_install_choices() {
                 INSTALL_OPS_ENV_SAFE=1
             fi
         fi
+    fi
+
+    echo ""
+    if [ "$INSTALL_LANG" = "en" ]; then
+        echo "Bundled session mode"
+        echo "  Caveman ships inside MMS as a pinned session asset."
+        echo "  MMS-launched Claude/Codex can toggle it from the launch confirm page without touching your global hooks or config."
+    else
+        echo "内建 session 模式"
+        echo "  Caveman 会随 MMS 一起内建分发为 pinned session asset。"
+        echo "  通过 MMS 启动的 Claude/Codex 可在启动确认页切换，不会改你的全局 hooks 或配置。"
     fi
 
     if [ "$INSTALL_CLI_EXPLICIT" -eq 1 ]; then
@@ -2306,13 +2318,16 @@ if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
 fi
 
-if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
-    echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
-    echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
-fi
+    if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
+        echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
+        echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
+    fi
 
-if [ "$ENSURE_NODE22" -eq 1 ]; then
-    echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
+    echo "• $(t "内建 Caveman session asset" "Bundled Caveman session asset"): on"
+    echo "  $(t "安装后会自带 pinned Caveman 资产；MMS 启动的 Claude/Codex 可在确认页切换，不改全局 hooks/config。" "Install includes a pinned Caveman asset; MMS-launched Claude/Codex can toggle it from the confirm page without changing global hooks/config.")"
+
+    if [ "$ENSURE_NODE22" -eq 1 ]; then
+        echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
 fi
 
 # ── 1. 检查 Python3 ──
@@ -2457,6 +2472,8 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms ls                              $(t "查看可见模型" "list visible models")"
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
+    echo ""
+    echo "  $(t "内建 Caveman 模式：MMS 启动的 Claude/Codex 可在启动确认页按 C 切换；安装不会改全局 hooks/config。" "Bundled Caveman mode: MMS-launched Claude/Codex can toggle it with C on the launch confirm page; install does not change global hooks/config.")"
     echo ""
 
     if [ "$INSTALL_RTK" -eq 1 ]; then
