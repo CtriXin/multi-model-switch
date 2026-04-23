@@ -2985,11 +2985,24 @@ def select_connect_tui():
         return "fallback"
 
 
-def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
-    """确认启动 TUI。返回 (action, bypass, claude_1m_enabled) 三元组。
+def confirm_tui(
+    cli,
+    model_info,
+    env_vars=None,
+    once=False,
+    context_lines=None,
+    *,
+    has_caveman=False,
+    caveman_enabled_default=False,
+    has_ecc=False,
+    ecc_enabled_default=False,
+):
+    """确认启动 TUI。返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled) 五元组。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
+    caveman_enabled: bool，仅 codex/claude 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+    ecc_enabled: bool，仅 Claude 国产模型且 ECC 可用时有效，True 时本次会话开启 ECC
     """
     def _supports_claude_1m_toggle(info):
         values = []
@@ -3069,6 +3082,8 @@ def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
 
         bypass_mode = True
         claude_1m_mode = False
+        caveman_mode = bool(has_caveman and caveman_enabled_default)
+        ecc_mode = bool(has_ecc and ecc_enabled_default)
 
         while True:
             stdscr.erase()
@@ -3085,6 +3100,12 @@ def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
             if has_claude_1m:
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
                 info_lines.append(("1M", f"[M] {one_m_text}"))
+            if has_caveman:
+                caveman_text = _L("开启", "On") if caveman_mode else _L("关闭", "Off")
+                info_lines.append(("Caveman", f"[C] {caveman_text}"))
+            if has_ecc:
+                ecc_text = _L("开启", "On") if ecc_mode else _L("关闭", "Off")
+                info_lines.append(("ECC", f"[E] {ecc_text}"))
 
             px = (max_w - total_w) // 2
             ll = px + 2
@@ -3117,6 +3138,10 @@ def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
             for label, value_lines in wrapped_info_lines:
                 if label in {"Bypass"}:
                     val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
+                elif label == "Caveman":
+                    val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
+                elif label == "ECC":
+                    val_attr = curses.color_pair(5) | curses.A_BOLD if ecc_mode else curses.color_pair(4)
                 else:
                     val_attr = curses.color_pair(1)
                 for idx, value in enumerate(value_lines):
@@ -3145,6 +3170,10 @@ def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
                 footer_items.append(("Tab", _L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_BOLD, curses.color_pair(4) | curses.A_DIM))
             if has_claude_1m:
                 footer_items.append(("M", _L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+            if has_caveman:
+                footer_items.append(("C", _L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+            if has_ecc:
+                footer_items.append(("E", _L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
             footer_items.extend([
                 ("B", _L("返回", "Back"), curses.A_BOLD, curses.A_DIM),
                 ("Q", _L("取消", "Cancel"), curses.A_BOLD, curses.A_DIM),
@@ -3166,20 +3195,24 @@ def confirm_tui(cli, model_info, env_vars=None, once=False, context_lines=None):
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode)
+                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode)
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False)
+                return ("b", False, False, False, False)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False)
+                return ("q", False, False, False, False)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (ord('m'), ord('M')) and has_claude_1m:
                 claude_1m_mode = not claude_1m_mode
+            elif key in (ord('c'), ord('C')) and has_caveman:
+                caveman_mode = not caveman_mode
+            elif key in (ord('e'), ord('E')) and has_ecc:
+                ecc_mode = not ecc_mode
 
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False, False)
+        return ("q", False, False, False, False)
 
 
 # ── Reasoning effort 选择 TUI ────────────────────────────────────

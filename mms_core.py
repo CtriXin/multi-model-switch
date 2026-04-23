@@ -412,6 +412,8 @@ MODEL_FAMILIES = [
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
 ]
+DOMESTIC_MODEL_FAMILIES = {"Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
+DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
 
 
 def _infer_model_family(model_name):
@@ -429,6 +431,30 @@ def _infer_model_family(model_name):
             if any(kw in candidate for kw in entry["keywords"]):
                 return entry["family"], entry["category"]
     return "其他", "其他"
+
+
+def _model_info_looks_domestic(model_info):
+    values = []
+    if isinstance(model_info, dict):
+        primary = str(model_info.get("model") or "").strip()
+        if primary:
+            values.append(primary)
+        values.extend(
+            str(value or "").strip()
+            for key, value in model_info.items()
+            if key not in {"subagent", "model"} and str(value or "").strip()
+        )
+    else:
+        values.append(str(model_info or "").strip())
+
+    for value in values:
+        lower = value.lower()
+        family, _ = _infer_model_family(value)
+        if family in DOMESTIC_MODEL_FAMILIES:
+            return True
+        if any(keyword in lower for keyword in DOMESTIC_MODEL_KEYWORDS):
+            return True
+    return False
 
 
 _MMS_HIDDEN_MODEL_FAMILIES = set()
@@ -7207,7 +7233,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
-    from mms_launchers import launch_cli, get_export_env
+    from mms_launchers import _caveman_available_for_cli, _ecc_available_for_claude, launch_cli, get_export_env
 
     def _safe_tui_call(fn, *args, **kwargs):
         try:
@@ -7675,6 +7701,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     "no_proxy_conflicts": [],
                 }
         context_lines = _confirm_context_lines(cli, runtime_runtime)
+        has_caveman = _caveman_available_for_cli(cli)
+        has_ecc = (
+            cli == "claude"
+            and _ecc_available_for_claude()
+            and _model_info_looks_domestic(clean_model_info)
+        )
         result = _safe_tui_call(
             confirm_tui,
             cli,
@@ -7682,17 +7714,30 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             env_vars=env_vars,
             once=once,
             context_lines=context_lines,
+            has_caveman=has_caveman,
+            caveman_enabled_default=has_caveman,
+            has_ecc=has_ecc,
+            ecc_enabled_default=has_ecc,
         )
         if result == "__interrupt__":
             return True
         if isinstance(result, tuple):
-            if len(result) >= 3:
+            if len(result) >= 5:
+                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
+            elif len(result) >= 4:
+                action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
+                ecc_enabled = False
+            elif len(result) >= 3:
                 action, bypass, claude_1m_enabled = result[:3]
+                caveman_enabled = False
+                ecc_enabled = False
             else:
                 action, bypass = result[:2]
                 claude_1m_enabled = False
+                caveman_enabled = False
+                ecc_enabled = False
         else:
-            action, bypass, claude_1m_enabled = result, False, False
+            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result, False, False, False, False
         if action == "q":
             return True
         if action == "b":
@@ -7707,6 +7752,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 )
         if cli == "claude":
             runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
+            runtime_runtime["ecc_mode"] = "enable" if ecc_enabled else "disable"
+        if cli in {"claude", "codex"}:
+            runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 

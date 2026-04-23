@@ -155,6 +155,524 @@ def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claud
     assert "mcpServers" not in result
 
 
+def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkeypatch, tmp_path):
+    import mms_launchers
+
+    caveman_root = tmp_path / "caveman"
+    hooks_dir = caveman_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (hooks_dir / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    base_settings = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": 'node "/global/caveman-activate.js"'},
+                        {"type": "command", "command": "/tmp/keep-session-start.sh"},
+                    ]
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": 'node "/global/caveman-mode-tracker.js"'},
+                    ]
+                }
+            ],
+        }
+    }
+
+    disabled = mms_launchers._build_claude_session_settings(
+        base_settings,
+        enable_caveman=False,
+    )
+    assert disabled["hooks"]["SessionStart"][0]["hooks"] == [
+        {"type": "command", "command": "/tmp/keep-session-start.sh"},
+    ]
+    assert "UserPromptSubmit" not in disabled["hooks"]
+
+    enabled = mms_launchers._build_claude_session_settings(
+        base_settings,
+        enable_caveman=True,
+    )
+    session_start_commands = [
+        item["command"]
+        for group in enabled["hooks"]["SessionStart"]
+        for item in group["hooks"]
+    ]
+    user_prompt_commands = [
+        item["command"]
+        for group in enabled["hooks"]["UserPromptSubmit"]
+        for item in group["hooks"]
+    ]
+    assert "/tmp/keep-session-start.sh" in session_start_commands
+    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in session_start_commands
+    assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
+
+
+def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, tmp_path):
+    import mms_launchers
+
+    caveman_root = tmp_path / "caveman"
+    hooks_dir = caveman_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (hooks_dir / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+    codex_dir = caveman_root / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "matcher": "startup|resume",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo 'CAVEMAN MODE ACTIVE. session default'",
+                                    "timeout": 5,
+                                    "statusMessage": "Loading caveman mode",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
+    base_hooks = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/notify.sh"},
+                    ]
+                },
+                {
+                    "matcher": "startup|resume",
+                    "hooks": [
+                        {"type": "command", "command": "echo 'CAVEMAN MODE ACTIVE. global default'"},
+                    ],
+                },
+            ]
+        }
+    }
+
+    disabled = mms_launchers._build_codex_session_hooks(
+        base_hooks,
+        enable_caveman=False,
+    )
+    disabled_groups = disabled["hooks"]["SessionStart"]
+    assert disabled_groups == [
+        {
+            "hooks": [
+                {"type": "command", "command": "/tmp/notify.sh"},
+            ]
+        }
+    ]
+
+    enabled = mms_launchers._build_codex_session_hooks(
+        base_hooks,
+        enable_caveman=True,
+    )
+    enabled_groups = enabled["hooks"]["SessionStart"]
+    enabled_commands = [
+        item["command"]
+        for group in enabled_groups
+        for item in group["hooks"]
+    ]
+    assert "/tmp/notify.sh" in enabled_commands
+    assert "echo 'CAVEMAN MODE ACTIVE. session default'" in enabled_commands
+    assert enabled_commands.count("echo 'CAVEMAN MODE ACTIVE. session default'") == 1
+
+
+def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    parent_dir = session_home / ".claude"
+    parent_dir.mkdir(parents=True)
+    global_assets = tmp_path / "global-assets"
+    (global_assets / "commands").mkdir(parents=True)
+    (global_assets / "skills").mkdir()
+    (global_assets / "commands" / "keep.toml").write_text("keep = true\n", encoding="utf-8")
+    (global_assets / "skills" / "keep-skill").mkdir()
+    os.symlink(global_assets / "commands", parent_dir / "commands")
+    os.symlink(global_assets / "skills", parent_dir / "skills")
+
+    caveman_root = tmp_path / "caveman"
+    (caveman_root / "commands").mkdir(parents=True)
+    (caveman_root / "skills" / "caveman").mkdir(parents=True)
+    (caveman_root / "commands" / "caveman.toml").write_text("name = 'caveman'\n", encoding="utf-8")
+    (caveman_root / "skills" / "caveman" / "SKILL.md").write_text("# caveman\n", encoding="utf-8")
+    (caveman_root / "hooks").mkdir()
+    (caveman_root / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (caveman_root / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
+
+    mms_launchers._overlay_caveman_session_entries(
+        str(parent_dir),
+        str(session_home),
+        enable_caveman=True,
+    )
+
+    assert os.path.islink(parent_dir / "commands")
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "commands" / "keep.toml")
+    assert os.path.islink(parent_dir / "commands" / "caveman.toml")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "caveman")
+
+
+def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    real_codex.mkdir(parents=True)
+    (real_codex / "config.toml").write_text('base_url = "https://api.example.com"\n', encoding="utf-8")
+    (real_codex / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {"type": "command", "command": "/tmp/notify.sh"},
+                            ]
+                        },
+                        {
+                            "matcher": "startup|resume",
+                            "hooks": [
+                                {"type": "command", "command": "echo 'CAVEMAN MODE ACTIVE. global default'"},
+                            ],
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (real_codex / "commands").mkdir()
+    (real_codex / "commands" / "keep.toml").write_text("keep = true\n", encoding="utf-8")
+    (real_codex / "skills").mkdir()
+    (real_codex / "skills" / "keep-skill").mkdir()
+
+    caveman_root = tmp_path / "caveman"
+    (caveman_root / "hooks").mkdir(parents=True)
+    (caveman_root / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (caveman_root / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+    (caveman_root / ".codex").mkdir()
+    (caveman_root / ".codex" / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "matcher": "startup|resume",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo 'CAVEMAN MODE ACTIVE. session default'",
+                                    "timeout": 5,
+                                    "statusMessage": "Loading caveman mode",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (caveman_root / "commands").mkdir()
+    (caveman_root / "commands" / "caveman.toml").write_text("name = 'caveman'\n", encoding="utf-8")
+    (caveman_root / "skills" / "caveman").mkdir(parents=True)
+    (caveman_root / "skills" / "caveman" / "SKILL.md").write_text("# caveman\n", encoding="utf-8")
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    env = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime", "caveman_mode": "enable"},
+        "https://relay.example.com",
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    hooks_payload = json.loads((session_codex / "hooks.json").read_text(encoding="utf-8"))
+    commands = [
+        item["command"]
+        for group in hooks_payload["hooks"]["SessionStart"]
+        for item in group["hooks"]
+    ]
+    assert "/tmp/notify.sh" in commands
+    assert "echo 'CAVEMAN MODE ACTIVE. session default'" in commands
+    assert os.path.islink(session_codex / "commands")
+    assert os.path.islink(session_codex / "skills")
+    assert os.path.islink(session_codex / "commands" / "keep.toml")
+    assert os.path.islink(session_codex / "commands" / "caveman.toml")
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "caveman")
+
+
+def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(monkeypatch, tmp_path):
+    import mms_launchers
+
+    ecc_root = tmp_path / "everything-claude-code"
+    (ecc_root / "hooks").mkdir(parents=True)
+    (ecc_root / "commands").mkdir()
+    (ecc_root / "skills").mkdir()
+    (ecc_root / "hooks" / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {"type": "command", "command": "node scripts/hooks/session-start-bootstrap.js"},
+                            ],
+                        }
+                    ],
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [
+                                {"type": "command", "command": "node scripts/hooks/pre-bash-dispatcher.js"},
+                            ],
+                        }
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MMS_ECC_ROOT", str(ecc_root))
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    base_settings = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "node /tmp/everything-claude-code/scripts/hooks/session-start-bootstrap.js"},
+                        {"type": "command", "command": "/tmp/keep-session-start.sh"},
+                    ]
+                }
+            ],
+        },
+        "env": {
+            "CLAUDE_PLUGIN_ROOT": "/tmp/old-ecc",
+            "ECC_PLUGIN_ROOT": "/tmp/old-ecc",
+            "ECC_HOOK_PROFILE": "strict",
+        },
+    }
+
+    disabled = mms_launchers._build_claude_session_settings(
+        base_settings,
+        enable_ecc=False,
+        default_env={"KEEP_ME": "1"},
+    )
+    disabled_commands = [
+        item["command"]
+        for group in disabled["hooks"]["SessionStart"]
+        for item in group["hooks"]
+    ]
+    assert disabled_commands == ["/tmp/keep-session-start.sh"]
+    assert "CLAUDE_PLUGIN_ROOT" not in disabled["env"]
+    assert "ECC_PLUGIN_ROOT" not in disabled["env"]
+    assert "ECC_HOOK_PROFILE" not in disabled["env"]
+    assert disabled["env"]["KEEP_ME"] == "1"
+
+    enabled = mms_launchers._build_claude_session_settings(
+        base_settings,
+        enable_ecc=True,
+        default_env={"KEEP_ME": "1"},
+    )
+    enabled_session_start = [
+        item["command"]
+        for group in enabled["hooks"]["SessionStart"]
+        for item in group["hooks"]
+    ]
+    enabled_pretool = [
+        item["command"]
+        for group in enabled["hooks"]["PreToolUse"]
+        for item in group["hooks"]
+    ]
+    assert "/tmp/keep-session-start.sh" in enabled_session_start
+    assert "node scripts/hooks/session-start-bootstrap.js" in enabled_session_start
+    assert "node scripts/hooks/pre-bash-dispatcher.js" in enabled_pretool
+    assert enabled["env"]["CLAUDE_PLUGIN_ROOT"] == str(ecc_root)
+    assert enabled["env"]["ECC_PLUGIN_ROOT"] == str(ecc_root)
+    assert enabled["env"]["ECC_HOOK_PROFILE"] == "standard"
+    assert enabled["env"]["KEEP_ME"] == "1"
+
+
+def test_overlay_ecc_session_entries_merges_session_and_ecc_assets(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    parent_dir = session_home / ".claude"
+    parent_dir.mkdir(parents=True)
+    global_assets = tmp_path / "global-assets"
+    (global_assets / "commands").mkdir(parents=True)
+    (global_assets / "skills").mkdir()
+    (global_assets / "commands" / "keep.md").write_text("keep\n", encoding="utf-8")
+    (global_assets / "skills" / "keep-skill").mkdir()
+    os.symlink(global_assets / "commands", parent_dir / "commands")
+    os.symlink(global_assets / "skills", parent_dir / "skills")
+
+    ecc_root = tmp_path / "everything-claude-code"
+    (ecc_root / "hooks").mkdir(parents=True)
+    (ecc_root / "hooks" / "hooks.json").write_text('{"hooks":{}}', encoding="utf-8")
+    (ecc_root / "commands").mkdir()
+    (ecc_root / "commands" / "feature-development.md").write_text("# feature\n", encoding="utf-8")
+    (ecc_root / "skills" / "core-skill").mkdir(parents=True)
+    (ecc_root / "skills" / "core-skill" / "SKILL.md").write_text("# core\n", encoding="utf-8")
+    (ecc_root / ".agents" / "skills" / "agent-skill").mkdir(parents=True)
+    (ecc_root / ".agents" / "skills" / "agent-skill" / "SKILL.md").write_text("# agent\n", encoding="utf-8")
+    (ecc_root / ".claude" / "skills" / "ecc-meta").mkdir(parents=True)
+    (ecc_root / ".claude" / "skills" / "ecc-meta" / "SKILL.md").write_text("# meta\n", encoding="utf-8")
+    (ecc_root / ".claude" / "commands").mkdir(parents=True)
+    (ecc_root / ".claude" / "commands" / "feature-development.md").write_text("# claude cmd\n", encoding="utf-8")
+    (ecc_root / "rules" / "common").mkdir(parents=True)
+    (ecc_root / "rules" / "common" / "hooks.md").write_text("# hooks\n", encoding="utf-8")
+    (ecc_root / ".claude" / "rules").mkdir(parents=True)
+    (ecc_root / ".claude" / "rules" / "everything-claude-code-guardrails.md").write_text("# guardrails\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_ECC_ROOT", str(ecc_root))
+
+    mms_launchers._overlay_ecc_session_entries(
+        str(parent_dir),
+        str(session_home),
+        enable_ecc=True,
+    )
+
+    assert os.path.islink(parent_dir / "commands")
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "rules")
+    assert os.path.islink(parent_dir / "commands" / "keep.md")
+    assert os.path.islink(parent_dir / "commands" / "feature-development.md")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "core-skill")
+    assert os.path.islink(parent_dir / "skills" / "agent-skill")
+    assert os.path.islink(parent_dir / "skills" / "ecc-meta")
+    assert os.path.islink(parent_dir / "rules" / "common")
+    assert os.path.islink(parent_dir / "rules" / "everything-claude-code-guardrails.md")
+
+
+def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    ecc_root = tmp_path / "everything-claude-code"
+    (ecc_root / "hooks").mkdir(parents=True)
+    (ecc_root / "hooks" / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {"type": "command", "command": "node scripts/hooks/session-start-bootstrap.js"},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ecc_root / "commands").mkdir()
+    (ecc_root / "commands" / "feature-development.md").write_text("# feature\n", encoding="utf-8")
+    (ecc_root / "skills" / "core-skill").mkdir(parents=True)
+    (ecc_root / "skills" / "core-skill" / "SKILL.md").write_text("# core\n", encoding="utf-8")
+    (ecc_root / "rules" / "common").mkdir(parents=True)
+    (ecc_root / "rules" / "common" / "hooks.md").write_text("# hooks\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_ECC_ROOT", str(ecc_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _home, claude_dir, **_kwargs: os.makedirs(claude_dir, exist_ok=True),
+    )
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "kimi-for-coding")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime", "ecc_mode": "enable"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    assert env["CLAUDE_PLUGIN_ROOT"] == str(ecc_root)
+    assert env["ECC_PLUGIN_ROOT"] == str(ecc_root)
+    assert env["ECC_HOOK_PROFILE"] == "standard"
+    settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings["env"]["CLAUDE_PLUGIN_ROOT"] == str(ecc_root)
+    assert settings["env"]["ECC_PLUGIN_ROOT"] == str(ecc_root)
+    session_start_commands = [
+        item["command"]
+        for group in settings["hooks"]["SessionStart"]
+        for item in group["hooks"]
+    ]
+    assert "node scripts/hooks/session-start-bootstrap.js" in session_start_commands
+    assert os.path.islink(session_home / ".claude" / "commands" / "feature-development.md")
+    assert os.path.islink(session_home / ".claude" / "skills" / "core-skill")
+    assert os.path.islink(session_home / ".claude" / "rules" / "common")
+
+
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
     import mms_launchers
 

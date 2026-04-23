@@ -2360,6 +2360,51 @@ def _append_command_hook(hooks_data, event_name, command_path, matcher=None):
     return merged
 
 
+def _append_shell_command_hook(
+    hooks_data,
+    event_name,
+    command_text,
+    *,
+    matcher=None,
+    timeout=None,
+    status_message=None,
+):
+    command_text = str(command_text or "").strip()
+    if not command_text:
+        return hooks_data
+
+    merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
+    event_groups = list(merged.get(event_name) or [])
+    target_matcher = str(matcher or "").strip()
+    hook_payload = {"type": "command", "command": command_text}
+    if timeout is not None:
+        hook_payload["timeout"] = timeout
+    if status_message:
+        hook_payload["statusMessage"] = str(status_message)
+
+    for group in event_groups:
+        if not isinstance(group, dict):
+            continue
+        existing_matcher = str(group.get("matcher") or "").strip() if matcher is not None else ""
+        if existing_matcher != target_matcher:
+            continue
+        hook_items = group.get("hooks")
+        if _hook_command_exists(hook_items, command_text):
+            merged[event_name] = event_groups
+            return merged
+        if isinstance(hook_items, list):
+            hook_items.append(dict(hook_payload))
+            merged[event_name] = event_groups
+            return merged
+
+    new_group = {"hooks": [dict(hook_payload)]}
+    if matcher is not None:
+        new_group["matcher"] = matcher
+    event_groups.append(new_group)
+    merged[event_name] = event_groups
+    return merged
+
+
 def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     hooks_data = _merge_claude_hooks(existing_hooks, template_hooks)
     hooks_data = _append_command_hook(
@@ -2376,6 +2421,353 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
     if not allow_execution_surfaces:
         return {}
     return hooks_data
+
+
+def _caveman_available_for_cli(cli_name):
+    return str(cli_name or "").strip() in {"claude", "codex"} and bool(_resolve_caveman_root())
+
+
+def _normalize_caveman_mode(value, default="disable"):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in {"auto", "enable", "disable"} else "disable"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in {"auto", "enable", "disable"} else "disable"
+
+
+def _runtime_caveman_enabled(runtime):
+    return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
+
+
+def _resolve_caveman_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.append(_real_user_path("caveman"))
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        activate = os.path.join(candidate, "hooks", "caveman-activate.js")
+        tracker = os.path.join(candidate, "hooks", "caveman-mode-tracker.js")
+        if os.path.isfile(activate) and os.path.isfile(tracker):
+            return candidate
+    return ""
+
+
+def _ecc_available_for_claude():
+    return bool(_resolve_ecc_root())
+
+
+def _normalize_ecc_mode(value, default="disable"):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in {"auto", "enable", "disable"} else "disable"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in {"auto", "enable", "disable"} else "disable"
+
+
+def _runtime_ecc_enabled(runtime):
+    return _normalize_ecc_mode((runtime or {}).get("ecc_mode", "disable")) == "enable"
+
+
+def _resolve_ecc_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_ECC_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path("auto-skills", "vendor", "everything-claude-code"),
+        _real_user_path("vendor", "everything-claude-code"),
+        _real_user_path("everything-claude-code"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        hooks_path = os.path.join(candidate, "hooks", "hooks.json")
+        commands_dir = os.path.join(candidate, "commands")
+        skills_dir = os.path.join(candidate, "skills")
+        if os.path.isfile(hooks_path) and os.path.isdir(commands_dir) and os.path.isdir(skills_dir):
+            return candidate
+    return ""
+
+
+def _is_caveman_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "caveman-activate.js",
+        "caveman-mode-tracker.js",
+        "caveman mode active",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _is_ecc_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "plugin-hook-bootstrap.js",
+        "run-with-flags.js",
+        "run-with-flags-shell.sh",
+        "session-start-bootstrap.js",
+        "pre-bash-dispatcher.js",
+        "post-bash-dispatcher.js",
+        "quality-gate.js",
+        "stop-format-typecheck.js",
+        "continuous-learning-v2/hooks/observe.sh",
+        "everything-claude-code",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _filter_hook_commands(hooks_data, predicate):
+    hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
+    filtered = {}
+    for event_name, groups in hooks_data.items():
+        if not isinstance(groups, list):
+            continue
+        kept_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                kept_groups.append(group)
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                kept_groups.append(dict(group))
+                continue
+            kept_hooks = []
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    kept_hooks.append(hook)
+                    continue
+                if (
+                    str(hook.get("type") or "").strip() == "command"
+                    and predicate(str(hook.get("command") or ""))
+                ):
+                    continue
+                kept_hooks.append(dict(hook))
+            if not kept_hooks and hook_items:
+                continue
+            next_group = dict(group)
+            next_group["hooks"] = kept_hooks
+            kept_groups.append(next_group)
+        if kept_groups:
+            filtered[event_name] = kept_groups
+    return filtered
+
+
+def _caveman_claude_activate_command(caveman_root):
+    script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
+    return f"node {json.dumps(script_path)}"
+
+
+def _caveman_claude_tracker_command(caveman_root):
+    script_path = os.path.join(caveman_root, "hooks", "caveman-mode-tracker.js")
+    return f"node {json.dumps(script_path)}"
+
+
+def _caveman_codex_hook_payload(caveman_root):
+    hooks_path = os.path.join(caveman_root, ".codex", "hooks.json")
+    try:
+        with open(hooks_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        for group in ((payload.get("hooks") or {}).get("SessionStart") or []):
+            if str(group.get("matcher") or "").strip() != "startup|resume":
+                continue
+            for hook in group.get("hooks") or []:
+                if not isinstance(hook, dict):
+                    continue
+                command = str(hook.get("command") or "").strip()
+                if command:
+                    return dict(hook)
+    except Exception:
+        pass
+    return {
+        "type": "command",
+        "command": (
+            "echo 'CAVEMAN MODE ACTIVE. Rules: Drop articles/filler/pleasantries/hedging. "
+            "Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step]. "
+            "Not: Sure! I would be happy to help you with that. Yes: Bug in auth middleware. "
+            "Fix: Code/commits/security: write normal. User says stop caveman or normal mode to deactivate.'"
+        ),
+        "timeout": 5,
+        "statusMessage": "Loading caveman mode",
+    }
+
+
+def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
+    if not enable_caveman:
+        return hooks_data
+    caveman_root = _resolve_caveman_root()
+    if not caveman_root:
+        return hooks_data
+    hooks_data = _append_shell_command_hook(
+        hooks_data,
+        "SessionStart",
+        _caveman_claude_activate_command(caveman_root),
+        timeout=5,
+        status_message="Loading caveman mode...",
+    )
+    hooks_data = _append_shell_command_hook(
+        hooks_data,
+        "UserPromptSubmit",
+        _caveman_claude_tracker_command(caveman_root),
+        timeout=5,
+        status_message="Tracking caveman mode...",
+    )
+    return hooks_data
+
+
+def _load_ecc_claude_hooks():
+    ecc_root = _resolve_ecc_root()
+    if not ecc_root:
+        return {}
+    hooks_path = os.path.join(ecc_root, "hooks", "hooks.json")
+    try:
+        with open(hooks_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        hooks_data = payload.get("hooks")
+        return copy.deepcopy(hooks_data) if isinstance(hooks_data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_ecc_hook_command)
+    if not enable_ecc:
+        return hooks_data
+    ecc_hooks = _load_ecc_claude_hooks()
+    if not ecc_hooks:
+        return hooks_data
+    return _merge_claude_hooks(hooks_data, ecc_hooks)
+
+
+def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False):
+    payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
+    hooks_data = _filter_hook_commands(payload.get("hooks"), _is_caveman_hook_command)
+    if enable_caveman:
+        caveman_root = _resolve_caveman_root()
+        if caveman_root:
+            hook_payload = _caveman_codex_hook_payload(caveman_root)
+            hooks_data = _append_shell_command_hook(
+                hooks_data,
+                "SessionStart",
+                hook_payload.get("command"),
+                matcher="startup|resume",
+                timeout=hook_payload.get("timeout"),
+                status_message=hook_payload.get("statusMessage"),
+            )
+    if hooks_data:
+        payload["hooks"] = hooks_data
+    else:
+        payload.pop("hooks", None)
+    return payload
+
+
+def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root):
+    extra_source_root = str(extra_source_root or "").strip()
+    if not extra_source_root:
+        return False
+    extra_dir = os.path.join(extra_source_root, entry_name)
+    if not os.path.isdir(extra_dir):
+        return False
+
+    dst = os.path.join(parent_dir, entry_name)
+    merged_dir = os.path.join(overlay_root, entry_name)
+    os.makedirs(merged_dir, exist_ok=True)
+
+    def _merge_dir(src_dir):
+        src_dir = str(src_dir or "").strip()
+        if not src_dir or not os.path.isdir(src_dir):
+            return
+        try:
+            if os.path.samefile(src_dir, merged_dir):
+                return
+        except Exception:
+            pass
+        for item in os.listdir(src_dir):
+            src = os.path.join(src_dir, item)
+            link = os.path.join(merged_dir, item)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            os.symlink(src, link)
+
+    if os.path.exists(dst) or os.path.islink(dst):
+        _merge_dir(os.path.realpath(dst))
+    _merge_dir(extra_dir)
+    if not os.listdir(merged_dir):
+        return False
+    if os.path.islink(dst):
+        os.unlink(dst)
+    elif os.path.isdir(dst):
+        shutil.rmtree(dst)
+    elif os.path.exists(dst):
+        os.unlink(dst)
+    os.symlink(merged_dir, dst)
+    return True
+
+
+def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False):
+    if not enable_caveman:
+        return
+    caveman_root = _resolve_caveman_root()
+    if not caveman_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-caveman-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    for entry_name in ("commands", "skills"):
+        _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, caveman_root)
+
+
+def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False):
+    if not enable_ecc:
+        return
+    ecc_root = _resolve_ecc_root()
+    if not ecc_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-ecc-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    for source_root, entry_name in (
+        (os.path.join(ecc_root, ".claude"), "commands"),
+        (ecc_root, "commands"),
+        (os.path.join(ecc_root, ".claude"), "skills"),
+        (os.path.join(ecc_root, ".agents"), "skills"),
+        (ecc_root, "skills"),
+        (os.path.join(ecc_root, ".claude"), "rules"),
+        (ecc_root, "rules"),
+    ):
+        _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, source_root)
+
+
+def _configure_ecc_session_env(env_data, *, enable_ecc=False):
+    merged = dict(env_data) if isinstance(env_data, dict) else {}
+    for key in ("CLAUDE_PLUGIN_ROOT", "ECC_PLUGIN_ROOT", "ECC_HOOK_PROFILE", "ECC_DISABLED_HOOKS"):
+        merged.pop(key, None)
+    if not enable_ecc:
+        return merged
+    ecc_root = _resolve_ecc_root()
+    if not ecc_root:
+        return merged
+    merged["CLAUDE_PLUGIN_ROOT"] = ecc_root
+    merged["ECC_PLUGIN_ROOT"] = ecc_root
+    merged.setdefault("ECC_HOOK_PROFILE", "standard")
+    return merged
 
 
 def _session_required_env_from_runtime_env(env):
@@ -3123,6 +3515,8 @@ def _build_claude_session_settings(
     required_env=None,
     default_env=None,
     allow_execution_surfaces=True,
+    enable_caveman=False,
+    enable_ecc=False,
 ):
     template_settings = _load_mms_claude_settings_template()
     inherited_settings = _sanitize_claude_inherited_settings_payload(
@@ -3146,6 +3540,14 @@ def _build_claude_session_settings(
         ),
         allow_execution_surfaces=allow_execution_surfaces,
     )
+    hooks = _configure_claude_caveman_hooks(
+        hooks,
+        enable_caveman=bool(enable_caveman and allow_execution_surfaces),
+    )
+    hooks = _configure_claude_ecc_hooks(
+        hooks,
+        enable_ecc=bool(enable_ecc and allow_execution_surfaces),
+    )
     if hooks:
         settings_data["hooks"] = hooks
     else:
@@ -3162,7 +3564,10 @@ def _build_claude_session_settings(
             merged_env.setdefault(key, value)
     if isinstance(required_env, dict):
         merged_env.update(required_env)
-    settings_data["env"] = merged_env
+    settings_data["env"] = _configure_ecc_session_env(
+        merged_env,
+        enable_ecc=bool(enable_ecc and allow_execution_surfaces),
+    )
 
     if managed_mcp_servers:
         settings_data["mcpServers"] = managed_mcp_servers
@@ -3202,6 +3607,8 @@ def _write_claude_session_settings(
     default_env=None,
     base_settings=None,
     allow_execution_surfaces=True,
+    enable_caveman=False,
+    enable_ecc=False,
 ):
     import json as _json
 
@@ -3214,6 +3621,8 @@ def _write_claude_session_settings(
         required_env=required_env,
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
+        enable_caveman=enable_caveman,
+        enable_ecc=enable_ecc,
     )
     settings_path = os.path.join(session_claude_dir, "settings.json")
     with locked_state_file(settings_path):
@@ -4889,6 +5298,8 @@ def _claude_gateway_env(
     effective_token = auth_token or runtime["api_key"]
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
+    enable_caveman = _runtime_caveman_enabled(runtime)
+    enable_ecc = _runtime_ecc_enabled(runtime)
     sensitive_provider = _runtime_is_sensitive_claude_provider(runtime)
     # 启动首帧优先写本次选中的真实模型名，避免 statusline / 初始 active model
     # 先落到 slot 占位名；bridge 仍负责把请求路由到实际目标模型。
@@ -4933,6 +5344,18 @@ def _claude_gateway_env(
         gw_claude_dir,
         required_env=required_settings_env,
         default_env=default_settings_env,
+        enable_caveman=enable_caveman,
+        enable_ecc=enable_ecc,
+    )
+    _overlay_caveman_session_entries(
+        gw_claude_dir,
+        gateway_home,
+        enable_caveman=enable_caveman,
+    )
+    _overlay_ecc_session_entries(
+        gw_claude_dir,
+        gateway_home,
+        enable_ecc=enable_ecc,
     )
 
     env = os.environ.copy()
@@ -4957,6 +5380,7 @@ def _claude_gateway_env(
         env["ANTHROPIC_MODEL"] = display_model
     if not sensitive_provider:
         env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
+    env = _configure_ecc_session_env(env, enable_ecc=enable_ecc)
     _apply_runtime_network_profile(
         env,
         runtime,
@@ -5031,6 +5455,7 @@ def _codex_gateway_env(runtime, base_url):
     auth_path = os.path.join(codex_dir, "auth.json")
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
+    enable_caveman = _runtime_caveman_enabled(runtime)
 
     def _set_top_level_scalar(text, key, value):
         import re
@@ -5216,10 +5641,24 @@ def _codex_gateway_env(runtime, base_url):
         except Exception:
             pass
 
-    # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
     real_codex_dir = _real_user_path(".codex")
+    real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
+    if enable_caveman or os.path.exists(real_hooks_path):
+        try:
+            with open(real_hooks_path, "r", encoding="utf-8") as f:
+                base_hooks = _json.load(f)
+        except Exception:
+            base_hooks = {}
+        session_hooks = _build_codex_session_hooks(
+            base_hooks,
+            enable_caveman=enable_caveman,
+        )
+        hooks_path = os.path.join(codex_dir, "hooks.json")
+        atomic_write_json(hooks_path, session_hooks, mode=0o600)
+
+    # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
     if os.path.isdir(real_codex_dir):
-        skip = {"auth.json", "config.toml"}
+        skip = {"auth.json", "config.toml", "hooks.json"}
         for entry in os.listdir(real_codex_dir):
             if entry in skip:
                 continue
@@ -5227,6 +5666,11 @@ def _codex_gateway_env(runtime, base_url):
             dst = os.path.join(codex_dir, entry)
             if not os.path.exists(dst) and not os.path.islink(dst):
                 os.symlink(src, dst)
+    _overlay_caveman_session_entries(
+        codex_dir,
+        session_home,
+        enable_caveman=enable_caveman,
+    )
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
