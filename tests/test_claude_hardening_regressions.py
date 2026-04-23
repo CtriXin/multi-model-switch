@@ -2108,6 +2108,133 @@ def test_forward_as_responses_retries_on_generic_403_permission_denied(monkeypat
     assert handler.server._gpt_last_response_id == "resp-new"
 
 
+def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypatch):
+    import mms_bridge
+
+    def fake_build_codex_payload(*_args, incremental_messages=None, **_kwargs):
+        return {
+            "model": "gpt-5.4",
+            "input": list(incremental_messages or []),
+            "instructions": "hello",
+            "stream": True,
+        }
+
+    class FakeResponse:
+        headers = {}
+
+        def __init__(self, status_code, body=""):
+            self.status_code = status_code
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body.encode("utf-8")
+
+    monkeypatch.setattr(mms_bridge, "_build_codex_payload", fake_build_codex_payload)
+    monkeypatch.setattr(
+        mms_bridge,
+        "httpx",
+        types.SimpleNamespace(
+            stream=lambda *_args, **_kwargs: FakeResponse(
+                403,
+                '{"error":{"type":"<nil>","message":"Permission denied","request_id":"req-2"}}',
+            )
+        ),
+    )
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.server = types.SimpleNamespace(
+        _gpt_last_response_id=None,
+        reasoning_effort="high",
+        bridge_token="bridge-token",
+        proxy_url="",
+        no_proxy="",
+    )
+    captured = {}
+    handler._json = lambda code, payload: captured.update({"code": code, "payload": payload})
+
+    handler._forward_as_responses(
+        {
+            "model": "gpt-5.4",
+            "stream": False,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        },
+        "gpt-5.4",
+        "https://crs.example.com/v1",
+        "sk-test",
+        False,
+    )
+
+    assert captured["code"] == 502
+    message = captured["payload"]["error"]["message"]
+    assert "Claude OAuth login is disabled here" in message
+    assert "/login" not in message
+    assert "HTTP 403" in message
+
+
+def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeypatch):
+    import mms_bridge
+
+    class FakeResponse:
+        status_code = 403
+        headers = {"content-type": "application/json"}
+        content = b'{"error":{"type":"<nil>","message":"Permission denied","request_id":"req-3"}}'
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(post=lambda *_args, **_kwargs: FakeResponse()))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps(
+        {
+            "model": "K2.6-code-preview",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        }
+    ).encode("utf-8")
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.path = "/v1/messages"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "x-api-key": "bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["K2.6-code-preview"],
+        heavy_model="K2.6-code-preview",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+    )
+    captured = {}
+    handler._json = lambda code, payload: captured.update({"code": code, "payload": payload})
+    handler.send_response = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("send_response should not be called"))
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["code"] == 502
+    message = captured["payload"]["error"]["message"]
+    assert "Claude OAuth login is disabled here" in message
+    assert "/login" not in message
+    assert "HTTP 403" in message
+
+
 def test_json_resp_to_sse_invalid_body_returns_error_event():
     import mms_bridge
 

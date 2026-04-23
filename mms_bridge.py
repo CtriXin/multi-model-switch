@@ -290,6 +290,29 @@ def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses
     )
 
 
+def _mms_fail_closed_auth_error_payload(status_code, body_text, *, model_name=""):
+    """将 upstream 401/403 改写成不会误导用户去 /login 的 MMS fail-closed 错误。"""
+    status_code = int(status_code or 0)
+    model_label = str(model_name or "").strip() or "current model"
+    detail = str(body_text or "").strip().replace("\n", " ")
+    if len(detail) > 240:
+        detail = detail[:237] + "..."
+    message = (
+        f"MMS fail-closed: upstream returned HTTP {status_code} for {model_label}. "
+        "This is an api_key/provider permission error inside the current MMS runtime; "
+        "Claude OAuth login is disabled here. Check provider/model permission or switch runtime in MMS."
+    )
+    if detail:
+        message += f" upstream_body={detail}"
+    return {
+        "type": "error",
+        "error": {
+            "type": "api_error",
+            "message": message,
+        },
+    }
+
+
 def _strip_cache_control(payload):
     """非 Claude 模型不支持 prompt caching，剥离 payload 中所有 cache_control 字段。"""
     # 顶层 cache_control
@@ -1850,6 +1873,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     timeout=300,
                     **_server_bridge_httpx_kwargs(self.server, target_url),
                 ) as response:
+                    if response.status_code in (401, 403):
+                        body = response.read().decode("utf-8", errors="replace")
+                        self._json(
+                            502,
+                            _mms_fail_closed_auth_error_payload(
+                                response.status_code,
+                                body,
+                                model_name=metrics_model,
+                            ),
+                        )
+                        return
                     self.send_response(response.status_code)
                     self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
                     self.send_header("Cache-Control", "no-cache")
@@ -1897,6 +1931,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     **_server_bridge_httpx_kwargs(self.server, target_url),
                 )
                 first_byte_ms = _now_ms()
+                if response.status_code in (401, 403):
+                    body = response.content.decode("utf-8", errors="replace")
+                    self._json(
+                        502,
+                        _mms_fail_closed_auth_error_payload(
+                            response.status_code,
+                            body,
+                            model_name=metrics_model,
+                        ),
+                    )
+                    return
                 body_out = response.content
                 if body_out:
                     try:
@@ -2055,6 +2100,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             responses_payload = dict(full_responses_payload)
                             retried_without_previous_response_id = True
                             continue
+                        if response.status_code in (401, 403):
+                            self._json(
+                                502,
+                                _mms_fail_closed_auth_error_payload(
+                                    response.status_code,
+                                    body,
+                                    model_name=model_name,
+                                ),
+                            )
+                            return
                         self._json(response.status_code, err)
                         return
 
