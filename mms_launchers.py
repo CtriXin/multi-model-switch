@@ -2530,6 +2530,28 @@ def _resolve_web_access_root():
     return ""
 
 
+def _resolve_agent_browser_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_AGENT_BROWSER_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
+        _real_user_path("auto-skills", "installed-skills", "agent-browser"),
+        _real_user_path("auto-skills", "vendor", "agent-browser"),
+        _real_user_path("vendor", "agent-browser"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
 def _is_caveman_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
@@ -2836,6 +2858,15 @@ def _overlay_web_access_session_entries(parent_dir, session_home):
     overlay_root = os.path.join(session_home, ".mms-web-access-overlay")
     os.makedirs(overlay_root, exist_ok=True)
     _overlay_session_skill_dir(parent_dir, overlay_root, "web-access", web_access_root)
+
+
+def _overlay_agent_browser_session_entries(parent_dir, session_home):
+    agent_browser_root = _resolve_agent_browser_root()
+    if not agent_browser_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-agent-browser-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -4010,6 +4041,7 @@ def _account_env(account, *, validate_proxy=True):
             _sync_codex_session_claude_json(session_home)
             _overlay_codex_shared_resume(home_dir, session_home)
             _overlay_web_access_session_entries(os.path.join(session_home, ".codex"), session_home)
+            _overlay_agent_browser_session_entries(os.path.join(session_home, ".codex"), session_home)
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
@@ -5758,6 +5790,7 @@ def _codex_gateway_env(runtime, base_url):
         enable_caveman=enable_caveman,
     )
     _overlay_web_access_session_entries(codex_dir, session_home)
+    _overlay_agent_browser_session_entries(codex_dir, session_home)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)

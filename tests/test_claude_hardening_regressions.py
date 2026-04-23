@@ -387,6 +387,35 @@ def test_overlay_web_access_session_entries_merges_session_and_web_access_skill(
     assert (parent_dir / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
 
 
+def test_overlay_agent_browser_session_entries_merges_session_and_agent_browser_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    parent_dir = session_home / ".codex"
+    parent_dir.mkdir(parents=True)
+    global_assets = tmp_path / "global-assets"
+    (global_assets / "skills").mkdir(parents=True)
+    (global_assets / "skills" / "keep-skill").mkdir()
+    os.symlink(global_assets / "skills", parent_dir / "skills")
+
+    agent_browser_root = tmp_path / "agent-browser"
+    agent_browser_root.mkdir()
+    (agent_browser_root / "SKILL.md").write_text("# agent-browser\n", encoding="utf-8")
+    (agent_browser_root / "_meta.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_AGENT_BROWSER_ROOT", str(agent_browser_root))
+
+    mms_launchers._overlay_agent_browser_session_entries(
+        str(parent_dir),
+        str(session_home),
+    )
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "agent-browser")
+    assert (parent_dir / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
+
+
 def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -528,6 +557,45 @@ def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tm
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "web-access")
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+
+
+def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    (real_codex / "skills" / "keep-skill").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    agent_browser_root = tmp_path / "agent-browser"
+    agent_browser_root.mkdir()
+    (agent_browser_root / "SKILL.md").write_text("# agent-browser\n", encoding="utf-8")
+    (agent_browser_root / "_meta.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_AGENT_BROWSER_ROOT", str(agent_browser_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    env = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        "https://relay.example.com",
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "agent-browser")
+    assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
 
 
 def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(monkeypatch, tmp_path):
@@ -1597,6 +1665,37 @@ def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_pa
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "web-access")
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+
+
+def test_account_env_materializes_agent_browser_skill_for_codex(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    (account_home / ".codex" / "skills" / "keep-skill").mkdir(parents=True)
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    agent_browser_root = tmp_path / "agent-browser"
+    agent_browser_root.mkdir()
+    (agent_browser_root / "SKILL.md").write_text("# agent-browser\n", encoding="utf-8")
+    (agent_browser_root / "_meta.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_AGENT_BROWSER_ROOT", str(agent_browser_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env = mms_launchers._account_env(
+        {"id": "codex-a", "cli": "codex", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "agent-browser")
+    assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
 
 
 def test_account_env_scrubs_inherited_openai_and_proxy_parent_env_for_gemini(monkeypatch, tmp_path):
