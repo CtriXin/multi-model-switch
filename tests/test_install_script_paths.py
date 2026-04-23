@@ -145,3 +145,16 @@ def test_version_output_shows_current_stable_and_latest(tmp_path):
     assert "Stable release (latest release): v1.16.5" in completed.stdout
     assert "Latest upstream tag (latest tag): v1.16.6" in completed.stdout
     assert "Planned install ref: v1.16.6" in completed.stdout
+
+
+def test_install_script_uses_npm_for_claude_code_install():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "npm install -g @anthropic-ai/claude-code" in text
+    assert "claude.ai/install.sh" not in text
+
+
+def test_install_script_copies_vendor_directory():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor"' in text

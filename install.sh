@@ -818,7 +818,10 @@ install_named_cli() {
                 echo "✓ Claude Code"
                 return 0
             fi
-            run_optional_command "Claude Code" bash -lc 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | sh'
+            if ! command -v npm >/dev/null 2>&1; then
+                ensure_brew_package "npm" "node" "Node.js (npm)" || return 1
+            fi
+            run_optional_command "Claude Code" npm install -g @anthropic-ai/claude-code
             ;;
         codex)
             ensure_brew_package "codex" "codex" "Codex CLI"
@@ -1190,42 +1193,49 @@ create_python_venv() {
     fi
 }
 
-copy_hooks_dir_safely() {
-    local source_hooks="$1"
-    local target_hooks="$2"
-    local temp_hooks="${target_hooks}.new.$$"
-    local backup_hooks="${target_hooks}.bak.$$"
+copy_dir_safely() {
+    local source_dir="$1"
+    local target_dir="$2"
+    local zh_label="$3"
+    local en_label="$4"
+    local temp_dir="${target_dir}.new.$$"
+    local backup_dir="${target_dir}.bak.$$"
 
-    if [ ! -d "$source_hooks" ]; then
+    if [ ! -d "$source_dir" ]; then
         return 0
     fi
 
-    rm -rf "$temp_hooks" "$backup_hooks"
-    if ! cp -R "$source_hooks" "$temp_hooks"; then
-        echo "❌ $(t "复制 hooks 目录失败" "Failed to copy the hooks directory")"
-        rm -rf "$temp_hooks"
+    rm -rf "$temp_dir" "$backup_dir"
+    if ! cp -R "$source_dir" "$temp_dir"; then
+        echo "❌ $(t "复制${zh_label}失败" "Failed to copy the ${en_label}")"
+        rm -rf "$temp_dir"
         return 1
     fi
 
-    if [ -e "$target_hooks" ]; then
-        if ! mv "$target_hooks" "$backup_hooks"; then
-            echo "❌ $(t "备份旧 hooks 目录失败" "Failed to back up the existing hooks directory")"
-            rm -rf "$temp_hooks"
+    if [ -e "$target_dir" ]; then
+        if ! mv "$target_dir" "$backup_dir"; then
+            echo "❌ $(t "备份旧${zh_label}失败" "Failed to back up the existing ${en_label}")"
+            rm -rf "$temp_dir"
             return 1
         fi
     fi
 
-    if mv "$temp_hooks" "$target_hooks"; then
-        rm -rf "$backup_hooks"
+    if mv "$temp_dir" "$target_dir"; then
+        rm -rf "$backup_dir"
         return 0
     fi
 
-    echo "❌ $(t "替换 hooks 目录失败，已尝试恢复旧版本" "Failed to replace the hooks directory; attempted to restore the previous version")"
-    rm -rf "$temp_hooks" "$target_hooks"
-    if [ -e "$backup_hooks" ]; then
-        mv "$backup_hooks" "$target_hooks" || true
+    echo "❌ $(t "替换${zh_label}失败，已尝试恢复旧版本" "Failed to replace the ${en_label}; attempted to restore the previous version")"
+    rm -rf "$temp_dir" "$target_dir"
+    if [ -e "$backup_dir" ]; then
+        mv "$backup_dir" "$target_dir" || true
     fi
     return 1
+}
+
+
+copy_hooks_dir_safely() {
+    copy_dir_safely "$1" "$2" "hooks 目录" "hooks directory"
 }
 
 rewrite_shebang() {
@@ -2336,6 +2346,7 @@ cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
+copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 # 复制所有 mms_*.py 确保完整
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"

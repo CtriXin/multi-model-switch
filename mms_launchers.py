@@ -2504,6 +2504,27 @@ def _resolve_ecc_root():
     return ""
 
 
+def _resolve_web_access_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_WEB_ACCESS_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
+        _real_user_path("auto-skills", "vendor", "web-access"),
+        _real_user_path("vendor", "web-access"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
 def _is_caveman_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
@@ -2723,6 +2744,54 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
     return True
 
 
+def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root):
+    skill_name = str(skill_name or "").strip()
+    skill_root = str(skill_root or "").strip()
+    if not skill_name or not skill_root:
+        return False
+    if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+        return False
+
+    os.makedirs(parent_dir, exist_ok=True)
+    skills_dir = os.path.join(parent_dir, "skills")
+    merged_dir = os.path.join(overlay_root, "skills")
+    os.makedirs(merged_dir, exist_ok=True)
+
+    def _merge_dir(src_dir):
+        src_dir = str(src_dir or "").strip()
+        if not src_dir or not os.path.isdir(src_dir):
+            return
+        try:
+            if os.path.samefile(src_dir, merged_dir):
+                return
+        except Exception:
+            pass
+        for item in os.listdir(src_dir):
+            src = os.path.join(src_dir, item)
+            link = os.path.join(merged_dir, item)
+            if os.path.exists(link) or os.path.islink(link):
+                continue
+            os.symlink(src, link)
+
+    if os.path.exists(skills_dir) or os.path.islink(skills_dir):
+        _merge_dir(os.path.realpath(skills_dir))
+
+    skill_link = os.path.join(merged_dir, skill_name)
+    if not os.path.exists(skill_link) and not os.path.islink(skill_link):
+        os.symlink(skill_root, skill_link)
+
+    if not os.listdir(merged_dir):
+        return False
+    if os.path.islink(skills_dir):
+        os.unlink(skills_dir)
+    elif os.path.isdir(skills_dir):
+        shutil.rmtree(skills_dir)
+    elif os.path.exists(skills_dir):
+        os.unlink(skills_dir)
+    os.symlink(merged_dir, skills_dir)
+    return True
+
+
 def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False):
     if not enable_caveman:
         return
@@ -2753,6 +2822,15 @@ def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False):
         (ecc_root, "rules"),
     ):
         _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, source_root)
+
+
+def _overlay_web_access_session_entries(parent_dir, session_home):
+    web_access_root = _resolve_web_access_root()
+    if not web_access_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-web-access-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "web-access", web_access_root)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -3894,6 +3972,7 @@ def _account_env(account, *, validate_proxy=True):
             source_claude_dir=account_claude_dir,
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
         )
+        _overlay_web_access_session_entries(session_claude_dir, session_home)
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -3925,6 +4004,7 @@ def _account_env(account, *, validate_proxy=True):
             _scrub_claude_oauth_env(env)
             _sync_codex_session_claude_json(session_home)
             _overlay_codex_shared_resume(home_dir, session_home)
+            _overlay_web_access_session_entries(os.path.join(session_home, ".codex"), session_home)
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
@@ -5357,6 +5437,7 @@ def _claude_gateway_env(
         gateway_home,
         enable_ecc=enable_ecc,
     )
+    _overlay_web_access_session_entries(gw_claude_dir, gateway_home)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -5671,6 +5752,7 @@ def _codex_gateway_env(runtime, base_url):
         session_home,
         enable_caveman=enable_caveman,
     )
+    _overlay_web_access_session_entries(codex_dir, session_home)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)

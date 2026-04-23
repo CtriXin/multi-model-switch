@@ -336,6 +336,35 @@ def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monke
     assert os.path.islink(parent_dir / "skills" / "caveman")
 
 
+def test_overlay_web_access_session_entries_merges_session_and_web_access_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    parent_dir = session_home / ".claude"
+    parent_dir.mkdir(parents=True)
+    global_assets = tmp_path / "global-assets"
+    (global_assets / "skills").mkdir(parents=True)
+    (global_assets / "skills" / "keep-skill").mkdir()
+    os.symlink(global_assets / "skills", parent_dir / "skills")
+
+    web_access_root = tmp_path / "web-access"
+    (web_access_root / "references").mkdir(parents=True)
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+    (web_access_root / "README.md").write_text("# readme\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+
+    mms_launchers._overlay_web_access_session_entries(
+        str(parent_dir),
+        str(session_home),
+    )
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "web-access")
+    assert (parent_dir / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+
+
 def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -439,6 +468,44 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     assert os.path.islink(session_codex / "commands" / "caveman.toml")
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "caveman")
+
+
+def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    (real_codex / "skills" / "keep-skill").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    web_access_root = tmp_path / "web-access"
+    (web_access_root / "references").mkdir(parents=True)
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    env = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        "https://relay.example.com",
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "web-access")
+    assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
 
 
 def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(monkeypatch, tmp_path):
@@ -671,6 +738,54 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     assert os.path.islink(session_home / ".claude" / "commands" / "feature-development.md")
     assert os.path.islink(session_home / ".claude" / "skills" / "core-skill")
     assert os.path.islink(session_home / ".claude" / "rules" / "common")
+
+
+def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    web_access_root = tmp_path / "web-access"
+    (web_access_root / "references").mkdir(parents=True)
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _home, claude_dir, **_kwargs: os.makedirs(claude_dir, exist_ok=True),
+    )
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "kimi-for-coding")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    assert env["HOME"] == str(session_home)
+    assert os.path.islink(session_home / ".claude" / "skills" / "web-access")
+    assert (session_home / ".claude" / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
 
 
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
@@ -1031,6 +1146,57 @@ def test_claude_passthrough_rules_use_minimal_headers_for_sensitive_provider():
     assert header_prefixes == ()
 
 
+def test_claude_passthrough_rules_drop_anthropic_beta_for_domestic_models():
+    import mms_bridge
+
+    header_names, header_prefixes = mms_bridge._claude_passthrough_rules(
+        types.SimpleNamespace(
+            minimal_claude_header_passthrough=False,
+            strip_upstream_user_agent=False,
+        ),
+        "kimi-for-coding",
+    )
+
+    assert "anthropic-version" in header_names
+    assert "anthropic-beta" not in header_names
+    assert header_prefixes == mms_bridge._CLAUDE_HEADER_PREFIX_PASSTHROUGH
+
+
+def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
+    import mms_bridge
+
+    payload = {
+        "thinking": {"type": "enabled", "budget_tokens": 2048},
+        "system": [
+            {"type": "text", "text": "system"},
+            {"type": "thinking", "thinking": "hidden"},
+        ],
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "abc", "signature": "sig"},
+                    {"type": "text", "text": "keep"},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "redacted_thinking", "data": "secret"},
+                    {"type": "text", "text": "still here"},
+                ],
+            },
+        ],
+    }
+
+    mms_bridge._strip_domestic_thinking_signals(payload)
+
+    assert "thinking" not in payload
+    assert payload["system"] == [{"type": "text", "text": "system"}]
+    assert payload["messages"][0]["content"] == [{"type": "text", "text": "keep"}]
+    assert payload["messages"][1]["content"] == [{"type": "text", "text": "still here"}]
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 
@@ -1381,6 +1547,36 @@ def test_account_env_scrubs_claude_oauth_parent_env_for_codex(monkeypatch, tmp_p
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
+def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    (account_home / ".codex" / "skills" / "keep-skill").mkdir(parents=True)
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    web_access_root = tmp_path / "web-access"
+    (web_access_root / "references").mkdir(parents=True)
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env = mms_launchers._account_env(
+        {"id": "codex-a", "cli": "codex", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "web-access")
+    assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+
+
 def test_account_env_scrubs_inherited_openai_and_proxy_parent_env_for_gemini(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1681,6 +1877,53 @@ def test_account_env_oauth_claude_fail_closes_execution_surfaces(monkeypatch, tm
     assert "wrapper_called" not in captured
     assert not (session_home / ".claude" / "settings.json").exists()
     assert env["HOME"] == str(session_home)
+
+
+def test_account_env_materializes_web_access_skill_for_oauth_claude(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    account_home = tmp_path / "account-home"
+    session_home = tmp_path / "session-home"
+    repo_dir = tmp_path / "repo"
+    real_home.mkdir()
+    account_home.mkdir()
+    session_home.mkdir()
+    repo_dir.mkdir()
+    (real_home / ".local").mkdir(parents=True)
+    web_access_root = tmp_path / "web-access"
+    (web_access_root / "references").mkdir(parents=True)
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+    monkeypatch.setattr(mms_launchers, "seed_claude_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _session_home, session_claude_dir, **kwargs: Path(session_claude_dir).mkdir(parents=True, exist_ok=True),
+    )
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_persist_account_guard_launch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+
+    env = mms_launchers._account_env(
+        {"id": "claude-a", "cli": "claude", "home_dir": str(account_home)},
+        validate_proxy=False,
+    )
+
+    assert env["HOME"] == str(session_home)
+    assert os.path.islink(session_home / ".claude" / "skills" / "web-access")
+    assert (session_home / ".claude" / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
 
 
 def test_sync_codex_session_claude_json_allowlists_non_sensitive_fields(monkeypatch, tmp_path):

@@ -157,7 +157,7 @@ def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH, prefixes
     return copied
 
 
-def _claude_passthrough_rules(server):
+def _claude_passthrough_rules(server, model_name=""):
     header_names = _CLAUDE_HEADER_PASSTHROUGH
     header_prefixes = _CLAUDE_HEADER_PREFIX_PASSTHROUGH
     if getattr(server, "minimal_claude_header_passthrough", False):
@@ -165,6 +165,8 @@ def _claude_passthrough_rules(server):
         header_prefixes = ()
     if getattr(server, "strip_upstream_user_agent", False):
         header_names = tuple(name for name in header_names if name != "User-Agent")
+    if _is_domestic_model(model_name):
+        header_names = tuple(name for name in header_names if name != "anthropic-beta")
     return header_names, header_prefixes
 
 
@@ -257,6 +259,8 @@ def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
 
 
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
+_DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k2.6", "mimo", "qwen", "minimax", "deepseek")
+_DOMESTIC_THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -267,6 +271,47 @@ _CODEX_CLI_INSTRUCTIONS_PREFIX = (
 def _is_openai_model(model_name):
     """检测模型是否为 OpenAI 系列（GPT/o1/o3/o4）。"""
     return isinstance(model_name, str) and model_name.lower().startswith(_OPENAI_MODEL_PREFIXES)
+
+
+def _normalize_model_name(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized
+
+
+def _is_domestic_model(model_name):
+    return _normalize_model_name(model_name).startswith(_DOMESTIC_MODEL_PREFIXES)
+
+
+def _strip_domestic_thinking_signals(payload):
+    """国产模型不支持 Anthropic thinking 信号，转发前剥离相关字段。"""
+    payload.pop("thinking", None)
+
+    system = payload.get("system")
+    if isinstance(system, list):
+        payload["system"] = [
+            block
+            for block in system
+            if not (
+                isinstance(block, dict)
+                and block.get("type") in _DOMESTIC_THINKING_BLOCK_TYPES
+            )
+        ]
+
+    for message in payload.get("messages", []):
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, list):
+            message["content"] = [
+                block
+                for block in content
+                if not (
+                    isinstance(block, dict)
+                    and block.get("type") in _DOMESTIC_THINKING_BLOCK_TYPES
+                )
+            ]
 
 
 def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):
@@ -1823,7 +1868,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
-        # 非 Claude 模型：剥离 cache_control 字段（国产模型网关不支持）
+        # 非 Claude 模型：剥离 Anthropic 专属信号（国产模型网关不支持）
+        if _is_domestic_model(resolved_model):
+            _strip_domestic_thinking_signals(payload)
         if not resolved_model.startswith("claude-"):
             _strip_cache_control(payload)
 
@@ -1839,7 +1886,10 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "x-api-key": gateway_key,
         }
-        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server)
+        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(
+            self.server,
+            resolved_model,
+        )
         fwd_headers.update(
             _copy_passthrough_headers(
                 self.headers,

@@ -38,7 +38,7 @@ When run in an interactive terminal, it asks for UI language first, then the opt
 
 Public surface note:
 
-- Installing `claude` here means installing the local `Claude Code` binary as a frontend CLI.
+- Installing `claude` here means installing the local `Claude Code` binary as a frontend CLI via `npm install -g @anthropic-ai/claude-code`.
 - The public build keeps the `claude` tab and `mms claude`.
 - It can show both native `claude-*` models and bridge-capable GPT / Gemini / compatible domestic models when the current routes support them.
 - Public docs do not include `Claude OAuth account.add/login`.

@@ -3636,7 +3636,7 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     provider_id = preset_id or current.get("id") or DEFAULT_PROVIDER_ID
     if not preset_id:
         provider_id = Prompt.ask("系统内部标识（高级）", default=provider_id).strip() or DEFAULT_PROVIDER_ID
-    name = Prompt.ask("显示名称", default=current.get("name") or provider_id).strip() or provider_id
+    name = Prompt.ask("显示名称 / 列表展示名", default=current.get("name") or provider_id).strip() or provider_id
     protocols = _prompt_csv_values(
         "协议（逗号分隔）",
         current.get("protocols", list(DEFAULT_PROVIDER_PROTOCOLS)),
@@ -3727,7 +3727,7 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
         if cli_name not in MMS_MANAGED_OAUTH_CLIS:
             cli_name = MMS_MANAGED_OAUTH_CLIS[0]
         cli_name = Prompt.ask("绑定的 CLI", choices=list(MMS_MANAGED_OAUTH_CLIS), default=cli_name)
-    name = Prompt.ask("显示名", default=current.get("name") or account_id).strip() or account_id
+    name = Prompt.ask("显示名 / 列表展示名", default=current.get("name") or account_id).strip() or account_id
     home_dir = current.get("home_dir") or _default_account_home(account_id)
     priority = _normalize_priority(Prompt.ask("优先级（数字越大越优先）", default=str(current.get("priority", DEFAULT_PRIORITY))))
     claude_1m_mode = _normalize_claude_1m_mode(
@@ -3830,6 +3830,36 @@ def _prompt_provider_credentials(provider, existing_base_url="", existing_api_ke
     return base_url, api_key, openai_base_url, anthropic_base_url
 
 
+def _save_provider_credentials_with_probe(provider, base_url, api_key, openai_base_url="", anthropic_base_url=""):
+    provider_ctx = dict(provider)
+    provider_ctx["base_url"] = base_url
+    provider_ctx["openai_base_url"] = openai_base_url
+    provider_ctx["anthropic_base_url"] = anthropic_base_url
+    provider_ctx["api_key"] = api_key
+
+    console.print("\n正在测试连接...", style="dim")
+    probe = _probe_models(provider_ctx)
+    models = probe.get("models")
+    if models is None:
+        console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
+    else:
+        console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
+        # Auto-fix: if probe succeeded with a different URL, update saved URL
+        working_url = probe.get("working_url")
+        computed_openai = _provider_openai_base_url(provider_ctx)
+        if working_url and working_url != computed_openai:
+            # working_url differs from what was computed → fix the stored base_url
+            fixed_base = working_url  # working_url is already the correct /v1 URL
+            console.print(f"[yellow]→ 自动修正地址为 {fixed_base}[/yellow]")
+            openai_base_url = fixed_base
+            base_url = fixed_base
+
+    save_provider_credentials(provider["id"], base_url, api_key, openai_base_url, anthropic_base_url)
+    console.print(f"[green]✓ provider '{provider['id']}' 的凭据已保存到 {CREDENTIALS_PATH}[/green]")
+    console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
+    return resolve_provider_context({"providers": [provider], "provider": {"default": provider["id"]}}, provider["id"])
+
+
 def _quick_connect_gateway(cfg, preset_id=None):
     _ensure_interactive_terminal(_L("网关通道接入", "gateway channel setup"))
     template_key = _select_provider_template(preset_id=preset_id)
@@ -3853,7 +3883,10 @@ def _quick_connect_gateway(cfg, preset_id=None):
     providers = _provider_map(cfg)
     suggested_name = template["name"]
     try:
-        name = _wizard_prompt(_L("显示名称（主界面里看到的名字）", "Display name"), default=suggested_name).strip() or suggested_name
+        name = _wizard_prompt(
+            _L("显示名称 / 列表展示名（主界面里看到的名字）", "Display name / list label"),
+            default=suggested_name,
+        ).strip() or suggested_name
         suggested_id = _normalize_provider_id_input(name)
         if suggested_id == DEFAULT_PROVIDER_ID:
             suggested_id = _normalize_provider_id_input(template["id"] or name)
@@ -3871,11 +3904,27 @@ def _quick_connect_gateway(cfg, preset_id=None):
         "id": provider_id,
         "name": name,
     })
-    if Confirm.ask(_L("模型列表地址与请求地址不同？（高级）", "Use a separate model list URL? (advanced)"), default=False):
-        provider["models_endpoint"] = _normalize_models_endpoint(
-            Prompt.ask(_L("模型列表地址（高级，仅用于拉取模型列表；通常留默认）", "Model list URL (advanced, only used to fetch models)"), default=provider.get("models_endpoint", "/models"))
-        )
     try:
+        base_url = _wizard_prompt(
+            _L("接口地址 / Base URL（请求地址）", "Request Base URL"),
+            default=provider.get("default_openai_base_url") or provider.get("default_anthropic_base_url") or DEFAULT_BASE_URL,
+            required=True,
+        ).rstrip("/")
+        api_key = _wizard_prompt(
+            _L("API Key（不会回显）", "API key (hidden)"),
+            password=True,
+            required=True,
+        )
+        if Confirm.ask(_L("模型列表地址与请求地址不同？（高级）", "Use a separate model list URL? (advanced)"), default=False):
+            provider["models_endpoint"] = _normalize_models_endpoint(
+                Prompt.ask(
+                    _L(
+                        "模型列表地址（高级，仅用于独立拉取模型列表；通常留默认）",
+                        "Model list URL (advanced, only used for a separate model-list endpoint)",
+                    ),
+                    default=provider.get("models_endpoint", "/models"),
+                )
+            )
         provider["proxy"], provider["no_proxy"] = _prompt_validated_proxy_fields(
             provider.get("proxy", ""),
             provider.get("no_proxy", ""),
@@ -3894,7 +3943,13 @@ def _quick_connect_gateway(cfg, preset_id=None):
         return cfg, False
     updated_cfg = _upsert_provider(cfg, provider)
     save_config(updated_cfg)
-    setup_provider_credentials(provider)
+    _save_provider_credentials_with_probe(
+        provider,
+        base_url,
+        api_key,
+        base_url if "openai_chat_completions" in provider.get("protocols", []) else "",
+        base_url if "anthropic_messages" in provider.get("protocols", []) else "",
+    )
     console.print(f"[green]✓ {_L('已接入网关通道', 'Gateway channel added')}: {name}[/green]")
     console.print(f"[dim]{_L('内部标识', 'System ID')}: {provider_id}[/dim]")
     return load_config(), True
@@ -3943,7 +3998,10 @@ def _quick_connect_official(cfg, preset_cli=None):
 
     suggested_name = f"{cli_name}-main"
     try:
-        name = _wizard_prompt(_L("显示名（主界面里看到的名字）", "Display name"), default=suggested_name).strip() or suggested_name
+        name = _wizard_prompt(
+            _L("显示名 / 列表展示名（主界面里看到的名字）", "Display name / list label"),
+            default=suggested_name,
+        ).strip() or suggested_name
     except WizardBack:
         console.print(f"[yellow]{_L('已返回上一层', 'Returned to previous step')}[/yellow]")
         return cfg, False
@@ -5612,33 +5670,9 @@ def setup_provider_credentials(provider, existing_base_url="", existing_api_key=
     base_url, api_key, openai_base_url, anthropic_base_url = _prompt_provider_credentials(
         provider, existing_base_url, existing_api_key, allow_keep
     )
-    provider_ctx = dict(provider)
-    provider_ctx["base_url"] = base_url
-    provider_ctx["openai_base_url"] = openai_base_url
-    provider_ctx["anthropic_base_url"] = anthropic_base_url
-    provider_ctx["api_key"] = api_key
-
-    console.print("\n正在测试连接...", style="dim")
-    probe = _probe_models(provider_ctx)
-    models = probe.get("models")
-    if models is None:
-        console.print("[yellow]⚠ 连接失败，但配置仍会保存。请检查地址和 Key。[/yellow]")
-    else:
-        console.print(f"[green]✓ 连接成功！发现 {len(models)} 个可用模型[/green]")
-        # Auto-fix: if probe succeeded with a different URL, update saved URL
-        working_url = probe.get("working_url")
-        computed_openai = _provider_openai_base_url(provider_ctx)
-        if working_url and working_url != computed_openai:
-            # working_url differs from what was computed → fix the stored base_url
-            fixed_base = working_url  # working_url is already the correct /v1 URL
-            console.print(f"[yellow]→ 自动修正地址为 {fixed_base}[/yellow]")
-            openai_base_url = fixed_base
-            base_url = fixed_base
-
-    save_provider_credentials(provider["id"], base_url, api_key, openai_base_url, anthropic_base_url)
-    console.print(f"[green]✓ provider '{provider['id']}' 的凭据已保存到 {CREDENTIALS_PATH}[/green]")
-    console.print("[dim]API Key 在配置显示里会以掩码形式展示，不会直接回显明文。[/dim]")
-    return resolve_provider_context({"providers": [provider], "provider": {"default": provider["id"]}}, provider["id"])
+    return _save_provider_credentials_with_probe(
+        provider, base_url, api_key, openai_base_url, anthropic_base_url
+    )
 
 
 def setup_api_credentials(existing_base_url="", existing_api_key="", allow_keep=False):
