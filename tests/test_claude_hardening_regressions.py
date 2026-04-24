@@ -2101,6 +2101,8 @@ def test_get_export_env_exposes_toon_bin_for_export_only_launch(monkeypatch, tmp
 
     assert claude_exports["MMS_TOON_BIN"] == str(toon_script)
     assert codex_exports["MMS_TOON_BIN"] == str(toon_script)
+    assert claude_exports["PATH"] == f"{toon_script.parent}:$PATH"
+    assert codex_exports["PATH"] == f"{toon_script.parent}:$PATH"
     assert claude_exports["ANTHROPIC_AUTH_TOKEN"] == "sk-runtime"
     assert codex_exports["OPENAI_API_KEY"] == "sk-runtime"
 

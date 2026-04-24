@@ -1,6 +1,6 @@
 ---
 name: toon
-description: Convert structured JSON into compact TOON for short model-to-model handoff, launch/session packets, status summaries, or repeated tabular metadata. Use when the user asks for TOON, compact context, token-saving structured payloads, or wants to pass structured state between Codex/Claude sessions.
+description: Convert structured JSON into compact TOON for short model-to-model handoff, launch/session packets, status summaries, or repeated tabular metadata. Use automatically when the user asks for TOON, compact context, token-saving structured payloads, or wants to pass structured state between Codex/Claude sessions.
 allowed-tools: Bash(mms-toon:*), Bash($MMS_TOON_BIN:*)
 ---
 
@@ -18,13 +18,13 @@ Do not use TOON for prose, code, logs, secrets, credentials, or data that needs 
 
 ## Command
 
-Prefer the session command:
+Prefer the command:
 
 ```bash
 mms-toon data.json
 ```
 
-If `mms-toon` is not on `PATH`, use:
+If `mms-toon` is not on `PATH`, use the fallback env:
 
 ```bash
 "$MMS_TOON_BIN" data.json

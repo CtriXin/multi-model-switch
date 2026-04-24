@@ -6155,6 +6155,7 @@ def get_export_env(cli, runtime):
     toon_script = _mms_toon_script_path()
     if toon_script and cli in {"claude", "codex"}:
         exports["MMS_TOON_BIN"] = toon_script
+        exports["PATH"] = f"{os.path.dirname(toon_script)}:$PATH"
     return exports
 
 
