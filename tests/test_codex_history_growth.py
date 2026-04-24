@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import sys
@@ -69,6 +70,46 @@ def test_seed_codex_bounded_resume_caps_files_and_directories(monkeypatch, tmp_p
     copied_snapshots = sorted(path.name for path in (session_codex / "shell_snapshots").glob("*.sh"))
     assert copied_snapshots == ["snapshot-2.sh"]
     assert list((session_codex / "archived_sessions").glob("*")) == []
+    manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
+    assert manifest["limits"]["files"]["history.jsonl"]["max_lines"] == 3
+    assert manifest["limits"]["dirs"]["sessions"]["max_files"] == 2
+    assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 3
+    assert manifest["seeded"]["dirs"]["sessions"]["files"] == 2
+
+
+def test_seed_codex_bounded_resume_defaults_are_strict_and_skip_oversize(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    source = tmp_path / "source" / ".codex"
+    session_codex = tmp_path / "session" / ".codex"
+    session_codex.mkdir(parents=True)
+    _write_lines(source / "history.jsonl", "history", 120)
+    _write_lines(source / "session_index.jsonl", "index", 40)
+    for index in range(8):
+        _write_file(
+            source / "sessions" / "2026" / "04" / f"session-{index}.jsonl",
+            f"session {index}\n",
+            mtime=100 + index,
+        )
+    _write_file(
+        source / "sessions" / "2026" / "04" / "session-big.jsonl",
+        "x" * (512 * 1024 + 1),
+        mtime=1000,
+    )
+
+    mms_launchers._seed_codex_bounded_resume([str(source)], str(session_codex))
+
+    assert len(_lines(session_codex / "history.jsonl")) == 80
+    assert len(_lines(session_codex / "session_index.jsonl")) == 20
+    copied_sessions = sorted(
+        path.name for path in (session_codex / "sessions").glob("2026/04/*.jsonl")
+    )
+    assert len(copied_sessions) == 5
+    assert "session-big.jsonl" not in copied_sessions
+    manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
+    assert manifest["limits"]["max_file_bytes"] == 512 * 1024
+    assert manifest["limits"]["dirs"]["sessions"]["max_files"] == 5
+    assert manifest["seeded"]["dirs"]["sessions"]["skipped_oversize_files"] == 1
 
 
 def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(monkeypatch, tmp_path):
@@ -112,6 +153,8 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     copied_sessions = list((session_codex / "sessions").glob("2026/04/*.jsonl"))
     assert len(copied_sessions) == 1
     assert copied_sessions[0].name == "account-session-2.jsonl"
+    manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
+    assert manifest["seeded"]["files"]["history.jsonl"]["bytes"] > 0
 
 
 def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path):
@@ -162,3 +205,5 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert len(copied_sessions) == 1
     assert copied_sessions[0].name == "gateway-session-1.jsonl"
     assert (session_codex / "memories").is_symlink()
+    manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
+    assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 2

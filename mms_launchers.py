@@ -4293,15 +4293,18 @@ def _overlay_codex_shared_resume(home_dir, session_home):
 
 
 _CODEX_BOUNDED_RESUME_FILES = {
-    "history.jsonl": 200,
-    "session_index.jsonl": 50,
+    "history.jsonl": 80,
+    "session_index.jsonl": 20,
 }
 
 _CODEX_BOUNDED_RESUME_DIRS = {
-    "sessions": 25,
-    "shell_snapshots": 20,
+    "sessions": 5,
+    "shell_snapshots": 5,
     "archived_sessions": 0,
 }
+
+_CODEX_RESUME_SEED_MANIFEST = "mms-resume-seed.json"
+_CODEX_RESUME_MAX_FILE_BYTES = 512 * 1024
 
 
 def _bounded_env_int(name, default):
@@ -4333,7 +4336,7 @@ def _copy_tail_lines(src, dst, max_lines):
         with open(dst, "w", encoding="utf-8") as handle:
             handle.write("")
         os.chmod(dst, 0o600)
-        return 0
+        return {"lines": 0, "bytes": 0}
 
     from collections import deque
 
@@ -4344,7 +4347,11 @@ def _copy_tail_lines(src, dst, max_lines):
     with open(dst, "w", encoding="utf-8") as handle:
         handle.writelines(lines)
     os.chmod(dst, 0o600)
-    return len(lines)
+    try:
+        size = os.path.getsize(dst)
+    except OSError:
+        size = 0
+    return {"lines": len(lines), "bytes": size}
 
 
 def _safe_relative_path(root, path):
@@ -4356,8 +4363,14 @@ def _safe_relative_path(root, path):
 
 def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
     os.makedirs(dst_root, exist_ok=True)
+    summary = {
+        "files": 0,
+        "bytes": 0,
+        "skipped_oversize_files": 0,
+        "skipped_oversize_bytes": 0,
+    }
     if max_files <= 0:
-        return 0
+        return summary
     candidates = []
     for current_root, _dirs, files in os.walk(src_root):
         for filename in files:
@@ -4371,9 +4384,10 @@ def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
             except OSError:
                 continue
             if stat.st_size > max_file_bytes:
+                summary["skipped_oversize_files"] += 1
+                summary["skipped_oversize_bytes"] += stat.st_size
                 continue
             candidates.append((stat.st_mtime, src))
-    copied = 0
     for _mtime, src in sorted(candidates, reverse=True)[: int(max_files)]:
         rel_path = _safe_relative_path(src_root, src)
         if not rel_path:
@@ -4381,8 +4395,12 @@ def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
         dst = os.path.join(dst_root, rel_path)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
-        copied += 1
-    return copied
+        summary["files"] += 1
+        try:
+            summary["bytes"] += os.path.getsize(dst)
+        except OSError:
+            pass
+    return summary
 
 
 def _seed_codex_bounded_resume(source_roots, session_codex_dir):
@@ -4390,31 +4408,70 @@ def _seed_codex_bounded_resume(source_roots, session_codex_dir):
     if not source_roots:
         return
 
+    manifest = {
+        "version": 1,
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "limits": {
+            "files": {},
+            "dirs": {},
+            "max_file_bytes": _bounded_env_int("MMS_CODEX_RESUME_MAX_FILE_BYTES", _CODEX_RESUME_MAX_FILE_BYTES),
+        },
+        "seeded": {
+            "files": {},
+            "dirs": {},
+        },
+    }
+
     for entry, default_lines in _CODEX_BOUNDED_RESUME_FILES.items():
         src = _first_existing_child(source_roots, entry, want_dir=False)
         dst = os.path.join(session_codex_dir, entry)
-        if os.path.exists(dst) or os.path.islink(dst):
-            continue
         max_lines = _bounded_env_int(f"MMS_CODEX_{entry.upper().replace('.', '_')}_MAX_LINES", default_lines)
+        manifest["limits"]["files"][entry] = {"max_lines": max_lines}
+        if os.path.exists(dst) or os.path.islink(dst):
+            manifest["seeded"]["files"][entry] = {"status": "preexisting"}
+            continue
         if src:
-            _copy_tail_lines(src, dst, max_lines)
+            summary = _copy_tail_lines(src, dst, max_lines)
+            manifest["seeded"]["files"][entry] = {
+                "status": "seeded",
+                **summary,
+            }
         else:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             with open(dst, "w", encoding="utf-8") as handle:
                 handle.write("")
             os.chmod(dst, 0o600)
+            manifest["seeded"]["files"][entry] = {"status": "empty", "lines": 0, "bytes": 0}
 
-    max_file_bytes = _bounded_env_int("MMS_CODEX_RESUME_MAX_FILE_BYTES", 2_000_000)
+    max_file_bytes = manifest["limits"]["max_file_bytes"]
     for entry, default_limit in _CODEX_BOUNDED_RESUME_DIRS.items():
         dst = os.path.join(session_codex_dir, entry)
+        max_files = _bounded_env_int(f"MMS_CODEX_{entry.upper()}_MAX_FILES", default_limit)
+        manifest["limits"]["dirs"][entry] = {"max_files": max_files}
         if os.path.exists(dst) or os.path.islink(dst):
+            manifest["seeded"]["dirs"][entry] = {"status": "preexisting"}
             continue
         src = _first_existing_child(source_roots, entry, want_dir=True)
-        max_files = _bounded_env_int(f"MMS_CODEX_{entry.upper()}_MAX_FILES", default_limit)
         if src:
-            _copy_latest_files(src, dst, max_files, max_file_bytes=max_file_bytes)
+            summary = _copy_latest_files(src, dst, max_files, max_file_bytes=max_file_bytes)
+            manifest["seeded"]["dirs"][entry] = {
+                "status": "seeded",
+                **summary,
+            }
         else:
             os.makedirs(dst, exist_ok=True)
+            manifest["seeded"]["dirs"][entry] = {
+                "status": "empty",
+                "files": 0,
+                "bytes": 0,
+                "skipped_oversize_files": 0,
+                "skipped_oversize_bytes": 0,
+            }
+
+    try:
+        atomic_write_json(os.path.join(session_codex_dir, _CODEX_RESUME_SEED_MANIFEST), manifest, mode=0o600)
+    except Exception:
+        pass
 
 
 def _codex_bounded_resume_entries():
