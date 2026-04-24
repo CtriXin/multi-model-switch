@@ -8,11 +8,17 @@ allowed-tools: Bash(token-saver:*), Bash($TOKEN_SAVER_BIN:*), Bash($MMS_TOKEN_SA
 
 Token Saver is the unified session behavior for saving context.
 
-Do not make the user remember helper commands. Use the rules automatically when they fit.
+The user-facing contract comes first: do not make the user remember helper commands.
 
-## Auto Rules
+Use Token Saver automatically when it fits. Do not tell the user to run `token-saver`,
+`mms-context`, or `mms-toon` unless they explicitly ask for the low-level command.
 
-Use `token-saver run -- <command>` when a command may print long output:
+The only user-facing trigger worth mentioning is the simple `/token-saver` command. Normal
+requests such as "跑测试", "看日志", "分析这个 JSON", or "省点 context" are enough.
+
+## Agent Rules
+
+For commands that may print long output, run the command through Token Saver yourself:
 
 ```bash
 token-saver run --title "short title" -- some-command
@@ -20,13 +26,13 @@ token-saver run --title "short title" -- some-command
 
 It prints the command output directly when short. When long, it stores the full output and returns:
 
-- `mmsctx://...` ref
+- `mmsctx://...` ref for agent reuse
 - exit code
 - short snippet
 
 Use the same wrapper for tests, builds, log reads, search commands, and diagnostics where full output may be noisy.
 
-Use `token-saver put` or `mms-context put` when text already exists and should be stored:
+Use `token-saver put` or `mms-context put` yourself when text already exists and should be stored:
 
 - tool output is long
 - logs contain many repeated lines
@@ -42,13 +48,14 @@ cat long-output.txt | token-saver put --kind tool-output --title "short title"
 
 Then respond with:
 
-- `mmsctx://...` ref
+- conclusion first
+- `mmsctx://...` ref only if useful for follow-up
 - short snippet
-- conclusion / next action
+- next action
 
 Use `mms-context search` and `mms-context show` only when the stored output is needed again.
 
-Use `token-saver toon` or `mms-toon --auto` when:
+Use `token-saver toon` or `mms-toon --auto` yourself when:
 
 - structured JSON is agent-facing context
 - rows are flat/repetitive
@@ -82,4 +89,4 @@ The user should only need to say normal task words like:
 - "省点 context"
 - `/token-saver`
 
-When Token Saver is active, do not ask the user to remember `token-saver run`, `mms-context`, `mms-toon`, or `mmsctx://` mechanics.
+When Token Saver is active, do not ask the user to remember `token-saver run`, `mms-context`, `mms-toon`, or `mmsctx://` mechanics. Treat those as internal implementation details.
