@@ -237,6 +237,9 @@ DIRECT_CLI_MODES = {"qwen", "kimi"}
 DEFAULT_KIMI_MODEL = "kimi-k2.5"
 UPDATE_CHECK_INTERVAL_SEC = 24 * 60 * 60
 UPDATE_PROMPT_INTERVAL_SEC = 24 * 60 * 60
+UPDATE_NOTICE_VERSION_GAP = 3
+UPDATE_NOTICE_SOURCES = frozenset({"install.sh"})
+UPDATE_CHECK_TAG_LIMIT = 100
 
 _UPDATE_CHECK_LOCK = threading.Lock()
 _UPDATE_CHECK_RUNNING = False
@@ -299,9 +302,27 @@ def _save_update_check_cache(payload):
     _save_json_file(UPDATE_CHECK_PATH, payload)
 
 
-def _fetch_latest_semver_tag():
+def _normalize_semver_tags(raw_tags):
+    if not isinstance(raw_tags, list):
+        return []
+
+    normalized = []
+    seen = set()
+    for item in raw_tags:
+        tag = str(item or "").strip()
+        parsed = _parse_semver_tag(tag)
+        if parsed is None or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append((parsed, tag))
+
+    normalized.sort(key=lambda item: item[0], reverse=True)
+    return [tag for _, tag in normalized]
+
+
+def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
     req = Request(
-        "https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page=100",
+        f"https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page={int(limit)}",
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "mms-update-check",
@@ -313,35 +334,77 @@ def _fetch_latest_semver_tag():
     if not isinstance(data, list):
         return ""
 
-    best = None
-    best_tag = ""
+    semver_tags = []
     for item in data:
         if not isinstance(item, dict):
             continue
         tag = str(item.get("name") or "").strip()
-        parsed = _parse_semver_tag(tag)
-        if parsed is None:
-            continue
-        if best is None or parsed > best:
-            best = parsed
-            best_tag = tag
-    return best_tag
+        semver_tags.append(tag)
+    return _normalize_semver_tags(semver_tags)
 
 
-def _major_update_notice():
+def _fetch_latest_semver_tag():
+    semver_tags = _fetch_latest_semver_tags()
+    return semver_tags[0] if semver_tags else ""
+
+
+def _installed_update_semver(version_meta):
+    source = str(version_meta.get("source") or "").strip()
+    install_channel = str(version_meta.get("install_channel") or "").strip()
+    if source:
+        is_install_managed = source in UPDATE_NOTICE_SOURCES
+    else:
+        is_install_managed = bool(install_channel)
+    if not is_install_managed:
+        return None, None
+
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    installed_semver = _parse_semver_tag(installed_version)
+    if installed_semver is None:
+        return None, None
+    return installed_version, installed_semver
+
+
+def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
+    installed_version = str(installed_version or "").strip()
+    tags = _normalize_semver_tags(known_tags)
+    if not tags:
+        latest_semver = _parse_semver_tag(latest_tag)
+        installed_semver = _parse_semver_tag(installed_version)
+        if latest_semver is None or installed_semver is None or latest_semver <= installed_semver:
+            return 0
+        return None
+
+    latest_tag = tags[0]
+    latest_semver = _parse_semver_tag(latest_tag)
+    installed_semver = _parse_semver_tag(installed_version)
+    if latest_semver is None or installed_semver is None or latest_semver <= installed_semver:
+        return 0
+
+    try:
+        return tags.index(installed_version)
+    except ValueError:
+        return len(tags)
+
+
+def _update_notice():
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
 
     version_meta = _load_version_meta()
-    installed_version = str(version_meta.get("installed_version") or "").strip()
-    installed_semver = _parse_semver_tag(installed_version)
+    installed_version, installed_semver = _installed_update_semver(version_meta)
     if installed_semver is None:
         return None
 
     cache = _load_update_check_cache()
     latest_tag = str(cache.get("latest_tag") or "").strip()
     latest_semver = _parse_semver_tag(latest_tag)
-    if latest_semver is None or latest_semver[0] <= installed_semver[0]:
+    if latest_semver is None or latest_semver <= installed_semver:
+        return None
+
+    gap_count = _semver_tag_gap(installed_version, cache.get("semver_tags"), latest_tag)
+    is_major_upgrade = latest_semver[0] > installed_semver[0]
+    if not is_major_upgrade and (gap_count is None or gap_count < UPDATE_NOTICE_VERSION_GAP):
         return None
 
     now = time.time()
@@ -356,16 +419,21 @@ def _major_update_notice():
     return {
         "installed_version": installed_version,
         "latest_tag": latest_tag,
+        "gap_count": gap_count,
         "upgrade_command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
     }
+
+
+def _major_update_notice():
+    return _update_notice()
 
 
 def _start_async_update_check():
     global _UPDATE_CHECK_RUNNING
 
     version_meta = _load_version_meta()
-    installed_version = str(version_meta.get("installed_version") or "").strip()
-    if _parse_semver_tag(installed_version) is None:
+    _installed_version, installed_semver = _installed_update_semver(version_meta)
+    if installed_semver is None:
         return
 
     cache = _load_update_check_cache()
@@ -381,11 +449,12 @@ def _start_async_update_check():
     def _run():
         global _UPDATE_CHECK_RUNNING
         try:
-            latest_tag = _fetch_latest_semver_tag()
+            semver_tags = _fetch_latest_semver_tags()
             payload = _load_update_check_cache()
             payload["checked_at"] = time.time()
-            if latest_tag:
-                payload["latest_tag"] = latest_tag
+            if semver_tags:
+                payload["latest_tag"] = semver_tags[0]
+                payload["semver_tags"] = semver_tags
             _save_update_check_cache(payload)
         except Exception:
             pass
@@ -9705,13 +9774,20 @@ def main():
         _trace_enabled = True
         _trace_overrides = []
 
-    update_notice = _major_update_notice()
+    update_notice = _update_notice()
     if update_notice:
         latest_tag = update_notice.get("latest_tag", "")
         installed_version = update_notice.get("installed_version", "")
+        gap_count = update_notice.get("gap_count")
+        behind_suffix = (
+            f" [dim]({_L(f'落后 {gap_count} 个版本', f'{gap_count} versions behind')})[/dim]"
+            if isinstance(gap_count, int) and gap_count > 0
+            else ""
+        )
         console.print(
             f"[yellow]{_L(f'发现新版本 {latest_tag}', f'New version available: {latest_tag}')}[/yellow] "
             f"[dim]({_L('当前', 'current')} {installed_version})[/dim]"
+            f"{behind_suffix}"
         )
         console.print(f"[dim]{_L('升级命令', 'Upgrade command')}: {update_notice['upgrade_command']}[/dim]")
     _start_async_update_check()

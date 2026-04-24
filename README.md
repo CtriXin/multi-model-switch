@@ -35,6 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 By default, the installer pulls the latest semver tag.
 When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, `read-once`, and `ops-env-safe`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
+`install.sh` installs also keep a lightweight version marker, so interactive `mms` runs can show an upgrade hint when you are `3+` tags behind without prompting on every launch.
 
 Public surface note:
 

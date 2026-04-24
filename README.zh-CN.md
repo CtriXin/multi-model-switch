@@ -49,6 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 默认会安装最新发布的 semver tag。
 如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`、`ops-env-safe`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
+通过 `install.sh` 安装的版本还会保留一个轻量版本标记；之后在交互终端里启动 `mms` 时，如果你已经落后 `3+` 个 tag，MMS 会给出升级提示，但不会每次启动都反复刷屏。
 
 ### 安装策略
 
