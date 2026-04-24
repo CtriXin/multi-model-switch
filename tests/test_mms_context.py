@@ -88,6 +88,19 @@ def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_
     assert os.path.islink(parent_dir / "commands" / "token-saver.toml")
 
 
+def test_resolve_token_saver_root_prefers_shared_skill(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    shared_root = home / "auto-skills" / "shared-skills" / "token-saver"
+    shared_root.mkdir(parents=True)
+    (shared_root / "SKILL.md").write_text("# shared token saver\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(home))
+    monkeypatch.delenv("MMS_TOKEN_SAVER_ROOT", raising=False)
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    assert Path(mms_launchers._resolve_token_saver_root()) == shared_root
+
+
 def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 

@@ -2671,6 +2671,7 @@ def _resolve_token_saver_root():
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend([
+        _real_user_path("auto-skills", "shared-skills", "token-saver"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
         _real_user_path("auto-skills", "vendor", "token-saver"),
         _real_user_path("vendor", "token-saver"),

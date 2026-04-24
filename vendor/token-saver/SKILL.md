@@ -6,7 +6,7 @@ allowed-tools: Bash(mms-context:*), Bash($MMS_CONTEXT_BIN:*), Bash(mms-toon:*), 
 
 # Token Saver
 
-Token Saver is the unified MMS session behavior for saving context.
+Token Saver is the unified session behavior for saving context.
 
 Do not make the user remember helper commands. Use the rules automatically when they fit.
 
