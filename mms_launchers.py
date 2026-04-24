@@ -32,6 +32,7 @@ from mms_fake_upstream import (
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
+from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, locked_state_file
 
 _build_gateway_url = None
@@ -714,6 +715,35 @@ def _set_session_home_hint(env, session_home):
     if session_home:
         env["MMS_SESSION_HOME"] = session_home
     return env
+
+
+def _install_session_packet_env(
+    env,
+    *,
+    cli,
+    runtime,
+    model_info=None,
+    session_home="",
+    features=None,
+    extra_paths=None,
+):
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return {}
+    try:
+        packet_env = write_session_packet(
+            session_home,
+            cli=cli,
+            runtime=runtime,
+            model_info=model_info,
+            features=features,
+            extra_paths=extra_paths,
+        )
+    except Exception:
+        return {}
+    if isinstance(env, dict):
+        env.update(packet_env)
+    return packet_env
 
 
 def _session_guard_marker_path(session_home):
@@ -3925,11 +3955,12 @@ def _scrub_inherited_runtime_env(env, *, strip_openai=False, strip_proxy=False):
     return env
 
 
-def _account_env(account, *, validate_proxy=True):
+def _account_env(account, *, validate_proxy=True, model_info=None):
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+    session_home = ""
     if not home_dir:
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
         sys.exit(1)
@@ -4047,6 +4078,18 @@ def _account_env(account, *, validate_proxy=True):
         env["XDG_CONFIG_HOME"] = xdg_config_home
         _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
+    if cli_name == "codex" and session_home:
+        _install_session_packet_env(
+            env,
+            cli="codex",
+            runtime=account,
+            model_info=model_info,
+            session_home=session_home,
+            features={
+                "web_access": bool(_resolve_web_access_root()),
+                "agent_browser": bool(_resolve_agent_browser_root()),
+            },
+        )
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
     if cli_name == "claude":
@@ -5457,6 +5500,24 @@ def _claude_gateway_env(
     # 其余 DEFAULT_*_MODEL slot 保持 Claude 壳名供 Claude Code 内部 slot 匹配
     if display_model:
         required_settings_env["ANTHROPIC_MODEL"] = display_model
+    session_packet_env = _install_session_packet_env(
+        {},
+        cli="claude",
+        runtime=runtime,
+        model_info={
+            "model": display_model or selected_model or heavy_model or best_model or "",
+            "lb_medium": medium_model or "",
+            "lb_light": light_model or "",
+        },
+        session_home=gateway_home,
+        features={
+            "caveman": enable_caveman,
+            "ecc": enable_ecc,
+            "web_access": bool(_resolve_web_access_root()),
+        },
+        extra_paths={"route_status": route_status_path},
+    )
+    required_settings_env.update(session_packet_env)
     _write_claude_session_settings(
         gw_claude_dir,
         required_env=required_settings_env,
@@ -5481,6 +5542,7 @@ def _claude_gateway_env(
     _inject_real_home_hints(env)
     env["HOME"] = gateway_home
     _set_session_home_hint(env, gateway_home)
+    env.update(session_packet_env)
     env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = effective_token
     env["MMS_ROUTE_STATUS_PATH"] = route_status_path
@@ -5533,7 +5595,7 @@ def _claude_gateway_env(
     return env
 
 
-def _codex_gateway_env(runtime, base_url):
+def _codex_gateway_env(runtime, base_url, model_info=None):
     """为 gateway api_key 模式创建独立 HOME，per-PID session 隔离。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
@@ -5803,6 +5865,18 @@ def _codex_gateway_env(runtime, base_url):
     _apply_runtime_locale_profile(env, runtime)
     _apply_runtime_ip_stack_profile(env, runtime)
     _install_session_command_wrappers(session_home, env)
+    _install_session_packet_env(
+        env,
+        cli="codex",
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+        features={
+            "caveman": enable_caveman,
+            "web_access": bool(_resolve_web_access_root()),
+            "agent_browser": bool(_resolve_agent_browser_root()),
+        },
+    )
     return env
 
 
@@ -5828,9 +5902,9 @@ def launch_codex(model_info, runtime, once=False):
     _ensure_speed_stats()
     auth_mode = runtime.get("auth_mode", "api_key")
     if auth_mode == "oauth":
-        env = _account_env(runtime)
-        _prepare_oauth_home_context(runtime, env, "codex")
         model = _resolve_model(model_info)
+        env = _account_env(runtime, model_info=model_info)
+        _prepare_oauth_home_context(runtime, env, "codex")
         cmd = ["codex"]
         if model:
             cmd += ["-m", model]
@@ -5862,7 +5936,7 @@ def launch_codex(model_info, runtime, once=False):
             no_proxy=runtime.get("no_proxy"),
         ) as bridge_cfg:
             bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
-            env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
+            env = _codex_gateway_env(runtime, bridge_cfg["base_url"], model_info=model_info)
             env["OPENAI_API_KEY"] = bridge_cfg["api_key"]
             env["OPENAI_BASE_URL"] = bridge_base_url
             cmd = ["codex"]
@@ -5898,7 +5972,7 @@ def launch_codex(model_info, runtime, once=False):
         no_proxy=runtime.get("no_proxy"),
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
-        env = _codex_gateway_env(runtime, bridge_cfg["base_url"])
+        env = _codex_gateway_env(runtime, bridge_cfg["base_url"], model_info=model_info)
         env["OPENAI_API_KEY"] = bridge_cfg["api_key"]
         env["OPENAI_BASE_URL"] = bridge_base_url
         cmd = ["codex"]

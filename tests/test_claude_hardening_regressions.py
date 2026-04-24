@@ -502,6 +502,7 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     env = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "caveman_mode": "enable"},
         "https://relay.example.com",
+        model_info={"model": "gpt-5.4"},
     )
 
     session_codex = Path(env["HOME"]) / ".codex"
@@ -519,6 +520,10 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     assert os.path.islink(session_codex / "commands" / "caveman.toml")
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "caveman")
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+    assert packet["cli"] == "codex"
+    assert packet["model"]["primary"] == "gpt-5.4"
+    assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
 
 def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tmp_path):
@@ -876,6 +881,12 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     assert env["HOME"] == str(session_home)
     assert os.path.islink(session_home / ".claude" / "skills" / "web-access")
     assert (session_home / ".claude" / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+    settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert packet["cli"] == "claude"
+    assert packet["model"]["primary"] == "kimi-for-coding"
+    assert settings["env"]["MMS_SESSION_PACKET_JSON"] == env["MMS_SESSION_PACKET_JSON"]
+    assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
 
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
