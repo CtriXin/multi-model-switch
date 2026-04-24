@@ -2697,6 +2697,11 @@ def _mms_context_script_path():
     return script_path if os.path.isfile(script_path) else ""
 
 
+def _token_saver_script_path():
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-saver")
+    return script_path if os.path.isfile(script_path) else ""
+
+
 def _is_caveman_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
@@ -4428,6 +4433,24 @@ def _install_session_command_wrappers(session_home, env):
         if isinstance(env, dict):
             env["MMS_CONTEXT_BIN"] = context_wrapper_path
             env["MMS_CONTEXT_DIR"] = os.path.join(session_home, ".mms", "context-store")
+
+    token_saver_script = _token_saver_script_path()
+    if token_saver_script:
+        token_saver_wrapper_path = os.path.join(wrapper_dir, "token-saver")
+        token_saver_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(token_saver_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(token_saver_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(token_saver_wrapper)
+        os.chmod(token_saver_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["TOKEN_SAVER_BIN"] = token_saver_wrapper_path
+            env["MMS_TOKEN_SAVER_BIN"] = token_saver_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
 
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
@@ -6310,13 +6333,18 @@ def get_export_env(cli, runtime):
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
+    token_saver_script = _token_saver_script_path()
     if cli in {"claude", "codex"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
             exports["MMS_CONTEXT_BIN"] = context_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(os.getcwd(), ".mms", "context-store"))
-        first_script = toon_script or context_script
+        if token_saver_script:
+            exports["TOKEN_SAVER_BIN"] = token_saver_script
+            exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(os.getcwd(), ".mms", "context-store"))
+        first_script = toon_script or context_script or token_saver_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
     return exports

@@ -56,6 +56,78 @@ def test_mms_context_defaults_to_session_home(monkeypatch, tmp_path):
     assert mms_context._store_dir() == session_home / ".mms" / "context-store"
 
 
+def test_token_saver_run_prints_short_output(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    result = token_saver.main(
+        [
+            "run",
+            "--threshold-chars",
+            "1000",
+            "--",
+            sys.executable,
+            "-c",
+            "print('small output')",
+        ]
+    )
+
+    assert result == 0
+    assert capsys.readouterr().out == "small output\n"
+    assert not (tmp_path / "store" / "index.json").exists()
+
+
+def test_token_saver_run_stores_long_output(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    result = token_saver.main(
+        [
+            "run",
+            "--threshold-chars",
+            "20",
+            "--title",
+            "long demo",
+            "--",
+            sys.executable,
+            "-c",
+            "print('x' * 80)",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "token-saver: stored command output" in output
+    assert "ref: mmsctx://ctx_" in output
+    assert "exit_code: 0" in output
+    assert (tmp_path / "store" / "index.json").exists()
+
+
+def test_token_saver_run_preserves_nonzero_exit_code_when_stored(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    result = token_saver.main(
+        [
+            "run",
+            "--threshold-chars",
+            "20",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; print('failure ' * 20); sys.exit(7)",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 7
+    assert "ref: mmsctx://ctx_" in output
+    assert "exit_code: 7" in output
+
+
 def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_commands(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
@@ -108,19 +180,27 @@ def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_p
     context_script = tmp_path / "mms-context"
     context_script.write_text("#!/bin/sh\nprintf 'context\\n'\n", encoding="utf-8")
     context_script.chmod(0o755)
+    token_saver_script = tmp_path / "token-saver"
+    token_saver_script.write_text("#!/bin/sh\nprintf 'token-saver\\n'\n", encoding="utf-8")
+    token_saver_script.chmod(0o755)
     env = {"HOME": str(session_home), "PATH": "/usr/bin"}
 
     monkeypatch.setenv("HOME", str(session_home))
     monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: "")
     monkeypatch.setattr(mms_launchers, "_mms_context_script_path", lambda: str(context_script))
+    monkeypatch.setattr(mms_launchers, "_token_saver_script_path", lambda: str(token_saver_script))
 
     mms_launchers._install_session_command_wrappers(str(session_home), env)
 
     wrapper = Path(env["MMS_CONTEXT_BIN"])
+    token_saver_wrapper = Path(env["TOKEN_SAVER_BIN"])
     assert wrapper == session_home / ".mms" / "bin" / "mms-context"
     assert wrapper.exists()
     assert f'exec "{context_script}" "$@"' in wrapper.read_text(encoding="utf-8")
+    assert token_saver_wrapper == session_home / ".mms" / "bin" / "token-saver"
+    assert env["MMS_TOKEN_SAVER_BIN"] == str(token_saver_wrapper)
+    assert f'exec "{token_saver_script}" "$@"' in token_saver_wrapper.read_text(encoding="utf-8")
     assert env["MMS_CONTEXT_DIR"] == str(session_home / ".mms" / "context-store")
     assert env["PATH"].startswith(str(wrapper.parent) + os.pathsep)
 
@@ -133,10 +213,14 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
     context_script = tmp_path / "mms-context"
     context_script.write_text("#!/bin/sh\nprintf 'context\\n'\n", encoding="utf-8")
     context_script.chmod(0o755)
+    token_saver_script = tmp_path / "token-saver"
+    token_saver_script.write_text("#!/bin/sh\nprintf 'token-saver\\n'\n", encoding="utf-8")
+    token_saver_script.chmod(0o755)
 
     monkeypatch.chdir(repo_dir)
     monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: "")
     monkeypatch.setattr(mms_launchers, "_mms_context_script_path", lambda: str(context_script))
+    monkeypatch.setattr(mms_launchers, "_token_saver_script_path", lambda: str(token_saver_script))
     monkeypatch.setattr(mms_launchers, "validate_provider_for_cli", lambda *_args, **_kwargs: None)
 
     runtime = {
@@ -152,6 +236,10 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
 
     assert claude_exports["MMS_CONTEXT_BIN"] == str(context_script)
     assert codex_exports["MMS_CONTEXT_BIN"] == str(context_script)
+    assert claude_exports["TOKEN_SAVER_BIN"] == str(token_saver_script)
+    assert codex_exports["TOKEN_SAVER_BIN"] == str(token_saver_script)
+    assert claude_exports["MMS_TOKEN_SAVER_BIN"] == str(token_saver_script)
+    assert codex_exports["MMS_TOKEN_SAVER_BIN"] == str(token_saver_script)
     assert claude_exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
     assert codex_exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
     assert claude_exports["PATH"] == f"{context_script.parent}:$PATH"

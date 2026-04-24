@@ -1,7 +1,7 @@
 ---
 name: token-saver
 description: Session behavior pack for automatic token-saving decisions. Use when handling large tool output, structured data for another model, repeated handoff/status context, long logs, or when the user asks to save tokens/context. Prefer this unified pack over remembering separate TOON or context commands.
-allowed-tools: Bash(mms-context:*), Bash($MMS_CONTEXT_BIN:*), Bash(mms-toon:*), Bash($MMS_TOON_BIN:*)
+allowed-tools: Bash(token-saver:*), Bash($TOKEN_SAVER_BIN:*), Bash($MMS_TOKEN_SAVER_BIN:*), Bash(mms-context:*), Bash($MMS_CONTEXT_BIN:*), Bash(mms-toon:*), Bash($MMS_TOON_BIN:*)
 ---
 
 # Token Saver
@@ -12,7 +12,21 @@ Do not make the user remember helper commands. Use the rules automatically when 
 
 ## Auto Rules
 
-Use `mms-context` when:
+Use `token-saver run -- <command>` when a command may print long output:
+
+```bash
+token-saver run --title "short title" -- some-command
+```
+
+It prints the command output directly when short. When long, it stores the full output and returns:
+
+- `mmsctx://...` ref
+- exit code
+- short snippet
+
+Use the same wrapper for tests, builds, log reads, search commands, and diagnostics where full output may be noisy.
+
+Use `token-saver put` or `mms-context put` when text already exists and should be stored:
 
 - tool output is long
 - logs contain many repeated lines
@@ -20,10 +34,10 @@ Use `mms-context` when:
 - a handoff/status packet would be noisy inline
 - the user asks to keep context small
 
-Default pattern:
+Stored-text pattern:
 
 ```bash
-some-command 2>&1 | mms-context put --kind tool-output --title "short title"
+cat long-output.txt | token-saver put --kind tool-output --title "short title"
 ```
 
 Then respond with:
@@ -34,16 +48,16 @@ Then respond with:
 
 Use `mms-context search` and `mms-context show` only when the stored output is needed again.
 
-Use `mms-toon` when:
+Use `token-saver toon` or `mms-toon --auto` when:
 
 - structured JSON is agent-facing context
 - rows are flat/repetitive
 - the payload is for model-to-model handoff, status, counters, or compact metadata
 
-Default pattern:
+Structured-data pattern:
 
 ```bash
-mms-toon --auto payload.json
+token-saver toon payload.json
 ```
 
 ## Do Not Convert
@@ -68,4 +82,4 @@ The user should only need to say normal task words like:
 - "省点 context"
 - `/token-saver`
 
-When Token Saver is active, do not ask the user to remember `mms-context`, `mms-toon`, or `mmsctx://` mechanics.
+When Token Saver is active, do not ask the user to remember `token-saver run`, `mms-context`, `mms-toon`, or `mmsctx://` mechanics.
