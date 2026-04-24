@@ -2582,6 +2582,32 @@ def _resolve_agent_browser_root():
     return ""
 
 
+def _resolve_toon_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_TOON_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
+        _real_user_path("auto-skills", "vendor", "toon"),
+        _real_user_path("vendor", "toon"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
+def _mms_toon_script_path():
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-toon")
+    return script_path if os.path.isfile(script_path) else ""
+
+
 def _is_caveman_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
@@ -2897,6 +2923,15 @@ def _overlay_agent_browser_session_entries(parent_dir, session_home):
     overlay_root = os.path.join(session_home, ".mms-agent-browser-overlay")
     os.makedirs(overlay_root, exist_ok=True)
     _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root)
+
+
+def _overlay_toon_session_entries(parent_dir, session_home):
+    toon_root = _resolve_toon_root()
+    if not toon_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-toon-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -4073,6 +4108,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             _overlay_codex_shared_resume(home_dir, session_home)
             _overlay_web_access_session_entries(os.path.join(session_home, ".codex"), session_home)
             _overlay_agent_browser_session_entries(os.path.join(session_home, ".codex"), session_home)
+            _overlay_toon_session_entries(os.path.join(session_home, ".codex"), session_home)
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
@@ -4088,6 +4124,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             features={
                 "web_access": bool(_resolve_web_access_root()),
                 "agent_browser": bool(_resolve_agent_browser_root()),
+                "toon": bool(_resolve_toon_root()),
             },
         )
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
@@ -4235,6 +4272,22 @@ def _install_session_command_wrappers(session_home, env):
         with open(wrapper_path, "w", encoding="utf-8") as handle:
             handle.write(wrapper)
         os.chmod(wrapper_path, 0o755)
+
+    toon_script = _mms_toon_script_path()
+    if toon_script:
+        toon_wrapper_path = os.path.join(wrapper_dir, "mms-toon")
+        toon_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(toon_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(toon_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(toon_wrapper)
+        os.chmod(toon_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["MMS_TOON_BIN"] = toon_wrapper_path
 
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
@@ -5514,6 +5567,7 @@ def _claude_gateway_env(
             "caveman": enable_caveman,
             "ecc": enable_ecc,
             "web_access": bool(_resolve_web_access_root()),
+            "toon": bool(_resolve_toon_root()),
         },
         extra_paths={"route_status": route_status_path},
     )
@@ -5536,6 +5590,7 @@ def _claude_gateway_env(
         enable_ecc=enable_ecc,
     )
     _overlay_web_access_session_entries(gw_claude_dir, gateway_home)
+    _overlay_toon_session_entries(gw_claude_dir, gateway_home)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -5853,6 +5908,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     )
     _overlay_web_access_session_entries(codex_dir, session_home)
     _overlay_agent_browser_session_entries(codex_dir, session_home)
+    _overlay_toon_session_entries(codex_dir, session_home)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -5875,6 +5931,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "caveman": enable_caveman,
             "web_access": bool(_resolve_web_access_root()),
             "agent_browser": bool(_resolve_agent_browser_root()),
+            "toon": bool(_resolve_toon_root()),
         },
     )
     return env
@@ -6095,6 +6152,9 @@ def get_export_env(cli, runtime):
     elif cli == "kimi":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+    toon_script = _mms_toon_script_path()
+    if toon_script and cli in {"claude", "codex"}:
+        exports["MMS_TOON_BIN"] = toon_script
     return exports
 
 

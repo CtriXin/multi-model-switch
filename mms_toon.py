@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 import json
 import math
 import re
+import sys
 from typing import Any
 
 
@@ -177,3 +179,63 @@ def _needs_quoted_string(value: str) -> bool:
     if value.startswith(("-", ":", "#")):
         return True
     return False
+
+
+def _read_json_input(path: str | None) -> Any:
+    if path and path != "-":
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    return json.load(sys.stdin)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="mms-toon",
+        description="Convert JSON from a file or stdin into compact TOON.",
+    )
+    parser.add_argument("path", nargs="?", default="-", help="JSON file path, or '-' / omitted for stdin")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Use TOON only when shorter; otherwise print pretty JSON fallback.",
+    )
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        help="Print chosen format and char savings to stderr.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        value = _read_json_input(args.path)
+        if args.auto:
+            result = choose_llm_data_format(value)
+            output = result.text
+        else:
+            output = "TOON:\n" + encode_toon(value)
+            json_chars = len(json_for_llm(value))
+            result = LlmDataFormat(
+                "toon",
+                output,
+                json_chars,
+                len(output),
+                json_chars - len(output),
+                (json_chars - len(output)) / json_chars if json_chars else 0.0,
+            )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        print(f"mms-toon: {exc}", file=sys.stderr)
+        return 2
+
+    print(output)
+    if args.stats:
+        ratio = f"{result.savings_ratio:.1%}" if result.json_chars else "0.0%"
+        print(
+            f"format={result.format} json_chars={result.json_chars} "
+            f"toon_chars={result.toon_chars} savings={result.savings_chars} ratio={ratio}",
+            file=sys.stderr,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

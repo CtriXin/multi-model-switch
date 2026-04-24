@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 
 
 def test_encode_toon_table_array():
@@ -51,6 +52,22 @@ def test_choose_llm_data_format_falls_back_for_unsupported_shape():
     assert selected.format == "json"
     assert selected.toon_chars is None
     assert '"rows"' in selected.text
+
+
+def test_mms_toon_cli_reads_json_from_stdin(monkeypatch, capsys):
+    from mms_toon import main
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO('{"rows":[{"id":"a","ok":true},{"id":"b","ok":false}]}'),
+    )
+
+    assert main([]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.startswith("TOON:\n")
+    assert "rows[2]{id,ok}:" in captured.out
+    assert "  a,true" in captured.out
 
 
 def test_phase3_synthesize_formats_structured_payload_as_toon(monkeypatch, tmp_path):

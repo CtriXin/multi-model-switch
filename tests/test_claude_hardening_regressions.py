@@ -603,6 +603,75 @@ def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch,
     assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
 
 
+def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    toon_root = tmp_path / "toon"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    toon_root.mkdir()
+    (toon_root / "SKILL.md").write_text("# toon\n", encoding="utf-8")
+    os.symlink(existing_skills, parent_dir / "skills")
+
+    monkeypatch.setenv("MMS_TOON_ROOT", str(toon_root))
+
+    mms_launchers._overlay_toon_session_entries(str(parent_dir), str(session_home))
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "toon")
+    assert (parent_dir / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
+
+
+def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    (real_codex / "skills" / "keep-skill").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    toon_root = tmp_path / "toon"
+    toon_root.mkdir()
+    (toon_root / "SKILL.md").write_text("# toon\n", encoding="utf-8")
+    toon_script = tmp_path / "mms-toon"
+    toon_script.write_text("#!/bin/sh\nprintf 'TOON:\\n'\n", encoding="utf-8")
+    toon_script.chmod(0o755)
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("HOME", str(tmp_path / "isolated-home"))
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("MMS_TOON_ROOT", str(toon_root))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
+    monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
+
+    env = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        "https://relay.example.com",
+    )
+
+    session_codex = Path(env["HOME"]) / ".codex"
+    toon_wrapper = Path(env["MMS_TOON_BIN"])
+    assert os.path.islink(session_codex / "skills" / "keep-skill")
+    assert os.path.islink(session_codex / "skills" / "toon")
+    assert (session_codex / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
+    assert toon_wrapper == Path(env["HOME"]) / ".mms" / "bin" / "mms-toon"
+    assert toon_wrapper.exists()
+    assert f'exec "{toon_script}" "$@"' in toon_wrapper.read_text(encoding="utf-8")
+    assert env["PATH"].startswith(str(toon_wrapper.parent) + os.pathsep)
+
+
 def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -887,6 +956,66 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     assert packet["model"]["primary"] == "kimi-for-coding"
     assert settings["env"]["MMS_SESSION_PACKET_JSON"] == env["MMS_SESSION_PACKET_JSON"]
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
+
+
+def test_claude_gateway_env_materializes_session_toon_skill_and_export(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "gateway-session"
+    session_home.mkdir()
+    real_home = tmp_path / "real-home"
+    (real_home / ".local").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    toon_root = tmp_path / "toon"
+    toon_root.mkdir()
+    (toon_root / "SKILL.md").write_text("# toon\n", encoding="utf-8")
+    toon_script = tmp_path / "mms-toon"
+    toon_script.write_text("#!/bin/sh\nprintf 'TOON:\\n'\n", encoding="utf-8")
+    toon_script.chmod(0o755)
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("HOME", str(tmp_path / "isolated-home"))
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("MMS_TOON_ROOT", str(toon_root))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_reserve_session_home",
+        lambda *args, **kwargs: (str(session_home), 0, 1),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_prepare_claude_session_tree",
+        lambda _home, claude_dir, **_kwargs: os.makedirs(claude_dir, exist_ok=True),
+    )
+    monkeypatch.setattr(mms_launchers, "_pick_gateway_model", lambda *args, **kwargs: "kimi-for-coding")
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
+    monkeypatch.setattr(mms_launchers, "_SESSION_REAL_HOME_WRAPPER_COMMANDS", ())
+    monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
+    monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+
+    env = mms_launchers._claude_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        base_url="https://relay.example.com",
+        auth_token="bridge-token",
+        selected_model="kimi-for-coding",
+        display_model="kimi-for-coding",
+    )
+
+    toon_wrapper = Path(env["MMS_TOON_BIN"])
+    assert env["HOME"] == str(session_home)
+    assert os.path.islink(session_home / ".claude" / "skills" / "toon")
+    assert (session_home / ".claude" / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
+    assert toon_wrapper == session_home / ".mms" / "bin" / "mms-toon"
+    assert toon_wrapper.exists()
+    assert f'exec "{toon_script}" "$@"' in toon_wrapper.read_text(encoding="utf-8")
+    assert env["PATH"].startswith(str(toon_wrapper.parent) + os.pathsep)
 
 
 def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch, tmp_path):
@@ -1947,6 +2076,33 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
     assert not (wrapper_dir / "claude").exists()
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
+
+
+def test_get_export_env_exposes_toon_bin_for_export_only_launch(monkeypatch, tmp_path):
+    import mms_launchers
+
+    toon_script = tmp_path / "mms-toon"
+    toon_script.write_text("#!/bin/sh\nprintf 'TOON:\\n'\n", encoding="utf-8")
+    toon_script.chmod(0o755)
+
+    monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: str(toon_script))
+    monkeypatch.setattr(mms_launchers, "validate_provider_for_cli", lambda *_args, **_kwargs: None)
+
+    runtime = {
+        "id": "relay-a",
+        "api_key": "sk-runtime",
+        "base_url": "https://relay.example.com",
+        "anthropic_base_url": "https://anthropic.example.com",
+        "openai_base_url": "https://openai.example.com/v1",
+    }
+
+    claude_exports = mms_launchers.get_export_env("claude", runtime)
+    codex_exports = mms_launchers.get_export_env("codex", runtime)
+
+    assert claude_exports["MMS_TOON_BIN"] == str(toon_script)
+    assert codex_exports["MMS_TOON_BIN"] == str(toon_script)
+    assert claude_exports["ANTHROPIC_AUTH_TOKEN"] == "sk-runtime"
+    assert codex_exports["OPENAI_API_KEY"] == "sk-runtime"
 
 
 def test_account_env_oauth_claude_fail_closes_execution_surfaces(monkeypatch, tmp_path):
