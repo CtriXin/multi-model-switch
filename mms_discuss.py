@@ -22,6 +22,7 @@ from mms_core import (
     ensure_provider_credentials,
     fetch_models,
 )
+from mms_toon import format_llm_data
 
 PHASE1_SYSTEM_PROMPT = """你是一个严格压缩输出的技术分析助手。
 你会收到一个任务，请独立思考，并且只输出 JSON。
@@ -227,7 +228,7 @@ async def phase2_cross_review(provider_ctx, client, ordered_models, summaries):
         }
         messages = [
             {"role": "system", "content": PHASE2_SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(review_payload, ensure_ascii=False, indent=2)},
+            {"role": "user", "content": format_llm_data(review_payload)},
         ]
         try:
             data = await _run_json_phase(
@@ -259,7 +260,7 @@ async def phase3_synthesize(provider_ctx, client, synthesizer_model, task_text, 
     }
     messages = [
         {"role": "system", "content": PHASE3_SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False, indent=2)},
+        {"role": "user", "content": format_llm_data(payload)},
     ]
 
     chunks = []
