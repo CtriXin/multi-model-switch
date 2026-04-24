@@ -2362,6 +2362,7 @@ cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 [ -f "$SOURCE_DIR/statusline-command.sh" ] && cp "$SOURCE_DIR"/statusline-command.sh "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
+copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
 # 复制所有 mms_*.py 确保完整
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
@@ -2376,6 +2377,7 @@ chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 [ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
+[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +
 
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3

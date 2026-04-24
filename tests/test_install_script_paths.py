@@ -160,6 +160,13 @@ def test_install_script_copies_vendor_directory():
     assert 'copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor"' in text
 
 
+def test_install_script_copies_session_tool_scripts_directory():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts"' in text
+    assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
+
+
 def test_install_script_mentions_bundled_caveman_mode():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
