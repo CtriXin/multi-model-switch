@@ -104,3 +104,40 @@ def test_build_model_families_for_cli_keeps_claude_family(monkeypatch):
     assert "Claude" in family_names
     assert "GPT" in family_names
     assert "Kimi" in family_names
+
+
+def test_infer_model_family_recognizes_deepseek():
+    import mms_core
+
+    family, category = mms_core._infer_model_family("deepseek-v4-pro")
+
+    assert family == "DeepSeek"
+    assert category == "国产系"
+
+
+def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
+    import mms_core
+
+    provider = {
+        "id": "mixed-provider",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["claude"],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_effective_models",
+        lambda _provider, _cached, _cfg=None: ["deepseek-v4-pro", "qwen3.6-plus"],
+    )
+    monkeypatch.setattr(mms_core, "_provider_supports_model_for_cli", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_provider_label", lambda _provider: "Mixed Provider")
+    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
+
+    families = mms_core._build_model_families_for_cli({}, "claude", {}, [])
+
+    family_names = [entry["family"] for entry in families]
+    assert "DeepSeek" in family_names
+    assert "其他" not in family_names

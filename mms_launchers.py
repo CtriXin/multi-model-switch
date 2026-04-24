@@ -2508,6 +2508,32 @@ def _runtime_caveman_enabled(runtime):
     return _normalize_caveman_mode((runtime or {}).get("caveman_mode", "disable")) == "enable"
 
 
+def _normalize_thinking_mode(value, default="enable"):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in {"auto", "enable", "disable"} else "enable"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in {"auto", "enable", "disable"} else "enable"
+
+
+def _runtime_thinking_enabled(runtime):
+    return _normalize_thinking_mode((runtime or {}).get("thinking_mode", "enable")) == "enable"
+
+
+def _normalize_reasoning_effort(value, default="high"):
+    raw = str(value or "").strip().lower()
+    if raw in {"low", "medium", "high", "xhigh"}:
+        return raw
+    return default if default in {"low", "medium", "high", "xhigh"} else "high"
+
+
+def _runtime_reasoning_effort(runtime, default="high"):
+    return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
@@ -4919,13 +4945,16 @@ def launch_claude(model_info, runtime, once=False):
         # 当使用 Claude 壳名时，保留真实模型名供 status line 显示
         _display_model = probe_model if _env_model != probe_model else None
 
-        # GPT 模型走 Responses API，提前询问 reasoning effort（所有分支共用）
-        if _gpt_openai_url and _is_gpt_model(probe_model):
+        _thinking_enabled = _runtime_thinking_enabled(runtime)
+        if "reasoning_effort" in runtime:
+            _reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+        elif _gpt_openai_url and _is_gpt_model(probe_model):
             from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
             _reasoning_effort = _sel_effort_claude(default="high")
-            console.print(f"[dim]reasoning effort: {_reasoning_effort}[/dim]")
         else:
             _reasoning_effort = "high"
+        if _gpt_openai_url and _is_gpt_model(probe_model):
+            console.print(f"[dim]thinking: {'on' if _thinking_enabled else 'off'} · effort: {_reasoning_effort}[/dim]")
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -4946,6 +4975,7 @@ def launch_claude(model_info, runtime, once=False):
                                                     no_proxy=runtime.get("no_proxy"),
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                                                    reasoning_enabled=_thinking_enabled,
                                                     reasoning_effort=_reasoning_effort)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -4980,6 +5010,7 @@ def launch_claude(model_info, runtime, once=False):
                     no_proxy=runtime.get("no_proxy"),
                     strip_upstream_user_agent=strip_upstream_user_agent,
                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                    reasoning_enabled=_thinking_enabled,
                     reasoning_effort=_reasoning_effort,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
@@ -5021,7 +5052,7 @@ def launch_claude(model_info, runtime, once=False):
             #   → 用 OpenAI URL 起 bridge，bridge 内部走 Responses API 转发
             openai_url = _gpt_openai_url
             api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
-            console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API (reasoning: {_reasoning_effort})[/dim]")
+            console.print(f"[dim]🔀 GPT-on-Claude: 通过 OpenAI 端点 bridge → Responses API (thinking: {'on' if _thinking_enabled else 'off'}, effort: {_reasoning_effort})[/dim]")
             cleanup_ctx = _gateway_claude_bridge_context(openai_url, api_key,
                                                 heavy_model=probe_model,
                                                 medium_model=lb_medium or None,
@@ -5035,6 +5066,7 @@ def launch_claude(model_info, runtime, once=False):
                                                 no_proxy=runtime.get("no_proxy"),
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                                                reasoning_enabled=_thinking_enabled,
                                                 reasoning_effort=_reasoning_effort)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
@@ -5575,7 +5607,7 @@ def _claude_gateway_env(
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
     if not runtime.get("bypass"):
         data.pop("bypassPermissionsModeAccepted", None)
-    data["alwaysThinkingEnabled"] = True
+    data["alwaysThinkingEnabled"] = _runtime_thinking_enabled(runtime)
     data = _ensure_claude_project_trust(
         data,
         current_project,
@@ -6131,9 +6163,13 @@ def launch_codex(model_info, runtime, once=False):
         return
 
     provider_id = runtime.get("id", "")
-    from mms_tui import select_reasoning_effort_tui as _sel_effort
-    reasoning_effort = _sel_effort(default="high")
-    console.print(f"[dim]reasoning effort: {reasoning_effort}[/dim]")
+    thinking_enabled = _runtime_thinking_enabled(runtime)
+    if "reasoning_effort" in runtime:
+        reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+    else:
+        from mms_tui import select_reasoning_effort_tui as _sel_effort
+        reasoning_effort = _sel_effort(default="high")
+    console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
     with codex_responses_bridge(
         gateway_url,
         api_key,
@@ -6141,6 +6177,7 @@ def launch_codex(model_info, runtime, once=False):
         advertised_models=advertised_models,
         speed_scope=speed_scope,
         provider_id=provider_id,
+        reasoning_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
         proxy_url=runtime.get("proxy"),
         no_proxy=runtime.get("no_proxy"),
@@ -6151,7 +6188,8 @@ def launch_codex(model_info, runtime, once=False):
         env["OPENAI_BASE_URL"] = bridge_base_url
         cmd = ["codex"]
         cmd += ["-c", 'model_provider="custom"']
-        cmd += ["-c", f'model_reasoning_effort="{reasoning_effort}"']
+        if thinking_enabled:
+            cmd += ["-c", f'model_reasoning_effort="{reasoning_effort}"']
         cmd += ["-c", f'openai_base_url="{bridge_base_url}"']
         cmd += ["-c", f'model_providers.custom.base_url="{bridge_base_url}"']
         cmd += ["-c", "features.responses_websockets=false"]

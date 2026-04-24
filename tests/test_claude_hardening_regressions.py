@@ -1485,11 +1485,32 @@ def test_claude_passthrough_rules_drop_anthropic_beta_for_domestic_models():
     assert header_prefixes == mms_bridge._CLAUDE_HEADER_PREFIX_PASSTHROUGH
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected"),
+    [
+        ("deepseek-v4-pro", True),
+        ("kimi-for-coding", True),
+        ("glm-5.1", True),
+        ("MiniMax-M2.7", True),
+        ("qwen3.5-plus", True),
+        ("qwen3-max-2026-01-23", True),
+        ("qwen3-coder-plus", False),
+        ("mimo-v2-pro", False),
+    ],
+)
+def test_domestic_model_supports_thinking_capability_allowlist(model_name, expected):
+    import mms_bridge
+
+    assert mms_bridge._domestic_model_supports_thinking(model_name) is expected
+    assert mms_bridge._should_strip_domestic_thinking_signals(model_name) is (not expected)
+
+
 def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
     import mms_bridge
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
+        "output_config": {"effort": "high"},
         "system": [
             {"type": "text", "text": "system"},
             {"type": "thinking", "thinking": "hidden"},
@@ -1515,9 +1536,51 @@ def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
     mms_bridge._strip_domestic_thinking_signals(payload)
 
     assert "thinking" not in payload
+    assert payload["output_config"] == {"effort": "high"}
     assert payload["system"] == [{"type": "text", "text": "system"}]
     assert payload["messages"][0]["content"] == [{"type": "text", "text": "keep"}]
     assert payload["messages"][1]["content"] == [{"type": "text", "text": "still here"}]
+
+
+def test_apply_domestic_reasoning_controls_preserves_supported_thinking_and_sets_deepseek_effort():
+    import mms_bridge
+
+    payload = {
+        "thinking": {"type": "enabled", "budget_tokens": 2048},
+        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "abc"}]}],
+    }
+
+    mms_bridge._apply_domestic_reasoning_controls(
+        payload,
+        "deepseek-v4-pro",
+        thinking_enabled=True,
+        reasoning_effort="xhigh",
+    )
+
+    assert payload["thinking"]["budget_tokens"] == 2048
+    assert payload["messages"][0]["content"][0]["type"] == "thinking"
+    assert payload["output_config"] == {"effort": "high"}
+
+
+def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort():
+    import mms_bridge
+
+    payload = {
+        "thinking": {"type": "enabled", "budget_tokens": 2048},
+        "output_config": {"effort": "high", "format": "markdown"},
+        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "abc"}]}],
+    }
+
+    mms_bridge._apply_domestic_reasoning_controls(
+        payload,
+        "deepseek-v4-pro",
+        thinking_enabled=False,
+        reasoning_effort="high",
+    )
+
+    assert "thinking" not in payload
+    assert payload["output_config"] == {"format": "markdown"}
+    assert payload["messages"][0]["content"] == []
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
@@ -2476,6 +2539,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     assert session_state["lastReleaseNotesSeen"] == "2.1.110"
     assert session_state["migrationVersion"] == 11
+    assert session_state["alwaysThinkingEnabled"] is True
     assert session_state["numStartups"] == 9
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
@@ -2966,6 +3030,23 @@ def test_build_codex_payload_can_skip_output_limit_mapping():
     assert "max_output_tokens" not in payload
 
 
+def test_build_codex_payload_can_disable_reasoning():
+    import mms_bridge
+
+    payload = mms_bridge._build_codex_payload(
+        {
+            "system": "You are helpful.",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+        },
+        "gpt-5.4",
+        reasoning_effort="high",
+        reasoning_enabled=False,
+        include_max_output_tokens=False,
+    )
+
+    assert "reasoning" not in payload
+
+
 def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstream(monkeypatch):
     import mms_bridge
 
@@ -2977,6 +3058,7 @@ def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstre
         incremental_messages=None,
         reasoning_effort="medium",
         *,
+        reasoning_enabled=True,
         include_max_output_tokens=True,
     ):
         captured["include_max_output_tokens"] = include_max_output_tokens
@@ -2984,8 +3066,9 @@ def test_gpt_on_claude_forward_as_responses_skips_output_limit_for_strict_upstre
             "model": model_name,
             "input": [],
             "stream": True,
-            "reasoning": {"effort": reasoning_effort},
         }
+        if reasoning_enabled:
+            payload["reasoning"] = {"effort": reasoning_effort}
         if include_max_output_tokens:
             payload["max_output_tokens"] = 256
         return payload
@@ -3320,6 +3403,120 @@ def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypat
     assert "Claude OAuth login is disabled here" in message
     assert "/login" not in message
     assert "HTTP 403" in message
+
+
+def test_responses_proxy_handler_strips_reasoning_when_disabled(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def iter_lines():
+            return iter([])
+
+    def fake_stream(method, url, **kwargs):
+        captured["url"] = url
+        captured["json"] = dict(kwargs.get("json") or {})
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    monkeypatch.setattr(mms_bridge, "_needs_chatcompletions_bridge", lambda *args, **kwargs: False)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    body = json.dumps({"model": "gpt-5.4", "reasoning": {"effort": "xhigh"}, "stream": True}).encode("utf-8")
+    handler.server = types.SimpleNamespace(
+        gateway_url="https://gw.example.com/v1",
+        gateway_key="sk-test",
+        model_name="gpt-5.4",
+        provider_id="relay-a",
+        bridge_token="bridge-token",
+        reasoning_enabled=False,
+        reasoning_effort="medium",
+        proxy_url="",
+        no_proxy="",
+        advertised_models=[],
+        speed_scope={},
+        route_status_paths=[],
+    )
+    handler.headers = {"authorization": "Bearer bridge-token", "content-length": str(len(body))}
+    handler.path = "/v1/responses"
+    handler.rfile = io.BytesIO(body)
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda _code: None
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["url"] == "https://gw.example.com/v1/responses"
+    assert "reasoning" not in captured["json"]
+
+
+def test_responses_proxy_handler_overrides_reasoning_effort_when_enabled(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        @staticmethod
+        def iter_lines():
+            return iter([])
+
+    def fake_stream(method, url, **kwargs):
+        captured["json"] = dict(kwargs.get("json") or {})
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    monkeypatch.setattr(mms_bridge, "_needs_chatcompletions_bridge", lambda *args, **kwargs: False)
+
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    body = json.dumps({"model": "gpt-5.4", "reasoning": {"effort": "low"}, "stream": True}).encode("utf-8")
+    handler.server = types.SimpleNamespace(
+        gateway_url="https://gw.example.com/v1",
+        gateway_key="sk-test",
+        model_name="gpt-5.4",
+        provider_id="relay-a",
+        bridge_token="bridge-token",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        proxy_url="",
+        no_proxy="",
+        advertised_models=[],
+        speed_scope={},
+        route_status_paths=[],
+    )
+    handler.headers = {"authorization": "Bearer bridge-token", "content-length": str(len(body))}
+    handler.path = "/v1/responses"
+    handler.rfile = io.BytesIO(body)
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda _code: None
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["json"]["reasoning"] == {"effort": "high"}
 
 
 def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeypatch):

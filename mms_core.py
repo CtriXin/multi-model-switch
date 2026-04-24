@@ -15,7 +15,7 @@ import hashlib
 import tempfile
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 
@@ -406,13 +406,14 @@ MODEL_FAMILIES = [
     {"family": "Claude",  "keywords": ("claude",),                          "category": "Claude 系 ⭐"},
     {"family": "GPT",     "keywords": ("gpt-", "o1-", "o3-", "o4-", "codex-"), "category": "GPT 系"},
     {"family": "Gemini",  "keywords": ("gemini",),                          "category": "Google 系"},
+    {"family": "DeepSeek","keywords": ("deepseek",),                       "category": "国产系"},
     {"family": "Qwen",    "keywords": ("qwen",),                           "category": "国产系"},
     {"family": "Kimi",    "keywords": ("kimi", "k2.6-code-preview", "k2.6"), "category": "国产系"},
     {"family": "Mimo",    "keywords": ("mimo",),                           "category": "国产系"},
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
 ]
-DOMESTIC_MODEL_FAMILIES = {"Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
+DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
 DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
 
 
@@ -6270,10 +6271,14 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
 
     # 注入 use_count（用于 TUI 排序）
     use_counts = {}
+    last_used_at_by_model = {}
     stats = _load_usage_stats()
     for src in stats.get("sources", {}).values():
+        used_at = str(src.get("last_used_at") or "").strip()
         for mname, cnt in src.get("models", {}).items():
             use_counts[mname] = use_counts.get(mname, 0) + cnt
+            if used_at and used_at > last_used_at_by_model.get(mname, ""):
+                last_used_at_by_model[mname] = used_at
 
     # 按 family 分组
     family_map = {}  # family_name -> [model_entry]
@@ -6293,6 +6298,7 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
             "provider_name": pname,
             "provider_ctx": provider_ctx,
             "use_count": use_counts.get(model_name, 0),
+            "last_used_at": last_used_at_by_model.get(model_name, ""),
         })
 
     return [{"family": f, "models": family_map[f]} for f in family_order]
@@ -7153,6 +7159,34 @@ _CLI_DEFAULT_FAMILY_FIRST = {
     "codex": "GPT",
 }
 
+_FAMILY_COLD_MAX_USE_COUNT = 3
+_FAMILY_COLD_IDLE_DAYS = 21
+
+
+def _parse_usage_timestamp(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
+    if str(family_name or "").strip() == str(preferred_family or "").strip():
+        return False
+    if int(total_use or 0) > _FAMILY_COLD_MAX_USE_COUNT:
+        return False
+    parsed = _parse_usage_timestamp(last_used_at)
+    if parsed is None:
+        return True
+    return parsed < (datetime.now(timezone.utc) - timedelta(days=_FAMILY_COLD_IDLE_DAYS))
+
 
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
     """为一组模型名构建运行来源替代选项映射（供 P 键使用）。
@@ -7293,10 +7327,26 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 current_cfg, cli_name, current_provider, default_models
             )
             fam_list = []
-            for f in raw:
-                total_use = sum(m.get("use_count", 0) for m in f["models"] if isinstance(m, dict))
-                fam_list.append({"family": f["family"], "count": len(f["models"]), "use_count": total_use})
             preferred_family = _CLI_DEFAULT_FAMILY_FIRST.get(cli_name)
+            for f in raw:
+                model_entries = [m for m in f["models"] if isinstance(m, dict)]
+                total_use = sum(int(m.get("use_count", 0) or 0) for m in model_entries)
+                family_last_used_at = max(
+                    (str(m.get("last_used_at") or "").strip() for m in model_entries),
+                    default="",
+                )
+                fam_list.append({
+                    "family": f["family"],
+                    "count": len(f["models"]),
+                    "use_count": total_use,
+                    "last_used_at": family_last_used_at,
+                    "is_cold": _family_is_cold_for_tui(
+                        f["family"],
+                        total_use,
+                        family_last_used_at,
+                        preferred_family=preferred_family,
+                    ),
+                })
             # 当前 CLI 的默认主族群置顶，其余再按使用量降序排列。
             fam_list.sort(
                 key=lambda x: (
@@ -7752,26 +7802,38 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             caveman_enabled_default=has_caveman,
             has_ecc=has_ecc,
             ecc_enabled_default=has_ecc,
+            thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
+            reasoning_effort_default=str(runtime_runtime.get("reasoning_effort", "high")).strip().lower() or "high",
         )
         if result == "__interrupt__":
             return True
         if isinstance(result, tuple):
-            if len(result) >= 5:
+            if len(result) >= 7:
+                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
+            elif len(result) >= 5:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
+                thinking_enabled = True
+                reasoning_effort = "high"
             elif len(result) >= 4:
                 action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
                 ecc_enabled = False
+                thinking_enabled = True
+                reasoning_effort = "high"
             elif len(result) >= 3:
                 action, bypass, claude_1m_enabled = result[:3]
                 caveman_enabled = False
                 ecc_enabled = False
+                thinking_enabled = True
+                reasoning_effort = "high"
             else:
                 action, bypass = result[:2]
                 claude_1m_enabled = False
                 caveman_enabled = False
                 ecc_enabled = False
+                thinking_enabled = True
+                reasoning_effort = "high"
         else:
-            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result, False, False, False, False
+            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result, False, False, False, False, True, "high"
         if action == "q":
             return True
         if action == "b":
@@ -7789,6 +7851,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["ecc_mode"] = "enable" if ecc_enabled else "disable"
         if cli in {"claude", "codex"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
+            runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
+            runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 

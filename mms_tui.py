@@ -230,9 +230,33 @@ def _draw_footer_actions(stdscr, y, x, max_w, actions):
 
 _FAMILY_COLORS = {
     "Claude": 3, "GPT": 5, "GLM": 7, "Kimi": 6,
-    "Qwen": 4, "MiniMax": 2, "Gemini": 1,
+    "Qwen": 4, "MiniMax": 2, "Gemini": 1, "DeepSeek": 1,
 }
 _CLI_COLORS = {"claude": 3, "codex": 5}
+_COLD_FAMILY_BUCKET_ID = "__cold_family_bucket__"
+
+
+def _build_family_menu_items(families, search_query="", cold_expanded=False):
+    if search_query:
+        query = str(search_query or "").lower()
+        filtered = [entry for entry in (families or []) if query in str(entry.get("family", "")).lower()]
+        if not filtered:
+            filtered = list(families or [])
+        return [("family", entry) for entry in filtered]
+
+    hot_families = [entry for entry in (families or []) if not entry.get("is_cold")]
+    cold_families = [entry for entry in (families or []) if entry.get("is_cold")]
+    items = [("family", entry) for entry in hot_families]
+    if cold_families:
+        items.append(("cold_bucket", {
+            "id": _COLD_FAMILY_BUCKET_ID,
+            "count": len(cold_families),
+            "expanded": bool(cold_expanded),
+            "families": cold_families,
+        }))
+        if cold_expanded:
+            items.extend(("family", entry) for entry in cold_families)
+    return items
 
 
 def _last_used_label(last_item):
@@ -297,6 +321,7 @@ def select_family_tui(
         initial_last = ((last_used or {}).get(cli_names[0]) or {}) if cli_names else {}
         sel_idx = -1 if initial_last.get("model") else 0
         search_query = ""
+        cold_expanded_by_cli = {}
 
         while True:
             stdscr.erase()
@@ -314,23 +339,18 @@ def select_family_tui(
             provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
             broker_available = False
 
-            # 搜索过滤
-            if search_query:
-                q = search_query.lower()
-                fams = [f for f in families if q in f["family"].lower()]
-                if not fams:
-                    fams = families
-            else:
-                fams = families
-
             # 上次使用
             cli_last = (last_used or {}).get(cli)
             has_last = cli_last and cli_last.get("model") and not search_query
 
-            # 构建列表项：只有品类；上次使用保持独立显示，但参与默认焦点
-            items = []
-            for f in fams:
-                items.append(("family", f))
+            # 构建列表项：默认折叠冷门 family；搜索时平铺所有匹配项
+            cold_expanded = bool(cold_expanded_by_cli.get(cli))
+            items = _build_family_menu_items(
+                families,
+                search_query=search_query,
+                cold_expanded=cold_expanded,
+            )
+            visible_family_count = sum(1 for itype, _idata in items if itype == "family")
 
             max_idx = len(items) - 1
             min_idx = -1 if has_last else 0
@@ -394,7 +414,7 @@ def select_family_tui(
             # -- 搜索栏 --
             if search_query:
                 _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
-                info = f"{len(fams)}/{len(families)}"
+                info = f"{visible_family_count}/{len(families)}"
                 _safe_addstr(stdscr, row, lr - len(info), info, curses.A_DIM)
                 row += 1
 
@@ -427,6 +447,23 @@ def select_family_tui(
                     else:
                         _safe_addstr(stdscr, y, ll, ".", fc | curses.A_DIM)
                         _safe_addstr(stdscr, y, ll + 2, name, curses.color_pair(2))
+                        cnt = str(count)
+                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.A_DIM)
+                elif itype == "cold_bucket":
+                    count = int(idata.get("count", 0) or 0)
+                    expanded = bool(idata.get("expanded"))
+                    label = _L("冷门 / 更多", "Cold / More")
+                    marker = "v" if expanded else ">"
+                    bucket_attr = curses.color_pair(6) | (curses.A_BOLD if is_sel else curses.A_DIM)
+                    if is_sel:
+                        _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), curses.color_pair(6) | curses.A_REVERSE)
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, f"{marker} {label}", curses.color_pair(6) | curses.A_BOLD | curses.A_REVERSE)
+                        cnt = str(count)
+                        _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.color_pair(6) | curses.A_REVERSE)
+                    else:
+                        _safe_addstr(stdscr, y, ll, marker, bucket_attr)
+                        _safe_addstr(stdscr, y, ll + 2, label, bucket_attr)
                         cnt = str(count)
                         _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.A_DIM)
 
@@ -465,6 +502,19 @@ def select_family_tui(
                 if len(model_names) > max_p:
                     _safe_addstr(stdscr, content_y + max_p, rl,
                                  f"... +{len(model_names) - max_p}", curses.A_DIM)
+            elif items and 0 <= sel_idx < len(items) and items[sel_idx][0] == "cold_bucket":
+                cold_families = items[sel_idx][1].get("families", [])
+                preview_lines = [
+                    f"{entry.get('family', '?')} ({entry.get('count', 0)})"
+                    for entry in cold_families[:max(1, len(items))]
+                ]
+                for mi, text in enumerate(preview_lines):
+                    my = content_y + mi
+                    attr = curses.color_pair(6) | curses.A_BOLD if mi == 0 else curses.color_pair(2)
+                    _safe_addstr(stdscr, my, rl, text, attr, max_w=right_w - 3)
+                if len(cold_families) > len(preview_lines):
+                    _safe_addstr(stdscr, content_y + len(preview_lines), rl,
+                                 f"... +{len(cold_families) - len(preview_lines)}", curses.A_DIM)
 
             # -- 底栏 --
             bot_y = content_y + len(items)
@@ -549,6 +599,8 @@ def select_family_tui(
                             selected = dict(selected)
                             selected["_family_name"] = family_name
                         return ("submodel", cli, selected)
+                elif itype == "cold_bucket":
+                    cold_expanded_by_cli[cli] = not bool(idata.get("expanded"))
             elif key in (10, 13, curses.KEY_ENTER):
                 if has_last and sel_idx == -1:
                     return ("last", cli, cli_last)
@@ -575,6 +627,8 @@ def select_family_tui(
                             selected = dict(selected)
                             selected["_family_name"] = family_name
                         return ("submodel", cli, selected)
+                elif itype == "cold_bucket":
+                    cold_expanded_by_cli[cli] = not bool(idata.get("expanded"))
             elif key in (ord('r'), ord('R')) and not search_query and has_last:
                 return ("last", cli, cli_last)
             elif key in (ord('l'), ord('L')) and not search_query:
@@ -2996,14 +3050,50 @@ def confirm_tui(
     caveman_enabled_default=False,
     has_ecc=False,
     ecc_enabled_default=False,
+    thinking_enabled_default=True,
+    reasoning_effort_default="high",
 ):
-    """确认启动 TUI。返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled) 五元组。
+    """确认启动 TUI。
+
+    返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort)。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     caveman_enabled: bool，仅 codex/claude 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     ecc_enabled: bool，仅 Claude 国产模型且 ECC 可用时有效，True 时本次会话开启 ECC
+    thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
+    reasoning_effort: str，仅 GPT / 支持 effort 的路径有效
     """
+    def _model_tokens(info):
+        values = []
+        if isinstance(info, dict):
+            values.extend(str(v or "") for k, v in info.items() if k != "subagent")
+        else:
+            values.append(str(info or ""))
+        normalized = []
+        for item in values:
+            value = str(item or "").strip().lower()
+            if "/" in value:
+                value = value.rsplit("/", 1)[-1]
+            if value:
+                normalized.append(value)
+        return normalized
+
+    def _is_gpt_like_token(token):
+        return token.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
+
+    def _supports_domestic_thinking_token(token):
+        if token.startswith(("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")):
+            return True
+        if token.startswith(("mimo", "qwen-coder", "qwen3-coder")):
+            return False
+        if token.startswith("qwen"):
+            return token.startswith(("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max"))
+        return False
+
+    def _supports_domestic_effort_token(token):
+        return token.startswith("deepseek")
+
     def _supports_claude_1m_toggle(info):
         values = []
         if isinstance(info, dict):
@@ -3068,8 +3158,24 @@ def confirm_tui(
             detail_lines.append((str(item[0]), str(item[1])))
     detail_lines = detail_lines[:10]
 
+    model_tokens = _model_tokens(model_info)
     has_bypass = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
+    has_thinking = has_bypass and any(
+        _is_gpt_like_token(token) or _supports_domestic_thinking_token(token)
+        for token in model_tokens
+    )
+    has_effort = has_bypass and any(
+        _is_gpt_like_token(token) or _supports_domestic_effort_token(token)
+        for token in model_tokens
+    )
+    effort_values = [value for value, _label in _EFFORT_OPTIONS]
+    if has_effort and not any(_is_gpt_like_token(token) for token in model_tokens):
+        effort_values = [value for value in effort_values if value != "xhigh"]
+    effort_default = str(reasoning_effort_default or "high").strip().lower()
+    if effort_default not in effort_values:
+        effort_default = "high" if "high" in effort_values else effort_values[-1]
+    ecc_key = _ECC_TOGGLE_KEY
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -3079,11 +3185,25 @@ def confirm_tui(
         curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_YELLOW, -1)
         curses.init_pair(5, curses.COLOR_GREEN, -1)
+        curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
         bypass_mode = True
         claude_1m_mode = False
         caveman_mode = bool(has_caveman and caveman_enabled_default)
         ecc_mode = bool(has_ecc and ecc_enabled_default)
+        thinking_mode = bool(has_thinking and thinking_enabled_default)
+        effort_mode = effort_default
+
+        def _effort_attr(value, enabled=True):
+            if not enabled:
+                return curses.color_pair(4) | curses.A_DIM
+            if value == "low":
+                return curses.color_pair(4) | curses.A_BOLD
+            if value == "medium":
+                return curses.color_pair(1) | curses.A_BOLD
+            if value == "high":
+                return curses.color_pair(5) | curses.A_BOLD
+            return curses.color_pair(6) | curses.A_BOLD
 
         while True:
             stdscr.erase()
@@ -3103,9 +3223,14 @@ def confirm_tui(
             if has_caveman:
                 caveman_text = _L("开启", "On") if caveman_mode else _L("关闭", "Off")
                 info_lines.append(("Caveman", f"[C] {caveman_text}"))
+            if has_thinking:
+                thinking_text = _L("开启", "On") if thinking_mode else _L("关闭", "Off")
+                info_lines.append(("Thinking", f"[T] {thinking_text}"))
+            if has_effort:
+                info_lines.append(("Effort", f"[E] {effort_mode.upper()}"))
             if has_ecc:
                 ecc_text = _L("开启", "On") if ecc_mode else _L("关闭", "Off")
-                info_lines.append(("ECC", f"[E] {ecc_text}"))
+                info_lines.append(("ECC", f"[{ecc_key}] {ecc_text}"))
 
             px = (max_w - total_w) // 2
             ll = px + 2
@@ -3140,6 +3265,10 @@ def confirm_tui(
                     val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
                 elif label == "Caveman":
                     val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
+                elif label == "Thinking":
+                    val_attr = curses.color_pair(1) | curses.A_BOLD if thinking_mode else curses.color_pair(4)
+                elif label == "Effort":
+                    val_attr = _effort_attr(effort_mode, enabled=thinking_mode)
                 elif label == "ECC":
                     val_attr = curses.color_pair(5) | curses.A_BOLD if ecc_mode else curses.color_pair(4)
                 else:
@@ -3172,8 +3301,12 @@ def confirm_tui(
                 footer_items.append(("M", _L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
             if has_caveman:
                 footer_items.append(("C", _L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+            if has_thinking:
+                footer_items.append(("T", _L("切 Thinking", "Toggle Thinking"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+            if has_effort:
+                footer_items.append(("E", _L("切 Effort", "Cycle Effort"), curses.color_pair(6) | curses.A_BOLD, curses.color_pair(6) | curses.A_DIM))
             if has_ecc:
-                footer_items.append(("E", _L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+                footer_items.append((ecc_key, _L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
             footer_items.extend([
                 ("B", _L("返回", "Back"), curses.A_BOLD, curses.A_DIM),
                 ("Q", _L("取消", "Cancel"), curses.A_BOLD, curses.A_DIM),
@@ -3195,27 +3328,34 @@ def confirm_tui(
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode)
+                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode, thinking_mode, effort_mode)
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, False)
+                return ("b", False, False, False, False, True, effort_default)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, False)
+                return ("q", False, False, False, False, True, effort_default)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (ord('m'), ord('M')) and has_claude_1m:
                 claude_1m_mode = not claude_1m_mode
             elif key in (ord('c'), ord('C')) and has_caveman:
                 caveman_mode = not caveman_mode
-            elif key in (ord('e'), ord('E')) and has_ecc:
+            elif key in (ord('t'), ord('T')) and has_thinking:
+                thinking_mode = not thinking_mode
+            elif key in (ord('e'), ord('E')) and has_effort:
+                current_idx = effort_values.index(effort_mode) if effort_mode in effort_values else 0
+                effort_mode = effort_values[(current_idx + 1) % len(effort_values)]
+            elif key in (ord('x'), ord('X')) and has_ecc:
                 ecc_mode = not ecc_mode
 
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False, False, False, False)
+        return ("q", False, False, False, False, True, effort_default)
 
 
 # ── Reasoning effort 选择 TUI ────────────────────────────────────
+
+_ECC_TOGGLE_KEY = "X"
 
 _EFFORT_OPTIONS = [
     ("low",    "Low    — 快速，适合简单任务"),

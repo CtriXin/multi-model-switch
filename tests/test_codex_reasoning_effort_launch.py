@@ -3,6 +3,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 
+def test_runtime_reasoning_helpers_normalize_values():
+    import mms_launchers
+
+    assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "disable"}) is False
+    assert mms_launchers._runtime_thinking_enabled({"thinking_mode": "enable"}) is True
+    assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "xhigh"}) == "xhigh"
+    assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "weird"}) == "high"
+
+
 def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     import mms_launchers
     import mms_tui
@@ -16,7 +25,7 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     monkeypatch.setattr(mms_launchers, "_openai_base_url", lambda runtime: "https://example.test/v1")
     monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda runtime: None)
     monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4"]})
-    monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url: {"PATH": ""})
+    monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url, model_info=None: {"PATH": ""})
 
     def fake_select_reasoning_effort_tui(default="medium"):
         captured["default_effort"] = default
@@ -52,3 +61,52 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     assert '-c' in captured["cmd"]
     assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
     assert captured["force_subprocess"] is True
+
+
+def test_launch_codex_uses_runtime_thinking_and_effort_without_prompt(monkeypatch):
+    import mms_launchers
+    import mms_tui
+
+    captured = {}
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda runtime: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_model", lambda model_info: "gpt-5.4")
+    monkeypatch.setattr(mms_launchers, "_openai_base_url", lambda runtime: "https://example.test/v1")
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda runtime: None)
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4"]})
+    monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url, model_info=None: {"PATH": ""})
+    monkeypatch.setattr(
+        mms_tui,
+        "select_reasoning_effort_tui",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected prompt")),
+    )
+
+    @contextmanager
+    def fake_bridge(gateway_url, api_key, **kwargs):
+        captured["bridge_kwargs"] = kwargs
+        yield {"base_url": "http://127.0.0.1:8765", "api_key": "bridge-key"}
+
+    def fake_exec_or_run(cmd, env, once=False, force_subprocess=False):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["once"] = once
+        captured["force_subprocess"] = force_subprocess
+
+    monkeypatch.setattr(mms_launchers, "codex_responses_bridge", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec_or_run)
+
+    runtime = {
+        "id": "openai-main",
+        "auth_mode": "api_key",
+        "api_key": "sk-test",
+        "thinking_mode": "disable",
+        "reasoning_effort": "medium",
+    }
+
+    mms_launchers.launch_codex({"model": "gpt-5.4"}, runtime, once=True)
+
+    assert captured["bridge_kwargs"]["reasoning_enabled"] is False
+    assert captured["bridge_kwargs"]["reasoning_effort"] == "medium"
+    assert all("model_reasoning_effort" not in item for item in captured["cmd"])

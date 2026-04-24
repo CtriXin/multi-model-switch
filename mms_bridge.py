@@ -261,6 +261,11 @@ def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
 _DOMESTIC_MODEL_PREFIXES = ("glm", "kimi", "k2.6", "mimo", "qwen", "minimax", "deepseek")
 _DOMESTIC_THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
+_DOMESTIC_THINKING_ALLOW_PREFIXES = ("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")
+_DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
+_QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
+_QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
+_DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -284,8 +289,41 @@ def _is_domestic_model(model_name):
     return _normalize_model_name(model_name).startswith(_DOMESTIC_MODEL_PREFIXES)
 
 
+def _domestic_model_supports_thinking(model_name):
+    normalized = _normalize_model_name(model_name)
+    if not normalized.startswith(_DOMESTIC_MODEL_PREFIXES):
+        return False
+    if normalized.startswith(_DOMESTIC_THINKING_BLOCK_PREFIXES):
+        return False
+    if normalized.startswith(_DOMESTIC_THINKING_ALLOW_PREFIXES):
+        return True
+    if normalized.startswith("qwen"):
+        if normalized.startswith(_QWEN_THINKING_BLOCK_PREFIXES):
+            return False
+        return normalized.startswith(_QWEN_THINKING_ALLOW_PREFIXES)
+    return False
+
+
+def _should_strip_domestic_thinking_signals(model_name):
+    return _is_domestic_model(model_name) and not _domestic_model_supports_thinking(model_name)
+
+
+def _domestic_model_supports_reasoning_effort(model_name):
+    normalized = _normalize_model_name(model_name)
+    return normalized.startswith(_DOMESTIC_EFFORT_ALLOW_PREFIXES)
+
+
+def _normalize_domestic_reasoning_effort(value, default="high"):
+    normalized = str(value or "").strip().lower()
+    if normalized == "xhigh":
+        return "high"
+    if normalized in {"low", "medium", "high"}:
+        return normalized
+    return default if default in {"low", "medium", "high"} else "high"
+
+
 def _strip_domestic_thinking_signals(payload):
-    """国产模型不支持 Anthropic thinking 信号，转发前剥离相关字段。"""
+    """未验证/不支持 Anthropic thinking 的国产模型在转发前剥离相关字段。"""
     payload.pop("thinking", None)
 
     system = payload.get("system")
@@ -312,6 +350,27 @@ def _strip_domestic_thinking_signals(payload):
                     and block.get("type") in _DOMESTIC_THINKING_BLOCK_TYPES
                 )
             ]
+
+
+def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=True, reasoning_effort="high"):
+    if not _is_domestic_model(model_name):
+        return
+    if not thinking_enabled or _should_strip_domestic_thinking_signals(model_name):
+        _strip_domestic_thinking_signals(payload)
+        output_config = payload.get("output_config")
+        if isinstance(output_config, dict) and "effort" in output_config:
+            next_config = dict(output_config)
+            next_config.pop("effort", None)
+            if next_config:
+                payload["output_config"] = next_config
+            else:
+                payload.pop("output_config", None)
+        return
+    if _domestic_model_supports_reasoning_effort(model_name):
+        output_config = payload.get("output_config")
+        next_config = dict(output_config) if isinstance(output_config, dict) else {}
+        next_config["effort"] = _normalize_domestic_reasoning_effort(reasoning_effort, default="high")
+        payload["output_config"] = next_config
 
 
 def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):
@@ -846,6 +905,7 @@ def _build_codex_payload(
     incremental_messages=None,
     reasoning_effort="medium",
     *,
+    reasoning_enabled=True,
     include_max_output_tokens=True,
 ):
     messages = incremental_messages if incremental_messages is not None else (request_payload.get("messages") or [])
@@ -855,8 +915,9 @@ def _build_codex_payload(
         "input": _anthropic_messages_to_responses_input(messages),
         "store": False,
         "stream": True,
-        "reasoning": {"effort": reasoning_effort},
     }
+    if reasoning_enabled:
+        payload["reasoning"] = {"effort": reasoning_effort}
     tools = _anthropic_tools_to_responses(request_payload.get("tools"))
     if tools:
         payload["tools"] = tools
@@ -1868,9 +1929,14 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
-        # 非 Claude 模型：剥离 Anthropic 专属信号（国产模型网关不支持）
+        # 非 Claude 模型：按 capability 调整 domestic thinking / effort
         if _is_domestic_model(resolved_model):
-            _strip_domestic_thinking_signals(payload)
+            _apply_domestic_reasoning_controls(
+                payload,
+                resolved_model,
+                thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
+                reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
+            )
         if not resolved_model.startswith("claude-"):
             _strip_cache_control(payload)
 
@@ -2049,10 +2115,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             for m in messages if m.get("role") == "user"
         )
         reasoning_effort = getattr(self.server, "reasoning_effort", "medium")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         full_responses_payload = _build_codex_payload(
             anthropic_payload,
             model_name,
             reasoning_effort=reasoning_effort,
+            reasoning_enabled=reasoning_enabled,
             include_max_output_tokens=False,
         )
         if last_response_id and not has_tool_result:
@@ -2067,6 +2135,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 model_name,
                 incremental_messages=incremental,
                 reasoning_effort=reasoning_effort,
+                reasoning_enabled=reasoning_enabled,
                 include_max_output_tokens=False,
             )
             responses_payload["previous_response_id"] = last_response_id
@@ -2634,6 +2703,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         gateway_key = getattr(self.server, "gateway_key")
         model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
         provider_id = getattr(self.server, "provider_id", "")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+        if reasoning_enabled:
+            reasoning_payload = payload.get("reasoning")
+            next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
+            next_reasoning["effort"] = reasoning_effort
+            payload["reasoning"] = next_reasoning
+        else:
+            payload.pop("reasoning", None)
         target_url = _build_gateway_url(gateway_url, "/responses")
         fwd_headers = {
             "Content-Type": "application/json",
@@ -3096,6 +3174,7 @@ def codex_responses_bridge(
     speed_scope=None,
     route_status_paths=None,
     provider_id="",
+    reasoning_enabled=True,
     reasoning_effort="medium",
     proxy_url="",
     no_proxy="",
@@ -3114,6 +3193,7 @@ def codex_responses_bridge(
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
     server.provider_id = provider_id
+    server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
@@ -3149,6 +3229,7 @@ def gateway_claude_bridge(
     openai_url=None,
     strip_upstream_user_agent=False,
     minimal_claude_header_passthrough=False,
+    reasoning_enabled=True,
     reasoning_effort="medium",
     proxy_url="",
     no_proxy="",
@@ -3184,6 +3265,7 @@ def gateway_claude_bridge(
     server.openai_url = openai_url
     server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
     server.minimal_claude_header_passthrough = bool(minimal_claude_header_passthrough)
+    server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
