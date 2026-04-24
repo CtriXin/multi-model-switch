@@ -4276,29 +4276,149 @@ def _overlay_codex_shared_resume(home_dir, session_home):
         os.unlink(session_codex_dir)
     os.makedirs(session_codex_dir, exist_ok=True)
 
-    shared_entries = {
-        "archived_sessions",
-        "history.jsonl",
-        "session_index.jsonl",
-        "sessions",
-        "shell_snapshots",
-    }
+    bounded_resume_entries = _codex_bounded_resume_entries()
     for entry in os.listdir(account_codex_dir):
-        if entry in shared_entries:
+        if entry in bounded_resume_entries:
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
         if not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
 
+    source_roots = [account_codex_dir]
     real_codex_dir = _real_user_path(".codex")
-    for entry in shared_entries:
-        source_root = real_codex_dir if os.path.isdir(real_codex_dir) else account_codex_dir
-        src = os.path.join(source_root, entry)
-        dst = os.path.join(session_codex_dir, entry)
-        if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
+    if os.path.isdir(real_codex_dir) and os.path.realpath(real_codex_dir) != os.path.realpath(account_codex_dir):
+        source_roots.append(real_codex_dir)
+    _seed_codex_bounded_resume(source_roots, session_codex_dir)
+
+
+_CODEX_BOUNDED_RESUME_FILES = {
+    "history.jsonl": 200,
+    "session_index.jsonl": 50,
+}
+
+_CODEX_BOUNDED_RESUME_DIRS = {
+    "sessions": 25,
+    "shell_snapshots": 20,
+    "archived_sessions": 0,
+}
+
+
+def _bounded_env_int(name, default):
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return int(default)
+
+
+def _first_existing_child(source_roots, entry_name, *, want_dir=False):
+    for root in source_roots:
+        if not root:
             continue
-        os.symlink(src, dst)
+        candidate = os.path.join(root, entry_name)
+        if want_dir:
+            if os.path.isdir(candidate):
+                return candidate
+        elif os.path.isfile(candidate) or os.path.islink(candidate):
+            return candidate
+    return ""
+
+
+def _copy_tail_lines(src, dst, max_lines):
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if max_lines <= 0:
+        with open(dst, "w", encoding="utf-8") as handle:
+            handle.write("")
+        os.chmod(dst, 0o600)
+        return 0
+
+    from collections import deque
+
+    lines = deque(maxlen=int(max_lines))
+    with open(src, "r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            lines.append(line)
+    with open(dst, "w", encoding="utf-8") as handle:
+        handle.writelines(lines)
+    os.chmod(dst, 0o600)
+    return len(lines)
+
+
+def _safe_relative_path(root, path):
+    rel_path = os.path.relpath(path, root)
+    if rel_path == "." or rel_path.startswith(".." + os.sep) or rel_path == "..":
+        return ""
+    return rel_path
+
+
+def _copy_latest_files(src_root, dst_root, max_files, *, max_file_bytes):
+    os.makedirs(dst_root, exist_ok=True)
+    if max_files <= 0:
+        return 0
+    candidates = []
+    for current_root, _dirs, files in os.walk(src_root):
+        for filename in files:
+            if filename == ".DS_Store":
+                continue
+            src = os.path.join(current_root, filename)
+            if not os.path.isfile(src):
+                continue
+            try:
+                stat = os.stat(src)
+            except OSError:
+                continue
+            if stat.st_size > max_file_bytes:
+                continue
+            candidates.append((stat.st_mtime, src))
+    copied = 0
+    for _mtime, src in sorted(candidates, reverse=True)[: int(max_files)]:
+        rel_path = _safe_relative_path(src_root, src)
+        if not rel_path:
+            continue
+        dst = os.path.join(dst_root, rel_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    return copied
+
+
+def _seed_codex_bounded_resume(source_roots, session_codex_dir):
+    source_roots = [str(root) for root in source_roots if root and os.path.isdir(root)]
+    if not source_roots:
+        return
+
+    for entry, default_lines in _CODEX_BOUNDED_RESUME_FILES.items():
+        src = _first_existing_child(source_roots, entry, want_dir=False)
+        dst = os.path.join(session_codex_dir, entry)
+        if os.path.exists(dst) or os.path.islink(dst):
+            continue
+        max_lines = _bounded_env_int(f"MMS_CODEX_{entry.upper().replace('.', '_')}_MAX_LINES", default_lines)
+        if src:
+            _copy_tail_lines(src, dst, max_lines)
+        else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "w", encoding="utf-8") as handle:
+                handle.write("")
+            os.chmod(dst, 0o600)
+
+    max_file_bytes = _bounded_env_int("MMS_CODEX_RESUME_MAX_FILE_BYTES", 2_000_000)
+    for entry, default_limit in _CODEX_BOUNDED_RESUME_DIRS.items():
+        dst = os.path.join(session_codex_dir, entry)
+        if os.path.exists(dst) or os.path.islink(dst):
+            continue
+        src = _first_existing_child(source_roots, entry, want_dir=True)
+        max_files = _bounded_env_int(f"MMS_CODEX_{entry.upper()}_MAX_FILES", default_limit)
+        if src:
+            _copy_latest_files(src, dst, max_files, max_file_bytes=max_file_bytes)
+        else:
+            os.makedirs(dst, exist_ok=True)
+
+
+def _codex_bounded_resume_entries():
+    return set(_CODEX_BOUNDED_RESUME_FILES) | set(_CODEX_BOUNDED_RESUME_DIRS)
 
 
 def _link_shared_dotfiles(session_home):
@@ -6062,9 +6182,10 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         hooks_path = os.path.join(codex_dir, "hooks.json")
         atomic_write_json(hooks_path, session_hooks, mode=0o600)
 
-    # symlink 真实 ~/.codex 下的其余子项（skills、memories 等）
+    # symlink 真实 ~/.codex 下的其余子项（skills、memories 等），
+    # but materialize resume/history entries locally with hard bounds below.
     if os.path.isdir(real_codex_dir):
-        skip = {"auth.json", "config.toml", "hooks.json"}
+        skip = {"auth.json", "config.toml", "hooks.json"} | _codex_bounded_resume_entries()
         for entry in os.listdir(real_codex_dir):
             if entry in skip:
                 continue
@@ -6072,6 +6193,9 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             dst = os.path.join(codex_dir, entry)
             if not os.path.exists(dst) and not os.path.islink(dst):
                 os.symlink(src, dst)
+    gateway_codex_dir = os.path.join(gateway_base, ".codex")
+    source_roots = [gateway_codex_dir, real_codex_dir]
+    _seed_codex_bounded_resume(source_roots, codex_dir)
     _overlay_caveman_session_entries(
         codex_dir,
         session_home,
