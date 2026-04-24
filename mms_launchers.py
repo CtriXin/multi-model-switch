@@ -1568,6 +1568,10 @@ _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
 _LOCAL_HOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks")
 _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
+_CLAUDE_HIVE_COMPACT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
+_CLAUDE_MINDKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-start-hook.sh")
+_CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-end-hook.sh")
+_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -1604,7 +1608,6 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
     "permissions",
 )
 _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST = (
-    "hive",
     "mindkeeper",
 )
 _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
@@ -2079,11 +2082,13 @@ def _merge_snapshot_with_current(snapshot_data, current_settings):
 def _prune_session_only_snapshot_entries(snapshot_data):
     snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     hooks = snapshot_data.get("hooks") or {}
-    feishu_guard = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
-    hive_compact = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
     session_only_commands = {
-        _normalize_hook_command(feishu_guard),
-        _normalize_hook_command(f"bash {hive_compact}"),
+        _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
+        _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
+        _normalize_hook_command(_CLAUDE_HIVE_COMPACT_HOOK),
+        _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_START_HOOK),
+        _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
+        _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2108,7 +2113,19 @@ def _prune_session_only_snapshot_entries(snapshot_data):
 def _sanitize_global_snapshot(snapshot_data):
     snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     snapshot_data.pop("env", None)
-    return _prune_session_only_snapshot_entries(snapshot_data)
+    snapshot_data = _prune_session_only_snapshot_entries(snapshot_data)
+    mcp_servers = snapshot_data.get("mcpServers")
+    if isinstance(mcp_servers, dict):
+        pruned_servers = {
+            name: copy.deepcopy(spec)
+            for name, spec in mcp_servers.items()
+            if name != "hive"
+        }
+        if pruned_servers:
+            snapshot_data["mcpServers"] = pruned_servers
+        else:
+            snapshot_data.pop("mcpServers", None)
+    return snapshot_data
 
 
 def _managed_snapshot_differs(previous_snapshot, current_settings, seed_template):
@@ -2193,6 +2210,7 @@ def _repair_real_claude_settings():
     )
 
     repaired = _merge_claude_settings(current_settings, managed_template)
+    repaired = _sanitize_global_snapshot(repaired)
     repaired_snapshot = _sanitize_global_snapshot(
         _extract_managed_claude_snapshot(repaired, managed_template)
     )
@@ -2442,6 +2460,24 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         "PreToolUse",
         _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
         matcher="WebFetch",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "SessionStart",
+        _CLAUDE_MINDKEEPER_SESSION_START_HOOK,
+        matcher="",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "Stop",
+        _CLAUDE_MINDKEEPER_SESSION_END_HOOK,
+        matcher="",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "UserPromptSubmit",
+        _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK,
+        matcher="",
     )
     return hooks_data
 
@@ -2982,15 +3018,6 @@ def _default_session_mcp_servers():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     servers = {}
 
-    hive_command = os.path.join(repo_root, "hive", "bin", "mcp-server.sh")
-    if os.path.isfile(hive_command):
-        servers["hive"] = {
-            "args": [],
-            "command": hive_command,
-            "env": {"HOME": _real_user_home()},
-            "type": "stdio",
-        }
-
     mindkeeper_server = os.path.join(repo_root, "mindkeeper", "dist", "server.js")
     if os.path.isfile(mindkeeper_server):
         servers["mindkeeper"] = {
@@ -3000,6 +3027,35 @@ def _default_session_mcp_servers():
         }
 
     return servers
+
+
+def _default_hive_session_mcp_server():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hive_command = os.path.join(repo_root, "hive", "bin", "mcp-server.sh")
+    if os.path.isfile(hive_command):
+        return {
+            "args": [],
+            "command": hive_command,
+            "env": {"HOME": _real_user_home()},
+            "type": "stdio",
+        }
+    return None
+
+
+def _ensure_session_only_claude_mcp_servers(settings_data):
+    settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
+    mcp_servers = settings_data.get("mcpServers")
+    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
+
+    hive_spec = _default_hive_session_mcp_server()
+    if hive_spec and not (isinstance(merged.get("hive"), dict) and str(merged.get("hive", {}).get("command") or "").strip()):
+        merged["hive"] = copy.deepcopy(hive_spec)
+
+    if merged:
+        settings_data["mcpServers"] = merged
+    else:
+        settings_data.pop("mcpServers", None)
+    return settings_data
 
 
 def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
@@ -3752,6 +3808,8 @@ def _build_claude_session_settings(
         settings_data["mcpServers"] = managed_mcp_servers
     else:
         settings_data.pop("mcpServers", None)
+    if allow_execution_surfaces:
+        settings_data = _ensure_session_only_claude_mcp_servers(settings_data)
 
     settings_data.setdefault(
         "includeCoAuthoredBy",

@@ -2484,7 +2484,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
-        echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, and the token monitor hook.")"
+        echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook、context restore hint hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, the token monitor hook, and the context restore hint hook.")"
         echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
         echo ""
     fi

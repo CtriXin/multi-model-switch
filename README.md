@@ -144,7 +144,7 @@ This optional path installs `jq` + `rtk`, wires the Claude `PreToolUse:Bash` hoo
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context
 ```
 
-This optional path installs `MindKeeper MCP`, Claude `/distill`, Claude `/cz`, and the Claude `UserPromptSubmit` token monitor hook. If `jq` is missing, the installer also attempts to install it because the hook depends on it.
+This optional path installs `MindKeeper MCP`, Claude `/distill`, Claude `/cz`, the Claude `UserPromptSubmit` token monitor hook, and the `claude-context-restore-hint` SessionStart hook. If `jq` is missing, the installer also attempts to install it because the token monitor hook depends on it.
 
 By default, MMS pins this pack to the tested `MindKeeper v2.2.0`.
 Override it when needed:

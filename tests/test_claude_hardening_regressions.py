@@ -45,6 +45,16 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_hive_session_mcp_server",
+        lambda: {
+            "command": "/tmp/hive-session-only.sh",
+            "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
 
     result = mms_launchers._build_claude_session_settings(
         {
@@ -57,8 +67,13 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
     )
 
     assert result["mcpServers"] == {
-        "hive": {"command": "/tmp/hive-mcp.sh", "args": [], "type": "stdio"},
         "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+        "hive": {
+            "command": "/tmp/hive-session-only.sh",
+            "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
     }
 
 
@@ -71,17 +86,21 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
         mms_launchers,
         "_default_session_mcp_servers",
         lambda: {
-            "hive": {
-                "command": "/tmp/hive/bin/mcp-server.sh",
-                "args": [],
-                "env": {"HOME": "/tmp/real-home"},
-                "type": "stdio",
-            },
             "mindkeeper": {
                 "command": "node",
                 "args": ["/tmp/mindkeeper/dist/server.js"],
                 "type": "stdio",
             },
+        },
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_hive_session_mcp_server",
+        lambda: {
+            "command": "/tmp/hive/bin/mcp-server.sh",
+            "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
         },
     )
 
@@ -193,10 +212,25 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
         base_settings,
         enable_caveman=False,
     )
-    assert disabled["hooks"]["SessionStart"][0]["hooks"] == [
-        {"type": "command", "command": "/tmp/keep-session-start.sh"},
+    disabled_session_start = [
+        item["command"]
+        for group in disabled["hooks"]["SessionStart"]
+        for item in group["hooks"]
     ]
-    assert "UserPromptSubmit" not in disabled["hooks"]
+    disabled_user_prompt = [
+        item["command"]
+        for group in disabled["hooks"]["UserPromptSubmit"]
+        for item in group["hooks"]
+    ]
+    disabled_stop = [
+        item["command"]
+        for group in disabled["hooks"]["Stop"]
+        for item in group["hooks"]
+    ]
+    assert "/tmp/keep-session-start.sh" in disabled_session_start
+    assert mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK in disabled_session_start
+    assert disabled_user_prompt == [mms_launchers._CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK]
+    assert disabled_stop == [mms_launchers._CLAUDE_MINDKEEPER_SESSION_END_HOOK]
 
     enabled = mms_launchers._build_claude_session_settings(
         base_settings,
@@ -738,7 +772,8 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
         for group in disabled["hooks"]["SessionStart"]
         for item in group["hooks"]
     ]
-    assert disabled_commands == ["/tmp/keep-session-start.sh"]
+    assert "/tmp/keep-session-start.sh" in disabled_commands
+    assert mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK in disabled_commands
     assert "CLAUDE_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_HOOK_PROFILE" not in disabled["env"]
@@ -766,6 +801,64 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
     assert enabled["env"]["ECC_PLUGIN_ROOT"] == str(ecc_root)
     assert enabled["env"]["ECC_HOOK_PROFILE"] == "standard"
     assert enabled["env"]["KEEP_ME"] == "1"
+
+
+def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
+    import mms_launchers
+
+    snapshot = {
+        "env": {"HTTP_PROXY": "http://127.0.0.1:7890"},
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "",
+                    "commands": [
+                        "/tmp/keep-session-start.sh",
+                        mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK,
+                    ],
+                }
+            ],
+            "Stop": [
+                {
+                    "matcher": "",
+                    "commands": [mms_launchers._CLAUDE_MINDKEEPER_SESSION_END_HOOK],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "commands": [mms_launchers._CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "WebFetch",
+                    "commands": [
+                        "/tmp/keep-webfetch.sh",
+                        mms_launchers._CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK,
+                    ],
+                }
+            ],
+        },
+        "mcpServers": {
+            "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
+            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper/dist/server.js"], "type": "stdio"},
+        },
+    }
+
+    sanitized = mms_launchers._sanitize_global_snapshot(snapshot)
+
+    assert "env" not in sanitized
+    assert sanitized["hooks"]["SessionStart"] == [
+        {"matcher": "", "commands": ["/tmp/keep-session-start.sh"]}
+    ]
+    assert sanitized["hooks"]["PreToolUse"] == [
+        {"matcher": "WebFetch", "commands": ["/tmp/keep-webfetch.sh"]}
+    ]
+    assert "Stop" not in sanitized["hooks"]
+    assert "UserPromptSubmit" not in sanitized["hooks"]
+    assert "hive" not in sanitized["mcpServers"]
+    assert sanitized["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
 
 
 def test_overlay_ecc_session_entries_merges_session_and_ecc_assets(monkeypatch, tmp_path):

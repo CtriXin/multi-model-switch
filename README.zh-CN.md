@@ -166,6 +166,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - Claude 的 `/distill`
 - Claude 的 `/cz`
 - Claude 的 `UserPromptSubmit` token monitor hook
+- Claude 的 `SessionStart` context restore hint hook
 
 如果本机没有 `jq`，安装器也会尝试补装，因为 token monitor hook 依赖它。
 
