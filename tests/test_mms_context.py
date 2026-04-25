@@ -128,6 +128,70 @@ def test_token_saver_run_preserves_nonzero_exit_code_when_stored(monkeypatch, tm
     assert "exit_code: 7" in output
 
 
+def test_token_saver_run_snippet_keeps_failure_signal(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    code = (
+        "for i in range(80): print(f'noise before {i}')\n"
+        "print('AssertionError: important failure in the middle')\n"
+        "for i in range(80): print(f'noise after {i}')\n"
+    )
+    result = token_saver.main(
+        [
+            "run",
+            "--threshold-lines",
+            "20",
+            "--snippet-chars",
+            "520",
+            "--",
+            sys.executable,
+            "-c",
+            code,
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "token-saver: stored command output" in output
+    assert "[token-saver: signal lines]" in output
+    assert "AssertionError: important failure in the middle" in output
+    assert "mmsctx://ctx_" in output
+
+
+def test_token_saver_run_shorthand_uses_run_subcommand(monkeypatch, tmp_path, capsys):
+    import token_saver
+
+    monkeypatch.setenv("MMS_CONTEXT_DIR", str(tmp_path / "store"))
+
+    result = token_saver.main(
+        [
+            "--",
+            sys.executable,
+            "-c",
+            "print('short shorthand')",
+        ]
+    )
+
+    assert result == 0
+    assert capsys.readouterr().out == "short shorthand\n"
+
+    result = token_saver.main(
+        [
+            "--threshold-chars",
+            "1000",
+            "--",
+            sys.executable,
+            "-c",
+            "print('short shorthand with option')",
+        ]
+    )
+
+    assert result == 0
+    assert capsys.readouterr().out == "short shorthand with option\n"
+
+
 def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_commands(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 

@@ -18,19 +18,30 @@ requests such as "跑测试", "看日志", "分析这个 JSON", or "省点 conte
 
 ## Agent Rules
 
-For commands that may print long output, run the command through Token Saver yourself:
+For commands that may print long output, run the command through Token Saver yourself.
+This is the default behavior for tests, builds, `git diff/show/log`, broad `rg`,
+logs, generated JSON, and diagnostics. Do not wait for the user to ask for
+token-saving when the output shape is obviously noisy.
 
 ```bash
 token-saver run --title "short title" -- some-command
+```
+
+The shorter shorthand is also valid when you do not need extra metadata:
+
+```bash
+token-saver -- some-command
 ```
 
 It prints the command output directly when short. When long, it stores the full output and returns:
 
 - `mmsctx://...` ref for agent reuse
 - exit code
-- short snippet
+- short snippet focused on failure/error signal lines when present
 
-Use the same wrapper for tests, builds, log reads, search commands, and diagnostics where full output may be noisy.
+For long failing commands, rely on the snippet for the user-facing conclusion,
+then use `mms-context show` only if you need exact surrounding lines from the
+stored output.
 
 Use `token-saver put` or `mms-context put` yourself when text already exists and should be stored:
 
