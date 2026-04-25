@@ -51,6 +51,8 @@ INSTALL_READ_ONCE=0
 INSTALL_READ_ONCE_EXPLICIT=0
 INSTALL_OPS_ENV_SAFE=0
 INSTALL_OPS_ENV_SAFE_EXPLICIT=0
+INSTALL_TOKEN_SAVER=0
+INSTALL_TOKEN_SAVER_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
@@ -141,6 +143,12 @@ optional_ops_env_safe_installed() {
         && [ -f "$REAL_HOME/.claude/commands/ops-env-safe.md" ]
 }
 
+optional_token_saver_installed() {
+    [ -f "$REAL_HOME/.codex/skills/token-saver/SKILL.md" ] \
+        && [ -f "$REAL_HOME/.claude/skills/token-saver/SKILL.md" ] \
+        && [ -x "$BIN_DIR/token-saver" ]
+}
+
 note_optional_pack_detected() {
     local zh_label="$1"
     local en_label="$2"
@@ -192,7 +200,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-ops-env-safe] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -212,6 +220,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
+  - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command")
   - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
   - $(t "Caveman mode 现在作为 MMS 内建 session asset 随安装一起提供；MMS 启动的 Claude/Codex 可在确认页切换，无需额外全局安装" "Caveman mode now ships as a bundled MMS session asset; MMS-launched Claude/Codex can toggle it from the confirm page without a separate global install")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
@@ -407,6 +416,32 @@ prompt_optional_install_choices() {
             echo "  Read 省 token 工具（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
             if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
                 INSTALL_READ_ONCE=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_TOKEN_SAVER_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if optional_token_saver_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional token saving"
+            else
+                echo "可选省 token 工具"
+            fi
+            note_optional_pack_detected " token-saver" "token-saver"
+        elif [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional token saving"
+            echo "  Token Saver installs a shared Codex/Claude skill and local command for large-output refs/snippets."
+            echo "  It helps export-only sessions use token saving without remembering low-level commands."
+            if confirm_from_tty "Install Token Saver for Codex and Claude? [y/N]: " "n"; then
+                INSTALL_TOKEN_SAVER=1
+            fi
+        else
+            echo "可选省 token 工具"
+            echo "  Token Saver 会安装 Codex/Claude 共用 skill 和本机命令，用 ref/snippet 收纳长输出。"
+            echo "  它让 export-only 会话也能省 token，不需要你记底层命令。"
+            if confirm_from_tty "是否为 Codex 和 Claude 安装 Token Saver？[y/N]: " "n"; then
+                INSTALL_TOKEN_SAVER=1
             fi
         fi
     fi
@@ -2165,6 +2200,110 @@ install_optional_ops_env_safe() {
     write_ops_env_safe_claude_command || true
 }
 
+install_token_saver_skill_link() {
+    local target_skill_dir="$1"
+    local source_skill_dir="$MMS_HOME/vendor/token-saver"
+    local marker="name: token-saver"
+    local backup_skill_dir="${target_skill_dir}.bak.$$"
+
+    if [ ! -f "$source_skill_dir/SKILL.md" ]; then
+        echo "⚠ $(t "找不到 token-saver skill，跳过" "token-saver skill not found, skipping"): $source_skill_dir"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_skill_dir")"
+
+    if [ -L "$target_skill_dir" ]; then
+        rm -f "$target_skill_dir"
+        ln -s "$source_skill_dir" "$target_skill_dir"
+        echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
+        return 0
+    fi
+
+    if [ -e "$target_skill_dir" ]; then
+        if [ -f "$target_skill_dir/SKILL.md" ] && grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
+            rm -rf "$backup_skill_dir"
+            mv "$target_skill_dir" "$backup_skill_dir"
+            ln -s "$source_skill_dir" "$target_skill_dir"
+            rm -rf "$backup_skill_dir"
+            echo "✓ $(t "已替换托管 skill 为 symlink" "Replaced managed skill with symlink"): $target_skill_dir"
+            return 0
+        fi
+        echo "⚠ $(t "检测到已有自定义 token-saver skill，跳过覆盖" "Detected custom token-saver skill, skipping overwrite"): $target_skill_dir"
+        return 1
+    fi
+
+    ln -s "$source_skill_dir" "$target_skill_dir"
+    echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
+    return 0
+}
+
+write_token_saver_bin_wrapper() {
+    local command_name="$1"
+    local source_script="$MMS_HOME/scripts/$command_name"
+    local target="$BIN_DIR/$command_name"
+    local marker="Managed by MMS optional token-saver pack"
+    local tmp_file=""
+
+    if [ ! -f "$source_script" ]; then
+        echo "⚠ $(t "找不到 token-saver 命令脚本，跳过" "token-saver command script not found, skipping"): $source_script"
+        return 1
+    fi
+
+    mkdir -p "$BIN_DIR"
+    if [ -L "$target" ]; then
+        rm -f "$target"
+    elif [ -e "$target" ] && ! grep -Fq "$marker" "$target" 2>/dev/null; then
+        echo "⚠ $(t "检测到已有自定义命令，跳过覆盖" "Detected custom command, skipping overwrite"): $target"
+        return 1
+    fi
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-token-saver.XXXXXX")"
+    cat > "$tmp_file" <<EOF
+#!/bin/sh
+# $marker
+exec "$source_script" "\$@"
+EOF
+    mv "$tmp_file" "$target"
+    chmod 755 "$target"
+    echo "✓ $(t "已安装命令" "Installed command"): $target"
+    return 0
+}
+
+install_token_saver_installed_skills_mirror() {
+    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
+    local source_skill_dir="$MMS_HOME/vendor/token-saver"
+    local target="$mirror_dir/token-saver"
+
+    if [ ! -d "$mirror_dir" ]; then
+        return 0
+    fi
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        echo "⚠ $(t "检测到 installed-skills 自定义 token-saver，跳过覆盖" "Detected custom installed-skills token-saver, skipping overwrite"): $target"
+        return 1
+    fi
+    if [ -L "$target" ]; then
+        rm -f "$target"
+    fi
+    ln -s "$source_skill_dir" "$target"
+    echo "✓ $(t "已更新 installed-skills 镜像" "Updated installed-skills mirror"): $target"
+    return 0
+}
+
+install_optional_token_saver() {
+    echo ""
+    echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
+    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/token-saver、~/.claude/skills/token-saver 和 ~/.local/bin/token-saver/mms-context/mms-toon。" "This optional pack writes ~/.codex/skills/token-saver, ~/.claude/skills/token-saver, and ~/.local/bin/token-saver/mms-context/mms-toon.")"
+    echo "  $(t "它不写 ~/.config/mms，也不修改模型、账号、proxy 或 reasoning 配置。" "It does not write ~/.config/mms or change model, account, proxy, or reasoning settings.")"
+
+    install_token_saver_skill_link "$REAL_HOME/.codex/skills/token-saver" || true
+    install_token_saver_skill_link "$REAL_HOME/.claude/skills/token-saver" || true
+    write_token_saver_bin_wrapper "token-saver" || true
+    write_token_saver_bin_wrapper "mms-context" || true
+    write_token_saver_bin_wrapper "mms-toon" || true
+    install_token_saver_installed_skills_mirror || true
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
@@ -2212,6 +2351,10 @@ while [[ $# -gt 0 ]]; do
         --install-read-once)
             INSTALL_READ_ONCE=1
             INSTALL_READ_ONCE_EXPLICIT=1
+            ;;
+        --install-token-saver)
+            INSTALL_TOKEN_SAVER=1
+            INSTALL_TOKEN_SAVER_EXPLICIT=1
             ;;
         --install-ops-env-safe)
             INSTALL_OPS_ENV_SAFE=1
@@ -2318,6 +2461,11 @@ if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
 fi
 
+if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
+    echo "• $(t "附带安装 Token Saver" "Optional Token Saver"): on"
+    echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/mms-toon, without writing ~/.config/mms.")"
+fi
+
     if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
         echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
         echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
@@ -2398,6 +2546,9 @@ if [ "$INSTALL_MAP" -eq 1 ]; then
 fi
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     install_optional_read_once || true
+fi
+if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
+    install_optional_token_saver || true
 fi
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
     install_optional_ops_env_safe || true
@@ -2488,6 +2639,12 @@ if [ -x "$BIN_DIR/mms" ]; then
     if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
         echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook、context restore hint hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, the token monitor hook, and the context restore hint hook.")"
         echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
+        echo "  $(t "Token Saver 已安装：Codex/Claude skill、token-saver/mms-context/mms-toon 命令。" "Token Saver installed: Codex/Claude skill plus token-saver/mms-context/mms-toon commands.")"
+        echo "  $(t "普通 export-only Codex/Claude 会话现在可以靠 skill 自动使用长输出 ref/snippet。" "Plain export-only Codex/Claude sessions can now use long-output refs/snippets through the skill.")"
         echo ""
     fi
 

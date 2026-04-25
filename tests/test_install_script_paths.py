@@ -179,3 +179,17 @@ def test_install_script_updates_chinese_optional_copy():
 
     assert "MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
     assert "Caveman 会随 MMS 一起作为内建 session 资产提供。" in text
+
+
+def test_install_script_has_optional_token_saver_pack():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "--install-token-saver" in text
+    assert "INSTALL_TOKEN_SAVER" in text
+    assert "optional_token_saver_installed" in text
+    assert "install_optional_token_saver" in text
+    assert "~/.codex/skills/token-saver" in text
+    assert "~/.claude/skills/token-saver" in text
+    assert 'write_token_saver_bin_wrapper "token-saver"' in text
+    assert 'write_token_saver_bin_wrapper "mms-context"' in text
+    assert 'write_token_saver_bin_wrapper "mms-toon"' in text

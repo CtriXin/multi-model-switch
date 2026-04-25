@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 默认会安装最新发布的 semver tag。
-如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`、`ops-env-safe`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
+如果在交互终端里执行，安装脚本现在会先询问 `中文 / English`，然后逐项询问是否安装 `RTK enhancement`、`MindKeeper context pack`、`Map auto-index`、`read-once`、`token-saver`、`ops-env-safe`，最后检查本机有没有 `Claude Code` / `Codex CLI`，只对缺失项逐个询问要不要安装。
 安装包会同时带上 MMS 自己的 `statusline-command.sh`，不依赖用户已有的全局 `~/.claude/` 脚本。
 通过 `install.sh` 安装的版本还会保留一个轻量版本标记；之后在交互终端里启动 `mms` 时，如果你已经落后 `3+` 个 tag，MMS 会给出升级提示，但不会每次启动都反复刷屏。
 
@@ -231,6 +231,24 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 不继承 global/source `hooks`
 - 不带 `Hive` / `Map` / `Feishu` / `agentim` hooks
 - `top-level mcpServers` 仍保持隔离，不通过 `MMC` 自动回流
+
+### 安装 MMS 时顺手加上 token-saver
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-token-saver
+```
+
+这条可选路径会给普通 export-only 会话安装共用 Token Saver：
+
+- Codex skill：`~/.codex/skills/token-saver`
+- Claude skill：`~/.claude/skills/token-saver`
+- 本机命令：`token-saver`、`mms-context`、`mms-toon`
+
+边界说明：
+
+- 不写 `~/.config/mms`
+- 不改模型、账号、proxy 或 reasoning 设置
+- 让普通 Codex/Claude 会话也能靠 skill 自动用长输出 ref/snippet，不需要记底层命令
 
 ### 安装 MMS 时顺手加上 ops-env-safe
 

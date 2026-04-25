@@ -34,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 ```
 
 By default, the installer pulls the latest semver tag.
-When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, `read-once`, and `ops-env-safe`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
+When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, `read-once`, `token-saver`, and `ops-env-safe`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
 `install.sh` installs also keep a lightweight version marker, so interactive `mms` runs can show an upgrade hint when you are `3+` tags behind without prompting on every launch.
 
 Public surface note:
@@ -195,6 +195,24 @@ This optional path installs `read-once` and wires two Claude hooks:
 - `PostCompact` cache reset hook
 
 It avoids redundant full-file rereads and prefers diffs after file changes. If `jq` is missing, the installer attempts to install it; if it is still unavailable, the hooks stay fail-open and do not block Claude.
+
+### Install with optional token-saver
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-token-saver
+```
+
+This optional path installs the shared Token Saver pack for plain export-only sessions:
+
+- a Codex skill: `~/.codex/skills/token-saver`
+- a Claude skill: `~/.claude/skills/token-saver`
+- local commands: `token-saver`, `mms-context`, and `mms-toon`
+
+Scope notes:
+
+- It does not write `~/.config/mms`
+- It does not change model, account, proxy, or reasoning settings
+- It lets normal Codex/Claude sessions use long-output refs/snippets without remembering helper commands
 
 ### Install with optional ops-env-safe
 
