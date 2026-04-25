@@ -10,6 +10,7 @@ import sys
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from time import perf_counter
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
@@ -5655,6 +5656,133 @@ def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
         shutil.rmtree(stale, ignore_errors=True)
 
 
+def _copy_tree_files_if_missing(src, dst):
+    if not os.path.isdir(src):
+        return
+    os.makedirs(dst, exist_ok=True)
+    for root, dirs, files in os.walk(src):
+        rel_root = os.path.relpath(root, src)
+        target_root = dst if rel_root == "." else os.path.join(dst, rel_root)
+        os.makedirs(target_root, exist_ok=True)
+        for dirname in dirs:
+            os.makedirs(os.path.join(target_root, dirname), exist_ok=True)
+        for filename in files:
+            source_file = os.path.join(root, filename)
+            target_file = os.path.join(target_root, filename)
+            if os.path.exists(target_file) or os.path.islink(target_file):
+                continue
+            try:
+                shutil.copy2(source_file, target_file)
+            except OSError:
+                pass
+
+
+def _normalized_claude_slot_account(value):
+    return str(value or "").strip().lower()
+
+
+def _claude_project_resume_dir_names(project_path):
+    paths = {
+        os.path.abspath(os.path.expanduser(str(project_path or ""))),
+        os.path.realpath(os.path.expanduser(str(project_path or ""))),
+    }
+    names = set()
+    for path in paths:
+        if not path:
+            continue
+        names.add(path.replace(os.sep, "-"))
+    return sorted(name for name in names if name)
+
+
+def _claude_slot_roots_for_resume_backfill(account_id):
+    roots = [
+        _real_user_path(".config", "mms", "claude-gateway", "s"),
+    ]
+    normalized_account_id = _normalized_claude_slot_account(account_id)
+    if normalized_account_id:
+        roots.append(_real_user_path(".config", "mms", "accounts", normalized_account_id, "s"))
+    return roots
+
+
+def _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd):
+    source_projects_root = _real_user_path(".claude", "projects")
+    if not os.path.isdir(source_projects_root):
+        return
+    if os.path.realpath(source_projects_root) == os.path.realpath(target_projects_dir):
+        return
+    for dirname in _claude_project_resume_dir_names(current_cwd):
+        source_project_dir = os.path.join(source_projects_root, dirname)
+        target_project_dir = os.path.join(target_projects_dir, dirname)
+        if os.path.realpath(source_project_dir) == os.path.realpath(target_project_dir):
+            continue
+        _copy_tree_files_if_missing(source_project_dir, target_project_dir)
+
+
+def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, account_id, current_session_home=""):
+    """Recover Claude Code /resume files from older MMS isolated slots.
+
+    Claude Code now lists resumable conversations from `.claude/projects/**`,
+    not just `history.jsonl`. Older MMS slots kept that directory local to the
+    isolated HOME, so copy matching project files into the persistent store.
+    """
+    target_projects_dir = os.path.abspath(os.path.expanduser(str(target_projects_dir or "")))
+    if not target_projects_dir:
+        return
+    os.makedirs(target_projects_dir, exist_ok=True)
+    current_cwd = os.path.realpath(current_cwd or os.getcwd())
+    current_session_home = os.path.realpath(current_session_home) if current_session_home else ""
+    expected_account = _normalized_claude_slot_account(account_id)
+
+    _backfill_real_claude_project_resume_files(target_projects_dir, current_cwd)
+
+    for slots_root in _claude_slot_roots_for_resume_backfill(expected_account):
+        if not os.path.isdir(slots_root):
+            continue
+        for name in os.listdir(slots_root):
+            slot_home = os.path.join(slots_root, name)
+            if not os.path.isdir(slot_home):
+                continue
+            if current_session_home and os.path.realpath(slot_home) == current_session_home:
+                continue
+            marker = read_slot_marker(slot_home)
+            if not isinstance(marker, dict):
+                continue
+            if os.path.realpath(str(marker.get("cwd") or "")) != current_cwd:
+                continue
+            marker_account = _normalized_claude_slot_account(marker.get("account_id"))
+            if expected_account and marker_account != expected_account:
+                continue
+            source_projects_dir = os.path.join(slot_home, ".claude", "projects")
+            if os.path.realpath(source_projects_dir) == os.path.realpath(target_projects_dir):
+                continue
+            _copy_tree_files_if_missing(source_projects_dir, target_projects_dir)
+
+
+def _link_claude_persistent_entry(session_claude_dir, entry, target):
+    dst = os.path.join(session_claude_dir, entry)
+    target = os.path.abspath(os.path.expanduser(str(target)))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if entry.endswith(".jsonl"):
+        if not os.path.exists(target):
+            Path(target).touch()
+    else:
+        os.makedirs(target, exist_ok=True)
+
+    if os.path.islink(dst):
+        if os.path.realpath(dst) == os.path.realpath(target):
+            return
+        os.unlink(dst)
+    elif os.path.exists(dst):
+        if entry == "projects" and os.path.isdir(dst):
+            _copy_tree_files_if_missing(dst, target)
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        else:
+            os.unlink(dst)
+
+    os.symlink(target, dst)
+
+
 def _prepare_claude_session_tree(
     session_home,
     session_claude_dir,
@@ -5712,8 +5840,14 @@ def _prepare_claude_session_tree(
                 account_id=normalized_account_id,
             )
         )
-        if not os.path.exists(dst) and not os.path.islink(dst):
-            os.symlink(target, dst)
+        if entry == "projects":
+            _backfill_claude_project_resume_files(
+                target,
+                current_cwd,
+                normalized_account_id,
+                current_session_home=session_home,
+            )
+        _link_claude_persistent_entry(session_claude_dir, entry, target)
     record_claude_session_start(
         cwd=current_cwd,
         account_id=normalized_account_id,

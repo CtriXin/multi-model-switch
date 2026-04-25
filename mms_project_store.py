@@ -16,6 +16,7 @@ DEFAULT_PROJECTS_DIR = DEFAULT_PRIMARY_CONFIG_DIR / "projects"
 PROJECTS_DIR = DEFAULT_PROJECTS_DIR
 CLAUDE_PERSISTENT_ENTRIES = (
     "history.jsonl",
+    "projects",
     "sessions",
     "transcripts",
     "file-history",
