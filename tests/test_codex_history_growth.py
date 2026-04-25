@@ -121,6 +121,8 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     real_codex = real_home / ".codex"
     _write_lines(account_codex / "history.jsonl", "account-history", 5)
     _write_lines(real_codex / "history.jsonl", "real-history", 5)
+    (account_codex / "installation_id").parent.mkdir(parents=True, exist_ok=True)
+    (account_codex / "installation_id").write_text("account-installation\n", encoding="utf-8")
     for index in range(3):
         _write_file(
             account_codex / "sessions" / "2026" / "04" / f"account-session-{index}.jsonl",
@@ -153,6 +155,8 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     copied_sessions = list((session_codex / "sessions").glob("2026/04/*.jsonl"))
     assert len(copied_sessions) == 1
     assert copied_sessions[0].name == "account-session-2.jsonl"
+    assert not (session_codex / "installation_id").is_symlink()
+    assert (session_codex / "installation_id").read_text(encoding="utf-8") == "account-installation\n"
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["bytes"] > 0
 
@@ -174,6 +178,7 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
             mtime=100 + index,
         )
     (real_codex / "memories").mkdir(parents=True)
+    (real_codex / "installation_id").write_text("real-installation\n", encoding="utf-8")
 
     monkeypatch.chdir(repo_dir)
     monkeypatch.setenv("MMS_CODEX_HISTORY_JSONL_MAX_LINES", "2")
@@ -205,5 +210,7 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert len(copied_sessions) == 1
     assert copied_sessions[0].name == "gateway-session-1.jsonl"
     assert (session_codex / "memories").is_symlink()
+    assert not (session_codex / "installation_id").is_symlink()
+    assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 2

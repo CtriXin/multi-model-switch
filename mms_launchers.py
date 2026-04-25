@@ -4336,8 +4336,7 @@ def _overlay_codex_shared_resume(home_dir, session_home):
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
-        if not os.path.exists(dst) and not os.path.islink(dst):
-            os.symlink(src, dst)
+        _materialize_codex_session_entry(entry, src, dst)
 
     source_roots = [account_codex_dir]
     real_codex_dir = _real_user_path(".codex")
@@ -4359,6 +4358,17 @@ _CODEX_BOUNDED_RESUME_DIRS = {
 
 _CODEX_RESUME_SEED_MANIFEST = "mms-resume-seed.json"
 _CODEX_RESUME_MAX_FILE_BYTES = 512 * 1024
+_CODEX_COPY_INTO_SESSION_FILES = {"installation_id"}
+
+
+def _materialize_codex_session_entry(entry, src, dst):
+    if os.path.exists(dst) or os.path.islink(dst):
+        return
+    if entry in _CODEX_COPY_INTO_SESSION_FILES and os.path.isfile(src):
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        return
+    os.symlink(src, dst)
 
 
 def _bounded_env_int(name, default):
@@ -6308,8 +6318,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                 continue
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)
-            if not os.path.exists(dst) and not os.path.islink(dst):
-                os.symlink(src, dst)
+            _materialize_codex_session_entry(entry, src, dst)
     gateway_codex_dir = os.path.join(gateway_base, ".codex")
     source_roots = [gateway_codex_dir, real_codex_dir]
     _seed_codex_bounded_resume(source_roots, codex_dir)
