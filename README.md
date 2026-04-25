@@ -319,6 +319,8 @@ mms --trace --preset coding
 ### Launch confirm
 ![Launch Confirm](assets/mms-launch-confirm.png)
 
+On the launch confirm page, use `←/→` to cycle across `Summary / MCP / Skills / Hooks`. Toggle keys such as `Tab`, `C`, `T`, `E`, and `X` update the preview panels live.
+
 ## Supported CLIs
 
 | CLI | Primary protocol | Notes |

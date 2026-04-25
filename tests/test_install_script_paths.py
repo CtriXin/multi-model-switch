@@ -172,3 +172,10 @@ def test_install_script_mentions_bundled_caveman_mode():
 
     assert "Bundled Caveman session asset" in text
     assert "Bundled Caveman mode" in text
+
+
+def test_install_script_updates_chinese_optional_copy():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
+    assert "Caveman 会随 MMS 一起作为内建 session 资产提供。" in text

@@ -226,6 +226,21 @@ def _draw_footer_actions(stdscr, y, x, max_w, actions):
     return rows
 
 
+def _measure_footer_actions(max_w, actions):
+    rows = 1
+    cursor = 0
+    gap = 2
+    for chunks in actions:
+        chunk_w = sum(_display_width(text) for text, _attr in chunks)
+        if cursor > 0 and cursor + gap + chunk_w > max_w:
+            rows += 1
+            cursor = 0
+        elif cursor > 0:
+            cursor += gap
+        cursor += chunk_w
+    return rows
+
+
 # ── 第 1 步：品类选择 TUI ──────────────────────────────────
 
 _FAMILY_COLORS = {
@@ -3052,6 +3067,7 @@ def confirm_tui(
     ecc_enabled_default=False,
     thinking_enabled_default=True,
     reasoning_effort_default="high",
+    preview_catalog=None,
 ):
     """确认启动 TUI。
 
@@ -3106,20 +3122,146 @@ def confirm_tui(
                 return True
         return False
 
+    def _confirm_label(label):
+        mapping = {
+            "CLI": _L("客户端", "CLI"),
+            "Model": _L("模型", "Model"),
+            "Launch": _L("启动", "Launch"),
+            "Bypass": _L("绕过审批", "Bypass"),
+            "Caveman": "Caveman",
+            "Thinking": _L("思考", "Thinking"),
+            "Effort": _L("强度", "Effort"),
+            "ECC": "ECC",
+            "URL": _L("地址", "URL"),
+            "Key": _L("密钥", "Key"),
+            "Active": _L("激活", "Active"),
+            "Preset": _L("预设", "Preset"),
+            "CLI source": _L("CLI 来源", "CLI source"),
+            "Source": _L("来源", "Source"),
+            "Proxy": _L("代理", "Proxy"),
+            "TZ": "TZ",
+            "IPv4": "IPv4",
+            "Slot": _L("槽位", "Slot"),
+            "Session": _L("会话", "Session"),
+            "Email": _L("邮箱", "Email"),
+            "UserID": _L("用户 ID", "User ID"),
+            "OrgID": _L("组织 ID", "Org ID"),
+            "DNS": "DNS",
+            "Check": _L("检查", "Check"),
+            "IPv4Egress": _L("IPv4 出口", "IPv4 egress"),
+            "IPv6Egress": _L("IPv6 出口", "IPv6 egress"),
+            "Reach": _L("目标", "Reach"),
+            "Leak": _L("泄漏", "Leak"),
+            "Score": _L("评分", "Score"),
+            "Sessions": _L("会话数", "Sessions"),
+            "Profile": _L("画像", "Profile"),
+            "Fake": _L("伪上游", "Fake"),
+        }
+        return mapping.get(str(label or ""), str(label or ""))
+
+    def _confirm_panel_title(panel_key):
+        mapping = {
+            "summary": _L("摘要", "Summary"),
+            "mcp": "MCP",
+            "skills": _L("技能", "Skills"),
+            "hooks": _L("钩子", "Hooks"),
+        }
+        return mapping.get(str(panel_key or ""), str(panel_key or ""))
+
+    def _confirm_panel_empty_message(panel_key):
+        allow_execution_surfaces = True
+        if isinstance(preview_catalog, dict):
+            allow_execution_surfaces = bool(preview_catalog.get("allow_execution_surfaces", True))
+        if not allow_execution_surfaces:
+            mapping = {
+                "mcp": _L("当前启动路径不会注入托管 MCP。", "This launch path does not inject managed MCP."),
+                "skills": _L("当前启动路径不会注入托管技能。", "This launch path does not inject managed skills."),
+                "hooks": _L("当前启动路径不会注入托管钩子。", "This launch path does not inject managed hooks."),
+            }
+            return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "No managed content for this panel."))
+        mapping = {
+            "mcp": _L("当前没有可预览的 MCP。", "No managed MCP to preview."),
+            "skills": _L("当前没有可预览的技能。", "No managed skills to preview."),
+            "hooks": _L("当前没有可预览的钩子。", "No managed hooks to preview."),
+        }
+        return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "Nothing to show on this panel."))
+
+    def _collect_preview_items(panel_key, *, caveman_enabled=False, ecc_enabled=False):
+        panel_key = str(panel_key or "").strip()
+        if not isinstance(preview_catalog, dict):
+            return []
+        sections = preview_catalog.get(panel_key)
+        if not isinstance(sections, dict):
+            return []
+        items = []
+        seen = set()
+        for scope in ("always",):
+            for item in sections.get(scope) or []:
+                if not isinstance(item, dict):
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
+                title = str(item.get("title") or "").strip()
+                summary = str(item.get("summary") or "").strip()
+                details = []
+                for detail in item.get("details") or []:
+                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
+                        continue
+                    label = str(detail[0] or "").strip()
+                    value = str(detail[1] or "").strip()
+                    if label and value:
+                        details.append((label, value))
+                signature = (title, summary, tuple(details))
+                if title and signature not in seen:
+                    seen.add(signature)
+                    items.append({"title": title, "summary": summary, "details": details})
+        if caveman_enabled:
+            for item in sections.get("caveman") or []:
+                if not isinstance(item, dict):
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
+                title = str(item.get("title") or "").strip()
+                summary = str(item.get("summary") or "").strip()
+                details = []
+                for detail in item.get("details") or []:
+                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
+                        continue
+                    label = str(detail[0] or "").strip()
+                    value = str(detail[1] or "").strip()
+                    if label and value:
+                        details.append((label, value))
+                signature = (title, summary, tuple(details))
+                if title and signature not in seen:
+                    seen.add(signature)
+                    items.append({"title": title, "summary": summary, "details": details})
+        if ecc_enabled:
+            for item in sections.get("ecc") or []:
+                if not isinstance(item, dict):
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
+                title = str(item.get("title") or "").strip()
+                summary = str(item.get("summary") or "").strip()
+                details = []
+                for detail in item.get("details") or []:
+                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
+                        continue
+                    label = str(detail[0] or "").strip()
+                    value = str(detail[1] or "").strip()
+                    if label and value:
+                        details.append((label, value))
+                signature = (title, summary, tuple(details))
+                if title and signature not in seen:
+                    seen.add(signature)
+                    items.append({"title": title, "summary": summary, "details": details})
+        return items
+
     if isinstance(model_info, dict):
         model_display = ", ".join(f"{k}={v}" for k, v in model_info.items()
                                   if k != "subagent")
     else:
         model_display = str(model_info)
-
-    env_lines = []
-    if env_vars:
-        for k, v in env_vars.items():
-            if "key" in k.lower() or "token" in k.lower() or "auth" in k.lower():
-                display_v = v[:4] + "****" + v[-4:] if len(v) > 8 else "****"
-            else:
-                display_v = v
-            env_lines.append(f"{k}={display_v}")
 
     detail_lines = []
     if env_vars:
@@ -3129,9 +3271,9 @@ def confirm_tui(
             ("ANTHROPIC_AUTH_TOKEN", "Key"),
             ("OPENAI_API_KEY", "Key"),
             ("GEMINI_API_KEY", "Key"),
-            ("MMS_ACTIVE_MODEL", _L("激活", "Active")),
-            ("MMS_ACTIVE_PRESET", _L("预设", "Preset")),
-            ("MMS_ACTIVE_CLI", _L("CLI源", "CLI source")),
+            ("MMS_ACTIVE_MODEL", "Active"),
+            ("MMS_ACTIVE_PRESET", "Preset"),
+            ("MMS_ACTIVE_CLI", "CLI source"),
         ]
         seen = set()
         for env_key, label in preferred_keys:
@@ -3139,7 +3281,7 @@ def confirm_tui(
                 value = env_vars.get(env_key, "")
                 if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
                     value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
-                detail_lines.append((label, value))
+                detail_lines.append((_confirm_label(label), value, "detail"))
                 seen.add(env_key)
         for env_key, value in env_vars.items():
             if env_key in seen:
@@ -3149,13 +3291,14 @@ def confirm_tui(
                 if "key" in env_key.lower() or "token" in env_key.lower() or "auth" in env_key.lower():
                     value = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
                 label = env_key[:6] + "…" if len(env_key) > 7 else env_key
-                detail_lines.append((label, value))
+                detail_lines.append((label, value, "detail"))
         detail_lines = detail_lines[:4]
     if context_lines:
         for item in context_lines:
             if not isinstance(item, (list, tuple)) or len(item) < 2:
                 continue
-            detail_lines.append((str(item[0]), str(item[1])))
+            raw_label = str(item[0])
+            detail_lines.append((_confirm_label(raw_label), str(item[1]), "fake" if raw_label == "Fake" else "detail"))
     detail_lines = detail_lines[:10]
 
     model_tokens = _model_tokens(model_info)
@@ -3193,6 +3336,9 @@ def confirm_tui(
         ecc_mode = bool(has_ecc and ecc_enabled_default)
         thinking_mode = bool(has_thinking and thinking_enabled_default)
         effort_mode = effort_default
+        panel_index = 0
+        preview_selection = {"mcp": 0, "skills": 0, "hooks": 0}
+        preview_detail_open = {"mcp": False, "skills": False, "hooks": False}
 
         def _effort_attr(value, enabled=True):
             if not enabled:
@@ -3212,118 +3358,226 @@ def confirm_tui(
 
             total_w = min(90, max_w - 4)
             info_lines = []
-            info_lines.append(("CLI", cli))
-            info_lines.append((_L("模型", "Model"), model_display))
-            info_lines.append((_L("启动", "Launch"), _L("一次性命令", "One-shot command") if once else _L("交互会话", "Interactive session")))
+            info_lines.append((_confirm_label("CLI"), cli, "plain"))
+            info_lines.append((_confirm_label("Model"), model_display, "plain"))
+            info_lines.append((_confirm_label("Launch"), _L("一次性命令", "One-shot command") if once else _L("交互会话", "Interactive session"), "plain"))
             if has_bypass:
-                info_lines.append(("Bypass", f"[Tab] {'ON' if bypass_mode else 'OFF'}"))
+                info_lines.append((_confirm_label("Bypass"), f"[Tab] {_L('开启', 'On') if bypass_mode else _L('关闭', 'Off')}", "bypass"))
             if has_claude_1m:
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
-                info_lines.append(("1M", f"[M] {one_m_text}"))
+                info_lines.append(("1M", f"[M] {one_m_text}", "one_m"))
             if has_caveman:
                 caveman_text = _L("开启", "On") if caveman_mode else _L("关闭", "Off")
-                info_lines.append(("Caveman", f"[C] {caveman_text}"))
+                info_lines.append((_confirm_label("Caveman"), f"[C] {caveman_text}", "caveman"))
             if has_thinking:
                 thinking_text = _L("开启", "On") if thinking_mode else _L("关闭", "Off")
-                info_lines.append(("Thinking", f"[T] {thinking_text}"))
+                info_lines.append((_confirm_label("Thinking"), f"[T] {thinking_text}", "thinking"))
             if has_effort:
-                info_lines.append(("Effort", f"[E] {effort_mode.upper()}"))
+                info_lines.append((_confirm_label("Effort"), f"[E] {effort_mode.upper()}", "effort"))
             if has_ecc:
                 ecc_text = _L("开启", "On") if ecc_mode else _L("关闭", "Off")
-                info_lines.append(("ECC", f"[{ecc_key}] {ecc_text}"))
+                info_lines.append((_confirm_label("ECC"), f"[{ecc_key}] {ecc_text}", "ecc"))
 
+            panels = [
+                {
+                    "key": "summary",
+                    "title": _confirm_panel_title("summary"),
+                    "mode": "summary",
+                    "rows": info_lines + detail_lines,
+                }
+            ]
+            if isinstance(preview_catalog, dict):
+                for panel_key in ("mcp", "skills", "hooks"):
+                    preview_items = _collect_preview_items(
+                        panel_key,
+                        caveman_enabled=caveman_mode,
+                        ecc_enabled=ecc_mode,
+                    )
+                    panels.append(
+                        {
+                            "key": panel_key,
+                            "title": _confirm_panel_title(panel_key),
+                            "mode": "list",
+                            "items": preview_items,
+                            "empty_message": _confirm_panel_empty_message(panel_key),
+                        }
+                    )
+
+            if panel_index >= len(panels):
+                panel_index = 0
+            current_panel = panels[panel_index]
             px = (max_w - total_w) // 2
             ll = px + 2
             rr = px + total_w - 2
-            all_labels = [str(label) for label, _ in info_lines] + [str(label) for label, _ in detail_lines]
-            label_w = max((_display_width(label) for label in all_labels), default=6)
-            value_x = ll + label_w + 3
-            value_w = max(10, rr - value_x)
-            wrapped_info_lines = []
-            for label, value in info_lines:
-                value_lines = _wrap_display_lines(value, value_w)
-                wrapped_info_lines.append((label, value_lines))
-            wrapped_detail_lines = []
-            for label, value in detail_lines:
-                value_lines = _wrap_display_lines(value, value_w)
-                wrapped_detail_lines.append((label, value_lines))
-
-            ph = sum(len(values) for _, values in wrapped_info_lines) + sum(len(values) for _, values in wrapped_detail_lines) + 5
-            py = max(1, (max_y - ph) // 2)
-
-            row = py
-            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
-            row += 1
-            title = _L("BYPASS 确认", "BYPASS Confirm") if bypass_mode else _L("确认启动", "Confirm Launch")
-            _safe_addstr(stdscr, row, ll, title, ac | curses.A_BOLD)
-            row += 1
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
-            row += 1
-
-            for label, value_lines in wrapped_info_lines:
-                if label in {"Bypass"}:
-                    val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
-                elif label == "Caveman":
-                    val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
-                elif label == "Thinking":
-                    val_attr = curses.color_pair(1) | curses.A_BOLD if thinking_mode else curses.color_pair(4)
-                elif label == "Effort":
-                    val_attr = _effort_attr(effort_mode, enabled=thinking_mode)
-                elif label == "ECC":
-                    val_attr = curses.color_pair(5) | curses.A_BOLD if ecc_mode else curses.color_pair(4)
-                else:
-                    val_attr = curses.color_pair(1)
-                for idx, value in enumerate(value_lines):
-                    if idx == 0:
-                        _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
-                    _safe_addstr(stdscr, row, value_x, value, val_attr, max_w=value_w)
-                    row += 1
-
-            for label, value_lines in wrapped_detail_lines:
-                if label == "Fake":
-                    detail_attr = curses.color_pair(3) | curses.A_BOLD
-                else:
-                    detail_attr = curses.color_pair(2)
-                for idx, value in enumerate(value_lines):
-                    if idx == 0:
-                        _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
-                    _safe_addstr(stdscr, row, value_x, str(value), detail_attr, max_w=value_w)
-                    row += 1
-
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
-            row += 1
-            footer_items = [
-                ("Enter", _L("启动", "Launch"), curses.color_pair(5) | curses.A_BOLD, curses.color_pair(5) | curses.A_DIM),
+            footer_actions = [
+                [("Enter", curses.color_pair(5) | curses.A_BOLD), (" ", 0), (_L("启动", "Launch"), curses.color_pair(5) | curses.A_DIM)],
             ]
+            if len(panels) > 1:
+                footer_actions.append([("←/→", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切面板", "Switch panel"), curses.color_pair(1) | curses.A_DIM)])
+            if current_panel.get("mode") == "list":
+                footer_actions.append([("↑/↓", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("看条目", "Browse items"), curses.color_pair(1) | curses.A_DIM)])
+                footer_actions.append([("Space", curses.color_pair(2) | curses.A_BOLD), (" ", 0), (_L("看路径", "Show path"), curses.color_pair(2) | curses.A_DIM)])
             if has_bypass:
-                footer_items.append(("Tab", _L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_BOLD, curses.color_pair(4) | curses.A_DIM))
+                footer_actions.append([("Tab", curses.color_pair(4) | curses.A_BOLD), (" ", 0), (_L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_DIM)])
             if has_claude_1m:
-                footer_items.append(("M", _L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+                footer_actions.append([("M", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_DIM)])
             if has_caveman:
-                footer_items.append(("C", _L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+                footer_actions.append([("C", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_DIM)])
             if has_thinking:
-                footer_items.append(("T", _L("切 Thinking", "Toggle Thinking"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
+                footer_actions.append([("T", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切思考", "Toggle Thinking"), curses.color_pair(1) | curses.A_DIM)])
             if has_effort:
-                footer_items.append(("E", _L("切 Effort", "Cycle Effort"), curses.color_pair(6) | curses.A_BOLD, curses.color_pair(6) | curses.A_DIM))
+                footer_actions.append([("E", curses.color_pair(6) | curses.A_BOLD), (" ", 0), (_L("切强度", "Cycle Effort"), curses.color_pair(6) | curses.A_DIM)])
             if has_ecc:
-                footer_items.append((ecc_key, _L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_BOLD, curses.color_pair(1) | curses.A_DIM))
-            footer_items.extend([
-                ("B", _L("返回", "Back"), curses.A_BOLD, curses.A_DIM),
-                ("Q", _L("取消", "Cancel"), curses.A_BOLD, curses.A_DIM),
+                footer_actions.append([(ecc_key, curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_DIM)])
+            footer_actions.extend([
+                [("B", curses.A_BOLD), (" ", 0), (_L("返回", "Back"), curses.A_DIM)],
+                [("Q", curses.A_BOLD), (" ", 0), (_L("取消", "Cancel"), curses.A_DIM)],
             ])
+            footer_rows = _measure_footer_actions(rr - ll + 1, footer_actions)
 
-            cursor = ll
-            for key_text, label_text, key_attr, label_attr in footer_items:
-                if cursor > rr:
-                    break
-                _safe_addstr(stdscr, row, cursor, key_text, key_attr, max_w=max(0, rr - cursor + 1))
-                cursor += _display_width(key_text) + 1
-                if cursor > rr:
-                    break
-                _safe_addstr(stdscr, row, cursor, label_text, label_attr, max_w=max(0, rr - cursor + 1))
-                cursor += _display_width(label_text) + 2
-            row += 1
-            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            title = _L("绕过审批确认", "Bypass Confirm") if bypass_mode else _L("确认启动", "Confirm Launch")
+            if len(panels) > 1:
+                title = f"{title} · {current_panel['title']} [{panel_index + 1}/{len(panels)}]"
+
+            if current_panel.get("mode") == "list":
+                panel_key = str(current_panel.get("key") or "")
+                items = list(current_panel.get("items") or [])
+                if items:
+                    cursor = max(0, min(preview_selection.get(panel_key, 0), len(items) - 1))
+                    preview_selection[panel_key] = cursor
+                else:
+                    cursor = 0
+                    preview_selection[panel_key] = 0
+                    preview_detail_open[panel_key] = False
+                detail_open = bool(preview_detail_open.get(panel_key, False) and items)
+                detail_h = 4
+                list_h = min(12, max(5, max_y - footer_rows - detail_h - 8))
+                ph = list_h + detail_h + footer_rows + 7
+                py = max(1, (max_y - ph) // 2)
+                row = py
+                _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+                row += 1
+                if items:
+                    title = f"{title} ({cursor + 1}/{len(items)})"
+                _safe_addstr(stdscr, row, ll, title, ac | curses.A_BOLD)
+                row += 1
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
+
+                title_w = min(34, max(18, (rr - ll - 6) // 2))
+                summary_x = ll + 2 + title_w + 2
+                summary_w = max(10, rr - summary_x)
+                offset = 0
+                if items and cursor >= list_h:
+                    offset = cursor - list_h + 1
+                if items and cursor < offset:
+                    offset = cursor
+                visible_items = items[offset: offset + list_h]
+
+                for idx in range(list_h):
+                    y = row + idx
+                    if idx >= len(visible_items):
+                        continue
+                    item = visible_items[idx]
+                    absolute_idx = offset + idx
+                    selected = absolute_idx == cursor
+                    marker_attr = curses.color_pair(1) | curses.A_BOLD if selected else curses.A_DIM
+                    title_attr = curses.color_pair(1) | curses.A_BOLD if selected else curses.color_pair(2)
+                    summary_attr = curses.color_pair(1) if selected else curses.A_DIM
+                    marker = ">" if selected else " "
+                    _safe_addstr(stdscr, y, ll, marker, marker_attr)
+                    _safe_addstr(stdscr, y, ll + 2, str(item.get("title") or ""), title_attr, max_w=title_w)
+                    _safe_addstr(stdscr, y, summary_x, str(item.get("summary") or ""), summary_attr, max_w=summary_w)
+
+                if offset > 0:
+                    _safe_addstr(stdscr, row, rr - 1, "^", curses.A_DIM)
+                if offset + list_h < len(items):
+                    _safe_addstr(stdscr, row + list_h - 1, rr - 1, "v", curses.A_DIM)
+                row += list_h
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
+
+                detail_preview_lines = []
+                if detail_open and items:
+                    selected_item = items[cursor]
+                    detail_entries = selected_item.get("details") or []
+                    label_w = max((_display_width(str(label or "")) for label, _ in detail_entries), default=6)
+                    detail_value_x = ll + label_w + 3
+                    detail_value_w = max(10, rr - detail_value_x)
+                    for label, value in detail_entries:
+                        wrapped = _wrap_display_lines(value, detail_value_w)
+                        for wrapped_idx, wrapped_value in enumerate(wrapped):
+                            detail_preview_lines.append((str(label) if wrapped_idx == 0 else "", wrapped_value))
+                    detail_preview_lines = detail_preview_lines[:detail_h]
+                if not detail_preview_lines:
+                    detail_preview_lines = [
+                        ("", _L("↑/↓ 选择条目，按 Space 查看路径或命令。", "Use Up/Down to select an item, then press Space to view its path or command.")),
+                    ]
+                detail_label_w = max((_display_width(label) for label, _ in detail_preview_lines if label), default=0)
+                detail_value_x = ll + detail_label_w + 3 if detail_label_w else ll + 1
+                detail_value_w = max(10, rr - detail_value_x)
+                for idx in range(detail_h):
+                    y = row + idx
+                    if idx >= len(detail_preview_lines):
+                        continue
+                    label, value = detail_preview_lines[idx]
+                    if label:
+                        _safe_addstr(stdscr, y, ll + 1, label, curses.A_DIM)
+                    _safe_addstr(stdscr, y, detail_value_x, value, curses.color_pair(2) if label else curses.A_DIM, max_w=detail_value_w)
+                row += detail_h
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
+                row += _draw_footer_actions(stdscr, row, ll, rr - ll + 1, footer_actions)
+                _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            else:
+                current_rows = current_panel["rows"]
+                all_labels = [str(label) for label, _, _ in current_rows if str(label)]
+                label_w = max((_display_width(label) for label in all_labels), default=6)
+                value_x = ll + label_w + 3
+                value_w = max(10, rr - value_x)
+                wrapped_rows = []
+                for label, value, style in current_rows:
+                    value_lines = _wrap_display_lines(value, value_w)
+                    wrapped_rows.append((label, value_lines, style))
+
+                ph = sum(len(values) for _, values, _ in wrapped_rows) + footer_rows + 5
+                py = max(1, (max_y - ph) // 2)
+
+                row = py
+                _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+                row += 1
+                _safe_addstr(stdscr, row, ll, title, ac | curses.A_BOLD)
+                row += 1
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
+
+                for label, value_lines, style in wrapped_rows:
+                    if style == "bypass":
+                        val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
+                    elif style == "caveman":
+                        val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
+                    elif style == "thinking":
+                        val_attr = curses.color_pair(1) | curses.A_BOLD if thinking_mode else curses.color_pair(4)
+                    elif style == "effort":
+                        val_attr = _effort_attr(effort_mode, enabled=thinking_mode)
+                    elif style == "ecc":
+                        val_attr = curses.color_pair(5) | curses.A_BOLD if ecc_mode else curses.color_pair(4)
+                    elif style == "fake":
+                        val_attr = curses.color_pair(3) | curses.A_BOLD
+                    elif style == "empty":
+                        val_attr = curses.A_DIM
+                    else:
+                        val_attr = curses.color_pair(1)
+                    for idx, value in enumerate(value_lines):
+                        if idx == 0 and label:
+                            _safe_addstr(stdscr, row, ll + 1, label, curses.A_DIM)
+                        _safe_addstr(stdscr, row, value_x, value, val_attr, max_w=value_w)
+                        row += 1
+
+                _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+                row += 1
+                row += _draw_footer_actions(stdscr, row, ll, rr - ll + 1, footer_actions)
+                _safe_addstr(stdscr, row, px, "-" * total_w, ac)
 
             stdscr.refresh()
             key = stdscr.getch()
@@ -3335,6 +3589,25 @@ def confirm_tui(
                 return ("q", False, False, False, False, True, effort_default)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
+            elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:
+                panel_index = (panel_index - 1) % len(panels)
+            elif key in (curses.KEY_RIGHT, ord('l'), ord('L')) and len(panels) > 1:
+                panel_index = (panel_index + 1) % len(panels)
+            elif key in (curses.KEY_UP, ord('k'), ord('K')) and current_panel.get("mode") == "list":
+                panel_key = str(current_panel.get("key") or "")
+                items = list(current_panel.get("items") or [])
+                if items:
+                    preview_selection[panel_key] = (preview_selection.get(panel_key, 0) - 1) % len(items)
+            elif key in (curses.KEY_DOWN, ord('j'), ord('J')) and current_panel.get("mode") == "list":
+                panel_key = str(current_panel.get("key") or "")
+                items = list(current_panel.get("items") or [])
+                if items:
+                    preview_selection[panel_key] = (preview_selection.get(panel_key, 0) + 1) % len(items)
+            elif key == ord(' ') and current_panel.get("mode") == "list":
+                panel_key = str(current_panel.get("key") or "")
+                items = list(current_panel.get("items") or [])
+                if items:
+                    preview_detail_open[panel_key] = not bool(preview_detail_open.get(panel_key, False))
             elif key in (ord('m'), ord('M')) and has_claude_1m:
                 claude_1m_mode = not claude_1m_mode
             elif key in (ord('c'), ord('C')) and has_caveman:

@@ -7009,6 +7009,536 @@ def _confirm_context_lines(cli, runtime):
     return lines[:12]
 
 
+def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=False):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
+    preview = {
+        "allow_execution_surfaces": allow_execution_surfaces,
+        "mcp": {"always": [], "caveman": [], "ecc": []},
+        "skills": {"always": [], "caveman": [], "ecc": []},
+        "hooks": {"always": [], "caveman": [], "ecc": []},
+    }
+
+    if cli not in {"claude", "codex"}:
+        return preview
+
+    try:
+        from mms_launchers import (
+            _build_codex_session_hooks,
+            _configure_claude_caveman_hooks,
+            _configure_claude_ecc_hooks,
+            _default_hive_session_mcp_server,
+            _filter_claude_session_hooks,
+            _load_global_claude_settings_template,
+            _load_mms_claude_settings_template,
+            _load_real_claude_settings,
+            _merge_claude_settings,
+            _merge_mms_session_hooks,
+            _resolve_agent_browser_root,
+            _resolve_caveman_root,
+            _resolve_ecc_root,
+            _resolve_token_saver_root,
+            _resolve_toon_root,
+            _resolve_web_access_root,
+            _sanitize_claude_inherited_settings_payload,
+            _session_managed_mcp_servers,
+            _strip_agent_im_hooks,
+        )
+    except Exception:
+        return preview
+
+    def _append(panel_key, scope, *, title, summary="", details=None):
+        panel = preview.get(panel_key)
+        if not isinstance(panel, dict):
+            return
+        bucket = panel.get(scope)
+        if not isinstance(bucket, list):
+            return
+        title = str(title or "").strip()
+        summary = str(summary or "").strip()
+        normalized_details = []
+        for item in details or []:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            label = str(item[0] or "").strip()
+            value = str(item[1] or "").strip()
+            if label and value:
+                normalized_details.append((label, value))
+        entry = {
+            "title": title,
+            "summary": summary,
+            "details": normalized_details,
+        }
+        if not title:
+            return
+        signature = (
+            entry["title"],
+            entry["summary"],
+            tuple(entry["details"]),
+        )
+        for existing in bucket:
+            if not isinstance(existing, dict):
+                continue
+            existing_signature = (
+                str(existing.get("title") or "").strip(),
+                str(existing.get("summary") or "").strip(),
+                tuple(
+                    (str(label or "").strip(), str(value or "").strip())
+                    for label, value in (existing.get("details") or [])
+                    if str(label or "").strip() and str(value or "").strip()
+                ),
+            )
+            if existing_signature == signature:
+                return
+        bucket.append(entry)
+
+    def _event_label(event_name, matcher=""):
+        mapping = {
+            "SessionStart": _L("会话启动", "SessionStart"),
+            "Stop": _L("会话结束", "Stop"),
+            "UserPromptSubmit": _L("提交提示", "UserPromptSubmit"),
+            "PreToolUse": _L("工具前", "PreToolUse"),
+            "PostToolUse": _L("工具后", "PostToolUse"),
+            "PreCompact": _L("压缩前", "PreCompact"),
+            "PostCompact": _L("压缩后", "PostCompact"),
+        }
+        label = mapping.get(str(event_name or "").strip(), str(event_name or "").strip())
+        matcher_text = str(matcher or "").strip()
+        return f"{label} · {matcher_text}" if matcher_text else label
+
+    def _abbrev_path(path_text):
+        path_text = str(path_text or "").strip()
+        if not path_text:
+            return ""
+        if "://" in path_text:
+            return path_text
+        if os.path.isabs(path_text):
+            normalized = os.path.abspath(path_text)
+            real_home = os.path.abspath(resolve_real_user_home())
+            cwd = os.path.abspath(os.getcwd())
+            try:
+                if os.path.commonpath([normalized, cwd]) == cwd:
+                    return f".{os.sep}{os.path.relpath(normalized, cwd)}"
+            except ValueError:
+                pass
+            try:
+                if os.path.commonpath([normalized, real_home]) == real_home:
+                    suffix = os.path.relpath(normalized, real_home)
+                    return "~" if suffix == "." else os.path.join("~", suffix)
+            except ValueError:
+                pass
+            return normalized
+        return path_text
+
+    def _command_target(command, args=None):
+        text = str(command or "").strip()
+        parts = []
+        try:
+            parts = shlex.split(text)
+        except ValueError:
+            parts = text.split()
+        if isinstance(args, list):
+            parts.extend(str(item or "").strip() for item in args if str(item or "").strip())
+        generic_runners = {
+            "bash", "sh", "node", "python", "python3",
+            "/bin/bash", "/bin/sh", "/usr/bin/env",
+        }
+        for token in reversed(parts):
+            token = str(token or "").strip()
+            if not token or token.startswith("-") or token.startswith("--"):
+                continue
+            if "/" in token:
+                return os.path.basename(token), token
+        for token in reversed(parts):
+            token = str(token or "").strip()
+            if not token or token.startswith("-") or "=" in token or token in generic_runners:
+                continue
+            return token[:64], token
+        return (_L("内联命令", "inline command"), text[:256] if text else "")
+
+    def _skill_path(root_path):
+        root_path = str(root_path or "").strip()
+        if not root_path:
+            return ""
+        skill_md = os.path.join(root_path, "SKILL.md")
+        return skill_md if os.path.isfile(skill_md) else root_path
+
+    def _hook_descriptor(command):
+        display_name, target_path = _command_target(command)
+        lower_command = str(command or "").strip().lower()
+        lower_target = str(target_path or "").strip().lower()
+        basename = os.path.basename(target_path or display_name).lower()
+
+        if "mindkeeper-session-start-hook" in lower_target or basename == "mindkeeper-session-start-hook.sh":
+            return _L("恢复上次进度", "Resume last work"), _L("MindKeeper 恢复提示", "MindKeeper restore hint")
+        if "mindkeeper-session-end-hook" in lower_target or basename == "mindkeeper-session-end-hook.sh":
+            return _L("保存当前进度", "Save current progress"), _L("MindKeeper 会话归档", "MindKeeper session checkpoint")
+        if "mindkeeper-token-monitor-hook" in lower_target or basename == "mindkeeper-token-monitor-hook.sh":
+            return _L("监控 token 用量", "Monitor token usage"), _L("MindKeeper token 监控", "MindKeeper token monitor")
+        if "map-auto-index" in lower_target or basename == "map-auto-index.sh":
+            return _L("Map 自动索引", "Map auto-index"), _L("刷新项目结构索引", "Refresh project structure index")
+        if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
+            return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
+        if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
+            return "RTK Bash 改写", _L("压缩高 token Bash 命令", "Rewrite token-heavy Bash commands")
+        if basename == "hook.sh" and "read-once" in (lower_target or lower_command):
+            return _L("Read-once 读取拦截", "Read-once read hook"), _L("避免重复全文读取", "Avoid redundant full-file rereads")
+        if basename == "compact.sh" and "read-once" in (lower_target or lower_command):
+            return _L("Read-once 压缩整理", "Read-once compact"), _L("编辑后优先回看 diff", "Prefer diff after edits")
+        if "hive-compact-hook" in lower_target or basename == "hive-compact-hook.sh":
+            return _L("Hive 压缩整理", "Hive compact"), _L("compact 前后整理上下文", "Summarize context before and after compact")
+        if "caveman-activate" in lower_target or basename == "caveman-activate.js":
+            return "Caveman 激活", _L("会话启动时载入 Caveman 模式", "Load Caveman mode on session start")
+        if "caveman-mode-tracker" in lower_target or basename == "caveman-mode-tracker.js":
+            return "Caveman 模式跟踪", _L("跟踪用户是否继续使用 Caveman", "Track whether Caveman stays enabled")
+        if "plugin-hook-bootstrap" in lower_target or basename == "plugin-hook-bootstrap.js":
+            return "ECC Hook 初始化", _L("载入 ECC hook 集", "Load ECC hook bundle")
+        if "session-start-bootstrap" in lower_target or basename == "session-start-bootstrap.js":
+            return "ECC 会话初始化", _L("会话启动时准备 ECC 运行环境", "Prepare ECC runtime on session start")
+        if "run-with-flags" in lower_target or basename in {"run-with-flags.js", "run-with-flags-shell.sh"}:
+            return "ECC Flag 包装", _L("为命令补充 ECC flags", "Wrap commands with ECC flags")
+        if "pre-bash-dispatcher" in lower_target or basename == "pre-bash-dispatcher.js":
+            return "ECC Bash 前置分发", _L("Bash 执行前做规则分发", "Dispatch ECC rules before Bash")
+        if "post-bash-dispatcher" in lower_target or basename == "post-bash-dispatcher.js":
+            return "ECC Bash 后置分发", _L("Bash 执行后补充检查", "Dispatch ECC checks after Bash")
+        if "quality-gate" in lower_target or basename == "quality-gate.js":
+            return "ECC 质量门", _L("关键阶段做质量检查", "Run ECC quality gates")
+        if "stop-format-typecheck" in lower_target or basename == "stop-format-typecheck.js":
+            return "ECC 停止前检查", _L("停止前做格式化与类型检查", "Run format and type checks before stop")
+        if "design-quality-check" in lower_target or basename == "design-quality-check.js":
+            return "ECC 设计质量检查", _L("设计相关质量检查", "Run design quality checks")
+        if "post-edit-accumulator" in lower_target or basename == "post-edit-accumulator.js":
+            return "ECC 编辑累积", _L("编辑后累积上下文与检查", "Accumulate edit context after changes")
+        if basename:
+            return os.path.splitext(os.path.basename(target_path or display_name))[0], _L("托管 hook", "Managed hook")
+        return display_name, _L("托管 hook", "Managed hook")
+
+    def _mcp_detail(spec):
+        spec = spec if isinstance(spec, dict) else {}
+        url = str(spec.get("url") or "").strip()
+        if url:
+            shortened = _abbrev_path(url)
+            return {
+                "summary": f"url · {shortened}",
+                "details": [
+                    ("URL", url),
+                    (_L("类型", "Type"), str(spec.get("type") or "sse").strip() or "sse"),
+                ],
+            }
+        command = str(spec.get("command") or "").strip()
+        if command:
+            type_name = str(spec.get("type") or "stdio").strip() or "stdio"
+            display_name, target_path = _command_target(command, spec.get("args"))
+            path_value = target_path or command
+            return {
+                "summary": f"{type_name} · {_abbrev_path(path_value)}",
+                "details": [
+                    (_L("类型", "Type"), type_name),
+                    (_L("路径", "Path"), path_value),
+                    (_L("命令", "Command"), command),
+                ],
+                "target_name": display_name,
+            }
+        type_name = str(spec.get("type") or "").strip()
+        return {
+            "summary": type_name or _L("托管", "Managed"),
+            "details": [(_L("类型", "Type"), type_name or _L("托管", "Managed"))],
+        }
+
+    def _append_hooks(scope, hooks_data):
+        hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
+        for event_name in sorted(hooks_data):
+            groups = hooks_data.get(event_name)
+            if not isinstance(groups, list):
+                continue
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                matcher = str(group.get("matcher") or "").strip()
+                for hook in group.get("hooks") or []:
+                    if not isinstance(hook, dict):
+                        continue
+                    if str(hook.get("type") or "").strip() != "command":
+                        continue
+                    command_text = str(hook.get("command") or "").strip()
+                    title, hint = _hook_descriptor(command_text)
+                    display_name, target_path = _command_target(command_text)
+                    event_label = _event_label(event_name, matcher)
+                    details = [
+                        (_L("触发", "Trigger"), event_label),
+                        (_L("路径", "Path"), target_path or display_name),
+                    ]
+                    if command_text and command_text != (target_path or display_name):
+                        details.append((_L("命令", "Command"), command_text))
+                    _append(
+                        "hooks",
+                        scope,
+                        title=title,
+                        summary=f"{event_label} · {hint}",
+                        details=details,
+                    )
+
+    def _list_skill_entries(*parent_dirs):
+        entries = []
+        seen = set()
+        for parent_dir in parent_dirs:
+            parent_dir = str(parent_dir or "").strip()
+            if not parent_dir or not os.path.isdir(parent_dir):
+                continue
+            try:
+                child_names = sorted(os.listdir(parent_dir))
+            except OSError:
+                continue
+            for entry_name in child_names:
+                skill_dir = os.path.join(parent_dir, entry_name)
+                skill_md = os.path.join(skill_dir, "SKILL.md")
+                if not os.path.isdir(skill_dir) or not os.path.isfile(skill_md):
+                    continue
+                if entry_name in seen:
+                    continue
+                seen.add(entry_name)
+                entries.append({"name": entry_name, "path": skill_md})
+        return entries
+
+    def _append_skill_entries(scope, entries, detail):
+        for entry in entries:
+            if isinstance(entry, str):
+                name = str(entry).strip()
+                path = ""
+            else:
+                name = str((entry or {}).get("name") or "").strip()
+                path = str((entry or {}).get("path") or "").strip()
+            if not name:
+                continue
+            details = [(_L("来源", "Source"), detail)]
+            if path:
+                details.insert(0, (_L("路径", "Path"), path))
+            _append(
+                "skills",
+                scope,
+                title=name,
+                summary=detail,
+                details=details,
+            )
+
+    def _count_files(*parent_dirs):
+        total = 0
+        seen = set()
+        for parent_dir in parent_dirs:
+            parent_dir = str(parent_dir or "").strip()
+            if not parent_dir or not os.path.isdir(parent_dir):
+                continue
+            for root_dir, _dirnames, filenames in os.walk(parent_dir):
+                for filename in filenames:
+                    file_path = os.path.join(root_dir, filename)
+                    if file_path in seen:
+                        continue
+                    seen.add(file_path)
+                    total += 1
+        return total
+
+    def _append_skill_collection(
+        scope,
+        entries,
+        detail,
+        *,
+        bundle_title="",
+        bundle_root="",
+        collapse_threshold=12,
+        bundle_note="",
+        extra_details=None,
+    ):
+        entries = list(entries or [])
+        if len(entries) <= max(1, int(collapse_threshold or 1)):
+            _append_skill_entries(scope, entries, detail)
+            return
+
+        sample_names = ", ".join(
+            str((entry or {}).get("name") or "").strip()
+            for entry in entries[:5]
+            if str((entry or {}).get("name") or "").strip()
+        )
+        details = []
+        if bundle_root:
+            details.append((_L("路径", "Path"), bundle_root))
+        details.append((_L("数量", "Count"), str(len(entries))))
+        if sample_names:
+            suffix = " …" if len(entries) > 5 else ""
+            details.append((_L("样例", "Samples"), f"{sample_names}{suffix}"))
+        for item in extra_details or []:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            label = str(item[0] or "").strip()
+            value = str(item[1] or "").strip()
+            if label and value:
+                details.append((label, value))
+        details.append((_L("来源", "Source"), detail))
+        if bundle_note:
+            details.append((_L("说明", "Note"), bundle_note))
+        _append(
+            "skills",
+            scope,
+            title=bundle_title or detail,
+            summary=_L(f"{len(entries)} 个 skill", f"{len(entries)} skills"),
+            details=details,
+        )
+
+    if cli == "claude":
+        base_settings = _load_real_claude_settings()
+        managed_mcp = _session_managed_mcp_servers(
+            base_settings,
+            allow_execution_surfaces=allow_execution_surfaces,
+        )
+        for name in sorted(managed_mcp):
+            mcp_entry = _mcp_detail(managed_mcp.get(name))
+            _append(
+                "mcp",
+                "always",
+                title=name,
+                summary=str(mcp_entry.get("summary") or ""),
+                details=mcp_entry.get("details") or [],
+            )
+
+        template_settings = _load_mms_claude_settings_template()
+        inherited_settings = _sanitize_claude_inherited_settings_payload(
+            base_settings,
+            allow_execution_surfaces=allow_execution_surfaces,
+        )
+        merged_settings = _merge_claude_settings(
+            inherited_settings,
+            _load_global_claude_settings_template(),
+        )
+        base_hooks = _filter_claude_session_hooks(
+            _merge_mms_session_hooks(
+                _strip_agent_im_hooks(merged_settings.get("hooks")),
+                template_settings.get("hooks"),
+            ),
+            allow_execution_surfaces=allow_execution_surfaces,
+        )
+        _append_hooks("always", base_hooks)
+        if has_caveman and allow_execution_surfaces:
+            _append_hooks(
+                "caveman",
+                _configure_claude_caveman_hooks({}, enable_caveman=True),
+            )
+        if has_ecc and allow_execution_surfaces:
+            _append_hooks(
+                "ecc",
+                _configure_claude_ecc_hooks({}, enable_ecc=True),
+            )
+    else:
+        real_claude_json = os.path.join(resolve_real_user_home(), ".claude.json")
+        try:
+            with open(real_claude_json, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            codex_mcp = loaded.get("mcpServers", {}) if isinstance(loaded, dict) else {}
+        except Exception:
+            codex_mcp = {}
+        codex_mcp = dict(codex_mcp) if isinstance(codex_mcp, dict) else {}
+        hive_spec = _default_hive_session_mcp_server()
+        if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
+            codex_mcp.setdefault("hive", hive_spec)
+        for name in sorted(codex_mcp):
+            mcp_entry = _mcp_detail(codex_mcp.get(name))
+            _append(
+                "mcp",
+                "always",
+                title=name,
+                summary=str(mcp_entry.get("summary") or ""),
+                details=mcp_entry.get("details") or [],
+            )
+
+        real_codex_hooks = os.path.join(resolve_real_user_home(), ".codex", "hooks.json")
+        try:
+            with open(real_codex_hooks, "r", encoding="utf-8") as f:
+                loaded_hooks = json.load(f)
+            codex_hooks = _build_codex_session_hooks(loaded_hooks, enable_caveman=False)
+        except Exception:
+            codex_hooks = {}
+        _append_hooks("always", (codex_hooks or {}).get("hooks"))
+        if has_caveman:
+            caveman_hooks = _build_codex_session_hooks({}, enable_caveman=True)
+            _append_hooks("caveman", (caveman_hooks or {}).get("hooks"))
+
+    if allow_execution_surfaces:
+        if _resolve_web_access_root():
+            web_access_root = _resolve_web_access_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "web-access", "path": _skill_path(web_access_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if cli == "codex" and _resolve_agent_browser_root():
+            agent_browser_root = _resolve_agent_browser_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "agent-browser", "path": _skill_path(agent_browser_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_toon_root():
+            toon_root = _resolve_toon_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "toon", "path": _skill_path(toon_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_token_saver_root():
+            token_saver_root = _resolve_token_saver_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "token-saver", "path": _skill_path(token_saver_root)}],
+                _L("会话技能", "Session skill"),
+            )
+
+        caveman_root = _resolve_caveman_root() if has_caveman else ""
+        if caveman_root:
+            caveman_skills = _list_skill_entries(os.path.join(caveman_root, "skills"))
+            if not caveman_skills:
+                caveman_skills = [{"name": "caveman", "path": _skill_path(caveman_root)}]
+            _append_skill_collection(
+                "caveman",
+                caveman_skills,
+                _L("Caveman 包", "Caveman bundle"),
+                bundle_title=_L("Caveman 能力包", "Caveman bundle"),
+                bundle_root=caveman_root,
+                collapse_threshold=12,
+                bundle_note=_L("这些是可用技能目录，不代表本次会全部执行。", "These are available skills, not all executed on launch."),
+            )
+
+        ecc_root = _resolve_ecc_root() if has_ecc else ""
+        if ecc_root:
+            ecc_skills = _list_skill_entries(
+                os.path.join(ecc_root, ".claude", "skills"),
+                os.path.join(ecc_root, ".agents", "skills"),
+                os.path.join(ecc_root, "skills"),
+            )
+            if not ecc_skills:
+                ecc_skills = [{"name": "ecc", "path": _skill_path(ecc_root)}]
+            ecc_command_count = _count_files(
+                os.path.join(ecc_root, ".claude", "commands"),
+                os.path.join(ecc_root, "commands"),
+            )
+            ecc_rule_count = _count_files(
+                os.path.join(ecc_root, ".claude", "rules"),
+                os.path.join(ecc_root, "rules"),
+            )
+            _append_skill_collection(
+                "ecc",
+                ecc_skills,
+                _L("ECC 包", "ECC bundle"),
+                bundle_title=_L("ECC 能力包", "ECC bundle"),
+                bundle_root=ecc_root,
+                collapse_threshold=12,
+                bundle_note=_L("这些是可用技能目录，不代表本次会全部执行；自动生效主要看 hooks 面板。", "These are available skills, not all executed on launch; automatic behavior mainly comes from hooks."),
+                extra_details=[
+                    (_L("命令", "Commands"), str(ecc_command_count)),
+                    (_L("规则", "Rules"), str(ecc_rule_count)),
+                ],
+            )
+
+    return preview
+
+
 def confirm_launch(cli, model_info, once=False, runtime=None):
     if isinstance(model_info, dict):
         model_items = [f"{k}={v}" for k, v in model_info.items() if k != "subagent" and v]
@@ -7892,6 +8422,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             str(runtime_runtime.get("reasoning_effort", "")).strip().lower()
             or _default_reasoning_effort_for_model_info(clean_model_info)
         )
+        preview_catalog = _build_confirm_preview_catalog(
+            cli,
+            runtime_runtime,
+            has_caveman=has_caveman,
+            has_ecc=has_ecc,
+        )
         result = _safe_tui_call(
             confirm_tui,
             cli,
@@ -7905,6 +8441,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             ecc_enabled_default=has_ecc,
             thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
             reasoning_effort_default=default_reasoning_effort,
+            preview_catalog=preview_catalog,
         )
         if result == "__interrupt__":
             return True

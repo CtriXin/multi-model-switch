@@ -332,6 +332,11 @@ mms codex --account work               # 临时切换账号
 - `O`：接入新通道
 - `Q/Esc`：退出
 
+**启动确认页补充**：
+- `←/→`：在 `摘要 / MCP / 技能 / 钩子` 面板之间循环切换
+- `Tab`：切换 `Bypass`
+- `C / T / E / X`：切换 `Caveman / Thinking / Effort / ECC`，右侧面板内容会随开关实时更新
+
 ---
 
 ## 🎯 使用场景

@@ -319,7 +319,7 @@ prompt_optional_install_choices() {
             else
                 echo "可选增强"
             fi
-            note_optional_pack_detected " RTK rewrite" "RTK rewrite"
+            note_optional_pack_detected " RTK 改写" "RTK rewrite"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional enhancement"
             echo "  RTK rewrite reduces token-heavy Bash commands in Claude sessions."
@@ -343,7 +343,7 @@ prompt_optional_install_choices() {
             else
                 echo "可选上下文工具"
             fi
-            note_optional_pack_detected " MindKeeper context pack" "MindKeeper context pack"
+            note_optional_pack_detected " MindKeeper 上下文包" "MindKeeper context pack"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
             echo "  MindKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
@@ -353,9 +353,9 @@ prompt_optional_install_choices() {
             fi
         else
             echo "可选上下文工具"
-            echo "  MindKeeper context pack 会安装 Claude 的 /distill、/cz 和 token monitor hook。"
+            echo "  MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。"
             echo "  默认会锁定到 ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}。"
-            if confirm_from_tty "是否安装 MindKeeper context pack（Claude）？[y/N]: " "n"; then
+            if confirm_from_tty "是否安装 MindKeeper 上下文包（Claude）？[y/N]: " "n"; then
                 INSTALL_MINDKEEPER_CONTEXT=1
             fi
         fi
@@ -369,7 +369,7 @@ prompt_optional_install_choices() {
             else
                 echo "可选 Claude hook"
             fi
-            note_optional_pack_detected " Map auto-index" "Map auto-index"
+            note_optional_pack_detected " Map 自动索引" "Map auto-index"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Project map auto-index installs Map and refreshes the project structure index on session start."
@@ -379,9 +379,9 @@ prompt_optional_install_choices() {
             fi
         else
             echo "可选 Claude hook"
-            echo "  Project map auto-index 会安装 Map，并在 SessionStart 时自动建立或刷新项目结构索引。"
+            echo "  Project map 自动索引会安装 Map，并在会话启动时自动建立或刷新项目结构索引。"
             echo "  默认优先复用现有 Node.js 18+；如果没有合适版本，会先跳过 Map，除非你显式要求 --ensure-node22。"
-            if confirm_from_tty "是否安装 Map 并启用 Claude SessionStart auto-index hook？[y/N]: " "n"; then
+            if confirm_from_tty "是否安装 Map 并启用 Claude 启动自动索引 hook？[y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
         fi
@@ -404,7 +404,7 @@ prompt_optional_install_choices() {
             fi
         else
             echo "可选 Claude hook"
-            echo "  Read token saver（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
+            echo "  Read 省 token 工具（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
             if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
                 INSTALL_READ_ONCE=1
             fi
@@ -429,9 +429,9 @@ prompt_optional_install_choices() {
             fi
         else
             echo "可选隔离路径提示"
-            echo "  ops-env-safe 会安装 path-only 的 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板。"
+            echo "  ops-env-safe 会安装仅路径的 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板。"
             echo "  它不会注入真实 HOME/XDG，也不会导出认证 secret。"
-            if confirm_from_tty "是否安装 ops-env-safe path-only host hints？[y/N]: " "n"; then
+            if confirm_from_tty "是否安装 ops-env-safe 仅路径宿主提示？[y/N]: " "n"; then
                 INSTALL_OPS_ENV_SAFE=1
             fi
         fi
@@ -444,7 +444,7 @@ prompt_optional_install_choices() {
         echo "  MMS-launched Claude/Codex can toggle it from the launch confirm page without touching your global hooks or config."
     else
         echo "内建 session 模式"
-        echo "  Caveman 会随 MMS 一起内建分发为 pinned session asset。"
+        echo "  Caveman 会随 MMS 一起作为内建 session 资产提供。"
         echo "  通过 MMS 启动的 Claude/Codex 可在启动确认页切换，不会改你的全局 hooks 或配置。"
     fi
 
