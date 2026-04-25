@@ -1276,6 +1276,85 @@ def test_prepare_claude_session_tree_keeps_static_tooling_allowlist(monkeypatch,
         assert os.path.islink(session_claude_dir / entry)
 
 
+def test_prepare_claude_session_tree_persists_claude_projects_for_resume(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+
+    raw_root = tmp_path / "project-store"
+    for entry in mms_launchers.CLAUDE_PERSISTENT_ENTRIES:
+        target = raw_root / entry
+        if entry.endswith(".jsonl"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        else:
+            target.mkdir(parents=True, exist_ok=True)
+
+    slots_root = tmp_path / "slots"
+    old_slot = slots_root / "111"
+    old_projects = old_slot / ".claude" / "projects" / "-tmp-repo"
+    old_projects.mkdir(parents=True)
+    (old_slot / ".mms_slot.json").write_text(
+        json.dumps(
+            {
+                "cwd": str(repo_dir.resolve()),
+                "project_key": "project-key",
+                "account_id": "relay-a",
+            }
+        ),
+        encoding="utf-8",
+    )
+    old_resume_file = old_projects / "old-session.jsonl"
+    old_resume_file.write_text('{"type":"summary","summary":"old"}\n', encoding="utf-8")
+
+    real_home = tmp_path / "real-home"
+    real_project_name = mms_launchers._claude_project_resume_dir_names(str(repo_dir.resolve()))[0]
+    real_projects = real_home / ".claude" / "projects" / real_project_name
+    real_projects.mkdir(parents=True)
+    real_resume_file = real_projects / "native-session.jsonl"
+    real_resume_file.write_text('{"type":"summary","summary":"native"}\n', encoding="utf-8")
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "ensure_claude_project_store",
+        lambda cwd, account_id="": {"project_key": "project-key"},
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "claude_raw_entry_path",
+        lambda entry, cwd, account_id="": raw_root / entry,
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_claude_slot_roots_for_resume_backfill",
+        lambda _account_id: [str(slots_root)],
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "record_claude_session_start", lambda **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "write_slot_marker", lambda *args, **kwargs: None)
+
+    session_home = tmp_path / "session"
+    session_claude_dir = session_home / ".claude"
+    local_projects = session_claude_dir / "projects" / "-tmp-repo"
+    local_projects.mkdir(parents=True)
+    local_resume_file = local_projects / "current-session.jsonl"
+    local_resume_file.write_text('{"type":"summary","summary":"current"}\n', encoding="utf-8")
+
+    mms_launchers._prepare_claude_session_tree(
+        str(session_home),
+        str(session_claude_dir),
+        account_id="relay-a",
+    )
+
+    assert os.path.islink(session_claude_dir / "projects")
+    assert os.path.realpath(session_claude_dir / "projects") == str((raw_root / "projects").resolve())
+    assert (raw_root / "projects" / "-tmp-repo" / "old-session.jsonl").read_text(encoding="utf-8") == old_resume_file.read_text(encoding="utf-8")
+    assert (raw_root / "projects" / "-tmp-repo" / "current-session.jsonl").read_text(encoding="utf-8") == local_resume_file.read_text(encoding="utf-8")
+    assert (raw_root / "projects" / real_project_name / "native-session.jsonl").read_text(encoding="utf-8") == real_resume_file.read_text(encoding="utf-8")
+
+
 def test_link_claude_library_entries_replaces_broad_library_symlink(monkeypatch, tmp_path):
     import mms_launchers
 
