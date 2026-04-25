@@ -111,6 +111,117 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
     assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
 
 
+def test_resolve_hive_root_prefers_installed_hive_home_for_installed_mms(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    hive_root = real_home / ".hive-orchestrator"
+    (hive_root / "bin").mkdir(parents=True)
+    (hive_root / "bin" / "mcp-server.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_HIVE_ROOT", raising=False)
+    monkeypatch.delenv("HIVE_HOME", raising=False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    resolved = mms_launchers._resolve_hive_root(module_path=str(real_home / ".mms" / "mms_launchers.py"))
+
+    assert resolved == str(hive_root)
+
+
+def test_resolve_hive_root_prefers_local_repo_for_source_checkout(monkeypatch, tmp_path):
+    import mms_launchers
+
+    source_root = tmp_path / "repo"
+    module_path = source_root / "multi-model-switch" / "mms_launchers.py"
+    local_hive_root = source_root / "hive"
+    installed_hive_root = tmp_path / "real-home" / ".hive-orchestrator"
+    (local_hive_root / "bin").mkdir(parents=True)
+    (local_hive_root / "bin" / "mcp-server.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (installed_hive_root / "bin").mkdir(parents=True)
+    (installed_hive_root / "bin" / "mcp-server.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_HIVE_ROOT", raising=False)
+    monkeypatch.delenv("HIVE_HOME", raising=False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str((tmp_path / "real-home").joinpath(*parts)),
+    )
+
+    resolved = mms_launchers._resolve_hive_root(module_path=str(module_path))
+
+    assert resolved == str(local_hive_root)
+
+
+def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "demo": {
+                        "command": "node",
+                        "args": ["/tmp/demo.js"],
+                        "type": "stdio",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_hive_session_mcp_server",
+        lambda: {
+            "command": "/tmp/hive/bin/mcp-server.sh",
+            "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert '[mcp_servers.demo]' in rendered
+    assert '[mcp_servers.hive]' in rendered
+    assert 'command = "/tmp/hive/bin/mcp-server.sh"' in rendered
+    assert 'HOME = "/tmp/real-home"' in rendered
+
+
+def test_inject_managed_mcp_servers_into_claude_state_adds_hive_fallback(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_real_claude_settings", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_hive_session_mcp_server",
+        lambda: {
+            "command": "/tmp/hive/bin/mcp-server.sh",
+            "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
+
+    result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
+
+    assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
+
+
 def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
     import mms_launchers
 

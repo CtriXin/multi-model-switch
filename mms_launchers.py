@@ -3110,10 +3110,47 @@ def _default_session_mcp_servers():
     return servers
 
 
+def _resolve_hive_root(module_path=None):
+    candidates = []
+    explicit = str(os.environ.get("MMS_HIVE_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    install_home = str(os.environ.get("HIVE_HOME") or "").strip()
+    if install_home:
+        candidates.append(os.path.abspath(os.path.expanduser(install_home)))
+
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    local_candidates = [
+        os.path.join(os.path.dirname(module_dir), "hive"),
+        _real_user_path("auto-skills", "CtriXin-repo", "hive"),
+        _real_user_path("auto-skills", "hive"),
+        _real_user_path("hive"),
+    ]
+    installed_candidates = [
+        _real_user_path(".hive-orchestrator"),
+        _real_user_path(".local", "share", "hive"),
+    ]
+    if _is_installed_mms_layout(module_path=module_path):
+        candidates.extend(installed_candidates)
+        candidates.extend(local_candidates)
+    else:
+        candidates.extend(local_candidates)
+        candidates.extend(installed_candidates)
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "bin", "mcp-server.sh")):
+            return candidate
+    return ""
+
+
 def _default_hive_session_mcp_server():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    hive_command = os.path.join(repo_root, "hive", "bin", "mcp-server.sh")
-    if os.path.isfile(hive_command):
+    hive_root = _resolve_hive_root()
+    if hive_root:
+        hive_command = os.path.join(hive_root, "bin", "mcp-server.sh")
         return {
             "args": [],
             "command": hive_command,
@@ -3162,6 +3199,10 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
     for name in allowlist:
         if name not in inherited and isinstance(fallback.get(name), dict):
             inherited[name] = copy.deepcopy(fallback[name])
+    if allow_execution_surfaces:
+        hive_spec = _default_hive_session_mcp_server()
+        if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
+            inherited.setdefault("hive", copy.deepcopy(hive_spec))
     return inherited
 
 
@@ -4885,7 +4926,12 @@ def _append_codex_mcp_servers_from_claude_json(config_text):
     except Exception:
         return config_text
 
-    if not isinstance(servers, dict) or not servers:
+    servers = copy.deepcopy(servers) if isinstance(servers, dict) else {}
+    hive_spec = _default_hive_session_mcp_server()
+    if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
+        servers.setdefault("hive", hive_spec)
+
+    if not servers:
         return config_text
 
     existing = set()
