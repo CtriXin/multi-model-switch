@@ -77,15 +77,15 @@ def test_seed_codex_bounded_resume_caps_files_and_directories(monkeypatch, tmp_p
     assert manifest["seeded"]["dirs"]["sessions"]["files"] == 2
 
 
-def test_seed_codex_bounded_resume_defaults_are_strict_and_skip_oversize(monkeypatch, tmp_path):
+def test_seed_codex_bounded_resume_defaults_are_resume_friendly_and_skip_oversize(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
     source = tmp_path / "source" / ".codex"
     session_codex = tmp_path / "session" / ".codex"
     session_codex.mkdir(parents=True)
-    _write_lines(source / "history.jsonl", "history", 120)
-    _write_lines(source / "session_index.jsonl", "index", 40)
-    for index in range(8):
+    _write_lines(source / "history.jsonl", "history", 240)
+    _write_lines(source / "session_index.jsonl", "index", 70)
+    for index in range(30):
         _write_file(
             source / "sessions" / "2026" / "04" / f"session-{index}.jsonl",
             f"session {index}\n",
@@ -93,22 +93,22 @@ def test_seed_codex_bounded_resume_defaults_are_strict_and_skip_oversize(monkeyp
         )
     _write_file(
         source / "sessions" / "2026" / "04" / "session-big.jsonl",
-        "x" * (512 * 1024 + 1),
+        "x" * (2_000_000 + 1),
         mtime=1000,
     )
 
     mms_launchers._seed_codex_bounded_resume([str(source)], str(session_codex))
 
-    assert len(_lines(session_codex / "history.jsonl")) == 80
-    assert len(_lines(session_codex / "session_index.jsonl")) == 20
+    assert len(_lines(session_codex / "history.jsonl")) == 200
+    assert len(_lines(session_codex / "session_index.jsonl")) == 50
     copied_sessions = sorted(
         path.name for path in (session_codex / "sessions").glob("2026/04/*.jsonl")
     )
-    assert len(copied_sessions) == 5
+    assert len(copied_sessions) == 25
     assert "session-big.jsonl" not in copied_sessions
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
-    assert manifest["limits"]["max_file_bytes"] == 512 * 1024
-    assert manifest["limits"]["dirs"]["sessions"]["max_files"] == 5
+    assert manifest["limits"]["max_file_bytes"] == 2_000_000
+    assert manifest["limits"]["dirs"]["sessions"]["max_files"] == 25
     assert manifest["seeded"]["dirs"]["sessions"]["skipped_oversize_files"] == 1
 
 

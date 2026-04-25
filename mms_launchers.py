@@ -4346,18 +4346,18 @@ def _overlay_codex_shared_resume(home_dir, session_home):
 
 
 _CODEX_BOUNDED_RESUME_FILES = {
-    "history.jsonl": 80,
-    "session_index.jsonl": 20,
+    "history.jsonl": 200,
+    "session_index.jsonl": 50,
 }
 
 _CODEX_BOUNDED_RESUME_DIRS = {
-    "sessions": 5,
-    "shell_snapshots": 5,
+    "sessions": 25,
+    "shell_snapshots": 20,
     "archived_sessions": 0,
 }
 
 _CODEX_RESUME_SEED_MANIFEST = "mms-resume-seed.json"
-_CODEX_RESUME_MAX_FILE_BYTES = 512 * 1024
+_CODEX_RESUME_MAX_FILE_BYTES = 2_000_000
 _CODEX_COPY_INTO_SESSION_FILES = {"installation_id"}
 
 

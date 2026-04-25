@@ -8,7 +8,7 @@ This was an MMS session-isolation bug, not a confirmed Codex upstream prompt bug
 
 Before `f6ca15d`, MMS-started Codex sessions could see full Codex resume/history stores via session symlinks. That does not prove every API request paid for all of it in tokens, but it did expose a large cross-project history tree to each MMS Codex session and made resume/history reads unbounded.
 
-The fix changes MMS-started Codex from full history exposure to strict, session-local bounded resume seeding.
+The fix changes MMS-started Codex from full history exposure to session-local bounded resume seeding. The current defaults are resume-friendly rather than maximally strict, because follow-up prompt-input experiments did not show startup-token benefit from very tight caps.
 
 ## Affected Surface
 
@@ -46,45 +46,41 @@ Important distinction:
 
 ## Post-Fix Policy
 
-Strict defaults after this report round:
+Resume-friendly defaults after the 2026-04-25 follow-up:
 
 | Entry | Default |
 | --- | ---: |
-| `history.jsonl` | last 80 lines |
-| `session_index.jsonl` | last 20 lines |
-| `sessions/` | latest 5 files |
-| `shell_snapshots/` | latest 5 files |
+| `history.jsonl` | last 200 lines |
+| `session_index.jsonl` | last 50 lines |
+| `sessions/` | latest 25 files |
+| `shell_snapshots/` | latest 20 files |
 | `archived_sessions/` | 0 files |
-| max copied session/snapshot file size | 512KB |
+| max copied session/snapshot file size | 2MB |
 
 Each MMS-started Codex session now gets a local `.codex/mms-resume-seed.json` manifest with actual seeded lines, files, bytes, and skipped oversized files.
 
 ## Post-Fix Local Upper Bounds
 
-Using the same local data and the strict defaults:
+Using the same local data and the resume-friendly defaults:
 
 | Source | Seeded bytes |
 | --- | ---: |
-| global `~/.codex` fallback | 2,160,699 |
-| gateway Codex store | 631,622 |
-| `alex-codex` account store | 47,620 |
+| global `~/.codex` fallback | 16,417,053 |
 
-The global fallback number is much lower than the old 1.386GB exposure, but still an upper bound of seeded local files, not confirmed prompt tokens.
+The global fallback number is much lower than the old 1.386GB exposure, but still an upper bound of seeded local files, not confirmed prompt tokens. It intentionally preserves more recent resume coverage than the temporary strict defaults.
 
 Rough token intuition if a downstream component naively read all seeded text:
 
-- global fallback seed: about 540k tokens at 4 chars/token
-- gateway seed: about 158k tokens at 4 chars/token
-- account seed: about 12k tokens at 4 chars/token
+- global fallback seed: about 4.1M tokens at 4 chars/token if a downstream component naively read every seeded byte
 
 Actual request token usage may be far lower, because Codex decides what history/resume files to read. The manifest now makes the local seed size auditable per session.
 
 ## Resume Impact
 
-Different-folder resume is intentionally narrowed for MMS-started Codex:
+Different-folder resume is intentionally bounded for MMS-started Codex:
 
 - Recent resume remains available within the bounded seed.
-- Older cross-folder resume may not appear inside MMS sessions.
+- Older or very large cross-folder resume may not appear inside MMS sessions.
 - Direct Codex outside MMS keeps its original full resume behavior.
 
 This is the intended tradeoff. MMS session isolation should not expose the full global history tree by default.
@@ -94,7 +90,8 @@ This is the intended tradeoff. MMS session isolation should not expose the full 
 Commits:
 
 - `f6ca15d fix(session): bound codex resume history`
-- follow-up strict-default commit in this round
+- `120fd68 fix(session): tighten codex resume seed`
+- later follow-up rebalanced the defaults toward resume coverage after startup prompt tests did not show token savings from very tight caps
 
 Key files:
 
@@ -118,7 +115,7 @@ Environment overrides remain available for controlled tuning:
 Validated:
 
 - bounded file tail copy
-- default strict caps
+- resume-friendly default caps
 - oversized session file skip
 - account Codex path
 - gateway Codex path
