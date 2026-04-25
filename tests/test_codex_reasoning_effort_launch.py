@@ -12,6 +12,38 @@ def test_runtime_reasoning_helpers_normalize_values():
     assert mms_launchers._runtime_reasoning_effort({"reasoning_effort": "weird"}) == "high"
 
 
+def test_default_gpt_reasoning_effort_uses_xhigh_for_source_checkout(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: "/tmp/real-home")
+
+    assert mms_launchers._default_gpt_reasoning_effort(module_path="/worktrees/mms/mms_launchers.py") == "xhigh"
+
+
+def test_default_gpt_reasoning_effort_keeps_high_for_installed_layout(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: "/tmp/real-home")
+
+    assert mms_launchers._default_gpt_reasoning_effort(module_path="/tmp/real-home/.mms/mms_launchers.py") == "high"
+
+
+def test_mms_core_prefers_xhigh_for_gpt_in_source_checkout(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda env=None: "/tmp/real-home")
+
+    assert mms_core._default_reasoning_effort_for_model_info({"model": "gpt-5.4"}) == "xhigh"
+
+
+def test_mms_core_keeps_high_for_installed_layout(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda env=None: "/tmp/real-home")
+
+    assert mms_core._default_gpt_reasoning_effort(module_path="/tmp/real-home/.mms/mms_core.py") == "high"
+
+
 def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     import mms_launchers
     import mms_tui
@@ -57,7 +89,7 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     mms_launchers.launch_codex(model_info, runtime, once=True)
 
     assert captured["bridge_kwargs"]["reasoning_effort"] == "xhigh"
-    assert captured["default_effort"] == "high"
+    assert captured["default_effort"] == "xhigh"
     assert '-c' in captured["cmd"]
     assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
     assert captured["force_subprocess"] is True

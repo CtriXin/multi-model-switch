@@ -2534,6 +2534,19 @@ def _runtime_reasoning_effort(runtime, default="high"):
     return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
 
 
+def _is_installed_mms_layout(module_path=None):
+    current_path = os.path.abspath(module_path or __file__)
+    installed_root = os.path.abspath(_real_user_path(".mms"))
+    try:
+        return os.path.commonpath([current_path, installed_root]) == installed_root
+    except ValueError:
+        return False
+
+
+def _default_gpt_reasoning_effort(module_path=None):
+    return "high" if _is_installed_mms_layout(module_path=module_path) else "xhigh"
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
@@ -5147,11 +5160,12 @@ def launch_claude(model_info, runtime, once=False):
         _display_model = probe_model if _env_model != probe_model else None
 
         _thinking_enabled = _runtime_thinking_enabled(runtime)
+        _gpt_default_effort = _default_gpt_reasoning_effort()
         if "reasoning_effort" in runtime:
-            _reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+            _reasoning_effort = _runtime_reasoning_effort(runtime, default=_gpt_default_effort)
         elif _gpt_openai_url and _is_gpt_model(probe_model):
             from mms_tui import select_reasoning_effort_tui as _sel_effort_claude
-            _reasoning_effort = _sel_effort_claude(default="high")
+            _reasoning_effort = _sel_effort_claude(default=_gpt_default_effort)
         else:
             _reasoning_effort = "high"
         if _gpt_openai_url and _is_gpt_model(probe_model):
@@ -6369,11 +6383,12 @@ def launch_codex(model_info, runtime, once=False):
 
     provider_id = runtime.get("id", "")
     thinking_enabled = _runtime_thinking_enabled(runtime)
+    gpt_default_effort = _default_gpt_reasoning_effort()
     if "reasoning_effort" in runtime:
-        reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+        reasoning_effort = _runtime_reasoning_effort(runtime, default=gpt_default_effort)
     else:
         from mms_tui import select_reasoning_effort_tui as _sel_effort
-        reasoning_effort = _sel_effort(default="high")
+        reasoning_effort = _sel_effort(default=gpt_default_effort)
     console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
     with codex_responses_bridge(
         gateway_url,

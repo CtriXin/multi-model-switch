@@ -1820,6 +1820,34 @@ def _native_clis_for_model(model_name):
     return []
 
 
+def _is_installed_mms_layout(module_path=None):
+    current_path = os.path.abspath(module_path or __file__)
+    installed_root = os.path.abspath(os.path.join(resolve_real_user_home(), ".mms"))
+    try:
+        return os.path.commonpath([current_path, installed_root]) == installed_root
+    except ValueError:
+        return False
+
+
+def _default_gpt_reasoning_effort(module_path=None):
+    return "high" if _is_installed_mms_layout(module_path=module_path) else "xhigh"
+
+
+def _default_reasoning_effort_for_model_info(model_info):
+    values = []
+    if isinstance(model_info, dict):
+        values.extend(str(v or "") for k, v in model_info.items() if k != "subagent")
+    else:
+        values.append(str(model_info or ""))
+    for item in values:
+        normalized = str(item or "").strip().lower()
+        if "/" in normalized:
+            normalized = normalized.rsplit("/", 1)[-1]
+        if _model_matches_account_cli("codex", normalized):
+            return _default_gpt_reasoning_effort()
+    return "high"
+
+
 def _bridge_clis_for_model(model_name):
     family, _ = _infer_model_family(model_name)
     if family == "Unknown":
@@ -7860,6 +7888,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             and _ecc_available_for_claude()
             and _model_info_looks_domestic(clean_model_info)
         )
+        default_reasoning_effort = (
+            str(runtime_runtime.get("reasoning_effort", "")).strip().lower()
+            or _default_reasoning_effort_for_model_info(clean_model_info)
+        )
         result = _safe_tui_call(
             confirm_tui,
             cli,
@@ -7872,7 +7904,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             has_ecc=has_ecc,
             ecc_enabled_default=has_ecc,
             thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
-            reasoning_effort_default=str(runtime_runtime.get("reasoning_effort", "high")).strip().lower() or "high",
+            reasoning_effort_default=default_reasoning_effort,
         )
         if result == "__interrupt__":
             return True
@@ -7882,27 +7914,27 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             elif len(result) >= 5:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
                 thinking_enabled = True
-                reasoning_effort = "high"
+                reasoning_effort = default_reasoning_effort
             elif len(result) >= 4:
                 action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
                 ecc_enabled = False
                 thinking_enabled = True
-                reasoning_effort = "high"
+                reasoning_effort = default_reasoning_effort
             elif len(result) >= 3:
                 action, bypass, claude_1m_enabled = result[:3]
                 caveman_enabled = False
                 ecc_enabled = False
                 thinking_enabled = True
-                reasoning_effort = "high"
+                reasoning_effort = default_reasoning_effort
             else:
                 action, bypass = result[:2]
                 claude_1m_enabled = False
                 caveman_enabled = False
                 ecc_enabled = False
                 thinking_enabled = True
-                reasoning_effort = "high"
+                reasoning_effort = default_reasoning_effort
         else:
-            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result, False, False, False, False, True, "high"
+            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result, False, False, False, False, True, default_reasoning_effort
         if action == "q":
             return True
         if action == "b":
