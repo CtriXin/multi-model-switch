@@ -237,6 +237,42 @@ def test_resolve_token_saver_root_prefers_shared_skill(monkeypatch, tmp_path):
     assert Path(mms_launchers._resolve_token_saver_root()) == shared_root
 
 
+def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    weber_root = tmp_path / "weber"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    weber_root.mkdir()
+    (weber_root / "SKILL.md").write_text("# weber\n", encoding="utf-8")
+    os.symlink(existing_skills, parent_dir / "skills")
+
+    monkeypatch.setenv("MMS_WEBER_ROOT", str(weber_root))
+
+    mms_launchers._overlay_weber_session_entries(str(parent_dir), str(session_home))
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "weber")
+    assert (parent_dir / "skills" / "weber" / "SKILL.md").read_text(encoding="utf-8") == "# weber\n"
+
+
+def test_resolve_weber_root_prefers_shared_skill(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    shared_root = home / "auto-skills" / "shared-skills" / "weber"
+    shared_root.mkdir(parents=True)
+    (shared_root / "SKILL.md").write_text("# shared weber\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(home))
+    monkeypatch.delenv("MMS_WEBER_ROOT", raising=False)
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    assert Path(mms_launchers._resolve_weber_root()) == shared_root
+
+
 def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 

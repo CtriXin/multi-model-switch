@@ -7040,6 +7040,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _resolve_token_saver_root,
             _resolve_toon_root,
             _resolve_web_access_root,
+            _resolve_weber_root,
             _sanitize_claude_inherited_settings_payload,
             _session_managed_mcp_servers,
             _strip_agent_im_hooks,
@@ -7472,6 +7473,13 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             agent_browser_root = _resolve_agent_browser_root()
             _append_skill_entries(
                 "always",
+        if _resolve_weber_root():
+            weber_root = _resolve_weber_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "weber", "path": _skill_path(weber_root)}],
+                _L("会话技能", "Session skill"),
+            )
                 [{"name": "agent-browser", "path": _skill_path(agent_browser_root)}],
                 _L("会话技能", "Session skill"),
             )
