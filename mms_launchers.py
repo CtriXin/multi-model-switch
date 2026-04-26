@@ -4287,6 +4287,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
         )
         _overlay_web_access_session_entries(session_claude_dir, session_home)
+        _overlay_weber_session_entries(session_claude_dir, session_home)
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -4319,6 +4320,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             _sync_codex_session_claude_json(session_home)
             _overlay_codex_shared_resume(home_dir, session_home)
             _overlay_web_access_session_entries(os.path.join(session_home, ".codex"), session_home)
+            _overlay_weber_session_entries(os.path.join(session_home, ".codex"), session_home)
             _overlay_agent_browser_session_entries(os.path.join(session_home, ".codex"), session_home)
             _overlay_toon_session_entries(os.path.join(session_home, ".codex"), session_home)
             _overlay_token_saver_session_entries(os.path.join(session_home, ".codex"), session_home)
@@ -4336,9 +4338,9 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home=session_home,
             features={
                 "web_access": bool(_resolve_web_access_root()),
+                "weber": bool(_resolve_weber_root()),
                 "agent_browser": bool(_resolve_agent_browser_root()),
                 "toon": bool(_resolve_toon_root()),
-        _overlay_weber_session_entries(session_claude_dir, session_home)
                 "token_saver": bool(_resolve_token_saver_root()),
             },
         )
@@ -4371,7 +4373,6 @@ def _overlay_codex_shared_resume(home_dir, session_home):
         dst = os.path.join(session_codex_dir, entry)
         _materialize_codex_session_entry(entry, src, dst)
 
-            _overlay_weber_session_entries(os.path.join(session_home, ".codex"), session_home)
     source_roots = [account_codex_dir]
     real_codex_dir = _real_user_path(".codex")
     if os.path.isdir(real_codex_dir) and os.path.realpath(real_codex_dir) != os.path.realpath(account_codex_dir):
@@ -4389,7 +4390,6 @@ _CODEX_BOUNDED_RESUME_DIRS = {
     "shell_snapshots": 20,
     "archived_sessions": 0,
 }
-                "weber": bool(_resolve_weber_root()),
 
 _CODEX_RESUME_SEED_MANIFEST = "mms-resume-seed.json"
 _CODEX_RESUME_MAX_FILE_BYTES = 2_000_000
@@ -6151,6 +6151,7 @@ def _claude_gateway_env(
             "caveman": enable_caveman,
             "ecc": enable_ecc,
             "web_access": bool(_resolve_web_access_root()),
+            "weber": bool(_resolve_weber_root()),
             "toon": bool(_resolve_toon_root()),
             "token_saver": bool(_resolve_token_saver_root()),
         },
@@ -6175,6 +6176,7 @@ def _claude_gateway_env(
         enable_ecc=enable_ecc,
     )
     _overlay_web_access_session_entries(gw_claude_dir, gateway_home)
+    _overlay_weber_session_entries(gw_claude_dir, gateway_home)
     _overlay_toon_session_entries(gw_claude_dir, gateway_home)
     _overlay_token_saver_session_entries(gw_claude_dir, gateway_home)
 
@@ -6205,7 +6207,6 @@ def _claude_gateway_env(
     _apply_runtime_network_profile(
         env,
         runtime,
-            "weber": bool(_resolve_weber_root()),
         validate_proxy=bool(runtime.get("proxy")),
     )
     _install_session_command_wrappers(gateway_home, env)
@@ -6230,7 +6231,6 @@ def _claude_gateway_env(
             _s = _h.get("status", "?")
             _b = _h.get("latency_bucket", "?")
             _icon = {"ok": "●", "slow": "◐", "degraded": "◑"}.get(_s, "?")
-    _overlay_weber_session_entries(gw_claude_dir, gateway_home)
             print(f"  {_icon} {status_model}: {_s} ({_b})")
     except Exception:
         pass
@@ -6498,6 +6498,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         enable_caveman=enable_caveman,
     )
     _overlay_web_access_session_entries(codex_dir, session_home)
+    _overlay_weber_session_entries(codex_dir, session_home)
     _overlay_agent_browser_session_entries(codex_dir, session_home)
     _overlay_toon_session_entries(codex_dir, session_home)
     _overlay_token_saver_session_entries(codex_dir, session_home)
@@ -6522,6 +6523,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         features={
             "caveman": enable_caveman,
             "web_access": bool(_resolve_web_access_root()),
+            "weber": bool(_resolve_weber_root()),
             "agent_browser": bool(_resolve_agent_browser_root()),
             "toon": bool(_resolve_toon_root()),
             "token_saver": bool(_resolve_token_saver_root()),
@@ -6552,7 +6554,6 @@ def launch_codex(model_info, runtime, once=False):
     _ensure_speed_stats()
     auth_mode = runtime.get("auth_mode", "api_key")
     if auth_mode == "oauth":
-    _overlay_weber_session_entries(codex_dir, session_home)
         model = _resolve_model(model_info)
         env = _account_env(runtime, model_info=model_info)
         _prepare_oauth_home_context(runtime, env, "codex")
@@ -6577,7 +6578,6 @@ def launch_codex(model_info, runtime, once=False):
     if not _is_gpt_model(model):
         bridge_label = f"模型 {model}" if model else "当前模型"
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
-            "weber": bool(_resolve_weber_root()),
         with codex_chatcompletions_bridge(
             gateway_url,
             api_key,

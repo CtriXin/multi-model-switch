@@ -7469,10 +7469,6 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 [{"name": "web-access", "path": _skill_path(web_access_root)}],
                 _L("会话技能", "Session skill"),
             )
-        if cli == "codex" and _resolve_agent_browser_root():
-            agent_browser_root = _resolve_agent_browser_root()
-            _append_skill_entries(
-                "always",
         if _resolve_weber_root():
             weber_root = _resolve_weber_root()
             _append_skill_entries(
@@ -7480,6 +7476,10 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 [{"name": "weber", "path": _skill_path(weber_root)}],
                 _L("会话技能", "Session skill"),
             )
+        if cli == "codex" and _resolve_agent_browser_root():
+            agent_browser_root = _resolve_agent_browser_root()
+            _append_skill_entries(
+                "always",
                 [{"name": "agent-browser", "path": _skill_path(agent_browser_root)}],
                 _L("会话技能", "Session skill"),
             )
