@@ -7048,7 +7048,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
     except Exception:
         return preview
 
-    def _append(panel_key, scope, *, title, summary="", details=None):
+    def _append(panel_key, scope, *, title, summary="", details=None, disable_key=None):
         panel = preview.get(panel_key)
         if not isinstance(panel, dict):
             return
@@ -7070,6 +7070,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             "summary": summary,
             "details": normalized_details,
         }
+        disable_key = str(disable_key or "").strip()
+        if disable_key:
+            entry["disable_key"] = disable_key
         if not title:
             return
         signature = (
@@ -7277,6 +7280,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                         title=title,
                         summary=f"{event_label} · {hint}",
                         details=details,
+                        disable_key=command_text,
                     )
 
     def _list_skill_entries(*parent_dirs):
@@ -7320,6 +7324,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 title=name,
                 summary=detail,
                 details=details,
+                disable_key=name,
             )
 
     def _count_files(*parent_dirs):
@@ -7348,6 +7353,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         collapse_threshold=12,
         bundle_note="",
         extra_details=None,
+        bundle_disable_key="",
     ):
         entries = list(entries or [])
         if len(entries) <= max(1, int(collapse_threshold or 1)):
@@ -7382,6 +7388,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             title=bundle_title or detail,
             summary=_L(f"{len(entries)} 个 skill", f"{len(entries)} skills"),
             details=details,
+            disable_key=bundle_disable_key or bundle_title or detail,
         )
 
     if cli == "claude":
@@ -7398,6 +7405,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 title=name,
                 summary=str(mcp_entry.get("summary") or ""),
                 details=mcp_entry.get("details") or [],
+                disable_key=name,
             )
 
         template_settings = _load_mms_claude_settings_template()
@@ -7447,6 +7455,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 title=name,
                 summary=str(mcp_entry.get("summary") or ""),
                 details=mcp_entry.get("details") or [],
+                disable_key=name,
             )
 
         real_codex_hooks = os.path.join(resolve_real_user_home(), ".codex", "hooks.json")
@@ -7511,6 +7520,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 bundle_root=caveman_root,
                 collapse_threshold=12,
                 bundle_note=_L("这些是可用技能目录，不代表本次会全部执行。", "These are available skills, not all executed on launch."),
+                bundle_disable_key="caveman",
             )
 
         ecc_root = _resolve_ecc_root() if has_ecc else ""
@@ -7542,6 +7552,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                     (_L("命令", "Commands"), str(ecc_command_count)),
                     (_L("规则", "Rules"), str(ecc_rule_count)),
                 ],
+                bundle_disable_key="ecc",
             )
 
     return preview
@@ -8453,8 +8464,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         )
         if result == "__interrupt__":
             return True
+        disabled_session_surfaces = {}
         if isinstance(result, tuple):
-            if len(result) >= 7:
+            if len(result) >= 8:
+                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
+            elif len(result) >= 7:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
             elif len(result) >= 5:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
@@ -8480,6 +8494,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 reasoning_effort = default_reasoning_effort
         else:
             action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result, False, False, False, False, True, default_reasoning_effort
+            disabled_session_surfaces = {}
         if action == "q":
             return True
         if action == "b":
@@ -8499,6 +8514,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
             runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
             runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
+            runtime_runtime["disabled_session_surfaces"] = (
+                disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
+            )
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 

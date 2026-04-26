@@ -2805,6 +2805,79 @@ def _filter_hook_commands(hooks_data, predicate):
     return filtered
 
 
+def _normalize_session_surface_disabled(disabled_session_surfaces):
+    disabled_session_surfaces = disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
+    normalized = {"mcp": set(), "skills": set(), "hooks": set()}
+    aliases = {
+        "mcp": "mcp",
+        "mcps": "mcp",
+        "mcp_servers": "mcp",
+        "skills": "skills",
+        "skill": "skills",
+        "hooks": "hooks",
+        "hook": "hooks",
+    }
+    for raw_key, raw_values in disabled_session_surfaces.items():
+        key = aliases.get(str(raw_key or "").strip().lower())
+        if not key:
+            continue
+        values = raw_values
+        if isinstance(values, str):
+            values = [values]
+        if not isinstance(values, (list, tuple, set)):
+            continue
+        for item in values:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            if key == "hooks":
+                value = _normalize_hook_command(value)
+            normalized[key].add(value)
+    return normalized
+
+
+def _session_surface_disabled(disabled_session_surfaces, surface, value):
+    surface = str(surface or "").strip()
+    value = str(value or "").strip()
+    if not surface or not value:
+        return False
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
+    if surface == "hooks":
+        value = _normalize_hook_command(value)
+    return value in disabled.get(surface, set())
+
+
+def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None):
+    if not isinstance(mcp_servers, dict):
+        return {}
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
+    disabled_names = disabled.get("mcp", set())
+    if not disabled_names:
+        return mcp_servers
+    return {
+        name: spec
+        for name, spec in mcp_servers.items()
+        if str(name or "").strip() not in disabled_names
+    }
+
+
+def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
+    if not isinstance(hooks_data, dict):
+        return {}
+    disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
+    disabled_commands = disabled.get("hooks", set())
+    if not disabled_commands:
+        return hooks_data
+    return _filter_hook_commands(
+        hooks_data,
+        lambda command: _normalize_hook_command(command) in disabled_commands,
+    )
+
+
+def _session_skill_disabled(disabled_session_surfaces, skill_name):
+    return _session_surface_disabled(disabled_session_surfaces, "skills", skill_name)
+
+
 def _caveman_claude_activate_command(caveman_root):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
     return f"node {json.dumps(script_path)}"
@@ -2892,7 +2965,7 @@ def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
     return _merge_claude_hooks(hooks_data, ecc_hooks)
 
 
-def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False):
+def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
     hooks_data = _filter_hook_commands(payload.get("hooks"), _is_caveman_hook_command)
     if enable_caveman:
@@ -2907,6 +2980,7 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False):
                 timeout=hook_payload.get("timeout"),
                 status_message=hook_payload.get("statusMessage"),
             )
+    hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     if hooks_data:
         payload["hooks"] = hooks_data
     else:
@@ -2914,13 +2988,14 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False):
     return payload
 
 
-def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root):
+def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
     extra_source_root = str(extra_source_root or "").strip()
     if not extra_source_root:
         return False
     extra_dir = os.path.join(extra_source_root, entry_name)
     if not os.path.isdir(extra_dir):
         return False
+    exclude_names = set(str(item or "").strip() for item in (exclude_names or []) if str(item or "").strip())
 
     dst = os.path.join(parent_dir, entry_name)
     merged_dir = os.path.join(overlay_root, entry_name)
@@ -2936,6 +3011,8 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
         except Exception:
             pass
         for item in os.listdir(src_dir):
+            if item in exclude_names:
+                continue
             src = os.path.join(src_dir, item)
             link = os.path.join(merged_dir, item)
             if os.path.exists(link) or os.path.islink(link):
@@ -2957,12 +3034,10 @@ def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_sourc
     return True
 
 
-def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root):
+def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root, *, disabled_session_surfaces=None):
     skill_name = str(skill_name or "").strip()
     skill_root = str(skill_root or "").strip()
     if not skill_name or not skill_root:
-        return False
-    if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
         return False
 
     os.makedirs(parent_dir, exist_ok=True)
@@ -2970,24 +3045,42 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root)
     merged_dir = os.path.join(overlay_root, "skills")
     os.makedirs(merged_dir, exist_ok=True)
 
-    def _merge_dir(src_dir):
+    def _merge_dir(src_dir, *, exclude_names=None):
         src_dir = str(src_dir or "").strip()
         if not src_dir or not os.path.isdir(src_dir):
             return
+        exclude_names = set(str(item or "").strip() for item in (exclude_names or []) if str(item or "").strip())
         try:
             if os.path.samefile(src_dir, merged_dir):
                 return
         except Exception:
             pass
         for item in os.listdir(src_dir):
+            if item in exclude_names:
+                continue
             src = os.path.join(src_dir, item)
             link = os.path.join(merged_dir, item)
             if os.path.exists(link) or os.path.islink(link):
                 continue
             os.symlink(src, link)
 
+    disabled = _session_skill_disabled(disabled_session_surfaces, skill_name)
     if os.path.exists(skills_dir) or os.path.islink(skills_dir):
-        _merge_dir(os.path.realpath(skills_dir))
+        _merge_dir(os.path.realpath(skills_dir), exclude_names={skill_name} if disabled else None)
+
+    if disabled:
+        if os.path.islink(skills_dir):
+            os.unlink(skills_dir)
+        elif os.path.isdir(skills_dir):
+            shutil.rmtree(skills_dir)
+        elif os.path.exists(skills_dir):
+            os.unlink(skills_dir)
+        if os.listdir(merged_dir):
+            os.symlink(merged_dir, skills_dir)
+        return False
+
+    if not os.path.isfile(os.path.join(skill_root, "SKILL.md")):
+        return False
 
     skill_link = os.path.join(merged_dir, skill_name)
     if not os.path.exists(skill_link) and not os.path.islink(skill_link):
@@ -3005,26 +3098,38 @@ def _overlay_session_skill_dir(parent_dir, overlay_root, skill_name, skill_root)
     return True
 
 
-def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False):
+def _overlay_caveman_session_entries(parent_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
     if not enable_caveman:
+        return
+    if _session_skill_disabled(disabled_session_surfaces, "caveman"):
         return
     caveman_root = _resolve_caveman_root()
     if not caveman_root:
         return
     overlay_root = os.path.join(session_home, ".mms-caveman-overlay")
     os.makedirs(overlay_root, exist_ok=True)
+    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
     for entry_name in ("commands", "skills"):
-        _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, caveman_root)
+        _overlay_session_entry_dir(
+            parent_dir,
+            overlay_root,
+            entry_name,
+            caveman_root,
+            exclude_names=disabled_names,
+        )
 
 
-def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False):
+def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, disabled_session_surfaces=None):
     if not enable_ecc:
+        return
+    if _session_skill_disabled(disabled_session_surfaces, "ecc") or _session_skill_disabled(disabled_session_surfaces, "__bundle__:ecc"):
         return
     ecc_root = _resolve_ecc_root()
     if not ecc_root:
         return
     overlay_root = os.path.join(session_home, ".mms-ecc-overlay")
     os.makedirs(overlay_root, exist_ok=True)
+    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
     for source_root, entry_name in (
         (os.path.join(ecc_root, ".claude"), "commands"),
         (ecc_root, "commands"),
@@ -3034,52 +3139,74 @@ def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False):
         (os.path.join(ecc_root, ".claude"), "rules"),
         (ecc_root, "rules"),
     ):
-        _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, source_root)
+        _overlay_session_entry_dir(
+            parent_dir,
+            overlay_root,
+            entry_name,
+            source_root,
+            exclude_names=disabled_names,
+        )
 
 
-def _overlay_web_access_session_entries(parent_dir, session_home):
+def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     web_access_root = _resolve_web_access_root()
     if not web_access_root:
         return
     overlay_root = os.path.join(session_home, ".mms-web-access-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "web-access", web_access_root)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "web-access", web_access_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
-def _overlay_weber_session_entries(parent_dir, session_home):
+def _overlay_weber_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     weber_root = _resolve_weber_root()
     if not weber_root:
         return
     overlay_root = os.path.join(session_home, ".mms-weber-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "weber", weber_root)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "weber", weber_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
-def _overlay_agent_browser_session_entries(parent_dir, session_home):
+def _overlay_agent_browser_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     agent_browser_root = _resolve_agent_browser_root()
     if not agent_browser_root:
         return
     overlay_root = os.path.join(session_home, ".mms-agent-browser-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "agent-browser", agent_browser_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
-def _overlay_toon_session_entries(parent_dir, session_home):
+def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     toon_root = _resolve_toon_root()
     if not toon_root:
         return
     overlay_root = os.path.join(session_home, ".mms-toon-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
-def _overlay_token_saver_session_entries(parent_dir, session_home):
+def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     token_saver_root = _resolve_token_saver_root()
     if not token_saver_root:
         return
     overlay_root = os.path.join(session_home, ".mms-token-saver-overlay")
     os.makedirs(overlay_root, exist_ok=True)
-    _overlay_session_skill_dir(parent_dir, overlay_root, "token-saver", token_saver_root)
+    if _session_skill_disabled(disabled_session_surfaces, "token-saver"):
+        _overlay_session_skill_dir(
+            parent_dir,
+            overlay_root,
+            "token-saver",
+            token_saver_root,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        _overlay_session_entry_dir(
+            parent_dir,
+            overlay_root,
+            "commands",
+            token_saver_root,
+            exclude_names={"token-saver", "token-saver.toml"},
+        )
+        return
+    _overlay_session_skill_dir(parent_dir, overlay_root, "token-saver", token_saver_root, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_session_entry_dir(parent_dir, overlay_root, "commands", token_saver_root)
 
 
@@ -3192,7 +3319,7 @@ def _default_hive_session_mcp_server():
     return None
 
 
-def _ensure_session_only_claude_mcp_servers(settings_data):
+def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
     settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
     mcp_servers = settings_data.get("mcpServers")
     merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
@@ -3200,6 +3327,7 @@ def _ensure_session_only_claude_mcp_servers(settings_data):
     hive_spec = _default_hive_session_mcp_server()
     if hive_spec and not (isinstance(merged.get("hive"), dict) and str(merged.get("hive", {}).get("command") or "").strip()):
         merged["hive"] = copy.deepcopy(hive_spec)
+    merged = _filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
 
     if merged:
         settings_data["mcpServers"] = merged
@@ -3214,7 +3342,7 @@ def _session_managed_mcp_server_allowlist(*, allow_execution_surfaces=True):
     return ()
 
 
-def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True):
+def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True, disabled_session_surfaces=None):
     settings_data = settings_data if isinstance(settings_data, dict) else {}
     inherited = {}
     allowlist = _session_managed_mcp_server_allowlist(
@@ -3235,6 +3363,7 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
             inherited.setdefault("hive", copy.deepcopy(hive_spec))
+    inherited = _filter_mcp_servers_by_disabled(inherited, disabled_session_surfaces)
     return inherited
 
 
@@ -3243,11 +3372,13 @@ def _inject_managed_mcp_servers_into_claude_state(
     settings_data=None,
     *,
     allow_execution_surfaces=True,
+    disabled_session_surfaces=None,
 ):
     state = dict(payload) if isinstance(payload, dict) else {}
     managed = _session_managed_mcp_servers(
         settings_data if isinstance(settings_data, dict) else _load_real_claude_settings(),
         allow_execution_surfaces=allow_execution_surfaces,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
     existing = state.get("mcpServers")
     merged = copy.deepcopy(managed)
@@ -3256,6 +3387,8 @@ def _inject_managed_mcp_servers_into_claude_state(
     )
     if isinstance(existing, dict):
         for name in allowlist:
+            if _session_surface_disabled(disabled_session_surfaces, "mcp", name):
+                continue
             spec = existing.get(name)
             if isinstance(spec, dict) and str(spec.get("command") or "").strip():
                 merged[name] = copy.deepcopy(spec)
@@ -3591,6 +3724,7 @@ def _ensure_claude_project_trust(
     project_state=None,
     *,
     allow_execution_surfaces=True,
+    disabled_session_surfaces=None,
 ):
     payload = dict(data) if isinstance(data, dict) else {}
     project_path = os.path.realpath(str(project_path or "").strip())
@@ -3613,6 +3747,17 @@ def _ensure_claude_project_trust(
         entry["mcpServers"] = {}
         entry["enabledMcpjsonServers"] = []
         entry["disabledMcpjsonServers"] = []
+    else:
+        entry["mcpServers"] = _filter_mcp_servers_by_disabled(
+            entry.get("mcpServers"),
+            disabled_session_surfaces,
+        )
+        disabled_mcp = _normalize_session_surface_disabled(disabled_session_surfaces).get("mcp", set())
+        if disabled_mcp:
+            entry["enabledMcpjsonServers"] = [
+                name for name in entry.get("enabledMcpjsonServers", [])
+                if str(name or "").strip() not in disabled_mcp
+            ]
     entry["hasTrustDialogAccepted"] = True
     entry["hasCompletedProjectOnboarding"] = True
     entry["hasClaudeMdExternalIncludesApproved"] = True
@@ -3906,6 +4051,7 @@ def _build_claude_session_settings(
     allow_execution_surfaces=True,
     enable_caveman=False,
     enable_ecc=False,
+    disabled_session_surfaces=None,
 ):
     template_settings = _load_mms_claude_settings_template()
     inherited_settings = _sanitize_claude_inherited_settings_payload(
@@ -3919,6 +4065,7 @@ def _build_claude_session_settings(
     managed_mcp_servers = _session_managed_mcp_servers(
         base_settings,
         allow_execution_surfaces=allow_execution_surfaces,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
 
     template_hooks = template_settings.get("hooks")
@@ -3937,6 +4084,7 @@ def _build_claude_session_settings(
         hooks,
         enable_ecc=bool(enable_ecc and allow_execution_surfaces),
     )
+    hooks = _filter_hooks_by_disabled(hooks, disabled_session_surfaces)
     if hooks:
         settings_data["hooks"] = hooks
     else:
@@ -3963,7 +4111,10 @@ def _build_claude_session_settings(
     else:
         settings_data.pop("mcpServers", None)
     if allow_execution_surfaces:
-        settings_data = _ensure_session_only_claude_mcp_servers(settings_data)
+        settings_data = _ensure_session_only_claude_mcp_servers(
+            settings_data,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     settings_data.setdefault(
         "includeCoAuthoredBy",
@@ -4000,6 +4151,7 @@ def _write_claude_session_settings(
     allow_execution_surfaces=True,
     enable_caveman=False,
     enable_ecc=False,
+    disabled_session_surfaces=None,
 ):
     import json as _json
 
@@ -4014,6 +4166,7 @@ def _write_claude_session_settings(
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
         enable_ecc=enable_ecc,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
     settings_path = os.path.join(session_claude_dir, "settings.json")
     with locked_state_file(settings_path):
@@ -4212,6 +4365,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         console.print(f"[red]账号档案 '{account.get('id', 'unknown')}' 未配置 home_dir[/red]")
         sys.exit(1)
     cli_name = account.get("cli")
+    disabled_session_surfaces = account.get("disabled_session_surfaces")
     if cli_name == "claude":
         seed_claude_state(home_dir)
         account_claude_dir = os.path.join(home_dir, ".claude")
@@ -4286,8 +4440,16 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             source_claude_dir=account_claude_dir,
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
         )
-        _overlay_web_access_session_entries(session_claude_dir, session_home)
-        _overlay_weber_session_entries(session_claude_dir, session_home)
+        _overlay_web_access_session_entries(
+            session_claude_dir,
+            session_home,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        _overlay_weber_session_entries(
+            session_claude_dir,
+            session_home,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -4317,13 +4479,36 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         _link_shared_dotfiles(session_home)
         if cli_name == "codex":
             _scrub_claude_oauth_env(env)
-            _sync_codex_session_claude_json(session_home)
+            _sync_codex_session_claude_json(
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_codex_shared_resume(home_dir, session_home)
-            _overlay_web_access_session_entries(os.path.join(session_home, ".codex"), session_home)
-            _overlay_weber_session_entries(os.path.join(session_home, ".codex"), session_home)
-            _overlay_agent_browser_session_entries(os.path.join(session_home, ".codex"), session_home)
-            _overlay_toon_session_entries(os.path.join(session_home, ".codex"), session_home)
-            _overlay_token_saver_session_entries(os.path.join(session_home, ".codex"), session_home)
+            _overlay_web_access_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
+            _overlay_weber_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
+            _overlay_agent_browser_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
+            _overlay_toon_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
+            _overlay_token_saver_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
@@ -4337,11 +4522,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             model_info=model_info,
             session_home=session_home,
             features={
-                "web_access": bool(_resolve_web_access_root()),
-                "weber": bool(_resolve_weber_root()),
-                "agent_browser": bool(_resolve_agent_browser_root()),
-                "toon": bool(_resolve_toon_root()),
-                "token_saver": bool(_resolve_token_saver_root()),
+                "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+                "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+                "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+                "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
+                "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
             },
         )
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
@@ -4897,7 +5082,7 @@ def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_clau
     _exec_or_run(cmd, env, once)
 
 
-def _sync_codex_session_claude_json(session_home):
+def _sync_codex_session_claude_json(session_home, *, disabled_session_surfaces=None):
     """Seed isolated Codex HOME with the real user's MCP-capable .claude.json."""
     import json as _json
 
@@ -4915,6 +5100,13 @@ def _sync_codex_session_claude_json(session_home):
         if not isinstance(loaded, dict):
             return
         data = _sanitize_codex_claude_state_payload(loaded)
+        if isinstance(data.get("mcpServers"), dict):
+            data["mcpServers"] = _filter_mcp_servers_by_disabled(
+                data.get("mcpServers"),
+                disabled_session_surfaces,
+            )
+            if not data["mcpServers"]:
+                data.pop("mcpServers", None)
     except Exception:
         return
 
@@ -4955,10 +5147,42 @@ def _toml_bare_key(key):
     return f'"{escaped}"'
 
 
-def _append_codex_mcp_servers_from_claude_json(config_text):
+def _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces=None):
+    import re
+
+    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("mcp", set())
+    if not disabled_names:
+        return config_text
+    text = str(config_text or "")
+    header_pattern = re.compile(
+        r'^\[mcp_servers\.(?:"([^"]+)"|([A-Za-z0-9_-]+))(?:\.[^\]]+)?\]\s*$',
+        flags=re.MULTILINE,
+    )
+    spans = []
+    for match in header_pattern.finditer(text):
+        name = match.group(1) or match.group(2)
+        if name not in disabled_names:
+            continue
+        next_header = re.search(r'^\[', text[match.end():], flags=re.MULTILINE)
+        end = match.end() + next_header.start() if next_header else len(text)
+        spans.append((match.start(), end))
+    if not spans:
+        return text
+    chunks = []
+    cursor = 0
+    for start, end in spans:
+        chunks.append(text[cursor:start])
+        cursor = end
+    chunks.append(text[cursor:])
+    return "".join(chunks)
+
+
+def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_surfaces=None):
     """Translate Claude-style mcpServers into Codex [mcp_servers.*] sections."""
     import json as _json
     import re
+
+    config_text = _strip_codex_mcp_server_blocks(config_text, disabled_session_surfaces)
 
     real_json = _real_user_path(".claude.json")
     if not os.path.exists(real_json):
@@ -4975,6 +5199,7 @@ def _append_codex_mcp_servers_from_claude_json(config_text):
     hive_spec = _default_hive_session_mcp_server()
     if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
         servers.setdefault("hive", hive_spec)
+    servers = _filter_mcp_servers_by_disabled(servers, disabled_session_surfaces)
 
     if not servers:
         return config_text
@@ -6006,6 +6231,7 @@ def _claude_gateway_env(
     )
     route_status_path = _claude_route_status_paths()[0]
     os.makedirs(gateway_home, exist_ok=True)
+    disabled_session_surfaces = runtime.get("disabled_session_surfaces")
 
     # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
     # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
@@ -6040,7 +6266,10 @@ def _claude_gateway_env(
 
     data = _merge_claude_ui_state_seed(data, _sanitize_claude_ui_state_seed_payload(gw_existing))
     data = _merge_claude_ui_state_seed(data, _load_real_claude_ui_state_seed())
-    data = _inject_managed_mcp_servers_into_claude_state(data)
+    data = _inject_managed_mcp_servers_into_claude_state(
+        data,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
     # 避免旧 session 残留的 bypassPermissionsModeAccepted 导致 Claude Code 自动进入 bypass
@@ -6051,6 +6280,7 @@ def _claude_gateway_env(
         data,
         current_project,
         project_state=current_project_state,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
     data = _overlay_project_scoped_claude_resume_state(
         data,
@@ -6150,10 +6380,10 @@ def _claude_gateway_env(
         features={
             "caveman": enable_caveman,
             "ecc": enable_ecc,
-            "web_access": bool(_resolve_web_access_root()),
-            "weber": bool(_resolve_weber_root()),
-            "toon": bool(_resolve_toon_root()),
-            "token_saver": bool(_resolve_token_saver_root()),
+            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+            "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+            "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
+            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
         },
         extra_paths={"route_status": route_status_path},
     )
@@ -6164,21 +6394,24 @@ def _claude_gateway_env(
         default_env=default_settings_env,
         enable_caveman=enable_caveman,
         enable_ecc=enable_ecc,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
     _overlay_caveman_session_entries(
         gw_claude_dir,
         gateway_home,
         enable_caveman=enable_caveman,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
     _overlay_ecc_session_entries(
         gw_claude_dir,
         gateway_home,
         enable_ecc=enable_ecc,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
-    _overlay_web_access_session_entries(gw_claude_dir, gateway_home)
-    _overlay_weber_session_entries(gw_claude_dir, gateway_home)
-    _overlay_toon_session_entries(gw_claude_dir, gateway_home)
-    _overlay_token_saver_session_entries(gw_claude_dir, gateway_home)
+    _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -6242,6 +6475,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     """为 gateway api_key 模式创建独立 HOME，per-PID session 隔离。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
+    disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     gateway_base = _real_user_path(".config", "mms", "codex-gateway")
     os.makedirs(gateway_base, exist_ok=True)
 
@@ -6266,7 +6500,10 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         os.symlink(real_library, session_library)
 
     _link_shared_dotfiles(session_home)
-    _sync_codex_session_claude_json(session_home)
+    _sync_codex_session_claude_json(
+        session_home,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
 
     # --- .codex 目录：auth + config 写入 session，其余从真实 ~/.codex symlink ---
     codex_dir = os.path.join(session_home, ".codex")
@@ -6437,7 +6674,10 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                     ("base_url", base_url),
                 ],
             )
-            config_text = _append_codex_mcp_servers_from_claude_json(config_text)
+            config_text = _append_codex_mcp_servers_from_claude_json(
+                config_text,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             config_text = _normalize_toml_layout(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
@@ -6457,7 +6697,10 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         try:
             with open(gateway_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
-            config_text = _append_codex_mcp_servers_from_claude_json(config_text)
+            config_text = _append_codex_mcp_servers_from_claude_json(
+                config_text,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             config_text = _normalize_toml_layout(config_text)
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
@@ -6475,6 +6718,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_hooks = _build_codex_session_hooks(
             base_hooks,
             enable_caveman=enable_caveman,
+            disabled_session_surfaces=disabled_session_surfaces,
         )
         hooks_path = os.path.join(codex_dir, "hooks.json")
         atomic_write_json(hooks_path, session_hooks, mode=0o600)
@@ -6496,12 +6740,13 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         codex_dir,
         session_home,
         enable_caveman=enable_caveman,
+        disabled_session_surfaces=disabled_session_surfaces,
     )
-    _overlay_web_access_session_entries(codex_dir, session_home)
-    _overlay_weber_session_entries(codex_dir, session_home)
-    _overlay_agent_browser_session_entries(codex_dir, session_home)
-    _overlay_toon_session_entries(codex_dir, session_home)
-    _overlay_token_saver_session_entries(codex_dir, session_home)
+    _overlay_web_access_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_weber_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -6522,11 +6767,11 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_home=session_home,
         features={
             "caveman": enable_caveman,
-            "web_access": bool(_resolve_web_access_root()),
-            "weber": bool(_resolve_weber_root()),
-            "agent_browser": bool(_resolve_agent_browser_root()),
-            "toon": bool(_resolve_toon_root()),
-            "token_saver": bool(_resolve_token_saver_root()),
+            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+            "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+            "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
+            "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
+            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
         },
     )
     return env

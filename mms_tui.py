@@ -3071,7 +3071,7 @@ def confirm_tui(
 ):
     """确认启动 TUI。
 
-    返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort)。
+    返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
@@ -3212,9 +3212,10 @@ def confirm_tui(
                     if label and value:
                         details.append((label, value))
                 signature = (title, summary, tuple(details))
+                disable_key = str(item.get("disable_key") or title).strip()
                 if title and signature not in seen:
                     seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details})
+                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
         if caveman_enabled:
             for item in sections.get("caveman") or []:
                 if not isinstance(item, dict):
@@ -3232,9 +3233,10 @@ def confirm_tui(
                     if label and value:
                         details.append((label, value))
                 signature = (title, summary, tuple(details))
+                disable_key = str(item.get("disable_key") or title).strip()
                 if title and signature not in seen:
                     seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details})
+                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
         if ecc_enabled:
             for item in sections.get("ecc") or []:
                 if not isinstance(item, dict):
@@ -3252,9 +3254,10 @@ def confirm_tui(
                     if label and value:
                         details.append((label, value))
                 signature = (title, summary, tuple(details))
+                disable_key = str(item.get("disable_key") or title).strip()
                 if title and signature not in seen:
                     seen.add(signature)
-                    items.append({"title": title, "summary": summary, "details": details})
+                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
         return items
 
     if isinstance(model_info, dict):
@@ -3338,7 +3341,15 @@ def confirm_tui(
         effort_mode = effort_default
         panel_index = 0
         preview_selection = {"mcp": 0, "skills": 0, "hooks": 0}
-        preview_detail_open = {"mcp": False, "skills": False, "hooks": False}
+        preview_disabled = {"mcp": set(), "skills": set(), "hooks": set()}
+        disable_mode = False
+
+        def _disabled_payload():
+            return {
+                key: sorted(str(item) for item in values if str(item).strip())
+                for key, values in preview_disabled.items()
+                if values
+            }
 
         def _effort_attr(value, enabled=True):
             if not enabled:
@@ -3416,7 +3427,9 @@ def confirm_tui(
                 footer_actions.append([("←/→", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切面板", "Switch panel"), curses.color_pair(1) | curses.A_DIM)])
             if current_panel.get("mode") == "list":
                 footer_actions.append([("↑/↓", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("看条目", "Browse items"), curses.color_pair(1) | curses.A_DIM)])
-                footer_actions.append([("Space", curses.color_pair(2) | curses.A_BOLD), (" ", 0), (_L("看路径", "Show path"), curses.color_pair(2) | curses.A_DIM)])
+                footer_actions.append([("D", curses.color_pair(4) | curses.A_BOLD), (" ", 0), (_L("禁用选择", "Disable select"), curses.color_pair(4) | curses.A_DIM)])
+                if disable_mode:
+                    footer_actions.append([("Space", curses.color_pair(2) | curses.A_BOLD), (" ", 0), (_L("切禁用", "Toggle disable"), curses.color_pair(2) | curses.A_DIM)])
             if has_bypass:
                 footer_actions.append([("Tab", curses.color_pair(4) | curses.A_BOLD), (" ", 0), (_L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_DIM)])
             if has_claude_1m:
@@ -3438,6 +3451,8 @@ def confirm_tui(
             title = _L("绕过审批确认", "Bypass Confirm") if bypass_mode else _L("确认启动", "Confirm Launch")
             if len(panels) > 1:
                 title = f"{title} · {current_panel['title']} [{panel_index + 1}/{len(panels)}]"
+            if current_panel.get("mode") == "list" and disable_mode:
+                title = f"{title} · {_L('禁用选择', 'Disable select')}"
 
             if current_panel.get("mode") == "list":
                 panel_key = str(current_panel.get("key") or "")
@@ -3448,8 +3463,7 @@ def confirm_tui(
                 else:
                     cursor = 0
                     preview_selection[panel_key] = 0
-                    preview_detail_open[panel_key] = False
-                detail_open = bool(preview_detail_open.get(panel_key, False) and items)
+                detail_open = bool(items)
                 detail_h = 4
                 list_h = min(12, max(5, max_y - footer_rows - detail_h - 8))
                 ph = list_h + detail_h + footer_rows + 7
@@ -3481,12 +3495,17 @@ def confirm_tui(
                     item = visible_items[idx]
                     absolute_idx = offset + idx
                     selected = absolute_idx == cursor
+                    disabled_key = str(item.get("disable_key") or item.get("title") or "").strip()
+                    is_disabled = disabled_key in preview_disabled.get(panel_key, set())
                     marker_attr = curses.color_pair(1) | curses.A_BOLD if selected else curses.A_DIM
-                    title_attr = curses.color_pair(1) | curses.A_BOLD if selected else curses.color_pair(2)
+                    title_attr = curses.color_pair(4) if is_disabled else (curses.color_pair(1) | curses.A_BOLD if selected else curses.color_pair(2))
                     summary_attr = curses.color_pair(1) if selected else curses.A_DIM
                     marker = ">" if selected else " "
+                    title_text = str(item.get("title") or "")
+                    if disable_mode or is_disabled:
+                        title_text = ("[x] " if is_disabled else "[ ] ") + title_text
                     _safe_addstr(stdscr, y, ll, marker, marker_attr)
-                    _safe_addstr(stdscr, y, ll + 2, str(item.get("title") or ""), title_attr, max_w=title_w)
+                    _safe_addstr(stdscr, y, ll + 2, title_text, title_attr, max_w=title_w)
                     _safe_addstr(stdscr, y, summary_x, str(item.get("summary") or ""), summary_attr, max_w=summary_w)
 
                 if offset > 0:
@@ -3511,7 +3530,7 @@ def confirm_tui(
                     detail_preview_lines = detail_preview_lines[:detail_h]
                 if not detail_preview_lines:
                     detail_preview_lines = [
-                        ("", _L("↑/↓ 选择条目，按 Space 查看路径或命令。", "Use Up/Down to select an item, then press Space to view its path or command.")),
+                        ("", _L("↑/↓ 选择条目，底部默认显示路径或命令。", "Use Up/Down to select an item; path or command is shown here by default.")),
                     ]
                 detail_label_w = max((_display_width(label) for label, _ in detail_preview_lines if label), default=0)
                 detail_value_x = ll + detail_label_w + 3 if detail_label_w else ll + 1
@@ -3582,11 +3601,11 @@ def confirm_tui(
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode, thinking_mode, effort_mode)
+                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode, thinking_mode, effort_mode, _disabled_payload())
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, False, True, effort_default)
+                return ("b", False, False, False, False, True, effort_default, {})
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, False, True, effort_default)
+                return ("q", False, False, False, False, True, effort_default, {})
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:
@@ -3603,11 +3622,20 @@ def confirm_tui(
                 items = list(current_panel.get("items") or [])
                 if items:
                     preview_selection[panel_key] = (preview_selection.get(panel_key, 0) + 1) % len(items)
-            elif key == ord(' ') and current_panel.get("mode") == "list":
+            elif key == ord(' ') and current_panel.get("mode") == "list" and disable_mode:
                 panel_key = str(current_panel.get("key") or "")
                 items = list(current_panel.get("items") or [])
                 if items:
-                    preview_detail_open[panel_key] = not bool(preview_detail_open.get(panel_key, False))
+                    cursor = max(0, min(preview_selection.get(panel_key, 0), len(items) - 1))
+                    disable_key = str(items[cursor].get("disable_key") or items[cursor].get("title") or "").strip()
+                    if disable_key:
+                        target = preview_disabled.setdefault(panel_key, set())
+                        if disable_key in target:
+                            target.remove(disable_key)
+                        else:
+                            target.add(disable_key)
+            elif key in (ord('d'), ord('D')) and current_panel.get("mode") == "list":
+                disable_mode = not disable_mode
             elif key in (ord('m'), ord('M')) and has_claude_1m:
                 claude_1m_mode = not claude_1m_mode
             elif key in (ord('c'), ord('C')) and has_caveman:
@@ -3623,7 +3651,7 @@ def confirm_tui(
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False, False, False, False, True, effort_default)
+        return ("q", False, False, False, False, True, effort_default, {})
 
 
 # ── Reasoning effort 选择 TUI ────────────────────────────────────

@@ -111,6 +111,46 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
     assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
 
 
+def test_build_claude_session_settings_respects_session_disabled_surfaces(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "mcpServers": {
+                "hive": {"command": "/tmp/hive.sh", "args": [], "type": "stdio"},
+                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+            },
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": "/tmp/drop.sh"},
+                            {"type": "command", "command": "/tmp/keep.sh"},
+                        ]
+                    }
+                ]
+            },
+        },
+        disabled_session_surfaces={"mcp": ["hive"], "hooks": ["/tmp/drop.sh"]},
+    )
+
+    assert "hive" not in result["mcpServers"]
+    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper.js"]
+    commands = [
+        hook["command"]
+        for group in result["hooks"]["SessionStart"]
+        for hook in group["hooks"]
+        if hook.get("type") == "command"
+    ]
+    assert "/tmp/drop.sh" not in commands
+    assert "/tmp/keep.sh" in commands
+
+
 def test_resolve_hive_root_prefers_installed_hive_home_for_installed_mms(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -198,6 +238,39 @@ def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeyp
     assert '[mcp_servers.hive]' in rendered
     assert 'command = "/tmp/hive/bin/mcp-server.sh"' in rendered
     assert 'HOME = "/tmp/real-home"' in rendered
+
+
+def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "demo": {"command": "node", "args": ["/tmp/demo.js"], "type": "stdio"},
+                    "keep": {"command": "node", "args": ["/tmp/keep.js"], "type": "stdio"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json(
+        '[mcp_servers.demo]\ncommand = "old"\n\nbase_url = "https://example.test"\n',
+        disabled_session_surfaces={"mcp": ["demo"]},
+    )
+
+    assert "[mcp_servers.demo]" not in rendered
+    assert "[mcp_servers.keep]" in rendered
+    assert 'args = ["/tmp/keep.js"]' in rendered
 
 
 def test_inject_managed_mcp_servers_into_claude_state_adds_hive_fallback(monkeypatch):
@@ -464,6 +537,36 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert enabled_commands.count("echo 'CAVEMAN MODE ACTIVE. session default'") == 1
 
 
+def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
+    import mms_launchers
+
+    payload = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/drop.sh"},
+                        {"type": "command", "command": "/tmp/keep.sh"},
+                    ]
+                }
+            ]
+        }
+    }
+
+    result = mms_launchers._build_codex_session_hooks(
+        payload,
+        disabled_session_surfaces={"hooks": ["/tmp/drop.sh"]},
+    )
+    commands = [
+        hook["command"]
+        for group in result["hooks"]["SessionStart"]
+        for hook in group["hooks"]
+    ]
+
+    assert "/tmp/drop.sh" not in commands
+    assert "/tmp/keep.sh" in commands
+
+
 def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -530,6 +633,34 @@ def test_overlay_web_access_session_entries_merges_session_and_web_access_skill(
     assert os.path.islink(parent_dir / "skills" / "keep-skill")
     assert os.path.islink(parent_dir / "skills" / "web-access")
     assert (parent_dir / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
+
+
+def test_overlay_web_access_session_entries_respects_session_disabled_skill(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    parent_dir = session_home / ".codex"
+    parent_dir.mkdir(parents=True)
+    global_assets = tmp_path / "global-assets"
+    (global_assets / "skills" / "keep-skill").mkdir(parents=True)
+    (global_assets / "skills" / "web-access").mkdir()
+    os.symlink(global_assets / "skills", parent_dir / "skills")
+
+    web_access_root = tmp_path / "web-access"
+    web_access_root.mkdir()
+    (web_access_root / "SKILL.md").write_text("# web-access\n", encoding="utf-8")
+    monkeypatch.setenv("MMS_WEB_ACCESS_ROOT", str(web_access_root))
+
+    mms_launchers._overlay_web_access_session_entries(
+        str(parent_dir),
+        str(session_home),
+        disabled_session_surfaces={"skills": ["web-access"]},
+    )
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert not (parent_dir / "skills" / "web-access").exists()
+    assert not (parent_dir / "skills" / "web-access").is_symlink()
 
 
 def test_overlay_agent_browser_session_entries_merges_session_and_agent_browser_skill(monkeypatch, tmp_path):
