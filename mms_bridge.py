@@ -266,6 +266,7 @@ _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek",)
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -313,6 +314,11 @@ def _domestic_model_supports_reasoning_effort(model_name):
     return normalized.startswith(_DOMESTIC_EFFORT_ALLOW_PREFIXES)
 
 
+def _domestic_model_requires_reasoning_content_roundtrip(model_name):
+    normalized = _normalize_model_name(model_name)
+    return normalized.startswith(_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES)
+
+
 def _normalize_domestic_reasoning_effort(value, default="high"):
     normalized = str(value or "").strip().lower()
     if normalized == "xhigh":
@@ -340,6 +346,7 @@ def _strip_domestic_thinking_signals(payload):
     for message in payload.get("messages", []):
         if not isinstance(message, dict):
             continue
+        message.pop("reasoning_content", None)
         content = message.get("content")
         if isinstance(content, list):
             message["content"] = [
@@ -352,10 +359,55 @@ def _strip_domestic_thinking_signals(payload):
             ]
 
 
+def _assistant_reasoning_content_from_blocks(content):
+    parts = []
+    for block in _normalize_message_content(content):
+        if block.get("type") != "thinking":
+            continue
+        text = block.get("thinking")
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def _assistant_messages_with_reasoning_slots(payload):
+    messages = []
+    for message in payload.get("messages", []):
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("role", "")).strip() != "assistant":
+            continue
+        messages.append(message)
+    return messages
+
+
+def _apply_domestic_thinking_toggle(payload, model_name, *, thinking_enabled):
+    if not _domestic_model_supports_thinking(model_name):
+        return
+    thinking_payload = payload.get("thinking")
+    next_thinking = dict(thinking_payload) if isinstance(thinking_payload, dict) else {}
+    next_thinking["type"] = "enabled" if thinking_enabled else "disabled"
+    payload["thinking"] = next_thinking
+
+
+def _preserve_domestic_reasoning_roundtrip(payload, model_name):
+    if not _domestic_model_requires_reasoning_content_roundtrip(model_name):
+        return
+    assistant_messages = _assistant_messages_with_reasoning_slots(payload)
+    for message in assistant_messages:
+        reasoning_content = _assistant_reasoning_content_from_blocks(message.get("content"))
+        if reasoning_content:
+            # Some OpenAI-compatible relays (notably DeepSeek thinking/tool-use paths)
+            # require assistant reasoning_content to be echoed back on continuation
+            # even when the client talks to us in Anthropic thinking blocks.
+            message["reasoning_content"] = reasoning_content
+
+
 def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=True, reasoning_effort="high"):
     if not _is_domestic_model(model_name):
         return
-    if not thinking_enabled or _should_strip_domestic_thinking_signals(model_name):
+    if not thinking_enabled:
+        _apply_domestic_thinking_toggle(payload, model_name, thinking_enabled=False)
         _strip_domestic_thinking_signals(payload)
         output_config = payload.get("output_config")
         if isinstance(output_config, dict) and "effort" in output_config:
@@ -366,11 +418,24 @@ def _apply_domestic_reasoning_controls(payload, model_name, *, thinking_enabled=
             else:
                 payload.pop("output_config", None)
         return
+    if _should_strip_domestic_thinking_signals(model_name):
+        _strip_domestic_thinking_signals(payload)
+        output_config = payload.get("output_config")
+        if isinstance(output_config, dict) and "effort" in output_config:
+            next_config = dict(output_config)
+            next_config.pop("effort", None)
+            if next_config:
+                payload["output_config"] = next_config
+            else:
+                payload.pop("output_config", None)
+        return
+    _apply_domestic_thinking_toggle(payload, model_name, thinking_enabled=True)
     if _domestic_model_supports_reasoning_effort(model_name):
         output_config = payload.get("output_config")
         next_config = dict(output_config) if isinstance(output_config, dict) else {}
         next_config["effort"] = _normalize_domestic_reasoning_effort(reasoning_effort, default="high")
         payload["output_config"] = next_config
+    _preserve_domestic_reasoning_roundtrip(payload, model_name)
 
 
 def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses_payload, error_text):

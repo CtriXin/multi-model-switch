@@ -51,6 +51,11 @@
 - sticky-session key source
 - `Responses` vs `Chat Completions` fallback
 
+另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
+
+- 像 `DeepSeek` 这类 `tool_use + thinking` 路径，后续 continuation 可能要求把上一轮 assistant reasoning 原样 round-trip 回去
+- 如果你在 `Anthropic Messages` bridge 里消费、裁剪、重排了 `thinking` block，要额外验证后续 `tool_result` 轮不会因为缺少 `reasoning_content` 等等价字段而报 `400`
+
 ### 4. OAuth 隔离语义优先于“方便复用”
 
 对于官方账号入口，默认目标应是：

@@ -1737,7 +1737,16 @@ def test_apply_domestic_reasoning_controls_preserves_supported_thinking_and_sets
 
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
-        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "abc"}]}],
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "step one"},
+                    {"type": "thinking", "thinking": "step two"},
+                    {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {"file": "x"}},
+                ],
+            }
+        ],
     }
 
     mms_bridge._apply_domestic_reasoning_controls(
@@ -1749,6 +1758,7 @@ def test_apply_domestic_reasoning_controls_preserves_supported_thinking_and_sets
 
     assert payload["thinking"]["budget_tokens"] == 2048
     assert payload["messages"][0]["content"][0]["type"] == "thinking"
+    assert payload["messages"][0]["reasoning_content"] == "step one\n\nstep two"
     assert payload["output_config"] == {"effort": "high"}
 
 
@@ -1758,7 +1768,13 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
     payload = {
         "thinking": {"type": "enabled", "budget_tokens": 2048},
         "output_config": {"effort": "high", "format": "markdown"},
-        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "abc"}]}],
+        "messages": [
+            {
+                "role": "assistant",
+                "reasoning_content": "abc",
+                "content": [{"type": "thinking", "thinking": "abc"}],
+            }
+        ],
     }
 
     mms_bridge._apply_domestic_reasoning_controls(
@@ -1771,6 +1787,25 @@ def test_apply_domestic_reasoning_controls_disables_thinking_and_removes_effort(
     assert "thinking" not in payload
     assert payload["output_config"] == {"format": "markdown"}
     assert payload["messages"][0]["content"] == []
+    assert "reasoning_content" not in payload["messages"][0]
+
+
+def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_non_deepseek():
+    import mms_bridge
+
+    payload = {
+        "thinking": {"type": "enabled", "budget_tokens": 2048},
+        "messages": [{"role": "assistant", "content": [{"type": "thinking", "thinking": "abc"}]}],
+    }
+
+    mms_bridge._apply_domestic_reasoning_controls(
+        payload,
+        "kimi-for-coding",
+        thinking_enabled=True,
+        reasoning_effort="high",
+    )
+
+    assert "reasoning_content" not in payload["messages"][0]
 
 
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
