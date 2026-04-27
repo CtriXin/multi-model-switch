@@ -1,3 +1,6 @@
+import ast
+from pathlib import Path
+
 from mms_tui import (
     _COLD_FAMILY_BUCKET_ID,
     _ECC_TOGGLE_KEY,
@@ -20,6 +23,27 @@ def test_reasoning_effort_tui_defaults_to_high():
 def test_confirm_tui_thinking_and_effort_defaults():
     assert confirm_tui.__kwdefaults__["thinking_enabled_default"] is True
     assert confirm_tui.__kwdefaults__["reasoning_effort_default"] == "high"
+    assert confirm_tui.__kwdefaults__["ecc_enabled_default"] is False
+
+
+def test_core_confirm_tui_keeps_ecc_default_off():
+    tree = ast.parse(Path("mms_core.py").read_text(encoding="utf-8"))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "_safe_tui_call":
+            continue
+        if not node.args or not isinstance(node.args[0], ast.Name) or node.args[0].id != "confirm_tui":
+            continue
+
+        keyword_values = {keyword.arg: keyword.value for keyword in node.keywords}
+        ecc_default = keyword_values.get("ecc_enabled_default")
+        assert isinstance(ecc_default, ast.Constant)
+        assert ecc_default.value is False
+        return
+
+    raise AssertionError("confirm_tui launch call was not found")
 
 
 def test_confirm_tui_ecc_hotkey_is_fixed_x():

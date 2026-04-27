@@ -8457,7 +8457,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             has_caveman=has_caveman,
             caveman_enabled_default=has_caveman,
             has_ecc=has_ecc,
-            ecc_enabled_default=has_ecc,
+            ecc_enabled_default=False,
             thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
             reasoning_effort_default=default_reasoning_effort,
             preview_catalog=preview_catalog,
