@@ -1591,6 +1591,19 @@ def test_finalize_claude_slot_stale_cleanup_skips_sync(monkeypatch, tmp_path):
     assert sync_calls == []
 
 
+def test_cleanup_stale_sessions_respects_launch_cap(tmp_path):
+    import mms_launchers
+
+    sessions_dir = tmp_path / "sessions"
+    for name in ("900001", "900002", "900003"):
+        (sessions_dir / name).mkdir(parents=True)
+
+    mms_launchers._cleanup_stale_sessions(str(sessions_dir), max_entries=1)
+
+    remaining = sorted(item.name for item in sessions_dir.iterdir())
+    assert len(remaining) == 2
+
+
 def test_claude_guard_runtime_uses_gateway_home_for_api_key(monkeypatch, tmp_path):
     import mms_launchers
 

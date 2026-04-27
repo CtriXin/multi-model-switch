@@ -17,6 +17,14 @@ class _FakeConsole:
         return None
 
 
+class _CollectingConsole:
+    def __init__(self):
+        self.items = []
+
+    def print(self, *args, **kwargs):
+        self.items.append(args[0] if args else "")
+
+
 def test_usage_main_initializes_rich_before_render(monkeypatch):
     import mms_account_state
     import mms_usage
@@ -75,3 +83,31 @@ def test_handle_session_command_initializes_rich_before_listing(monkeypatch):
     mms_core.handle_session_command(["ls"])
 
     assert mms_core.Table is _FakeTable
+
+
+def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, tmp_path):
+    import mms_core
+
+    real_home = tmp_path / "home"
+    stale = real_home / ".config" / "mms" / "claude-gateway" / "s" / "999999"
+    stale.mkdir(parents=True)
+    (stale / "payload.txt").write_text("stale session\n", encoding="utf-8")
+    console = _CollectingConsole()
+
+    def _fake_ensure_rich():
+        mms_core.Table = _FakeTable
+        mms_core.Text = str
+
+    monkeypatch.setattr(mms_core, "Table", None)
+    monkeypatch.setattr(mms_core, "Text", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", _fake_ensure_rich)
+    monkeypatch.setattr(mms_core, "console", console)
+    monkeypatch.setattr(mms_core, "resolve_real_user_home", lambda: str(real_home))
+
+    mms_core.handle_session_command(["prune", "--cli", "claude"])
+
+    tables = [item for item in console.items if isinstance(item, _FakeTable)]
+    assert tables
+    assert tables[0].rows[0][0][0] == "claude"
+    assert tables[0].rows[0][0][1] == "999999"
+    assert stale.exists()

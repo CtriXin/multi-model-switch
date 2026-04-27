@@ -430,12 +430,55 @@ def _print_launch_step_done(label, started_at, detail=None, *, style="dim"):
     console.print(f"[{style}]· {label} 完成 ({elapsed:.1f}s){suffix}[/{style}]")
 
 
+def _launch_timing_threshold_sec():
+    raw = str(os.environ.get("MMS_LAUNCH_TIMING_THRESHOLD_SEC") or "").strip()
+    if not raw:
+        return 5.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 5.0
+
+
+def _launch_timing_enabled():
+    return str(os.environ.get("MMS_LAUNCH_TIMING") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@contextmanager
+def _timed_launch_step(timings, label):
+    start = perf_counter()
+    try:
+        yield
+    finally:
+        if isinstance(timings, list):
+            timings.append((str(label), perf_counter() - start))
+
+
+def _print_launch_timing_breakdown(timings, *, total_elapsed):
+    if not isinstance(timings, list) or not timings:
+        return
+    if not _launch_timing_enabled() and total_elapsed < _launch_timing_threshold_sec():
+        return
+    top = sorted(
+        ((label, elapsed) for label, elapsed in timings if elapsed >= 0.05),
+        key=lambda item: item[1],
+        reverse=True,
+    )[:8]
+    if not top:
+        return
+    detail = "；".join(f"{label} {elapsed:.1f}s" for label, elapsed in top)
+    console.print(f"[dim]  慢步骤拆分: {detail}[/dim]")
+
+
 def _prepare_claude_env_with_status(runtime, **kwargs):
+    timings = []
     with _launch_status("准备 Claude 会话环境中...", spinner="dots") as step_start:
-        env = _claude_gateway_env(runtime, **kwargs)
+        env = _claude_gateway_env(runtime, _timings=timings, **kwargs)
     selected = kwargs.get("selected_model") or kwargs.get("heavy_model")
     detail = selected if selected else runtime.get("id", "provider")
+    total_elapsed = perf_counter() - step_start
     _print_launch_step_done("Claude 会话环境准备", step_start, detail)
+    _print_launch_timing_breakdown(timings, total_elapsed=total_elapsed)
     return env
 
 
@@ -864,6 +907,24 @@ def _session_home_is_active(session_home):
     return _session_guard_pid_alive(pid)
 
 
+def _bounded_env_float(name, default):
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return float(default)
+
+
+def _session_cleanup_launch_max_entries():
+    return _bounded_env_int("MMS_SESSION_CLEANUP_MAX_ENTRIES", 3)
+
+
+def _session_cleanup_launch_max_seconds():
+    return _bounded_env_float("MMS_SESSION_CLEANUP_MAX_SECONDS", 2.0)
+
+
 def _reserve_session_home(
     sessions_dir,
     *,
@@ -871,27 +932,35 @@ def _reserve_session_home(
     runtime_kind="",
     stale_callback=None,
     max_live_sessions=None,
+    timings=None,
 ):
     sessions_dir = str(sessions_dir or "").strip()
     if not sessions_dir:
         return "", 0, 0
     os.makedirs(sessions_dir, exist_ok=True)
     session_home = os.path.join(sessions_dir, str(os.getpid()))
-    with locked_state_file(_session_guard_lock_path(sessions_dir)):
-        _cleanup_stale_sessions(sessions_dir, stale_callback=stale_callback)
-        active_before = _count_live_session_dirs(sessions_dir)
-        if _session_home_is_active(session_home):
-            active_before = max(0, active_before - 1)
-        active_after = active_before + 1
-        if max_live_sessions is not None and active_after > int(max_live_sessions):
-            return "", active_before, active_after
-        os.makedirs(session_home, exist_ok=True)
-        _write_session_guard_marker(
-            session_home,
-            account_id=account_id,
-            runtime_kind=runtime_kind,
-        )
-        return session_home, active_before, active_after
+    with _timed_launch_step(timings, "reserve session lock+cleanup"):
+        with locked_state_file(_session_guard_lock_path(sessions_dir)):
+            with _timed_launch_step(timings, "stale session cleanup"):
+                _cleanup_stale_sessions(
+                    sessions_dir,
+                    stale_callback=stale_callback,
+                    max_entries=_session_cleanup_launch_max_entries(),
+                    max_seconds=_session_cleanup_launch_max_seconds(),
+                )
+            active_before = _count_live_session_dirs(sessions_dir)
+            if _session_home_is_active(session_home):
+                active_before = max(0, active_before - 1)
+            active_after = active_before + 1
+            if max_live_sessions is not None and active_after > int(max_live_sessions):
+                return "", active_before, active_after
+            os.makedirs(session_home, exist_ok=True)
+            _write_session_guard_marker(
+                session_home,
+                account_id=account_id,
+                runtime_kind=runtime_kind,
+            )
+            return session_home, active_before, active_after
 
 
 def _real_home_wrapper_scrub_lines():
@@ -6033,11 +6102,17 @@ def _pick_gateway_model(runtime, base_url):
     return None
 
 
-def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
+def _cleanup_stale_sessions(sessions_dir, stale_callback=None, *, max_entries=None, max_seconds=None):
     """清理已死进程的残留 session 目录。"""
     if not os.path.isdir(sessions_dir):
         return
+    start = perf_counter()
+    removed = 0
     for name in os.listdir(sessions_dir):
+        if max_entries is not None and removed >= int(max_entries):
+            break
+        if max_seconds is not None and (perf_counter() - start) >= float(max_seconds):
+            break
         stale = os.path.join(sessions_dir, name)
         if not os.path.isdir(stale):
             continue
@@ -6049,6 +6124,7 @@ def _cleanup_stale_sessions(sessions_dir, stale_callback=None):
             except Exception:
                 pass
         shutil.rmtree(stale, ignore_errors=True)
+        removed += 1
 
 
 def _copy_tree_files_if_missing(src, dst):
@@ -6342,6 +6418,7 @@ def _claude_gateway_env(
     selected_model=None,
     runtime_kind=None,
     display_model=None,
+    _timings=None,
 ):
     """Gateway api_key 模式独立 HOME（per-PID 会话隔离）：
     - 每个 mms 进程使用独立的 ~/.config/mms/claude-gateway/s/{pid}/ 作为 HOME
@@ -6364,6 +6441,7 @@ def _claude_gateway_env(
         account_id=str(runtime.get("id", "")),
         runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
         stale_callback=_finalize_claude_slot,
+        timings=_timings,
     )
     route_status_path = _claude_route_status_paths()[0]
     os.makedirs(gateway_home, exist_ok=True)
@@ -6377,6 +6455,7 @@ def _claude_gateway_env(
             base_url = base_url[:-3]
 
     # ── .claude.json：schema-based allowlist，避免未知 global 字段渗入 gateway session ──
+    state_step_start = perf_counter()
     real_json = _real_user_path(".claude.json")
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
@@ -6427,28 +6506,32 @@ def _claude_gateway_env(
     )
     with locked_state_file(gw_json):
         atomic_write_json(gw_json, data, mode=0o600)
+    if isinstance(_timings, list):
+        _timings.append(("claude state seed", perf_counter() - state_step_start))
 
     # ── .local symlink：Claude Code 检测 $HOME/.local/bin/claude（installMethod=native）──
-    real_local = _real_user_path(".local")
-    gw_local = os.path.join(gateway_home, ".local")
-    if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
-        os.symlink(real_local, gw_local)
+    with _timed_launch_step(_timings, "link shared home entries"):
+        real_local = _real_user_path(".local")
+        gw_local = os.path.join(gateway_home, ".local")
+        if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
+            os.symlink(real_local, gw_local)
 
-    # ── Library allowlist：仅保留 Keychain 依赖 ──
-    _link_claude_library_entries(gateway_home)
+        # ── Library allowlist：仅保留 Keychain 依赖 ──
+        _link_claude_library_entries(gateway_home)
 
-    _link_shared_dotfiles(gateway_home)
+        _link_shared_dotfiles(gateway_home)
 
     # ── ~/.claude 目录：仅保留 project-scoped 持久项，其余不再继承真实树 ──
     gw_claude_dir = os.path.join(gateway_home, ".claude")
-    _prepare_claude_session_tree(
-        gateway_home,
-        gw_claude_dir,
-        account_id=str(runtime.get("id", "")),
-        runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
-        resume_model=resume_model,
-        skip_real_entries={"settings.json"},
-    )
+    with _timed_launch_step(_timings, "prepare claude tree"):
+        _prepare_claude_session_tree(
+            gateway_home,
+            gw_claude_dir,
+            account_id=str(runtime.get("id", "")),
+            runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
+            resume_model=resume_model,
+            skip_real_entries={"settings.json"},
+        )
     report = runtime.get("_account_guard_report")
     if report:
         _persist_account_guard_launch(
@@ -6503,108 +6586,112 @@ def _claude_gateway_env(
     # 其余 DEFAULT_*_MODEL slot 保持 Claude 壳名供 Claude Code 内部 slot 匹配
     if display_model:
         required_settings_env["ANTHROPIC_MODEL"] = display_model
-    session_packet_env = _install_session_packet_env(
-        {},
-        cli="claude",
-        runtime=runtime,
-        model_info={
-            "model": display_model or selected_model or heavy_model or best_model or "",
-            "lb_medium": medium_model or "",
-            "lb_light": light_model or "",
-        },
-        session_home=gateway_home,
-        features={
-            "caveman": enable_caveman,
-            "ecc": enable_ecc,
-            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
-            "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
-            "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
-            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-            "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
-        },
-        extra_paths={"route_status": route_status_path},
-    )
-    required_settings_env.update(session_packet_env)
-    _write_claude_session_settings(
-        gw_claude_dir,
-        required_env=required_settings_env,
-        default_env=default_settings_env,
-        enable_caveman=enable_caveman,
-        enable_ecc=enable_ecc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-    _overlay_caveman_session_entries(
-        gw_claude_dir,
-        gateway_home,
-        enable_caveman=enable_caveman,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-    _overlay_ecc_session_entries(
-        gw_claude_dir,
-        gateway_home,
-        enable_ecc=enable_ecc,
-        disabled_session_surfaces=disabled_session_surfaces,
-    )
-    _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+    with _timed_launch_step(_timings, "write session settings"):
+        session_packet_env = _install_session_packet_env(
+            {},
+            cli="claude",
+            runtime=runtime,
+            model_info={
+                "model": display_model or selected_model or heavy_model or best_model or "",
+                "lb_medium": medium_model or "",
+                "lb_light": light_model or "",
+            },
+            session_home=gateway_home,
+            features={
+                "caveman": enable_caveman,
+                "ecc": enable_ecc,
+                "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+                "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+                "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
+                "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
+            },
+            extra_paths={"route_status": route_status_path},
+        )
+        required_settings_env.update(session_packet_env)
+        _write_claude_session_settings(
+            gw_claude_dir,
+            required_env=required_settings_env,
+            default_env=default_settings_env,
+            enable_caveman=enable_caveman,
+            enable_ecc=enable_ecc,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+    with _timed_launch_step(_timings, "overlay session assets"):
+        _overlay_caveman_session_entries(
+            gw_claude_dir,
+            gateway_home,
+            enable_caveman=enable_caveman,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        _overlay_ecc_session_entries(
+            gw_claude_dir,
+            gateway_home,
+            enable_ecc=enable_ecc,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
-    env = os.environ.copy()
-    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    _inject_real_home_hints(env)
-    env["HOME"] = gateway_home
-    _set_session_home_hint(env, gateway_home)
-    env.update(session_packet_env)
-    env["ANTHROPIC_BASE_URL"] = base_url
-    env["ANTHROPIC_AUTH_TOKEN"] = effective_token
-    env["MMS_ROUTE_STATUS_PATH"] = route_status_path
-    if sensitive_provider:
-        env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
-    if best_model:
-        best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m)
-        for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
-            env[key] = best_1m
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
-    if selected_model:
-        _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
-    if display_model:
-        env["ANTHROPIC_MODEL"] = display_model
-    if not sensitive_provider:
-        env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
-    env = _configure_ecc_session_env(env, enable_ecc=enable_ecc)
-    _apply_runtime_network_profile(
-        env,
-        runtime,
-        validate_proxy=bool(runtime.get("proxy")),
-    )
-    _install_session_command_wrappers(gateway_home, env)
+    with _timed_launch_step(_timings, "build env and wrappers"):
+        env = os.environ.copy()
+        _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+        _inject_real_home_hints(env)
+        env["HOME"] = gateway_home
+        _set_session_home_hint(env, gateway_home)
+        env.update(session_packet_env)
+        env["ANTHROPIC_BASE_URL"] = base_url
+        env["ANTHROPIC_AUTH_TOKEN"] = effective_token
+        env["MMS_ROUTE_STATUS_PATH"] = route_status_path
+        if sensitive_provider:
+            env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
+        if best_model:
+            best_1m = _with_1m_suffix(best_model, enable_1m=enable_claude_1m)
+            for key in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_REASONING_MODEL"):
+                env[key] = best_1m
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = best_model  # haiku 不支持 1M
+        if selected_model:
+            _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
+        if display_model:
+            env["ANTHROPIC_MODEL"] = display_model
+        if not sensitive_provider:
+            env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
+        env = _configure_ecc_session_env(env, enable_ecc=enable_ecc)
+        _apply_runtime_network_profile(
+            env,
+            runtime,
+            validate_proxy=bool(runtime.get("proxy")),
+        )
+        _install_session_command_wrappers(gateway_home, env)
 
     # Context window 在 launch_claude() 中用真实模型名计算，此处不设置
 
     # ── 写入 route_status.json 供 statusline 读取 ──
     # bridge 模式下用 heavy_model，直连模式下用 best_model
-    status_model = display_model or selected_model or heavy_model or best_model or "unknown"
-    status_tier = "heavy" if auth_token else "-"
-    status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
-    _ensure_bridge_helpers()
-    try:
-        _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
-    except Exception:
-        pass
+    with _timed_launch_step(_timings, "route status"):
+        status_model = display_model or selected_model or heavy_model or best_model or "unknown"
+        status_tier = "heavy" if auth_token else "-"
+        status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
+        _ensure_bridge_helpers()
+        try:
+            _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
+        except Exception:
+            pass
 
-    # ── health 预检摘要 ──
-    try:
-        _h = _get_model_health(status_model)
-        if _h:
-            _s = _h.get("status", "?")
-            _b = _h.get("latency_bucket", "?")
-            _icon = {"ok": "●", "slow": "◐", "degraded": "◑"}.get(_s, "?")
-            print(f"  {_icon} {status_model}: {_s} ({_b})")
-    except Exception:
-        pass
+        # ── health 预检摘要 ──
+        try:
+            _h = _get_model_health(status_model)
+            if _h:
+                _s = _h.get("status", "?")
+                _b = _h.get("latency_bucket", "?")
+                _icon = {"ok": "●", "slow": "◐", "degraded": "◑"}.get(_s, "?")
+                print(f"  {_icon} {status_model}: {_s} ({_b})")
+        except Exception:
+            pass
 
     return env
 
