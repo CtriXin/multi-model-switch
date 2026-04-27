@@ -18,6 +18,22 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 ---
 
+## ⚠️ 协议与缓存的重要结论
+
+后续只要新增 dual-protocol provider，先记住这 4 条：
+
+- `Anthropic /v1/messages` 和 `OpenAI /v1/chat/completions` 不是等价 transport
+- 如果 provider 支持 `anthropic_messages`，`Claude` 语义默认应优先走 `messages`
+- `chat/completions` 是 fallback，不是默认兜底
+- `cache hit` 很低时，先查实际 request path，不要只看 model/vendor 名称
+
+进一步的运维/排查规则见：
+
+- `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
+- `docs/AGENT_GUARDRAILS.md`
+
+---
+
 ## ✨ 核心特性
 
 - 🎯 **统一 TUI**：方向键选模型，回车启动，无需记忆命令
@@ -650,6 +666,16 @@ home_dir = "~/.config/mms/accounts/personal"
 # timezone = "America/Los_Angeles"  # 可选：默认就是这个；只影响该次 Claude 进程
 # force_ipv4 = true                 # 可选：默认开启；MMS 会话优先 IPv4
 ```
+
+### dual-protocol provider 建议
+
+- 如果某个 provider 同时支持 `anthropic_messages` 和 `openai_chat_completions`，推荐显式同时配置：
+  - `anthropic_base_url`
+  - `openai_base_url`
+- `claude` 会优先走 `anthropic_base_url`
+- `codex` / `qwen` / `kimi` 继续走 `openai_base_url`
+- 如果是 `newapi/shared-root` 这类同 root 同时承载两种协议的 gateway，只配 `openai_base_url = https://gateway.example.com/v1` 也可以；`MMS` 会先尝试把它探测成 `https://gateway.example.com` 的 `Anthropic /v1/messages`
+- 但如果厂商把两种协议放在不同路径，例如 `.../v1` 和 `.../apps/anthropic`，`MMS` 不能自动猜出第二条路径，仍然应该显式配置两条 URL
 
 ---
 

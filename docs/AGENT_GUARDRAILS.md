@@ -44,6 +44,25 @@
 - `MMS -> sensitive OpenAI-compatible relay -> upstream`
 - `MMS -> sticky-session relay -> upstream`
 
+## Anthropic-First / Cache Guardrail
+
+这条规则专门针对 dual-protocol provider 与 cache 命中问题：
+
+- `Anthropic Messages` 和 `OpenAI chat/completions` 不是等价 transport
+- 同一个 vendor、同一个 model、同一个 key，在 `/v1/messages` 和 `/v1/chat/completions` 上的 cache 表现可能完全不同
+- 如果 route 支持 `anthropic_messages`，默认应优先 `Anthropic /v1/messages`
+- `chat/completions` 只能作为 fallback，不应该是静默默认值
+
+当前已知稳定经验：
+
+- `shared-root gateway`：如果 `openai_base_url=/v1` 且已知支持 `anthropic_messages`，优先验证裁 root 后的 `/v1/messages`
+- `separate-path vendor`：例如 `.../v1` 与 `.../apps/anthropic`，必须显式配置两条 URL；不要靠猜
+- 低 cache 先区分 `route/protocol` 问题和 `model-level` 问题，不要一上来就怀疑 sticky failure
+
+相关事实 runbook：
+
+- `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
+
 只要改动会碰到下面任一项，就不能只看“本地代码改得小不小”，必须先回答“会不会影响这条链路”：
 
 - provider 的 `models_endpoint`
@@ -70,6 +89,7 @@
 2. 这次会不会改变任一敏感 relay 链的 `/models`、`/responses`、`/messages` 行为？
 3. 这次会不会改变 sticky-session 的 key source、header 透传，或上游对客户端类型的识别？
 4. 如果线上坏了，能不能立刻用现有 smoke 文档复现并回溯？
+5. 这次会不会把原本应走 `Anthropic /v1/messages` 的流量重新打回 `chat/completions`，从而影响 cache？
 
 ## 这条链路的最低验证
 
@@ -81,6 +101,10 @@
   - manual model-list / fallback / extra model smoke
 - sticky-session relay：
   - sticky-session 命中与关键 header 识别 smoke
+- dual-protocol / cache-sensitive route：
+  - 实际 `request_path` 是否仍是 `/v1/messages`
+  - 是否意外退回 `/v1/chat/completions`
+  - 如果 cache 异常，是否已区分 `route-level` vs `model-level`
 
 统一追溯入口：
 

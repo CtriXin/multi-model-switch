@@ -1,6 +1,6 @@
 # Server Claude Cache Runbook
 
-> 更新时间：2026-04-08
+> 更新时间：2026-04-26
 > 适用范围：服务端 `new-api` / `new-api-custom` 上所有走 `Claude-compatible /v1/messages` 的 channel
 
 ## 目的
@@ -11,6 +11,57 @@
 
 - 如果某条 `Claude-compatible` 通道明明上游支持 cache，但经服务端转发后一直不命中，第一优先排查服务端 `new-api` channel 配置，不要先怀疑本地 `MMS`
 - 是否需要修，不按“厂商名”判断，而按“这条 `/v1/messages` 转发链有没有稳定透传 `anthropic-beta` 与 `cache_control`”判断
+- 对同时支持 `Anthropic` / `OpenAI-compatible` 的 provider，`Claude` 路径应优先走 `Anthropic /v1/messages`；只有这条路不通时，才退到 `OpenAI bridge`
+
+---
+
+## 2026-04-26 补充：`MMS` 对 dual-protocol / `newapi` 的默认兜底
+
+### 结论
+
+- 最稳妥的配置仍然是同时提供：
+  - `anthropic_base_url`
+  - `openai_base_url`
+- `Claude` 应该吃 `anthropic_base_url`
+- `Codex` / `Qwen` / `Kimi` 这类 `OpenAI-compatible` CLI 继续吃 `openai_base_url`
+
+### 新增的 launcher 兜底
+
+从 `2026-04-26` 起，`MMS` 的 `Claude launcher` 多了一层保守兜底：
+
+- 如果 provider 声明支持 `anthropic_messages`
+- 但没有显式配置 `anthropic_base_url`
+- 只有 `openai_base_url = https://gateway.example.com/v1`
+- 那么 `MMS` 会先把它裁成 `https://gateway.example.com`
+- 再主动 probe `https://gateway.example.com/v1/messages`
+
+如果 probe 成功：
+
+- `Claude` 直接走 `Anthropic Messages`
+- 避免直接掉进 `OpenAI bridge -> /v1/chat/completions`
+- 对 `prompt cache` 更友好
+
+如果 probe 失败：
+
+- 保持原来的 bridge fallback
+- 不会强行假设这个 root 一定支持 `Anthropic`
+
+### 这个兜底能覆盖什么，不能覆盖什么
+
+能覆盖：
+
+- `newapi` / `new-api-custom`
+- 这类 `shared-root gateway`
+- 同一个 root 同时承载 `/v1/chat/completions` 和 `/v1/messages`
+
+不能覆盖：
+
+- `Anthropic` 路径和 `OpenAI` 路径本来就不同的厂商
+- 例如：
+  - `https://coding.dashscope.aliyuncs.com/v1`
+  - `https://coding.dashscope.aliyuncs.com/apps/anthropic`
+
+这种场景下，`MMS` 没法从 `.../v1` 自动猜出 `.../apps/anthropic`，仍然应该显式配置两条 URL。
 
 ---
 

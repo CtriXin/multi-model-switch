@@ -2723,6 +2723,27 @@ def _resolve_token_saver_root():
     return ""
 
 
+def _resolve_auto_github_contributor_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
+        _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
+        _real_user_path("vendor", "auto-github-contributor", "skills", "auto-github-contributor"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
 def _mms_toon_script_path():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-toon")
     return script_path if os.path.isfile(script_path) else ""
@@ -3210,6 +3231,19 @@ def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_s
     _overlay_session_entry_dir(parent_dir, overlay_root, "commands", token_saver_root)
 
 
+def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    auto_gh_root = _resolve_auto_github_contributor_root()
+    if not auto_gh_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-auto-github-contributor-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "auto-github-contributor", auto_gh_root, disabled_session_surfaces=disabled_session_surfaces)
+    # Also overlay commands (auto-contribute.md) from the vendor root
+    vendor_commands_root = os.path.normpath(os.path.join(auto_gh_root, "..", "..", "commands"))
+    if os.path.isdir(vendor_commands_root):
+        _overlay_session_entry_dir(parent_dir, overlay_root, "commands", vendor_commands_root)
+
+
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
     merged = dict(env_data) if isinstance(env_data, dict) else {}
     for key in ("CLAUDE_PLUGIN_ROOT", "ECC_PLUGIN_ROOT", "ECC_HOOK_PROFILE", "ECC_DISABLED_HOOKS"):
@@ -3319,6 +3353,51 @@ def _default_hive_session_mcp_server():
     return None
 
 
+def _resolve_pilot_root(module_path=None):
+    candidates = []
+    explicit = str(os.environ.get("MMS_PILOT_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+
+    module_dir = os.path.dirname(os.path.abspath(module_path or __file__))
+    auto_skills_root = os.path.dirname(os.path.dirname(module_dir))
+    local_candidates = [
+        os.path.join(auto_skills_root, "shared-skills", "pilot"),
+        _real_user_path("auto-skills", "shared-skills", "pilot"),
+        os.path.join(os.path.dirname(module_dir), "pilot"),
+    ]
+    installed_candidates = [
+        _real_user_path(".local", "share", "pilot"),
+    ]
+    if _is_installed_mms_layout(module_path=module_path):
+        candidates.extend(installed_candidates)
+        candidates.extend(local_candidates)
+    else:
+        candidates.extend(local_candidates)
+        candidates.extend(installed_candidates)
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "scripts", "pilot_mcp_server.py")):
+            return candidate
+    return ""
+
+
+def _default_pilot_session_mcp_server():
+    pilot_root = _resolve_pilot_root()
+    if pilot_root:
+        return {
+            "command": "python3",
+            "args": [os.path.join(pilot_root, "scripts", "pilot_mcp_server.py")],
+            "env": {"HOME": _real_user_home()},
+            "type": "stdio",
+        }
+    return None
+
+
 def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
     settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
     mcp_servers = settings_data.get("mcpServers")
@@ -3327,6 +3406,9 @@ def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_s
     hive_spec = _default_hive_session_mcp_server()
     if hive_spec and not (isinstance(merged.get("hive"), dict) and str(merged.get("hive", {}).get("command") or "").strip()):
         merged["hive"] = copy.deepcopy(hive_spec)
+    pilot_spec = _default_pilot_session_mcp_server()
+    if pilot_spec and not (isinstance(merged.get("pilot"), dict) and str(merged.get("pilot", {}).get("command") or "").strip()):
+        merged["pilot"] = copy.deepcopy(pilot_spec)
     merged = _filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
 
     if merged:
@@ -3363,6 +3445,9 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
             inherited.setdefault("hive", copy.deepcopy(hive_spec))
+        pilot_spec = _default_pilot_session_mcp_server()
+        if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
+            inherited.setdefault("pilot", copy.deepcopy(pilot_spec))
     inherited = _filter_mcp_servers_by_disabled(inherited, disabled_session_surfaces)
     return inherited
 
@@ -4509,6 +4594,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
+            _overlay_auto_github_contributor_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
         xdg_config_home = os.path.join(session_home, ".config")
         env["HOME"] = session_home
         env["XDG_CONFIG_HOME"] = xdg_config_home
@@ -4527,6 +4617,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
         )
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
@@ -5199,6 +5290,9 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     hive_spec = _default_hive_session_mcp_server()
     if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
         servers.setdefault("hive", hive_spec)
+    pilot_spec = _default_pilot_session_mcp_server()
+    if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
+        servers.setdefault("pilot", pilot_spec)
     servers = _filter_mcp_servers_by_disabled(servers, disabled_session_surfaces)
 
     if not servers:
@@ -5291,6 +5385,20 @@ def _anthropic_base_url(provider):
     if "anthropic_messages" not in _provider_protocols(provider):
         return ""
     return str(provider.get("base_url", "")).strip().rstrip("/")
+
+
+def _anthropic_probe_target(runtime):
+    configured = _anthropic_base_url(runtime)
+    if configured:
+        return configured.rstrip("/"), "configured"
+    if "anthropic_messages" not in _provider_protocols(runtime):
+        return "", ""
+    openai_url = str(_openai_base_url(runtime) or "").strip().rstrip("/")
+    if not openai_url:
+        return "", ""
+    if openai_url.endswith("/v1"):
+        return openai_url[:-3], "openai_fallback"
+    return openai_url, "openai_fallback"
 
 
 def _resolve_model(model_info):
@@ -5773,10 +5881,19 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
       候选1: base_without_v1  （通常正确）
       候选2: base_with_v1     （少数兼容两种路径的 gateway）
 
+    如果 provider 没显式给出 anthropic_base_url，但同时声明支持
+    anthropic_messages + openai_chat_completions，则会额外尝试把
+    openai_base_url 去掉尾部 /v1 后当成 shared-root candidate，探测
+    /v1/messages 是否可用；这样 newapi/shared-root provider 可以优先
+    走 cache 更友好的 Anthropic Messages，而不是直接退到 OpenAI bridge。
+
     Returns: (base_url: str | None, method: str)
-      method: 'cached' | 'probed' | 'fallback' | 'failed'
+      method: 'cached' | 'file_cached' | 'normalized' | 'config_bypass'
+              | 'sensitive_bypass' | 'bypass_for_bailian' | 'probed'
+              | 'openai_fallback_probed' | 'openai_fallback_failed'
+              | 'no_config' | 'failed'
     """
-    configured = _anthropic_base_url(runtime)
+    configured, probe_source = _anthropic_probe_target(runtime)
     api_key = runtime.get("api_key", "")
     provider_id = runtime.get("id", "default")
 
@@ -5786,7 +5903,7 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     # 预处理 URL
     url = configured.rstrip("/")
     normalized_url = url[:-3] if url.endswith("/v1") else url
-    cache_key = _anthropic_cache_key(provider_id, url)
+    cache_key = _anthropic_cache_key(provider_id, configured)
 
     # ---- 内存缓存（TTL 1h）----
     cached = _ANTHROPIC_URL_CACHE.get(cache_key)
@@ -5810,22 +5927,28 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
                 return cached_url, "file_cached"
 
     # ---- 快速兼容：Claude SDK 自己会拼 /v1/messages，配置尾部 /v1 时直接裁掉 ----
-    if url.endswith("/v1"):
+    if probe_source == "configured" and url.endswith("/v1"):
         _remember_anthropic_url(provider_id, url, normalized_url)
         return normalized_url, "normalized"
 
     if provider_id and runtime.get("skip_anthropic_probe"):
+        if probe_source != "configured":
+            return None, "openai_fallback_failed"
         console.print("[dim]已跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
         _remember_anthropic_url(provider_id, url, url)
         return url, "config_bypass"
 
     if _runtime_is_sensitive_claude_provider(runtime):
+        if probe_source != "configured":
+            return None, "openai_fallback_failed"
         console.print("[dim]敏感 Claude provider：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
         _remember_anthropic_url(provider_id, url, url)
         return url, "sensitive_bypass"
 
     # 对 bailian-codingplan，直接使用配置的 URL，不做探测（百炼 Anthropic 端点行为特殊）
     if provider_id == "bailian-codingplan":
+        if probe_source != "configured":
+            return None, "openai_fallback_failed"
         console.print(f"[dim]百炼 CodingPlan：跳过 Anthropic 端点探测，直接使用配置 URL[/dim]")
         _remember_anthropic_url(provider_id, url, url)
         return url, "bypass_for_bailian"
@@ -5852,11 +5975,15 @@ def _resolve_anthropic_base_url(runtime, probe_model="claude-sonnet-4-6"):
     candidate = detect_working_base_url(url, "/v1/messages", headers, body=body, timeout=5, runtime=runtime)
 
     if candidate is not None:
-        _remember_anthropic_url(provider_id, url, candidate)
+        _remember_anthropic_url(provider_id, configured, candidate)
         if candidate != url:
             console.print(f"[dim]✓ Anthropic 端点自动修正: {url} → {candidate}[/dim]")
+        if probe_source == "openai_fallback":
+            return candidate, "openai_fallback_probed"
         return candidate, "probed"
 
+    if probe_source == "openai_fallback":
+        return None, "openai_fallback_failed"
     return None, "failed"
 
 
@@ -6384,6 +6511,7 @@ def _claude_gateway_env(
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+            "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
         extra_paths={"route_status": route_status_path},
     )
@@ -6412,6 +6540,7 @@ def _claude_gateway_env(
     _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -6747,6 +6876,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
@@ -6772,6 +6902,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+            "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
     )
     return env

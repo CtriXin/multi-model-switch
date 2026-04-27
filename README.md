@@ -17,6 +17,20 @@
 - One way to export env vars or presets for scripts and automation
 - One routing layer for provider priority, bridge compatibility, and diagnostics
 
+## Protocol And Cache Note
+
+For dual-protocol providers, keep these rules in mind:
+
+- `Anthropic /v1/messages` and `OpenAI /v1/chat/completions` are not equivalent transports
+- if a provider supports `anthropic_messages`, `Claude` semantics should prefer `messages`
+- `chat/completions` is fallback transport, not the silent default
+- when cache looks bad, verify the real request path before blaming the model or vendor
+
+Detailed operator rules:
+
+- `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
+- `docs/AGENT_GUARDRAILS.md`
+
 <!-- repo-graphics:runtime-start -->
 ## Runtime Flow
 

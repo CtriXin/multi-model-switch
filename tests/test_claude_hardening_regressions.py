@@ -55,6 +55,16 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
             "type": "stdio",
         },
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_pilot_session_mcp_server",
+        lambda: {
+            "command": "python3",
+            "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
 
     result = mms_launchers._build_claude_session_settings(
         {
@@ -71,6 +81,12 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
         "hive": {
             "command": "/tmp/hive-session-only.sh",
             "args": [],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+        "pilot": {
+            "command": "python3",
+            "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
         },
@@ -103,12 +119,23 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
             "type": "stdio",
         },
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_pilot_session_mcp_server",
+        lambda: {
+            "command": "python3",
+            "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
 
     result = mms_launchers._build_claude_session_settings({})
 
     assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
     assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
     assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
+    assert result["mcpServers"]["pilot"]["args"] == ["/tmp/pilot/scripts/pilot_mcp_server.py"]
 
 
 def test_build_claude_session_settings_respects_session_disabled_surfaces(monkeypatch):
@@ -118,6 +145,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
     result = mms_launchers._build_claude_session_settings(
         {
@@ -231,12 +259,24 @@ def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeyp
             "type": "stdio",
         },
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_pilot_session_mcp_server",
+        lambda: {
+            "command": "python3",
+            "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
 
     rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
 
     assert '[mcp_servers.demo]' in rendered
     assert '[mcp_servers.hive]' in rendered
+    assert '[mcp_servers.pilot]' in rendered
     assert 'command = "/tmp/hive/bin/mcp-server.sh"' in rendered
+    assert 'args = ["/tmp/pilot/scripts/pilot_mcp_server.py"]' in rendered
     assert 'HOME = "/tmp/real-home"' in rendered
 
 
@@ -262,6 +302,7 @@ def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp
         lambda *parts: str(real_home.joinpath(*parts)),
     )
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
     rendered = mms_launchers._append_codex_mcp_servers_from_claude_json(
         '[mcp_servers.demo]\ncommand = "old"\n\nbase_url = "https://example.test"\n',
@@ -273,7 +314,7 @@ def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp
     assert 'args = ["/tmp/keep.js"]' in rendered
 
 
-def test_inject_managed_mcp_servers_into_claude_state_adds_hive_fallback(monkeypatch):
+def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_real_claude_settings", lambda: {})
@@ -288,11 +329,23 @@ def test_inject_managed_mcp_servers_into_claude_state_adds_hive_fallback(monkeyp
             "type": "stdio",
         },
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_default_pilot_session_mcp_server",
+        lambda: {
+            "command": "python3",
+            "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
+            "env": {"HOME": "/tmp/real-home"},
+            "type": "stdio",
+        },
+    )
 
     result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
 
     assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
     assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
+    assert result["mcpServers"]["pilot"]["args"] == ["/tmp/pilot/scripts/pilot_mcp_server.py"]
+    assert result["mcpServers"]["pilot"]["env"]["HOME"] == "/tmp/real-home"
 
 
 def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
@@ -1674,6 +1727,61 @@ def test_resolve_anthropic_base_url_cache_is_scoped_by_configured_url(monkeypatc
     assert resolved == "https://new.example.com"
     assert method == "config_bypass"
     assert mms_launchers._anthropic_cache_key("relay-a", "https://new.example.com") in saved_cache
+
+
+def test_resolve_anthropic_base_url_accepts_openai_base_url_only_when_messages_probe_succeeds(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    def fake_detect(url, endpoint, headers, body=None, timeout=0, runtime=None):
+        captured["url"] = url
+        captured["endpoint"] = endpoint
+        return url
+
+    monkeypatch.setattr(mms_launchers, "detect_working_base_url", fake_detect)
+    monkeypatch.setattr(mms_launchers, "_load_anthropic_url_file_cache", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_save_anthropic_url_file_cache", lambda payload: None)
+    mms_launchers._ANTHROPIC_URL_CACHE.clear()
+
+    resolved, method = mms_launchers._resolve_anthropic_base_url(
+        {
+            "id": "relay-a",
+            "api_key": "sk-test",
+            "openai_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+        }
+    )
+
+    assert resolved == "https://relay.example.com"
+    assert method == "openai_fallback_probed"
+    assert captured["url"] == "https://relay.example.com"
+    assert captured["endpoint"] == "/v1/messages"
+
+
+def test_resolve_anthropic_base_url_openai_base_url_only_keeps_bridge_fallback_when_messages_probe_fails(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "detect_working_base_url",
+        lambda url, endpoint, headers, body=None, timeout=0, runtime=None: None,
+    )
+    monkeypatch.setattr(mms_launchers, "_load_anthropic_url_file_cache", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_save_anthropic_url_file_cache", lambda payload: None)
+    mms_launchers._ANTHROPIC_URL_CACHE.clear()
+
+    resolved, method = mms_launchers._resolve_anthropic_base_url(
+        {
+            "id": "relay-a",
+            "api_key": "sk-test",
+            "openai_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages", "openai_chat_completions"],
+        }
+    )
+
+    assert resolved is None
+    assert method == "openai_fallback_failed"
 
 
 def test_load_probe_file_cache_marks_stale_and_preserves_error(monkeypatch, tmp_path):

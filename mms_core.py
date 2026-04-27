@@ -7028,6 +7028,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _configure_claude_caveman_hooks,
             _configure_claude_ecc_hooks,
             _default_hive_session_mcp_server,
+            _default_pilot_session_mcp_server,
             _filter_claude_session_hooks,
             _load_global_claude_settings_template,
             _load_mms_claude_settings_template,
@@ -7039,8 +7040,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _resolve_ecc_root,
             _resolve_token_saver_root,
             _resolve_toon_root,
-            _resolve_web_access_root,
             _resolve_weber_root,
+            _resolve_web_access_root,
             _sanitize_claude_inherited_settings_payload,
             _session_managed_mcp_servers,
             _strip_agent_im_hooks,
@@ -7447,6 +7448,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         hive_spec = _default_hive_session_mcp_server()
         if isinstance(hive_spec, dict) and str(hive_spec.get("command") or "").strip():
             codex_mcp.setdefault("hive", hive_spec)
+        pilot_spec = _default_pilot_session_mcp_server()
+        if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
+            codex_mcp.setdefault("pilot", pilot_spec)
         for name in sorted(codex_mcp):
             mcp_entry = _mcp_detail(codex_mcp.get(name))
             _append(
