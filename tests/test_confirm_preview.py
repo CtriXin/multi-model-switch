@@ -127,6 +127,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "/tmp/toon")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "/tmp/token-saver")
+    monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "/tmp/auto-github-contributor")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
     monkeypatch.setattr(mms_launchers, "_resolve_ecc_root", lambda: str(ecc_root))
 
@@ -147,7 +148,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     ecc_hook_titles = {item["title"] for item in preview["hooks"]["ecc"]}
 
     assert mcp_titles == {"mindkeeper"}
-    assert skill_titles >= {"web-access", "toon", "token-saver"}
+    assert skill_titles >= {"web-access", "toon", "token-saver", "auto-github-contributor"}
     assert caveman_skill_titles == {"caveman", "caveman-review"}
     assert len(preview["skills"]["ecc"]) == 1
     assert next(iter(ecc_skill_titles)).startswith("ECC")

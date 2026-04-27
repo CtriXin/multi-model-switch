@@ -224,6 +224,86 @@ def test_overlay_token_saver_session_entries_merges_existing_session_skills_and_
     assert os.path.islink(parent_dir / "commands" / "token-saver.toml")
 
 
+def test_overlay_auto_github_contributor_session_entries_merges_symlinked_skill_and_commands(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    existing_commands = tmp_path / "existing-commands"
+    vendor_root = tmp_path / "vendor" / "auto-github-contributor"
+    skill_root = vendor_root / "skills" / "auto-github-contributor"
+    installed_root = tmp_path / "installed-skills" / "auto-github-contributor"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    existing_commands.mkdir(parents=True)
+    (existing_commands / "keep.toml").write_text("description = \"keep\"\n", encoding="utf-8")
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# auto-github-contributor\n", encoding="utf-8")
+    (vendor_root / "commands").mkdir()
+    (vendor_root / "commands" / "auto-contribute.md").write_text("# auto contribute\n", encoding="utf-8")
+    installed_root.parent.mkdir(parents=True)
+    os.symlink(skill_root, installed_root)
+    os.symlink(existing_skills, parent_dir / "skills")
+    os.symlink(existing_commands, parent_dir / "commands")
+
+    monkeypatch.setenv("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT", str(installed_root))
+
+    mms_launchers._overlay_auto_github_contributor_session_entries(str(parent_dir), str(session_home))
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert os.path.islink(parent_dir / "skills" / "auto-github-contributor")
+    assert (parent_dir / "skills" / "auto-github-contributor" / "SKILL.md").read_text(encoding="utf-8") == "# auto-github-contributor\n"
+    assert os.path.islink(parent_dir / "commands")
+    assert os.path.islink(parent_dir / "commands" / "keep.toml")
+    assert os.path.islink(parent_dir / "commands" / "auto-contribute.md")
+
+
+def test_overlay_auto_github_contributor_session_entries_respects_disabled_skill(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    session_home = tmp_path / "session-home"
+    parent_dir = session_home / ".codex"
+    existing_skills = tmp_path / "existing-skills"
+    existing_commands = tmp_path / "existing-commands"
+    vendor_root = tmp_path / "vendor" / "auto-github-contributor"
+    skill_root = vendor_root / "skills" / "auto-github-contributor"
+    installed_root = tmp_path / "installed-skills" / "auto-github-contributor"
+    parent_dir.mkdir(parents=True)
+    (existing_skills / "keep-skill").mkdir(parents=True)
+    (existing_skills / "auto-github-contributor").mkdir()
+    (existing_skills / "auto-github-contributor" / "SKILL.md").write_text("# existing\n", encoding="utf-8")
+    existing_commands.mkdir(parents=True)
+    (existing_commands / "keep.toml").write_text("description = \"keep\"\n", encoding="utf-8")
+    (existing_commands / "auto-contribute.md").write_text("# existing command\n", encoding="utf-8")
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# auto-github-contributor\n", encoding="utf-8")
+    (vendor_root / "commands").mkdir()
+    (vendor_root / "commands" / "auto-contribute.md").write_text("# auto contribute\n", encoding="utf-8")
+    installed_root.parent.mkdir(parents=True)
+    os.symlink(skill_root, installed_root)
+    os.symlink(existing_skills, parent_dir / "skills")
+    os.symlink(existing_commands, parent_dir / "commands")
+
+    monkeypatch.setenv("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT", str(installed_root))
+
+    mms_launchers._overlay_auto_github_contributor_session_entries(
+        str(parent_dir),
+        str(session_home),
+        disabled_session_surfaces={"skills": ["auto-github-contributor"]},
+    )
+
+    assert os.path.islink(parent_dir / "skills")
+    assert os.path.islink(parent_dir / "skills" / "keep-skill")
+    assert not (parent_dir / "skills" / "auto-github-contributor").exists()
+    assert not (parent_dir / "skills" / "auto-github-contributor").is_symlink()
+    assert os.path.islink(parent_dir / "commands")
+    assert os.path.islink(parent_dir / "commands" / "keep.toml")
+    assert not (parent_dir / "commands" / "auto-contribute.md").exists()
+    assert not (parent_dir / "commands" / "auto-contribute.md").is_symlink()
+
+
 def test_resolve_token_saver_root_prefers_shared_skill(monkeypatch, tmp_path):
     home = tmp_path / "home"
     shared_root = home / "auto-skills" / "shared-skills" / "token-saver"

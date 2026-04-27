@@ -3238,10 +3238,19 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
     overlay_root = os.path.join(session_home, ".mms-auto-github-contributor-overlay")
     os.makedirs(overlay_root, exist_ok=True)
     _overlay_session_skill_dir(parent_dir, overlay_root, "auto-github-contributor", auto_gh_root, disabled_session_surfaces=disabled_session_surfaces)
-    # Also overlay commands (auto-contribute.md) from the vendor root
-    vendor_commands_root = os.path.normpath(os.path.join(auto_gh_root, "..", "..", "commands"))
-    if os.path.isdir(vendor_commands_root):
-        _overlay_session_entry_dir(parent_dir, overlay_root, "commands", vendor_commands_root)
+    vendor_root = os.path.normpath(os.path.join(os.path.realpath(auto_gh_root), "..", ".."))
+    if _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"):
+        if os.path.isdir(os.path.join(vendor_root, "commands")):
+            _overlay_session_entry_dir(
+                parent_dir,
+                overlay_root,
+                "commands",
+                vendor_root,
+                exclude_names={"auto-contribute.md"},
+            )
+        return
+    if os.path.isdir(os.path.join(vendor_root, "commands")):
+        _overlay_session_entry_dir(parent_dir, overlay_root, "commands", vendor_root)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):

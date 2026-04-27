@@ -7036,6 +7036,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _merge_claude_settings,
             _merge_mms_session_hooks,
             _resolve_agent_browser_root,
+            _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
             _resolve_ecc_root,
             _resolve_token_saver_root,
@@ -7508,6 +7509,18 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _append_skill_entries(
                 "always",
                 [{"name": "token-saver", "path": _skill_path(token_saver_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_auto_github_contributor_root():
+            auto_github_contributor_root = _resolve_auto_github_contributor_root()
+            _append_skill_entries(
+                "always",
+                [
+                    {
+                        "name": "auto-github-contributor",
+                        "path": _skill_path(auto_github_contributor_root),
+                    }
+                ],
                 _L("会话技能", "Session skill"),
             )
 
