@@ -179,6 +179,7 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
         bypass=False,
         set_env=[
             "ANTHROPIC_MODEL=claude-sonnet-4-6",
+            "MMS_MODEL_NAME=claude-sonnet-4-6",
             "OPENAI_API_KEY=sk-should-drop",
             "BAD=value",
         ],
@@ -196,6 +197,7 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     path_parts = env["PATH"].split(os.pathsep)
 
     assert env["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
+    assert env["MMS_MODEL_NAME"] == "claude-sonnet-4-6"
     assert env["HTTP_PROXY"] == "http://127.0.0.1:7890"
     assert env["NO_PROXY"] == "127.0.0.1,localhost"
     assert env["HOME"] == str(session_home)

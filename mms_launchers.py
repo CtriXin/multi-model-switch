@@ -761,6 +761,37 @@ def _set_session_home_hint(env, session_home):
     return env
 
 
+def _model_name_from_info(model_info):
+    if isinstance(model_info, str):
+        return model_info.strip()
+    if not isinstance(model_info, dict):
+        return ""
+    for key in ("model", "sonnet", "opus", "haiku"):
+        value = str(model_info.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _selected_model_name(*candidates, model_info=None):
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return _model_name_from_info(model_info)
+
+
+def _inject_selected_model_name(env, *candidates, model_info=None):
+    if not isinstance(env, dict):
+        return env
+    model_name = _selected_model_name(*candidates, model_info=model_info)
+    if model_name:
+        env["MMS_MODEL_NAME"] = model_name
+    else:
+        env.pop("MMS_MODEL_NAME", None)
+    return env
+
+
 def _install_session_packet_env(
     env,
     *,
@@ -4522,6 +4553,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env)
+    _inject_selected_model_name(env, model_info=model_info)
     home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
     session_home = ""
     if not home_dir:
@@ -5160,6 +5192,7 @@ def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
         "API_TIMEOUT_MS": "3000000",
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     }
+    _inject_selected_model_name(env, resolved_model)
     _apply_claude_model_overrides(env, model_info or resolved_model, enable_1m=enable_claude_1m)
     if isinstance(model_info, dict):
         env["CLAUDE_CODE_ENABLE_SUBAGENT_PARALLELISM"] = "1"
@@ -6559,11 +6592,14 @@ def _claude_gateway_env(
         best_model = fallback[0] if fallback else "qwen3.5-plus"
     else:
         best_model = _pick_gateway_model(runtime, base_url)
+    mms_model_name = _selected_model_name(display_model, selected_model, heavy_model, best_model)
     required_settings_env: dict = {
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
         "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
+    if mms_model_name:
+        required_settings_env["MMS_MODEL_NAME"] = mms_model_name
     default_settings_env: dict = {
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
     }
@@ -6646,6 +6682,7 @@ def _claude_gateway_env(
         env["ANTHROPIC_BASE_URL"] = base_url
         env["ANTHROPIC_AUTH_TOKEN"] = effective_token
         env["MMS_ROUTE_STATUS_PATH"] = route_status_path
+        _inject_selected_model_name(env, mms_model_name)
         if sensitive_provider:
             env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
         if best_model:
@@ -6977,6 +7014,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env, include_xdg=True)
+    _inject_selected_model_name(env, model_info=model_info)
     env["HOME"] = session_home
     _set_session_home_hint(env, session_home)
     env["OPENAI_API_KEY"] = openai_key
@@ -7136,6 +7174,7 @@ def launch_qwen(model_info, provider, once=False):
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    _inject_selected_model_name(env, model)
     _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
@@ -7148,6 +7187,7 @@ def launch_kimi(model_info, provider, once=False):
     model = _resolve_model(model_info)
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    _inject_selected_model_name(env, model)
     _apply_runtime_network_profile(env, provider, validate_proxy=False)
     _apply_runtime_locale_profile(env, provider)
     _apply_runtime_ip_stack_profile(env, provider)
@@ -7184,7 +7224,7 @@ def launch_gemini(model_info, runtime, once=False):
         console.print("[red]Gemini 当前只支持官方账号入口，不支持直接使用模型源启动[/red]")
         sys.exit(1)
 
-    env = _account_env(runtime)
+    env = _account_env(runtime, model_info=model_info)
     _prepare_oauth_home_context(runtime, env, "gemini")
     model = _resolve_model(model_info)
     cmd = ["gemini"]

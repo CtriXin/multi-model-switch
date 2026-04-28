@@ -852,6 +852,7 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
     packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
     assert packet["cli"] == "codex"
     assert packet["model"]["primary"] == "gpt-5.4"
+    assert env["MMS_MODEL_NAME"] == "gpt-5.4"
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
 
@@ -1342,6 +1343,8 @@ def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, t
     settings = json.loads((session_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert packet["cli"] == "claude"
     assert packet["model"]["primary"] == "kimi-for-coding"
+    assert env["MMS_MODEL_NAME"] == "kimi-for-coding"
+    assert settings["env"]["MMS_MODEL_NAME"] == "kimi-for-coding"
     assert settings["env"]["MMS_SESSION_PACKET_JSON"] == env["MMS_SESSION_PACKET_JSON"]
     assert env["MMS_SESSION_PACKET_FORMAT"] == "toon"
 
@@ -2232,6 +2235,7 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "claude-haiku-4-5")
     monkeypatch.setenv("CLAUDE_CODE_ATTRIBUTION_HEADER", "1")
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("MMS_MODEL_NAME", "parent-stale")
 
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
@@ -2253,6 +2257,7 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
     assert "CLAUDE_CODE_ATTRIBUTION_HEADER" not in env
     assert "HTTP_PROXY" not in env
+    assert "MMS_MODEL_NAME" not in env
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
@@ -2432,9 +2437,11 @@ def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_pa
     env = mms_launchers._account_env(
         {"id": "codex-a", "cli": "codex", "home_dir": str(account_home)},
         validate_proxy=False,
+        model_info={"model": "gpt-5.4"},
     )
 
     session_codex = Path(env["HOME"]) / ".codex"
+    assert env["MMS_MODEL_NAME"] == "gpt-5.4"
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "web-access")
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
@@ -2571,6 +2578,7 @@ def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
     )
 
     assert captured["cmd"][:3] == ["qwen", "--openai-base-url", "https://api.example.com/v1"]
+    assert captured["env"]["MMS_MODEL_NAME"] == "qwen3.5-plus"
     assert "OPENAI_API_KEY" not in captured["env"]
     assert "OPENAI_BASE_URL" not in captured["env"]
     assert "HTTP_PROXY" not in captured["env"]
@@ -3174,7 +3182,7 @@ def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypa
         ],
     )
 
-    mms_launchers._claude_gateway_env(
+    env = mms_launchers._claude_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime"},
         base_url="https://relay.example.com",
         auth_token="bridge-token",
@@ -3182,6 +3190,7 @@ def test_claude_gateway_env_does_not_restore_cross_model_resume_pointer(monkeypa
         display_model="gpt-5.4",
     )
 
+    assert env["MMS_MODEL_NAME"] == "gpt-5.4"
     session_state = json.loads((session_home / ".claude.json").read_text(encoding="utf-8"))
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert "lastSessionId" not in project_state
