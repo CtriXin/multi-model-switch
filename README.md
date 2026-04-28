@@ -28,6 +28,7 @@ For dual-protocol providers, keep these rules in mind:
 
 Detailed operator rules:
 
+- `docs/PROVIDER_PROFILES.md`
 - `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
 - `docs/AGENT_GUARDRAILS.md`
 

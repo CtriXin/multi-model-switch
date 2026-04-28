@@ -112,7 +112,7 @@ def _format_json_error(raw_text, exc):
     return f"JSON 解析失败: {exc}; 原始响应: {preview}"
 
 
-async def _collect_stream_text(client, base_url, api_key, model, messages, max_tokens):
+async def _collect_stream_text(client, base_url, api_key, model, messages, max_tokens, provider_ctx=None):
     chunks = []
     async for chunk in stream_model(
         client,
@@ -121,12 +121,13 @@ async def _collect_stream_text(client, base_url, api_key, model, messages, max_t
         model,
         messages,
         max_tokens=max_tokens,
+        runtime=provider_ctx,
     ):
         chunks.append(chunk)
     return "".join(chunks).strip()
 
 
-async def call_model_json(client, base_url, api_key, model, messages, max_tokens=500):
+async def call_model_json(client, base_url, api_key, model, messages, max_tokens=500, provider_ctx=None):
     if httpx is None:
         raise StreamError("当前环境缺少 httpx，无法发起请求")
 
@@ -138,6 +139,7 @@ async def call_model_json(client, base_url, api_key, model, messages, max_tokens
             model,
             messages,
             max_tokens=max_tokens,
+            provider_ctx=provider_ctx,
         )
     )
     if not raw_text:
@@ -185,6 +187,7 @@ async def phase1_diverge(provider_ctx, client, models, task_text):
                     model,
                     messages,
                     max_tokens=420,
+                    provider_ctx=provider_ctx,
                 ),
             )
             return model, {"ok": True, "data": data}
@@ -241,6 +244,7 @@ async def phase2_cross_review(provider_ctx, client, ordered_models, summaries):
                     model,
                     messages,
                     max_tokens=260,
+                    provider_ctx=provider_ctx,
                 ),
             )
             return model, {"ok": True, "target": target, "data": data}
@@ -277,6 +281,7 @@ async def phase3_synthesize(provider_ctx, client, synthesizer_model, task_text, 
             synthesizer_model,
             messages,
             max_tokens=1400,
+            runtime=provider_ctx,
         ):
             chunks.append(chunk)
             live.update(

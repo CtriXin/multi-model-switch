@@ -35,6 +35,7 @@ from mms_core import (
     ensure_provider_credentials,
     fetch_models,
 )
+from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
 
 MAX_SELECT = 5
 
@@ -75,6 +76,26 @@ def _nonblock_read_key() -> str | None:
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 _IMAGE_REF_RE = re.compile(r"@(\S+)")
+
+
+def _profile_runtime_thinking_enabled(runtime):
+    if not isinstance(runtime, dict) or "thinking_mode" not in runtime:
+        return None
+    value = str(runtime.get("thinking_mode") or "").strip().lower()
+    if value in {"disable", "disabled", "off", "false", "0", "no"}:
+        return False
+    if value in {"enable", "enabled", "on", "true", "1", "yes"}:
+        return True
+    return None
+
+
+def _profile_runtime_id(runtime):
+    if not isinstance(runtime, dict):
+        return "", ""
+    return (
+        str(runtime.get("id") or runtime.get("provider_id") or "").strip(),
+        str(runtime.get("profile") or runtime.get("provider_profile") or "").strip(),
+    )
 
 
 def _load_image_b64(path: str) -> tuple:
@@ -364,7 +385,16 @@ async def parse_sse_stream(response):
             yield part
 
 
-async def stream_model(client, base_url, api_key, model, messages, max_tokens=1200):
+async def stream_model(
+    client,
+    base_url,
+    api_key,
+    model,
+    messages,
+    max_tokens=1200,
+    runtime=None,
+    purpose="default",
+):
     if httpx is None:
         raise StreamError("当前环境缺少 httpx，无法建立流式请求")
 
@@ -379,6 +409,29 @@ async def stream_model(client, base_url, api_key, model, messages, max_tokens=12
         "stream": True,
         "max_tokens": max_tokens,
     }
+    provider_id, provider_profile = _profile_runtime_id(runtime)
+    apply_profile_body_patches(
+        payload,
+        protocol="openai_chat",
+        runtime=runtime if isinstance(runtime, dict) else None,
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=str(base_url),
+        model_name=model,
+        thinking_enabled=_profile_runtime_thinking_enabled(runtime),
+        reasoning_effort=(runtime or {}).get("reasoning_effort") if isinstance(runtime, dict) else None,
+        purpose=purpose,
+    )
+    apply_profile_auth_headers(
+        headers,
+        protocol="openai_chat",
+        api_key=api_key,
+        runtime=runtime if isinstance(runtime, dict) else None,
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=str(base_url),
+        model_name=model,
+    )
     timeout = httpx.Timeout(connect=10, write=10, read=None, pool=10)
 
     async with client.stream("POST", url, headers=headers, json=payload, timeout=timeout) as response:
@@ -386,12 +439,12 @@ async def stream_model(client, base_url, api_key, model, messages, max_tokens=12
             yield chunk
 
 
-async def _stream_compare_model(client, queue, base_url, api_key, model, prompt, with_footer=False):
+async def _stream_compare_model(client, queue, base_url, api_key, model, prompt, with_footer=False, runtime=None):
     from mms_session import FOOTER_INSTRUCTION
     full_prompt = prompt + FOOTER_INSTRUCTION if with_footer else prompt
     _display, messages = build_messages(full_prompt)
     try:
-        async for chunk in stream_model(client, base_url, api_key, model, messages):
+        async for chunk in stream_model(client, base_url, api_key, model, messages, runtime=runtime):
             await queue.put((model, chunk, None))
     except StreamError as exc:
         await queue.put((model, None, str(exc)))
@@ -486,7 +539,7 @@ async def run_compare(provider_ctx, models, prompt, with_footer=False):
         async with httpx.AsyncClient(timeout=timeout) as client:
             tasks = [
                 asyncio.create_task(
-                    _stream_compare_model(client, queue, base_url, api_key, model, prompt, with_footer=with_footer)
+                    _stream_compare_model(client, queue, base_url, api_key, model, prompt, with_footer=with_footer, runtime=provider_ctx)
                 )
                 for model in models
             ]

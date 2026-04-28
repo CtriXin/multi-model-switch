@@ -28,6 +28,7 @@ except ImportError:
     _httpx = None
 
 from mms_state_io import resolve_mms_config_dir
+from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
 
 # ── 路径 ──
 _CONFIG_DIR = resolve_mms_config_dir()
@@ -309,7 +310,14 @@ def _post_with_retry_after(url, *, headers, json_body, timeout=5, max_attempts=2
     return response
 
 
-def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[str, str] | None:
+def _llm_classify(
+    text: str,
+    api_url: str,
+    api_key: str,
+    model: str,
+    provider_id: str = "",
+    provider_profile: str = "",
+) -> tuple[str, str] | None:
     """用 light 模型做二分类 + 置信度。返回 (tier, confidence) 或 None。
 
     优化：max_tokens=16（只需 2 个词），禁用 thinking/reasoning 避免 token 浪费。
@@ -341,6 +349,25 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
+        apply_profile_body_patches(
+            body,
+            protocol="anthropic_messages",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=base_v1,
+            model_name=model,
+            thinking_enabled=False,
+            purpose="classify",
+        )
+        apply_profile_auth_headers(
+            headers,
+            protocol="anthropic_messages",
+            api_key=api_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=base_v1,
+            model_name=model,
+        )
         # 尝试 Anthropic messages → fallback OpenAI chat/completions
         r = _post_with_retry_after(f"{base_v1}/messages", headers=headers, json_body=body, timeout=5)
         protocol = "anthropic"
@@ -354,11 +381,26 @@ def _llm_classify(text: str, api_url: str, api_key: str, model: str) -> tuple[st
                     {"role": "system", "content": "Reply with exactly two words. No explanation."},
                     {"role": "user", "content": classify_content},
                 ],
-                # 各家禁用 thinking 的通用兼容参数：
-                "enable_thinking": False,       # Qwen 系列
-                "reasoning_effort": "low",      # OpenAI 兼容（"none" 非标准值）
-                "use_thinking": False,          # Kimi 系列
             }
+            apply_profile_body_patches(
+                oai_body,
+                protocol="openai_chat",
+                provider_id=provider_id,
+                profile_id=provider_profile,
+                base_url=base_v1,
+                model_name=model,
+                thinking_enabled=False,
+                purpose="classify",
+            )
+            apply_profile_auth_headers(
+                headers,
+                protocol="openai_chat",
+                api_key=api_key,
+                provider_id=provider_id,
+                profile_id=provider_profile,
+                base_url=base_v1,
+                model_name=model,
+            )
             r = _post_with_retry_after(
                 f"{base_v1}/chat/completions",
                 headers=headers,
@@ -442,7 +484,8 @@ def _log_llm_error(msg: str):
 
 
 def classify_task(text: str, api_url: str = None, api_key: str = None,
-                  light_model: str = None) -> tuple[str, str]:
+                  light_model: str = None, provider_id: str = "",
+                  provider_profile: str = "") -> tuple[str, str]:
     """四层分类：guardrail → 关键词 fast-path → LLM 异步分类 → 默认 medium。
 
     返回 (tier, reason)，tier 为 "light" / "medium" / "heavy"。
@@ -483,7 +526,7 @@ def classify_task(text: str, api_url: str = None, api_key: str = None,
         # 检查异步分类结果（只匹配相同文本的缓存）
         cached = _get_async_llm_result(text)
         # 启动后台分类（不阻塞当前请求）
-        _submit_async_llm_classify(text, api_url, api_key, light_model)
+        _submit_async_llm_classify(text, api_url, api_key, light_model, provider_id, provider_profile)
         if cached:
             tier, confidence = cached
             if confidence == "high":
@@ -523,7 +566,7 @@ def _get_async_llm_result(text: str):
     return (tier, confidence)
 
 
-def _submit_async_llm_classify(text, api_url, api_key, light_model):
+def _submit_async_llm_classify(text, api_url, api_key, light_model, provider_id="", provider_profile=""):
     """在后台线程中执行 LLM 分类，结果存入 _async_llm_result。"""
     # 避免并发提交多个分类请求
     if not _async_llm_lock.acquire(blocking=False):
@@ -532,7 +575,7 @@ def _submit_async_llm_classify(text, api_url, api_key, light_model):
     def _run():
         global _async_llm_result
         try:
-            result = _llm_classify(text, api_url, api_key, light_model)
+            result = _llm_classify(text, api_url, api_key, light_model, provider_id, provider_profile)
             if result:
                 import time
                 tier, confidence = result[0], result[1]

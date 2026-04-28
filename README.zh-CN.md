@@ -29,6 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 进一步的运维/排查规则见：
 
+- `docs/PROVIDER_PROFILES.md`
 - `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
 - `docs/AGENT_GUARDRAILS.md`
 

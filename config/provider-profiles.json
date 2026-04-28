@@ -1,0 +1,708 @@
+{
+  "schema_version": 1,
+  "description": "MMS provider/model profile references. This file is declarative data only: endpoints, docs, auth headers, thinking/body patch rules, and context metadata.",
+  "profiles": {
+    "openai": {
+      "label": "OpenAI GPT",
+      "match": {
+        "provider_id_contains": [
+          "openai"
+        ],
+        "base_url_contains": [
+          "api.openai.com"
+        ],
+        "model_prefixes": [
+          "gpt-",
+          "o1",
+          "o3",
+          "o4",
+          "codex-"
+        ]
+      },
+      "references": [
+        "https://platform.openai.com/docs/api-reference/responses",
+        "https://platform.openai.com/docs/guides/reasoning",
+        "https://platform.openai.com/docs/models"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.openai.com/v1",
+        "anthropic_base_url": ""
+      },
+      "auth_headers": {
+        "responses": [
+          "authorization_bearer"
+        ],
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "responses_items"
+      },
+      "effort": {
+        "responses": {
+          "path": "reasoning.effort",
+          "default": "medium",
+          "allowed": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        }
+      },
+      "model_overrides": {
+        "gpt-5.1": {
+          "effort": {
+            "responses": {
+              "default": "none",
+              "allowed": [
+                "none",
+                "low",
+                "medium",
+                "high"
+              ]
+            }
+          }
+        },
+        "gpt-5-pro": {
+          "effort": {
+            "responses": {
+              "default": "high",
+              "allowed": [
+                "high"
+              ]
+            }
+          }
+        }
+      },
+      "context_windows": {
+        "gpt-5": 1000000,
+        "gpt-5.4": 1000000,
+        "gpt-5.4-mini": 1000000,
+        "gpt-5.5": 1000000,
+        "gpt-5-pro": 1000000
+      },
+      "api_formats": {
+        "responses": {
+          "base_url": "https://api.openai.com/v1",
+          "request_path": "/responses"
+        }
+      },
+      "body_patches": {
+        "responses": {
+          "thinking_off": {
+            "reasoning": "__delete__"
+          }
+        }
+      }
+    },
+    "dashscope-openai": {
+      "label": "Alibaba DashScope OpenAI-compatible",
+      "match": {
+        "provider_id_contains": [
+          "qwen",
+          "dashscope",
+          "bailian"
+        ],
+        "base_url_contains": [
+          "dashscope.aliyuncs.com"
+        ]
+      },
+      "references": [
+        "https://help.aliyun.com/zh/model-studio/deep-thinking",
+        "https://help.aliyun.com/zh/model-studio/compatibility-with-openai-responses-api"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "anthropic_base_url": "https://dashscope.aliyuncs.com/apps/anthropic"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "authorization_bearer",
+          "x-api-key"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": null,
+        "roundtrip": "openai_reasoning_content"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "enable_thinking": true
+          },
+          "thinking_off": {
+            "enable_thinking": false
+          },
+          "classify": {
+            "enable_thinking": false
+          }
+        },
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "budget": {
+        "openai_chat": {
+          "path": "thinking_budget"
+        }
+      },
+      "model_overrides": {
+        "qwen3.6": {
+          "thinking": {
+            "default_enabled": true
+          }
+        },
+        "qwen3.5": {
+          "thinking": {
+            "default_enabled": true
+          }
+        },
+        "qwen3-max": {
+          "thinking": {
+            "default_enabled": false
+          }
+        },
+        "qwen-plus": {
+          "thinking": {
+            "default_enabled": false
+          }
+        },
+        "qwen-turbo": {
+          "thinking": {
+            "default_enabled": false
+          }
+        },
+        "qwq": {
+          "thinking": {
+            "mode": "always_on"
+          }
+        }
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://dashscope.aliyuncs.com/apps/anthropic",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
+    "qwen-chat-template": {
+      "label": "Qwen local/chat-template compatible",
+      "match": {
+        "profile_only": true,
+        "model_prefixes": [
+          "qwen"
+        ]
+      },
+      "references": [
+        "https://help.aliyun.com/zh/model-studio/deep-thinking"
+      ],
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "openai_reasoning_content"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "chat_template_kwargs.enable_thinking": true
+          },
+          "thinking_off": {
+            "chat_template_kwargs.enable_thinking": false
+          },
+          "classify": {
+            "chat_template_kwargs.enable_thinking": false
+          }
+        }
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "<local-or-compatible>/v1",
+          "request_path": "/chat/completions"
+        }
+      }
+    },
+    "mimo": {
+      "label": "Xiaomi MiMo",
+      "match": {
+        "provider_id_contains": [
+          "mimo",
+          "xiaomi"
+        ],
+        "base_url_contains": [
+          "xiaomimimo.com"
+        ],
+        "model_prefixes": [
+          "mimo"
+        ]
+      },
+      "references": [
+        "https://platform.xiaomimimo.com/docs/zh-CN/api/chat/anthropic-api?target=%E8%AF%B7%E6%B1%82%E4%BD%93",
+        "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md",
+        "https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md",
+        "https://platform.xiaomimimo.com/static/docs/integration/codex.md",
+        "https://platform.xiaomimimo.com/static/docs/integration/claudecode.md"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.xiaomimimo.com/v1",
+        "anthropic_base_url": "https://api.xiaomimimo.com/anthropic",
+        "token_plan_openai_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "token_plan_anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "api-key",
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "api-key",
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "anthropic_thinking_blocks"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        },
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "context_windows": {
+        "mimo-v2.5-pro": 1000000,
+        "mimo-v2.5": 1000000,
+        "mimo-v2-pro": 1000000,
+        "mimo-v2-omni": 262144,
+        "mimo-v2-flash": 262144
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.xiaomimimo.com/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.xiaomimimo.com/anthropic",
+          "request_path": "/v1/messages"
+        },
+        "token_plan_openai_chat": {
+          "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+          "request_path": "/chat/completions"
+        },
+        "token_plan_anthropic_messages": {
+          "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
+    "minimax": {
+      "label": "MiniMax",
+      "match": {
+        "provider_id_contains": [
+          "minimax"
+        ],
+        "base_url_contains": [
+          "api.minimaxi.com",
+          "api.minimax.io"
+        ],
+        "model_prefixes": [
+          "minimax"
+        ]
+      },
+      "references": [
+        "https://platform.minimaxi.com/docs/api-reference/text-anthropic-api",
+        "https://platform.minimaxi.com/docs/api-reference/text-openai-api"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.minimaxi.com/v1",
+        "anthropic_base_url": "https://api.minimaxi.com/anthropic",
+        "openai_base_url_en": "https://api.minimax.io/v1",
+        "anthropic_base_url_en": "https://api.minimax.io/anthropic"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "x-api-key",
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "full_assistant_message"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "reasoning_split": true
+          },
+          "classify": {
+            "reasoning_split": false
+          }
+        },
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "context_windows": {
+        "minimax-m2.7": 204800,
+        "minimax-m2.7-highspeed": 204800,
+        "minimax-m2.5": 204800,
+        "minimax-m2.5-highspeed": 204800,
+        "minimax-m2.1": 204800,
+        "minimax-m2.1-highspeed": 204800,
+        "minimax-m2": 204800
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.minimaxi.com/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.minimaxi.com/anthropic",
+          "request_path": "/v1/messages"
+        },
+        "openai_chat_global": {
+          "base_url": "https://api.minimax.io/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages_global": {
+          "base_url": "https://api.minimax.io/anthropic",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "match": {
+        "provider_id_contains": [
+          "deepseek"
+        ],
+        "base_url_contains": [
+          "api.deepseek.com"
+        ],
+        "model_prefixes": [
+          "deepseek"
+        ]
+      },
+      "references": [
+        "https://api-docs.deepseek.com/",
+        "https://api-docs.deepseek.com/api/create-chat-completion",
+        "https://api-docs.deepseek.com/guides/anthropic_api",
+        "https://api-docs.deepseek.com/guides/reasoning_model"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.deepseek.com",
+        "anthropic_base_url": "https://api.deepseek.com/anthropic"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "x-api-key"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_and_effort",
+        "default_enabled": true,
+        "roundtrip": "anthropic_thinking_blocks"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        },
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "effort": {
+        "openai_chat": {
+          "path": "reasoning_effort",
+          "default": "high",
+          "allowed": [
+            "high",
+            "max"
+          ],
+          "map": {
+            "low": "high",
+            "medium": "high",
+            "xhigh": "max"
+          }
+        },
+        "anthropic_messages": {
+          "path": "output_config.effort",
+          "default": "high",
+          "allowed": [
+            "high",
+            "max"
+          ],
+          "map": {
+            "low": "high",
+            "medium": "high",
+            "xhigh": "max"
+          }
+        }
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.deepseek.com",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.deepseek.com/anthropic",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
+    "kimi-code": {
+      "label": "Kimi Code",
+      "match": {
+        "provider_id_contains": [
+          "kimi"
+        ],
+        "base_url_contains": [
+          "api.kimi.com/coding"
+        ],
+        "model_prefixes": [
+          "kimi"
+        ]
+      },
+      "references": [
+        "https://www.kimi.com/code/docs/en/",
+        "https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.kimi.com/coding/v1",
+        "anthropic_base_url": "https://api.kimi.com/coding/"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "x-api-key",
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "anthropic_thinking_blocks"
+      },
+      "body_patches": {
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "context_windows": {
+        "kimi-for-coding": 262144,
+        "kimi-k2.5": 262144,
+        "kimi-k2.6": 262144
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.kimi.com/coding/v1",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.kimi.com/coding/",
+          "request_path": "/v1/messages"
+        }
+      }
+    },
+    "glm": {
+      "label": "Z.ai GLM",
+      "match": {
+        "provider_id_contains": [
+          "glm",
+          "zai",
+          "z.ai",
+          "bigmodel"
+        ],
+        "base_url_contains": [
+          "api.z.ai",
+          "open.bigmodel.cn"
+        ],
+        "model_prefixes": [
+          "glm"
+        ]
+      },
+      "references": [
+        "https://docs.z.ai/devpack/overview",
+        "https://docs.z.ai/api-reference/introduction",
+        "https://docs.z.ai/guides/llm/glm-4.6",
+        "https://docs.z.ai/scenario-example/develop-tools/claude",
+        "https://docs.z.ai/devpack/tool/others"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.z.ai/api/paas/v4/",
+        "coding_openai_base_url": "https://api.z.ai/api/coding/paas/v4",
+        "anthropic_base_url": "https://api.z.ai/api/anthropic",
+        "bigmodel_openai_base_url": "https://open.bigmodel.cn/api/paas/v4/",
+        "bigmodel_anthropic_base_url": "https://open.bigmodel.cn/api/anthropic"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ],
+        "anthropic_messages": [
+          "x-api-key",
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "openai_reasoning_content"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        },
+        "anthropic_messages": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "budget": {
+        "openai_chat": {
+          "path": "thinking_budget"
+        }
+      },
+      "context_windows": {
+        "glm-5.1": 200000,
+        "glm-5": 200000,
+        "glm-5-turbo": 200000,
+        "glm-4.7": 200000,
+        "glm-4.6": 200000,
+        "glm-4.5": 200000,
+        "glm-4.5-air": 200000
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.z.ai/api/paas/v4/",
+          "request_path": "/chat/completions"
+        },
+        "coding_openai_chat": {
+          "base_url": "https://api.z.ai/api/coding/paas/v4",
+          "request_path": "/chat/completions"
+        },
+        "anthropic_messages": {
+          "base_url": "https://api.z.ai/api/anthropic",
+          "request_path": "/v1/messages"
+        },
+        "bigmodel_openai_chat": {
+          "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+          "request_path": "/chat/completions"
+        },
+        "bigmodel_anthropic_messages": {
+          "base_url": "https://open.bigmodel.cn/api/anthropic",
+          "request_path": "/v1/messages"
+        }
+      }
+    }
+  }
+}

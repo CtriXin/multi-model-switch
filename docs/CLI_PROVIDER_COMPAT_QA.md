@@ -30,6 +30,8 @@
 - `responses`
 - 是否需要 manual model list
 
+厂商差异优先沉淀到 `config/provider-profiles.json`，并在 `docs/PROVIDER_PROFILES.md` 记录双格式端点、auth header、thinking/effort 字段和官方 reference；不要为单个厂商在 launcher/bridge/chat/discuss 里继续堆新分支。
+
 不要因为某个 provider “看起来像 Claude / OpenAI” 就假设它一定支持对应 CLI 的所有路径。
 
 ### 2. 模型可见性和真实可用性必须分开验证

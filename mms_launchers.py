@@ -32,6 +32,7 @@ from mms_fake_upstream import (
     status_payload as _fake_upstream_status_payload,
 )
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
+from mms_provider_profiles import profile_context_window
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, locked_state_file
@@ -359,6 +360,10 @@ def _lookup_context_window(model_name, provider_id=None):
     for key, value in models.items():
         if key.lower() == lower:
             return value
+
+    profiled = profile_context_window(clean, provider_id=provider_id or "")
+    if profiled is not None:
+        return profiled
 
     direct = _MODEL_CONTEXT_WINDOWS.get(clean)
     if direct is not None:
@@ -5616,6 +5621,7 @@ def launch_claude(model_info, runtime, once=False):
         _exit_oauth_claude_manual_only(runtime, model_info, caller="launch_claude")
     else:
         provider_id = runtime.get("id", "default")
+        provider_profile = str(runtime.get("profile") or runtime.get("provider_profile") or "")
         if runtime.get("skip_gateway_health_check"):
             console.print("[dim]· 跳过 gateway 健康检查（provider 配置）[/dim]")
         elif not _health_check_due(provider_id):
@@ -5720,6 +5726,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
+                                                    provider_id=provider_id,
+                                                    provider_profile=provider_profile,
                                                     openai_url=_gpt_openai_url,
                                                     proxy_url=runtime.get("proxy"),
                                                     no_proxy=runtime.get("no_proxy"),
@@ -5755,6 +5763,8 @@ def launch_claude(model_info, runtime, once=False):
                     advertised_models=advertised_models,
                     speed_scope=speed_scope,
                     route_status_paths=route_status_paths,
+                    provider_id=provider_id,
+                    provider_profile=provider_profile,
                     openai_url=_gpt_openai_url,
                     proxy_url=runtime.get("proxy"),
                     no_proxy=runtime.get("no_proxy"),
@@ -5811,6 +5821,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
+                                                provider_id=provider_id,
+                                                provider_profile=provider_profile,
                                                 openai_url=openai_url,
                                                 proxy_url=runtime.get("proxy"),
                                                 no_proxy=runtime.get("no_proxy"),
@@ -5846,6 +5858,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 speed_scope=speed_scope,
                                                 route_status_paths=route_status_paths,
                                                 slot_configs=lb_slot_configs,
+                                                provider_id=provider_id,
+                                                provider_profile=provider_profile,
                                                 openai_url=openai_url,
                                                 proxy_url=runtime.get("proxy"),
                                                 no_proxy=runtime.get("no_proxy"),
@@ -5886,6 +5900,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     speed_scope=speed_scope,
                                                     route_status_paths=route_status_paths,
                                                     slot_configs=lb_slot_configs,
+                                                    provider_id=provider_id,
+                                                    provider_profile=provider_profile,
                                                     openai_url=openai_url,
                                                     proxy_url=runtime.get("proxy"),
                                                     no_proxy=runtime.get("no_proxy"),
@@ -7079,6 +7095,8 @@ def launch_codex(model_info, runtime, once=False):
     model = _resolve_model(model_info)
     gateway_url = _openai_base_url(runtime)
     api_key = runtime.get("openai_api_key") or runtime.get("api_key", "")
+    provider_id = runtime.get("id", "")
+    provider_profile = str(runtime.get("profile") or runtime.get("provider_profile") or "")
     speed_scope = build_provider_speed_scope(runtime)
     try:
         advertised_models = list(_probe_models(runtime, emit_output=False).get("models") or [])
@@ -7088,12 +7106,18 @@ def launch_codex(model_info, runtime, once=False):
     if not _is_gpt_model(model):
         bridge_label = f"模型 {model}" if model else "当前模型"
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
+        bridge_thinking_enabled = _runtime_thinking_enabled(runtime)
+        bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
         with codex_chatcompletions_bridge(
             gateway_url,
             api_key,
             model_name=model or "unknown",
             advertised_models=advertised_models,
             speed_scope=speed_scope,
+            provider_id=provider_id,
+            provider_profile=provider_profile,
+            reasoning_enabled=bridge_thinking_enabled,
+            reasoning_effort=bridge_reasoning_effort,
             proxy_url=runtime.get("proxy"),
             no_proxy=runtime.get("no_proxy"),
         ) as bridge_cfg:
@@ -7118,7 +7142,6 @@ def launch_codex(model_info, runtime, once=False):
                 sys.exit(0)
         return
 
-    provider_id = runtime.get("id", "")
     thinking_enabled = _runtime_thinking_enabled(runtime)
     gpt_default_effort = _default_gpt_reasoning_effort()
     if "reasoning_effort" in runtime:
@@ -7134,6 +7157,7 @@ def launch_codex(model_info, runtime, once=False):
         advertised_models=advertised_models,
         speed_scope=speed_scope,
         provider_id=provider_id,
+        provider_profile=provider_profile,
         reasoning_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
         proxy_url=runtime.get("proxy"),

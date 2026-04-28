@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from mms_speed_stats import record_model_speed
 from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
+from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
 
 try:
     from mms_events import emit_event as _emit_event
@@ -1875,6 +1876,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     level, reason = classify_task(
                         last_text, api_url=gw_url, api_key=gw_key,
                         light_model=light_model or medium_model,
+                        provider_id=getattr(self.server, "provider_id", ""),
+                        provider_profile=getattr(self.server, "provider_profile", ""),
                     )
                     self.server._last_classify = (last_text, level, _now, reason)
 
@@ -1994,8 +1997,19 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
-        # 非 Claude 模型：按 capability 调整 domestic thinking / effort
-        if _is_domestic_model(resolved_model):
+        # 非 Claude 模型：优先按 declarative provider profile 调整 body。
+        profile_id = apply_profile_body_patches(
+            payload,
+            protocol="anthropic_messages",
+            provider_id=getattr(self.server, "provider_id", ""),
+            profile_id=getattr(self.server, "provider_profile", ""),
+            base_url=gateway_url,
+            model_name=resolved_model,
+            thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
+            reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
+        )
+        # 未命中 profile 时保留旧的 domestic fallback，避免破坏未知 provider。
+        if not profile_id and _is_domestic_model(resolved_model):
             _apply_domestic_reasoning_controls(
                 payload,
                 resolved_model,
@@ -2017,6 +2031,15 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "x-api-key": gateway_key,
         }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="anthropic_messages",
+            api_key=gateway_key,
+            provider_id=getattr(self.server, "provider_id", ""),
+            profile_id=getattr(self.server, "provider_profile", ""),
+            base_url=gateway_url,
+            model_name=resolved_model,
+        )
         claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(
             self.server,
             resolved_model,
@@ -2181,6 +2204,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         )
         reasoning_effort = getattr(self.server, "reasoning_effort", "medium")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        provider_id = getattr(self.server, "provider_id", "")
+        provider_profile = getattr(self.server, "provider_profile", "")
         full_responses_payload = _build_codex_payload(
             anthropic_payload,
             model_name,
@@ -2212,6 +2237,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             if not orig_instructions.startswith(_CODEX_CLI_INSTRUCTIONS_PREFIX):
                 payload["instructions"] = _CODEX_CLI_INSTRUCTIONS_PREFIX + "\n\n" + orig_instructions
             payload["stream"] = True
+            apply_profile_body_patches(
+                payload,
+                protocol="responses",
+                provider_id=provider_id,
+                profile_id=provider_profile,
+                base_url=openai_url,
+                model_name=model_name,
+                thinking_enabled=reasoning_enabled,
+                reasoning_effort=reasoning_effort,
+            )
 
         # 构造 target URL
         _oai = openai_url.rstrip("/")
@@ -2232,6 +2267,15 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             "originator": "codex_cli_rs",
             "session_id": session_id,
         }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="responses",
+            api_key=api_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=openai_url,
+            model_name=model_name,
+        )
 
         client_wants_stream = bool(anthropic_payload.get("stream"))
         metrics_model = model_name
@@ -2768,20 +2812,40 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         gateway_key = getattr(self.server, "gateway_key")
         model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
         provider_id = getattr(self.server, "provider_id", "")
+        provider_profile = getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
-        if reasoning_enabled:
+        profile_id = apply_profile_body_patches(
+            payload,
+            protocol="responses",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+            thinking_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        if not profile_id and reasoning_enabled:
             reasoning_payload = payload.get("reasoning")
             next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
             next_reasoning["effort"] = reasoning_effort
             payload["reasoning"] = next_reasoning
-        else:
+        elif not profile_id:
             payload.pop("reasoning", None)
         target_url = _build_gateway_url(gateway_url, "/responses")
         fwd_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="responses",
+            api_key=gateway_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+        )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         started_ms = _now_ms()
@@ -2906,6 +2970,10 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
 
     def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
+        provider_id = getattr(self.server, "provider_id", "")
+        provider_profile = getattr(self.server, "provider_profile", "")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
         chat_messages = _responses_input_to_messages(
             payload.get("instructions", ""),
             payload.get("input", []),
@@ -2921,11 +2989,30 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         chat_tools = _responses_tools_to_chat(payload.get("tools"))
         if chat_tools:
             chat_payload["tools"] = chat_tools
+        apply_profile_body_patches(
+            chat_payload,
+            protocol="openai_chat",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+            thinking_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+        )
 
         fwd_headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="openai_chat",
+            api_key=gateway_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+        )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
@@ -3094,6 +3181,10 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
         gateway_url = getattr(self.server, "gateway_url")
         gateway_key = getattr(self.server, "gateway_key")
         model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
+        provider_id = getattr(self.server, "provider_id", "")
+        provider_profile = getattr(self.server, "provider_profile", "")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
 
         # Translate Responses → Chat Completions request
         chat_messages = _responses_input_to_messages(
@@ -3111,6 +3202,16 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
         chat_tools = _responses_tools_to_chat(payload.get("tools"))
         if chat_tools:
             chat_payload["tools"] = chat_tools
+        apply_profile_body_patches(
+            chat_payload,
+            protocol="openai_chat",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+            thinking_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+        )
 
         # Forward to gateway /v1/chat/completions
         target_url = _build_gateway_url(gateway_url, "/chat/completions")
@@ -3118,6 +3219,15 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {gateway_key}",
         }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="openai_chat",
+            api_key=gateway_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+        )
         fwd_headers.update(_copy_passthrough_headers(self.headers))
 
         translator = _ChatCompletionsToResponsesTranslator(model_name)
@@ -3185,6 +3295,10 @@ def codex_chatcompletions_bridge(
     advertised_models=None,
     speed_scope=None,
     route_status_paths=None,
+    provider_id="",
+    provider_profile="",
+    reasoning_enabled=True,
+    reasoning_effort="high",
     proxy_url="",
     no_proxy="",
 ):
@@ -3206,6 +3320,10 @@ def codex_chatcompletions_bridge(
     server.speed_scope = dict(speed_scope or {})
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
+    server.provider_id = str(provider_id or "")
+    server.provider_profile = str(provider_profile or "")
+    server.reasoning_enabled = bool(reasoning_enabled)
+    server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     server.session_input_tokens = 0
@@ -3239,6 +3357,7 @@ def codex_responses_bridge(
     speed_scope=None,
     route_status_paths=None,
     provider_id="",
+    provider_profile="",
     reasoning_enabled=True,
     reasoning_effort="medium",
     proxy_url="",
@@ -3258,6 +3377,7 @@ def codex_responses_bridge(
     server.route_status_paths = list(route_status_paths or [])
     server.bridge_token = bridge_token
     server.provider_id = provider_id
+    server.provider_profile = str(provider_profile or "")
     server.reasoning_enabled = bool(reasoning_enabled)
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
@@ -3291,6 +3411,8 @@ def gateway_claude_bridge(
     speed_scope=None,
     route_status_paths=None,
     slot_configs=None,
+    provider_id="",
+    provider_profile="",
     openai_url=None,
     strip_upstream_user_agent=False,
     minimal_claude_header_passthrough=False,
@@ -3327,6 +3449,8 @@ def gateway_claude_bridge(
     server.route_status_paths = list(route_status_paths or [])
     # 止血：暂时禁用 bridge 层跨 provider slot 切换，避免实际 provider/account 漂移。
     server.slot_configs = {}
+    server.provider_id = str(provider_id or "")
+    server.provider_profile = str(provider_profile or "")
     server.openai_url = openai_url
     server.strip_upstream_user_agent = bool(strip_upstream_user_agent)
     server.minimal_claude_header_passthrough = bool(minimal_claude_header_passthrough)
