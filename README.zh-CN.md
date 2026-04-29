@@ -23,7 +23,7 @@ MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、
 
 ## 当前版本
 
-最新 release：`v2.0.0`
+最新 release：`v2.0.1`
 
 这一代的重点：
 
@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.1/install.sh | bash -s --
 ```
 
 安装后自检：

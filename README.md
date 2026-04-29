@@ -23,7 +23,7 @@ It helps you:
 
 ## Current Release
 
-Latest release: `v2.0.0`
+Latest release: `v2.0.1`
 
 Key changes in this generation:
 
@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.1/install.sh | bash -s --
 ```
 
 Verify the install:
