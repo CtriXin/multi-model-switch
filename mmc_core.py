@@ -146,6 +146,7 @@ _FORBIDDEN_BINARY_PATH_PARTS = (
     "/ccswitch",
     "/hive",
 )
+_BRAINKEEPER_SERVER_RELATIVE_PATH = (".local", "share", "brainkeeper", "dist", "server.js")
 _MINDKEEPER_SERVER_RELATIVE_PATH = (".local", "share", "mindkeeper", "dist", "server.js")
 _CLAUDE_NO_PROXY_TOKENS = (
     "*",
@@ -501,16 +502,25 @@ def _copy_allowed_scalar_dict_fields(payload, allowed_keys):
     return copied
 
 
+def _builtin_brainkeeper_server_map() -> dict:
+    candidates = (
+        ("brainkeeper", _BRAINKEEPER_SERVER_RELATIVE_PATH),
+        ("mindkeeper", _MINDKEEPER_SERVER_RELATIVE_PATH),
+    )
+    for key, relative_path in candidates:
+        server_script = _real_user_home().joinpath(*relative_path)
+        if server_script.exists():
+            return {
+                key: {
+                    "command": "node",
+                    "args": [str(server_script)],
+                }
+            }
+    return {}
+
+
 def _builtin_mindkeeper_server_map() -> dict:
-    server_script = _real_user_home().joinpath(*_MINDKEEPER_SERVER_RELATIVE_PATH)
-    if not server_script.exists():
-        return {}
-    return {
-        "mindkeeper": {
-            "command": "node",
-            "args": [str(server_script)],
-        }
-    }
+    return _builtin_brainkeeper_server_map()
 
 
 def _sanitize_project_state_entry(entry):
@@ -1702,7 +1712,7 @@ def _build_session_state(project_path: str, *, explicit_session_id: str = "", by
     state = _merge_account_state(_default_ui_state_seed(), account_state)
     state = _overlay_project_scoped_resume_state(state, project_path, explicit_session_id=explicit_session_id)
     state = _ensure_project_trust(state, project_path)
-    builtin_mcp = _builtin_mindkeeper_server_map()
+    builtin_mcp = _builtin_brainkeeper_server_map()
     if builtin_mcp:
         state["mcpServers"] = builtin_mcp
     else:

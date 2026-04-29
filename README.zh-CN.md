@@ -188,12 +188,14 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 
 ```bash
 bash install.sh --install-rtk
-bash install.sh --install-mindkeeper-context
+bash install.sh --install-brainkeeper-context
 bash install.sh --install-map
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
+
+旧参数 `--install-mindkeeper-context` 和 `--mindkeeper-ref` 仍作为 BrainKeeper 安装的 deprecated alias 兼容。
 
 安装 MMS-managed Claude agent packs，不写全局 Claude 配置：
 

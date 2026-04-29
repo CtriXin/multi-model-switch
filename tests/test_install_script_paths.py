@@ -177,7 +177,11 @@ def test_install_script_mentions_bundled_session_assets():
 def test_install_script_updates_chinese_optional_copy():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
+    assert "BrainKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
+    assert "--install-brainkeeper-context" in text
+    assert "--install-mindkeeper-context" in text
+    assert "--brainkeeper-ref" in text
+    assert "--mindkeeper-ref" in text
     assert "Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。" in text
 
 

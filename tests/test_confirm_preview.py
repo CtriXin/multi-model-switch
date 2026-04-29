@@ -63,7 +63,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
         mms_launchers,
         "_session_managed_mcp_servers",
         lambda settings, allow_execution_surfaces=True: (
-            {"mindkeeper": {"type": "stdio", "command": "/tmp/mindkeeper-server.sh"}}
+            {"brainkeeper": {"type": "stdio", "command": "/tmp/brainkeeper-server.sh"}}
             if allow_execution_surfaces
             else {}
         ),
@@ -167,7 +167,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     caveman_hook_titles = {item["title"] for item in preview["hooks"]["caveman"]}
     ecc_hook_titles = {item["title"] for item in preview["hooks"]["ecc"]}
 
-    assert "mindkeeper" in mcp_titles
+    assert "brainkeeper" in mcp_titles
     assert skill_titles >= {"web-access", "toon", "token-saver", "auto-github-contributor"}
     assert caveman_skill_titles >= {"caveman", "caveman-review"}
     assert len(preview["skills"]["ecc"]) == 1
@@ -176,8 +176,8 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     assert "Caveman 激活" in caveman_hook_titles
     assert "ecc-stop" in ecc_hook_titles or any(title.startswith("ECC") for title in ecc_hook_titles)
 
-    mindkeeper_item = next(item for item in preview["mcp"]["always"] if item["title"] == "mindkeeper")
-    assert any(label == "路径" and value for label, value in mindkeeper_item["details"])
+    brainkeeper_item = next(item for item in preview["mcp"]["always"] if item["title"] == "brainkeeper")
+    assert any(label == "路径" and value for label, value in brainkeeper_item["details"])
 
     ecc_bundle = preview["skills"]["ecc"][0]
     assert "skill" in ecc_bundle["summary"]

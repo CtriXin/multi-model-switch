@@ -188,12 +188,14 @@ Install global optional packs only when you want them available outside MMS-mana
 
 ```bash
 bash install.sh --install-rtk
-bash install.sh --install-mindkeeper-context
+bash install.sh --install-brainkeeper-context
 bash install.sh --install-map
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
+
+Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
 
 Install MMS-managed Claude agent packs without touching global Claude config:
 

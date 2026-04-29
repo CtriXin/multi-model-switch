@@ -28,8 +28,11 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-MINDKEEPER_DEFAULT_REF="${MINDKEEPER_DEFAULT_REF:-v2.2.0}"
-MINDKEEPER_INSTALL_REF="${MINDKEEPER_INSTALL_REF:-}"
+BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.2.0}}"
+BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
+# Legacy env names remain accepted by installer aliases and downstream scripts.
+MINDKEEPER_DEFAULT_REF="$BRAINKEEPER_DEFAULT_REF"
+MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
 MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
 ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code}"
@@ -47,8 +50,8 @@ ENSURE_NODE22=0
 LAUNCH_AFTER_INSTALL=0
 INSTALL_RTK=0
 INSTALL_RTK_EXPLICIT=0
-INSTALL_MINDKEEPER_CONTEXT=0
-INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=0
+INSTALL_BRAINKEEPER_CONTEXT=0
+INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=0
 INSTALL_MAP=0
 INSTALL_MAP_EXPLICIT=0
 INSTALL_READ_ONCE=0
@@ -131,7 +134,7 @@ optional_rtk_installed() {
     [ -x "$REAL_HOME/.claude/hooks/rtk-rewrite.sh" ]
 }
 
-optional_mindkeeper_context_installed() {
+optional_brainkeeper_context_installed() {
     [ -f "$REAL_HOME/.claude/commands/distill.md" ] \
         && [ -f "$REAL_HOME/.claude/commands/cz.md" ] \
         && [ -x "$REAL_HOME/.claude/hooks/token-monitor-hook.sh" ]
@@ -223,7 +226,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -238,8 +241,9 @@ $(t "说明:" "Notes:")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
-  - $(t "--install-mindkeeper-context 会安装 MindKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook；默认锁定到经过 MMS 验证的 MindKeeper tag" "--install-mindkeeper-context installs MindKeeper MCP plus Claude /distill /cz commands and the token monitor hook; by default it pins the MMS-tested MindKeeper tag")
-  - $(t "--mindkeeper-ref 可覆盖 MindKeeper 安装版本，例如 v2.2.0 / main" "--mindkeeper-ref overrides the MindKeeper install ref, for example v2.2.0 / main")
+  - $(t "--install-brainkeeper-context 会安装 BrainKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs BrainKeeper MCP plus Claude /distill /cz commands and the token monitor hook; by default it pins the MMS-tested BrainKeeper tag")
+  - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.2.0 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.2.0 / main")
+  - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
@@ -369,28 +373,28 @@ prompt_optional_install_choices() {
         fi
     fi
 
-    if [ "$INSTALL_MINDKEEPER_CONTEXT_EXPLICIT" -eq 0 ]; then
+    if [ "$INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT" -eq 0 ]; then
         echo ""
-        if optional_mindkeeper_context_installed; then
+        if optional_brainkeeper_context_installed; then
             if [ "$INSTALL_LANG" = "en" ]; then
                 echo "Optional context tools"
             else
                 echo "可选上下文工具"
             fi
-            note_optional_pack_detected " MindKeeper 上下文包" "MindKeeper context pack"
+            note_optional_pack_detected " BrainKeeper 上下文包" "BrainKeeper context pack"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
-            echo "  MindKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
-            echo "  By default MMS pins MindKeeper to ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}."
-            if confirm_from_tty "Install MindKeeper context pack for Claude? [y/N]: " "n"; then
-                INSTALL_MINDKEEPER_CONTEXT=1
+            echo "  BrainKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
+            echo "  By default MMS pins BrainKeeper to ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}."
+            if confirm_from_tty "Install BrainKeeper context pack for Claude? [y/N]: " "n"; then
+                INSTALL_BRAINKEEPER_CONTEXT=1
             fi
         else
             echo "可选上下文工具"
-            echo "  MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。"
-            echo "  默认会锁定到 ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}。"
-            if confirm_from_tty "是否安装 MindKeeper 上下文包（Claude）？[y/N]: " "n"; then
-                INSTALL_MINDKEEPER_CONTEXT=1
+            echo "  BrainKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。"
+            echo "  默认会锁定到 ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}。"
+            if confirm_from_tty "是否安装 BrainKeeper 上下文包（Claude）？[y/N]: " "n"; then
+                INSTALL_BRAINKEEPER_CONTEXT=1
             fi
         fi
     fi
@@ -1568,32 +1572,40 @@ install_optional_rtk() {
     enable_rtk_codex_integration || true
 }
 
-run_mindkeeper_installer() {
+run_brainkeeper_installer() {
     local local_installer=""
-    local effective_mindkeeper_ref="${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}"
+    local effective_brainkeeper_ref="${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
+
+    local_installer="$(dirname "$SOURCE_DIR")/brainkeeper/install.sh"
+    if [ -f "$local_installer" ]; then
+        run_optional_command \
+            "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
+            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"
+        return 0
+    fi
 
     local_installer="$(dirname "$SOURCE_DIR")/mindkeeper/install.sh"
     if [ -f "$local_installer" ]; then
         run_optional_command \
-            "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_mindkeeper_ref"
+            "$(t "BrainKeeper MCP 安装（legacy MindKeeper 本地源）" "BrainKeeper MCP install (legacy local MindKeeper source)")" \
+            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"
         return 0
     fi
 
     run_optional_command \
-        "$(t "MindKeeper MCP 安装" "MindKeeper MCP install")" \
-        env HOME="$REAL_HOME" MINDKEEPER_INSTALL_REF="$effective_mindkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/mindkeeper/main/install.sh | bash -s -- --ref "$MINDKEEPER_INSTALL_REF"'
+        "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
+        env HOME="$REAL_HOME" BRAINKEEPER_INSTALL_REF="$effective_brainkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/brainkeeper/main/install.sh | bash -s -- --ref "$BRAINKEEPER_INSTALL_REF"'
 }
 
-write_mindkeeper_distill_command() {
+write_brainkeeper_distill_command() {
     local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/distill.md"
-    local marker="Managed by MMS MindKeeper context pack"
+    local marker="Managed by MMS BrainKeeper context pack"
     local tmp_file=""
 
     tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-distill.XXXXXX")"
     cat > "$tmp_file" <<'EOF'
-<!-- Managed by MMS MindKeeper context pack -->
+<!-- Managed by MMS BrainKeeper context pack -->
 # /distill — 上下文蒸馏
 
 蒸馏当前工作状态，保存为 thread 文件，支持跨 session 恢复。
@@ -1608,7 +1620,7 @@ write_mindkeeper_distill_command() {
    - **next** — 待续事项
    - **status** — 一句话当前状态
 
-2. 调用 MCP 工具 `brain_checkpoint`，传入提取的信息。
+2. 调用 MCP 工具 `brainkeeper.brain_checkpoint`，传入提取的信息。
 
 3. 展示蒸馏回执（仅 1-2 行）。
 
@@ -1647,7 +1659,7 @@ write_mindkeeper_distill_command() {
 
 - status 必须让下个 session 立刻知道"从哪续"
 - 蒸馏后不需要 /clear，用户可以继续工作
-- 如果 brain_checkpoint MCP 不可用，写入 `~/.sce/threads/`
+- 如果 `brainkeeper.brain_checkpoint` 不可用，可尝试 legacy `mindkeeper.brain_checkpoint`；仍不可用再写入 `~/.sce/threads/`
 EOF
 
     mkdir -p "$command_dir"
@@ -1664,10 +1676,10 @@ EOF
     return 0
 }
 
-write_mindkeeper_contextzip_command() {
+write_brainkeeper_contextzip_command() {
     local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/contextzip.md"
-    local marker="Managed by MMS MindKeeper context pack"
+    local marker="Managed by MMS BrainKeeper context pack"
     local tmp_file=""
 
     tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-contextzip.XXXXXX")"
@@ -1677,12 +1689,12 @@ name: contextzip
 description: '蒸馏当前工作状态并重置 token 计数器。当用户提到 "contextzip"、"cz"、"压缩 context"、"context 满了"、"达到 token 上限" 时使用。也用于手动触发上下文压缩，保存当前进度到 thread 文件。'
 ---
 
-<!-- Managed by MMS MindKeeper context pack -->
+<!-- Managed by MMS BrainKeeper context pack -->
 # /contextzip — 蒸馏状态 + 重置计数器
 
 ## 执行步骤
 
-1. **调用 `brain_checkpoint`** 蒸馏当前状态：
+1. **调用 `brainkeeper.brain_checkpoint`** 蒸馏当前状态：
    - `repo`: 当前工作目录
    - `task`: 当前任务（从对话中提取）
    - `status`: "已压缩 context，准备重置计数器"
@@ -1691,7 +1703,7 @@ description: '蒸馏当前工作状态并重置 token 计数器。当用户提�
    - `findings`: 重要发现/踩坑
    - `next`: 待续事项
 
-2. **调用 `brain_token_reset`** 重置 token 计数器
+2. **调用 `brainkeeper.brain_token_reset`** 重置 token 计数器
 
 3. **输出回执**（1-2 行）：
    ```
@@ -1725,10 +1737,10 @@ EOF
     return 0
 }
 
-write_mindkeeper_cz_alias_command() {
+write_brainkeeper_cz_alias_command() {
     local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/cz.md"
-    local marker="Managed by MMS MindKeeper context pack"
+    local marker="Managed by MMS BrainKeeper context pack"
     local tmp_file=""
 
     tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cz.XXXXXX")"
@@ -1738,13 +1750,13 @@ name: cz
 description: '蒸馏当前工作状态并重置 token 计数器；是 /contextzip 的短命令版本。'
 ---
 
-<!-- Managed by MMS MindKeeper context pack -->
+<!-- Managed by MMS BrainKeeper context pack -->
 # /cz — 蒸馏状态 + 重置计数器
 
 执行逻辑与 `/contextzip` 相同：
 
-1. 调用 `brain_checkpoint` 蒸馏当前状态
-2. 调用 `brain_token_reset` 重置计数器
+1. 调用 `brainkeeper.brain_checkpoint` 蒸馏当前状态
+2. 调用 `brainkeeper.brain_token_reset` 重置计数器
 3. 输出 1-2 行回执，并提示 `/clear` 后新 session 使用 `/cr` 恢复
 
 ## 极简写法
@@ -1767,10 +1779,10 @@ EOF
     return 0
 }
 
-write_mindkeeper_cr_command() {
+write_brainkeeper_cr_command() {
     local command_dir="$REAL_HOME/.claude/commands"
     local target="$command_dir/cr.md"
-    local marker="Managed by MMS MindKeeper context pack"
+    local marker="Managed by MMS BrainKeeper context pack"
     local tmp_file=""
 
     tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-cr.XXXXXX")"
@@ -1781,7 +1793,7 @@ description: '恢复当前 repo 最近的 thread，或恢复指定 thread id（c
 argument-hint: [dst-thread-id]
 ---
 
-<!-- Managed by MMS MindKeeper context pack -->
+<!-- Managed by MMS BrainKeeper context pack -->
 # /cr — 恢复上次进度
 
 ## 执行步骤
@@ -1792,17 +1804,17 @@ argument-hint: [dst-thread-id]
 
 2. 如果 `$ARGUMENTS` 非空：
    - 提取其中的 thread id（如 `dst-0407-gpkzox`）
-   - 调用 `brain_bootstrap`，传入：
+   - 调用 `brainkeeper.brain_bootstrap`，传入：
      - `repo`: 上一步解析出的 repo
      - `task`: `"恢复"`
      - `thread`: 提取到的 id
 
 3. 如果 `$ARGUMENTS` 为空：
-   - 调用 `brain_bootstrap`，传入：
+   - 调用 `brainkeeper.brain_bootstrap`，传入：
      - `repo`: 上一步解析出的 repo
      - `task`: `"恢复"`
 
-4. 直接展示 `brain_bootstrap` 的返回结果，不额外改写。
+4. 直接展示 `brainkeeper.brain_bootstrap` 的返回结果，不额外改写。
 EOF
 
     mkdir -p "$command_dir"
@@ -1819,12 +1831,28 @@ EOF
     return 0
 }
 
-enable_mindkeeper_token_monitor_hook() {
-    local hook_source="$REAL_HOME/.local/share/mindkeeper/hooks/token-monitor-hook.sh"
+brainkeeper_hook_source() {
+    local hook_name="$1"
+    local source_dir=""
+    for source_dir in \
+        "$REAL_HOME/.local/share/brainkeeper" \
+        "$REAL_HOME/.local/share/mindkeeper"; do
+        if [ -f "$source_dir/hooks/$hook_name" ]; then
+            printf "%s" "$source_dir/hooks/$hook_name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+enable_brainkeeper_token_monitor_hook() {
+    local hook_source=""
     local claude_dir="$REAL_HOME/.claude"
     local hook_dir="$claude_dir/hooks"
     local hook_target="$hook_dir/token-monitor-hook.sh"
     local py_output=""
+
+    hook_source="$(brainkeeper_hook_source "token-monitor-hook.sh")"
 
     if [ ! -f "$hook_source" ]; then
         echo "⚠ $(t "找不到 token monitor hook 模板，跳过" "Token monitor hook template not found, skipping"): $hook_source"
@@ -1922,12 +1950,14 @@ PY
     return 0
 }
 
-enable_mindkeeper_context_restore_hint_hook() {
-    local hook_source="$REAL_HOME/.local/share/mindkeeper/hooks/claude-context-restore-hint.sh"
+enable_brainkeeper_context_restore_hint_hook() {
+    local hook_source=""
     local claude_dir="$REAL_HOME/.claude"
     local hook_dir="$claude_dir/hooks"
     local hook_target="$hook_dir/claude-context-restore-hint.sh"
     local py_output=""
+
+    hook_source="$(brainkeeper_hook_source "claude-context-restore-hint.sh")"
 
     if [ ! -f "$hook_source" ]; then
         echo "⚠ $(t "找不到 context restore hint hook 模板，跳过" "Context restore hint hook template not found, skipping"): $hook_source"
@@ -2025,25 +2055,25 @@ PY
     return 0
 }
 
-install_optional_mindkeeper_context() {
+install_optional_brainkeeper_context() {
     echo ""
-    echo "$(t "正在安装 MindKeeper context pack..." "Installing MindKeeper context pack...")"
+    echo "$(t "正在安装 BrainKeeper context pack..." "Installing BrainKeeper context pack...")"
 
     echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json、~/.claude/commands/ 和 ~/.claude/hooks/；若缺少 jq 会尝试安装。" "This optional pack updates ~/.claude/settings.json, ~/.claude/commands/, and ~/.claude/hooks/; it also attempts to install jq if missing.")"
 
-    run_mindkeeper_installer || true
+    run_brainkeeper_installer || true
     ensure_brew_package "jq" "jq" "jq" || true
 
     if ! command -v jq >/dev/null 2>&1; then
         echo "⚠ $(t "未检测到 jq，token monitor hook 已安装但会保持静默，直到 jq 可用" "jq not found; the token monitor hook is installed but remains inactive until jq is available")"
     fi
 
-    write_mindkeeper_distill_command || true
-    write_mindkeeper_contextzip_command || true
-    write_mindkeeper_cz_alias_command || true
-    write_mindkeeper_cr_command || true
-    enable_mindkeeper_token_monitor_hook || true
-    enable_mindkeeper_context_restore_hint_hook || true
+    write_brainkeeper_distill_command || true
+    write_brainkeeper_contextzip_command || true
+    write_brainkeeper_cz_alias_command || true
+    write_brainkeeper_cr_command || true
+    enable_brainkeeper_token_monitor_hook || true
+    enable_brainkeeper_context_restore_hint_hook || true
 }
 
 run_map_installer() {
@@ -2522,9 +2552,23 @@ while [[ $# -gt 0 ]]; do
             INSTALL_RTK=1
             INSTALL_RTK_EXPLICIT=1
             ;;
+        --install-brainkeeper-context)
+            INSTALL_BRAINKEEPER_CONTEXT=1
+            INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=1
+            ;;
         --install-mindkeeper-context)
-            INSTALL_MINDKEEPER_CONTEXT=1
-            INSTALL_MINDKEEPER_CONTEXT_EXPLICIT=1
+            INSTALL_BRAINKEEPER_CONTEXT=1
+            INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=1
+            ;;
+        --brainkeeper-ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--brainkeeper-ref 需要一个版本号或分支名" "--brainkeeper-ref requires a tag or branch name")"
+                usage
+                exit 1
+            fi
+            BRAINKEEPER_INSTALL_REF="$1"
+            MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
             ;;
         --mindkeeper-ref)
             shift
@@ -2533,7 +2577,8 @@ while [[ $# -gt 0 ]]; do
                 usage
                 exit 1
             fi
-            MINDKEEPER_INSTALL_REF="$1"
+            BRAINKEEPER_INSTALL_REF="$1"
+            MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
             ;;
         --install-map)
             INSTALL_MAP=1
@@ -2675,10 +2720,10 @@ if [ "$INSTALL_RTK" -eq 1 ]; then
     echo "• $(t "附带安装 RTK rewrite 增强" "Optional RTK rewrite enhancement"): on"
 fi
 
-if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
-    echo "• $(t "附带安装 MindKeeper context pack" "Optional MindKeeper context pack"): on"
+if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
+    echo "• $(t "附带安装 BrainKeeper context pack" "Optional BrainKeeper context pack"): on"
     echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，不包含 Hive 能力。" "This writes Claude MCP / command / hook config and does not include Hive features.")"
-    echo "  $(t "MindKeeper 版本" "MindKeeper ref"): ${MINDKEEPER_INSTALL_REF:-$MINDKEEPER_DEFAULT_REF}"
+    echo "  $(t "BrainKeeper 版本" "BrainKeeper ref"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
 fi
 
 if [ "$INSTALL_MAP" -eq 1 ]; then
@@ -2782,8 +2827,8 @@ install_requested_clis
 if [ "$INSTALL_RTK" -eq 1 ]; then
     install_optional_rtk || true
 fi
-if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
-    install_optional_mindkeeper_context || true
+if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
+    install_optional_brainkeeper_context || true
 fi
 if [ "$INSTALL_MAP" -eq 1 ]; then
     install_optional_map || true
@@ -2886,8 +2931,8 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo ""
     fi
 
-    if [ "$INSTALL_MINDKEEPER_CONTEXT" -eq 1 ]; then
-        echo "  $(t "MindKeeper context pack 已安装：Claude /distill、/cz、MindKeeper MCP、token monitor hook、context restore hint hook。" "MindKeeper context pack installed: Claude /distill, /cz, MindKeeper MCP, the token monitor hook, and the context restore hint hook.")"
+    if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
+        echo "  $(t "BrainKeeper context pack 已安装：Claude /distill、/cz、BrainKeeper MCP、token monitor hook、context restore hint hook。" "BrainKeeper context pack installed: Claude /distill, /cz, BrainKeeper MCP, the token monitor hook, and the context restore hint hook.")"
         echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
         echo ""
     fi

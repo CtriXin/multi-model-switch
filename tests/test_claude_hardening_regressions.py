@@ -39,7 +39,7 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
 
-def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_servers(monkeypatch):
+def test_build_claude_session_settings_injects_only_hive_and_brainkeeper_mcp_servers(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -71,13 +71,13 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
             "mcpServers": {
                 "demo": {"command": "demo"},
                 "hive": {"command": "/tmp/hive-mcp.sh", "args": [], "type": "stdio"},
-                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+                "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
             },
         }
     )
 
     assert result["mcpServers"] == {
-        "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+        "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
         "hive": {
             "command": "/tmp/hive-session-only.sh",
             "args": [],
@@ -93,7 +93,50 @@ def test_build_claude_session_settings_injects_only_hive_and_mindkeeper_mcp_serv
     }
 
 
-def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_mcp_servers(monkeypatch):
+def test_build_claude_session_settings_keeps_legacy_mindkeeper_mcp(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "mcpServers": {
+                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+            },
+        }
+    )
+
+    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper.js"]
+
+
+def test_default_session_mcp_servers_prefer_brainkeeper_over_legacy(monkeypatch, tmp_path):
+    import mms_launchers
+
+    install_root = tmp_path / "mms-install"
+    repo_root = tmp_path
+    brainkeeper_server = repo_root / "brainkeeper" / "dist" / "server.js"
+    mindkeeper_server = repo_root / "mindkeeper" / "dist" / "server.js"
+    brainkeeper_server.parent.mkdir(parents=True)
+    mindkeeper_server.parent.mkdir(parents=True)
+    brainkeeper_server.write_text("// brainkeeper\n", encoding="utf-8")
+    mindkeeper_server.write_text("// mindkeeper\n", encoding="utf-8")
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str((tmp_path / "real-home").joinpath(*parts)),
+    )
+
+    assert mms_launchers._default_session_mcp_servers() == {
+        "brainkeeper": {"command": "node", "args": [str(brainkeeper_server)], "type": "stdio"}
+    }
+
+
+def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_mcp_servers(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -102,9 +145,9 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
         mms_launchers,
         "_default_session_mcp_servers",
         lambda: {
-            "mindkeeper": {
+            "brainkeeper": {
                 "command": "node",
-                "args": ["/tmp/mindkeeper/dist/server.js"],
+                "args": ["/tmp/brainkeeper/dist/server.js"],
                 "type": "stdio",
             },
         },
@@ -134,7 +177,7 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_mindkeeper_m
 
     assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
     assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
-    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
+    assert result["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper/dist/server.js"]
     assert result["mcpServers"]["pilot"]["args"] == ["/tmp/pilot/scripts/pilot_mcp_server.py"]
 
 
@@ -151,7 +194,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
         {
             "mcpServers": {
                 "hive": {"command": "/tmp/hive.sh", "args": [], "type": "stdio"},
-                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+                "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
             },
             "hooks": {
                 "SessionStart": [
@@ -168,7 +211,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     )
 
     assert "hive" not in result["mcpServers"]
-    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper.js"]
+    assert result["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper.js"]
     commands = [
         hook["command"]
         for group in result["hooks"]["SessionStart"]
@@ -389,7 +432,7 @@ def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claud
         "_default_session_mcp_servers",
         lambda: {
             "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
-            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
+            "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
         },
     )
 
@@ -465,9 +508,9 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_session_start
-    assert mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK in disabled_session_start
-    assert disabled_user_prompt == [mms_launchers._CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK]
-    assert disabled_stop == [mms_launchers._CLAUDE_MINDKEEPER_SESSION_END_HOOK]
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_session_start
+    assert disabled_user_prompt == [mms_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK]
+    assert disabled_stop == [mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK]
 
     enabled = mms_launchers._build_claude_session_settings(
         base_settings,
@@ -1100,7 +1143,7 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in disabled_commands
-    assert mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK in disabled_commands
+    assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_commands
     assert "CLAUDE_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_PLUGIN_ROOT" not in disabled["env"]
     assert "ECC_HOOK_PROFILE" not in disabled["env"]
@@ -1225,20 +1268,20 @@ def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
                     "matcher": "",
                     "commands": [
                         "/tmp/keep-session-start.sh",
-                        mms_launchers._CLAUDE_MINDKEEPER_SESSION_START_HOOK,
+                        mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK,
                     ],
                 }
             ],
             "Stop": [
                 {
                     "matcher": "",
-                    "commands": [mms_launchers._CLAUDE_MINDKEEPER_SESSION_END_HOOK],
+                    "commands": [mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK],
                 }
             ],
             "UserPromptSubmit": [
                 {
                     "matcher": "",
-                    "commands": [mms_launchers._CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK],
+                    "commands": [mms_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK],
                 }
             ],
             "PreToolUse": [
@@ -1253,7 +1296,7 @@ def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
         },
         "mcpServers": {
             "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
-            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper/dist/server.js"], "type": "stdio"},
+            "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper/dist/server.js"], "type": "stdio"},
         },
     }
 
@@ -1269,7 +1312,7 @@ def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
     assert "Stop" not in sanitized["hooks"]
     assert "UserPromptSubmit" not in sanitized["hooks"]
     assert "hive" not in sanitized["mcpServers"]
-    assert sanitized["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
+    assert sanitized["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper/dist/server.js"]
 
 
 def test_overlay_ecc_session_entries_merges_session_and_ecc_assets(monkeypatch, tmp_path):
@@ -3123,7 +3166,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
         "_session_managed_mcp_servers",
         lambda _settings=None, **_kwargs: {
             "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
-            "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper/dist/server.js"], "type": "stdio"},
+            "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper/dist/server.js"], "type": "stdio"},
         },
     )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
@@ -3144,7 +3187,7 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
     assert session_state["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
-    assert session_state["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper/dist/server.js"]
+    assert session_state["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper/dist/server.js"]
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["hasTrustDialogAccepted"] is True
     assert project_state["hasCompletedProjectOnboarding"] is True

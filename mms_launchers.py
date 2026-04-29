@@ -1675,6 +1675,9 @@ _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__
 _LOCAL_HOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks")
 _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
 _CLAUDE_HIVE_COMPACT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
+_CLAUDE_BRAINKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-start-hook.sh")
+_CLAUDE_BRAINKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-end-hook.sh")
+_CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-token-monitor-hook.sh")
 _CLAUDE_MINDKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-start-hook.sh")
 _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-end-hook.sh")
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
@@ -1714,6 +1717,7 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
     "permissions",
 )
 _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST = (
+    "brainkeeper",
     "mindkeeper",
 )
 _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
@@ -2193,12 +2197,18 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
         _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
         _normalize_hook_command(_CLAUDE_HIVE_COMPACT_HOOK),
+        _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_START_HOOK),
+        _normalize_hook_command(_CLAUDE_BRAINKEEPER_SESSION_END_HOOK),
+        _normalize_hook_command(_CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_START_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-start-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-session-end-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "brainkeeper-token-monitor-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-start-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
@@ -2577,19 +2587,19 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     hooks_data = _append_command_hook(
         hooks_data,
         "SessionStart",
-        _CLAUDE_MINDKEEPER_SESSION_START_HOOK,
+        _CLAUDE_BRAINKEEPER_SESSION_START_HOOK,
         matcher="",
     )
     hooks_data = _append_command_hook(
         hooks_data,
         "Stop",
-        _CLAUDE_MINDKEEPER_SESSION_END_HOOK,
+        _CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         matcher="",
     )
     hooks_data = _append_command_hook(
         hooks_data,
         "UserPromptSubmit",
-        _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK,
+        _CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK,
         matcher="",
     )
     return hooks_data
@@ -3571,14 +3581,20 @@ def _sanitize_account_claude_settings_payload(settings_data):
 def _default_session_mcp_servers():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     servers = {}
-
-    mindkeeper_server = os.path.join(repo_root, "mindkeeper", "dist", "server.js")
-    if os.path.isfile(mindkeeper_server):
-        servers["mindkeeper"] = {
-            "args": [mindkeeper_server],
-            "command": "node",
-            "type": "stdio",
-        }
+    candidates = [
+        ("brainkeeper", os.path.join(repo_root, "brainkeeper", "dist", "server.js")),
+        ("brainkeeper", _real_user_path(".local", "share", "brainkeeper", "dist", "server.js")),
+        ("mindkeeper", os.path.join(repo_root, "mindkeeper", "dist", "server.js")),
+        ("mindkeeper", _real_user_path(".local", "share", "mindkeeper", "dist", "server.js")),
+    ]
+    for key, server_path in candidates:
+        if os.path.isfile(server_path):
+            servers[key] = {
+                "args": [server_path],
+                "command": "node",
+                "type": "stdio",
+            }
+            break
 
     return servers
 

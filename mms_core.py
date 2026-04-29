@@ -7178,12 +7178,24 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         lower_target = str(target_path or "").strip().lower()
         basename = os.path.basename(target_path or display_name).lower()
 
-        if "mindkeeper-session-start-hook" in lower_target or basename == "mindkeeper-session-start-hook.sh":
-            return _L("恢复上次进度", "Resume last work"), _L("MindKeeper 恢复提示", "MindKeeper restore hint")
-        if "mindkeeper-session-end-hook" in lower_target or basename == "mindkeeper-session-end-hook.sh":
-            return _L("保存当前进度", "Save current progress"), _L("MindKeeper 会话归档", "MindKeeper session checkpoint")
-        if "mindkeeper-token-monitor-hook" in lower_target or basename == "mindkeeper-token-monitor-hook.sh":
-            return _L("监控 token 用量", "Monitor token usage"), _L("MindKeeper token 监控", "MindKeeper token monitor")
+        if (
+            "brainkeeper-session-start-hook" in lower_target
+            or "mindkeeper-session-start-hook" in lower_target
+            or basename in {"brainkeeper-session-start-hook.sh", "mindkeeper-session-start-hook.sh"}
+        ):
+            return _L("恢复上次进度", "Resume last work"), _L("BrainKeeper 恢复提示", "BrainKeeper restore hint")
+        if (
+            "brainkeeper-session-end-hook" in lower_target
+            or "mindkeeper-session-end-hook" in lower_target
+            or basename in {"brainkeeper-session-end-hook.sh", "mindkeeper-session-end-hook.sh"}
+        ):
+            return _L("保存当前进度", "Save current progress"), _L("BrainKeeper 会话归档", "BrainKeeper session checkpoint")
+        if (
+            "brainkeeper-token-monitor-hook" in lower_target
+            or "mindkeeper-token-monitor-hook" in lower_target
+            or basename in {"brainkeeper-token-monitor-hook.sh", "mindkeeper-token-monitor-hook.sh"}
+        ):
+            return _L("监控 token 用量", "Monitor token usage"), _L("BrainKeeper token 监控", "BrainKeeper token monitor")
         if "map-auto-index" in lower_target or basename == "map-auto-index.sh":
             return _L("Map 自动索引", "Map auto-index"), _L("刷新项目结构索引", "Refresh project structure index")
         if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":

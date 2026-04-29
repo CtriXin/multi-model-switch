@@ -95,6 +95,37 @@ def test_import_legacy_auth_state_only_keeps_auth_and_theme(monkeypatch, tmp_pat
     assert settings == {"theme": "dark"}
 
 
+def test_builtin_brainkeeper_server_map_prefers_new_install(monkeypatch, tmp_path):
+    import mmc_core
+
+    real_home = tmp_path / "real-home"
+    brainkeeper_server = real_home / ".local" / "share" / "brainkeeper" / "dist" / "server.js"
+    mindkeeper_server = real_home / ".local" / "share" / "mindkeeper" / "dist" / "server.js"
+    brainkeeper_server.parent.mkdir(parents=True)
+    mindkeeper_server.parent.mkdir(parents=True)
+    brainkeeper_server.write_text("// brainkeeper\n", encoding="utf-8")
+    mindkeeper_server.write_text("// mindkeeper\n", encoding="utf-8")
+    monkeypatch.setenv("MMC_REAL_HOME", str(real_home))
+
+    assert mmc_core._builtin_brainkeeper_server_map() == {
+        "brainkeeper": {"command": "node", "args": [str(brainkeeper_server)]}
+    }
+
+
+def test_builtin_brainkeeper_server_map_accepts_legacy_mindkeeper(monkeypatch, tmp_path):
+    import mmc_core
+
+    real_home = tmp_path / "real-home"
+    mindkeeper_server = real_home / ".local" / "share" / "mindkeeper" / "dist" / "server.js"
+    mindkeeper_server.parent.mkdir(parents=True)
+    mindkeeper_server.write_text("// mindkeeper\n", encoding="utf-8")
+    monkeypatch.setenv("MMC_REAL_HOME", str(real_home))
+
+    assert mmc_core._builtin_brainkeeper_server_map() == {
+        "mindkeeper": {"command": "node", "args": [str(mindkeeper_server)]}
+    }
+
+
 def test_build_session_settings_only_uses_repo_allowlisted_hooks(monkeypatch, tmp_path):
     import mmc_core
 
