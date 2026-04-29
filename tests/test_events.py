@@ -12,6 +12,7 @@ import pytest
 
 @pytest.fixture
 def signal_dir(tmp_path):
+    pytest.importorskip("gbrain_memory_hook", reason="optional local GBrain hook is not shipped")
     d = tmp_path / "gbrain"
     d.mkdir()
     with patch("gbrain_memory_hook.PROFILE_DIR", d), \

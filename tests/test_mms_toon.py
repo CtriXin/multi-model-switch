@@ -77,7 +77,7 @@ def test_phase3_synthesize_formats_structured_payload_as_toon(monkeypatch, tmp_p
 
     captured = {}
 
-    async def fake_stream_model(_client, _base_url, _api_key, _model, messages, max_tokens):
+    async def fake_stream_model(_client, _base_url, _api_key, _model, messages, max_tokens, **_kwargs):
         captured["messages"] = messages
         captured["max_tokens"] = max_tokens
         yield "done"

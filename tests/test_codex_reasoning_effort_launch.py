@@ -70,11 +70,12 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
         captured["bridge_kwargs"] = kwargs
         yield {"base_url": "http://127.0.0.1:8765", "api_key": "bridge-key"}
 
-    def fake_exec_or_run(cmd, env, once=False, force_subprocess=False):
+    def fake_exec_or_run(cmd, env, once=False, force_subprocess=False, **kwargs):
         captured["cmd"] = cmd
         captured["env"] = env
         captured["once"] = once
         captured["force_subprocess"] = force_subprocess
+        captured["exit_callback"] = kwargs.get("exit_callback")
 
     monkeypatch.setattr(mms_launchers, "codex_responses_bridge", fake_bridge)
     monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec_or_run)
@@ -120,11 +121,12 @@ def test_launch_codex_uses_runtime_thinking_and_effort_without_prompt(monkeypatc
         captured["bridge_kwargs"] = kwargs
         yield {"base_url": "http://127.0.0.1:8765", "api_key": "bridge-key"}
 
-    def fake_exec_or_run(cmd, env, once=False, force_subprocess=False):
+    def fake_exec_or_run(cmd, env, once=False, force_subprocess=False, **kwargs):
         captured["cmd"] = cmd
         captured["env"] = env
         captured["once"] = once
         captured["force_subprocess"] = force_subprocess
+        captured["exit_callback"] = kwargs.get("exit_callback")
 
     monkeypatch.setattr(mms_launchers, "codex_responses_bridge", fake_bridge)
     monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec_or_run)

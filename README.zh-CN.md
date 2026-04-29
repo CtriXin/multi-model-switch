@@ -23,7 +23,7 @@ MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、
 
 ## 当前版本
 
-最新 release：`v1.20.0`
+最新 release：`v2.0.0`
 
 这一代的重点：
 
@@ -32,8 +32,8 @@ MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、
 - Claude 通过 `.claude/projects` 恢复项目级 resume
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
 - 启动确认页按 provider profile 显示 Thinking/Effort 与默认值
-- OMC/ECC Claude agent pack 变成互斥选择
-- session surface 覆盖 `token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`、`Pilot`、`auto-github-contributor`
+- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
+- ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
 ## 安装 / 升级
 
@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.20.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -169,32 +169,41 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 
 ## Session 能力包
 
-MMS 可以按 session 暴露这些能力：
+MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 
-| Pack | 用途 |
-| --- | --- |
-| `token-saver` / `TOON` | 压缩长输出和结构化 handoff |
-| `web-access` / `weber` / `agent-browser` | 浏览器和 web 任务路由指导 |
-| `Caveman` | 低 token 沟通模式 |
-| `OMC` / `ECC` | Claude workflow / orchestration agent pack |
-| `Pilot` / `auto-github-contributor` | 规划和开源贡献入口 |
+| Pack | 安装状态 | 用途 |
+| --- | --- | --- |
+| `token-saver` / `TOON` | 内建 | 压缩长输出和结构化 handoff |
+| `web-access` / `weber` / `agent-browser` | 内建 | 浏览器和 web 任务路由指导 |
+| `Caveman` | 内建 | 低 token 沟通模式 |
+| `ECC` | MMS-managed 可选包 | Claude engineering workflow / rules / quality hooks |
+| `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
+| `Pilot` / `auto-github-contributor` | 已安装时检测 | 规划和开源贡献入口 |
 
-启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。
+启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。ECC 和 OMC 默认关闭，只有在 Claude 启动确认页选择后才注入。
 
 ## 可选安装包
 
-只有当你希望能力在 MMS 管理之外也全局可用时，才需要安装这些包：
+只有当你希望能力在 MMS 管理之外也全局可用时，才需要安装这些全局包：
 
 ```bash
-bash install.sh --install-token-saver
 bash install.sh --install-rtk
 bash install.sh --install-mindkeeper-context
 bash install.sh --install-map
 bash install.sh --install-read-once
+bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
 
-大多数日常 MMS session 不需要改全局 hook；launcher 可以直接注入 repo-owned session assets。
+安装 MMS-managed Claude agent packs，不写全局 Claude 配置：
+
+```bash
+bash install.sh --install-ecc
+bash install.sh --install-omc
+bash install.sh --install-agent-packs
+```
+
+大多数日常 MMS session 不需要改全局 hook；launcher 可以直接注入内建或 MMS-managed session assets。
 
 ## 清理和重装
 

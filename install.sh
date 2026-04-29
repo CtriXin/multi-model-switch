@@ -32,6 +32,10 @@ MINDKEEPER_DEFAULT_REF="${MINDKEEPER_DEFAULT_REF:-v2.2.0}"
 MINDKEEPER_INSTALL_REF="${MINDKEEPER_INSTALL_REF:-}"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
 MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
+ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code}"
+ECC_INSTALL_REF="${ECC_INSTALL_REF:-}"
+OMC_REPO_URL="${OMC_REPO_URL:-https://github.com/Yeachan-Heo/oh-my-claudecode}"
+OMC_INSTALL_REF="${OMC_INSTALL_REF:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
@@ -53,6 +57,10 @@ INSTALL_OPS_ENV_SAFE=0
 INSTALL_OPS_ENV_SAFE_EXPLICIT=0
 INSTALL_TOKEN_SAVER=0
 INSTALL_TOKEN_SAVER_EXPLICIT=0
+INSTALL_ECC=0
+INSTALL_ECC_EXPLICIT=0
+INSTALL_OMC=0
+INSTALL_OMC_EXPLICIT=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
@@ -149,6 +157,20 @@ optional_token_saver_installed() {
         && [ -x "$BIN_DIR/token-saver" ]
 }
 
+optional_ecc_installed() {
+    local pack_dir="$MMS_HOME/agent-packs/everything-claude-code"
+    [ -f "$pack_dir/hooks/hooks.json" ] \
+        && [ -d "$pack_dir/commands" ] \
+        && [ -d "$pack_dir/skills" ]
+}
+
+optional_omc_installed() {
+    local pack_dir="$MMS_HOME/agent-packs/oh-my-claudecode"
+    [ -f "$pack_dir/hooks/hooks.json" ] \
+        && [ -d "$pack_dir/skills" ] \
+        && [ -f "$pack_dir/.claude-plugin/plugin.json" ]
+}
+
 note_optional_pack_detected() {
     local zh_label="$1"
     local en_label="$2"
@@ -160,7 +182,8 @@ note_optional_pack_detected() {
 }
 
 can_prompt_interactively() {
-    [ -r /dev/tty ] && [ -w /dev/tty ]
+    [ -r /dev/tty ] && [ -w /dev/tty ] || return 1
+    { : < /dev/tty > /dev/tty; } 2>/dev/null
 }
 
 read_from_tty() {
@@ -200,7 +223,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-rtk] [--install-mindkeeper-context] [--mindkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -222,7 +245,9 @@ $(t "说明:" "Notes:")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command")
   - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
-  - $(t "Caveman mode 现在作为 MMS 内建 session asset 随安装一起提供；MMS 启动的 Claude/Codex 可在确认页切换，无需额外全局安装" "Caveman mode now ships as a bundled MMS session asset; MMS-launched Claude/Codex can toggle it from the confirm page without a separate global install")
+  - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
+  - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
+  - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -472,15 +497,78 @@ prompt_optional_install_choices() {
         fi
     fi
 
+    if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] || [ "$INSTALL_OMC_EXPLICIT" -eq 0 ]; then
+        local answer=""
+        local normalized=""
+        local ecc_ready=0
+        local omc_ready=0
+
+        optional_ecc_installed && ecc_ready=1 || true
+        optional_omc_installed && omc_ready=1 || true
+
+        echo ""
+        if [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional Claude agent packs"
+            [ "$ecc_ready" -eq 1 ] && note_optional_pack_detected " ECC" "ECC"
+            [ "$omc_ready" -eq 1 ] && note_optional_pack_detected " OMC" "OMC"
+            echo "  ECC: engineering workflow / rules / quality hooks."
+            echo "  OMC: orchestration runtime / team / verify loop."
+            echo "  These are installed under ~/.mms/agent-packs and stay disabled until selected in the launch confirm page."
+            if [ "$ecc_ready" -eq 1 ] && [ "$omc_ready" -eq 1 ]; then
+                :
+            else
+                answer="$(read_from_tty "Install Claude agent packs? [n/ecc/omc/both, default n]: ")" || answer="n"
+            fi
+        else
+            echo "可选 Claude agent packs"
+            [ "$ecc_ready" -eq 1 ] && note_optional_pack_detected " ECC" "ECC"
+            [ "$omc_ready" -eq 1 ] && note_optional_pack_detected " OMC" "OMC"
+            echo "  ECC：工程 workflow / rules / quality hooks。"
+            echo "  OMC：orchestration runtime / team / verify loop。"
+            echo "  它们会安装到 ~/.mms/agent-packs，默认不启用，只在启动确认页选择后注入 session。"
+            if [ "$ecc_ready" -eq 1 ] && [ "$omc_ready" -eq 1 ]; then
+                :
+            else
+                answer="$(read_from_tty "是否安装 Claude agent packs？[n/ecc/omc/both，默认 n]: ")" || answer="n"
+            fi
+        fi
+
+        normalized="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]' | xargs)"
+        [ -z "$normalized" ] && normalized="n"
+        case "$normalized" in
+            e|ecc)
+                if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] && [ "$ecc_ready" -eq 0 ]; then
+                    INSTALL_ECC=1
+                fi
+                ;;
+            o|omc)
+                if [ "$INSTALL_OMC_EXPLICIT" -eq 0 ] && [ "$omc_ready" -eq 0 ]; then
+                    INSTALL_OMC=1
+                fi
+                ;;
+            b|both|all|agent-packs|agent_packs)
+                if [ "$INSTALL_ECC_EXPLICIT" -eq 0 ] && [ "$ecc_ready" -eq 0 ]; then
+                    INSTALL_ECC=1
+                fi
+                if [ "$INSTALL_OMC_EXPLICIT" -eq 0 ] && [ "$omc_ready" -eq 0 ]; then
+                    INSTALL_OMC=1
+                fi
+                ;;
+            *)
+                :
+                ;;
+        esac
+    fi
+
     echo ""
     if [ "$INSTALL_LANG" = "en" ]; then
         echo "Bundled session mode"
-        echo "  Caveman ships inside MMS as a pinned session asset."
-        echo "  MMS-launched Claude/Codex can toggle it from the launch confirm page without touching your global hooks or config."
+        echo "  Caveman, weber, web-access, agent-browser, TOON, and token-saver ship inside MMS as pinned session assets."
+        echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config."
     else
         echo "内建 session 模式"
-        echo "  Caveman 会随 MMS 一起作为内建 session 资产提供。"
-        echo "  通过 MMS 启动的 Claude/Codex 可在启动确认页切换，不会改你的全局 hooks 或配置。"
+        echo "  Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。"
+        echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置。"
     fi
 
     if [ "$INSTALL_CLI_EXPLICIT" -eq 1 ]; then
@@ -1399,6 +1487,24 @@ run_install_check() {
     else
         echo "• $(t "ccs 命令链接尚未创建" "ccs symlink not created yet"): $BIN_DIR/ccs"
     fi
+
+    if [ -f "$MMS_HOME/vendor/weber/SKILL.md" ]; then
+        echo "✓ $(t "内建 weber session asset 已存在" "Bundled weber session asset present"): $MMS_HOME/vendor/weber"
+    else
+        echo "• $(t "未检测到内建 weber session asset" "Bundled weber session asset not found"): $MMS_HOME/vendor/weber"
+    fi
+
+    if optional_ecc_installed; then
+        echo "✓ $(t "ECC agent pack 已安装" "ECC agent pack installed"): $MMS_HOME/agent-packs/everything-claude-code"
+    else
+        echo "• $(t "ECC agent pack 未安装（可选）" "ECC agent pack not installed (optional)"): --install-ecc"
+    fi
+
+    if optional_omc_installed; then
+        echo "✓ $(t "OMC agent pack 已安装" "OMC agent pack installed"): $MMS_HOME/agent-packs/oh-my-claudecode"
+    else
+        echo "• $(t "OMC agent pack 未安装（可选）" "OMC agent pack not installed (optional)"): --install-omc"
+    fi
 }
 
 
@@ -2304,6 +2410,100 @@ install_optional_token_saver() {
     install_token_saver_installed_skills_mirror || true
 }
 
+validate_ecc_pack_dir() {
+    local pack_dir="$1"
+    [ -f "$pack_dir/hooks/hooks.json" ] \
+        && [ -d "$pack_dir/commands" ] \
+        && [ -d "$pack_dir/skills" ]
+}
+
+validate_omc_pack_dir() {
+    local pack_dir="$1"
+    [ -f "$pack_dir/hooks/hooks.json" ] \
+        && [ -d "$pack_dir/skills" ] \
+        && [ -f "$pack_dir/.claude-plugin/plugin.json" ]
+}
+
+install_agent_pack_from_git() {
+    local label="$1"
+    local repo_url="$2"
+    local ref="$3"
+    local target_dir="$4"
+    local validator="$5"
+    local tmp_dir=""
+
+    if ! command -v git >/dev/null 2>&1; then
+        echo "⚠ $(t "未检测到 git，跳过 agent pack 安装" "git not found, skipping agent pack install"): $label"
+        return 1
+    fi
+
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mms-agent-pack.XXXXXX")"
+    echo ""
+    echo "→ $(t "正在安装 Claude agent pack" "Installing Claude agent pack"): $label"
+    echo "  $repo_url${ref:+#$ref}"
+
+    if [ -n "$ref" ]; then
+        if ! git clone --depth 1 --branch "$ref" --single-branch "$repo_url" "$tmp_dir"; then
+            echo "⚠ $(t "下载 agent pack 失败" "Failed to download agent pack"): $label"
+            rm -rf "$tmp_dir"
+            return 1
+        fi
+    else
+        if ! git clone --depth 1 "$repo_url" "$tmp_dir"; then
+            echo "⚠ $(t "下载 agent pack 失败" "Failed to download agent pack"): $label"
+            rm -rf "$tmp_dir"
+            return 1
+        fi
+    fi
+
+    rm -rf "$tmp_dir/.git"
+    if ! "$validator" "$tmp_dir"; then
+        echo "⚠ $(t "agent pack 结构校验失败，跳过" "Agent pack structure validation failed, skipping"): $label"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_dir")"
+    if ! copy_dir_safely "$tmp_dir" "$target_dir" "$label" "$label"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    cat > "$target_dir/.mms-agent-pack-source" <<EOF
+name=$label
+repo=$repo_url
+ref=${ref:-default}
+installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+    rm -rf "$tmp_dir"
+    echo "✓ $(t "已安装 Claude agent pack" "Installed Claude agent pack"): $target_dir"
+    return 0
+}
+
+install_optional_ecc() {
+    echo ""
+    echo "$(t "正在安装 ECC agent pack..." "Installing ECC agent pack...")"
+    echo "⚠ $(t "这个可选包只写入 ~/.mms/agent-packs/everything-claude-code；不会修改全局 Claude hooks/config。" "This optional pack writes only ~/.mms/agent-packs/everything-claude-code; it does not modify global Claude hooks/config.")"
+    install_agent_pack_from_git \
+        "ECC" \
+        "$ECC_REPO_URL" \
+        "$ECC_INSTALL_REF" \
+        "$MMS_HOME/agent-packs/everything-claude-code" \
+        validate_ecc_pack_dir
+}
+
+install_optional_omc() {
+    echo ""
+    echo "$(t "正在安装 OMC agent pack..." "Installing OMC agent pack...")"
+    echo "⚠ $(t "这个可选包只写入 ~/.mms/agent-packs/oh-my-claudecode；不会修改全局 Claude hooks/config。" "This optional pack writes only ~/.mms/agent-packs/oh-my-claudecode; it does not modify global Claude hooks/config.")"
+    install_agent_pack_from_git \
+        "OMC" \
+        "$OMC_REPO_URL" \
+        "$OMC_INSTALL_REF" \
+        "$MMS_HOME/agent-packs/oh-my-claudecode" \
+        validate_omc_pack_dir
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --write-shell-rc)
@@ -2359,6 +2559,38 @@ while [[ $# -gt 0 ]]; do
         --install-ops-env-safe)
             INSTALL_OPS_ENV_SAFE=1
             INSTALL_OPS_ENV_SAFE_EXPLICIT=1
+            ;;
+        --install-ecc)
+            INSTALL_ECC=1
+            INSTALL_ECC_EXPLICIT=1
+            ;;
+        --ecc-ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--ecc-ref 需要一个版本号或分支名" "--ecc-ref requires a tag or branch name")"
+                usage
+                exit 1
+            fi
+            ECC_INSTALL_REF="$1"
+            ;;
+        --install-omc)
+            INSTALL_OMC=1
+            INSTALL_OMC_EXPLICIT=1
+            ;;
+        --omc-ref)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--omc-ref 需要一个版本号或分支名" "--omc-ref requires a tag or branch name")"
+                usage
+                exit 1
+            fi
+            OMC_INSTALL_REF="$1"
+            ;;
+        --install-agent-packs)
+            INSTALL_ECC=1
+            INSTALL_ECC_EXPLICIT=1
+            INSTALL_OMC=1
+            INSTALL_OMC_EXPLICIT=1
             ;;
         --install-cli)
             shift
@@ -2466,13 +2698,25 @@ if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/mms-toon, without writing ~/.config/mms.")"
 fi
 
-    if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
-        echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
-        echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
-    fi
+if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
+    echo "• $(t "附带安装 ops-env-safe" "Optional ops-env-safe"): on"
+    echo "  $(t "会写入 Codex skill、Claude /ops-env-safe 命令和 path-only 路径映射模板。" "This writes a Codex skill, a Claude /ops-env-safe command, and a path-only path-map template.")"
+fi
 
-    echo "• $(t "内建 Caveman session asset" "Bundled Caveman session asset"): on"
-    echo "  $(t "安装后会自带 pinned Caveman 资产；MMS 启动的 Claude/Codex 可在确认页切换，不改全局 hooks/config。" "Install includes a pinned Caveman asset; MMS-launched Claude/Codex can toggle it from the confirm page without changing global hooks/config.")"
+if [ "$INSTALL_ECC" -eq 1 ]; then
+    echo "• $(t "附带安装 ECC agent pack" "Optional ECC agent pack"): on"
+    echo "  $(t "写入 ~/.mms/agent-packs/everything-claude-code，默认不启用，不写全局 Claude 配置。" "Writes ~/.mms/agent-packs/everything-claude-code, disabled by default, without global Claude config writes.")"
+    [ -n "$ECC_INSTALL_REF" ] && echo "  ECC ref: $ECC_INSTALL_REF"
+fi
+
+if [ "$INSTALL_OMC" -eq 1 ]; then
+    echo "• $(t "附带安装 OMC agent pack" "Optional OMC agent pack"): on"
+    echo "  $(t "写入 ~/.mms/agent-packs/oh-my-claudecode，默认不启用，不写全局 Claude 配置。" "Writes ~/.mms/agent-packs/oh-my-claudecode, disabled by default, without global Claude config writes.")"
+    [ -n "$OMC_INSTALL_REF" ] && echo "  OMC ref: $OMC_INSTALL_REF"
+fi
+
+echo "• $(t "内建 session assets" "Bundled session assets"): on"
+echo "  $(t "安装后会自带 Caveman、weber、web-access、agent-browser、TOON、token-saver；按 session 注入，不改全局 hooks/config。" "Install includes Caveman, weber, web-access, agent-browser, TOON, and token-saver; they are injected per session without changing global hooks/config.")"
 
     if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
@@ -2553,6 +2797,12 @@ fi
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
     install_optional_ops_env_safe || true
 fi
+if [ "$INSTALL_ECC" -eq 1 ]; then
+    install_optional_ecc || true
+fi
+if [ "$INSTALL_OMC" -eq 1 ]; then
+    install_optional_omc || true
+fi
 
 # ── 5. 建立命令入口 ──
 echo ""
@@ -2626,7 +2876,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
-    echo "  $(t "内建 Caveman 模式：MMS 启动的 Claude/Codex 可在启动确认页按 C 切换；安装不会改全局 hooks/config。" "Bundled Caveman mode: MMS-launched Claude/Codex can toggle it with C on the launch confirm page; install does not change global hooks/config.")"
+    echo "  $(t "内建 session assets：Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起提供，按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, weber, web-access, agent-browser, TOON, and token-saver ship with MMS and are injected per session without global hooks/config writes.")"
     echo ""
 
     if [ "$INSTALL_RTK" -eq 1 ]; then
@@ -2651,6 +2901,16 @@ if [ -x "$BIN_DIR/mms" ]; then
     if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
         echo "  $(t "ops-env-safe 已安装：Codex skill、Claude /ops-env-safe 和 path-only 路径映射模板。" "ops-env-safe installed: Codex skill, Claude /ops-env-safe, and a path-only path-map template.")"
         echo "  $(t "如需自定义宿主路径，请编辑 ~/.config/mms/ops-env-safe.toml；它不会注入真实 HOME/XDG。" "To customize host paths, edit ~/.config/mms/ops-env-safe.toml; it will not inject real HOME/XDG.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_ECC" -eq 1 ]; then
+        echo "  $(t "ECC agent pack 已安装到 ~/.mms/agent-packs/everything-claude-code；默认关闭，Claude 启动确认页按 X 选择后才注入。" "ECC agent pack installed under ~/.mms/agent-packs/everything-claude-code; it stays off until selected with X on the Claude launch confirm page.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_OMC" -eq 1 ]; then
+        echo "  $(t "OMC agent pack 已安装到 ~/.mms/agent-packs/oh-my-claudecode；默认关闭，Claude 启动确认页按 X 选择后才注入。" "OMC agent pack installed under ~/.mms/agent-packs/oh-my-claudecode; it stays off until selected with X on the Claude launch confirm page.")"
         echo ""
     fi
 

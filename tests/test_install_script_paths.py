@@ -167,18 +167,18 @@ def test_install_script_copies_session_tool_scripts_directory():
     assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
 
 
-def test_install_script_mentions_bundled_caveman_mode():
+def test_install_script_mentions_bundled_session_assets():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "Bundled Caveman session asset" in text
-    assert "Bundled Caveman mode" in text
+    assert "Bundled session assets" in text
+    assert "Caveman, weber, web-access, agent-browser, TOON, and token-saver" in text
 
 
 def test_install_script_updates_chinese_optional_copy():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert "MindKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
-    assert "Caveman 会随 MMS 一起作为内建 session 资产提供。" in text
+    assert "Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。" in text
 
 
 def test_install_script_has_optional_token_saver_pack():
@@ -193,3 +193,17 @@ def test_install_script_has_optional_token_saver_pack():
     assert 'write_token_saver_bin_wrapper "token-saver"' in text
     assert 'write_token_saver_bin_wrapper "mms-context"' in text
     assert 'write_token_saver_bin_wrapper "mms-toon"' in text
+
+
+def test_install_script_has_optional_claude_agent_packs():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "--install-ecc" in text
+    assert "--install-omc" in text
+    assert "--install-agent-packs" in text
+    assert "INSTALL_ECC" in text
+    assert "INSTALL_OMC" in text
+    assert "install_optional_ecc" in text
+    assert "install_optional_omc" in text
+    assert "$MMS_HOME/agent-packs/everything-claude-code" in text
+    assert "$MMS_HOME/agent-packs/oh-my-claudecode" in text

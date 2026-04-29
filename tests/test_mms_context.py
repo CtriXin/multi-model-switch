@@ -304,17 +304,22 @@ def test_overlay_auto_github_contributor_session_entries_respects_disabled_skill
     assert not (parent_dir / "commands" / "auto-contribute.md").is_symlink()
 
 
-def test_resolve_token_saver_root_prefers_shared_skill(monkeypatch, tmp_path):
+def test_resolve_token_saver_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     home = tmp_path / "home"
+    install_root = tmp_path / "mms-install"
+    bundled_root = install_root / "vendor" / "token-saver"
     shared_root = home / "auto-skills" / "shared-skills" / "token-saver"
+    bundled_root.mkdir(parents=True)
     shared_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled token saver\n", encoding="utf-8")
     (shared_root / "SKILL.md").write_text("# shared token saver\n", encoding="utf-8")
 
     monkeypatch.setenv("MMS_REAL_HOME", str(home))
     monkeypatch.delenv("MMS_TOKEN_SAVER_ROOT", raising=False)
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
 
-    assert Path(mms_launchers._resolve_token_saver_root()) == shared_root
+    assert Path(mms_launchers._resolve_token_saver_root()) == bundled_root
 
 
 def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatch, tmp_path):
@@ -340,17 +345,22 @@ def test_overlay_weber_session_entries_merges_existing_session_skills(monkeypatc
     assert (parent_dir / "skills" / "weber" / "SKILL.md").read_text(encoding="utf-8") == "# weber\n"
 
 
-def test_resolve_weber_root_prefers_shared_skill(monkeypatch, tmp_path):
+def test_resolve_weber_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     home = tmp_path / "home"
+    install_root = tmp_path / "mms-install"
+    bundled_root = install_root / "vendor" / "weber"
     shared_root = home / "auto-skills" / "shared-skills" / "weber"
+    bundled_root.mkdir(parents=True)
     shared_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled weber\n", encoding="utf-8")
     (shared_root / "SKILL.md").write_text("# shared weber\n", encoding="utf-8")
 
     monkeypatch.setenv("MMS_REAL_HOME", str(home))
     monkeypatch.delenv("MMS_WEBER_ROOT", raising=False)
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
 
-    assert Path(mms_launchers._resolve_weber_root()) == shared_root
+    assert Path(mms_launchers._resolve_weber_root()) == bundled_root
 
 
 def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_path):

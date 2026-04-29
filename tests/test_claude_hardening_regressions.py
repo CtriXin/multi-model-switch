@@ -510,6 +510,37 @@ def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypa
     assert mms_launchers._resolve_caveman_root() == str(bundled_root)
 
 
+def test_resolve_agent_pack_roots_prefer_mms_installed_packs(monkeypatch, tmp_path):
+    import mms_launchers
+
+    install_root = tmp_path / "mms-install"
+    ecc_root = install_root / "agent-packs" / "everything-claude-code"
+    omc_root = install_root / "agent-packs" / "oh-my-claudecode"
+
+    (ecc_root / "hooks").mkdir(parents=True)
+    (ecc_root / "commands").mkdir()
+    (ecc_root / "skills").mkdir()
+    (ecc_root / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
+
+    (omc_root / "hooks").mkdir(parents=True)
+    (omc_root / "skills").mkdir()
+    (omc_root / ".claude-plugin").mkdir()
+    (omc_root / "hooks" / "hooks.json").write_text("{}", encoding="utf-8")
+    (omc_root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_ECC_ROOT", raising=False)
+    monkeypatch.delenv("MMS_OMC_ROOT", raising=False)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str((tmp_path / "real-home").joinpath(*parts)),
+    )
+
+    assert mms_launchers._resolve_ecc_root() == str(ecc_root)
+    assert mms_launchers._resolve_omc_root() == str(omc_root)
+
+
 def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, tmp_path):
     import mms_launchers
 

@@ -2188,6 +2188,7 @@ def _merge_snapshot_with_current(snapshot_data, current_settings):
 def _prune_session_only_snapshot_entries(snapshot_data):
     snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
     hooks = snapshot_data.get("hooks") or {}
+    local_hooks_dir = _LOCAL_HOOKS_DIR
     session_only_commands = {
         _normalize_hook_command(_CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK),
         _normalize_hook_command(f"bash {_CLAUDE_HIVE_COMPACT_HOOK}"),
@@ -2195,6 +2196,12 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_START_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
+        _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-start-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2735,6 +2742,8 @@ def _resolve_ecc_root():
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
         _real_user_path("auto-skills", "vendor", "everything-claude-code"),
         _real_user_path("vendor", "everything-claude-code"),
         _real_user_path("everything-claude-code"),
@@ -2759,6 +2768,8 @@ def _resolve_omc_root():
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
         _real_user_path("auto-skills", "installed-skills", "oh-my-claudecode"),
         _real_user_path("auto-skills", "vendor", "oh-my-claudecode"),
         _real_user_path("vendor", "oh-my-claudecode"),
@@ -2805,8 +2816,8 @@ def _resolve_weber_root():
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend([
-        _real_user_path("auto-skills", "shared-skills", "weber"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
+        _real_user_path("auto-skills", "shared-skills", "weber"),
         _real_user_path("auto-skills", "vendor", "weber"),
         _real_user_path("vendor", "weber"),
     ])
@@ -2870,8 +2881,8 @@ def _resolve_token_saver_root():
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
     candidates.extend([
-        _real_user_path("auto-skills", "shared-skills", "token-saver"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
+        _real_user_path("auto-skills", "shared-skills", "token-saver"),
         _real_user_path("auto-skills", "vendor", "token-saver"),
         _real_user_path("vendor", "token-saver"),
     ])

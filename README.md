@@ -23,7 +23,7 @@ It helps you:
 
 ## Current Release
 
-Latest release: `v1.20.0`
+Latest release: `v2.0.0`
 
 Key changes in this generation:
 
@@ -32,8 +32,8 @@ Key changes in this generation:
 - Claude resume persistence through `.claude/projects`
 - Codex resume write-back across isolated MMS-managed launches
 - profile-aware Thinking/Effort controls in the launch confirmation screen
-- mutually exclusive OMC/ECC Claude agent-pack controls
-- session surfaces for `token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`, `Pilot`, and `auto-github-contributor`
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
+- optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
 ## Install Or Upgrade
 
@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.20.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -169,32 +169,41 @@ User overlays can live in the MMS config directory as read-only profile inputs. 
 
 ## Session Packs
 
-MMS can expose optional capabilities per session:
+MMS can expose capabilities per session without writing global hooks/config.
 
-| Pack | Purpose |
-| --- | --- |
-| `token-saver` / `TOON` | compact long outputs and structured handoffs |
-| `web-access` / `weber` / `agent-browser` | browser and web-task routing guidance |
-| `Caveman` | compact communication mode |
-| `OMC` / `ECC` | Claude workflow / orchestration agent packs |
-| `Pilot` / `auto-github-contributor` | planning and contribution surfaces when installed |
+| Pack | Install state | Purpose |
+| --- | --- | --- |
+| `token-saver` / `TOON` | bundled | compact long outputs and structured handoffs |
+| `web-access` / `weber` / `agent-browser` | bundled | browser and web-task routing guidance |
+| `Caveman` | bundled | compact communication mode |
+| `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
+| `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
+| `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
 
 ## Optional Installer Packs
 
-Install optional packs only when you want them globally available outside MMS-managed sessions:
+Install global optional packs only when you want them available outside MMS-managed sessions:
 
 ```bash
-bash install.sh --install-token-saver
 bash install.sh --install-rtk
 bash install.sh --install-mindkeeper-context
 bash install.sh --install-map
 bash install.sh --install-read-once
+bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
 
-Most day-to-day MMS sessions do not need global hook installation; the launcher can inject repo-owned session assets directly.
+Install MMS-managed Claude agent packs without touching global Claude config:
+
+```bash
+bash install.sh --install-ecc
+bash install.sh --install-omc
+bash install.sh --install-agent-packs
+```
+
+Most day-to-day MMS sessions do not need global hook installation; the launcher can inject bundled or MMS-managed session assets directly.
 
 ## Cleanup And Reset
 
