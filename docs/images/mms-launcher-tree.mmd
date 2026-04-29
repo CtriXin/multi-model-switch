@@ -1,0 +1,21 @@
+flowchart TD
+  MMS["MMS: local AI coding launcher"]
+  MMS --> Entry["Entry surfaces"]
+  Entry --> TUI["mms TUI"]
+  Entry --> Direct["mms claude / mms codex"]
+  Entry --> Export["mms --export / presets"]
+
+  MMS --> Decision["Decision layer"]
+  Decision --> Profiles["provider profiles\nprotocol + auth + thinking"]
+  Decision --> Priority["roles + priority\nprimary / auto / fallback"]
+  Decision --> Diagnostics["doctor / test / trace"]
+
+  MMS --> Runtime["Runtime isolation"]
+  Runtime --> Claude["Claude session\n.claude/projects resume"]
+  Runtime --> Codex["Codex session\n.codex bounded seed + write-back"]
+  Runtime --> Bridge["local bridges\nAnthropic-first where supported"]
+
+  MMS --> Packs["Session packs"]
+  Packs --> Token["token-saver / TOON"]
+  Packs --> Web["web-access / weber / agent-browser"]
+  Packs --> Agent["Caveman / OMC / ECC / Pilot"]

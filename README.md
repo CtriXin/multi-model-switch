@@ -4,73 +4,65 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> A local launcher that unifies `claude`, `codex`, and other AI coding CLIs behind one entrypoint.
+> A launcher-first runtime manager for local AI coding CLIs. Use one entrypoint to choose models, providers, session packs, and isolated Claude/Codex homes without turning your real global account state into a fallback pool.
 
-![MMS - Before vs After](assets/cover.svg)
+![MMS launcher tree](docs/images/mms-launcher-tree-en.svg)
 
-## Why MMS
+## What MMS Does
 
-**MMS** helps local developers manage multiple AI coding tools from one place:
+MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `qwen`, `kimi`, and `gemini`.
 
-- One TUI to browse model families and launch sessions
-- One config system for gateway providers and OAuth accounts
-- One way to export env vars or presets for scripts and automation
-- One routing layer for provider priority, bridge compatibility, and diagnostics
+It helps you:
 
-## Protocol And Cache Note
+- start the right CLI from one TUI or command line
+- choose providers and OAuth/account profiles explicitly
+- keep Claude/Codex session state isolated and resumable
+- bridge compatible model providers while preserving protocol semantics
+- inject session-scoped skills and hooks without editing global config
+- diagnose provider, route, cache, and exposed runtime state before blaming a model
 
-For dual-protocol providers, keep these rules in mind:
+## Current Release
 
-- `Anthropic /v1/messages` and `OpenAI /v1/chat/completions` are not equivalent transports
-- if a provider supports `anthropic_messages`, `Claude` semantics should prefer `messages`
-- `chat/completions` is fallback transport, not the silent default
-- when cache looks bad, verify the real request path before blaming the model or vendor
+Latest release: `v1.20.0`
 
-Detailed operator rules:
+Key changes in this generation:
 
-- `docs/PROVIDER_PROFILES.md`
-- `docs/SERVER_CLAUDE_CACHE_RUNBOOK.md`
-- `docs/AGENT_GUARDRAILS.md`
+- provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
+- profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
+- Claude resume persistence through `.claude/projects`
+- Codex resume write-back across isolated MMS-managed launches
+- profile-aware Thinking/Effort controls in the launch confirmation screen
+- mutually exclusive OMC/ECC Claude agent-pack controls
+- session surfaces for `token-saver`, `TOON`, `web-access`, `weber`, `agent-browser`, `Pilot`, and `auto-github-contributor`
 
-<!-- repo-graphics:runtime-start -->
-## Runtime Flow
-
-![MMS runtime flow](docs/images/architecture-mainline-en.png)
-
-This diagram compresses the current MMS mainline into one picture: config and routing first, then isolated launch, export, and diagnostics.
-<!-- repo-graphics:runtime-end -->
-
-## Install
-
-### Quick install
+## Install Or Upgrade
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
-By default, the installer pulls the latest semver tag.
-When run in an interactive terminal, it asks for UI language first, then the optional `RTK enhancement`, `MindKeeper context pack`, `Map auto-index`, `read-once`, `token-saver`, and `ops-env-safe`, and finally checks whether `Claude Code` / `Codex CLI` are already present before asking to install any missing ones.
-`install.sh` installs also keep a lightweight version marker, so interactive `mms` runs can show an upgrade hint when you are `3+` tags behind without prompting on every launch.
+Default behavior:
 
-Public surface note:
+- installs the latest semver tag
+- creates an isolated MMS runtime under `~/.mms`
+- links `mms` and `ccs` into `~/.local/bin`
+- asks before installing optional packs or missing frontend CLIs
+- does not silently rewrite your real provider/account configuration
 
-- Installing `claude` here means installing the local `Claude Code` binary as a frontend CLI via `npm install -g @anthropic-ai/claude-code`.
-- The public build keeps the `claude` tab and `mms claude`.
-- It can show both native `claude-*` models and bridge-capable GPT / Gemini / compatible domestic models when the current routes support them.
-- Public docs do not include `Claude OAuth account.add/login`.
-
-### Install policy
-
-- Use `main/install.sh` for normal installs and upgrades after a fix has landed on `main`.
-- Use a `tag-pinned installer` for an urgent hotfix that has been released but not merged to `main` yet:
+Set the UI language during install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.16.3/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang en
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang zh
 ```
 
-- Reason: installer fixes live in `install.sh` itself; a stale `main/install.sh` can still miss a hotfix even if the tag already exists.
+Pin a release when you need an exact version:
 
-### Verify right after install
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v1.20.0/install.sh | bash -s --
+```
+
+Verify the install:
 
 ```bash
 bash install.sh --check
@@ -79,353 +71,177 @@ mms test --provider <id> --cli claude
 mms test --provider <id> --cli codex
 ```
 
-Meaning:
+## Quick Start
 
-- `--check`: verify install landing paths
-- `doctor`: verify route / auth / protocol reachability
-- `test`: verify the real message path for one provider / CLI pair
-
-### Clean up a previously dirty install
-
-If you installed from an older broken installer that may have written into a gateway session home, run the cleanup script first in `dry-run` mode:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
-```
-
-Then apply it only if the reported paths look correct:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
-```
-
-The script only targets obvious leaked artifacts from dirty installs:
-
-- `<session-home>/.mms`
-- `<session-home>/.nvm`
-- `<session-home>/.config/mms`
-- `<session-home>/.local/bin/mms`
-- `<session-home>/.local/bin/ccs`
-- `~/.local/bin/mms` / `~/.local/bin/ccs` when they still point into a gateway session path
-
-If you need a hotfix-specific cleanup script before `main` is updated, replace `main` with the released tag, for example `v1.16.3`.
-
-### Full reset before reinstall
-
-If a machine has too much historical MMS state and you want to reinstall from scratch, use the full reset script in `dry-run` mode first:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
-```
-
-Apply it only after confirming the reported paths are correct:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
-```
-
-By default it only removes MMS-owned surfaces:
-
-- `~/.mms`
-- `~/.config/mms`
-- `~/.local/bin/mms`
-- `~/.local/bin/ccs`
-- `~/.local/bin/mmslogs`
-
-It intentionally does not touch shared `~/.claude`, shared `~/.codex`, or any global OAuth state.
-
-If you previously used `install.sh --write-shell-rc` and also want to remove the exact `# Added by MMS` PATH block from your shell rc, add:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply --include-shell-rc
-```
-
-### Default English UI on install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --lang en
-```
-
-### Install with optional RTK rewrite enhancement
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-rtk
-```
-
-This optional path installs `jq` + `rtk`, wires the Claude `PreToolUse:Bash` hook, and when `Codex CLI` is already available (or gets installed in the same run) it also runs `rtk init --codex --global`.
-
-### Install with optional MindKeeper context pack
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context
-```
-
-This optional path installs `MindKeeper MCP`, Claude `/distill`, Claude `/cz`, the Claude `UserPromptSubmit` token monitor hook, and the `claude-context-restore-hint` SessionStart hook. If `jq` is missing, the installer also attempts to install it because the token monitor hook depends on it.
-
-By default, MMS pins this pack to the tested `MindKeeper v2.2.0`.
-Override it when needed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref v2.2.0
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-mindkeeper-context --mindkeeper-ref main
-```
-
-Scope notes:
-
-- This pack is `Claude`-first; it does not add Hive compact/restore features
-- It does not auto-create a separate `Codex` slash command surface
-- `Hive`-related hooks and packs remain outside the default MMS install path
-
-### Install with optional Map auto-index
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map
-```
-
-This optional path installs `Map` and wires the Claude `SessionStart` auto-index hook so project structure indexing can be built or refreshed automatically when a session starts. By default, MMS pins `Map` to the tested release `v0.3.1`.
-
-Override the bundled `Map` version when needed:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map --map-ref main
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-map --map-ref v0.3.1
-```
-
-Scope notes:
-
-- The current integration targets the Claude `SessionStart` hook first
-- It prefers an existing local `Node.js 18+` runtime; if none is available, MMS skips `Map` instead of changing your default `Node` automatically
-- Use `--ensure-node22` only when you explicitly want MMS to prepare a separate `Node 22` fallback
-- If the `Map` build output is missing, the installer skips hook injection and prints a warning
-
-### Install with optional read-once
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-read-once
-```
-
-This optional path installs `read-once` and wires two Claude hooks:
-
-- `PreToolUse:Read` token saver hook
-- `PostCompact` cache reset hook
-
-It avoids redundant full-file rereads and prefers diffs after file changes. If `jq` is missing, the installer attempts to install it; if it is still unavailable, the hooks stay fail-open and do not block Claude.
-
-### Install with optional token-saver
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-token-saver
-```
-
-This optional path installs the shared Token Saver pack for plain export-only sessions:
-
-- a Codex skill: `~/.codex/skills/token-saver`
-- a Claude skill: `~/.claude/skills/token-saver`
-- local commands: `token-saver`, `mms-context`, and `mms-toon`
-
-Scope notes:
-
-- It does not write `~/.config/mms`
-- It does not change model, account, proxy, or reasoning settings
-- It lets normal Codex/Claude sessions use long-output refs/snippets without remembering helper commands
-
-### Install with optional ops-env-safe
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-ops-env-safe
-```
-
-This optional path installs a path-only host integration pack for isolated sessions:
-
-- a Codex skill: `~/.codex/skills/ops-env-safe`
-- a Claude command: `~/.claude/commands/ops-env-safe.md`
-- a local path-map template: `~/.config/mms/ops-env-safe.toml`
-
-Scope notes:
-
-- It is `path-only`; it does not inject real `HOME/XDG`
-- It does not export auth secrets or bootstrap a host shell
-- Edit `~/.config/mms/ops-env-safe.toml` to add your own stable host paths after install
-- Use this when isolated `mms/mmc` sessions need to know where configs, caches, or shared bins live without breaking isolation
-
-After install:
-
-- in Claude, use `/ops-env-safe <entry-name>`
-- in Codex, let the `ops-env-safe` skill trigger on path lookup requests
-
-### Bundled Caveman mode
-
-`MMS` now ships a pinned `vendor/caveman` session asset by default. There is no separate `--install-caveman` path because this integration is intentionally session-scoped instead of global-hook install.
-
-After install:
-
-- `MMS`-launched `Claude` and `Codex` can toggle `Caveman` from the launch confirm page
-- the integration uses the bundled `vendor/caveman` asset first, then falls back to explicit `MMS_CAVEMAN_ROOT` or legacy host paths
-- the installer does **not** run Caveman's standalone global hook installer or modify your host `Claude/Codex` config on your behalf
-
-This keeps the shipped behavior reproducible while preserving the existing `Caveman` session toggle inside `MMS`.
-
-### Install MMS plus selected CLIs
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex
-```
-
-Supported names: `claude`, `codex`.
-
-### Upgrade
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
-```
-
-### Install a specific version or branch
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --ref v1.3.5
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --main
-```
-
-## Language
-
-MMS defaults to Chinese unless you choose English during install or override it explicitly.
-
-Supported ways to switch UI language:
-
-```bash
-mms config set ui.language en
-mms config set ui.language zh
-
-MMS_LANG=en mms
-mms --lang en
-```
-
-Priority order:
-
-1. `--lang`
-2. `MMS_LANG`
-3. `ui.language` in config
-4. install preference
-5. fallback `zh`
-
-## Quick start
-
-### First-time setup
-
-```bash
-mms config connect
-```
-
-### Launch the TUI
+Interactive launch:
 
 ```bash
 mms
 ```
 
-### Non-interactive examples
+Direct CLI launch:
 
 ```bash
-mms --preset coding
-mms claude --provider openrouter
-mms codex --account work
-mms --trace --preset coding
+mms claude
+mms codex
+mms --provider <provider-id> codex
+mms --account <account-id> claude
 ```
 
-## Core features
-
-- Unified TUI for model-family-first navigation
-- Gateway providers and supported OAuth accounts in one config surface
-- Provider/account priority with bridge-aware routing
-- Presets and load-balance profiles
-- Usage tracking, route export, and diagnostics
-- Per-account isolation for supported OAuth login state
-- `doctor`, `test`, `warm`, `routes`, and `session` utilities
-
-## Screenshots
-
-### Claude tab
-![Claude Tab](assets/mms-tui.png)
-
-### Codex tab
-![Codex Tab](assets/mms-tui-codex.png)
-
-### Launch confirm
-![Launch Confirm](assets/mms-launch-confirm.png)
-
-On the launch confirm page, use `←/→` to cycle across `Summary / MCP / Skills / Hooks`. Toggle keys such as `Tab`, `C`, `T`, `E`, and `X` update the preview panels live.
-
-## Supported CLIs
-
-| CLI | Primary protocol | Notes |
-|-----|------------------|------|
-| `claude` | Anthropic Messages | Public build keeps the tab and `mms claude`; it can expose both native `claude-*` models and bridge-capable non-Claude models when routes support them |
-| `codex` | OpenAI Responses | Falls back to chat-completions bridge when needed |
-| `qwen` | OpenAI compatible | Direct launch |
-| `kimi` | OpenAI compatible | Defaults to `kimi-k2.5` |
-| `gemini` | Google AI | OAuth account support |
-
-## Common commands
+Export environment variables instead of launching:
 
 ```bash
-mms config connect
-mms config provider.list
+mms --export codex
+mms --export claude --apply
+```
 
-mms ls
-mms warm
+Inspect routes and health:
+
+```bash
+mms models
 mms routes
-mms routes export
-
-mms doctor                      # default lite: route / auth / protocol only
-mms doctor full                 # full: also runs real Claude CLI smoke
-mms test --provider <id> --cli <name>  # minimal end-to-end message path smoke
-
-mms chat "explain recursion"
-mms discuss "design a protocol"
+mms doctor
+mms test --provider <id> --cli claude
+mms exposure
+mms logs
 ```
 
-## Config layout
+## Mental Model
 
 ```text
-~/.config/mms/
-├── config.toml
-├── credentials.sh
-├── usage.json
-├── model-routes.json
-├── model-routes.snapshots/
-├── env/
-└── accounts/
+MMS
+├── Entry
+│   ├── mms TUI
+│   ├── mms claude / mms codex
+│   └── export / presets
+├── Decision
+│   ├── provider profiles
+│   ├── role + priority routing
+│   └── doctor / test / trace diagnostics
+├── Runtime Isolation
+│   ├── Claude: session HOME + .claude/projects resume
+│   ├── Codex: bounded .codex seed + write-back
+│   └── bridge: local protocol adapters when needed
+└── Session Packs
+    ├── token-saver / TOON
+    ├── web-access / weber / agent-browser
+    └── Caveman / OMC / ECC / Pilot
 ```
 
-## Hive routes export
+The diagram source lives in:
 
-- Fixed latest path: `~/.config/mms/model-routes.json`
-- Snapshot history: `~/.config/mms/model-routes.snapshots/`
-- Export shape is minimal: `version`, `generated_at`, and per-model `primary` / `fallbacks`
-- Each route entry only includes `provider_id`, `anthropic_base_url`, `openai_base_url`, and `api_key`
-- Snapshot dedupe uses a canonical content hash over `version + routes`; `generated_at` is excluded from the hash
-- If the canonical content is unchanged, MMS reuses the existing snapshot and mirrors that snapshot back to `model-routes.json` instead of creating a new snapshot
-- Starting the `mms` CLI now forces a synchronous Hive routes refresh before command dispatch so in-session Hive reads the latest usable routes sooner
+- `docs/images/mms-launcher-tree.mmd`
+- `docs/images/mms-launcher-tree-outline.md`
+- `docs/images/mms-launcher-tree.html`
 
-Key docs:
+## Runtime Safety Rules
 
-- [Routing system](./docs/MMS_ROUTING_SYSTEM.md)
-- [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
+MMS tries to fail closed inside the selected runtime.
+
+- Real `HOME` and global OAuth state are protected surfaces, not fallback pools.
+- A failed provider/account should not silently become another global account.
+- Claude semantics prefer `Anthropic /v1/messages` when a route supports it.
+- `OpenAI /v1/chat/completions` is fallback transport, not an invisible equivalent.
+- Session packs are injected into the isolated session; they are not global default hooks.
+- Resume data is bounded and scoped so startup stays usable and account state stays isolated.
+
+Operational details:
+
+- [Provider profiles](./docs/PROVIDER_PROFILES.md)
+- [Claude cache / protocol runbook](./docs/SERVER_CLAUDE_CACHE_RUNBOOK.md)
 - [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
+- [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
 
-## What the `claude` tab shows in the public build
+## Provider Profiles
 
-- The `claude` tab is still visible.
-- It can list native `claude-*` models when the current routes expose them.
-- It can also list bridge-capable non-Claude models, such as GPT / Gemini / compatible domestic families, when a route supports `claude` bridge mode.
-- Public docs and commands do not include `Claude OAuth account.add/login`.
+Provider-specific behavior belongs in data, not in one-off launcher branches.
 
-## Notes
+`config/provider-profiles.json` records:
 
-- `priority` is runtime-level, not per-model
-- Higher numeric `priority` means higher precedence
-- `role` still outranks `priority`: `primary > auto > fallback`
-- `use_count` still affects MMS display/ranking metadata, but it is no longer exported to Hive
-- Hive reads the ordered `primary` + `fallbacks` contract and does not need MMS internal priority / ranking fields
+- OpenAI-compatible and Anthropic-compatible endpoints
+- auth header expectations
+- Thinking / Effort request fields
+- provider-specific body patches
+- context window metadata
+- reference URLs for future verification
+
+User overlays can live in the MMS config directory as read-only profile inputs. MMS should not mutate your real `config.toml` just because a model was probed.
+
+## Session Packs
+
+MMS can expose optional capabilities per session:
+
+| Pack | Purpose |
+| --- | --- |
+| `token-saver` / `TOON` | compact long outputs and structured handoffs |
+| `web-access` / `weber` / `agent-browser` | browser and web-task routing guidance |
+| `Caveman` | compact communication mode |
+| `OMC` / `ECC` | Claude workflow / orchestration agent packs |
+| `Pilot` / `auto-github-contributor` | planning and contribution surfaces when installed |
+
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI.
+
+## Optional Installer Packs
+
+Install optional packs only when you want them globally available outside MMS-managed sessions:
+
+```bash
+bash install.sh --install-token-saver
+bash install.sh --install-rtk
+bash install.sh --install-mindkeeper-context
+bash install.sh --install-map
+bash install.sh --install-read-once
+bash install.sh --install-ops-env-safe
+```
+
+Most day-to-day MMS sessions do not need global hook installation; the launcher can inject repo-owned session assets directly.
+
+## Cleanup And Reset
+
+Dry-run dirty-install cleanup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash
+```
+
+Apply only after checking the printed paths:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/cleanup_dirty_install.sh | bash -s -- --apply
+```
+
+Full MMS-owned reset, dry-run first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash
+```
+
+Then apply:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/scripts/reset_mms_install.sh | bash -s -- --apply
+```
+
+Reset targets MMS-owned install/config surfaces. It intentionally avoids shared `~/.claude`, shared `~/.codex`, and global OAuth state unless an explicit flag says otherwise.
+
+## Developer Notes
+
+Run focused checks before publishing launcher/session changes:
+
+```bash
+python3 -m py_compile mms_core.py mms_launchers.py mms_tui.py
+PYTHONPATH=. python3 -m pytest -q tests/test_codex_history_growth.py
+PYTHONPATH=. python3 -m pytest -q tests/test_claude_hardening_regressions.py -k 'resume or routing or bridge'
+git diff --check
+```
+
+Release checklist:
+
+1. keep the working tree clean
+2. choose the next semver tag
+3. create an annotated tag
+4. push branch and tag
+5. create a GitHub Release with install/upgrade notes
 
 ## License
 

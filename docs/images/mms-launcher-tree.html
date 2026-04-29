@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MMS Launcher Tree</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f3;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+    }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f3f4f6 0%, #f8fafc 100%);
+      color: var(--text);
+    }
+    .wrap {
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+    p {
+      margin: 0 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .diagram-shell {
+      overflow: auto;
+      padding: 12px;
+      border: 1px solid #eef0f4;
+      border-radius: 12px;
+      background: #fffef7;
+    }
+    pre.mermaid {
+      margin: 0;
+      min-width: max-content;
+    }
+    .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>MMS Launcher Tree</h1>
+      <p>Open this file in a browser to view the Mermaid diagram.</p>
+      <div class="diagram-shell">
+        <pre class="mermaid">flowchart TD
+  MMS[&quot;MMS: local AI coding launcher&quot;]
+  MMS --&gt; Entry[&quot;Entry surfaces&quot;]
+  Entry --&gt; TUI[&quot;mms TUI&quot;]
+  Entry --&gt; Direct[&quot;mms claude / mms codex&quot;]
+  Entry --&gt; Export[&quot;mms --export / presets&quot;]
+
+  MMS --&gt; Decision[&quot;Decision layer&quot;]
+  Decision --&gt; Profiles[&quot;provider profiles\nprotocol + auth + thinking&quot;]
+  Decision --&gt; Priority[&quot;roles + priority\nprimary / auto / fallback&quot;]
+  Decision --&gt; Diagnostics[&quot;doctor / test / trace&quot;]
+
+  MMS --&gt; Runtime[&quot;Runtime isolation&quot;]
+  Runtime --&gt; Claude[&quot;Claude session\n.claude/projects resume&quot;]
+  Runtime --&gt; Codex[&quot;Codex session\n.codex bounded seed + write-back&quot;]
+  Runtime --&gt; Bridge[&quot;local bridges\nAnthropic-first where supported&quot;]
+
+  MMS --&gt; Packs[&quot;Session packs&quot;]
+  Packs --&gt; Token[&quot;token-saver / TOON&quot;]
+  Packs --&gt; Web[&quot;web-access / weber / agent-browser&quot;]
+  Packs --&gt; Agent[&quot;Caveman / OMC / ECC / Pilot&quot;]
+</pre>
+      </div>
+    </div>
+  </div>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "loose",
+      theme: "default",
+      flowchart: {
+        useMaxWidth: false,
+        htmlLabels: true
+      }
+    });
+  </script>
+</body>
+</html>
