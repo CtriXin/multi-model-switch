@@ -112,6 +112,110 @@ def test_seed_codex_bounded_resume_defaults_are_resume_friendly_and_skip_oversiz
     assert manifest["seeded"]["dirs"]["sessions"]["skipped_oversize_files"] == 1
 
 
+def test_codex_resume_writeback_merges_session_tail_and_files(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    store_codex = tmp_path / "store" / ".codex"
+    session_codex = tmp_path / "session" / ".codex"
+    _write_lines(store_codex / "history.jsonl", "history", 3)
+    _write_lines(store_codex / "session_index.jsonl", "index", 3)
+    _write_lines(session_codex / "history.jsonl", "history", 4)
+    _write_lines(session_codex / "session_index.jsonl", "index", 4)
+    _write_file(
+        session_codex / "sessions" / "2026" / "04" / "session-new.jsonl",
+        "new session\n",
+        mtime=200,
+    )
+    _write_file(
+        session_codex / "shell_snapshots" / "snapshot-new.sh",
+        "snapshot\n",
+        mtime=201,
+    )
+
+    monkeypatch.setenv("MMS_CODEX_HISTORY_JSONL_MAX_LINES", "3")
+    monkeypatch.setenv("MMS_CODEX_SESSION_INDEX_JSONL_MAX_LINES", "2")
+    monkeypatch.setenv("MMS_CODEX_SESSIONS_MAX_FILES", "1")
+    monkeypatch.setenv("MMS_CODEX_SHELL_SNAPSHOTS_MAX_FILES", "1")
+
+    manifest = mms_launchers._sync_codex_bounded_resume_back(
+        str(session_codex),
+        str(store_codex),
+    )
+
+    assert _lines(store_codex / "history.jsonl") == ["history-1", "history-2", "history-3"]
+    assert _lines(store_codex / "session_index.jsonl") == ["index-2", "index-3"]
+    assert (store_codex / "sessions" / "2026" / "04" / "session-new.jsonl").read_text(encoding="utf-8") == "new session\n"
+    assert (store_codex / "shell_snapshots" / "snapshot-new.sh").read_text(encoding="utf-8") == "snapshot\n"
+    assert manifest["files"]["history.jsonl"]["status"] == "merged"
+    writeback_manifest = json.loads((store_codex / "mms-resume-writeback.json").read_text(encoding="utf-8"))
+    assert writeback_manifest["dirs"]["sessions"]["files"] == 1
+
+
+def test_codex_resume_writeback_makes_next_seed_visible(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    store_codex = tmp_path / "store" / ".codex"
+    first_session = tmp_path / "first" / ".codex"
+    second_session = tmp_path / "second" / ".codex"
+    _write_lines(store_codex / "history.jsonl", "history", 2)
+    _write_lines(first_session / "history.jsonl", "history", 3)
+    _write_file(
+        first_session / "sessions" / "2026" / "04" / "session-current.jsonl",
+        "current session\n",
+        mtime=300,
+    )
+
+    monkeypatch.setenv("MMS_CODEX_HISTORY_JSONL_MAX_LINES", "5")
+    monkeypatch.setenv("MMS_CODEX_SESSIONS_MAX_FILES", "5")
+
+    mms_launchers._sync_codex_bounded_resume_back(str(first_session), str(store_codex))
+    mms_launchers._seed_codex_bounded_resume([str(store_codex)], str(second_session))
+
+    assert _lines(second_session / "history.jsonl") == ["history-0", "history-1", "history-2"]
+    copied = list((second_session / "sessions").glob("2026/04/session-current.jsonl"))
+    assert len(copied) == 1
+    assert copied[0].read_text(encoding="utf-8") == "current session\n"
+
+
+def test_seed_codex_bounded_resume_backfills_current_project_oversize_sibling(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    seed_codex = tmp_path / "gateway" / ".codex"
+    sibling_codex = tmp_path / "gateway" / "s" / "old-pid" / ".codex"
+    new_session_codex = tmp_path / "gateway" / "s" / "new-pid" / ".codex"
+    _write_file(
+        seed_codex / "sessions" / "2026" / "04" / "old.jsonl",
+        '{"timestamp":"2026-04-01T00:00:00Z","type":"session_meta","payload":{"id":"old","cwd":"/tmp/other"}}\n',
+        mtime=100,
+    )
+    current_payload = (
+        '{"timestamp":"2026-04-28T00:00:00Z","type":"session_meta",'
+        f'"payload":{{"id":"current","cwd":"{repo_dir}"}}}}\n'
+        + ("x" * 200)
+    )
+    _write_file(
+        sibling_codex / "sessions" / "2026" / "04" / "current.jsonl",
+        current_payload,
+        mtime=200,
+    )
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setenv("MMS_CODEX_SESSIONS_MAX_FILES", "1")
+    monkeypatch.setenv("MMS_CODEX_RESUME_MAX_FILE_BYTES", "64")
+    monkeypatch.setenv("MMS_CODEX_RESUME_PROJECT_MAX_FILE_BYTES", "1024")
+
+    mms_launchers._seed_codex_bounded_resume(
+        [str(seed_codex), str(sibling_codex)],
+        str(new_session_codex),
+    )
+
+    copied = list((new_session_codex / "sessions").glob("2026/04/*.jsonl"))
+    assert [path.name for path in copied] == ["current.jsonl"]
+    assert copied[0].read_text(encoding="utf-8") == current_payload
+
+
 def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
@@ -157,6 +261,7 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     assert copied_sessions[0].name == "account-session-2.jsonl"
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "account-installation\n"
+    assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(account_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["bytes"] > 0
 
@@ -212,5 +317,6 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert (session_codex / "memories").is_symlink()
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
+    assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(gateway_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 2
