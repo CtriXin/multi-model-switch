@@ -1099,6 +1099,90 @@ def test_build_claude_session_settings_rewrites_ecc_hooks_and_env_per_session(mo
     assert enabled["env"]["KEEP_ME"] == "1"
 
 
+def test_build_claude_session_settings_rewrites_omc_hooks_env_and_mcp(monkeypatch, tmp_path):
+    import mms_launchers
+
+    omc_root = tmp_path / "oh-my-claudecode"
+    (omc_root / "hooks").mkdir(parents=True)
+    (omc_root / "skills").mkdir()
+    (omc_root / ".claude-plugin").mkdir()
+    (omc_root / ".claude-plugin" / "plugin.json").write_text('{"name":"oh-my-claudecode"}', encoding="utf-8")
+    (omc_root / "hooks" / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "matcher": "",
+                            "hooks": [
+                                {"type": "command", "command": 'node "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs'},
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (omc_root / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"t": {"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs"]}}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MMS_OMC_ROOT", str(omc_root))
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    result = mms_launchers._build_claude_session_settings(
+        {
+            "hooks": {
+                "UserPromptSubmit": [
+                    {
+                        "hooks": [
+                            {"type": "command", "command": 'node /tmp/oh-my-claudecode/scripts/keyword-detector.mjs'},
+                            {"type": "command", "command": "/tmp/keep-prompt.sh"},
+                        ]
+                    }
+                ],
+            },
+            "env": {
+                "CLAUDE_PLUGIN_ROOT": "/tmp/old-plugin",
+                "ECC_PLUGIN_ROOT": "/tmp/old-ecc",
+                "OMC_PLUGIN_ROOT": "/tmp/old-omc",
+            },
+        },
+        enable_omc=True,
+        default_env={"KEEP_ME": "1"},
+    )
+
+    prompt_commands = [
+        item["command"]
+        for group in result["hooks"]["UserPromptSubmit"]
+        for item in group["hooks"]
+    ]
+    assert "/tmp/keep-prompt.sh" in prompt_commands
+    assert 'node "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs' in prompt_commands
+    assert result["env"]["CLAUDE_PLUGIN_ROOT"] == str(omc_root)
+    assert result["env"]["OMC_PLUGIN_ROOT"] == str(omc_root)
+    assert "ECC_PLUGIN_ROOT" not in result["env"]
+    assert result["env"]["KEEP_ME"] == "1"
+    assert result["mcpServers"]["t"]["args"] == [str(omc_root / "bridge" / "mcp-server.cjs")]
+
+
+def test_runtime_agent_pack_is_mutually_exclusive():
+    import mms_launchers
+
+    assert mms_launchers._runtime_agent_pack({}) == "none"
+    assert mms_launchers._runtime_agent_pack({"ecc_mode": "enable"}) == "ecc"
+    assert mms_launchers._runtime_agent_pack({"omc_mode": "enable"}) == "omc"
+    assert mms_launchers._runtime_agent_pack({"agent_pack": "omc", "ecc_mode": "enable"}) == "omc"
+    assert mms_launchers._runtime_ecc_enabled({"agent_pack": "omc", "ecc_mode": "enable"}) is False
+    assert mms_launchers._runtime_omc_enabled({"agent_pack": "omc", "ecc_mode": "enable"}) is True
+
+
 def test_sanitize_global_snapshot_strips_session_only_hooks_and_hive_server():
     import mms_launchers
 

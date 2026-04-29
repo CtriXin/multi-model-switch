@@ -185,10 +185,24 @@ def profile_thinking_capabilities(
         return {"profile": "", "thinking_supported": False, "effort_supported": False}
     thinking = _effective_section(profile, "thinking", model_name)
     effort = _effective_section(profile, "effort", model_name)
+    effort_allowed: set[str] = set()
+    effort_map: dict[str, str] = {}
+    effort_default = ""
+    for config in effort.values():
+        if not isinstance(config, dict) or not config.get("path"):
+            continue
+        effort_allowed.update(_lower(item) for item in (config.get("allowed") or []) if _lower(item))
+        if isinstance(config.get("map"), dict):
+            effort_map.update({_lower(key): _lower(value) for key, value in config["map"].items() if _lower(key)})
+        if not effort_default:
+            effort_default = _lower(config.get("default"))
     return {
         "profile": profile_id,
         "thinking_supported": bool(thinking.get("supported")),
         "effort_supported": any(isinstance(v, dict) and v.get("path") for v in effort.values()),
+        "effort_allowed": sorted(effort_allowed),
+        "effort_map": effort_map,
+        "effort_default": effort_default,
         "ui": thinking.get("ui") or "",
         "default_enabled": thinking.get("default_enabled"),
     }

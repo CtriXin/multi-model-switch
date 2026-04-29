@@ -52,7 +52,7 @@ def _enabled_feature_rows(runtime: dict[str, Any], features: dict[str, Any] | No
     merged: dict[str, Any] = {}
     if isinstance(features, dict):
         merged.update(features)
-    for key in ("caveman_mode", "ecc_mode"):
+    for key in ("caveman_mode", "ecc_mode", "omc_mode"):
         value = _clean_text(runtime.get(key))
         if value:
             merged.setdefault(key.replace("_mode", ""), value)

@@ -2681,6 +2681,10 @@ def _ecc_available_for_claude():
     return bool(_resolve_ecc_root())
 
 
+def _omc_available_for_claude():
+    return bool(_resolve_omc_root())
+
+
 def _normalize_ecc_mode(value, default="disable"):
     raw = str(value or "").strip().lower()
     if raw in {"", "inherit", "default", "auto"}:
@@ -2692,8 +2696,37 @@ def _normalize_ecc_mode(value, default="disable"):
     return default if default in {"auto", "enable", "disable"} else "disable"
 
 
+def _normalize_agent_pack(value, default="none"):
+    raw = str(value or "").strip().lower()
+    fallback = default if default in {"none", "ecc", "omc"} else "none"
+    if raw in {"", "inherit", "default", "auto"}:
+        return fallback
+    if raw in {"0", "false", "no", "off", "disable", "disabled", "none", "null"}:
+        return "none"
+    if raw in {"ecc", "everything-claude-code", "everything_claude_code"}:
+        return "ecc"
+    if raw in {"omc", "oh-my-claudecode", "oh_my_claudecode", "oh-my-claude-code"}:
+        return "omc"
+    return fallback
+
+
+def _runtime_agent_pack(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if "agent_pack" in runtime and str(runtime.get("agent_pack") or "").strip():
+        return _normalize_agent_pack(runtime.get("agent_pack"), default="none")
+    if _normalize_ecc_mode(runtime.get("ecc_mode", "disable")) == "enable":
+        return "ecc"
+    if _normalize_ecc_mode(runtime.get("omc_mode", "disable")) == "enable":
+        return "omc"
+    return "none"
+
+
 def _runtime_ecc_enabled(runtime):
-    return _normalize_ecc_mode((runtime or {}).get("ecc_mode", "disable")) == "enable"
+    return _runtime_agent_pack(runtime) == "ecc"
+
+
+def _runtime_omc_enabled(runtime):
+    return _runtime_agent_pack(runtime) == "omc"
 
 
 def _resolve_ecc_root():
@@ -2716,6 +2749,31 @@ def _resolve_ecc_root():
         commands_dir = os.path.join(candidate, "commands")
         skills_dir = os.path.join(candidate, "skills")
         if os.path.isfile(hooks_path) and os.path.isdir(commands_dir) and os.path.isdir(skills_dir):
+            return candidate
+    return ""
+
+
+def _resolve_omc_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_OMC_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path("auto-skills", "installed-skills", "oh-my-claudecode"),
+        _real_user_path("auto-skills", "vendor", "oh-my-claudecode"),
+        _real_user_path("vendor", "oh-my-claudecode"),
+        _real_user_path("oh-my-claudecode"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        hooks_path = os.path.join(candidate, "hooks", "hooks.json")
+        skills_dir = os.path.join(candidate, "skills")
+        plugin_json = os.path.join(candidate, ".claude-plugin", "plugin.json")
+        if os.path.isfile(hooks_path) and os.path.isdir(skills_dir) and os.path.isfile(plugin_json):
             return candidate
     return ""
 
@@ -2891,6 +2949,38 @@ def _is_ecc_hook_command(command_text):
         "stop-format-typecheck.js",
         "continuous-learning-v2/hooks/observe.sh",
         "everything-claude-code",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _is_omc_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "oh-my-claudecode",
+        "keyword-detector.mjs",
+        "skill-injector.mjs",
+        "session-start.mjs",
+        "project-memory-session.mjs",
+        "wiki-session-start.mjs",
+        "setup-init.mjs",
+        "setup-maintenance.mjs",
+        "pre-tool-enforcer.mjs",
+        "permission-handler.mjs",
+        "post-tool-verifier.mjs",
+        "project-memory-posttool.mjs",
+        "post-tool-rules-injector.mjs",
+        "post-tool-use-failure.mjs",
+        "subagent-tracker.mjs",
+        "verify-deliverables.mjs",
+        "project-memory-precompact.mjs",
+        "wiki-pre-compact.mjs",
+        "context-guard-stop.mjs",
+        "persistent-mode.mjs",
+        "code-simplifier.mjs",
+        "session-end.mjs",
+        "wiki-session-end.mjs",
     )
     return any(marker in command_text for marker in markers)
 
@@ -3081,6 +3171,20 @@ def _load_ecc_claude_hooks():
         return {}
 
 
+def _load_omc_claude_hooks():
+    omc_root = _resolve_omc_root()
+    if not omc_root:
+        return {}
+    hooks_path = os.path.join(omc_root, "hooks", "hooks.json")
+    try:
+        with open(hooks_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        hooks_data = payload.get("hooks")
+        return copy.deepcopy(hooks_data) if isinstance(hooks_data, dict) else {}
+    except Exception:
+        return {}
+
+
 def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
     hooks_data = _filter_hook_commands(hooks_data, _is_ecc_hook_command)
     if not enable_ecc:
@@ -3089,6 +3193,16 @@ def _configure_claude_ecc_hooks(hooks_data, *, enable_ecc=False):
     if not ecc_hooks:
         return hooks_data
     return _merge_claude_hooks(hooks_data, ecc_hooks)
+
+
+def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_omc_hook_command)
+    if not enable_omc:
+        return hooks_data
+    omc_hooks = _load_omc_claude_hooks()
+    if not omc_hooks:
+        return hooks_data
+    return _merge_claude_hooks(hooks_data, omc_hooks)
 
 
 def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
@@ -3274,6 +3388,27 @@ def _overlay_ecc_session_entries(parent_dir, session_home, *, enable_ecc=False, 
         )
 
 
+def _overlay_omc_session_entries(parent_dir, session_home, *, enable_omc=False, disabled_session_surfaces=None):
+    if not enable_omc:
+        return
+    if _session_skill_disabled(disabled_session_surfaces, "omc") or _session_skill_disabled(disabled_session_surfaces, "__bundle__:omc"):
+        return
+    omc_root = _resolve_omc_root()
+    if not omc_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-omc-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    disabled_names = _normalize_session_surface_disabled(disabled_session_surfaces).get("skills", set())
+    for entry_name in ("agents", "skills", "commands"):
+        _overlay_session_entry_dir(
+            parent_dir,
+            overlay_root,
+            entry_name,
+            omc_root,
+            exclude_names=disabled_names,
+        )
+
+
 def _overlay_web_access_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     web_access_root = _resolve_web_access_root()
     if not web_access_root:
@@ -3360,7 +3495,13 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
     merged = dict(env_data) if isinstance(env_data, dict) else {}
-    for key in ("CLAUDE_PLUGIN_ROOT", "ECC_PLUGIN_ROOT", "ECC_HOOK_PROFILE", "ECC_DISABLED_HOOKS"):
+    for key in (
+        "CLAUDE_PLUGIN_ROOT",
+        "ECC_PLUGIN_ROOT",
+        "ECC_HOOK_PROFILE",
+        "ECC_DISABLED_HOOKS",
+        "OMC_PLUGIN_ROOT",
+    ):
         merged.pop(key, None)
     if not enable_ecc:
         return merged
@@ -3370,6 +3511,20 @@ def _configure_ecc_session_env(env_data, *, enable_ecc=False):
     merged["CLAUDE_PLUGIN_ROOT"] = ecc_root
     merged["ECC_PLUGIN_ROOT"] = ecc_root
     merged.setdefault("ECC_HOOK_PROFILE", "standard")
+    return merged
+
+
+def _configure_agent_pack_session_env(env_data, *, agent_pack="none"):
+    merged = _configure_ecc_session_env(env_data, enable_ecc=False)
+    pack = _normalize_agent_pack(agent_pack, default="none")
+    if pack == "ecc":
+        return _configure_ecc_session_env(merged, enable_ecc=True)
+    if pack == "omc":
+        omc_root = _resolve_omc_root()
+        if not omc_root:
+            return merged
+        merged["CLAUDE_PLUGIN_ROOT"] = omc_root
+        merged["OMC_PLUGIN_ROOT"] = omc_root
     return merged
 
 
@@ -3512,6 +3667,61 @@ def _default_pilot_session_mcp_server():
     return None
 
 
+def _replace_plugin_root_tokens(value, plugin_root):
+    if isinstance(value, str):
+        return value.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root).replace("$CLAUDE_PLUGIN_ROOT", plugin_root)
+    if isinstance(value, list):
+        return [_replace_plugin_root_tokens(item, plugin_root) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_plugin_root_tokens(child, plugin_root)
+            for key, child in value.items()
+        }
+    return value
+
+
+def _load_plugin_mcp_servers(plugin_root):
+    plugin_root = str(plugin_root or "").strip()
+    if not plugin_root:
+        return {}
+    mcp_path = os.path.join(plugin_root, ".mcp.json")
+    if not os.path.isfile(mcp_path):
+        return {}
+    try:
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return {}
+    servers = payload.get("mcpServers") if isinstance(payload, dict) else {}
+    if not isinstance(servers, dict):
+        return {}
+    normalized = {}
+    for name, spec in servers.items():
+        key = str(name or "").strip()
+        if not key or not isinstance(spec, dict):
+            continue
+        normalized[key] = _replace_plugin_root_tokens(copy.deepcopy(spec), plugin_root)
+    return normalized
+
+
+def _agent_pack_mcp_servers(agent_pack):
+    pack = _normalize_agent_pack(agent_pack, default="none")
+    if pack == "ecc":
+        return _load_plugin_mcp_servers(_resolve_ecc_root())
+    if pack == "omc":
+        return _load_plugin_mcp_servers(_resolve_omc_root())
+    return {}
+
+
+def _merge_agent_pack_mcp_servers(mcp_servers, *, agent_pack="none", disabled_session_surfaces=None):
+    merged = copy.deepcopy(mcp_servers) if isinstance(mcp_servers, dict) else {}
+    for name, spec in _agent_pack_mcp_servers(agent_pack).items():
+        if _session_surface_disabled(disabled_session_surfaces, "mcp", name):
+            continue
+        merged.setdefault(name, copy.deepcopy(spec))
+    return _filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
+
+
 def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_surfaces=None):
     settings_data = dict(settings_data) if isinstance(settings_data, dict) else {}
     mcp_servers = settings_data.get("mcpServers")
@@ -3572,6 +3782,7 @@ def _inject_managed_mcp_servers_into_claude_state(
     *,
     allow_execution_surfaces=True,
     disabled_session_surfaces=None,
+    agent_pack="none",
 ):
     state = dict(payload) if isinstance(payload, dict) else {}
     managed = _session_managed_mcp_servers(
@@ -3579,6 +3790,12 @@ def _inject_managed_mcp_servers_into_claude_state(
         allow_execution_surfaces=allow_execution_surfaces,
         disabled_session_surfaces=disabled_session_surfaces,
     )
+    if allow_execution_surfaces:
+        managed = _merge_agent_pack_mcp_servers(
+            managed,
+            agent_pack=agent_pack,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
     existing = state.get("mcpServers")
     merged = copy.deepcopy(managed)
     allowlist = _session_managed_mcp_server_allowlist(
@@ -4250,8 +4467,12 @@ def _build_claude_session_settings(
     allow_execution_surfaces=True,
     enable_caveman=False,
     enable_ecc=False,
+    enable_omc=False,
     disabled_session_surfaces=None,
 ):
+    agent_pack = "omc" if enable_omc else ("ecc" if enable_ecc else "none")
+    enable_ecc = agent_pack == "ecc"
+    enable_omc = agent_pack == "omc"
     template_settings = _load_mms_claude_settings_template()
     inherited_settings = _sanitize_claude_inherited_settings_payload(
         base_settings,
@@ -4266,6 +4487,12 @@ def _build_claude_session_settings(
         allow_execution_surfaces=allow_execution_surfaces,
         disabled_session_surfaces=disabled_session_surfaces,
     )
+    if allow_execution_surfaces:
+        managed_mcp_servers = _merge_agent_pack_mcp_servers(
+            managed_mcp_servers,
+            agent_pack=agent_pack,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     template_hooks = template_settings.get("hooks")
     hooks = _filter_claude_session_hooks(
@@ -4282,6 +4509,10 @@ def _build_claude_session_settings(
     hooks = _configure_claude_ecc_hooks(
         hooks,
         enable_ecc=bool(enable_ecc and allow_execution_surfaces),
+    )
+    hooks = _configure_claude_omc_hooks(
+        hooks,
+        enable_omc=bool(enable_omc and allow_execution_surfaces),
     )
     hooks = _filter_hooks_by_disabled(hooks, disabled_session_surfaces)
     if hooks:
@@ -4300,9 +4531,9 @@ def _build_claude_session_settings(
             merged_env.setdefault(key, value)
     if isinstance(required_env, dict):
         merged_env.update(required_env)
-    settings_data["env"] = _configure_ecc_session_env(
+    settings_data["env"] = _configure_agent_pack_session_env(
         merged_env,
-        enable_ecc=bool(enable_ecc and allow_execution_surfaces),
+        agent_pack=agent_pack if allow_execution_surfaces else "none",
     )
 
     if managed_mcp_servers:
@@ -4350,6 +4581,7 @@ def _write_claude_session_settings(
     allow_execution_surfaces=True,
     enable_caveman=False,
     enable_ecc=False,
+    enable_omc=False,
     disabled_session_surfaces=None,
 ):
     import json as _json
@@ -4365,6 +4597,7 @@ def _write_claude_session_settings(
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
         enable_ecc=enable_ecc,
+        enable_omc=enable_omc,
         disabled_session_surfaces=disabled_session_surfaces,
     )
     settings_path = os.path.join(session_claude_dir, "settings.json")
@@ -6495,6 +6728,7 @@ def _claude_gateway_env(
     route_status_path = _claude_route_status_paths()[0]
     os.makedirs(gateway_home, exist_ok=True)
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
+    agent_pack = _runtime_agent_pack(runtime)
 
     # 若调用方已通过 _resolve_anthropic_base_url 探测到正确 URL，直接用；
     # 否则保底剥离 /v1（避免双重 /v1/v1/messages）。
@@ -6533,6 +6767,7 @@ def _claude_gateway_env(
     data = _inject_managed_mcp_servers_into_claude_state(
         data,
         disabled_session_surfaces=disabled_session_surfaces,
+        agent_pack=agent_pack,
     )
 
     # 当用户在 TUI 选择不 bypass 时，主动移除持久化的 bypass 状态，
@@ -6594,7 +6829,8 @@ def _claude_gateway_env(
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     enable_caveman = _runtime_caveman_enabled(runtime)
-    enable_ecc = _runtime_ecc_enabled(runtime)
+    enable_ecc = agent_pack == "ecc"
+    enable_omc = agent_pack == "omc"
     sensitive_provider = _runtime_is_sensitive_claude_provider(runtime)
     # 启动首帧优先写本次选中的真实模型名，避免 statusline / 初始 active model
     # 先落到 slot 占位名；bridge 仍负责把请求路由到实际目标模型。
@@ -6652,6 +6888,8 @@ def _claude_gateway_env(
             features={
                 "caveman": enable_caveman,
                 "ecc": enable_ecc,
+                "omc": enable_omc,
+                "agent_pack": agent_pack,
                 "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
@@ -6667,6 +6905,7 @@ def _claude_gateway_env(
             default_env=default_settings_env,
             enable_caveman=enable_caveman,
             enable_ecc=enable_ecc,
+            enable_omc=enable_omc,
             disabled_session_surfaces=disabled_session_surfaces,
         )
     with _timed_launch_step(_timings, "overlay session assets"):
@@ -6680,6 +6919,12 @@ def _claude_gateway_env(
             gw_claude_dir,
             gateway_home,
             enable_ecc=enable_ecc,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        _overlay_omc_session_entries(
+            gw_claude_dir,
+            gateway_home,
+            enable_omc=enable_omc,
             disabled_session_surfaces=disabled_session_surfaces,
         )
         _overlay_web_access_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
@@ -6713,7 +6958,7 @@ def _claude_gateway_env(
             env["ANTHROPIC_MODEL"] = display_model
         if not sensitive_provider:
             env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
-        env = _configure_ecc_session_env(env, enable_ecc=enable_ecc)
+        env = _configure_agent_pack_session_env(env, agent_pack=agent_pack)
         _apply_runtime_network_profile(
             env,
             runtime,

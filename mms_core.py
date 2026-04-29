@@ -7009,14 +7009,14 @@ def _confirm_context_lines(cli, runtime):
     return lines[:12]
 
 
-def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=False):
+def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=False, has_omc=False):
     runtime = runtime if isinstance(runtime, dict) else {}
     allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
-        "mcp": {"always": [], "caveman": [], "ecc": []},
-        "skills": {"always": [], "caveman": [], "ecc": []},
-        "hooks": {"always": [], "caveman": [], "ecc": []},
+        "mcp": {"always": [], "caveman": [], "ecc": [], "omc": []},
+        "skills": {"always": [], "caveman": [], "ecc": [], "omc": []},
+        "hooks": {"always": [], "caveman": [], "ecc": [], "omc": []},
     }
 
     if cli not in {"claude", "codex"}:
@@ -7027,6 +7027,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _build_codex_session_hooks,
             _configure_claude_caveman_hooks,
             _configure_claude_ecc_hooks,
+            _configure_claude_omc_hooks,
+            _agent_pack_mcp_servers,
             _default_hive_session_mcp_server,
             _default_pilot_session_mcp_server,
             _filter_claude_session_hooks,
@@ -7039,6 +7041,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
             _resolve_ecc_root,
+            _resolve_omc_root,
             _resolve_token_saver_root,
             _resolve_toon_root,
             _resolve_weber_root,
@@ -7215,6 +7218,28 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             return "ECC 设计质量检查", _L("设计相关质量检查", "Run design quality checks")
         if "post-edit-accumulator" in lower_target or basename == "post-edit-accumulator.js":
             return "ECC 编辑累积", _L("编辑后累积上下文与检查", "Accumulate edit context after changes")
+        if "keyword-detector" in lower_target or basename == "keyword-detector.mjs":
+            return "OMC 关键词检测", _L("识别 autopilot / ralph / team 等触发词", "Detect autopilot / ralph / team keywords")
+        if "skill-injector" in lower_target or basename == "skill-injector.mjs":
+            return "OMC Skill 注入", _L("按任务注入 OMC workflow skills", "Inject OMC workflow skills")
+        if "session-start" in lower_target or basename == "session-start.mjs":
+            return "OMC 会话初始化", _L("准备 OMC runtime 与会话状态", "Prepare OMC runtime and session state")
+        if "pre-tool-enforcer" in lower_target or basename == "pre-tool-enforcer.mjs":
+            return "OMC 工具前检查", _L("工具执行前做约束检查", "Run checks before tool use")
+        if "permission-handler" in lower_target or basename == "permission-handler.mjs":
+            return "OMC 权限处理", _L("处理 OMC permission request", "Handle OMC permission requests")
+        if "post-tool-verifier" in lower_target or basename == "post-tool-verifier.mjs":
+            return "OMC 工具后验证", _L("工具执行后验证交付物", "Verify outputs after tool use")
+        if "subagent-tracker" in lower_target or basename == "subagent-tracker.mjs":
+            return "OMC Agent 跟踪", _L("跟踪 subagent 生命周期", "Track subagent lifecycle")
+        if "context-guard-stop" in lower_target or basename == "context-guard-stop.mjs":
+            return "OMC 上下文防护", _L("停止前检查上下文安全", "Check context safety on stop")
+        if "persistent-mode" in lower_target or basename == "persistent-mode.mjs":
+            return "OMC 持续模式", _L("维持 ralph/verify loop 状态", "Maintain ralph / verify loop state")
+        if "code-simplifier" in lower_target or basename == "code-simplifier.mjs":
+            return "OMC 简化检查", _L("停止前触发 code simplifier", "Run code simplifier on stop")
+        if "oh-my-claudecode" in lower_target or "oh-my-claudecode" in lower_command:
+            return "OMC Hook", _L("OMC orchestration runtime hook", "OMC orchestration runtime hook")
         if basename:
             return os.path.splitext(os.path.basename(target_path or display_name))[0], _L("托管 hook", "Managed hook")
         return display_name, _L("托管 hook", "Managed hook")
@@ -7437,6 +7462,11 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 "ecc",
                 _configure_claude_ecc_hooks({}, enable_ecc=True),
             )
+        if has_omc and allow_execution_surfaces:
+            _append_hooks(
+                "omc",
+                _configure_claude_omc_hooks({}, enable_omc=True),
+            )
     else:
         real_claude_json = os.path.join(resolve_real_user_home(), ".claude.json")
         try:
@@ -7476,6 +7506,20 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _append_hooks("caveman", (caveman_hooks or {}).get("hooks"))
 
     if allow_execution_surfaces:
+        for pack_key, enabled in (("ecc", has_ecc), ("omc", has_omc)):
+            if enabled:
+                pack_mcp = _agent_pack_mcp_servers(pack_key)
+                for name in sorted(pack_mcp):
+                    mcp_entry = _mcp_detail(pack_mcp.get(name))
+                    _append(
+                        "mcp",
+                        pack_key,
+                        title=name,
+                        summary=str(mcp_entry.get("summary") or ""),
+                        details=mcp_entry.get("details") or [],
+                        disable_key=name,
+                    )
+
         if _resolve_web_access_root():
             web_access_root = _resolve_web_access_root()
             _append_skill_entries(
@@ -7570,6 +7614,26 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                     (_L("规则", "Rules"), str(ecc_rule_count)),
                 ],
                 bundle_disable_key="ecc",
+            )
+
+        omc_root = _resolve_omc_root() if has_omc else ""
+        if omc_root:
+            omc_skills = _list_skill_entries(os.path.join(omc_root, "skills"))
+            if not omc_skills:
+                omc_skills = [{"name": "omc", "path": _skill_path(omc_root)}]
+            omc_agent_count = _count_files(os.path.join(omc_root, "agents"))
+            _append_skill_collection(
+                "omc",
+                omc_skills,
+                _L("OMC 包", "OMC bundle"),
+                bundle_title=_L("OMC 能力包", "OMC bundle"),
+                bundle_root=omc_root,
+                collapse_threshold=12,
+                bundle_note=_L("启用 orchestration runtime；可能写入 .omc/ 并使用 team/tmux/CLI worker。", "Enables orchestration runtime; may write .omc/ and use team/tmux/CLI workers."),
+                extra_details=[
+                    (_L("Agents", "Agents"), str(omc_agent_count)),
+                ],
+                bundle_disable_key="omc",
             )
 
     return preview
@@ -7964,7 +8028,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
-    from mms_launchers import _caveman_available_for_cli, _ecc_available_for_claude, launch_cli, get_export_env
+    from mms_launchers import (
+        _caveman_available_for_cli,
+        _ecc_available_for_claude,
+        _omc_available_for_claude,
+        launch_cli,
+        get_export_env,
+    )
 
     def _safe_tui_call(fn, *args, **kwargs):
         try:
@@ -8454,6 +8524,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             and _ecc_available_for_claude()
             and _model_info_looks_domestic(clean_model_info)
         )
+        has_omc = (
+            cli == "claude"
+            and _omc_available_for_claude()
+            and _model_info_looks_domestic(clean_model_info)
+        )
         default_reasoning_effort = (
             str(runtime_runtime.get("reasoning_effort", "")).strip().lower()
             or _default_reasoning_effort_for_model_info(clean_model_info)
@@ -8463,6 +8538,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime,
             has_caveman=has_caveman,
             has_ecc=has_ecc,
+            has_omc=has_omc,
         )
         result = _safe_tui_call(
             confirm_tui,
@@ -8475,42 +8551,53 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             caveman_enabled_default=has_caveman,
             has_ecc=has_ecc,
             ecc_enabled_default=False,
+            has_omc=has_omc,
+            agent_pack_default=str(runtime_runtime.get("agent_pack") or "none"),
             thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
             reasoning_effort_default=default_reasoning_effort,
             preview_catalog=preview_catalog,
+            runtime=runtime_runtime,
         )
         if result == "__interrupt__":
             return True
         disabled_session_surfaces = {}
+        agent_pack = "none"
+
+        def _confirm_agent_pack(value):
+            raw = str(value or "").strip().lower()
+            if raw in {"ecc", "omc", "none"}:
+                return raw
+            return "ecc" if bool(value) else "none"
+
         if isinstance(result, tuple):
             if len(result) >= 8:
-                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
+                action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
+                agent_pack = _confirm_agent_pack(pack_value)
             elif len(result) >= 7:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
+                agent_pack = _confirm_agent_pack(ecc_enabled)
             elif len(result) >= 5:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
+                agent_pack = _confirm_agent_pack(ecc_enabled)
                 thinking_enabled = True
                 reasoning_effort = default_reasoning_effort
             elif len(result) >= 4:
                 action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
-                ecc_enabled = False
                 thinking_enabled = True
                 reasoning_effort = default_reasoning_effort
             elif len(result) >= 3:
                 action, bypass, claude_1m_enabled = result[:3]
                 caveman_enabled = False
-                ecc_enabled = False
                 thinking_enabled = True
                 reasoning_effort = default_reasoning_effort
             else:
                 action, bypass = result[:2]
                 claude_1m_enabled = False
                 caveman_enabled = False
-                ecc_enabled = False
                 thinking_enabled = True
                 reasoning_effort = default_reasoning_effort
         else:
-            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result, False, False, False, False, True, default_reasoning_effort
+            action, bypass, claude_1m_enabled, caveman_enabled, thinking_enabled, reasoning_effort = result, False, False, False, True, default_reasoning_effort
             disabled_session_surfaces = {}
         if action == "q":
             return True
@@ -8526,7 +8613,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 )
         if cli == "claude":
             runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
-            runtime_runtime["ecc_mode"] = "enable" if ecc_enabled else "disable"
+            runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
+            runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
+            runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
         if cli in {"claude", "codex"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
             runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"

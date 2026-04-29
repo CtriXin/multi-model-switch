@@ -3065,18 +3065,21 @@ def confirm_tui(
     caveman_enabled_default=False,
     has_ecc=False,
     ecc_enabled_default=False,
+    has_omc=False,
+    agent_pack_default="none",
     thinking_enabled_default=True,
     reasoning_effort_default="high",
     preview_catalog=None,
+    runtime=None,
 ):
     """确认启动 TUI。
 
-    返回 (action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
+    返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     caveman_enabled: bool，仅 codex/claude 且 Caveman 可用时有效，True 时本次会话开启 Caveman
-    ecc_enabled: bool，仅 Claude 国产模型且 ECC 可用时有效，True 时本次会话开启 ECC
+    agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
     reasoning_effort: str，仅 GPT / 支持 effort 的路径有效
     """
@@ -3131,7 +3134,9 @@ def confirm_tui(
             "Caveman": "Caveman",
             "Thinking": _L("思考", "Thinking"),
             "Effort": _L("强度", "Effort"),
+            "Agent Pack": _L("能力包", "Agent Pack"),
             "ECC": "ECC",
+            "OMC": "OMC",
             "URL": _L("地址", "URL"),
             "Key": _L("密钥", "Key"),
             "Active": _L("激活", "Active"),
@@ -3186,7 +3191,7 @@ def confirm_tui(
         }
         return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "Nothing to show on this panel."))
 
-    def _collect_preview_items(panel_key, *, caveman_enabled=False, ecc_enabled=False):
+    def _collect_preview_items(panel_key, *, caveman_enabled=False, agent_pack="none"):
         panel_key = str(panel_key or "").strip()
         if not isinstance(preview_catalog, dict):
             return []
@@ -3237,8 +3242,9 @@ def confirm_tui(
                 if title and signature not in seen:
                     seen.add(signature)
                     items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
-        if ecc_enabled:
-            for item in sections.get("ecc") or []:
+        pack_key = str(agent_pack or "none").strip().lower()
+        if pack_key in {"ecc", "omc"}:
+            for item in sections.get(pack_key) or []:
                 if not isinstance(item, dict):
                     if not isinstance(item, (list, tuple)) or len(item) < 2:
                         continue
@@ -3304,24 +3310,42 @@ def confirm_tui(
             detail_lines.append((_confirm_label(raw_label), str(item[1]), "fake" if raw_label == "Fake" else "detail"))
     detail_lines = detail_lines[:10]
 
-    model_tokens = _model_tokens(model_info)
+    profile_caps = _confirm_profile_capabilities(model_info, runtime=runtime)
+    model_tokens = profile_caps["tokens"] or _model_tokens(model_info)
     has_bypass = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
-    has_thinking = has_bypass and any(
-        _is_gpt_like_token(token) or _supports_domestic_thinking_token(token)
-        for token in model_tokens
-    )
-    has_effort = has_bypass and any(
-        _is_gpt_like_token(token) or _supports_domestic_effort_token(token)
-        for token in model_tokens
-    )
-    effort_values = [value for value, _label in _EFFORT_OPTIONS]
-    if has_effort and not any(_is_gpt_like_token(token) for token in model_tokens):
-        effort_values = [value for value in effort_values if value != "xhigh"]
+    has_thinking = has_bypass and bool(profile_caps["thinking_supported"])
+    has_effort = has_bypass and bool(profile_caps["effort_supported"])
+    effort_values = _confirm_effort_values(profile_caps, model_tokens)
     effort_default = str(reasoning_effort_default or "high").strip().lower()
     if effort_default not in effort_values:
         effort_default = "high" if "high" in effort_values else effort_values[-1]
-    ecc_key = _ECC_TOGGLE_KEY
+    explicit_thinking_default = _confirm_explicit_thinking_default(runtime)
+    profile_thinking_default = profile_caps.get("default_enabled")
+    if explicit_thinking_default is not None:
+        initial_thinking_enabled = explicit_thinking_default
+    elif isinstance(profile_thinking_default, bool):
+        initial_thinking_enabled = profile_thinking_default
+    else:
+        initial_thinking_enabled = bool(thinking_enabled_default)
+    pack_options = ["none"]
+    if has_ecc:
+        pack_options.append("ecc")
+    if has_omc:
+        pack_options.append("omc")
+    default_pack = str(agent_pack_default or "").strip().lower()
+    if default_pack not in pack_options:
+        default_pack = "ecc" if bool(has_ecc and ecc_enabled_default) else "none"
+    has_agent_pack = len(pack_options) > 1
+    pack_key = _ECC_TOGGLE_KEY
+
+    def _agent_pack_text(value):
+        value = str(value or "none").strip().lower()
+        if value == "ecc":
+            return _L("ECC · 工程 workflow / rules / quality hooks", "ECC · engineering workflow / rules / quality hooks")
+        if value == "omc":
+            return _L("OMC · orchestration runtime / team / verify loop", "OMC · orchestration runtime / team / verify loop")
+        return _L("关闭", "Off")
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -3336,8 +3360,8 @@ def confirm_tui(
         bypass_mode = True
         claude_1m_mode = False
         caveman_mode = bool(has_caveman and caveman_enabled_default)
-        ecc_mode = bool(has_ecc and ecc_enabled_default)
-        thinking_mode = bool(has_thinking and thinking_enabled_default)
+        agent_pack = default_pack
+        thinking_mode = bool(has_thinking and initial_thinking_enabled)
         effort_mode = effort_default
         panel_index = 0
         preview_selection = {"mcp": 0, "skills": 0, "hooks": 0}
@@ -3385,9 +3409,8 @@ def confirm_tui(
                 info_lines.append((_confirm_label("Thinking"), f"[T] {thinking_text}", "thinking"))
             if has_effort:
                 info_lines.append((_confirm_label("Effort"), f"[E] {effort_mode.upper()}", "effort"))
-            if has_ecc:
-                ecc_text = _L("开启", "On") if ecc_mode else _L("关闭", "Off")
-                info_lines.append((_confirm_label("ECC"), f"[{ecc_key}] {ecc_text}", "ecc"))
+            if has_agent_pack:
+                info_lines.append((_confirm_label("Agent Pack"), f"[{pack_key}] {_agent_pack_text(agent_pack)}", "agent_pack"))
 
             panels = [
                 {
@@ -3402,7 +3425,7 @@ def confirm_tui(
                     preview_items = _collect_preview_items(
                         panel_key,
                         caveman_enabled=caveman_mode,
-                        ecc_enabled=ecc_mode,
+                        agent_pack=agent_pack,
                     )
                     panels.append(
                         {
@@ -3440,8 +3463,8 @@ def confirm_tui(
                 footer_actions.append([("T", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切思考", "Toggle Thinking"), curses.color_pair(1) | curses.A_DIM)])
             if has_effort:
                 footer_actions.append([("E", curses.color_pair(6) | curses.A_BOLD), (" ", 0), (_L("切强度", "Cycle Effort"), curses.color_pair(6) | curses.A_DIM)])
-            if has_ecc:
-                footer_actions.append([(ecc_key, curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 ECC", "Toggle ECC"), curses.color_pair(1) | curses.A_DIM)])
+            if has_agent_pack:
+                footer_actions.append([(pack_key, curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切能力包", "Cycle Agent Pack"), curses.color_pair(1) | curses.A_DIM)])
             footer_actions.extend([
                 [("B", curses.A_BOLD), (" ", 0), (_L("返回", "Back"), curses.A_DIM)],
                 [("Q", curses.A_BOLD), (" ", 0), (_L("取消", "Cancel"), curses.A_DIM)],
@@ -3579,8 +3602,8 @@ def confirm_tui(
                         val_attr = curses.color_pair(1) | curses.A_BOLD if thinking_mode else curses.color_pair(4)
                     elif style == "effort":
                         val_attr = _effort_attr(effort_mode, enabled=thinking_mode)
-                    elif style == "ecc":
-                        val_attr = curses.color_pair(5) | curses.A_BOLD if ecc_mode else curses.color_pair(4)
+                    elif style == "agent_pack":
+                        val_attr = curses.color_pair(5) | curses.A_BOLD if agent_pack in {"ecc", "omc"} else curses.color_pair(4)
                     elif style == "fake":
                         val_attr = curses.color_pair(3) | curses.A_BOLD
                     elif style == "empty":
@@ -3601,11 +3624,11 @@ def confirm_tui(
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode, caveman_mode, ecc_mode, thinking_mode, effort_mode, _disabled_payload())
+                return ("", bypass_mode, claude_1m_mode, caveman_mode, agent_pack, thinking_mode, effort_mode, _disabled_payload())
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, False, True, effort_default, {})
+                return ("b", False, False, False, "none", True, effort_default, {})
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, False, True, effort_default, {})
+                return ("q", False, False, False, "none", True, effort_default, {})
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:
@@ -3645,13 +3668,14 @@ def confirm_tui(
             elif key in (ord('e'), ord('E')) and has_effort:
                 current_idx = effort_values.index(effort_mode) if effort_mode in effort_values else 0
                 effort_mode = effort_values[(current_idx + 1) % len(effort_values)]
-            elif key in (ord('x'), ord('X')) and has_ecc:
-                ecc_mode = not ecc_mode
+            elif key in (ord('x'), ord('X')) and has_agent_pack:
+                current_idx = pack_options.index(agent_pack) if agent_pack in pack_options else 0
+                agent_pack = pack_options[(current_idx + 1) % len(pack_options)]
 
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False, False, False, False, True, effort_default, {})
+        return ("q", False, False, False, "none", True, effort_default, {})
 
 
 # ── Reasoning effort 选择 TUI ────────────────────────────────────
@@ -3664,6 +3688,140 @@ _EFFORT_OPTIONS = [
     ("high",   "High   — 深度思考，慢但更准"),
     ("xhigh",  "XHigh  — 更深推理，最慢但更稳"),
 ]
+
+
+def _confirm_model_tokens(model_info):
+    values = []
+    if isinstance(model_info, dict):
+        values.extend(str(v or "") for k, v in model_info.items() if k != "subagent")
+    else:
+        values.append(str(model_info or ""))
+    normalized = []
+    for item in values:
+        value = str(item or "").strip().lower()
+        if "/" in value:
+            value = value.rsplit("/", 1)[-1]
+        if value:
+            normalized.append(value)
+    return normalized
+
+
+def _confirm_is_gpt_like_token(token):
+    return str(token or "").startswith(("gpt-", "o1-", "o3-", "o4-", "codex-"))
+
+
+def _confirm_supports_domestic_thinking_token(token):
+    token = str(token or "")
+    if token.startswith(("glm", "kimi", "k2.5", "k2.6", "minimax", "deepseek")):
+        return True
+    if token.startswith(("mimo", "qwen-coder", "qwen3-coder")):
+        return False
+    if token.startswith("qwen"):
+        return token.startswith(("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max"))
+    return False
+
+
+def _confirm_supports_domestic_effort_token(token):
+    return str(token or "").startswith("deepseek")
+
+
+def _confirm_explicit_thinking_default(runtime):
+    if not isinstance(runtime, dict) or "thinking_mode" not in runtime:
+        return None
+    value = str(runtime.get("thinking_mode") or "").strip().lower()
+    if value in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if value in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    return None
+
+
+def _confirm_profile_capabilities(model_info, runtime=None):
+    tokens = _confirm_model_tokens(model_info)
+    fallback_thinking = any(
+        _confirm_is_gpt_like_token(token) or _confirm_supports_domestic_thinking_token(token)
+        for token in tokens
+    )
+    fallback_effort = any(
+        _confirm_is_gpt_like_token(token) or _confirm_supports_domestic_effort_token(token)
+        for token in tokens
+    )
+    result = {
+        "tokens": tokens,
+        "profile": "",
+        "profile_matched": False,
+        "thinking_supported": fallback_thinking,
+        "effort_supported": fallback_effort,
+        "default_enabled": None,
+        "effort_allowed": [],
+        "effort_map": {},
+    }
+    try:
+        from mms_provider_profiles import profile_thinking_capabilities
+    except Exception:
+        return result
+
+    defaults = []
+    effort_allowed = set()
+    effort_map = {}
+    profile_thinking = False
+    profile_effort = False
+    profile_ids = []
+    runtime_obj = runtime if isinstance(runtime, dict) else None
+    provider_id = str((runtime_obj or {}).get("id") or (runtime_obj or {}).get("provider_id") or "").strip()
+    base_url = str(
+        (runtime_obj or {}).get("anthropic_base_url")
+        or (runtime_obj or {}).get("openai_base_url")
+        or (runtime_obj or {}).get("base_url")
+        or ""
+    ).strip()
+    for token in tokens:
+        caps = profile_thinking_capabilities(
+            token,
+            runtime=runtime_obj,
+            provider_id=provider_id,
+            base_url=base_url,
+        )
+        profile_id = str(caps.get("profile") or "").strip()
+        if not profile_id:
+            continue
+        profile_ids.append(profile_id)
+        result["profile_matched"] = True
+        profile_thinking = profile_thinking or bool(caps.get("thinking_supported"))
+        profile_effort = profile_effort or bool(caps.get("effort_supported"))
+        if isinstance(caps.get("default_enabled"), bool):
+            defaults.append(bool(caps["default_enabled"]))
+        effort_allowed.update(str(item).strip().lower() for item in (caps.get("effort_allowed") or []) if str(item).strip())
+        if isinstance(caps.get("effort_map"), dict):
+            effort_map.update({str(k).strip().lower(): str(v).strip().lower() for k, v in caps["effort_map"].items()})
+
+    if result["profile_matched"]:
+        result["profile"] = ",".join(dict.fromkeys(profile_ids))
+        result["thinking_supported"] = profile_thinking
+        result["effort_supported"] = profile_effort
+        if any(defaults):
+            result["default_enabled"] = True
+        elif defaults:
+            result["default_enabled"] = False
+        result["effort_allowed"] = sorted(effort_allowed)
+        result["effort_map"] = effort_map
+    return result
+
+
+def _confirm_effort_values(profile_caps, model_tokens):
+    values = [value for value, _label in _EFFORT_OPTIONS]
+    allowed = set(profile_caps.get("effort_allowed") or [])
+    effort_map = profile_caps.get("effort_map") if isinstance(profile_caps.get("effort_map"), dict) else {}
+    if allowed:
+        filtered = [
+            value for value in values
+            if value in allowed or (value == "xhigh" and effort_map.get(value) in allowed)
+        ]
+        return filtered or values
+    if not any(_confirm_is_gpt_like_token(token) for token in model_tokens):
+        return [value for value in values if value != "xhigh"]
+    return values
+
 
 def select_reasoning_effort_tui(default="high"):
     """选择 GPT reasoning effort。返回 'low' / 'medium' / 'high' / 'xhigh'，Esc 返回 default。"""

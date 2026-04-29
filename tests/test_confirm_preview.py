@@ -123,6 +123,24 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
             else {}
         ),
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_configure_claude_omc_hooks",
+        lambda hooks, enable_omc=False: (
+            {
+                "UserPromptSubmit": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {"type": "command", "command": 'node "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs'},
+                        ],
+                    }
+                ]
+            }
+            if enable_omc
+            else {}
+        ),
+    )
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: "/tmp/web-access")
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "/tmp/toon")
@@ -130,12 +148,14 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "/tmp/auto-github-contributor")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
     monkeypatch.setattr(mms_launchers, "_resolve_ecc_root", lambda: str(ecc_root))
+    monkeypatch.setattr(mms_launchers, "_resolve_omc_root", lambda: "")
 
     preview = mms_core._build_confirm_preview_catalog(
         "claude",
         {"auth_mode": "provider"},
         has_caveman=True,
         has_ecc=True,
+        has_omc=False,
     )
 
     assert preview["allow_execution_surfaces"] is True
@@ -169,3 +189,64 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     rtk_hook = next(item for item in preview["hooks"]["always"] if item["title"] == "RTK Bash 改写")
     assert any(label == "触发" and "Bash" in value for label, value in rtk_hook["details"])
     assert any(label == "路径" and value == str(base_hook) for label, value in rtk_hook["details"])
+
+
+def test_build_confirm_preview_catalog_collects_omc_bundle(monkeypatch, tmp_path):
+    omc_root = tmp_path / "oh-my-claudecode"
+    for name in ("team", "ralph", "autopilot"):
+        _write_skill(omc_root, name)
+    (omc_root / "agents").mkdir(parents=True)
+    (omc_root / "agents" / "executor.md").write_text("# executor\n", encoding="utf-8")
+    (omc_root / "hooks").mkdir(parents=True)
+    (omc_root / "hooks" / "hooks.json").write_text('{"hooks":{}}', encoding="utf-8")
+    (omc_root / ".claude-plugin").mkdir(parents=True)
+    (omc_root / ".claude-plugin" / "plugin.json").write_text('{"name":"oh-my-claudecode"}', encoding="utf-8")
+    (omc_root / ".mcp.json").write_text(
+        '{"mcpServers":{"t":{"command":"node","args":["${CLAUDE_PLUGIN_ROOT}/bridge/mcp-server.cjs"]}}}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(mms_launchers, "_load_real_claude_settings", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_session_managed_mcp_servers", lambda settings, allow_execution_surfaces=True: {})
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {"hooks": {}})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_sanitize_claude_inherited_settings_payload", lambda settings, allow_execution_surfaces=True: {})
+    monkeypatch.setattr(mms_launchers, "_merge_claude_settings", lambda base, template: dict(base))
+    monkeypatch.setattr(mms_launchers, "_strip_agent_im_hooks", lambda hooks: hooks)
+    monkeypatch.setattr(mms_launchers, "_merge_mms_session_hooks", lambda existing, template: existing or template or {})
+    monkeypatch.setattr(mms_launchers, "_filter_claude_session_hooks", lambda hooks, allow_execution_surfaces=True: hooks if allow_execution_surfaces else {})
+    monkeypatch.setattr(mms_launchers, "_configure_claude_caveman_hooks", lambda hooks, enable_caveman=False: {})
+    monkeypatch.setattr(mms_launchers, "_configure_claude_ecc_hooks", lambda hooks, enable_ecc=False: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_configure_claude_omc_hooks",
+        lambda hooks, enable_omc=False: {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [{"type": "command", "command": 'node "$CLAUDE_PLUGIN_ROOT"/scripts/keyword-detector.mjs'}],
+                }
+            ]
+        } if enable_omc else {},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_ecc_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_omc_root", lambda: str(omc_root))
+
+    preview = mms_core._build_confirm_preview_catalog(
+        "claude",
+        {"auth_mode": "provider"},
+        has_omc=True,
+    )
+
+    assert {item["title"] for item in preview["mcp"]["omc"]} == {"t"}
+    assert {item["title"] for item in preview["skills"]["omc"]} == {"team", "ralph", "autopilot"}
+    assert "OMC 关键词检测" in {item["title"] for item in preview["hooks"]["omc"]}
+    mcp_item = preview["mcp"]["omc"][0]
+    assert any(label == "路径" and str(omc_root) in value for label, value in mcp_item["details"])
