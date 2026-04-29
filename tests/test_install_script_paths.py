@@ -174,6 +174,26 @@ def test_install_script_mentions_bundled_session_assets():
     assert "Caveman, weber, web-access, agent-browser, TOON, and token-saver" in text
 
 
+def test_install_script_keeps_ccs_as_legacy_opt_in():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "INSTALL_LEGACY_CCS=0" in text
+    assert "--install-legacy-ccs" in text
+    assert 'ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"' in text
+    assert 'if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then' in text
+    assert 'ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"' in text
+    assert "Legacy ccs symlink is no longer created by default" in text
+
+
+def test_install_check_reports_legacy_ccs_as_disabled_by_default(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    output = _run_install_check(home=home)
+
+    assert "legacy ccs 命令链接未启用（默认不再创建）" in output
+
+
 def test_install_script_updates_chinese_optional_copy():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

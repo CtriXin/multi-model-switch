@@ -23,7 +23,7 @@ MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、
 
 ## 当前版本
 
-最新 release：`v2.0.1`
+最新 release：`v2.0.2`
 
 这一代的重点：
 
@@ -45,7 +45,8 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
-- 把 `mms` 和 `ccs` 链接到 `~/.local/bin`
+- 把 `mms` 链接到 `~/.local/bin`
+- legacy `ccs` shim 仍可通过 `--install-legacy-ccs` 显式安装，但默认不再暴露
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
 
@@ -59,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.2/install.sh | bash -s --
 ```
 
 安装后自检：

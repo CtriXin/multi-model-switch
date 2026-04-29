@@ -64,6 +64,7 @@ INSTALL_ECC=0
 INSTALL_ECC_EXPLICIT=0
 INSTALL_OMC=0
 INSTALL_OMC_EXPLICIT=0
+INSTALL_LEGACY_CCS=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
@@ -226,7 +227,7 @@ confirm_from_tty() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]] [--install-legacy-ccs]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -253,6 +254,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
   - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
   - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
+  - $(t "--install-legacy-ccs 可显式恢复旧 ccs 命令链接；默认只链接 mms" "--install-legacy-ccs explicitly restores the legacy ccs command link; by default only mms is linked")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
 }
@@ -1487,9 +1489,9 @@ run_install_check() {
     fi
 
     if [ -L "$BIN_DIR/ccs" ]; then
-        echo "✓ $(t "已存在 ccs 命令链接" "ccs symlink present"): $BIN_DIR/ccs"
+        echo "✓ $(t "已存在 legacy ccs 命令链接" "legacy ccs symlink present"): $BIN_DIR/ccs"
     else
-        echo "• $(t "ccs 命令链接尚未创建" "ccs symlink not created yet"): $BIN_DIR/ccs"
+        echo "• $(t "legacy ccs 命令链接未启用（默认不再创建）" "legacy ccs symlink disabled (no longer created by default)"): $BIN_DIR/ccs"
     fi
 
     if [ -f "$MMS_HOME/vendor/weber/SKILL.md" ]; then
@@ -2637,6 +2639,9 @@ while [[ $# -gt 0 ]]; do
             INSTALL_OMC=1
             INSTALL_OMC_EXPLICIT=1
             ;;
+        --install-legacy-ccs)
+            INSTALL_LEGACY_CCS=1
+            ;;
         --install-cli)
             shift
             parse_install_cli_arg "${1:-}"
@@ -2853,13 +2858,22 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 symlink
-ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
+# 创建 primary symlink；legacy ccs 入口保留为显式 opt-in，避免 fresh install 继续暴露双入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then
+    ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
+fi
 if [ -e "$MMS_HOME/mmslogs" ]; then
     ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 fi
-echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms $(t "和" "and") $BIN_DIR/ccs"
+echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
+if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then
+    echo "✓ $(t "legacy ccs 命令已显式链接到" "Legacy ccs command explicitly linked to") $BIN_DIR/ccs"
+elif [ -L "$BIN_DIR/ccs" ]; then
+    echo "• $(t "保留已有 legacy ccs 命令链接，不在本轮重写" "Existing legacy ccs symlink left unchanged; not rewritten in this run"): $BIN_DIR/ccs"
+else
+    echo "• $(t "默认不再创建 legacy ccs 命令链接；如仍需要可加 --install-legacy-ccs" "Legacy ccs symlink is no longer created by default; pass --install-legacy-ccs if still needed")"
+fi
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then

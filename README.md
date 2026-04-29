@@ -23,7 +23,7 @@ It helps you:
 
 ## Current Release
 
-Latest release: `v2.0.1`
+Latest release: `v2.0.2`
 
 Key changes in this generation:
 
@@ -45,7 +45,8 @@ Default behavior:
 
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
-- links `mms` and `ccs` into `~/.local/bin`
+- links `mms` into `~/.local/bin`
+- keeps the legacy `ccs` shim installable with `--install-legacy-ccs`, but no longer exposes it by default
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 
@@ -59,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.2/install.sh | bash -s --
 ```
 
 Verify the install:
