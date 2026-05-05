@@ -130,3 +130,35 @@ def test_core_provider_supports_opencode_cli():
     assert "opencode" in mms_core.CLI_NAMES
     assert mms_core._provider_supports_cli_name(provider, "opencode") is True
     assert mms_core._provider_supports_model_for_cli(provider, "opencode", "deepseek-chat") is True
+
+
+def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
+    import mms_core
+
+    provider = _runtime(
+        supported_clis=["claude", "codex"],
+        models=["deepseek-chat"],
+    )
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+    }
+
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda _provider, cached, _cfg=None: list(cached or []))
+
+    assert mms_core._provider_supports_cli_name(provider, "opencode") is True
+    assert mms_core._provider_supports_model_for_cli(provider, "opencode", "deepseek-chat") is True
+    assert "opencode" in mms_core._resolve_visible_clis(cfg, provider, ["deepseek-chat"])
+
+
+def test_launchers_validate_existing_openai_provider_for_opencode():
+    import mms_launchers
+
+    provider = _runtime(
+        supported_clis=["claude", "codex"],
+        models=["deepseek-chat"],
+    )
+
+    assert mms_launchers._provider_supports_cli(provider, "opencode") is True
+    mms_launchers.validate_provider_for_cli("opencode", provider)
