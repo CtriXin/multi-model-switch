@@ -68,6 +68,14 @@ def test_opencode_provider_base_url_adds_v1_after_gateway_openai_prefix():
     assert mms_launchers._opencode_provider_base_url(runtime) == "http://129.146.32.12:3000/openai/v1"
 
 
+def test_opencode_provider_base_url_adds_v1_after_gateway_root():
+    import mms_launchers
+
+    runtime = _runtime(openai_base_url="http://161.33.197.51:4001")
+
+    assert mms_launchers._opencode_provider_base_url(runtime) == "http://161.33.197.51:4001/v1"
+
+
 def test_opencode_provider_base_url_preserves_existing_v1_and_explicit_override():
     import mms_launchers
 
