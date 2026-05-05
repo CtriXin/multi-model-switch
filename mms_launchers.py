@@ -1768,6 +1768,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 OPENCODE_PROVIDER_ID = "mms"
 OPENCODE_API_KEY_ENV = "MMS_OPENCODE_API_KEY"
+OPENCODE_DEFAULT_OUTPUT_LIMIT = 8192
 
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -8091,6 +8092,18 @@ def _opencode_model_ref(model_name):
     return f"{OPENCODE_PROVIDER_ID}/{model_name}"
 
 
+def _opencode_output_limit(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    for key in ("opencode_output_limit", "output_limit", "max_output_tokens"):
+        try:
+            value = int(runtime.get(key))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return OPENCODE_DEFAULT_OUTPUT_LIMIT
+
+
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -8100,7 +8113,10 @@ def _opencode_model_config(runtime, model_name):
         provider_id=(runtime or {}).get("id"),
     )
     if context_window:
-        config["limit"] = {"context": context_window}
+        config["limit"] = {
+            "context": context_window,
+            "output": _opencode_output_limit(runtime),
+        }
     return config
 
 

@@ -41,6 +41,23 @@ def test_opencode_config_uses_openai_compatible_provider():
         "apiKey": "{env:MMS_OPENCODE_API_KEY}",
     }
     assert sorted(provider["models"]) == ["deepseek-chat", "deepseek-reasoner"]
+    reasoner = provider["models"]["deepseek-reasoner"]
+    if "limit" in reasoner:
+        assert isinstance(reasoner["limit"]["context"], int)
+        assert reasoner["limit"]["output"] == mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+
+
+def test_opencode_model_limit_includes_required_output_value():
+    import mms_launchers
+
+    config = mms_launchers._opencode_model_config(
+        _runtime(opencode_output_limit=16384),
+        "gpt-5.5",
+    )
+
+    assert isinstance(config["limit"]["context"], int)
+    assert config["limit"]["context"] > 0
+    assert config["limit"]["output"] == 16384
 
 
 def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path):
