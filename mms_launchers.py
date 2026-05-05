@@ -7863,6 +7863,21 @@ def _opencode_output_limit(runtime):
     return OPENCODE_DEFAULT_OUTPUT_LIMIT
 
 
+def _opencode_provider_base_url(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    explicit = str(runtime.get("opencode_base_url") or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    base_url = str(_openai_base_url(runtime) or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    path = urlsplit(base_url).path.rstrip("/")
+    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
+    if last_segment == "openai":
+        return f"{base_url}/v1"
+    return base_url
+
+
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -7887,7 +7902,7 @@ def _build_opencode_config_payload(runtime, model_name=""):
         "npm": "@ai-sdk/openai-compatible",
         "name": provider_name,
         "options": {
-            "baseURL": _openai_base_url(runtime),
+            "baseURL": _opencode_provider_base_url(runtime),
             "apiKey": f"{{env:{OPENCODE_API_KEY_ENV}}}",
         },
         "models": {
@@ -7954,7 +7969,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
     env[OPENCODE_API_KEY_ENV] = str(runtime.get("openai_api_key") or runtime.get("api_key") or "")
     env["OPENAI_API_KEY"] = env[OPENCODE_API_KEY_ENV]
-    env["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+    env["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
     env["OPENCODE_CONFIG"] = config_path
     env["OPENCODE_CONFIG_DIR"] = config_dir
     env["OPENCODE_CONFIG_CONTENT"] = config_content
@@ -8038,7 +8053,7 @@ def get_export_env(cli, runtime):
     elif cli == "opencode":
         exports[OPENCODE_API_KEY_ENV] = api_key
         exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+        exports["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
         exports["OPENCODE_CONFIG_CONTENT"] = _build_opencode_config_content(runtime, _resolve_model(runtime))
         exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
         exports["OPENCODE_CLIENT"] = "mms"

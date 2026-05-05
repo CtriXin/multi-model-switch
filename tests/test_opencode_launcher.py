@@ -60,6 +60,50 @@ def test_opencode_model_limit_includes_required_output_value():
     assert config["limit"]["output"] == 16384
 
 
+def test_opencode_provider_base_url_adds_v1_after_gateway_openai_prefix():
+    import mms_launchers
+
+    runtime = _runtime(openai_base_url="http://129.146.32.12:3000/openai")
+
+    assert mms_launchers._opencode_provider_base_url(runtime) == "http://129.146.32.12:3000/openai/v1"
+
+
+def test_opencode_provider_base_url_preserves_existing_v1_and_explicit_override():
+    import mms_launchers
+
+    assert (
+        mms_launchers._opencode_provider_base_url(
+            _runtime(openai_base_url="http://129.146.32.12:3000/openai/v1/")
+        )
+        == "http://129.146.32.12:3000/openai/v1"
+    )
+    assert (
+        mms_launchers._opencode_provider_base_url(
+            _runtime(
+                openai_base_url="http://129.146.32.12:3000/openai",
+                opencode_base_url="https://custom.example/openai",
+            )
+        )
+        == "https://custom.example/openai"
+    )
+
+
+def test_opencode_config_and_exports_use_normalized_gateway_openai_url():
+    import mms_launchers
+
+    runtime = _runtime(
+        model="gpt-5.5",
+        models=["gpt-5.5"],
+        openai_base_url="http://129.146.32.12:3000/openai",
+    )
+
+    payload = json.loads(mms_launchers._build_opencode_config_content(runtime, "gpt-5.5"))
+    exports = mms_launchers.get_export_env("opencode", runtime)
+
+    assert payload["provider"]["mms"]["options"]["baseURL"] == "http://129.146.32.12:3000/openai/v1"
+    assert exports["OPENAI_BASE_URL"] == "http://129.146.32.12:3000/openai/v1"
+
+
 def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path):
     import mms_launchers
 
