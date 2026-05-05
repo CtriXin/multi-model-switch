@@ -8114,7 +8114,7 @@ def _opencode_provider_base_url(runtime):
         return ""
     path = urlsplit(base_url).path.rstrip("/")
     last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
-    if last_segment == "openai":
+    if last_segment != "v1":
         return f"{base_url}/v1"
     return base_url
 
