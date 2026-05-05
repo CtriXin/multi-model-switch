@@ -4871,6 +4871,12 @@ def _provider_supports_cli(provider, cli):
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
+    if cli == "opencode" and "opencode" not in supported_clis:
+        protocols = _provider_protocols(provider)
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "qwen", "kimi")
+        ):
+            return True
     return cli in supported_clis
 
 
