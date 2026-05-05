@@ -7878,6 +7878,13 @@ def _opencode_provider_base_url(runtime):
     return base_url
 
 
+def _opencode_gateway_health_check(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    health_runtime = dict(runtime)
+    health_runtime["openai_base_url"] = _opencode_provider_base_url(runtime)
+    gateway_health_check(health_runtime)
+
+
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -7993,7 +8000,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
-    gateway_health_check(runtime)
+    _opencode_gateway_health_check(runtime)
     model = _resolve_model(model_info)
     if not model:
         console.print("[red]OpenCode 启动需要先选择一个模型[/red]")

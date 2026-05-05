@@ -143,7 +143,11 @@ def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
     import mms_launchers
 
     captured = {}
-    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda _runtime: None)
+
+    def fake_health_check(runtime):
+        captured["health_base_url"] = runtime["openai_base_url"]
+
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", fake_health_check)
     monkeypatch.setattr(
         mms_launchers,
         "_opencode_gateway_env",
@@ -159,13 +163,14 @@ def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
 
     mms_launchers.launch_opencode(
         {"model": "deepseek-chat"},
-        _runtime(),
+        _runtime(openai_base_url="http://129.146.32.12:3000/openai"),
         once=True,
     )
 
     assert captured["cmd"] == ["opencode", "-m", "mms/deepseek-chat"]
     assert captured["env"]["HOME"] == "/tmp/opencode-session"
     assert captured["once"] is True
+    assert captured["health_base_url"] == "http://129.146.32.12:3000/openai/v1"
 
 
 def test_get_export_env_exposes_opencode_inline_config():
