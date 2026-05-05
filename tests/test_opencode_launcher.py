@@ -88,9 +88,12 @@ def test_opencode_provider_base_url_preserves_existing_v1_and_explicit_override(
     )
 
 
-def test_opencode_config_and_exports_use_normalized_gateway_openai_url():
+def test_opencode_config_and_exports_use_normalized_gateway_openai_url(monkeypatch, tmp_path):
     import mms_launchers
 
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
     runtime = _runtime(
         model="gpt-5.5",
         models=["gpt-5.5"],
@@ -102,6 +105,7 @@ def test_opencode_config_and_exports_use_normalized_gateway_openai_url():
 
     assert payload["provider"]["mms"]["options"]["baseURL"] == "http://129.146.32.12:3000/openai/v1"
     assert exports["OPENAI_BASE_URL"] == "http://129.146.32.12:3000/openai/v1"
+    assert json.loads(Path(exports["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))["provider"]["mms"]["options"]["baseURL"] == "http://129.146.32.12:3000/openai/v1"
 
 
 def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path):
@@ -131,12 +135,14 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     config_path = Path(env["OPENCODE_CONFIG"])
     assert session_home.is_dir()
     assert config_path == session_home / ".config" / "opencode" / "opencode.json"
-    assert json.loads(config_path.read_text(encoding="utf-8")) == json.loads(env["OPENCODE_CONFIG_CONTENT"])
+    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config_payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
     assert env["XDG_CONFIG_HOME"] == str(session_home / ".config")
     assert env["MMS_SESSION_HOME"] == str(session_home)
     assert env["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert env["OPENCODE_CLIENT"] == "mms"
+    assert "OPENCODE_CONFIG_CONTENT" not in env
 
 
 def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
@@ -173,17 +179,22 @@ def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
     assert captured["health_base_url"] == "http://129.146.32.12:3000/openai/v1"
 
 
-def test_get_export_env_exposes_opencode_inline_config():
+def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
     import mms_launchers
 
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
     runtime = _runtime(model="deepseek-chat")
 
     exports = mms_launchers.get_export_env("opencode", runtime)
-    payload = json.loads(exports["OPENCODE_CONFIG_CONTENT"])
+    payload = json.loads(Path(exports["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
 
     assert exports["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert exports["OPENAI_API_KEY"] == "sk-runtime"
     assert exports["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
+    assert exports["OPENCODE_CONFIG_DIR"] == str(Path(exports["OPENCODE_CONFIG"]).parent)
+    assert "OPENCODE_CONFIG_CONTENT" not in exports
     assert payload["model"] == "mms/deepseek-chat"
     assert payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
 

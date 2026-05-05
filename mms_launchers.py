@@ -8126,6 +8126,14 @@ def _opencode_gateway_health_check(runtime):
     gateway_health_check(health_runtime)
 
 
+def _opencode_config_slug(value, default="default"):
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_"
+        for ch in str(value or "").strip()
+    ).strip("_")
+    return cleaned or default
+
+
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -8185,6 +8193,26 @@ def _build_opencode_config_content(runtime, model_name=""):
     )
 
 
+def _write_opencode_config(path, runtime, model):
+    config_content = _build_opencode_config_content(runtime, model)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    atomic_write_text(path, config_content + "\n", mode=0o600)
+    return config_content
+
+
+def _opencode_export_config_path(runtime, model):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    provider = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
+    model_slug = _opencode_config_slug(model or runtime.get("model"), "model")
+    return _real_user_path(
+        ".config",
+        "mms",
+        "opencode-gateway",
+        "exports",
+        f"{provider}-{model_slug}.json",
+    )
+
+
 def _opencode_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = _resolve_model(model_info or runtime)
@@ -8203,6 +8231,8 @@ def _opencode_gateway_env(runtime, model_info=None):
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"):
+        env.pop(key, None)
     _inject_real_home_hints(env)
     _inject_selected_model_name(env, model, model_info=model_info)
     env["HOME"] = session_home
@@ -8212,15 +8242,13 @@ def _opencode_gateway_env(runtime, model_info=None):
     config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "opencode.json")
-    config_content = _build_opencode_config_content(runtime, model)
-    atomic_write_text(config_path, config_content + "\n", mode=0o600)
+    _write_opencode_config(config_path, runtime, model)
 
     env[OPENCODE_API_KEY_ENV] = str(runtime.get("openai_api_key") or runtime.get("api_key") or "")
     env["OPENAI_API_KEY"] = env[OPENCODE_API_KEY_ENV]
     env["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
     env["OPENCODE_CONFIG"] = config_path
     env["OPENCODE_CONFIG_DIR"] = config_dir
-    env["OPENCODE_CONFIG_CONTENT"] = config_content
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     env["OPENCODE_CLIENT"] = "mms"
 
@@ -8299,10 +8327,14 @@ def get_export_env(cli, runtime):
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     elif cli == "opencode":
+        model = _resolve_model(runtime)
+        config_path = _opencode_export_config_path(runtime, model)
+        _write_opencode_config(config_path, runtime, model)
         exports[OPENCODE_API_KEY_ENV] = api_key
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
-        exports["OPENCODE_CONFIG_CONTENT"] = _build_opencode_config_content(runtime, _resolve_model(runtime))
+        exports["OPENCODE_CONFIG"] = config_path
+        exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
         exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
         exports["OPENCODE_CLIENT"] = "mms"
     elif cli == "kimi":
