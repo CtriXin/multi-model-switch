@@ -23,6 +23,7 @@ console = _LazyConsole()
 INSTALL_COMMANDS = {
     "claude": "curl -fsSL https://claude.ai/install.sh | sh",
     "codex": "brew install codex",
+    "opencode": "curl -fsSL https://opencode.ai/install | bash",
     "gemini": "npm install -g @google/gemini-cli",
     "qwen": "npm install -g @qwen-code/qwen-code",
     "kimi": "uv tool install kimi-cli",
@@ -31,6 +32,7 @@ INSTALL_COMMANDS = {
 CLI_DESCRIPTIONS = {
     "claude": "Claude Code (Anthropic)",
     "codex": "Codex CLI (OpenAI)",
+    "opencode": "OpenCode CLI",
     "gemini": "Gemini CLI (Google)",
     "qwen": "Qwen Code (Alibaba)",
     "kimi": "Kimi CLI (Moonshot)",

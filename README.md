@@ -10,7 +10,7 @@
 
 ## What MMS Does
 
-MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `qwen`, `kimi`, and `gemini`.
+MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, `qwen`, `kimi`, and `gemini`.
 
 Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 
@@ -33,6 +33,7 @@ Key changes in this generation:
 - profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
 - Claude resume persistence through `.claude/projects`
 - Codex resume write-back across isolated MMS-managed launches
+- OpenCode launch through session-local OpenAI-compatible config
 - profile-aware Thinking/Effort controls in the launch confirmation screen
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
@@ -87,7 +88,9 @@ Direct CLI launch:
 ```bash
 mms claude
 mms codex
+mms opencode
 mms --provider <provider-id> codex
+mms --provider <provider-id> opencode
 mms --account <account-id> claude
 ```
 
@@ -95,6 +98,7 @@ Export environment variables instead of launching:
 
 ```bash
 mms --export codex
+mms --export opencode
 mms --export claude --apply
 ```
 
@@ -115,7 +119,7 @@ mms logs
 MMS
 ├── Entry
 │   ├── mms TUI
-│   ├── mms claude / mms codex
+│   ├── mms claude / mms codex / mms opencode
 │   └── export / presets
 ├── Decision
 │   ├── provider profiles
@@ -124,6 +128,7 @@ MMS
 ├── Runtime Isolation
 │   ├── Claude: session HOME + .claude/projects resume
 │   ├── Codex: bounded .codex seed + write-back
+│   ├── OpenCode: session HOME + inline OpenAI-compatible config
 │   └── bridge: local protocol adapters when needed
 └── Session Packs
     ├── token-saver / TOON

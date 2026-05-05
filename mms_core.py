@@ -699,7 +699,7 @@ SCENES = {
     },
 }
 
-CLI_NAMES = ["claude", "codex", "gemini"]
+CLI_NAMES = ["claude", "codex", "opencode", "gemini"]
 CLI_MODEL_FAMILY_HINTS = {
     "qwen": ("qwen",),
     "kimi": ("kimi",),
@@ -7655,7 +7655,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "kimi") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "kimi") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = _runtime_source_kind_label(runtime)
@@ -8651,7 +8651,7 @@ def handle_export(cli_name, provider, apply=False):
         console.print(f"[yellow]{cli_name} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
         return
 
-    lines = [f'export {k}="{v}"' for k, v in exports.items()]
+    lines = [f"export {k}={shlex.quote(str(v))}" for k, v in exports.items()]
     export_block = "\n".join(lines)
 
     console.print(f"\n[bold cyan]{cli_name} 环境变量:[/bold cyan]\n")
@@ -8736,7 +8736,7 @@ def handle_env_command(cfg, argv):
         return
 
     cli, exports, _runtime = result
-    lines = [f'export {k}="{v}"' for k, v in exports.items()]
+    lines = [f"export {k}={shlex.quote(str(v))}" for k, v in exports.items()]
     export_block = "\n".join(lines)
 
     console.print(f"\n[bold cyan]{args.preset_name} ({cli}) 环境变量:[/bold cyan]\n")
@@ -8778,7 +8778,7 @@ def handle_activate_command(cfg, argv):
 
     _cli, exports, _runtime = result
     for k, v in exports.items():
-        print(f'export {k}="{v}"')
+        print(f"export {k}={shlex.quote(str(v))}")
 
     if sys.stderr.isatty():
         print(f"# ✓ preset '{args.preset_name}' activated", file=sys.stderr)
@@ -9944,6 +9944,8 @@ def _session_gateway_roots(cli_name):
         gateway_names.append(("claude", "claude-gateway"))
     if cli_name in {"all", "codex"}:
         gateway_names.append(("codex", "codex-gateway"))
+    if cli_name in {"all", "opencode"}:
+        gateway_names.append(("opencode", "opencode-gateway"))
     return [
         (cli, os.path.join(real_home, ".config", "mms", gateway_name, "s"))
         for cli, gateway_name in gateway_names
@@ -10073,7 +10075,7 @@ def handle_session_command(argv):
     resume_parser.add_argument("--provider", help="临时指定 provider")
 
     prune_parser = subparsers.add_parser("prune", help="列出或删除 stale MMS gateway session")
-    prune_parser.add_argument("--cli", default="all", choices=["claude", "codex", "all"])
+    prune_parser.add_argument("--cli", default="all", choices=["claude", "codex", "opencode", "all"])
     prune_parser.add_argument("--dry-run", action="store_true", help="只列出候选项；默认行为")
     prune_parser.add_argument("--apply", action="store_true", help="实际删除 stale session；默认只 dry-run")
     prune_parser.add_argument("--yes", action="store_true", help="配合 --apply，确认删除")
@@ -10596,7 +10598,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/qwen/kimi/gemini)")
+                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/qwen/kimi/gemini)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带场景编号）")

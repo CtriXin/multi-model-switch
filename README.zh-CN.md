@@ -10,7 +10,7 @@
 
 ## MMS 是什么
 
-MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、`gemini` 等本地 AI coding CLI 前面的控制面。
+MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`opencode`、`qwen`、`kimi`、`gemini` 等本地 AI coding CLI 前面的控制面。
 
 MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review helper 属于 legacy / maintenance-only 表面，除非直接支持 launcher/session 验证，否则不继续扩展；长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons。
 
@@ -33,6 +33,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - bridge / launcher / chat / discuss / router 共享 profile-driven auth/body/thinking/effort patch
 - Claude 通过 `.claude/projects` 恢复项目级 resume
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
+- OpenCode 通过 session-local OpenAI-compatible config 启动
 - 启动确认页按 provider profile 显示 Thinking/Effort 与默认值
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
@@ -87,7 +88,9 @@ mms
 ```bash
 mms claude
 mms codex
+mms opencode
 mms --provider <provider-id> codex
+mms --provider <provider-id> opencode
 mms --account <account-id> claude
 ```
 
@@ -95,6 +98,7 @@ mms --account <account-id> claude
 
 ```bash
 mms --export codex
+mms --export opencode
 mms --export claude --apply
 ```
 
@@ -115,7 +119,7 @@ mms logs
 MMS
 ├── 入口层
 │   ├── mms TUI
-│   ├── mms claude / mms codex
+│   ├── mms claude / mms codex / mms opencode
 │   └── export / presets
 ├── 决策层
 │   ├── provider profiles
@@ -124,6 +128,7 @@ MMS
 ├── 运行时隔离
 │   ├── Claude: session HOME + .claude/projects resume
 │   ├── Codex: bounded .codex seed + write-back
+│   ├── OpenCode: session HOME + inline OpenAI-compatible config
 │   └── bridge: 需要时启动本地协议适配
 └── Session 能力包
     ├── token-saver / TOON
