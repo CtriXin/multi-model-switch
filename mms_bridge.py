@@ -268,6 +268,7 @@ _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "q
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
 _DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek",)
+_ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -318,6 +319,11 @@ def _domestic_model_supports_reasoning_effort(model_name):
 def _domestic_model_requires_reasoning_content_roundtrip(model_name):
     normalized = _normalize_model_name(model_name)
     return normalized.startswith(_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES)
+
+
+def _model_supports_anthropic_cache_control(model_name):
+    normalized = _normalize_model_name(model_name)
+    return normalized.startswith(_ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES)
 
 
 def _normalize_domestic_reasoning_effort(value, default="high"):
@@ -484,7 +490,7 @@ def _mms_fail_closed_auth_error_payload(status_code, body_text, *, model_name=""
 
 
 def _strip_cache_control(payload):
-    """非 Claude 模型不支持 prompt caching，剥离 payload 中所有 cache_control 字段。"""
+    """剥离不支持 Anthropic prompt cache 的模型 payload 中的 cache_control 字段。"""
     # 顶层 cache_control
     payload.pop("cache_control", None)
     # system 可能是字符串或 content block 列表
@@ -2016,7 +2022,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                 thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
                 reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
             )
-        if not resolved_model.startswith("claude-"):
+        if not resolved_model.startswith("claude-") and not _model_supports_anthropic_cache_control(resolved_model):
             _strip_cache_control(payload)
 
         # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容

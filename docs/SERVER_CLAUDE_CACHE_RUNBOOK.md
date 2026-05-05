@@ -253,6 +253,12 @@
 - `cache_creation_tokens > 0`
   说明成功创建 cache
 
+Qwen plus/max 专项判断：
+
+- `qwen-plus`、`qwen3.5-plus`、`qwen3.6-plus`、`qwen3-max` 走 `Anthropic /v1/messages` 时应保留 Claude payload 里的 `cache_control`
+- 如果日志变成 `/v1/chat/completions` 且 `request_conversion` 包含 `OpenAI Compatible`，先按 route / bridge shape 问题处理
+- `cache_tokens > prompt_tokens` 不是异常；按 `cache / (prompt + cache + cache_creation)` 看 aggregate cache hit
+
 ---
 
 ## 标准验证 payload

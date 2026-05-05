@@ -57,6 +57,7 @@
 
 - `shared-root gateway`：如果 `openai_base_url=/v1` 且已知支持 `anthropic_messages`，优先验证裁 root 后的 `/v1/messages`
 - `separate-path vendor`：例如 `.../v1` 与 `.../apps/anthropic`，必须显式配置两条 URL；不要靠猜
+- `Qwen plus/max`：`qwen-plus`、`qwen3.5-plus`、`qwen3.6-plus`、`qwen3-max` 在 `Anthropic /v1/messages` 路径上需要保留 `cache_control`，不要按“非 Claude 模型”统一剥离
 - 低 cache 先区分 `route/protocol` 问题和 `model-level` 问题，不要一上来就怀疑 sticky failure
 
 相关事实 runbook：

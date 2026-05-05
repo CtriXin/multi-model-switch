@@ -2108,6 +2108,22 @@ def test_domestic_model_supports_thinking_capability_allowlist(model_name, expec
     assert mms_bridge._should_strip_domestic_thinking_signals(model_name) is (not expected)
 
 
+@pytest.mark.parametrize(
+    ("model_name", "expected"),
+    [
+        ("qwen3.6-plus", True),
+        ("qwen3.5-plus", True),
+        ("qwen3-max-2026-01-23", True),
+        ("qwen3-coder-plus", False),
+        ("mimo-v2-pro", False),
+    ],
+)
+def test_anthropic_cache_control_allowlist_for_qwen_models(model_name, expected):
+    import mms_bridge
+
+    assert mms_bridge._model_supports_anthropic_cache_control(model_name) is expected
+
+
 def test_strip_domestic_thinking_signals_removes_thinking_payload_fields():
     import mms_bridge
 
@@ -3573,6 +3589,85 @@ def test_gateway_bridge_post_disables_trust_env_and_respects_runtime_proxy(monke
     assert captured["url"] == "https://relay.example.com/v1/messages"
     assert captured["kwargs"]["trust_env"] is False
     assert captured["kwargs"]["proxy"] == "http://127.0.0.1:15721"
+
+
+def test_gateway_bridge_preserves_qwen_anthropic_cache_control(monkeypatch):
+    import mms_bridge
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+        content = b'{"ok": true}'
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(post=fake_post))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps(
+        {
+            "model": "qwen3.6-plus",
+            "system": [
+                {
+                    "type": "text",
+                    "text": "stable cacheable prefix",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "hi",
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                }
+            ],
+            "stream": False,
+        }
+    ).encode("utf-8")
+
+    handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
+    handler.path = "/v1/messages"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "x-api-key": "bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="gateway-key",
+        gateway_url="https://relay.example.com/v1",
+        route_status_paths=[],
+        advertised_models=["qwen3.6-plus"],
+        heavy_model="qwen3.6-plus",
+        medium_model=None,
+        light_model=None,
+        slot_configs={},
+        openai_url=None,
+        speed_scope=None,
+        proxy_url="",
+        no_proxy="",
+    )
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["status"] == 200
+    assert captured["url"] == "https://relay.example.com/v1/messages"
+    assert captured["json"]["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert captured["json"]["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
 def test_chatcompletions_fallback_429_respects_retry_after_without_fanout(monkeypatch):
