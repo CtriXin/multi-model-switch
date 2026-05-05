@@ -1663,10 +1663,13 @@ _ANTHROPIC_URL_CACHE: dict = {}
 CLI_PROTOCOL_REQUIREMENTS = {
     "claude": "anthropic_messages",
     "codex": "openai_chat_completions",
+    "opencode": "openai_chat_completions",
     "qwen": "openai_chat_completions",
     "kimi": "openai_chat_completions",
 }
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
+OPENCODE_PROVIDER_ID = "mms"
+OPENCODE_API_KEY_ENV = "MMS_OPENCODE_API_KEY"
 
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -4787,7 +4790,7 @@ def validate_provider_for_cli(cli, provider):
     if cli == "claude" and not _anthropic_base_url(provider) and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置任何 API 地址[/red]")
         sys.exit(1)
-    if cli in {"codex", "qwen", "kimi"} and not _openai_base_url(provider):
+    if cli in {"codex", "opencode", "qwen", "kimi"} and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
         sys.exit(1)
 
@@ -7813,6 +7816,156 @@ def launch_kimi(model_info, provider, once=False):
     _exec_or_run(cmd, env, once)
 
 
+def _opencode_model_names(runtime, selected_model=""):
+    seen = set()
+    models = []
+
+    def add(value):
+        model = str(value or "").strip()
+        if model and model not in seen:
+            seen.add(model)
+            models.append(model)
+
+    add(selected_model)
+    if isinstance(runtime, dict):
+        add(runtime.get("model"))
+        add(runtime.get("default_model"))
+        for key in ("models", "fallback_models"):
+            values = runtime.get(key)
+            if isinstance(values, str):
+                add(values)
+            elif isinstance(values, (list, tuple)):
+                for value in values:
+                    add(value)
+    return models
+
+
+def _opencode_model_ref(model_name):
+    return f"{OPENCODE_PROVIDER_ID}/{model_name}"
+
+
+def _opencode_model_config(runtime, model_name):
+    model = str(model_name or "").strip()
+    config = {"name": model}
+    context_window = _effective_context_window(
+        model,
+        enable_claude_1m=False,
+        provider_id=(runtime or {}).get("id"),
+    )
+    if context_window:
+        config["limit"] = {"context": context_window}
+    return config
+
+
+def _build_opencode_config_payload(runtime, model_name=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    model_names = _opencode_model_names(runtime, model_name)
+    provider_name = str(runtime.get("name") or runtime.get("id") or "MMS").strip() or "MMS"
+    provider_config = {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_name,
+        "options": {
+            "baseURL": _openai_base_url(runtime),
+            "apiKey": f"{{env:{OPENCODE_API_KEY_ENV}}}",
+        },
+        "models": {
+            name: _opencode_model_config(runtime, name)
+            for name in model_names
+        },
+    }
+    payload = {
+        "$schema": "https://opencode.ai/config.json",
+        "autoupdate": False,
+        "share": "disabled",
+        "provider": {OPENCODE_PROVIDER_ID: provider_config},
+    }
+    if model_names:
+        model_ref = _opencode_model_ref(model_names[0])
+        payload["model"] = model_ref
+        payload["small_model"] = model_ref
+    if not runtime.get("bypass"):
+        payload["permission"] = {
+            "edit": "ask",
+            "bash": "ask",
+        }
+    return payload
+
+
+def _build_opencode_config_content(runtime, model_name=""):
+    return json.dumps(
+        _build_opencode_config_payload(runtime, model_name),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _opencode_gateway_env(runtime, model_info=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    model = _resolve_model(model_info or runtime)
+    gateway_base = _real_user_path(".config", "mms", "opencode-gateway")
+    os.makedirs(gateway_base, exist_ok=True)
+    sessions_dir = os.path.join(gateway_base, "s")
+    session_home = os.path.join(sessions_dir, str(os.getpid()))
+    os.makedirs(session_home, exist_ok=True)
+    _cleanup_stale_sessions(sessions_dir)
+
+    real_local = _real_user_path(".local")
+    session_local = os.path.join(session_home, ".local")
+    if os.path.isdir(real_local) and not os.path.exists(session_local) and not os.path.islink(session_local):
+        os.symlink(real_local, session_local)
+    _link_shared_dotfiles(session_home)
+
+    env = os.environ.copy()
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    _inject_real_home_hints(env)
+    _inject_selected_model_name(env, model, model_info=model_info)
+    env["HOME"] = session_home
+    env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
+    _set_session_home_hint(env, session_home)
+
+    config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "opencode.json")
+    config_content = _build_opencode_config_content(runtime, model)
+    atomic_write_text(config_path, config_content + "\n", mode=0o600)
+
+    env[OPENCODE_API_KEY_ENV] = str(runtime.get("openai_api_key") or runtime.get("api_key") or "")
+    env["OPENAI_API_KEY"] = env[OPENCODE_API_KEY_ENV]
+    env["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+    env["OPENCODE_CONFIG"] = config_path
+    env["OPENCODE_CONFIG_DIR"] = config_dir
+    env["OPENCODE_CONFIG_CONTENT"] = config_content
+    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    env["OPENCODE_CLIENT"] = "mms"
+
+    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
+    _apply_runtime_locale_profile(env, runtime)
+    _apply_runtime_ip_stack_profile(env, runtime)
+    _install_session_command_wrappers(session_home, env)
+    _install_session_packet_env(
+        env,
+        cli="opencode",
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+        features={},
+    )
+    return env
+
+
+def launch_opencode(model_info, runtime, once=False):
+    """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
+    gateway_health_check(runtime)
+    model = _resolve_model(model_info)
+    if not model:
+        console.print("[red]OpenCode 启动需要先选择一个模型[/red]")
+        sys.exit(1)
+    env = _opencode_gateway_env(runtime, model_info=model_info)
+    cmd = ["opencode", "-m", _opencode_model_ref(model)]
+    _exec_or_run(cmd, env, once)
+
+
 def launch_gemini(model_info, runtime, once=False):
     """启动 Gemini，当前只支持官方账号档案模式。"""
     auth_mode = runtime.get("auth_mode", "api_key")
@@ -7832,6 +7985,7 @@ def launch_gemini(model_info, runtime, once=False):
 LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
+    "opencode": launch_opencode,
     "qwen": launch_qwen,
     "kimi": launch_kimi,
     "gemini": launch_gemini,
@@ -7859,13 +8013,20 @@ def get_export_env(cli, runtime):
     elif cli == "codex":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+    elif cli == "opencode":
+        exports[OPENCODE_API_KEY_ENV] = api_key
+        exports["OPENAI_API_KEY"] = api_key
+        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+        exports["OPENCODE_CONFIG_CONTENT"] = _build_opencode_config_content(runtime, _resolve_model(runtime))
+        exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+        exports["OPENCODE_CLIENT"] = "mms"
     elif cli == "kimi":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
     token_saver_script = _token_saver_script_path()
-    if cli in {"claude", "codex"}:
+    if cli in {"claude", "codex", "opencode"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
