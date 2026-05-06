@@ -10469,6 +10469,10 @@ def main():
 
     if len(argv) >= 1:
         command = argv[0]
+        if command == "review-launch":
+            from mms_review_launch import handle_review_launch_command
+
+            raise SystemExit(handle_review_launch_command(argv[1:], command_name=current_command()))
         if command == "guard":
             handle_guard_command(argv[1:], bootstrap_cfg=bootstrap_cfg)
             return
@@ -10588,6 +10592,7 @@ def main():
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} chat ...        进入 chat 子命令\n"
             f"  {current_command()} discuss ...     进入 discuss 子命令\n"
+            f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
             f"  {current_command()} usage ...       查看 usage 统计"
