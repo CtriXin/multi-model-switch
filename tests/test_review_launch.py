@@ -184,6 +184,116 @@ def test_review_launch_fake_dispatch_writes_exact_expected_review_file(tmp_path,
     assert review_files == [expected_output]
 
 
+def test_review_launch_resolves_anthropic_only_provider(monkeypatch):
+    import mms_core
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_provider_for_model
+
+    provider = {
+        "id": "mimo-direct-anthropic",
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL],
+        "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        "api_key": "key",
+    }
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "default"}, "providers": []})
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda cfg, provider_id: {})
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        mms_core,
+        "_resolve_best_provider",
+        lambda cfg, model_name, default_provider, default_models, cli_name=None, protocol=None: (
+            provider,
+            "mimo-direct-anthropic",
+        )
+        if protocol == ANTHROPIC_MESSAGES_PROTOCOL and model_name == "mimo-v2.5"
+        else (None, None),
+    )
+
+    resolved, protocol, error = _resolve_provider_for_model("mimo-v2.5", {})
+
+    assert error == ""
+    assert resolved["id"] == "mimo-direct-anthropic"
+    assert protocol == ANTHROPIC_MESSAGES_PROTOCOL
+
+
+def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monkeypatch):
+    import mms_core
+    from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_provider_for_model
+
+    provider = {
+        "id": "mimo-direct-anthropic",
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        "api_key": "key",
+    }
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "default"}, "providers": []})
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda cfg: cfg)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda cfg, provider_id: provider)
+
+    resolved, protocol, error = _resolve_provider_for_model(
+        "mimo-v2.5",
+        {"MMS_REVIEW_LAUNCH_PROVIDER_ID": "mimo-direct-anthropic", "MMS_REVIEW_LAUNCH_PROTOCOL": OPENAI_CHAT_PROTOCOL},
+    )
+
+    assert resolved is None
+    assert protocol == ""
+    assert "does not declare protocol openai_chat_completions" in error
+
+
+def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
+    import asyncio
+    import httpx
+    from mms_review_launch import _call_model_anthropic_messages
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"content": [{"type": "text", "text": "Reviewer: mimo-v2.5\n\nVerdict: PASS"}]}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers or {}
+            captured["json"] = json or {}
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    text = asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "mimo-direct-anthropic",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+                "api_key": "key",
+            },
+            model_name="mimo-v2.5",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert text.startswith("Reviewer: mimo-v2.5")
+    assert captured["url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages"
+    assert captured["headers"]["x-api-key"] == "key"
+    assert captured["headers"]["anthropic-version"] == "2023-06-01"
+    assert captured["json"]["model"] == "mimo-v2.5"
+    assert captured["json"]["max_tokens"] == 1234
+    assert captured["json"]["messages"][0]["content"][0]["text"] == "review this"
+
+
 def test_review_launch_rejects_output_path_escape_before_writing(tmp_path, monkeypatch, capsys):
     from mms_review_launch import handle_review_launch_command
 

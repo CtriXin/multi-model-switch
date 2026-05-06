@@ -40,9 +40,13 @@ PROVIDER_ID_ENV = "MMS_REVIEW_LAUNCH_PROVIDER_ID"
 MAX_TOKENS_ENV = "MMS_REVIEW_LAUNCH_MAX_TOKENS"
 MAX_FILE_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_FILE_CHARS"
 MAX_PROMPT_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_PROMPT_CHARS"
+PROTOCOL_ENV = "MMS_REVIEW_LAUNCH_PROTOCOL"
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_MAX_FILE_CHARS = 12000
 DEFAULT_MAX_PROMPT_CHARS = 90000
+OPENAI_CHAT_PROTOCOL = "openai_chat_completions"
+ANTHROPIC_MESSAGES_PROTOCOL = "anthropic_messages"
+DEFAULT_PROTOCOL_ORDER = (ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL)
 
 
 def _now() -> str:
@@ -125,6 +129,11 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
         "test_hooks": {
             FAKE_RESPONSE_ENV: "optional test-only fake reviewer response text; avoids real provider calls",
             FAKE_RESPONSE_FILE_ENV: "optional test-only path to fake reviewer response text",
+        },
+        "provider_protocols": {
+            "supported": list(DEFAULT_PROTOCOL_ORDER),
+            "selection": "Anthropic-compatible providers are preferred when configured; OpenAI chat completions remains the fallback.",
+            PROTOCOL_ENV: "optional override: auto, anthropic_messages, or openai_chat_completions",
         },
     }
 
@@ -314,7 +323,62 @@ def _provider_openai_base_url(runtime: dict[str, Any]) -> str:
     return ""
 
 
-def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, str]:
+def _provider_anthropic_base_url(runtime: dict[str, Any]) -> str:
+    for key in ("anthropic_base_url",):
+        value = str(runtime.get(key) or "").strip()
+        if value:
+            return value.rstrip("/")
+    protocols = runtime.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    base_url = str(runtime.get("base_url") or runtime.get("url") or "").strip().rstrip("/")
+    if base_url and ANTHROPIC_MESSAGES_PROTOCOL in protocols:
+        return base_url
+    return ""
+
+
+def _provider_protocols(runtime: dict[str, Any]) -> list[str]:
+    raw = runtime.get("protocols", [])
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _protocol_order(env: dict[str, str]) -> list[str]:
+    requested = str(env.get(PROTOCOL_ENV) or "").strip()
+    if not requested or requested == "auto":
+        return list(DEFAULT_PROTOCOL_ORDER)
+    if requested in DEFAULT_PROTOCOL_ORDER:
+        return [requested]
+    return list(DEFAULT_PROTOCOL_ORDER)
+
+
+def _provider_base_url_for_protocol(provider: dict[str, Any], protocol: str) -> str:
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        return _provider_anthropic_base_url(provider)
+    if protocol == OPENAI_CHAT_PROTOCOL:
+        return _provider_openai_base_url(provider)
+    return ""
+
+
+def _provider_api_key_for_protocol(provider: dict[str, Any], protocol: str) -> str:
+    if protocol == OPENAI_CHAT_PROTOCOL:
+        return str(provider.get("openai_api_key") or provider.get("api_key") or "").strip()
+    return str(provider.get("api_key") or "").strip()
+
+
+def _provider_ready_for_protocol(provider: dict[str, Any], protocol: str) -> str:
+    protocols = _provider_protocols(provider)
+    if protocol not in protocols:
+        return f"provider {provider.get('id') or ''} does not declare protocol {protocol}"
+    if not _provider_base_url_for_protocol(provider, protocol):
+        return f"provider {provider.get('id') or ''} has no {protocol} base_url"
+    if not _provider_api_key_for_protocol(provider, protocol):
+        return f"provider {provider.get('id') or ''} has no api_key for {protocol}"
+    return ""
+
+
+def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, str, str]:
     try:
         from mms_core import (
             _default_config,
@@ -330,16 +394,19 @@ def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[d
     cfg = load_config() or _default_config()
     cfg = apply_local_overrides(cfg)
     provider_id = str(env.get(PROVIDER_ID_ENV) or "").strip()
+    protocol_order = _protocol_order(env)
     if provider_id:
         try:
             provider = resolve_provider_context(cfg, provider_id)
         except Exception as exc:
-            return None, f"cannot resolve provider {provider_id}: {exc}"
-        if not provider.get("api_key"):
-            return None, f"provider {provider_id} has no api_key"
-        if not _provider_openai_base_url(provider):
-            return None, f"provider {provider_id} has no OpenAI-compatible base_url"
-        return provider, ""
+            return None, "", f"cannot resolve provider {provider_id}: {exc}"
+        errors: list[str] = []
+        for protocol in protocol_order:
+            error = _provider_ready_for_protocol(provider, protocol)
+            if not error:
+                return provider, protocol, ""
+            errors.append(error)
+        return None, "", "; ".join(errors)
 
     default_id = str((cfg.get("provider") or {}).get("default") or "default")
     try:
@@ -347,16 +414,22 @@ def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[d
     except Exception:
         default_provider = {}
     default_models = _provider_effective_models(default_provider, None, cfg) if default_provider else []
-    provider, _provider_name = _resolve_best_provider(
-        cfg,
-        model_name,
-        default_provider,
-        default_models,
-        protocol="openai_chat_completions",
+    for protocol in protocol_order:
+        provider, _provider_name = _resolve_best_provider(
+            cfg,
+            model_name,
+            default_provider,
+            default_models,
+            protocol=protocol,
+        )
+        if provider is not None:
+            error = _provider_ready_for_protocol(provider, protocol)
+            if not error:
+                return provider, protocol, ""
+    return None, "", (
+        f"no configured review-launch provider found for reviewer model {model_name} "
+        f"with supported protocols {', '.join(protocol_order)}"
     )
-    if provider is None:
-        return None, f"no configured OpenAI-compatible provider found for reviewer model {model_name}"
-    return provider, ""
 
 
 async def _call_model_openai_chat(
@@ -431,6 +504,100 @@ async def _call_model_openai_chat(
     return content
 
 
+def _anthropic_messages_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/v1/messages") or base.endswith("/messages"):
+        return base
+    return f"{base}/v1/messages"
+
+
+async def _call_model_anthropic_messages(
+    *,
+    provider: dict[str, Any],
+    model_name: str,
+    prompt: str,
+    max_tokens: int,
+) -> str:
+    try:
+        import httpx
+    except ImportError as exc:  # pragma: no cover - exercised only without dependency
+        raise RuntimeError("httpx is required for real review-launch model dispatch") from exc
+
+    base_url = _provider_anthropic_base_url(provider)
+    api_key = _provider_api_key_for_protocol(provider, ANTHROPIC_MESSAGES_PROTOCOL)
+    if not base_url or not api_key:
+        raise RuntimeError("provider is missing Anthropic-compatible base_url or api_key")
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
+        "model": model_name,
+        "system": "You are a precise code-review agent. Return only the review Markdown.",
+        "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+        "stream": False,
+        "max_tokens": max_tokens,
+    }
+    provider_id = str(provider.get("id") or "")
+    provider_profile = str(provider.get("profile") or provider.get("provider_profile") or "")
+    apply_profile_body_patches(
+        payload,
+        protocol="anthropic_messages",
+        runtime=provider,
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=base_url,
+        model_name=model_name,
+        thinking_enabled=True,
+        reasoning_effort=str(provider.get("reasoning_effort") or "high"),
+        purpose="review_launch",
+    )
+    apply_profile_auth_headers(
+        headers,
+        protocol="anthropic_messages",
+        api_key=api_key,
+        runtime=provider,
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=base_url,
+        model_name=model_name,
+    )
+
+    timeout = httpx.Timeout(connect=20, write=20, read=900, pool=20)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(_anthropic_messages_url(base_url), headers=headers, json=payload, timeout=timeout)
+    if response.status_code >= 400:
+        raise RuntimeError(f"model dispatch failed HTTP {response.status_code}: {response.text[:1000]}")
+    data = response.json()
+    blocks = data.get("content") if isinstance(data, dict) else None
+    if isinstance(blocks, str):
+        content = blocks.strip()
+    elif isinstance(blocks, list):
+        content = "\n".join(str(item.get("text") or "").strip() for item in blocks if isinstance(item, dict) and str(item.get("text") or "").strip()).strip()
+    else:
+        content = ""
+    if not content:
+        raise RuntimeError("model response content is empty")
+    return content
+
+
+async def _call_model(
+    *,
+    provider: dict[str, Any],
+    protocol: str,
+    model_name: str,
+    prompt: str,
+    max_tokens: int,
+) -> str:
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        return await _call_model_anthropic_messages(provider=provider, model_name=model_name, prompt=prompt, max_tokens=max_tokens)
+    if protocol == OPENAI_CHAT_PROTOCOL:
+        return await _call_model_openai_chat(provider=provider, model_name=model_name, prompt=prompt, max_tokens=max_tokens)
+    raise RuntimeError(f"unsupported review-launch provider protocol: {protocol}")
+
+
 def _fake_response(env: dict[str, str]) -> str:
     inline = str(env.get(FAKE_RESPONSE_ENV) or "")
     if inline:
@@ -464,6 +631,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
     model_calls = 0
     fake_dispatch = False
     provider_id = ""
+    provider_protocol = ""
     context_entries: list[dict[str, Any]] = []
 
     try:
@@ -475,15 +643,16 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             model_calls = 1
             review_text = fake_text
         else:
-            provider, provider_error = _resolve_provider_for_model(reviewer_id, effective_env)
+            provider, provider_protocol, provider_error = _resolve_provider_for_model(reviewer_id, effective_env)
             if provider_error:
                 raise RuntimeError(provider_error)
             provider_id = str((provider or {}).get("id") or "")
             max_tokens = _int_env(effective_env, MAX_TOKENS_ENV, DEFAULT_MAX_TOKENS, maximum=200000)
             model_calls = 1
             review_text = asyncio.run(
-                _call_model_openai_chat(
+                _call_model(
                     provider=provider or {},
+                    protocol=provider_protocol,
                     model_name=reviewer_id,
                     prompt=prompt,
                     max_tokens=max_tokens,
@@ -512,6 +681,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
         "status": status,
         "reviewer_id": reviewer_id,
         "provider_id": provider_id,
+        "provider_protocol": provider_protocol,
         "fake_dispatch": fake_dispatch,
         "expected_output": str(expected_output),
         "expected_output_rel": _relative_to(expected_output, repo_root),
