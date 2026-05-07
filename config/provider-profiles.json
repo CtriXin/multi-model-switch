@@ -448,6 +448,8 @@
       "references": [
         "https://api-docs.deepseek.com/",
         "https://api-docs.deepseek.com/api/create-chat-completion",
+        "https://api-docs.deepseek.com/quick_start/pricing/",
+        "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
         "https://api-docs.deepseek.com/guides/anthropic_api",
         "https://api-docs.deepseek.com/guides/reasoning_model"
       ],
@@ -518,6 +520,22 @@
             "low": "high",
             "medium": "high",
             "xhigh": "max"
+          }
+        }
+      },
+      "context_windows": {
+        "deepseek-v4-pro": 1000000,
+        "deepseek-v4-flash": 1000000,
+        "deepseek-chat": 1000000,
+        "deepseek-reasoner": 1000000
+      },
+      "model_aliases": {
+        "anthropic_messages": {
+          "deepseek-v4-pro": {
+            "target": "deepseek-v4-pro[1m]",
+            "base_url_contains": [
+              "api.deepseek.com"
+            ]
           }
         }
       },

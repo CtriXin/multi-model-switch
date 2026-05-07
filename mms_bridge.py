@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from mms_speed_stats import record_model_speed
 from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
-from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
+from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
 
 try:
     from mms_events import emit_event as _emit_event
@@ -2002,6 +2002,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._forward_as_responses(payload, resolved_model, openai_url, gateway_key, should_record_speed)
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
+
+        wire_model = profile_model_alias(
+            resolved_model,
+            protocol="anthropic_messages",
+            provider_id=getattr(self.server, "provider_id", ""),
+            profile_id=getattr(self.server, "provider_profile", ""),
+            base_url=gateway_url,
+        )
+        if wire_model:
+            payload["model"] = wire_model
+            resolved_model = wire_model
 
         # 非 Claude 模型：优先按 declarative provider profile 调整 body。
         profile_id = apply_profile_body_patches(

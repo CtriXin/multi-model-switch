@@ -19,6 +19,7 @@ Agents must not auto-write the real `~/.config/mms/**` files. User overlays are 
 - `body_patches`: protocol/purpose-specific request body patches, including `thinking_on`, `thinking_off`, and `classify`.
 - `effort`: protocol-specific effort field path, allowed values, defaults, and mappings.
 - `context_windows`: model-prefix context metadata.
+- `model_aliases`: protocol-specific provider wire-model aliases, optionally gated by `provider_id_contains` or `base_url_contains`, for cases where the logical MMS model should stay stable but the upstream API needs a different model string.
 - `model_overrides`: model-prefix overrides for thinking/effort/context behavior.
 
 The patch engine intentionally supports only data-driven field patches. It does not load Python hooks from profiles.
@@ -47,6 +48,8 @@ The patch engine intentionally supports only data-driven field patches. It does 
 - MiniMax Anthropic API: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 - MiniMax OpenAI API: https://platform.minimaxi.com/docs/api-reference/text-openai-api
 - DeepSeek Chat Completion: https://api-docs.deepseek.com/api/create-chat-completion
+- DeepSeek pricing / context lengths: https://api-docs.deepseek.com/quick_start/pricing/
+- DeepSeek Claude Code integration: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 - DeepSeek Anthropic API: https://api-docs.deepseek.com/guides/anthropic_api
 - Kimi Code docs: https://www.kimi.com/code/docs/en/
 - Kimi Code third-party agents: https://www.kimi.com/code/docs/en/third-party-tools/other-coding-agents.html

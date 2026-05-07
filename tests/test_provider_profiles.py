@@ -119,6 +119,37 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
     assert "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md" in refs["mimo"]
 
 
+def test_deepseek_context_and_wire_model_are_profile_driven(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    assert profiles.profile_context_window(
+        "deepseek-v4-pro",
+        provider_id="newapi-personal-tokyo",
+    ) == 1_000_000
+    assert profiles.profile_context_window(
+        "deepseek-v4-flash",
+        provider_id="newapi-personal-tokyo",
+    ) == 1_000_000
+    assert profiles.profile_model_alias(
+        "deepseek-v4-pro",
+        protocol="anthropic_messages",
+        provider_id="newapi-personal-tokyo",
+        base_url="http://161.33.197.51:4001",
+    ) == ""
+    assert profiles.profile_model_alias(
+        "deepseek-v4-pro",
+        protocol="anthropic_messages",
+        provider_id="deepseek-direct",
+        base_url="https://api.deepseek.com/anthropic",
+    ) == "deepseek-v4-pro[1m]"
+    assert profiles.profile_model_alias(
+        "deepseek-v4-flash",
+        protocol="anthropic_messages",
+        provider_id="deepseek-direct",
+        base_url="https://api.deepseek.com/anthropic",
+    ) == ""
+
+
 def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
 

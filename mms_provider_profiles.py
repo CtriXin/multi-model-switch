@@ -397,6 +397,48 @@ def profile_context_window(
     return best_value
 
 
+def profile_model_alias(
+    model_name: str,
+    *,
+    protocol: str,
+    runtime: dict[str, Any] | None = None,
+    provider_id: str = "",
+    base_url: str = "",
+    profile_id: str = "",
+) -> str:
+    """Return provider wire-model override for a protocol, if configured."""
+    profile_id, profile = resolve_provider_profile(
+        runtime=runtime,
+        provider_id=provider_id,
+        base_url=base_url,
+        model_name=model_name,
+        profile_id=profile_id,
+    )
+    if not profile_id:
+        return ""
+    aliases = profile.get("model_aliases") if isinstance(profile.get("model_aliases"), dict) else {}
+    protocol_aliases = aliases.get(protocol) if isinstance(aliases.get(protocol), dict) else {}
+    if not protocol_aliases:
+        protocol_aliases = {key: value for key, value in aliases.items() if not isinstance(value, dict)}
+    model = _normalize_model(model_name)
+    for key, value in protocol_aliases.items():
+        conditions = value if isinstance(value, dict) else {}
+        alias = _clean(conditions.get("target") if isinstance(conditions, dict) else value)
+        if not alias:
+            continue
+        provider_l = _lower(provider_id)
+        base_l = _lower(base_url)
+        provider_tokens = [_lower(item) for item in (conditions.get("provider_id_contains") or []) if _lower(item)]
+        base_tokens = [_lower(item) for item in (conditions.get("base_url_contains") or []) if _lower(item)]
+        if provider_tokens and not any(token in provider_l for token in provider_tokens):
+            continue
+        if base_tokens and not any(token in base_l for token in base_tokens):
+            continue
+        if model == _lower(key) or model == _normalize_model(alias):
+            return alias
+    return ""
+
+
 def provider_profile_references() -> dict[str, list[str]]:
     profiles = load_provider_profiles().get("profiles") or {}
     refs: dict[str, list[str]] = {}
