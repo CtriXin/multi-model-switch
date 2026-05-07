@@ -114,19 +114,19 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         "mimo-v2.5-pro",
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
-    ) == 1_000_000
+    ) == 262_144
     assert profiles.profile_model_alias(
         "mimo-v2.5-pro",
         protocol="anthropic_messages",
         provider_id="mimo-direct-anthropic",
         base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
-    ) == "mimo-v2.5-pro[1m]"
+    ) == ""
     assert profiles.profile_model_alias(
         "mimo-v2.5",
         protocol="anthropic_messages",
         provider_id="mimo-direct-anthropic",
         base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
-    ) == "mimo-v2.5[1m]"
+    ) == ""
     assert profiles.profile_model_alias(
         "mimo-v2.5-pro",
         protocol="anthropic_messages",

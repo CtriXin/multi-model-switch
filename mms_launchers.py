@@ -232,8 +232,8 @@ _MODEL_CONTEXT_WINDOWS = {
     "glm-5-turbo": 200_000,
     "glm-5.1": 200_000,
     "glm-4.7": 200_000,
-    # MiniMax / MiMo — 已确认 mimo-v2-pro 为 1M；M2.5 为 196K，M2.7 为 200K
-    "mimo-v2-pro": 1_000_000,
+    # MiniMax / MiMo — MiMo [1m] suffix is not universally accepted; keep safe 256K default.
+    "mimo-v2-pro": 262_144,
     "MiniMax-M2.5": 196_608,
     "MiniMax-M2.7": 200_000,
     # GPT-5 系列 — 大部分 1M，nano 256K

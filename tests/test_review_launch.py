@@ -457,7 +457,7 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
     assert captured["json"]["messages"][0]["content"][0]["text"] == "review this"
 
 
-def test_review_launch_anthropic_call_uses_profile_wire_model_alias(monkeypatch):
+def test_review_launch_anthropic_call_does_not_force_unsupported_mimo_1m_alias(monkeypatch):
     import asyncio
     import httpx
     from mms_review_launch import _call_model_anthropic_messages
@@ -498,7 +498,7 @@ def test_review_launch_anthropic_call_uses_profile_wire_model_alias(monkeypatch)
         )
     )
 
-    assert captured["json"]["model"] == "mimo-v2.5-pro[1m]"
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
 
 
 def test_review_launch_anthropic_call_does_not_double_append_v1(monkeypatch):

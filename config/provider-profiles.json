@@ -319,33 +319,11 @@
         }
       },
       "context_windows": {
-        "mimo-v2.5-pro": 1000000,
-        "mimo-v2.5": 1000000,
-        "mimo-v2-pro": 1000000,
+        "mimo-v2.5-pro": 262144,
+        "mimo-v2.5": 262144,
+        "mimo-v2-pro": 262144,
         "mimo-v2-omni": 262144,
         "mimo-v2-flash": 262144
-      },
-      "model_aliases": {
-        "anthropic_messages": {
-          "mimo-v2.5-pro": {
-            "target": "mimo-v2.5-pro[1m]",
-            "base_url_contains": [
-              "xiaomimimo.com"
-            ]
-          },
-          "mimo-v2.5": {
-            "target": "mimo-v2.5[1m]",
-            "base_url_contains": [
-              "xiaomimimo.com"
-            ]
-          },
-          "mimo-v2-pro": {
-            "target": "mimo-v2-pro[1m]",
-            "base_url_contains": [
-              "xiaomimimo.com"
-            ]
-          }
-        }
       },
       "api_formats": {
         "openai_chat": {
