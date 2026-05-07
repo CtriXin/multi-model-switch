@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
+from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
 
 
 REVIEW_LAUNCH_CONTRACT_SCHEMA = "mms.review_launch_contract.v1"
@@ -44,6 +44,7 @@ READ_TIMEOUT_ENV = "MMS_REVIEW_LAUNCH_READ_TIMEOUT_SECONDS"
 MAX_FILE_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_FILE_CHARS"
 MAX_PROMPT_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_PROMPT_CHARS"
 PROTOCOL_ENV = "MMS_REVIEW_LAUNCH_PROTOCOL"
+ALLOW_CHAT_FALLBACK_ENV = "MMS_REVIEW_LAUNCH_ALLOW_CHAT_FALLBACK"
 ALLOWED_READ_ROOTS_ENV = "MMS_REVIEW_LAUNCH_ALLOWED_READ_ROOTS"
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_MAX_CANDIDATES = 6
@@ -144,8 +145,9 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
         },
         "provider_protocols": {
             "supported": list(DEFAULT_PROTOCOL_ORDER),
-            "selection": "Providers are ordered by MMS routing; each provider tries Anthropic-compatible protocol first, then OpenAI chat completions when configured.",
+            "selection": "Providers are ordered by MMS routing; each provider tries Anthropic-compatible protocol first. OpenAI chat fallback is blocked by default after an Anthropic attempt on dual-protocol cache-sensitive routes.",
             PROTOCOL_ENV: "optional override: auto, anthropic_messages, or openai_chat_completions",
+            ALLOW_CHAT_FALLBACK_ENV: "set to 1/true/yes to explicitly allow OpenAI chat fallback after an Anthropic attempt",
             MAX_CANDIDATES_ENV: f"optional cap for provider/protocol fallback attempts; default {DEFAULT_MAX_CANDIDATES}",
             READ_TIMEOUT_ENV: f"optional per-attempt read timeout seconds; default {DEFAULT_READ_TIMEOUT_SECONDS}",
         },
@@ -409,6 +411,10 @@ def _provider_api_key_for_protocol(provider: dict[str, Any], protocol: str) -> s
     return str(provider.get("api_key") or "").strip()
 
 
+def _truthy_env(env: dict[str, str], name: str) -> bool:
+    return str(env.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _provider_ready_for_protocol(provider: dict[str, Any], protocol: str) -> str:
     protocols = _provider_protocols(provider)
     if protocol not in protocols:
@@ -605,12 +611,55 @@ def _extract_openai_stream_text(text: str) -> str:
     return "".join(chunks).strip()
 
 
+def _safe_endpoint_trace(provider: dict[str, Any], protocol: str) -> dict[str, str]:
+    base_url = _provider_base_url_for_protocol(provider, protocol)
+    if not base_url:
+        return {}
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        url = _anthropic_messages_url(base_url, provider=provider)
+    elif protocol == OPENAI_CHAT_PROTOCOL:
+        url = _openai_chat_url(base_url)
+    else:
+        url = base_url
+    parts = urlsplit(url)
+    trace = {
+        "request_host": parts.netloc,
+        "request_path": parts.path or "/",
+    }
+    if parts.query:
+        trace["request_query_keys"] = ",".join(sorted(key for key, _value in parse_qsl(parts.query, keep_blank_values=True)))
+    return trace
+
+
+def _wire_model_for_protocol(provider: dict[str, Any], protocol: str, model_name: str) -> str:
+    base_url = _provider_base_url_for_protocol(provider, protocol)
+    if protocol != ANTHROPIC_MESSAGES_PROTOCOL:
+        return model_name
+    provider_id = str(provider.get("id") or "")
+    provider_profile = str(provider.get("profile") or provider.get("provider_profile") or "")
+    return (
+        profile_model_alias(
+            model_name,
+            protocol="anthropic_messages",
+            runtime=provider,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=base_url,
+        )
+        or model_name
+    )
+
+
 def _dispatch_attempt(provider: dict[str, Any], protocol: str, model_name: str) -> dict[str, Any]:
-    return {
+    wire_model_name = _wire_model_for_protocol(provider, protocol, model_name)
+    attempt = {
         "provider_id": str(provider.get("id") or ""),
         "provider_protocol": protocol,
         "model_name": model_name,
+        "wire_model_name": wire_model_name,
     }
+    attempt.update(_safe_endpoint_trace(provider, protocol))
+    return attempt
 
 
 def _compact_error(exc: Exception) -> str:
@@ -630,12 +679,59 @@ def _format_attempt_errors(attempts: list[dict[str, Any]]) -> str:
     return "; ".join(parts)
 
 
+def _provider_is_cache_sensitive_dual_protocol(provider: dict[str, Any]) -> bool:
+    protocols = set(_provider_protocols(provider))
+    if not {ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL}.issubset(protocols):
+        return False
+    if not _provider_anthropic_base_url(provider):
+        return False
+    return True
+
+
+def _has_failed_anthropic_attempt(attempts: list[dict[str, Any]], provider_id: str, model_name: str) -> bool:
+    for item in attempts:
+        if item.get("skipped"):
+            continue
+        if item.get("ok") is not False:
+            continue
+        if item.get("provider_id") != provider_id:
+            continue
+        if item.get("model_name") != model_name:
+            continue
+        if item.get("provider_protocol") == ANTHROPIC_MESSAGES_PROTOCOL:
+            return True
+    return False
+
+
+def _should_block_chat_fallback(
+    *,
+    provider: dict[str, Any],
+    protocol: str,
+    model_name: str,
+    attempts: list[dict[str, Any]],
+    allow_chat_fallback: bool,
+) -> bool:
+    if allow_chat_fallback or protocol != OPENAI_CHAT_PROTOCOL:
+        return False
+    provider_id = str(provider.get("id") or "")
+    return _provider_is_cache_sensitive_dual_protocol(provider) and _has_failed_anthropic_attempt(
+        attempts,
+        provider_id,
+        model_name,
+    )
+
+
+def _model_call_count(attempts: list[dict[str, Any]]) -> int:
+    return len([item for item in attempts if not item.get("skipped")])
+
+
 async def _call_first_working_model(
     *,
     candidates: list[dict[str, Any]],
     prompt: str,
     max_tokens: int,
     read_timeout_seconds: int,
+    allow_chat_fallback: bool = False,
 ) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
     attempts: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -643,6 +739,21 @@ async def _call_first_working_model(
         protocol = str(candidate["protocol"])
         model_name = str(candidate["model_name"])
         attempt = _dispatch_attempt(provider, protocol, model_name)
+        if _should_block_chat_fallback(
+            provider=provider,
+            protocol=protocol,
+            model_name=model_name,
+            attempts=attempts,
+            allow_chat_fallback=allow_chat_fallback,
+        ):
+            attempt["ok"] = False
+            attempt["skipped"] = True
+            attempt["error"] = (
+                "chat fallback blocked for cache-sensitive Anthropic route; "
+                f"set {ALLOW_CHAT_FALLBACK_ENV}=1 to allow explicit fallback"
+            )
+            attempts.append(attempt)
+            continue
         try:
             content = await _call_model(
                 provider=provider,
@@ -800,7 +911,7 @@ async def _call_model_anthropic_messages(
         "Content-Type": "application/json",
     }
     payload: dict[str, Any] = {
-        "model": model_name,
+        "model": _wire_model_for_protocol(provider, ANTHROPIC_MESSAGES_PROTOCOL, model_name),
         "system": "You are a precise code-review agent. Return only the review Markdown.",
         "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
         "stream": False,
@@ -954,18 +1065,19 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
                         prompt=prompt,
                         max_tokens=max_tokens,
                         read_timeout_seconds=read_timeout_seconds,
+                        allow_chat_fallback=_truthy_env(effective_env, ALLOW_CHAT_FALLBACK_ENV),
                     )
                 )
             except ReviewLaunchDispatchError as exc:
                 dispatch_attempts = exc.attempts
-                model_calls = len(dispatch_attempts)
+                model_calls = _model_call_count(dispatch_attempts)
                 if dispatch_attempts:
                     last_attempt = dispatch_attempts[-1]
                     provider_id = str(last_attempt.get("provider_id") or "")
                     provider_protocol = str(last_attempt.get("provider_protocol") or "")
                     dispatch_model_name = str(last_attempt.get("model_name") or reviewer_id)
                 raise RuntimeError(str(exc)) from exc
-            model_calls = len(dispatch_attempts)
+            model_calls = _model_call_count(dispatch_attempts)
             provider_id = str((selected_candidate.get("provider") or {}).get("id") or "")
             provider_protocol = str(selected_candidate.get("protocol") or "")
             dispatch_model_name = str(selected_candidate.get("model_name") or reviewer_id)
@@ -996,6 +1108,16 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
         "dispatch_model_name": dispatch_model_name,
         "dispatch_candidates_count": dispatch_candidates_count,
         "dispatch_attempts": dispatch_attempts,
+        "dispatch_trace": {
+            "run_id": str(effective_env.get("MOEBIUS_RUN_ID") or ""),
+            "reviewer_id": reviewer_id,
+            "selected_provider_id": provider_id,
+            "selected_protocol": provider_protocol,
+            "selected_model_name": dispatch_model_name,
+            "attempt_count": len(dispatch_attempts),
+            "model_call_count": model_calls,
+            "chat_fallback_allowed": _truthy_env(effective_env, ALLOW_CHAT_FALLBACK_ENV),
+        },
         "fake_dispatch": fake_dispatch,
         "expected_output": str(expected_output),
         "expected_output_rel": _relative_to(expected_output, repo_root),

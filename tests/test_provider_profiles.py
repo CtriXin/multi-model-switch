@@ -115,6 +115,24 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
     ) == 1_000_000
+    assert profiles.profile_model_alias(
+        "mimo-v2.5-pro",
+        protocol="anthropic_messages",
+        provider_id="mimo-direct-anthropic",
+        base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    ) == "mimo-v2.5-pro[1m]"
+    assert profiles.profile_model_alias(
+        "mimo-v2.5",
+        protocol="anthropic_messages",
+        provider_id="mimo-direct-anthropic",
+        base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    ) == "mimo-v2.5[1m]"
+    assert profiles.profile_model_alias(
+        "mimo-v2.5-pro",
+        protocol="anthropic_messages",
+        provider_id="newapi-personal-tokyo",
+        base_url="http://161.33.197.51:4001",
+    ) == ""
     refs = profiles.provider_profile_references()
     assert "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md" in refs["mimo"]
 
@@ -148,6 +166,21 @@ def test_deepseek_context_and_wire_model_are_profile_driven(monkeypatch, tmp_pat
         provider_id="deepseek-direct",
         base_url="https://api.deepseek.com/anthropic",
     ) == ""
+
+
+def test_kimi_k26_context_aliases_are_profile_driven(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    assert profiles.profile_context_window(
+        "K2.6-code-preview",
+        provider_id="kimi-code",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
+    assert profiles.profile_context_window(
+        "kimi-k2.6-code-preview",
+        provider_id="kimi-code",
+        base_url="https://api.kimi.com/coding/",
+    ) == 262_144
 
 
 def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):

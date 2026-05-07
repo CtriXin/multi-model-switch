@@ -64,3 +64,7 @@ def test_sensitive_claude_provider_ids_can_come_from_local_env(monkeypatch):
 
     assert mms_launchers._runtime_is_sensitive_claude_provider({"id": "relay-a"}) is True
     assert mms_launchers._runtime_supports_claude_1m({"id": "relay-b", "claude_1m_mode": "auto"}) is False
+
+
+def test_known_k26_context_window_is_not_unknown():
+    assert mms_launchers._lookup_context_window("K2.6-code-preview", provider_id="newapi-personal-tokyo") == 262_144

@@ -323,6 +323,7 @@ def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path
     env = _write_review_launch_fixture(tmp_path, reviewer_id="gemini-3-flash-preview")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setenv("MMS_REVIEW_LAUNCH_ALLOW_CHAT_FALLBACK", "1")
 
     provider = {"id": "us-cpa-local-gemini", "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL]}
     monkeypatch.setattr(
@@ -355,6 +356,55 @@ def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
 
+def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path, monkeypatch, capsys):
+    import mms_review_launch
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    provider = {
+        "id": "newapi-personal-tokyo",
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL],
+        "anthropic_base_url": "http://tokyo.example.com",
+        "openai_base_url": "http://tokyo.example.com/v1",
+        "api_key": "key",
+    }
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [
+                {"provider": provider, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "kimi-for-coding"},
+                {"provider": provider, "protocol": OPENAI_CHAT_PROTOCOL, "model_name": "kimi-for-coding"},
+            ],
+            "",
+        ),
+    )
+
+    calls = []
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        calls.append(protocol)
+        raise RuntimeError("model response content is empty")
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 2
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is False
+    assert payload["model_calls"] == 1
+    assert calls == [ANTHROPIC_MESSAGES_PROTOCOL]
+    assert payload["dispatch_attempts"][0]["ok"] is False
+    assert payload["dispatch_attempts"][1]["ok"] is False
+    assert payload["dispatch_attempts"][1]["skipped"] is True
+    assert "chat fallback blocked" in payload["dispatch_attempts"][1]["error"]
+    assert payload["dispatch_trace"]["chat_fallback_allowed"] is False
+    assert not Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
 def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
     import asyncio
     import httpx
@@ -367,7 +417,7 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
         text = ""
 
         def json(self):
-            return {"content": [{"type": "text", "text": "Reviewer: mimo-v2.5\n\nVerdict: PASS"}]}
+            return {"content": [{"type": "text", "text": "Reviewer: mimo-v2-flash\n\nVerdict: PASS"}]}
 
     class FakeAsyncClient:
         async def __aenter__(self):
@@ -392,19 +442,63 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
                 "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
                 "api_key": "key",
             },
-            model_name="mimo-v2.5",
+            model_name="mimo-v2-flash",
             prompt="review this",
             max_tokens=1234,
         )
     )
 
-    assert text.startswith("Reviewer: mimo-v2.5")
+    assert text.startswith("Reviewer: mimo-v2-flash")
     assert captured["url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages"
     assert captured["headers"]["x-api-key"] == "key"
     assert captured["headers"]["anthropic-version"] == "2023-06-01"
-    assert captured["json"]["model"] == "mimo-v2.5"
+    assert captured["json"]["model"] == "mimo-v2-flash"
     assert captured["json"]["max_tokens"] == 1234
     assert captured["json"]["messages"][0]["content"][0]["text"] == "review this"
+
+
+def test_review_launch_anthropic_call_uses_profile_wire_model_alias(monkeypatch):
+    import asyncio
+    import httpx
+    from mms_review_launch import _call_model_anthropic_messages
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"content": [{"type": "text", "text": "Verdict: PASS"}]}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured["json"] = json or {}
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "mimo-direct-anthropic",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+                "api_key": "key",
+            },
+            model_name="mimo-v2.5-pro",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert captured["json"]["model"] == "mimo-v2.5-pro[1m]"
 
 
 def test_review_launch_anthropic_call_does_not_double_append_v1(monkeypatch):

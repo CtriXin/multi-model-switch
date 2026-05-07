@@ -325,6 +325,28 @@
         "mimo-v2-omni": 262144,
         "mimo-v2-flash": 262144
       },
+      "model_aliases": {
+        "anthropic_messages": {
+          "mimo-v2.5-pro": {
+            "target": "mimo-v2.5-pro[1m]",
+            "base_url_contains": [
+              "xiaomimimo.com"
+            ]
+          },
+          "mimo-v2.5": {
+            "target": "mimo-v2.5[1m]",
+            "base_url_contains": [
+              "xiaomimimo.com"
+            ]
+          },
+          "mimo-v2-pro": {
+            "target": "mimo-v2-pro[1m]",
+            "base_url_contains": [
+              "xiaomimimo.com"
+            ]
+          }
+        }
+      },
       "api_formats": {
         "openai_chat": {
           "base_url": "https://api.xiaomimimo.com/v1",
@@ -602,7 +624,10 @@
       "context_windows": {
         "kimi-for-coding": 262144,
         "kimi-k2.5": 262144,
-        "kimi-k2.6": 262144
+        "kimi-k2.6": 262144,
+        "kimi-k2.6-code-preview": 262144,
+        "k2.6": 262144,
+        "k2.6-code-preview": 262144
       },
       "api_formats": {
         "openai_chat": {

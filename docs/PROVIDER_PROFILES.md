@@ -22,6 +22,8 @@ Agents must not auto-write the real `~/.config/mms/**` files. User overlays are 
 - `model_aliases`: protocol-specific provider wire-model aliases, optionally gated by `provider_id_contains` or `base_url_contains`, for cases where the logical MMS model should stay stable but the upstream API needs a different model string.
 - `model_overrides`: model-prefix overrides for thinking/effort/context behavior.
 
+Context metadata is advisory unless the matching protocol can activate that upstream context mode. For example, MiMo documents 1M context for selected Claude Code models through a `[1m]` model suffix, so the MiMo Anthropic profile maps logical `mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-pro` to `[1m]` wire models only on `xiaomimimo.com` Anthropic-compatible endpoints. NewAPI/shared relays should keep their own logical model names unless a relay-specific alias is proven.
+
 The patch engine intentionally supports only data-driven field patches. It does not load Python hooks from profiles.
 
 ## Current Dual-Format References

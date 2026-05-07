@@ -215,9 +215,13 @@ _MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-6": 1_000_000,
     "claude-haiku-4-5-20251001": 200_000,
     "claude-haiku-4-5": 200_000,
-    # Kimi — kimi-k2.5 系列均为 256K (262144)
+    # Kimi / K2 — K2.5/K2.6 系列均为 256K (262144)
     "kimi-for-coding": 262_144,
     "kimi-k2.5": 262_144,
+    "kimi-k2.6": 262_144,
+    "kimi-k2.6-code-preview": 262_144,
+    "K2.6": 262_144,
+    "K2.6-code-preview": 262_144,
     # Qwen — hosted plus/coder-plus/3.6-plus 支持 1M；qwen3-max 为 262K
     "qwen3.5-plus": 1_000_000,
     "qwen3.6-plus": 1_000_000,
