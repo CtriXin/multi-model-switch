@@ -38,15 +38,26 @@ FAKE_RESPONSE_ENV = "MMS_REVIEW_LAUNCH_FAKE_RESPONSE"
 FAKE_RESPONSE_FILE_ENV = "MMS_REVIEW_LAUNCH_FAKE_RESPONSE_FILE"
 PROVIDER_ID_ENV = "MMS_REVIEW_LAUNCH_PROVIDER_ID"
 MAX_TOKENS_ENV = "MMS_REVIEW_LAUNCH_MAX_TOKENS"
+MAX_CANDIDATES_ENV = "MMS_REVIEW_LAUNCH_MAX_CANDIDATES"
+READ_TIMEOUT_ENV = "MMS_REVIEW_LAUNCH_READ_TIMEOUT_SECONDS"
 MAX_FILE_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_FILE_CHARS"
 MAX_PROMPT_CHARS_ENV = "MMS_REVIEW_LAUNCH_MAX_PROMPT_CHARS"
 PROTOCOL_ENV = "MMS_REVIEW_LAUNCH_PROTOCOL"
+ALLOWED_READ_ROOTS_ENV = "MMS_REVIEW_LAUNCH_ALLOWED_READ_ROOTS"
 DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_CANDIDATES = 6
+DEFAULT_READ_TIMEOUT_SECONDS = 180
 DEFAULT_MAX_FILE_CHARS = 12000
 DEFAULT_MAX_PROMPT_CHARS = 90000
 OPENAI_CHAT_PROTOCOL = "openai_chat_completions"
 ANTHROPIC_MESSAGES_PROTOCOL = "anthropic_messages"
 DEFAULT_PROTOCOL_ORDER = (ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL)
+
+
+class ReviewLaunchDispatchError(RuntimeError):
+    def __init__(self, message: str, attempts: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.attempts = attempts
 
 
 def _now() -> str:
@@ -132,8 +143,14 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
         },
         "provider_protocols": {
             "supported": list(DEFAULT_PROTOCOL_ORDER),
-            "selection": "Anthropic-compatible providers are preferred when configured; OpenAI chat completions remains the fallback.",
+            "selection": "Providers are ordered by MMS routing; each provider tries Anthropic-compatible protocol first, then OpenAI chat completions when configured.",
             PROTOCOL_ENV: "optional override: auto, anthropic_messages, or openai_chat_completions",
+            MAX_CANDIDATES_ENV: f"optional cap for provider/protocol fallback attempts; default {DEFAULT_MAX_CANDIDATES}",
+            READ_TIMEOUT_ENV: f"optional per-attempt read timeout seconds; default {DEFAULT_READ_TIMEOUT_SECONDS}",
+        },
+        "read_context": {
+            ALLOWED_READ_ROOTS_ENV: "optional os.pathsep-separated absolute roots for read-only context outside MOEBIUS_REPO_ROOT",
+            "default": "only MOEBIUS_REPO_ROOT is readable unless the host injects explicit roots",
         },
     }
 
@@ -217,6 +234,29 @@ def _read_text_preview(path: Path, max_chars: int) -> tuple[str, bool, str]:
     return text, truncated, ""
 
 
+def _allowed_read_roots(repo_root: Path, env: dict[str, str]) -> list[Path]:
+    roots = [repo_root]
+    raw = str(env.get(ALLOWED_READ_ROOTS_ENV) or "").strip()
+    for item in raw.split(os.pathsep):
+        if item.strip():
+            roots.append(Path(item).expanduser())
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        try:
+            key = str(root.resolve())
+        except OSError:
+            key = str(root)
+        if key not in seen:
+            deduped.append(root)
+            seen.add(key)
+    return deduped
+
+
+def _path_under_any(path: Path, roots: list[Path]) -> bool:
+    return any(_path_under(path, root) for root in roots)
+
+
 def _pack_paths(pack: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for key in ("prompt_path",):
@@ -243,6 +283,7 @@ def _pack_paths(pack: dict[str, Any]) -> list[str]:
 def _render_file_context(repo_root: Path, pack: dict[str, Any], env: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
     max_file_chars = _int_env(env, MAX_FILE_CHARS_ENV, DEFAULT_MAX_FILE_CHARS, maximum=100000)
     max_prompt_chars = _int_env(env, MAX_PROMPT_CHARS_ENV, DEFAULT_MAX_PROMPT_CHARS, maximum=500000)
+    allowed_roots = _allowed_read_roots(repo_root, env)
     sections: list[str] = []
     entries: list[dict[str, Any]] = []
     used_chars = 0
@@ -260,7 +301,7 @@ def _render_file_context(repo_root: Path, pack: dict[str, Any], env: dict[str, s
             entry["error"] = "missing_or_not_file"
             entries.append(entry)
             continue
-        if not (_path_under(path, repo_root) or str(path).startswith("/Users/xin/auto-skills/")):
+        if not _path_under_any(path, allowed_roots):
             entry["error"] = "path_outside_allowed_read_roots"
             entries.append(entry)
             continue
@@ -378,58 +419,247 @@ def _provider_ready_for_protocol(provider: dict[str, Any], protocol: str) -> str
     return ""
 
 
-def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, str, str]:
+def _canonical_model_name(models: list[str], requested: str) -> str:
+    requested_l = str(requested or "").strip().lower()
+    for model_name in models:
+        normalized = str(model_name or "").strip()
+        if normalized.lower() == requested_l:
+            return normalized
+    return str(requested or "").strip()
+
+
+def _cached_provider_models(provider_id: str, load_cache_fn: Any) -> list[str] | None:
+    try:
+        cached = load_cache_fn(provider_id, allow_stale=True)
+    except TypeError:
+        cached = load_cache_fn(provider_id)
+    except Exception:
+        cached = None
+    if not isinstance(cached, dict):
+        return None
+    raw = cached.get("raw_models") or cached.get("models") or []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _provider_models(
+    provider: dict[str, Any],
+    cached_models: list[str] | None,
+    cfg: dict[str, Any],
+    provider_effective_models_fn: Any,
+    load_cache_fn: Any,
+) -> list[str]:
+    if cached_models is None:
+        cached_models = _cached_provider_models(str(provider.get("id") or ""), load_cache_fn)
+    try:
+        models = provider_effective_models_fn(provider, cached_models, cfg)
+    except TypeError:
+        models = provider_effective_models_fn(provider, cached_models)
+    return [str(item).strip() for item in (models or []) if str(item).strip()]
+
+
+def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> tuple[list[dict[str, Any]], str]:
     try:
         from mms_core import (
+            ROLE_WEIGHTS,
             _default_config,
+            _load_probe_file_cache,
+            _normalize_role,
+            _provider_candidates,
             _provider_effective_models,
-            _resolve_best_provider,
+            _runtime_priority_for_model,
+            _runtime_with_priority,
             apply_local_overrides,
             load_config,
             resolve_provider_context,
         )
     except Exception as exc:
-        return None, f"cannot import MMS provider resolver: {exc}"
+        return [], f"cannot import MMS provider resolver: {exc}"
 
     cfg = load_config() or _default_config()
     cfg = apply_local_overrides(cfg)
     provider_id = str(env.get(PROVIDER_ID_ENV) or "").strip()
     protocol_order = _protocol_order(env)
+
     if provider_id:
         try:
             provider = resolve_provider_context(cfg, provider_id)
         except Exception as exc:
-            return None, "", f"cannot resolve provider {provider_id}: {exc}"
+            return [], f"cannot resolve provider {provider_id}: {exc}"
         errors: list[str] = []
+        models = _provider_models(provider, None, cfg, _provider_effective_models, _load_probe_file_cache)
+        dispatch_model = _canonical_model_name(models, model_name)
+        candidates: list[dict[str, Any]] = []
         for protocol in protocol_order:
             error = _provider_ready_for_protocol(provider, protocol)
-            if not error:
-                return provider, protocol, ""
-            errors.append(error)
-        return None, "", "; ".join(errors)
+            if error:
+                errors.append(error)
+                continue
+            candidate_provider = dict(provider)
+            candidate_provider["review_launch_model_name"] = dispatch_model
+            candidates.append({"provider": candidate_provider, "protocol": protocol, "model_name": dispatch_model})
+        if candidates:
+            return candidates, ""
+        return [], "; ".join(errors)
 
     default_id = str((cfg.get("provider") or {}).get("default") or "default")
     try:
         default_provider = resolve_provider_context(cfg, default_id)
     except Exception:
         default_provider = {}
-    default_models = _provider_effective_models(default_provider, None, cfg) if default_provider else []
-    for protocol in protocol_order:
-        provider, _provider_name = _resolve_best_provider(
-            cfg,
-            model_name,
-            default_provider,
-            default_models,
-            protocol=protocol,
-        )
-        if provider is not None:
-            error = _provider_ready_for_protocol(provider, protocol)
-            if not error:
-                return provider, protocol, ""
-    return None, "", (
+
+    default_cached = (
+        _cached_provider_models(str(default_provider.get("id") or ""), _load_probe_file_cache)
+        if default_provider
+        else []
+    )
+    default_models = (
+        _provider_models(default_provider, default_cached, cfg, _provider_effective_models, _load_probe_file_cache)
+        if default_provider
+        else []
+    )
+
+    rows: list[tuple[int, int, int, dict[str, Any], str]] = []
+    requested_l = str(model_name or "").strip().lower()
+    for index, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
+        if not isinstance(provider, dict) or not provider.get("enabled", True):
+            continue
+        models = _provider_models(provider, cached_models, cfg, _provider_effective_models, _load_probe_file_cache)
+        model_names_lower = [item.lower() for item in models]
+        if requested_l not in model_names_lower:
+            continue
+        dispatch_model = _canonical_model_name(models, model_name)
+        role_weight = ROLE_WEIGHTS.get(_normalize_role(provider.get("role", "auto")), 1)
+        priority = _runtime_priority_for_model(provider, dispatch_model)
+        rows.append((role_weight, -priority, index, provider, dispatch_model))
+
+    rows.sort(key=lambda item: (item[0], item[1], item[2]))
+    candidates = []
+    for _role_weight, _priority, _index, provider, dispatch_model in rows:
+        provider_with_priority = _runtime_with_priority(provider, model_name=dispatch_model)
+        for protocol in protocol_order:
+            if _provider_ready_for_protocol(provider_with_priority, protocol):
+                continue
+            candidate_provider = dict(provider_with_priority)
+            candidate_provider["review_launch_model_name"] = dispatch_model
+            candidates.append({"provider": candidate_provider, "protocol": protocol, "model_name": dispatch_model})
+
+    if candidates:
+        return candidates, ""
+    return [], (
         f"no configured review-launch provider found for reviewer model {model_name} "
         f"with supported protocols {', '.join(protocol_order)}"
     )
+
+
+def _resolve_provider_for_model(model_name: str, env: dict[str, str]) -> tuple[dict[str, Any] | None, str, str]:
+    candidates, error = _resolve_review_launch_candidates(model_name, env)
+    if error:
+        return None, "", error
+    first = candidates[0]
+    return first["provider"], str(first["protocol"]), ""
+
+
+def _extract_response_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n".join(_extract_response_text(item) for item in value).strip()
+    if isinstance(value, dict):
+        return _extract_response_text(value.get("text") or value.get("content") or "")
+    return ""
+
+
+def _openai_chat_url(base_url: str) -> str:
+    base = base_url.rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    if base.endswith("/v1"):
+        return f"{base}/chat/completions"
+    return f"{base}/v1/chat/completions"
+
+
+def _extract_openai_stream_text(text: str) -> str:
+    chunks: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        data_text = line[len("data:") :].strip()
+        if not data_text or data_text == "[DONE]":
+            continue
+        try:
+            data = json.loads(data_text)
+        except json.JSONDecodeError:
+            continue
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not isinstance(choices, list) or not choices:
+            continue
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        delta = first.get("delta") if isinstance(first.get("delta"), dict) else {}
+        message = first.get("message") if isinstance(first.get("message"), dict) else {}
+        raw_chunk = delta.get("content") or message.get("content") or ""
+        chunk = raw_chunk if isinstance(raw_chunk, str) else _extract_response_text(raw_chunk)
+        if chunk:
+            chunks.append(chunk)
+    return "".join(chunks).strip()
+
+
+def _dispatch_attempt(provider: dict[str, Any], protocol: str, model_name: str) -> dict[str, Any]:
+    return {
+        "provider_id": str(provider.get("id") or ""),
+        "provider_protocol": protocol,
+        "model_name": model_name,
+    }
+
+
+def _compact_error(exc: Exception) -> str:
+    return str(exc)[:1000]
+
+
+def _format_attempt_errors(attempts: list[dict[str, Any]]) -> str:
+    failed = [item for item in attempts if not item.get("ok")]
+    if not failed:
+        return "no dispatch candidates attempted"
+    parts = []
+    for item in failed:
+        parts.append(
+            f"{item.get('provider_id')}/{item.get('provider_protocol')}/{item.get('model_name')}: "
+            f"{item.get('error')}"
+        )
+    return "; ".join(parts)
+
+
+async def _call_first_working_model(
+    *,
+    candidates: list[dict[str, Any]],
+    prompt: str,
+    max_tokens: int,
+    read_timeout_seconds: int,
+) -> tuple[str, dict[str, Any], list[dict[str, Any]]]:
+    attempts: list[dict[str, Any]] = []
+    for candidate in candidates:
+        provider = candidate["provider"]
+        protocol = str(candidate["protocol"])
+        model_name = str(candidate["model_name"])
+        attempt = _dispatch_attempt(provider, protocol, model_name)
+        try:
+            content = await _call_model(
+                provider=provider,
+                protocol=protocol,
+                model_name=model_name,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                read_timeout_seconds=read_timeout_seconds,
+            )
+        except Exception as exc:
+            attempt["ok"] = False
+            attempt["error"] = _compact_error(exc)
+            attempts.append(attempt)
+            continue
+        attempt["ok"] = True
+        attempts.append(attempt)
+        return content, candidate, attempts
+    raise ReviewLaunchDispatchError("all model dispatch candidates failed: " + _format_attempt_errors(attempts), attempts)
 
 
 async def _call_model_openai_chat(
@@ -438,6 +668,7 @@ async def _call_model_openai_chat(
     model_name: str,
     prompt: str,
     max_tokens: int,
+    read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
 ) -> str:
     try:
         import httpx
@@ -449,7 +680,7 @@ async def _call_model_openai_chat(
     if not base_url or not api_key:
         raise RuntimeError("provider is missing OpenAI-compatible base_url or api_key")
 
-    url = f"{base_url.rstrip('/')}/v1/chat/completions"
+    url = _openai_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -488,9 +719,17 @@ async def _call_model_openai_chat(
         model_name=model_name,
     )
 
-    timeout = httpx.Timeout(connect=20, write=20, read=900, pool=20)
+    timeout = httpx.Timeout(connect=20, write=20, read=read_timeout_seconds, pool=20)
     async with httpx.AsyncClient() as client:
         response = await client.post(url, headers=headers, json=payload, timeout=timeout)
+        if response.status_code == 400 and "Stream must be set to true" in response.text:
+            stream_payload = dict(payload)
+            stream_payload["stream"] = True
+            response = await client.post(url, headers=headers, json=stream_payload, timeout=timeout)
+            if response.status_code < 400:
+                content = _extract_openai_stream_text(response.text)
+                if content:
+                    return content
     if response.status_code >= 400:
         raise RuntimeError(f"model dispatch failed HTTP {response.status_code}: {response.text[:1000]}")
     data = response.json()
@@ -498,7 +737,7 @@ async def _call_model_openai_chat(
     if not choices:
         raise RuntimeError("model response has no choices")
     message = choices[0].get("message") if isinstance(choices[0], dict) else {}
-    content = str((message or {}).get("content") or "").strip()
+    content = _extract_response_text((message or {}).get("content"))
     if not content:
         raise RuntimeError("model response content is empty")
     return content
@@ -508,6 +747,8 @@ def _anthropic_messages_url(base_url: str) -> str:
     base = base_url.rstrip("/")
     if base.endswith("/v1/messages") or base.endswith("/messages"):
         return base
+    if base.endswith("/v1"):
+        return f"{base}/messages"
     return f"{base}/v1/messages"
 
 
@@ -517,6 +758,7 @@ async def _call_model_anthropic_messages(
     model_name: str,
     prompt: str,
     max_tokens: int,
+    read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
 ) -> str:
     try:
         import httpx
@@ -565,7 +807,7 @@ async def _call_model_anthropic_messages(
         model_name=model_name,
     )
 
-    timeout = httpx.Timeout(connect=20, write=20, read=900, pool=20)
+    timeout = httpx.Timeout(connect=20, write=20, read=read_timeout_seconds, pool=20)
     async with httpx.AsyncClient() as client:
         response = await client.post(_anthropic_messages_url(base_url), headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
@@ -575,9 +817,11 @@ async def _call_model_anthropic_messages(
     if isinstance(blocks, str):
         content = blocks.strip()
     elif isinstance(blocks, list):
-        content = "\n".join(str(item.get("text") or "").strip() for item in blocks if isinstance(item, dict) and str(item.get("text") or "").strip()).strip()
+        content = _extract_response_text(blocks)
     else:
-        content = ""
+        choices = data.get("choices") if isinstance(data, dict) else None
+        message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        content = _extract_response_text((message or {}).get("content"))
     if not content:
         raise RuntimeError("model response content is empty")
     return content
@@ -590,11 +834,24 @@ async def _call_model(
     model_name: str,
     prompt: str,
     max_tokens: int,
+    read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
 ) -> str:
     if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
-        return await _call_model_anthropic_messages(provider=provider, model_name=model_name, prompt=prompt, max_tokens=max_tokens)
+        return await _call_model_anthropic_messages(
+            provider=provider,
+            model_name=model_name,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            read_timeout_seconds=read_timeout_seconds,
+        )
     if protocol == OPENAI_CHAT_PROTOCOL:
-        return await _call_model_openai_chat(provider=provider, model_name=model_name, prompt=prompt, max_tokens=max_tokens)
+        return await _call_model_openai_chat(
+            provider=provider,
+            model_name=model_name,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            read_timeout_seconds=read_timeout_seconds,
+        )
     raise RuntimeError(f"unsupported review-launch provider protocol: {protocol}")
 
 
@@ -632,6 +889,9 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
     fake_dispatch = False
     provider_id = ""
     provider_protocol = ""
+    dispatch_model_name = reviewer_id
+    dispatch_attempts: list[dict[str, Any]] = []
+    dispatch_candidates_count = 0
     context_entries: list[dict[str, Any]] = []
 
     try:
@@ -643,21 +903,48 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             model_calls = 1
             review_text = fake_text
         else:
-            provider, provider_protocol, provider_error = _resolve_provider_for_model(reviewer_id, effective_env)
+            candidates, provider_error = _resolve_review_launch_candidates(reviewer_id, effective_env)
             if provider_error:
                 raise RuntimeError(provider_error)
-            provider_id = str((provider or {}).get("id") or "")
-            max_tokens = _int_env(effective_env, MAX_TOKENS_ENV, DEFAULT_MAX_TOKENS, maximum=200000)
-            model_calls = 1
-            review_text = asyncio.run(
-                _call_model(
-                    provider=provider or {},
-                    protocol=provider_protocol,
-                    model_name=reviewer_id,
-                    prompt=prompt,
-                    max_tokens=max_tokens,
-                )
+            max_candidates = _int_env(
+                effective_env,
+                MAX_CANDIDATES_ENV,
+                DEFAULT_MAX_CANDIDATES,
+                minimum=1,
+                maximum=20,
             )
+            candidates = candidates[:max_candidates]
+            dispatch_candidates_count = len(candidates)
+            max_tokens = _int_env(effective_env, MAX_TOKENS_ENV, DEFAULT_MAX_TOKENS, maximum=200000)
+            read_timeout_seconds = _int_env(
+                effective_env,
+                READ_TIMEOUT_ENV,
+                DEFAULT_READ_TIMEOUT_SECONDS,
+                minimum=5,
+                maximum=900,
+            )
+            try:
+                review_text, selected_candidate, dispatch_attempts = asyncio.run(
+                    _call_first_working_model(
+                        candidates=candidates,
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        read_timeout_seconds=read_timeout_seconds,
+                    )
+                )
+            except ReviewLaunchDispatchError as exc:
+                dispatch_attempts = exc.attempts
+                model_calls = len(dispatch_attempts)
+                if dispatch_attempts:
+                    last_attempt = dispatch_attempts[-1]
+                    provider_id = str(last_attempt.get("provider_id") or "")
+                    provider_protocol = str(last_attempt.get("provider_protocol") or "")
+                    dispatch_model_name = str(last_attempt.get("model_name") or reviewer_id)
+                raise RuntimeError(str(exc)) from exc
+            model_calls = len(dispatch_attempts)
+            provider_id = str((selected_candidate.get("provider") or {}).get("id") or "")
+            provider_protocol = str(selected_candidate.get("protocol") or "")
+            dispatch_model_name = str(selected_candidate.get("model_name") or reviewer_id)
         final_text = _ensure_reviewer_header(review_text, reviewer_id)
         if not _path_under(expected_output, repo_root):
             raise RuntimeError("expected output escaped repo root after validation")
@@ -682,6 +969,9 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
         "reviewer_id": reviewer_id,
         "provider_id": provider_id,
         "provider_protocol": provider_protocol,
+        "dispatch_model_name": dispatch_model_name,
+        "dispatch_candidates_count": dispatch_candidates_count,
+        "dispatch_attempts": dispatch_attempts,
         "fake_dispatch": fake_dispatch,
         "expected_output": str(expected_output),
         "expected_output_rel": _relative_to(expected_output, repo_root),
