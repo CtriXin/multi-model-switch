@@ -451,6 +451,69 @@ def test_review_launch_anthropic_call_does_not_double_append_v1(monkeypatch):
     assert captured["url"] == "http://127.0.0.1:18417/v1/messages"
 
 
+def test_review_launch_anthropic_call_adds_newapi_beta_once(monkeypatch):
+    import asyncio
+    import httpx
+    from mms_review_launch import _call_model_anthropic_messages
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"content": [{"type": "text", "text": "Verdict: PASS"}]}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json or {}
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "newapi-personal-tokyo",
+                "name": "newapi-personal-tokyo",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "http://161.33.197.51:4001",
+                "api_key": "key",
+            },
+            model_name="deepseek-v4-flash",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
+    assert captured["json"]["stream"] is False
+
+    asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "newapi-personal-tokyo",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "http://161.33.197.51:4001/v1/messages?beta=true",
+                "api_key": "key",
+            },
+            model_name="deepseek-v4-flash",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
+
+
 def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback(monkeypatch):
     import asyncio
     import httpx

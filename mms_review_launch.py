@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches
 
@@ -743,13 +744,36 @@ async def _call_model_openai_chat(
     return content
 
 
-def _anthropic_messages_url(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    if base.endswith("/v1/messages") or base.endswith("/messages"):
-        return base
-    if base.endswith("/v1"):
-        return f"{base}/messages"
-    return f"{base}/v1/messages"
+def _with_query_param_once(url: str, key: str, value: str) -> str:
+    parts = urlsplit(url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    if not any(item_key == key for item_key, _item_value in query_items):
+        query_items.append((key, value))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
+
+
+def _review_launch_needs_newapi_beta(provider: dict[str, Any]) -> bool:
+    """NewAPI Claude Messages cache path expects the same beta query Claude Code sends."""
+    haystack = " ".join(
+        str(provider.get(key) or "").lower()
+        for key in ("id", "name", "profile", "provider_profile")
+    )
+    return "newapi" in haystack or "new-api" in haystack
+
+
+def _anthropic_messages_url(base_url: str, *, provider: dict[str, Any] | None = None) -> str:
+    parts = urlsplit(base_url.rstrip("/"))
+    path = parts.path.rstrip("/")
+    if path.endswith("/v1/messages") or path.endswith("/messages"):
+        messages_path = path
+    elif path.endswith("/v1"):
+        messages_path = f"{path}/messages"
+    else:
+        messages_path = f"{path}/v1/messages"
+    url = urlunsplit((parts.scheme, parts.netloc, messages_path, parts.query, parts.fragment))
+    if provider and _review_launch_needs_newapi_beta(provider):
+        return _with_query_param_once(url, "beta", "true")
+    return url
 
 
 async def _call_model_anthropic_messages(
@@ -809,7 +833,7 @@ async def _call_model_anthropic_messages(
 
     timeout = httpx.Timeout(connect=20, write=20, read=read_timeout_seconds, pool=20)
     async with httpx.AsyncClient() as client:
-        response = await client.post(_anthropic_messages_url(base_url), headers=headers, json=payload, timeout=timeout)
+        response = await client.post(_anthropic_messages_url(base_url, provider=provider), headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
         raise RuntimeError(f"model dispatch failed HTTP {response.status_code}: {response.text[:1000]}")
     data = response.json()
