@@ -1,0 +1,164 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1777454662633,
+  "projectRoot": "/Users/xin/auto-skills/CtriXin-repo/multi-model-switch",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "pnpm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "pnpm build",
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": "pnpm dev",
+    "scripts": {
+      "dev:web": "cd apps/web && npm run dev",
+      "dev:api": "cd apps/runtime-api && python3 -m uvicorn main:app --reload --port 8000",
+      "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+      "build": "cd apps/web && npm run build",
+      "type-check": "cd apps/web && vue-tsc --noEmit"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": true,
+    "workspaces": [
+      "apps/*",
+      "packages/*"
+    ],
+    "mainDirectories": [
+      "assets",
+      "docs",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 50,
+      "lastAccessed": 1777454662605,
+      "keyFiles": [
+        "gbrain_memory_hook.cpython-313.pyc",
+        "mmc_core.cpython-312.pyc",
+        "mmc_core.cpython-313.pyc",
+        "mmc_project_store.cpython-312.pyc",
+        "mmc_project_store.cpython-313.pyc"
+      ]
+    },
+    "apps": {
+      "path": "apps",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1777454662606,
+      "keyFiles": []
+    },
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 5,
+      "lastAccessed": 1777454662623,
+      "keyFiles": [
+        "cover.svg",
+        "cover.txt",
+        "mms-launch-confirm.png",
+        "mms-tui-codex.png",
+        "mms-tui.png"
+      ]
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 3,
+      "lastAccessed": 1777454662624,
+      "keyFiles": [
+        "mmc-proxy-routes.example.json",
+        "ops-env-safe.template.toml",
+        "provider-profiles.json"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 15,
+      "lastAccessed": 1777454662625,
+      "keyFiles": [
+        "3-tier-routing-flow.elements.json",
+        "3-tier-routing-flow.excalidraw",
+        "ADAPTER_REGISTRY.md",
+        "AGENT_GUARDRAILS.md",
+        "CHAT_DISCUSS_PRODUCT_SPEC.md"
+      ]
+    },
+    "hooks": {
+      "path": "hooks",
+      "purpose": null,
+      "fileCount": 13,
+      "lastAccessed": 1777454662626,
+      "keyFiles": [
+        "brainkeeper-session-end-hook.sh",
+        "brainkeeper-session-start-hook.sh",
+        "brainkeeper-token-monitor-hook.sh",
+        "claude-feishu-prompt.sh",
+        "claude-feishu-webfetch-guard.sh"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 10,
+      "lastAccessed": 1777454662626,
+      "keyFiles": [
+        "cleanup_dirty_install.sh",
+        "doctor_claude_models.py",
+        "gemini_codeassist_bridge.mjs",
+        "mmc-loopback-tunnel-template.sh",
+        "mms-context"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 31,
+      "lastAccessed": 1777454662627,
+      "keyFiles": [
+        "test_bridge_reasoning_summary.py",
+        "test_claude_hardening_regressions.py",
+        "test_claude_isolation.py",
+        "test_claude_model_visibility.py",
+        "test_cleanup_dirty_install.py"
+      ]
+    },
+    "vendor": {
+      "path": "vendor",
+      "purpose": "Third-party code",
+      "fileCount": 0,
+      "lastAccessed": 1777454662629,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
