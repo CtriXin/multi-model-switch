@@ -184,7 +184,7 @@ def test_review_launch_fake_dispatch_writes_exact_expected_review_file(tmp_path,
     assert review_files == [expected_output]
 
 
-@pytest.mark.parametrize("reviewer_id", ["kimi-for-coding", "minimax-m2.7"])
+@pytest.mark.parametrize("reviewer_id", ["kimi-for-coding", "minimax-m2.7", "qwen3.5-plus", "glm-5-turbo", "gpt-5.4"])
 def test_review_launch_high_context_reviewers_get_larger_output_budget(
     tmp_path,
     monkeypatch,
