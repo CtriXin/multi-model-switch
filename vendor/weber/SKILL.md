@@ -1,6 +1,6 @@
 ---
 name: weber
-description: Use when the user wants web or browser automation but tool choice is unclear, including authorized browser interaction, local webapp UI testing, screenshots/traces, public crawling or scraping, batch data extraction, headless browser backends, or choosing between web-access, Playwright, agent-browser, Crawlee, Firecrawl/Browserless, Browser Use/Stagehand, and Obscura.
+description: Use when the user wants web or browser automation but tool choice is unclear, including authorized browser interaction, local webapp UI testing, screenshots/traces, public crawling or scraping, batch data extraction, headless browser backends, anti-detection browsing, or choosing between web-access, Playwright, agent-browser, Camofox, Crawlee, Firecrawl/Browserless, Browser Use/Stagehand, and Obscura.
 ---
 
 # Weber Skill
@@ -29,6 +29,8 @@ Choose by task shape:
 | Managed crawling/scraping/search API is acceptable and API keys/cost are approved | `Firecrawl` or `Browserless` |
 | Production automation mixing code with natural-language page handling | `Stagehand` |
 | Autonomous browser agent experiments with an LLM loop | `Browser Use` |
+| Anti-detection browsing, bypass Cloudflare/Google bot detection, geo-specific scraping with proxy | `Camofox` — C++ fingerprint spoofing, REST API, 90% smaller a11y snapshots |
+| Python crawling, adaptive element tracking, large-scale structured scraping with checkpoint/resume | `Scrapling` — Python framework, anti-detect fetchers, MCP built-in, install-on-demand |
 | Experimental lightweight CDP-compatible engine for high-volume isolated headless work | `Obscura`, installed only when a concrete task justifies it |
 
 When uncertain, start with the least invasive option that can prove progress, then escalate only when evidence shows it is insufficient.
@@ -50,9 +52,59 @@ Use these commands to refresh assumptions; versions change over time:
 agent-browser --version
 npx --yes --package @playwright/cli@latest playwright-cli --version
 npm view playwright @playwright/cli @playwright/mcp agent-browser version --json
+curl -s http://localhost:9377/health  # Camofox
 ```
 
 The ClawSkills `thesethrose/agent-browser` entry is the same tool family as the local `agent-browser` skill/CLI. Do not install it again if `agent-browser --version` works.
+
+## Optional Backend: Scrapling
+
+Python scraping framework with adaptive element tracking. Install-on-demand.
+
+Use when:
+- Crawlee insufficient: sites change structure frequently, need elements to auto-relocate
+- Python AI pipeline needs crawling with MCP integration
+- Large-scale crawling with checkpoint pause/resume needed
+
+Install:
+```bash
+pip install "scrapling[all]" && scrapling install
+```
+
+Smoke test:
+```bash
+python3 -c "from scrapling import Fetcher; print(Fetcher('https://example.com').status)"
+```
+
+Key API: `Fetcher` (HTTP), `StealthyFetcher` (anti-detect), `DynamicFetcher` (Playwright), `Adaptor.find_similar()` (adaptive tracking).
+
+Limitations: Python 3.10+ required, heavier than Node alternatives for simple tasks.
+
+## Optional Backend: Camofox
+
+Anti-detection headless browser server wrapping Camoufox (Firefox fork with C++ fingerprint spoofing). REST API on `localhost:9377`.
+
+Use when:
+- Bot detection (Cloudflare, Google, etc.) blocks other backends
+- Need geo-specific scraping with auto proxy/locale/timezone matching
+- Need token-efficient a11y snapshots (90% smaller than raw HTML)
+
+Install:
+```bash
+npm install @askjo/camofox-browser
+npx camoufox-js fetch   # download ~300MB binary on first run
+node node_modules/@askjo/camofox-browser/server.js  # start server
+```
+
+Smoke test:
+```bash
+curl -s http://localhost:9377/health
+curl -s -X POST http://localhost:9377/tabs -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'
+```
+
+Key API: `POST /tabs` (create), `GET /tabs/:id/snapshot` (a11y), `POST /tabs/:id/click` (by ref), `POST /tabs/:id/navigate`, `DELETE /tabs/:id` (close).
+
+Limitations: Single instance, no existing login state (needs cookie injection), ~40MB idle memory.
 
 ## Optional Backend: Obscura
 
@@ -73,6 +125,28 @@ obscura fetch https://example.com --dump links
 ```
 
 Do not make Obscura the default backend until it passes task-specific smoke tests on the user's machine.
+
+## Unified Browser Adapter
+
+`lib/` 目录提供跨后端统一接口，屏蔽 Camoufox/Playwright/agent-browser/web-access 差异。
+
+```typescript
+import { createBrowser } from './lib'
+
+// 自动选后端 + 降级
+const browser = await createBrowser({ backend: 'auto' })
+const session = await browser.exec(a => a.open('https://example.com'))
+await browser.exec(a => a.click(session, 'button.submit'))
+const shot = await browser.exec(a => a.screenshot(session, { path: '/tmp/result.png' }))
+await browser.exec(a => a.close(session))
+
+// 指定后端
+const browser = await createBrowser({ backend: 'camoufox' })
+```
+
+降级链：`web-access → playwright → agent-browser → camoufox`（可配置）
+
+各 adapter 详见：`lib/adapters/` 目录。
 
 ## References
 
