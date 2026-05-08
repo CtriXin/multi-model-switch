@@ -55,6 +55,7 @@ DEFAULT_MAX_TOKENS = 4096
 HIGH_CONTEXT_REVIEW_MAX_TOKENS = 32768
 DEFAULT_MAX_CANDIDATES = 6
 DEFAULT_READ_TIMEOUT_SECONDS = 180
+HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS = 900
 DEFAULT_MAX_FILE_CHARS = 12000
 DEFAULT_MAX_PROMPT_CHARS = 90000
 HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS = 100000
@@ -111,6 +112,12 @@ def _default_max_tokens_for_review_launch(model_name: str) -> int:
     if _is_high_context_review_model(model_name):
         return HIGH_CONTEXT_REVIEW_MAX_TOKENS
     return DEFAULT_MAX_TOKENS
+
+
+def _default_read_timeout_for_review_launch(model_name: str) -> int:
+    if _is_high_context_review_model(model_name):
+        return HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS
+    return DEFAULT_READ_TIMEOUT_SECONDS
 
 
 def _default_max_file_chars_for_review_launch(model_name: str) -> int:
@@ -259,7 +266,10 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
                 f"{HIGH_CONTEXT_REVIEW_MAX_TOKENS} for high-context thinking reviewers"
             ),
             MAX_CANDIDATES_ENV: f"optional cap for provider/protocol fallback attempts; default {DEFAULT_MAX_CANDIDATES}",
-            READ_TIMEOUT_ENV: f"optional per-attempt read timeout seconds; default {DEFAULT_READ_TIMEOUT_SECONDS}",
+            READ_TIMEOUT_ENV: (
+                f"optional per-attempt read timeout seconds; default {DEFAULT_READ_TIMEOUT_SECONDS}, "
+                f"{HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS} for high-context thinking reviewers"
+            ),
         },
         "read_context": {
             ALLOWED_READ_ROOTS_ENV: "optional os.pathsep-separated absolute roots for read-only context outside MOEBIUS_REPO_ROOT",
@@ -787,7 +797,17 @@ def _dispatch_attempt(provider: dict[str, Any], protocol: str, model_name: str) 
 
 
 def _compact_error(exc: Exception) -> str:
-    return str(exc)[:1000]
+    message = str(exc).strip()
+    if not message:
+        message = exc.__class__.__name__
+    return message[:1000]
+
+
+def _last_non_skipped_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    for item in reversed(attempts):
+        if not item.get("skipped"):
+            return item
+    return attempts[-1] if attempts else {}
 
 
 def _format_attempt_errors(attempts: list[dict[str, Any]]) -> str:
@@ -1196,7 +1216,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             read_timeout_seconds = _int_env(
                 effective_env,
                 READ_TIMEOUT_ENV,
-                DEFAULT_READ_TIMEOUT_SECONDS,
+                _default_read_timeout_for_review_launch(reviewer_id),
                 minimum=5,
                 maximum=900,
             )
@@ -1214,7 +1234,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
                 dispatch_attempts = exc.attempts
                 model_calls = _model_call_count(dispatch_attempts)
                 if dispatch_attempts:
-                    last_attempt = dispatch_attempts[-1]
+                    last_attempt = _last_non_skipped_attempt(dispatch_attempts)
                     provider_id = str(last_attempt.get("provider_id") or "")
                     provider_protocol = str(last_attempt.get("provider_protocol") or "")
                     dispatch_model_name = str(last_attempt.get("model_name") or reviewer_id)

@@ -195,6 +195,7 @@ def test_review_launch_high_context_reviewers_get_larger_output_budget(
     from mms_review_launch import (
         ANTHROPIC_MESSAGES_PROTOCOL,
         HIGH_CONTEXT_REVIEW_MAX_TOKENS,
+        HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS,
         handle_review_launch_command,
     )
 
@@ -215,6 +216,7 @@ def test_review_launch_high_context_reviewers_get_larger_output_budget(
 
     async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
         captured["max_tokens"] = max_tokens
+        captured["read_timeout_seconds"] = read_timeout_seconds
         return "Verdict: PASS\n\nNo blockers found.\n"
 
     monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
@@ -223,6 +225,7 @@ def test_review_launch_high_context_reviewers_get_larger_output_budget(
     payload = json.loads(capsys.readouterr().out)
 
     assert captured["max_tokens"] == HIGH_CONTEXT_REVIEW_MAX_TOKENS
+    assert captured["read_timeout_seconds"] == HIGH_CONTEXT_REVIEW_READ_TIMEOUT_SECONDS
     assert payload["dispatch_trace"]["max_tokens"] == HIGH_CONTEXT_REVIEW_MAX_TOKENS
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
@@ -543,6 +546,8 @@ def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path,
 
     assert payload["ok"] is False
     assert payload["model_calls"] == 1
+    assert payload["provider_protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert payload["dispatch_trace"]["selected_protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
     assert calls == [ANTHROPIC_MESSAGES_PROTOCOL]
     assert payload["dispatch_attempts"][0]["ok"] is False
     assert payload["dispatch_attempts"][1]["ok"] is False
@@ -550,6 +555,12 @@ def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path,
     assert "chat fallback blocked" in payload["dispatch_attempts"][1]["error"]
     assert payload["dispatch_trace"]["chat_fallback_allowed"] is False
     assert not Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
+def test_review_launch_compact_error_keeps_blank_exception_class():
+    from mms_review_launch import _compact_error
+
+    assert _compact_error(TimeoutError()) == "TimeoutError"
 
 
 def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
