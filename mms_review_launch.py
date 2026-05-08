@@ -44,6 +44,7 @@ WRAPPER_ONLY_IDS = {"agent", "claude-code", "cli", "codex", "default", "local", 
 FAKE_RESPONSE_ENV = "MMS_REVIEW_LAUNCH_FAKE_RESPONSE"
 FAKE_RESPONSE_FILE_ENV = "MMS_REVIEW_LAUNCH_FAKE_RESPONSE_FILE"
 PROVIDER_ID_ENV = "MMS_REVIEW_LAUNCH_PROVIDER_ID"
+PROVIDER_IDS_ENV = "MMS_REVIEW_LAUNCH_PROVIDER_IDS"
 MAX_TOKENS_ENV = "MMS_REVIEW_LAUNCH_MAX_TOKENS"
 MAX_CANDIDATES_ENV = "MMS_REVIEW_LAUNCH_MAX_CANDIDATES"
 READ_TIMEOUT_ENV = "MMS_REVIEW_LAUNCH_READ_TIMEOUT_SECONDS"
@@ -263,6 +264,8 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
         "provider_protocols": {
             "supported": list(DEFAULT_PROTOCOL_ORDER),
             "selection": "Providers are ordered by MMS routing; each provider tries Anthropic-compatible protocol first. OpenAI chat fallback is blocked by default after an Anthropic attempt on dual-protocol cache-sensitive routes.",
+            PROVIDER_ID_ENV: "optional provider pin for a single provider",
+            PROVIDER_IDS_ENV: "optional comma-separated constrained provider fallback chain; preserves Anthropic-first per provider",
             PROTOCOL_ENV: "optional override: auto, anthropic_messages, or openai_chat_completions",
             ALLOW_CHAT_FALLBACK_ENV: "set to 1/true/yes to explicitly allow OpenAI chat fallback after an Anthropic attempt",
             MAX_TOKENS_ENV: (
@@ -611,6 +614,60 @@ def _provider_models(
     return [str(item).strip() for item in (models or []) if str(item).strip()]
 
 
+def _provider_ids_from_env(env: dict[str, str]) -> list[str]:
+    raw_chain = str(env.get(PROVIDER_IDS_ENV) or "").strip()
+    if raw_chain:
+        parts = raw_chain.replace(os.pathsep, ",").split(",")
+    else:
+        parts = [str(env.get(PROVIDER_ID_ENV) or "").strip()]
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        provider_id = part.strip()
+        if not provider_id or provider_id in seen:
+            continue
+        seen.add(provider_id)
+        result.append(provider_id)
+    return result
+
+
+def _candidates_for_explicit_providers(
+    *,
+    provider_ids: list[str],
+    cfg: dict[str, Any],
+    resolve_provider_context_fn: Any,
+    provider_effective_models_fn: Any,
+    load_cache_fn: Any,
+    protocol_order: list[str],
+    model_name: str,
+) -> tuple[list[dict[str, Any]], str]:
+    candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for provider_id in provider_ids:
+        try:
+            provider = resolve_provider_context_fn(cfg, provider_id)
+        except Exception as exc:
+            errors.append(f"cannot resolve provider {provider_id}: {exc}")
+            continue
+        models = _provider_models(provider, None, cfg, provider_effective_models_fn, load_cache_fn)
+        dispatch_model = _canonical_model_name(models, model_name)
+        provider_errors: list[str] = []
+        for protocol in protocol_order:
+            error = _provider_ready_for_protocol(provider, protocol)
+            if error:
+                provider_errors.append(error)
+                continue
+            candidate_provider = dict(provider)
+            candidate_provider["review_launch_model_name"] = dispatch_model
+            candidates.append({"provider": candidate_provider, "protocol": protocol, "model_name": dispatch_model})
+        if provider_errors and not any(
+            str((candidate.get("provider") or {}).get("id") or "") == provider_id
+            for candidate in candidates
+        ):
+            errors.extend(provider_errors)
+    return candidates, "; ".join(errors)
+
+
 def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> tuple[list[dict[str, Any]], str]:
     try:
         from mms_core import (
@@ -631,29 +688,22 @@ def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> t
 
     cfg = load_config() or _default_config()
     cfg = apply_local_overrides(cfg)
-    provider_id = str(env.get(PROVIDER_ID_ENV) or "").strip()
+    provider_ids = _provider_ids_from_env(env)
     protocol_order = _protocol_order(env, model_name)
 
-    if provider_id:
-        try:
-            provider = resolve_provider_context(cfg, provider_id)
-        except Exception as exc:
-            return [], f"cannot resolve provider {provider_id}: {exc}"
-        errors: list[str] = []
-        models = _provider_models(provider, None, cfg, _provider_effective_models, _load_probe_file_cache)
-        dispatch_model = _canonical_model_name(models, model_name)
-        candidates: list[dict[str, Any]] = []
-        for protocol in protocol_order:
-            error = _provider_ready_for_protocol(provider, protocol)
-            if error:
-                errors.append(error)
-                continue
-            candidate_provider = dict(provider)
-            candidate_provider["review_launch_model_name"] = dispatch_model
-            candidates.append({"provider": candidate_provider, "protocol": protocol, "model_name": dispatch_model})
+    if provider_ids:
+        candidates, error = _candidates_for_explicit_providers(
+            provider_ids=provider_ids,
+            cfg=cfg,
+            resolve_provider_context_fn=resolve_provider_context,
+            provider_effective_models_fn=_provider_effective_models,
+            load_cache_fn=_load_probe_file_cache,
+            protocol_order=protocol_order,
+            model_name=model_name,
+        )
         if candidates:
             return candidates, ""
-        return [], "; ".join(errors)
+        return [], error
 
     default_id = str((cfg.get("provider") or {}).get("default") or "default")
     try:

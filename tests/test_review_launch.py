@@ -548,6 +548,66 @@ def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monk
     assert "does not declare protocol openai_chat_completions" in error
 
 
+def test_review_launch_explicit_provider_chain_preserves_order(monkeypatch):
+    import mms_core
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
+
+    tokyo = {
+        "id": "newapi-tokyo-test",
+        "enabled": True,
+        "role": "auto",
+        "priority": 120,
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL],
+        "anthropic_base_url": "https://tokyo.example.com",
+        "openai_base_url": "https://tokyo.example.com/v1",
+        "api_key": "key",
+        "models": ["qwen3.5-plus"],
+    }
+    xin = {
+        "id": "xin-test",
+        "enabled": True,
+        "role": "fallback",
+        "priority": 90,
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL],
+        "anthropic_base_url": "https://xin.example.com",
+        "openai_base_url": "https://xin.example.com/v1",
+        "api_key": "key",
+        "models": ["qwen3.5-plus"],
+    }
+    extra = {**xin, "id": "unlisted-test", "priority": 200}
+    cfg = {"provider": {"default": "unlisted-test"}, "providers": [extra, tokyo, xin]}
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda loaded: loaded)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(
+        mms_core,
+        "resolve_provider_context",
+        lambda _loaded, provider_id: {"newapi-tokyo-test": tokyo, "xin-test": xin, "unlisted-test": extra}[provider_id],
+    )
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda provider_id, allow_stale=False: {"raw_models": ["qwen3.5-plus"]})
+
+    def fake_effective_models(provider, cached, _cfg=None):
+        if isinstance(cached, dict):
+            return list(cached.get("raw_models") or [])
+        return list(cached or provider.get("models") or [])
+
+    monkeypatch.setattr(mms_core, "_provider_effective_models", fake_effective_models)
+
+    candidates, error = _resolve_review_launch_candidates(
+        "qwen3.5-plus",
+        {"MMS_REVIEW_LAUNCH_PROVIDER_IDS": "newapi-tokyo-test,xin-test"},
+    )
+
+    assert error == ""
+    assert [(item["provider"]["id"], item["protocol"]) for item in candidates] == [
+        ("newapi-tokyo-test", ANTHROPIC_MESSAGES_PROTOCOL),
+        ("newapi-tokyo-test", OPENAI_CHAT_PROTOCOL),
+        ("xin-test", ANTHROPIC_MESSAGES_PROTOCOL),
+        ("xin-test", OPENAI_CHAT_PROTOCOL),
+    ]
+
+
 def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path, monkeypatch, capsys):
     import mms_review_launch
     from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
@@ -585,6 +645,72 @@ def test_review_launch_falls_back_to_next_protocol_after_failed_attempt(tmp_path
     assert payload["provider_protocol"] == OPENAI_CHAT_PROTOCOL
     assert payload["dispatch_attempts"][0]["ok"] is False
     assert payload["dispatch_attempts"][1]["ok"] is True
+    assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
+def test_review_launch_falls_back_to_next_provider_without_chat_fallback(tmp_path, monkeypatch, capsys):
+    import mms_review_launch
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="qwen3.5-plus")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    tokyo = {
+        "id": "newapi-tokyo-test",
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL],
+        "anthropic_base_url": "https://tokyo.example.com",
+        "openai_base_url": "https://tokyo.example.com/v1",
+        "api_key": "key",
+    }
+    xin = {
+        "id": "xin-test",
+        "protocols": [ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL],
+        "anthropic_base_url": "https://xin.example.com",
+        "openai_base_url": "https://xin.example.com/v1",
+        "api_key": "key",
+    }
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [
+                {"provider": tokyo, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "qwen3.5-plus"},
+                {"provider": tokyo, "protocol": OPENAI_CHAT_PROTOCOL, "model_name": "qwen3.5-plus"},
+                {"provider": xin, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "qwen3.5-plus"},
+            ],
+            "",
+        ),
+    )
+
+    calls = []
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        calls.append((provider["id"], protocol))
+        if provider["id"] == "newapi-tokyo-test":
+            raise RuntimeError("model dispatch failed HTTP 503: tokyo unavailable")
+        return "Verdict: PASS\n\nNo blockers found.\n"
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert calls == [
+        ("newapi-tokyo-test", ANTHROPIC_MESSAGES_PROTOCOL),
+        ("xin-test", ANTHROPIC_MESSAGES_PROTOCOL),
+    ]
+    assert payload["provider_id"] == "xin-test"
+    assert payload["provider_protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert payload["model_calls"] == 2
+    assert payload["dispatch_attempts"][1]["skipped"] is True
+    assert payload["dispatch_attempts"][1]["request_path"] == "/v1/chat/completions"
+    evidence = payload["transport_evidence"][0]
+    assert evidence["provider_id"] == "xin-test"
+    assert evidence["protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert evidence["request_path"] == "/v1/messages"
+    assert evidence["fallback_used"] is True
+    assert "tokyo unavailable" in evidence["fallback_reason"]
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
 
