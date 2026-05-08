@@ -61,6 +61,7 @@ DEFAULT_MAX_PROMPT_CHARS = 90000
 HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS = 100000
 HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS = 500000
 HIGH_CONTEXT_REVIEW_MODEL_PREFIXES = ("kimi", "minimax", "mimo", "deepseek")
+ANTHROPIC_STREAM_MODEL_PREFIXES = ("kimi",)
 CONTEXT_COMPACT_TRIGGER_RATIO = 0.70
 CONTEXT_SAFETY_MARGIN_TOKENS = 4096
 CONTEXT_CHAR_PER_TOKEN = 4
@@ -745,6 +746,45 @@ def _extract_openai_stream_text(text: str) -> str:
     return "".join(chunks).strip()
 
 
+def _extract_anthropic_stream_text(text: str) -> str:
+    chunks: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        data_text = line[len("data:") :].strip()
+        if not data_text or data_text == "[DONE]":
+            continue
+        try:
+            data = json.loads(data_text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        delta = data.get("delta") if isinstance(data.get("delta"), dict) else {}
+        if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+            chunks.append(delta["text"])
+            continue
+        content_block = data.get("content_block") if isinstance(data.get("content_block"), dict) else {}
+        if content_block.get("type") == "text" and isinstance(content_block.get("text"), str):
+            chunks.append(content_block["text"])
+            continue
+        # Some Anthropic-compatible gateways stream OpenAI-shaped chunks.
+        choices = data.get("choices") if isinstance(data.get("choices"), list) else []
+        first = choices[0] if choices and isinstance(choices[0], dict) else {}
+        openai_delta = first.get("delta") if isinstance(first.get("delta"), dict) else {}
+        raw_chunk = openai_delta.get("content") or first.get("text") or ""
+        chunk = raw_chunk if isinstance(raw_chunk, str) else _extract_response_text(raw_chunk)
+        if chunk:
+            chunks.append(chunk)
+    return "".join(chunks).strip()
+
+
+def _anthropic_stream_enabled_for_review_launch(model_name: str) -> bool:
+    normalized = str(model_name or "").strip().lower()
+    return any(normalized.startswith(prefix) for prefix in ANTHROPIC_STREAM_MODEL_PREFIXES)
+
+
 def _safe_endpoint_trace(provider: dict[str, Any], protocol: str) -> dict[str, str]:
     base_url = _provider_base_url_for_protocol(provider, protocol)
     if not base_url:
@@ -1054,11 +1094,12 @@ async def _call_model_anthropic_messages(
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
+    stream_enabled = _anthropic_stream_enabled_for_review_launch(model_name)
     payload: dict[str, Any] = {
         "model": _wire_model_for_protocol(provider, ANTHROPIC_MESSAGES_PROTOCOL, model_name),
         "system": "You are a precise code-review agent. Return only the review Markdown.",
         "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
-        "stream": False,
+        "stream": stream_enabled,
         "max_tokens": max_tokens,
     }
     provider_id = str(provider.get("id") or "")
@@ -1091,6 +1132,10 @@ async def _call_model_anthropic_messages(
         response = await client.post(_anthropic_messages_url(base_url, provider=provider), headers=headers, json=payload, timeout=timeout)
     if response.status_code >= 400:
         raise RuntimeError(f"model dispatch failed HTTP {response.status_code}: {response.text[:1000]}")
+    if payload.get("stream"):
+        content = _extract_anthropic_stream_text(response.text)
+        if content:
+            return content
     data = response.json()
     blocks = data.get("content") if isinstance(data, dict) else None
     if isinstance(blocks, str):

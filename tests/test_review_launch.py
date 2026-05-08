@@ -766,6 +766,58 @@ def test_review_launch_anthropic_call_adds_newapi_beta_once(monkeypatch):
     assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
 
 
+def test_review_launch_kimi_anthropic_call_uses_streaming(monkeypatch):
+    import asyncio
+    import httpx
+    from mms_review_launch import _call_model_anthropic_messages
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = (
+            'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hidden"}}\n'
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Verdict: "}}\n'
+            'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"PASS"}}\n'
+            'data: {"type":"message_stop"}\n'
+        )
+
+        def json(self):
+            raise AssertionError("streaming response should be parsed as SSE")
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json or {}
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    text = asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "newapi-personal-tokyo",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "http://161.33.197.51:4001",
+                "api_key": "key",
+            },
+            model_name="kimi-for-coding",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
+    assert captured["json"]["stream"] is True
+    assert text == "Verdict: PASS"
+
+
 def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback(monkeypatch):
     import asyncio
     import httpx
