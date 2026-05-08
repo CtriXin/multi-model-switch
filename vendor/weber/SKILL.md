@@ -15,6 +15,23 @@ Weber is a router, not a replacement for browser tools. Use it to choose the sma
 - Prefer existing local tools before installing anything.
 - Do not export cookies, tokens, localStorage, credentials, or private page data into reusable artifacts.
 
+## Host Chrome And Isolated Runtimes
+
+- If the task needs the user's logged-in Chrome, choose `web-access` CDP and repair that route before falling back to isolated backends.
+- In MMS-launched sessions, prefer `MMS_HOST_CONTEXT_JSON` / `MMS_OPS_ENV_SAFE_CONFIG` for host path and WebAccess hints before guessing paths.
+- MMS/Codex sandboxes may rewrite `HOME`/`XDG_*`; do not assume `os.homedir()` points at the real Chrome profile.
+- Before declaring `web-access` unavailable from an isolated session, run the web-access dependency check with host-home hints; the current web-access scripts also read `WEB_ACCESS_HOST_HOME`, `HOST_HOME`, `REAL_HOME`, and `os.userInfo().homedir`:
+
+```bash
+WEB_ACCESS_HOST_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')" \
+  node /Users/xin/.codex/skills/web-access/scripts/check-deps.mjs
+```
+
+- If the proxy is stale, kill only the `3456` listener and rerun `check-deps`; do not kill/restart the user's Chrome unless explicitly asked.
+- Treat `3456` as the CDP proxy and `9222` as the real Chrome debug endpoint; if `9222` is already listening, keep Chrome running and reconnect the proxy.
+- Do not switch to Playwright, `agent-browser`, Camofox, or Obscura for a logged-in-user task just because the isolated agent cannot see the host Chrome profile.
+- If using the unified adapter for a logged-in-user task, pass `requireLoggedInChrome: true` so fallback cannot jump to an isolated backend.
+
 ## Default Routing
 
 Choose by task shape:
@@ -29,7 +46,7 @@ Choose by task shape:
 | Managed crawling/scraping/search API is acceptable and API keys/cost are approved | `Firecrawl` or `Browserless` |
 | Production automation mixing code with natural-language page handling | `Stagehand` |
 | Autonomous browser agent experiments with an LLM loop | `Browser Use` |
-| Anti-detection browsing, bypass Cloudflare/Google bot detection, geo-specific scraping with proxy | `Camofox` — C++ fingerprint spoofing, REST API, 90% smaller a11y snapshots |
+| Authorized pages blocked by bot-detection heuristics, geo-specific public scraping with approved proxy | `Camofox` — fingerprint-consistent browser backend, REST API, compact a11y snapshots |
 | Python crawling, adaptive element tracking, large-scale structured scraping with checkpoint/resume | `Scrapling` — Python framework, anti-detect fetchers, MCP built-in, install-on-demand |
 | Experimental lightweight CDP-compatible engine for high-volume isolated headless work | `Obscura`, installed only when a concrete task justifies it |
 
@@ -85,9 +102,9 @@ Limitations: Python 3.10+ required, heavier than Node alternatives for simple ta
 Anti-detection headless browser server wrapping Camoufox (Firefox fork with C++ fingerprint spoofing). REST API on `localhost:9377`.
 
 Use when:
-- Bot detection (Cloudflare, Google, etc.) blocks other backends
-- Need geo-specific scraping with auto proxy/locale/timezone matching
-- Need token-efficient a11y snapshots (90% smaller than raw HTML)
+- An authorized page is inaccessible to simpler automation because of bot-detection heuristics, and the task does not require bypassing login, CAPTCHA, bans, or access controls
+- Need geo-specific public scraping with an approved proxy/locale/timezone setup
+- Need compact a11y snapshots instead of raw HTML dumps
 
 Install:
 ```bash
@@ -104,7 +121,7 @@ curl -s -X POST http://localhost:9377/tabs -H 'Content-Type: application/json' -
 
 Key API: `POST /tabs` (create), `GET /tabs/:id/snapshot` (a11y), `POST /tabs/:id/click` (by ref), `POST /tabs/:id/navigate`, `DELETE /tabs/:id` (close).
 
-Limitations: Single instance, no existing login state (needs cookie injection), ~40MB idle memory.
+Limitations: Single instance, no existing login state; do not export or inject user cookies unless the user explicitly approves that flow.
 
 ## Optional Backend: Obscura
 
@@ -139,6 +156,9 @@ const session = await browser.exec(a => a.open('https://example.com'))
 await browser.exec(a => a.click(session, 'button.submit'))
 const shot = await browser.exec(a => a.screenshot(session, { path: '/tmp/result.png' }))
 await browser.exec(a => a.close(session))
+
+// 登录态 Chrome 任务：禁止降级到 isolated backend
+const browser = await createBrowser({ requireLoggedInChrome: true })
 
 // 指定后端
 const browser = await createBrowser({ backend: 'camoufox' })

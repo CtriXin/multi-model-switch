@@ -2,6 +2,12 @@
  * Playwright Adapter - 封装 Playwright Node.js API
  */
 
+import { existsSync, readdirSync } from 'fs'
+import { createRequire } from 'module'
+import { homedir, userInfo } from 'os'
+import { join } from 'path'
+import { pathToFileURL } from 'url'
+
 import type {
   BrowserAdapter,
   Session,
@@ -15,23 +21,74 @@ import type {
 
 // Lazy-loaded playwright module
 let _playwright: any = null
+const requireFromHere = createRequire(import.meta.url)
 
 async function getPlaywright() {
   if (!_playwright) {
-    // 优先从全局 npx cache 加载
-    const paths = [
-      '/Users/xin/.npm/_npx/423231821c231c73/node_modules/playwright',
-      'playwright',
-    ]
-    for (const p of paths) {
+    const candidates = [process.env.PLAYWRIGHT_MODULE_PATH, 'playwright'].filter(Boolean) as string[]
+    for (const specifier of candidates) {
       try {
-        _playwright = await import(p)
+        _playwright = await importPlaywright(specifier)
         break
       } catch { /* try next */ }
     }
     if (!_playwright) throw new Error('Playwright not installed. Run: npm install playwright')
   }
   return _playwright
+}
+
+async function importPlaywright(specifier: string): Promise<any> {
+  try {
+    return await import(specifier)
+  } catch (directError) {
+    const resolved = requireFromHere.resolve(specifier, { paths: moduleSearchPaths() })
+    try {
+      return await import(pathToFileURL(resolved).href)
+    } catch {
+      throw directError
+    }
+  }
+}
+
+function moduleSearchPaths(): string[] {
+  const homes = hostHomeCandidates()
+  const paths = [process.cwd(), ...homes]
+  for (const home of homes) {
+    paths.push(join(home, '.npm/_npx'))
+    paths.push(...npxRunDirs(home))
+  }
+  return [...new Set(paths)]
+}
+
+function npxRunDirs(home: string): string[] {
+  const root = join(home, '.npm/_npx')
+  if (!existsSync(root)) return []
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(root, entry.name))
+  } catch {
+    return []
+  }
+}
+
+function hostHomeCandidates(): string[] {
+  const candidates = [
+    process.env.WEB_ACCESS_HOST_HOME,
+    process.env.HOST_HOME,
+    process.env.REAL_HOME,
+    safeUserHome(),
+    homedir(),
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+  return [...new Set(candidates)]
+}
+
+function safeUserHome(): string {
+  try {
+    return userInfo().homedir
+  } catch {
+    return ''
+  }
 }
 
 export class PlaywrightAdapter implements BrowserAdapter {

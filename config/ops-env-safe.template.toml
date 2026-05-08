@@ -4,18 +4,56 @@
 mode = "path-only"
 host_root = "__REAL_HOME__"
 
+[host]
+home = "__REAL_HOME__"
+
+[web_access]
+proxy_url = "http://127.0.0.1:3456"
+chrome_debug_port = 9222
+extension_id = ""
+check_deps = "__REAL_HOME__/.codex/skills/web-access/scripts/check-deps.mjs"
+
 [paths]
 shared_bin = "__REAL_HOME__/.local/bin"
 codex_home = "__REAL_HOME__/.codex"
+codex_skills = "__REAL_HOME__/.codex/skills"
+claude_home = "__REAL_HOME__/.claude"
+claude_skills = "__REAL_HOME__/.claude/skills"
 gh_config = "__REAL_HOME__/.config/gh"
+npm_npx_cache = "__REAL_HOME__/.npm/_npx"
 playwright_browsers = "__REAL_HOME__/Library/Caches/ms-playwright"
+chrome_profile_root = "__REAL_HOME__/Library/Application Support/Google/Chrome"
 custom_1 = ""
 custom_2 = ""
 
 [purposes]
 shared_bin = "stable user bin"
 codex_home = "Codex config root"
+codex_skills = "Codex skills root"
+claude_home = "Claude config root"
+claude_skills = "Claude skills root"
 gh_config = "GitHub CLI config/auth"
+npm_npx_cache = "shared npm npx cache"
 playwright_browsers = "shared Playwright browser cache"
+chrome_profile_root = "Chrome profile root path hint"
 custom_1 = ""
 custom_2 = ""
+
+[tools.gh]
+mode = "host-wrapper"
+requires_auth = true
+
+[tools.lark_cli]
+mode = "host-wrapper"
+requires_auth = true
+
+[tools.rh]
+mode = "host-wrapper"
+requires_auth = true
+
+[boundaries]
+path_only = true
+never_export_home = true
+never_export_xdg = true
+never_export_tokens = true
+logged_in_browser_requires_web_access = true

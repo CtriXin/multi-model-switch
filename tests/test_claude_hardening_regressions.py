@@ -2616,6 +2616,14 @@ def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_pa
 
     session_codex = Path(env["HOME"]) / ".codex"
     assert env["MMS_MODEL_NAME"] == "gpt-5.4"
+    assert env["WEB_ACCESS_HOST_HOME"] == str(real_home)
+    assert env["MMS_WEB_ACCESS_PROXY"] == "http://127.0.0.1:3456"
+    host_context = json.loads(Path(env["MMS_HOST_CONTEXT_JSON"]).read_text(encoding="utf-8"))
+    assert host_context["session"]["cli"] == "codex"
+    assert host_context["session"]["model"] == "gpt-5.4"
+    assert host_context["host"]["home"] == str(real_home)
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+    assert {"name": "host_context", "path": env["MMS_HOST_CONTEXT_JSON"]} in packet["paths"]
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "web-access")
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"

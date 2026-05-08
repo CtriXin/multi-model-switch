@@ -67,9 +67,13 @@ export interface UnifiedBrowser {
  */
 export async function createBrowser(config?: Partial<BrowserConfig>): Promise<UnifiedBrowser> {
   const cfg = { ...DEFAULT_CONFIG, ...config }
+  const backend = cfg.requireLoggedInChrome ? 'web-access' : (cfg.backend || 'auto')
+  const fallbackOrder: BackendName[] = cfg.requireLoggedInChrome
+    ? ['web-access']
+    : (cfg.fallbackOrder || DEFAULT_CONFIG.fallbackOrder!)
   const adapters = await selectAdapters(
-    cfg.backend || 'auto',
-    cfg.fallbackOrder || DEFAULT_CONFIG.fallbackOrder!,
+    backend,
+    fallbackOrder,
     cfg.backends
   )
 

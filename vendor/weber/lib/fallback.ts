@@ -11,18 +11,25 @@ import { WebAccessAdapter } from './adapters/web-access'
 // ─── Factory ────────────────────────────────────────────────────────
 
 export function createAdapter(name: BackendName, config?: any): BrowserAdapter {
+  const adapterConfig = getBackendConfig(name, config)
   switch (name) {
     case 'camoufox':
-      return new CamoufoxAdapter(config)
+      return new CamoufoxAdapter(adapterConfig)
     case 'playwright':
-      return new PlaywrightAdapter(config)
+      return new PlaywrightAdapter(adapterConfig)
     case 'agent-browser':
       return new AgentBrowserAdapter()
     case 'web-access':
-      return new WebAccessAdapter(config)
+      return new WebAccessAdapter(adapterConfig)
     default:
       throw new Error(`Unknown backend: ${name}`)
   }
+}
+
+function getBackendConfig(name: BackendName, config?: any): any {
+  if (!config || typeof config !== 'object') return config
+  if (Object.prototype.hasOwnProperty.call(config, name)) return config[name]
+  return config
 }
 
 // ─── Health Check ───────────────────────────────────────────────────

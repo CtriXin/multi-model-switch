@@ -31,6 +31,7 @@ from mms_fake_upstream import (
     is_enabled as _fake_upstream_enabled,
     status_payload as _fake_upstream_status_payload,
 )
+from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_provider_profiles import profile_context_window
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
@@ -762,6 +763,56 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     if include_xdg:
         env["XDG_CONFIG_HOME"] = _real_user_path(".config")
     return env
+
+
+def _host_context_real_home():
+    try:
+        return _real_user_path()
+    except TypeError:
+        return _real_user_home()
+
+
+def _host_tool_context(session_home, env=None):
+    path_value = ""
+    if isinstance(env, dict):
+        path_value = str(env.get("PATH") or "").strip()
+    filtered_path = _filter_real_home_wrapper_path(path_value or os.environ.get("PATH", "")) or os.defpath
+    tools = resolve_tool_bins(_SESSION_REAL_HOME_WRAPPER_COMMANDS, path=filtered_path)
+    wrapper_dir = os.path.join(str(session_home or "").strip(), ".mms", "bin")
+    for name, payload in tools.items():
+        payload["wrapper"] = os.path.join(wrapper_dir, name)
+    return tools
+
+
+def _inject_host_capability_hints(env):
+    if not isinstance(env, dict):
+        return env
+    try:
+        env.update(host_capability_env(real_home=_host_context_real_home()))
+    except Exception:
+        pass
+    return env
+
+
+def _install_host_context_env(env, *, cli, runtime=None, model_info=None, session_home=""):
+    if not isinstance(env, dict):
+        env = {}
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return {}
+    try:
+        host_env = write_host_context(
+            session_home,
+            real_home=_host_context_real_home(),
+            cli=cli,
+            model=_selected_model_name(model_info=model_info),
+            cwd=os.getcwd(),
+            tool_bins=_host_tool_context(session_home, env),
+        )
+    except Exception:
+        return {}
+    env.update(host_env)
+    return host_env
 
 
 def _set_session_home_hint(env, session_home):
@@ -1743,6 +1794,7 @@ _CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE = 86
 _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
     "gh",
     "lark-cli",
+    "rh",
     "hive",
     "pm2",
     "npm",
@@ -4917,6 +4969,13 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
+        _install_host_context_env(
+            env,
+            cli="claude",
+            runtime=account,
+            model_info=model_info,
+            session_home=session_home,
+        )
     elif cli_name == "gemini":
         seed_gemini_state(home_dir)
         _scrub_claude_oauth_env(env)
@@ -4985,6 +5044,13 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         if cli_name == "codex":
             _set_codex_resume_writeback_root(env, codex_resume_writeback_root)
         _install_session_command_wrappers(session_home, env)
+        host_context_env = _install_host_context_env(
+            env,
+            cli=cli_name or "codex",
+            runtime=account,
+            model_info=model_info,
+            session_home=session_home,
+        )
     if cli_name == "codex" and session_home:
         _install_session_packet_env(
             env,
@@ -5000,6 +5066,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
+            extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
         )
     _apply_runtime_network_profile(env, account, validate_proxy=validate_proxy)
     env["MMS_ACCOUNT_ID"] = str(account.get("id", ""))
@@ -7188,6 +7255,13 @@ def _claude_gateway_env(
     if display_model:
         required_settings_env["ANTHROPIC_MODEL"] = display_model
     with _timed_launch_step(_timings, "write session settings"):
+        host_context_env = _install_host_context_env(
+            {},
+            cli="claude",
+            runtime=runtime,
+            model_info={"model": display_model or selected_model or heavy_model or best_model or ""},
+            session_home=gateway_home,
+        )
         session_packet_env = _install_session_packet_env(
             {},
             cli="claude",
@@ -7209,8 +7283,12 @@ def _claude_gateway_env(
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
-            extra_paths={"route_status": route_status_path},
+            extra_paths={
+                "route_status": route_status_path,
+                "host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", ""),
+            },
         )
+        required_settings_env.update(host_context_env)
         required_settings_env.update(session_packet_env)
         _write_claude_session_settings(
             gw_claude_dir,
@@ -7252,6 +7330,7 @@ def _claude_gateway_env(
         _inject_real_home_hints(env)
         env["HOME"] = gateway_home
         _set_session_home_hint(env, gateway_home)
+        env.update(host_context_env)
         env.update(session_packet_env)
         env["ANTHROPIC_BASE_URL"] = base_url
         env["ANTHROPIC_AUTH_TOKEN"] = effective_token
@@ -7605,6 +7684,13 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _apply_runtime_locale_profile(env, runtime)
     _apply_runtime_ip_stack_profile(env, runtime)
     _install_session_command_wrappers(session_home, env)
+    host_context_env = _install_host_context_env(
+        env,
+        cli="codex",
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+    )
     _install_session_packet_env(
         env,
         cli="codex",
@@ -7620,6 +7706,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
             "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
+        extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
     )
     return env
 
@@ -7866,6 +7953,8 @@ def get_export_env(cli, runtime):
     elif cli == "kimi":
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
+    if cli in {"claude", "codex"}:
+        _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
     token_saver_script = _token_saver_script_path()

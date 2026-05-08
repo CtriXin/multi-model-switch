@@ -97,12 +97,14 @@ export interface BrowserConfig {
   backend?: BackendName | 'auto'
   /** 降级优先级（auto 模式下使用） */
   fallbackOrder?: BackendName[]
+  /** 任务必须使用用户已登录 Chrome 时，只允许 web-access 路由 */
+  requireLoggedInChrome?: boolean
   /** 各后端配置 */
   backends?: {
     camoufox?: { baseUrl?: string }
     playwright?: { executablePath?: string; headless?: boolean }
     'agent-browser'?: { sessionName?: string }
-    'web-access'?: { baseUrl?: string }
+    'web-access'?: { baseUrl?: string; checkDepsScript?: string; hostHome?: string; autoStart?: boolean }
   }
   /** 默认 viewport */
   viewport?: { width: number; height: number }

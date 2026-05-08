@@ -2288,11 +2288,12 @@ argument-hint: [entry-name]
 
 ## 执行步骤
 
-1. 读取 `~/.config/mms/ops-env-safe.toml`。
-2. 如果 `$ARGUMENTS` 非空：
+1. 优先读取 `MMS_HOST_CONTEXT_JSON` 指向的 session-local context。
+2. 没有 session context 时，读取 `MMS_OPS_ENV_SAFE_CONFIG` 或 `~/.config/mms/ops-env-safe.toml`。
+3. 如果 `$ARGUMENTS` 非空：
    - 优先匹配 `[paths]` 里的同名 key
    - 输出该条目的绝对路径和用途
-3. 如果 `$ARGUMENTS` 为空：
+4. 如果 `$ARGUMENTS` 为空：
    - 列出已配置的可用 key
    - 简要说明每个 key 的 path 和 purpose
 
@@ -2310,6 +2311,7 @@ argument-hint: [entry-name]
 - 不要设置任何真实 `XDG_*`
 - 不要导出 token / auth env
 - 不要把 path lookup 伪装成“已经可直接执行”
+- 登录态 Chrome 任务必须走配置里的 WebAccess localhost proxy，不要因隔离 `HOME` 自动降级到 isolated browser
 - 如果真正要执行 host 命令，必须明确提示切到单独的非隔离 shell
 EOF
 
