@@ -516,6 +516,10 @@ def test_review_launch_gpt_dual_provider_never_calls_messages_endpoint(tmp_path,
     assert calls == [OPENAI_CHAT_PROTOCOL]
     assert payload["provider_protocol"] == OPENAI_CHAT_PROTOCOL
     assert payload["dispatch_attempts"][0]["request_path"] == "/openai/v1/chat/completions"
+    assert payload["transport_evidence"][0]["schema"] == "cache_transport_evidence.v1"
+    assert payload["transport_evidence"][0]["protocol"] == OPENAI_CHAT_PROTOCOL
+    assert payload["transport_evidence"][0]["request_path"] == "/openai/v1/chat/completions"
+    assert payload["transport_evidence"][0]["usage"]["cached_tokens"] == 0
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
 

@@ -27,6 +27,7 @@ from mms_provider_profiles import (
 REVIEW_LAUNCH_CONTRACT_SCHEMA = "mms.review_launch_contract.v1"
 REVIEW_LAUNCH_VALIDATION_SCHEMA = "mms.review_launch_validation.v1"
 REVIEW_LAUNCH_RESULT_SCHEMA = "mms.review_launch_result.v1"
+CACHE_TRANSPORT_EVIDENCE_SCHEMA = "cache_transport_evidence.v1"
 REQUIRED_ENV = [
     "MOEBIUS_RUN_ID",
     "MOEBIUS_RUN_DIR",
@@ -846,6 +847,62 @@ def _dispatch_attempt(provider: dict[str, Any], protocol: str, model_name: str) 
     return attempt
 
 
+def _default_provider_profile(provider: dict[str, Any], protocol: str) -> str:
+    explicit = str(provider.get("profile") or provider.get("provider_profile") or "").strip()
+    if explicit:
+        return explicit
+    if protocol == OPENAI_CHAT_PROTOCOL:
+        return "openai"
+    if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
+        return "anthropic-compatible"
+    return "unknown"
+
+
+def _empty_cache_usage() -> dict[str, int]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cached_tokens": 0,
+    }
+
+
+def _fallback_reason_for_attempts(attempts: list[dict[str, Any]]) -> str:
+    previous_failures = [item for item in attempts[:-1] if item.get("ok") is False and not item.get("skipped")]
+    if not previous_failures:
+        return ""
+    last_failure = previous_failures[-1]
+    return (
+        f"previous {last_failure.get('provider_protocol') or 'unknown'} attempt failed: "
+        f"{last_failure.get('error') or 'unknown error'}"
+    )[:1000]
+
+
+def _transport_evidence_for_selection(
+    *,
+    candidate: dict[str, Any],
+    attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    provider = candidate.get("provider") if isinstance(candidate.get("provider"), dict) else {}
+    protocol = str(candidate.get("protocol") or "")
+    selected_attempt = attempts[-1] if attempts else _dispatch_attempt(provider, protocol, str(candidate.get("model_name") or ""))
+    fallback_reason = _fallback_reason_for_attempts(attempts)
+    return {
+        "schema": CACHE_TRANSPORT_EVIDENCE_SCHEMA,
+        "model": str(candidate.get("model_name") or ""),
+        "provider_id": str(provider.get("id") or selected_attempt.get("provider_id") or ""),
+        "protocol": protocol,
+        "request_url": "",
+        "request_path": str(selected_attempt.get("request_path") or ""),
+        "route_source": str(provider.get("route_source") or "mms:model-routes.json"),
+        "provider_profile": _default_provider_profile(provider, protocol),
+        "fallback_used": bool(fallback_reason),
+        "fallback_reason": fallback_reason,
+        "usage": _empty_cache_usage(),
+    }
+
+
 def _compact_error(exc: Exception) -> str:
     message = str(exc).strip()
     if not message:
@@ -1227,6 +1284,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
     dispatch_attempts: list[dict[str, Any]] = []
     dispatch_candidates_count = 0
     dispatch_max_tokens = 0
+    transport_evidence: list[dict[str, Any]] = []
     context_budget: dict[str, Any] = {}
     context_entries: list[dict[str, Any]] = []
 
@@ -1298,6 +1356,9 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             provider_id = str((selected_candidate.get("provider") or {}).get("id") or "")
             provider_protocol = str(selected_candidate.get("protocol") or "")
             dispatch_model_name = str(selected_candidate.get("model_name") or reviewer_id)
+            transport_evidence = [
+                _transport_evidence_for_selection(candidate=selected_candidate, attempts=dispatch_attempts)
+            ]
         final_text = _ensure_reviewer_header(review_text, reviewer_id)
         if not _path_under(expected_output, repo_root):
             raise RuntimeError("expected output escaped repo root after validation")
@@ -1325,6 +1386,8 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
         "dispatch_model_name": dispatch_model_name,
         "dispatch_candidates_count": dispatch_candidates_count,
         "dispatch_attempts": dispatch_attempts,
+        "transport_evidence": transport_evidence,
+        "cache_transport_evidence": transport_evidence,
         "dispatch_trace": {
             "run_id": str(effective_env.get("MOEBIUS_RUN_ID") or ""),
             "reviewer_id": reviewer_id,
