@@ -69,6 +69,7 @@ MAX_DYNAMIC_PROMPT_CHARS = 3_000_000
 OPENAI_CHAT_PROTOCOL = "openai_chat_completions"
 ANTHROPIC_MESSAGES_PROTOCOL = "anthropic_messages"
 DEFAULT_PROTOCOL_ORDER = (ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL)
+OPENAI_FAMILY_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
 
 
 class ReviewLaunchDispatchError(RuntimeError):
@@ -523,12 +524,21 @@ def _provider_protocols(runtime: dict[str, Any]) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()]
 
 
-def _protocol_order(env: dict[str, str]) -> list[str]:
+def _is_openai_family_model(model_name: str) -> bool:
+    normalized = str(model_name or "").strip().lower()
+    return normalized.startswith(OPENAI_FAMILY_MODEL_PREFIXES)
+
+
+def _protocol_order(env: dict[str, str], model_name: str = "") -> list[str]:
     requested = str(env.get(PROTOCOL_ENV) or "").strip()
     if not requested or requested == "auto":
+        if _is_openai_family_model(model_name):
+            return [OPENAI_CHAT_PROTOCOL]
         return list(DEFAULT_PROTOCOL_ORDER)
     if requested in DEFAULT_PROTOCOL_ORDER:
         return [requested]
+    if _is_openai_family_model(model_name):
+        return [OPENAI_CHAT_PROTOCOL]
     return list(DEFAULT_PROTOCOL_ORDER)
 
 
@@ -620,7 +630,7 @@ def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> t
     cfg = load_config() or _default_config()
     cfg = apply_local_overrides(cfg)
     provider_id = str(env.get(PROVIDER_ID_ENV) or "").strip()
-    protocol_order = _protocol_order(env)
+    protocol_order = _protocol_order(env, model_name)
 
     if provider_id:
         try:

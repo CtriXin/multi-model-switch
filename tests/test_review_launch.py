@@ -441,6 +441,84 @@ def test_review_launch_uses_default_provider_cache_and_canonical_model_case(monk
     assert candidates[0]["model_name"] == "MiniMax-M2.7"
 
 
+def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
+    import mms_core
+    from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
+
+    provider = {
+        "id": "companycrsopenai",
+        "enabled": True,
+        "role": "auto",
+        "priority": 120,
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+        "anthropic_base_url": "https://gateway.example.com/openai",
+        "openai_base_url": "https://gateway.example.com/openai/v1",
+        "api_key": "key",
+    }
+    cfg = {"provider": {"default": "companycrsopenai"}, "providers": [provider]}
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda loaded: loaded)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _loaded, _provider_id: provider)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda _provider_id, allow_stale=False: {"raw_models": ["gpt-5.4"]})
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda _loaded, default, default_models: [(default, default_models)])
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda _provider, cached, _cfg=None: list(cached or []))
+
+    candidates, error = _resolve_review_launch_candidates("gpt-5.4", {})
+
+    assert error == ""
+    assert [candidate["protocol"] for candidate in candidates] == [OPENAI_CHAT_PROTOCOL]
+    assert candidates[0]["provider"]["id"] == "companycrsopenai"
+    assert candidates[0]["model_name"] == "gpt-5.4"
+
+
+def test_review_launch_gpt_dual_provider_never_calls_messages_endpoint(tmp_path, monkeypatch, capsys):
+    import mms_core
+    import mms_review_launch
+    from mms_review_launch import OPENAI_CHAT_PROTOCOL, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="gpt-5.4")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    provider = {
+        "id": "companycrsopenai",
+        "enabled": True,
+        "role": "auto",
+        "priority": 120,
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+        "anthropic_base_url": "https://gateway.example.com/openai",
+        "openai_base_url": "https://gateway.example.com/openai/v1",
+        "api_key": "key",
+    }
+    cfg = {"provider": {"default": "companycrsopenai"}, "providers": [provider]}
+
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda loaded: loaded)
+    monkeypatch.setattr(mms_core, "_default_config", lambda: {})
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _loaded, _provider_id: provider)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda _provider_id, allow_stale=False: {"raw_models": ["gpt-5.4"]})
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda _loaded, default, default_models: [(default, default_models)])
+    monkeypatch.setattr(mms_core, "_provider_effective_models", lambda _provider, cached, _cfg=None: list(cached or []))
+
+    calls = []
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        calls.append(protocol)
+        return "Verdict: PASS\n\nNo blockers found.\n"
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert calls == [OPENAI_CHAT_PROTOCOL]
+    assert payload["provider_protocol"] == OPENAI_CHAT_PROTOCOL
+    assert payload["dispatch_attempts"][0]["request_path"] == "/openai/v1/chat/completions"
+    assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
 def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monkeypatch):
     import mms_core
     from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_provider_for_model
