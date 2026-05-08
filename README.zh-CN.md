@@ -12,6 +12,8 @@
 
 MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`qwen`、`kimi`、`gemini` 等本地 AI coding CLI 前面的控制面。
 
+MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review helper 属于 legacy / maintenance-only 表面，除非直接支持 launcher/session 验证，否则不继续扩展；长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons。
+
 它解决这些问题：
 
 - 用一个 TUI 或命令启动不同 CLI

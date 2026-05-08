@@ -10061,7 +10061,7 @@ def handle_session_command(argv):
     _ensure_rich()
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} session",
-        description="查看 MMS 托管 session，或恢复已保存的 chat session",
+        description="查看 MMS 托管 session，或恢复 legacy chat session",
     )
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -10072,7 +10072,7 @@ def handle_session_command(argv):
     info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
     info_parser.add_argument("--cli", default="claude", choices=["claude"])
 
-    resume_parser = subparsers.add_parser("resume", help="恢复已保存的 chat session")
+    resume_parser = subparsers.add_parser("resume", help="恢复 legacy chat session")
     resume_parser.add_argument("session_ref", help="session id / 前缀 / 最近列表序号")
     resume_parser.add_argument("--provider", help="临时指定 provider")
 
@@ -10590,8 +10590,8 @@ def main():
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
-            f"  {current_command()} chat ...        进入 chat 子命令\n"
-            f"  {current_command()} discuss ...     进入 discuss 子命令\n"
+            f"  {current_command()} chat ...        legacy/maintenance-only chat 子命令\n"
+            f"  {current_command()} discuss ...     legacy/maintenance-only discuss 子命令\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"

@@ -1,3 +1,5 @@
+> Legacy / archived design note. `mms chat` and `mms discuss` are maintenance-only surfaces; do not treat this as current launcher roadmap.
+
 # Chat + Discuss 产品方案（v1 草案）
 
 ## 1. 目标
