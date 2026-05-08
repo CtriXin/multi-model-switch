@@ -12,6 +12,8 @@
 
 MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `qwen`, `kimi`, and `gemini`.
 
+Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
+
 It helps you:
 
 - start the right CLI from one TUI or command line
