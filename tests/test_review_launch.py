@@ -184,6 +184,131 @@ def test_review_launch_fake_dispatch_writes_exact_expected_review_file(tmp_path,
     assert review_files == [expected_output]
 
 
+@pytest.mark.parametrize("reviewer_id", ["kimi-for-coding", "minimax-m2.7"])
+def test_review_launch_high_context_reviewers_get_larger_output_budget(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    reviewer_id,
+):
+    import mms_review_launch
+    from mms_review_launch import (
+        ANTHROPIC_MESSAGES_PROTOCOL,
+        HIGH_CONTEXT_REVIEW_MAX_TOKENS,
+        handle_review_launch_command,
+    )
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id=reviewer_id)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    provider = {"id": "newapi-personal-tokyo", "protocols": [ANTHROPIC_MESSAGES_PROTOCOL]}
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [{"provider": provider, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": reviewer_id}],
+            "",
+        ),
+    )
+    captured = {}
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        captured["max_tokens"] = max_tokens
+        return "Verdict: PASS\n\nNo blockers found.\n"
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert captured["max_tokens"] == HIGH_CONTEXT_REVIEW_MAX_TOKENS
+    assert payload["dispatch_trace"]["max_tokens"] == HIGH_CONTEXT_REVIEW_MAX_TOKENS
+    assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
+def test_review_launch_max_tokens_env_override_still_wins_for_high_context_reviewer(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    import mms_review_launch
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, MAX_TOKENS_ENV, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv(MAX_TOKENS_ENV, "8192")
+
+    provider = {"id": "newapi-personal-tokyo", "protocols": [ANTHROPIC_MESSAGES_PROTOCOL]}
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [{"provider": provider, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "kimi-for-coding"}],
+            "",
+        ),
+    )
+    captured = {}
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        captured["max_tokens"] = max_tokens
+        return "Verdict: PASS\n\nNo blockers found.\n"
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert captured["max_tokens"] == 8192
+    assert payload["dispatch_trace"]["max_tokens"] == 8192
+
+
+def test_review_launch_uses_route_context_window_for_large_review_context(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    import mms_review_launch
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="kimi-for-coding")
+    repo_root = Path(env["MOEBIUS_REPO_ROOT"])
+    large_file = repo_root / "large-context.txt"
+    large_file.write_text(("x" * 520_000) + "ROUTE_CONTEXT_TAIL\n", encoding="utf-8")
+    pack_path = Path(env["MOEBIUS_REVIEW_PACK"])
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    pack["changed_files"] = ["large-context.txt"]
+    pack_path.write_text(json.dumps(pack) + "\n", encoding="utf-8")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    provider = {"id": "newapi-personal-tokyo", "protocols": [ANTHROPIC_MESSAGES_PROTOCOL]}
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [{"provider": provider, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "kimi-for-coding"}],
+            "",
+        ),
+    )
+    monkeypatch.setattr(mms_review_launch, "_route_context_window_tokens", lambda _model, _candidate: 262_144)
+    captured = {}
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        captured["prompt"] = prompt
+        return "Verdict: PASS\n\nNo blockers found.\n"
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert "ROUTE_CONTEXT_TAIL" in captured["prompt"]
+    assert payload["dispatch_trace"]["context_window_tokens"] == 262_144
+    assert payload["dispatch_trace"]["prompt_context_char_budget"] > 500_000
+
+
 def test_review_launch_requires_explicit_allowed_read_root_for_external_context(tmp_path):
     from mms_review_launch import ALLOWED_READ_ROOTS_ENV, _render_file_context
 
@@ -209,6 +334,28 @@ def test_review_launch_requires_explicit_allowed_read_root_for_external_context(
     assert "repo context" in text
     assert "external context" in text
     assert entries[1]["read"] is True
+
+
+def test_review_launch_high_context_reviewer_reads_larger_file_context_by_default(tmp_path):
+    from mms_review_launch import _render_file_context
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    large_file = repo_root / "large.txt"
+    large_file.write_text(("x" * 13000) + "HIGH_CONTEXT_TAIL\n", encoding="utf-8")
+    pack = {"changed_files": ["large.txt"]}
+
+    default_text, default_entries = _render_file_context(repo_root, pack, {})
+    high_context_text, high_context_entries = _render_file_context(
+        repo_root,
+        pack,
+        {"MOEBIUS_REVIEWER_ID": "kimi-for-coding"},
+    )
+
+    assert "HIGH_CONTEXT_TAIL" not in default_text
+    assert default_entries[0]["truncated"] is True
+    assert "HIGH_CONTEXT_TAIL" in high_context_text
+    assert high_context_entries[0]["truncated"] is False
 
 
 def test_review_launch_resolves_anthropic_only_provider(monkeypatch):

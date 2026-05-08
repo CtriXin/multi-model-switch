@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
+from mms_provider_profiles import (
+    apply_profile_auth_headers,
+    apply_profile_body_patches,
+    profile_context_window,
+    profile_model_alias,
+)
 
 
 REVIEW_LAUNCH_CONTRACT_SCHEMA = "mms.review_launch_contract.v1"
@@ -47,10 +52,18 @@ PROTOCOL_ENV = "MMS_REVIEW_LAUNCH_PROTOCOL"
 ALLOW_CHAT_FALLBACK_ENV = "MMS_REVIEW_LAUNCH_ALLOW_CHAT_FALLBACK"
 ALLOWED_READ_ROOTS_ENV = "MMS_REVIEW_LAUNCH_ALLOWED_READ_ROOTS"
 DEFAULT_MAX_TOKENS = 4096
+HIGH_CONTEXT_REVIEW_MAX_TOKENS = 32768
 DEFAULT_MAX_CANDIDATES = 6
 DEFAULT_READ_TIMEOUT_SECONDS = 180
 DEFAULT_MAX_FILE_CHARS = 12000
 DEFAULT_MAX_PROMPT_CHARS = 90000
+HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS = 100000
+HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS = 500000
+HIGH_CONTEXT_REVIEW_MODEL_PREFIXES = ("kimi", "minimax", "mimo", "deepseek")
+CONTEXT_COMPACT_TRIGGER_RATIO = 0.70
+CONTEXT_SAFETY_MARGIN_TOKENS = 4096
+CONTEXT_CHAR_PER_TOKEN = 4
+MAX_DYNAMIC_PROMPT_CHARS = 3_000_000
 OPENAI_CHAT_PROTOCOL = "openai_chat_completions"
 ANTHROPIC_MESSAGES_PROTOCOL = "anthropic_messages"
 DEFAULT_PROTOCOL_ORDER = (ANTHROPIC_MESSAGES_PROTOCOL, OPENAI_CHAT_PROTOCOL)
@@ -87,6 +100,99 @@ def _int_env(env: dict[str, str], name: str, default: int, *, minimum: int = 1, 
     except ValueError:
         return default
     return max(minimum, min(maximum, value))
+
+
+def _is_high_context_review_model(model_name: str) -> bool:
+    normalized = str(model_name or "").strip().lower()
+    return any(normalized.startswith(prefix) for prefix in HIGH_CONTEXT_REVIEW_MODEL_PREFIXES)
+
+
+def _default_max_tokens_for_review_launch(model_name: str) -> int:
+    if _is_high_context_review_model(model_name):
+        return HIGH_CONTEXT_REVIEW_MAX_TOKENS
+    return DEFAULT_MAX_TOKENS
+
+
+def _default_max_file_chars_for_review_launch(model_name: str) -> int:
+    if _is_high_context_review_model(model_name):
+        return HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS
+    return DEFAULT_MAX_FILE_CHARS
+
+
+def _default_max_prompt_chars_for_review_launch(model_name: str) -> int:
+    if _is_high_context_review_model(model_name):
+        return HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS
+    return DEFAULT_MAX_PROMPT_CHARS
+
+
+def _dynamic_prompt_chars_for_context_window(context_window_tokens: int, output_tokens: int) -> int:
+    usable_tokens = max(0, context_window_tokens - output_tokens - CONTEXT_SAFETY_MARGIN_TOKENS)
+    target_tokens = int(usable_tokens * CONTEXT_COMPACT_TRIGGER_RATIO)
+    return max(0, min(MAX_DYNAMIC_PROMPT_CHARS, target_tokens * CONTEXT_CHAR_PER_TOKEN))
+
+
+def _context_window_from_mms_core(model_name: str) -> int | None:
+    try:
+        from mms_core import _model_context_window
+    except Exception:
+        return None
+    try:
+        value = _model_context_window(model_name)
+    except Exception:
+        return None
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _route_context_window_tokens(model_name: str, candidate: dict[str, Any] | None) -> int | None:
+    provider = candidate.get("provider") if isinstance(candidate, dict) else {}
+    if not isinstance(provider, dict):
+        provider = {}
+    protocol = str((candidate or {}).get("protocol") or "")
+    base_url = _provider_base_url_for_protocol(provider, protocol) if protocol else ""
+    provider_id = str(provider.get("id") or provider.get("provider_id") or "")
+    provider_profile = str(provider.get("profile") or provider.get("provider_profile") or "")
+    profiled = profile_context_window(
+        model_name,
+        runtime=provider,
+        provider_id=provider_id,
+        base_url=base_url,
+        profile_id=provider_profile,
+    )
+    core = _context_window_from_mms_core(model_name)
+    if profiled and core:
+        return min(profiled, core)
+    return profiled or core
+
+
+def _context_budget_env(
+    env: dict[str, str],
+    *,
+    reviewer_id: str,
+    context_window_tokens: int | None,
+    output_tokens: int,
+) -> tuple[dict[str, str], dict[str, Any]]:
+    default_file_chars = _default_max_file_chars_for_review_launch(reviewer_id)
+    default_prompt_chars = _default_max_prompt_chars_for_review_launch(reviewer_id)
+    dynamic_prompt_chars = 0
+    if context_window_tokens:
+        dynamic_prompt_chars = _dynamic_prompt_chars_for_context_window(context_window_tokens, output_tokens)
+        if dynamic_prompt_chars > 0:
+            default_prompt_chars = max(default_prompt_chars, dynamic_prompt_chars)
+            default_file_chars = max(default_file_chars, default_prompt_chars)
+
+    prompt_chars = _int_env(env, MAX_PROMPT_CHARS_ENV, default_prompt_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
+    file_chars = _int_env(env, MAX_FILE_CHARS_ENV, default_file_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
+    next_env = dict(env)
+    next_env["_MMS_REVIEW_LAUNCH_DEFAULT_MAX_FILE_CHARS"] = str(file_chars)
+    next_env["_MMS_REVIEW_LAUNCH_DEFAULT_MAX_PROMPT_CHARS"] = str(prompt_chars)
+    return next_env, {
+        "context_window_tokens": context_window_tokens or 0,
+        "context_compact_trigger_ratio": CONTEXT_COMPACT_TRIGGER_RATIO,
+        "context_safety_margin_tokens": CONTEXT_SAFETY_MARGIN_TOKENS,
+        "prompt_context_char_budget": prompt_chars,
+        "file_context_char_budget": file_chars,
+        "dynamic_prompt_context_chars": dynamic_prompt_chars,
+    }
 
 
 def _path_under(path: Path, root: Path) -> bool:
@@ -148,11 +254,23 @@ def build_review_launch_contract(command_name: str = "mms") -> dict[str, Any]:
             "selection": "Providers are ordered by MMS routing; each provider tries Anthropic-compatible protocol first. OpenAI chat fallback is blocked by default after an Anthropic attempt on dual-protocol cache-sensitive routes.",
             PROTOCOL_ENV: "optional override: auto, anthropic_messages, or openai_chat_completions",
             ALLOW_CHAT_FALLBACK_ENV: "set to 1/true/yes to explicitly allow OpenAI chat fallback after an Anthropic attempt",
+            MAX_TOKENS_ENV: (
+                f"optional per-call output budget override; default {DEFAULT_MAX_TOKENS}, "
+                f"{HIGH_CONTEXT_REVIEW_MAX_TOKENS} for high-context thinking reviewers"
+            ),
             MAX_CANDIDATES_ENV: f"optional cap for provider/protocol fallback attempts; default {DEFAULT_MAX_CANDIDATES}",
             READ_TIMEOUT_ENV: f"optional per-attempt read timeout seconds; default {DEFAULT_READ_TIMEOUT_SECONDS}",
         },
         "read_context": {
             ALLOWED_READ_ROOTS_ENV: "optional os.pathsep-separated absolute roots for read-only context outside MOEBIUS_REPO_ROOT",
+            MAX_FILE_CHARS_ENV: (
+                f"optional per-file context char override; default {DEFAULT_MAX_FILE_CHARS}, "
+                f"{HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS} for high-context thinking reviewers"
+            ),
+            MAX_PROMPT_CHARS_ENV: (
+                f"optional total context char override; default {DEFAULT_MAX_PROMPT_CHARS}, "
+                f"{HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS} for high-context thinking reviewers"
+            ),
             "default": "only MOEBIUS_REPO_ROOT is readable unless the host injects explicit roots",
         },
     }
@@ -284,8 +402,13 @@ def _pack_paths(pack: dict[str, Any]) -> list[str]:
 
 
 def _render_file_context(repo_root: Path, pack: dict[str, Any], env: dict[str, str]) -> tuple[str, list[dict[str, Any]]]:
-    max_file_chars = _int_env(env, MAX_FILE_CHARS_ENV, DEFAULT_MAX_FILE_CHARS, maximum=100000)
-    max_prompt_chars = _int_env(env, MAX_PROMPT_CHARS_ENV, DEFAULT_MAX_PROMPT_CHARS, maximum=500000)
+    reviewer_id = str(env.get("MOEBIUS_REVIEWER_ID") or "").strip()
+    default_file_chars = _default_max_file_chars_for_review_launch(reviewer_id)
+    default_prompt_chars = _default_max_prompt_chars_for_review_launch(reviewer_id)
+    default_file_chars = _int_env(env, "_MMS_REVIEW_LAUNCH_DEFAULT_MAX_FILE_CHARS", default_file_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
+    default_prompt_chars = _int_env(env, "_MMS_REVIEW_LAUNCH_DEFAULT_MAX_PROMPT_CHARS", default_prompt_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
+    max_file_chars = _int_env(env, MAX_FILE_CHARS_ENV, default_file_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
+    max_prompt_chars = _int_env(env, MAX_PROMPT_CHARS_ENV, default_prompt_chars, maximum=MAX_DYNAMIC_PROMPT_CHARS)
     allowed_roots = _allowed_read_roots(repo_root, env)
     sections: list[str] = []
     entries: list[dict[str, Any]] = []
@@ -339,6 +462,7 @@ def _review_prompt(repo_root: Path, pack_path: Path, pack: dict[str, Any], env: 
         f"- Expected output path is: {expected_output}\n"
         "- Use verdict PASS, PASS_WITH_NOTES, or BLOCKED.\n"
         "- Lead with concrete blockers if any, with file/path references.\n"
+        "- If the supplied context is long, internally compact it and still return a final review; do not treat long context as a reason for an empty answer.\n"
         "- Do not declare the gate clear. Host intake owns gate aggregation.\n\n"
         f"Review pack path: {pack_path}\n\n"
         "Review pack JSON:\n"
@@ -1027,13 +1151,21 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
     dispatch_model_name = reviewer_id
     dispatch_attempts: list[dict[str, Any]] = []
     dispatch_candidates_count = 0
+    dispatch_max_tokens = 0
+    context_budget: dict[str, Any] = {}
     context_entries: list[dict[str, Any]] = []
 
     try:
         pack = _read_json(pack_path)
-        prompt, context_entries = _review_prompt(repo_root, pack_path, pack, effective_env)
         fake_text = _fake_response(effective_env)
         if fake_text:
+            prompt_env, context_budget = _context_budget_env(
+                effective_env,
+                reviewer_id=reviewer_id,
+                context_window_tokens=None,
+                output_tokens=0,
+            )
+            _prompt, context_entries = _review_prompt(repo_root, pack_path, pack, prompt_env)
             fake_dispatch = True
             model_calls = 1
             review_text = fake_text
@@ -1050,7 +1182,17 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             )
             candidates = candidates[:max_candidates]
             dispatch_candidates_count = len(candidates)
-            max_tokens = _int_env(effective_env, MAX_TOKENS_ENV, DEFAULT_MAX_TOKENS, maximum=200000)
+            default_max_tokens = _default_max_tokens_for_review_launch(reviewer_id)
+            max_tokens = _int_env(effective_env, MAX_TOKENS_ENV, default_max_tokens, maximum=200000)
+            dispatch_max_tokens = max_tokens
+            context_window_tokens = _route_context_window_tokens(reviewer_id, candidates[0] if candidates else None)
+            prompt_env, context_budget = _context_budget_env(
+                effective_env,
+                reviewer_id=reviewer_id,
+                context_window_tokens=context_window_tokens,
+                output_tokens=max_tokens,
+            )
+            prompt, context_entries = _review_prompt(repo_root, pack_path, pack, prompt_env)
             read_timeout_seconds = _int_env(
                 effective_env,
                 READ_TIMEOUT_ENV,
@@ -1114,6 +1256,8 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
             "selected_provider_id": provider_id,
             "selected_protocol": provider_protocol,
             "selected_model_name": dispatch_model_name,
+            "max_tokens": dispatch_max_tokens,
+            **context_budget,
             "attempt_count": len(dispatch_attempts),
             "model_call_count": model_calls,
             "chat_fallback_allowed": _truthy_env(effective_env, ALLOW_CHAT_FALLBACK_ENV),
