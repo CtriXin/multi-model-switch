@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import stat
 
@@ -37,7 +38,11 @@ def _patch_export_paths(monkeypatch, tmp_path):
     import mms_router
 
     monkeypatch.setattr(mms_router, "MODEL_ROUTES_PATH", str(tmp_path / "model-routes.json"))
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_LINEUP_PATH", str(tmp_path / "model-routes.lineup.json"))
+    monkeypatch.setattr(mms_router, "MODEL_POLICY_PATH", str(tmp_path / "model-policy.json"))
+    monkeypatch.setattr(mms_router, "MODEL_CONFIG_AUDIT_PATH", str(tmp_path / "model-config.audit.ndjson"))
     monkeypatch.setattr(mms_router, "MODEL_ROUTES_SNAPSHOTS_DIR", str(tmp_path / "model-routes.snapshots"))
+    monkeypatch.setattr(mms_router, "MODEL_ROUTES_LINEUP_SNAPSHOTS_DIR", str(tmp_path / "model-routes.lineup.snapshots"))
 
 
 def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypatch, tmp_path):
@@ -82,6 +87,7 @@ def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypat
         "anthropic_base_url": "https://kimi.example.com/anthropic",
         "openai_base_url": "",
         "api_key": "sk-kimi",
+        "model_id": "kimi-k2.5",
     }
     assert info["fallbacks"] == []
 
@@ -96,7 +102,16 @@ def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypat
         "anthropic_base_url",
         "openai_base_url",
         "api_key",
+        "model_id",
     ]
+
+    lineup = json.loads((tmp_path / "model-routes.lineup.json").read_text(encoding="utf-8"))
+    assert list(lineup) == ["version", "generated_at", "source_routes_hash", "routes"]
+    assert lineup["routes"]["kimi-k2.5"]["primary"]["provider_id"] == "kimi-direct"
+    assert lineup["routes"]["kimi-k2.5"]["primary"]["model_id"] == "kimi-k2.5"
+    assert "api_key" not in lineup["routes"]["kimi-k2.5"]["primary"]
+    assert (tmp_path / "model-policy.json").exists()
+    assert (tmp_path / "model-config.audit.ndjson").exists()
 
     snapshots = sorted((tmp_path / "model-routes.snapshots").glob("*.json"))
     assert len(snapshots) == 1
@@ -148,6 +163,146 @@ def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch,
     assert second_routes == first_routes
     assert second_written["generated_at"] == first_written["generated_at"]
     assert len(list((tmp_path / "model-routes.snapshots").glob("*.json"))) == 1
+
+
+def test_export_model_routes_refreshes_profile_lineup_metadata_without_secrets(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "deepseek-direct": {
+                "id": "deepseek-direct",
+                "provider_name": "DeepSeek Direct",
+                "anthropic_base_url": "https://api.deepseek.com/anthropic",
+                "openai_base_url": "https://api.deepseek.com",
+                "api_key": "sk-deepseek",
+                "models": ["deepseek-v4-pro"],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_router, "_route_context_window", lambda _model, _route: 1000000)
+    monkeypatch.setattr(mms_router, "_profile_reference_urls", lambda _model, _route: ["https://api-docs.deepseek.com/"])
+    (tmp_path / "model-routes.lineup.json").write_text(json.dumps({
+        "version": 1,
+        "routes": {
+            "deepseek-v4-pro": {
+                "display_name": "Main DeepSeek",
+                "primary": {
+                    "max_context_tokens": 654321,
+                    "context_reference_url": "https://docs.example/context",
+                    "api_key": "must-not-survive",
+                    "openai_base_url": "https://must-not-survive",
+                },
+                "fallbacks": []
+            }
+        }
+    }), encoding="utf-8")
+
+    cfg = {
+        "provider": {"default": "deepseek-direct"},
+        "providers": [
+            {
+                "id": "deepseek-direct",
+                "role": "auto",
+                "priority": 60,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["codex"],
+                "models": ["deepseek-v4-pro"],
+            }
+        ],
+    }
+
+    mms_router.export_model_routes(cfg, force=True)
+
+    lineup = json.loads((tmp_path / "model-routes.lineup.json").read_text(encoding="utf-8"))
+    entry = lineup["routes"]["deepseek-v4-pro"]
+    assert entry["display_name"] == "Main DeepSeek"
+    assert entry["primary"]["max_context_tokens"] == 1000000
+    assert entry["primary"]["context_reference_url"] == "https://api-docs.deepseek.com/"
+    assert entry["primary"]["context_source"] == "provider-profiles.json"
+    assert "api_key" not in entry["primary"]
+    assert "openai_base_url" not in entry["primary"]
+
+
+def test_latest_routes_freshness_tracks_provider_profiles(monkeypatch, tmp_path):
+    import mms_core
+    import mms_router
+
+    _patch_export_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_core, "CONFIG_PATH", str(tmp_path / "missing-config.toml"))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(tmp_path / "missing-credentials.sh"))
+    monkeypatch.setattr(mms_core, "LEGACY_CREDENTIALS_PATH", str(tmp_path / "missing-legacy-credentials.sh"))
+    monkeypatch.setattr(mms_core, "OVERRIDE_PATHS", [])
+    monkeypatch.setattr(mms_router, "_BUILTIN_PROVIDER_PROFILE_PATH", str(tmp_path / "provider-profiles.json"))
+    routes = {
+        "demo": {
+            "primary": {
+                "provider_id": "demo",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://demo.example/v1",
+                "api_key": "sk-demo",
+                "model_id": "demo",
+            },
+            "fallbacks": []
+        }
+    }
+    route_payload = {"version": 1, "generated_at": "2026-05-08T00:00:00.000Z", "routes": routes}
+    lineup_payload = {
+        "version": 1,
+        "generated_at": "2026-05-08T00:00:00.000Z",
+        "source_routes_hash": mms_router._content_hash({"version": 1, "routes": routes}),
+        "routes": {"demo": {"primary": {"provider_id": "demo", "model_id": "demo"}, "fallbacks": []}},
+    }
+    (tmp_path / "model-routes.json").write_text(json.dumps(route_payload), encoding="utf-8")
+    (tmp_path / "model-routes.lineup.json").write_text(json.dumps(lineup_payload), encoding="utf-8")
+    profile_path = tmp_path / "provider-profiles.json"
+    profile_path.write_text("{}", encoding="utf-8")
+
+    old_time = 1_700_000_000
+    new_time = old_time + 10
+    for path in (tmp_path / "model-routes.json", tmp_path / "model-routes.lineup.json"):
+        os.utime(path, (old_time, old_time))
+    os.utime(profile_path, (new_time, new_time))
+
+    assert mms_router._latest_routes_is_fresh() is False
+
+
+def test_validate_model_config_bundle_errors_on_bad_lineup_and_fallback():
+    import mms_router
+
+    routes = {
+        "version": 1,
+        "routes": {
+            "demo": {
+                "primary": {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-demo",
+                },
+                "fallbacks": [{
+                    "provider_id": "fallback",
+                    "openai_base_url": "https://fallback.example/v1",
+                    "api_key": "",
+                }],
+            }
+        },
+    }
+    lineup = {
+        "version": 1,
+        "source_routes_hash": mms_router._content_hash({"version": 1, "routes": routes["routes"]}),
+        "routes": {
+            "demo": {"primary": {"provider_id": "demo"}, "fallbacks": [{"provider_id": "fallback"}]},
+            "ghost": {"primary": {"provider_id": "ghost"}, "fallbacks": []},
+        },
+    }
+
+    issues = mms_router.validate_model_config_bundle(routes, lineup, {"models": {}, "projects": {}})
+    error_codes = {item["code"] for item in issues if item.get("level") == "error"}
+    assert "fallback_missing_api_key" in error_codes
+    assert "lineup_extra_model" in error_codes
 
 
 def test_export_model_routes_creates_new_snapshot_when_key_changes(monkeypatch, tmp_path):
@@ -245,7 +400,7 @@ def test_export_model_routes_keeps_only_minimal_fields_for_hive(monkeypatch, tmp
     routes = mms_router.export_model_routes(cfg, force=True)
 
     info = routes["kimi-k2.5"]
-    assert list(info["primary"]) == ["provider_id", "anthropic_base_url", "openai_base_url", "api_key"]
+    assert list(info["primary"]) == ["provider_id", "anthropic_base_url", "openai_base_url", "api_key", "model_id"]
     assert info["primary"]["provider_id"] == "openai-relay-high-priority"
     assert info["fallbacks"][0]["provider_id"] == "kimi-direct-compatible"
     assert "priority" not in info["primary"]

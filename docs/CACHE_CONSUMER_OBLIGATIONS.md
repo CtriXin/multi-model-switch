@@ -31,7 +31,7 @@ cache never engages.
 Without consumer discipline, ten projects extending MMS will each
 re-discover this same lesson at the cost of thousands of cache misses.
 
-## The two rules
+## The four rules
 
 If your project consumes MMS routes and calls providers directly
 (rather than going through MMS bridge), you MUST do the following:
@@ -113,6 +113,29 @@ is the canonical anti-example: every pilot-run got a fresh cache key,
 guaranteeing zero cross-run cache benefit no matter how many other
 things were correct.
 
+### Rule 4 — runtime evidence must be actual
+
+Every direct model call must write `cache_transport_evidence.v1` to the
+project's run artifact, worker result, or review result. See
+`docs/MODEL_CONFIG_CONTRACT.md` for the exact minimal shape.
+
+The evidence must be based on the real selected transport, not only the
+logical model route:
+
+- `protocol`: `anthropic_messages`, `openai_chat_completions`, or
+  `openai_responses`
+- `request_url` or `request_path`: the actual upstream target path
+- `provider_id`: the selected MMS provider/channel
+- `fallback_used` and `fallback_reason`: non-empty reason for any audited
+  fallback to OpenAI chat on a cache-sensitive non-OpenAI-family route
+- `usage.cache_read_input_tokens`, `usage.cache_creation_input_tokens`, and
+  `usage.cached_tokens`: normalized from provider response usage fields
+
+Do not report only semantic labels such as `claude_style`, `anthropic`, or
+`openai`. If a direct SDK path cannot observe the final URL, record
+`evidence_source: "resolved_route"` and still include the resolved route's
+concrete request path. Proxy/adapter paths must record the actual upstream URL.
+
 ## Validation checklist
 
 Before merging any PR that touches direct provider calls, run this:
@@ -124,9 +147,13 @@ Before merging any PR that touches direct provider calls, run this:
 4. If `0`: one of the three rules is broken. Diff the request bodies
    to find which.
 
-For automated validation, every project should have at least one test
-that asserts `cache_read_input_tokens > 0` on a second call against a
-mocked or recorded provider.
+For automated validation, every project should have tests that assert:
+
+- CN dual route first attempt is `/v1/messages`
+- DeepSeek through NewAPI first attempt is `/v1/messages`
+- GPT/OpenAI-family first attempt is `/v1/chat/completions` or `/v1/responses`
+- OpenAI chat fallback on cache-sensitive routes has `fallback_reason`
+- worker/run result includes `cache_transport_evidence.v1`
 
 ## Per-project status reference
 
