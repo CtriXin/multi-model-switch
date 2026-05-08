@@ -177,6 +177,16 @@ def test_kimi_k26_context_aliases_are_profile_driven(monkeypatch, tmp_path):
         base_url="https://api.kimi.com/coding/",
     ) == 262_144
     assert profiles.profile_context_window(
+        "K2.6",
+        provider_id="newapi-personal-tokyo",
+        base_url="https://newapi.evilsngx.ccwu.cc",
+    ) == 262_144
+    assert profiles.profile_context_window(
+        "K2.6-code-preview",
+        provider_id="newapi-personal-tokyo",
+        base_url="https://newapi.evilsngx.ccwu.cc",
+    ) == 262_144
+    assert profiles.profile_context_window(
         "kimi-k2.6-code-preview",
         provider_id="kimi-code",
         base_url="https://api.kimi.com/coding/",

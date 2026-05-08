@@ -560,7 +560,8 @@
           "api.kimi.com/coding"
         ],
         "model_prefixes": [
-          "kimi"
+          "kimi",
+          "k2."
         ]
       },
       "references": [
