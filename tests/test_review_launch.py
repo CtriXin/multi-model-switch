@@ -635,6 +635,15 @@ def test_review_launch_blocks_cache_sensitive_chat_fallback_by_default(tmp_path,
     assert payload["dispatch_attempts"][1]["ok"] is False
     assert payload["dispatch_attempts"][1]["skipped"] is True
     assert "chat fallback blocked" in payload["dispatch_attempts"][1]["error"]
+    assert len(payload["transport_evidence"]) == 1
+    evidence = payload["transport_evidence"][0]
+    assert evidence["schema"] == "cache_transport_evidence.v1"
+    assert evidence["provider_id"] == "newapi-personal-tokyo"
+    assert evidence["protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert evidence["request_url"] == "http://tokyo.example.com/v1/messages?beta=true"
+    assert evidence["request_path"] == "/v1/messages"
+    assert evidence["usage"]["cache_read_input_tokens"] == 0
+    assert payload["cache_transport_evidence"] == payload["transport_evidence"]
     assert payload["dispatch_trace"]["chat_fallback_allowed"] is False
     assert not Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
@@ -848,7 +857,8 @@ def test_review_launch_anthropic_call_adds_newapi_beta_once(monkeypatch):
     assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
 
 
-def test_review_launch_kimi_anthropic_call_uses_streaming(monkeypatch):
+@pytest.mark.parametrize("model_name", ["kimi-for-coding", "qwen3.5-plus"])
+def test_review_launch_anthropic_high_latency_models_use_streaming(monkeypatch, model_name):
     import asyncio
     import httpx
     from mms_review_launch import _call_model_anthropic_messages
@@ -889,7 +899,7 @@ def test_review_launch_kimi_anthropic_call_uses_streaming(monkeypatch):
                 "anthropic_base_url": "http://161.33.197.51:4001",
                 "api_key": "key",
             },
-            model_name="kimi-for-coding",
+            model_name=model_name,
             prompt="review this",
             max_tokens=1234,
         )

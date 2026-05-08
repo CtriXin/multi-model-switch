@@ -62,7 +62,8 @@ DEFAULT_MAX_PROMPT_CHARS = 90000
 HIGH_CONTEXT_REVIEW_MAX_FILE_CHARS = 100000
 HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS = 500000
 HIGH_CONTEXT_REVIEW_MODEL_PREFIXES = ("kimi", "minimax", "mimo", "deepseek", "qwen", "glm", "gpt-", "o1-", "o3-", "o4-", "codex-")
-ANTHROPIC_STREAM_MODEL_PREFIXES = ("kimi",)
+ANTHROPIC_STREAM_MODEL_PREFIXES = ("kimi", "qwen")
+SENSITIVE_QUERY_KEY_PARTS = ("key", "token", "secret", "credential", "password", "auth")
 CONTEXT_COMPACT_TRIGGER_RATIO = 0.70
 CONTEXT_SAFETY_MARGIN_TOKENS = 4096
 CONTEXT_CHAR_PER_TOKEN = 4
@@ -796,6 +797,18 @@ def _anthropic_stream_enabled_for_review_launch(model_name: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in ANTHROPIC_STREAM_MODEL_PREFIXES)
 
 
+def _safe_request_url(url: str) -> str:
+    parts = urlsplit(url)
+    query_items = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        lower_key = key.lower()
+        if any(part in lower_key for part in SENSITIVE_QUERY_KEY_PARTS):
+            query_items.append((key, "REDACTED"))
+        else:
+            query_items.append((key, value))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/", urlencode(query_items), ""))
+
+
 def _safe_endpoint_trace(provider: dict[str, Any], protocol: str) -> dict[str, str]:
     base_url = _provider_base_url_for_protocol(provider, protocol)
     if not base_url:
@@ -808,6 +821,7 @@ def _safe_endpoint_trace(provider: dict[str, Any], protocol: str) -> dict[str, s
         url = base_url
     parts = urlsplit(url)
     trace = {
+        "request_url": _safe_request_url(url),
         "request_host": parts.netloc,
         "request_path": parts.path or "/",
     }
@@ -893,7 +907,7 @@ def _transport_evidence_for_selection(
         "model": str(candidate.get("model_name") or ""),
         "provider_id": str(provider.get("id") or selected_attempt.get("provider_id") or ""),
         "protocol": protocol,
-        "request_url": "",
+        "request_url": str(selected_attempt.get("request_url") or ""),
         "request_path": str(selected_attempt.get("request_path") or ""),
         "route_source": str(provider.get("route_source") or "mms:model-routes.json"),
         "provider_profile": _default_provider_profile(provider, protocol),
@@ -915,6 +929,48 @@ def _last_non_skipped_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any]:
         if not item.get("skipped"):
             return item
     return attempts[-1] if attempts else {}
+
+
+def _attempt_prefix_through(attempts: list[dict[str, Any]], selected: dict[str, Any]) -> list[dict[str, Any]]:
+    for index, item in enumerate(attempts):
+        if item is selected:
+            return attempts[: index + 1]
+    return [item for item in attempts if item is selected] or ([selected] if selected else [])
+
+
+def _candidate_for_attempt(candidates: list[dict[str, Any]], attempt: dict[str, Any]) -> dict[str, Any] | None:
+    provider_id = str(attempt.get("provider_id") or "")
+    protocol = str(attempt.get("provider_protocol") or "")
+    model_name = str(attempt.get("model_name") or "")
+    for candidate in candidates:
+        provider = candidate.get("provider") if isinstance(candidate.get("provider"), dict) else {}
+        if str(provider.get("id") or "") != provider_id:
+            continue
+        if str(candidate.get("protocol") or "") != protocol:
+            continue
+        if str(candidate.get("model_name") or "") != model_name:
+            continue
+        return candidate
+    return None
+
+
+def _transport_evidence_for_failed_attempt(
+    *,
+    candidates: list[dict[str, Any]],
+    attempts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected_attempt = _last_non_skipped_attempt(attempts)
+    if not selected_attempt:
+        return []
+    candidate = _candidate_for_attempt(candidates, selected_attempt)
+    if not candidate:
+        return []
+    return [
+        _transport_evidence_for_selection(
+            candidate=candidate,
+            attempts=_attempt_prefix_through(attempts, selected_attempt),
+        )
+    ]
 
 
 def _format_attempt_errors(attempts: list[dict[str, Any]]) -> str:
@@ -1285,6 +1341,7 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
     dispatch_candidates_count = 0
     dispatch_max_tokens = 0
     transport_evidence: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     context_budget: dict[str, Any] = {}
     context_entries: list[dict[str, Any]] = []
 
@@ -1351,6 +1408,10 @@ def run_review_launch(env: dict[str, str] | None = None) -> dict[str, Any]:
                     provider_id = str(last_attempt.get("provider_id") or "")
                     provider_protocol = str(last_attempt.get("provider_protocol") or "")
                     dispatch_model_name = str(last_attempt.get("model_name") or reviewer_id)
+                    transport_evidence = _transport_evidence_for_failed_attempt(
+                        candidates=candidates,
+                        attempts=dispatch_attempts,
+                    )
                 raise RuntimeError(str(exc)) from exc
             model_calls = _model_call_count(dispatch_attempts)
             provider_id = str((selected_candidate.get("provider") or {}).get("id") or "")
