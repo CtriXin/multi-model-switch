@@ -2750,6 +2750,15 @@ def _runtime_reasoning_effort(runtime, default="high"):
     return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
 
 
+def _resolve_native_fallback_routes(runtime, model_name):
+    try:
+        from mms_native_fallback import resolve_native_fallback_routes
+
+        return resolve_native_fallback_routes(runtime, model_name)
+    except Exception:
+        return []
+
+
 def _is_installed_mms_layout(module_path=None):
     current_path = os.path.abspath(module_path or __file__)
     installed_root = os.path.abspath(_real_user_path(".mms"))
@@ -6366,6 +6375,10 @@ def launch_claude(model_info, runtime, once=False):
             bridge_gw_url = anthropic_url.rstrip("/")
             if not bridge_gw_url.endswith("/v1"):
                 bridge_gw_url += "/v1"
+            native_fallback_routes = _resolve_native_fallback_routes(runtime, probe_model)
+            if native_fallback_routes:
+                fallback_ids = ", ".join(route.get("provider_id", "") for route in native_fallback_routes)
+                console.print(f"[dim]native fallback: {fallback_ids}[/dim]")
             if lb_light or lb_medium:
                 # 智能路由：通过本地 bridge 路由，以便拦截并切换模型
                 cleanup_ctx = _gateway_claude_bridge_context(bridge_gw_url, runtime["api_key"],
@@ -6384,7 +6397,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     reasoning_enabled=_thinking_enabled,
-                                                    reasoning_effort=_reasoning_effort)
+                                                    reasoning_effort=_reasoning_effort,
+                                                    native_fallback_routes=native_fallback_routes)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -6422,6 +6436,7 @@ def launch_claude(model_info, runtime, once=False):
                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                     reasoning_enabled=_thinking_enabled,
                     reasoning_effort=_reasoning_effort,
+                    native_fallback_routes=native_fallback_routes,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(

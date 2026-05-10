@@ -1,6 +1,6 @@
 # CLI / Provider Compatibility Notes
 
-> 更新时间：2026-04-17
+> 更新时间：2026-05-10
 > 范围：`claude` / `codex` / `qwen` / `kimi` 与公开仓库内可见的通用兼容性规则。
 
 > 2026-04-16 stopgap：`MMS` 当前保留 `Claude CLI` 启动能力，但默认隐藏 `Claude family model` 的展示与候选选择；这是 surface 收口，不是 runtime 下线。
@@ -52,6 +52,7 @@
 - header passthrough
 - sticky-session key source
 - `Responses` vs `Chat Completions` fallback
+- same-vendor native/direct fallback
 
 另外，对带 `thinking` 的非 Claude upstream 不要只验证“首轮能回字”：
 
@@ -108,6 +109,7 @@
 - 本地 bridge 不应先探测空闲端口再二次 bind；应直接 `bind(127.0.0.1, 0)` 取内核分配端口，并在 yield 前完成 ready wait，避免首请求 `connection refused`
 - `Responses -> Chat Completions fallback` 只在明确“不支持 Responses API”时才写 cache；`empty body / empty stream / content-length=0` 这类模糊失败不能持久化成 fallback 结论
 - Anthropic-facing probe / classify / bridge fallback 遇到 `429` 时应优先 respect `Retry-After` 并对同一目标做最小 backoff，不要立刻横扫其它 candidate URL
+- same-vendor native/direct fallback 只能作为显式诊断 fallback：同厂商、同 profile、API-key runtime、有明确 native/direct provider 与模型元数据；不得写 config、不得同步 probe、不得切到 global OAuth、不得在 client response 已经开始后切 route
 - probe metadata 不应带固定可识别前缀，也不应带 runtime/account identity；如果必须带 session identity，默认使用中性/随机值
 - `load_config()` 这类 read path 不应在仅做 normalize/migrate 时自动落盘真实 config；显式写配置必须保持为单独动作
 - stale probe cache 可以用于“提示后台刷新”，但不能静默主导 provider 选择；缓存里的 `error / error_kind` 也不应被洗白
@@ -128,6 +130,7 @@
 10. Anthropic `429` 时不会继续 fanout 到其它 candidate URL，OAuth 路径也不会继承父进程里的 `ANTHROPIC_*` 认证环境
 11. gateway/proxy 健康检查不会把 `401/403/404` 误判成“线路可用”，多 provider 之间也不会共享同一条 health 记录
 12. local bridge 在 yield 前已经 listen，首请求不会因为端口竞争或未 ready 而偶发 `connection refused`
+13. same-vendor native/direct fallback 只在首个 client response 前发生，并且能在日志/route status 里看到 fallback source、target、request path 与 reason
 
 ## 本地私有文档建议
 

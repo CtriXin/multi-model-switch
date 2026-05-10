@@ -1,5 +1,6 @@
 import json
 import logging
+import copy
 import os
 import re
 import socket
@@ -286,6 +287,135 @@ def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
             if should_refresh:
                 cache[key] = {"mode": "chatcompletions", "ts": time.time()}
                 _save_bridge_mode_cache_unlocked(cache)
+
+
+_NATIVE_FALLBACK_RETRY_STATUSES = {401, 403, 408, 409, 425, 429, 500, 502, 503, 504}
+_NATIVE_FALLBACK_RETRY_TOKENS = {"connect_error", "timeout", "invalid_json", "invalid_text"}
+
+
+def _native_fallback_retry_sets(route):
+    raw = route.get("try_next_on") if isinstance(route, dict) else None
+    if not raw:
+        return set(_NATIVE_FALLBACK_RETRY_STATUSES), set(_NATIVE_FALLBACK_RETRY_TOKENS)
+    statuses = set()
+    tokens = set()
+    for item in raw:
+        try:
+            statuses.add(int(item))
+            continue
+        except Exception:
+            pass
+        token = str(item or "").strip().lower()
+        if token:
+            tokens.add(token)
+    return statuses, tokens
+
+
+def _native_fallback_failure_for_body(body):
+    try:
+        data = json.loads((body or b"").decode("utf-8", errors="replace"))
+    except Exception:
+        return "invalid_json"
+    if not isinstance(data, dict):
+        return "invalid_json"
+    if data.get("type") == "message":
+        content = data.get("content")
+        if not isinstance(content, list) or not content:
+            return "invalid_text"
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                return None
+            if block.get("type") == "text" and str(block.get("text") or "").strip():
+                return None
+        return "invalid_text"
+    if "choices" in data:
+        choices = data.get("choices") or []
+        choice = choices[0] if choices else {}
+        message = choice.get("message") if isinstance(choice, dict) else {}
+        if isinstance(message, dict):
+            if str(message.get("content") or "").strip() or message.get("tool_calls"):
+                return None
+        return "invalid_text"
+    return "invalid_json"
+
+
+def _native_fallback_error_token(exc):
+    name = exc.__class__.__name__.lower()
+    module = exc.__class__.__module__.lower()
+    text = str(exc).lower()
+    if "timeout" in name or "timeout" in text:
+        return "timeout"
+    transport_markers = (
+        "connect",
+        "network",
+        "proxy",
+        "protocol",
+        "readerror",
+        "writeerror",
+        "transport",
+    )
+    text_markers = (
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "server disconnected",
+        "remote protocol",
+        "broken pipe",
+    )
+    if "httpx" in module and any(marker in name for marker in transport_markers):
+        return "connect_error"
+    if any(marker in text for marker in text_markers):
+        return "connect_error"
+    return ""
+
+
+def _route_httpx_kwargs(server, route, target_url):
+    route = route if isinstance(route, dict) else {}
+    return _bridge_httpx_kwargs(
+        target_url=target_url,
+        proxy_url=route.get("proxy_url", getattr(server, "proxy_url", "")),
+        no_proxy=route.get("no_proxy", getattr(server, "no_proxy", "")),
+    )
+
+
+def _fallback_safe_url(url):
+    try:
+        parsed = urlsplit(str(url or ""))
+        return parsed.path or "/"
+    except Exception:
+        return "/"
+
+
+def _log_native_fallback(*, from_route, to_route, model_name, reason, request_url):
+    evidence = {
+        "schema": "cache_transport_evidence.v1",
+        "model": model_name,
+        "provider_id": str((to_route or {}).get("provider_id") or ""),
+        "request_path": _fallback_safe_url(request_url),
+        "fallback_reason": reason,
+        "from_provider_id": str((from_route or {}).get("provider_id") or ""),
+    }
+    _bridge_error_logger.warning(
+        "native fallback triggered: %s",
+        json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _gateway_route_payload(route, *, gateway_url, gateway_key, server):
+    route = route if isinstance(route, dict) else {}
+    return {
+        "provider_id": str(route.get("provider_id") or getattr(server, "provider_id", "") or ""),
+        "provider_profile": str(route.get("provider_profile") or getattr(server, "provider_profile", "") or ""),
+        "gateway_url": str(route.get("gateway_url") or gateway_url or "").strip(),
+        "gateway_key": str(route.get("gateway_key") or gateway_key or ""),
+        "openai_url": str(route.get("openai_url") or getattr(server, "openai_url", "") or "").strip(),
+        "proxy_url": str(route.get("proxy_url") or getattr(server, "proxy_url", "") or "").strip(),
+        "no_proxy": str(route.get("no_proxy") or getattr(server, "no_proxy", "") or "").strip(),
+        "fallback_reason": str(route.get("fallback_reason") or "primary"),
+        "try_next_on": list(route.get("try_next_on") or []),
+    }
 
 
 _OPENAI_MODEL_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "codex-")
@@ -2040,107 +2170,227 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
-        enable_mimo_1m_context = _requests_mimo_1m_context(resolved_model)
-        wire_model = profile_model_alias(
-            resolved_model,
-            protocol="anthropic_messages",
-            provider_id=getattr(self.server, "provider_id", ""),
-            profile_id=getattr(self.server, "provider_profile", ""),
-            base_url=gateway_url,
-        )
-        if wire_model:
-            payload["model"] = wire_model
-            resolved_model = wire_model
-        if enable_mimo_1m_context:
-            # MiMo Token Plan documents the [1m] selector for Claude Code, but
-            # its Messages API currently accepts the base model plus 1M beta.
-            payload["model"] = resolved_model.replace(_ONE_M_CONTEXT_SUFFIX, "")
-            resolved_model = str(payload["model"] or "")
-
-        # 非 Claude 模型：优先按 declarative provider profile 调整 body。
-        profile_id = apply_profile_body_patches(
-            payload,
-            protocol="anthropic_messages",
-            provider_id=getattr(self.server, "provider_id", ""),
-            profile_id=getattr(self.server, "provider_profile", ""),
-            base_url=gateway_url,
-            model_name=resolved_model,
-            thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
-            reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
-        )
-        # 未命中 profile 时保留旧的 domestic fallback，避免破坏未知 provider。
-        if not profile_id and _is_domestic_model(resolved_model):
-            _apply_domestic_reasoning_controls(
-                payload,
-                resolved_model,
-                thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
-                reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
-            )
-        if not resolved_model.startswith("claude-") and not _model_supports_anthropic_cache_control(resolved_model):
-            _strip_cache_control(payload)
-
-        # gateway_url 可能以 /v1 结尾也可能不以 /v1 结尾，需兼容
-        _gw = gateway_url.rstrip("/")
-        if _gw.endswith("/v1"):
-            path_suffix = path[3:]  # strip /v1 prefix to avoid double /v1
-        else:
-            path_suffix = path      # keep full path including /v1
-        target_url = _gw + path_suffix
-
-        fwd_headers = {
-            "Content-Type": "application/json",
-            "x-api-key": gateway_key,
-        }
-        apply_profile_auth_headers(
-            fwd_headers,
-            protocol="anthropic_messages",
-            api_key=gateway_key,
-            provider_id=getattr(self.server, "provider_id", ""),
-            profile_id=getattr(self.server, "provider_profile", ""),
-            base_url=gateway_url,
-            model_name=resolved_model,
-        )
-        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(
-            self.server,
-            resolved_model,
-        )
-        fwd_headers.update(
-            _copy_passthrough_headers(
-                self.headers,
-                names=claude_passthrough,
-                prefixes=claude_passthrough_prefixes,
-            )
-        )
-        # Anthropic API 需要 version；若客户端没显式带，保守回退到官方默认值。
-        if "anthropic-version" not in {name.lower() for name in fwd_headers}:
-            fwd_headers["anthropic-version"] = "2023-06-01"
-        if enable_mimo_1m_context:
-            _merge_header_token(fwd_headers, "anthropic-beta", _MIMO_1M_CONTEXT_BETA)
-
         client_wants_stream = bool(payload.get("stream"))
-        stream = client_wants_stream
-        # 智能路由模式下强制非流式（避免各 provider SSE 格式 / 连接行为不一致）
-        if has_routing:
-            stream = False
-            payload["stream"] = False  # 确保 upstream 也返回 JSON 而非 SSE
-        metrics_model = str(payload.get("model") or "")
-        started_ms = _now_ms()
-        first_byte_ms = None
-        output_tokens = None
+        base_forward_payload = copy.deepcopy(payload)
+        primary_route = _gateway_route_payload(
+            {},
+            gateway_url=gateway_url,
+            gateway_key=gateway_key,
+            server=self.server,
+        )
+        fallback_routes = [
+            _gateway_route_payload(route, gateway_url="", gateway_key="", server=self.server)
+            for route in getattr(self.server, "native_fallback_routes", []) or []
+            if isinstance(route, dict)
+            and (
+                not route.get("model")
+                or _normalize_model_name(route.get("model")) == _normalize_model_name(payload.get("model"))
+            )
+        ]
+        forward_routes = [primary_route] + [route for route in fallback_routes if route.get("gateway_url") and route.get("gateway_key")]
         input_tokens = None
 
         try:
-            if stream:
-                with httpx.stream(
-                    "POST",
-                    target_url,
-                    headers=fwd_headers,
-                    json=payload,
-                    timeout=300,
-                    **_server_bridge_httpx_kwargs(self.server, target_url),
-                ) as response:
+            for route_index, route in enumerate(forward_routes):
+                route_payload = copy.deepcopy(base_forward_payload)
+                route_gateway_url = route.get("gateway_url") or gateway_url
+                route_gateway_key = route.get("gateway_key") or gateway_key
+                route_provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
+                route_provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+                resolved_model = str(route_payload.get("model") or "")
+                enable_mimo_1m_context = _requests_mimo_1m_context(resolved_model)
+                wire_model = profile_model_alias(
+                    resolved_model,
+                    protocol="anthropic_messages",
+                    provider_id=route_provider_id,
+                    profile_id=route_provider_profile,
+                    base_url=route_gateway_url,
+                )
+                if wire_model:
+                    route_payload["model"] = wire_model
+                    resolved_model = wire_model
+                if enable_mimo_1m_context:
+                    # MiMo Token Plan documents the [1m] selector for Claude Code, but
+                    # its Messages API currently accepts the base model plus 1M beta.
+                    route_payload["model"] = resolved_model.replace(_ONE_M_CONTEXT_SUFFIX, "")
+                    resolved_model = str(route_payload["model"] or "")
+
+                profile_id = apply_profile_body_patches(
+                    route_payload,
+                    protocol="anthropic_messages",
+                    provider_id=route_provider_id,
+                    profile_id=route_provider_profile,
+                    base_url=route_gateway_url,
+                    model_name=resolved_model,
+                    thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
+                    reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
+                )
+                if not profile_id and _is_domestic_model(resolved_model):
+                    _apply_domestic_reasoning_controls(
+                        route_payload,
+                        resolved_model,
+                        thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
+                        reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
+                    )
+                if not resolved_model.startswith("claude-") and not _model_supports_anthropic_cache_control(resolved_model):
+                    _strip_cache_control(route_payload)
+
+                _gw = route_gateway_url.rstrip("/")
+                if _gw.endswith("/v1"):
+                    path_suffix = path[3:]
+                else:
+                    path_suffix = path
+                target_url = _gw + path_suffix
+
+                fwd_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": route_gateway_key,
+                }
+                apply_profile_auth_headers(
+                    fwd_headers,
+                    protocol="anthropic_messages",
+                    api_key=route_gateway_key,
+                    provider_id=route_provider_id,
+                    profile_id=route_provider_profile,
+                    base_url=route_gateway_url,
+                    model_name=resolved_model,
+                )
+                claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(
+                    self.server,
+                    resolved_model,
+                )
+                fwd_headers.update(
+                    _copy_passthrough_headers(
+                        self.headers,
+                        names=claude_passthrough,
+                        prefixes=claude_passthrough_prefixes,
+                    )
+                )
+                if "anthropic-version" not in {name.lower() for name in fwd_headers}:
+                    fwd_headers["anthropic-version"] = "2023-06-01"
+                if enable_mimo_1m_context:
+                    _merge_header_token(fwd_headers, "anthropic-beta", _MIMO_1M_CONTEXT_BETA)
+
+                stream = client_wants_stream
+                # 智能路由模式下强制非流式（避免各 provider SSE 格式 / 连接行为不一致）
+                if has_routing:
+                    stream = False
+                    route_payload["stream"] = False
+                metrics_model = str(route_payload.get("model") or "")
+                route_started_ms = _now_ms()
+                first_byte_ms = None
+                output_tokens = None
+                is_last_route = route_index >= len(forward_routes) - 1
+                retry_statuses, retry_tokens = _native_fallback_retry_sets(route)
+                response_started = False
+
+                try:
+                    if stream:
+                        with httpx.stream(
+                            "POST",
+                            target_url,
+                            headers=fwd_headers,
+                            json=route_payload,
+                            timeout=300,
+                            **_route_httpx_kwargs(self.server, route, target_url),
+                        ) as response:
+                            if response.status_code in retry_statuses and not is_last_route:
+                                body = response.read().decode("utf-8", errors="replace")
+                                next_route = forward_routes[route_index + 1]
+                                reason = f"http_{response.status_code}"
+                                _log_native_fallback(
+                                    from_route=route,
+                                    to_route=next_route,
+                                    model_name=metrics_model,
+                                    reason=reason,
+                                    request_url=target_url,
+                                )
+                                _write_route_status(
+                                    "fallback",
+                                    metrics_model,
+                                    reason,
+                                    status_paths=getattr(self.server, "route_status_paths", None),
+                                )
+                                continue
+                            if response.status_code in (401, 403):
+                                body = response.read().decode("utf-8", errors="replace")
+                                self._json(
+                                    502,
+                                    _mms_fail_closed_auth_error_payload(
+                                        response.status_code,
+                                        body,
+                                        model_name=metrics_model,
+                                    ),
+                                )
+                                return
+                            self.send_response(response.status_code)
+                            self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
+                            self.send_header("Cache-Control", "no-cache")
+                            self.send_header("Connection", "close")
+                            self.end_headers()
+                            response_started = True
+                            for raw_line in response.iter_lines():
+                                if first_byte_ms is None:
+                                    first_byte_ms = _now_ms()
+                                stripped = raw_line.strip()
+                                if stripped.startswith("data:"):
+                                    data_str = stripped[5:].strip()
+                                    if data_str and data_str != "[DONE]":
+                                        try:
+                                            event_payload = json.loads(data_str)
+                                        except json.JSONDecodeError:
+                                            event_payload = None
+                                        if event_payload:
+                                            extracted = _extract_output_tokens(event_payload)
+                                            if extracted is not None:
+                                                output_tokens = extracted
+                                            inp, _ = _extract_usage(event_payload)
+                                            if inp > 0:
+                                                input_tokens = inp
+                                self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                                if raw_line == "":
+                                    self.wfile.flush()
+                            self.close_connection = True
+                        if should_record_speed and response.status_code < 400:
+                            _record_bridge_speed(
+                                metrics_model,
+                                started_ms=route_started_ms,
+                                first_byte_ms=first_byte_ms,
+                                output_tokens=output_tokens,
+                                input_tokens=input_tokens,
+                                provider_scope=getattr(self.server, "speed_scope", None),
+                                server=self.server,
+                            )
+                        return
+
+                    response = httpx.post(
+                        target_url,
+                        headers=fwd_headers,
+                        json=route_payload,
+                        timeout=300,
+                        **_route_httpx_kwargs(self.server, route, target_url),
+                    )
+                    first_byte_ms = _now_ms()
+                    body_out = response.content
+                    if response.status_code in retry_statuses and not is_last_route:
+                        next_route = forward_routes[route_index + 1]
+                        reason = f"http_{response.status_code}"
+                        _log_native_fallback(
+                            from_route=route,
+                            to_route=next_route,
+                            model_name=metrics_model,
+                            reason=reason,
+                            request_url=target_url,
+                        )
+                        _write_route_status(
+                            "fallback",
+                            metrics_model,
+                            reason,
+                            status_paths=getattr(self.server, "route_status_paths", None),
+                        )
+                        continue
                     if response.status_code in (401, 403):
-                        body = response.read().decode("utf-8", errors="replace")
+                        body = body_out.decode("utf-8", errors="replace")
                         self._json(
                             502,
                             _mms_fail_closed_auth_error_payload(
@@ -2150,93 +2400,75 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             ),
                         )
                         return
-                    self.send_response(response.status_code)
-                    self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    for raw_line in response.iter_lines():
-                        if first_byte_ms is None:
-                            first_byte_ms = _now_ms()
-                        stripped = raw_line.strip()
-                        if stripped.startswith("data:"):
-                            data_str = stripped[5:].strip()
-                            if data_str and data_str != "[DONE]":
-                                try:
-                                    event_payload = json.loads(data_str)
-                                except json.JSONDecodeError:
-                                    event_payload = None
-                                if event_payload:
-                                    extracted = _extract_output_tokens(event_payload)
-                                    if extracted is not None:
-                                        output_tokens = extracted
-                                    # 提取 input_tokens（在 message_start 或 message_delta 事件中）
-                                    inp, _ = _extract_usage(event_payload)
-                                    if inp > 0:
-                                        input_tokens = inp
-                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
-                        if raw_line == "":
-                            self.wfile.flush()
-                    self.close_connection = True
-                if should_record_speed and response.status_code < 400:
-                    _record_bridge_speed(
-                        metrics_model,
-                        started_ms=started_ms,
-                        first_byte_ms=first_byte_ms,
-                        output_tokens=output_tokens,
-                        input_tokens=input_tokens,
-                        provider_scope=getattr(self.server, "speed_scope", None),
-                        server=self.server,
-                    )
-            else:
-                response = httpx.post(
-                    target_url,
-                    headers=fwd_headers,
-                    json=payload,
-                    timeout=300,
-                    **_server_bridge_httpx_kwargs(self.server, target_url),
-                )
-                first_byte_ms = _now_ms()
-                if response.status_code in (401, 403):
-                    body = response.content.decode("utf-8", errors="replace")
-                    self._json(
-                        502,
-                        _mms_fail_closed_auth_error_payload(
-                            response.status_code,
-                            body,
-                            model_name=metrics_model,
-                        ),
-                    )
+                    if response.status_code == 200 and path_bare == "/v1/messages" and not is_last_route:
+                        failure = _native_fallback_failure_for_body(body_out)
+                        if failure in retry_tokens:
+                            next_route = forward_routes[route_index + 1]
+                            _log_native_fallback(
+                                from_route=route,
+                                to_route=next_route,
+                                model_name=metrics_model,
+                                reason=failure,
+                                request_url=target_url,
+                            )
+                            _write_route_status(
+                                "fallback",
+                                metrics_model,
+                                failure,
+                                status_paths=getattr(self.server, "route_status_paths", None),
+                            )
+                            continue
+                    if body_out:
+                        try:
+                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                        except Exception:
+                            output_tokens = None
+                    if has_routing and client_wants_stream and response.status_code == 200:
+                        body_out = _json_resp_to_sse(body_out)
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                    else:
+                        self.send_response(response.status_code)
+                        self.send_header("Content-Type", response.headers.get("content-type", "application/json"))
+                        self.send_header("Content-Length", str(len(body_out)))
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                    if should_record_speed and response.status_code < 400:
+                        _record_bridge_speed(
+                            metrics_model,
+                            started_ms=route_started_ms,
+                            first_byte_ms=first_byte_ms,
+                            output_tokens=output_tokens,
+                            provider_scope=getattr(self.server, "speed_scope", None),
+                            server=self.server,
+                        )
                     return
-                body_out = response.content
-                if body_out:
-                    try:
-                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
-                    except Exception:
-                        output_tokens = None
-                # 路由模式：upstream 返回 JSON，但 Claude Code 期望 SSE → 转换
-                if has_routing and client_wants_stream and response.status_code == 200:
-                    body_out = _json_resp_to_sse(body_out)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-cache")
-                    self.end_headers()
-                    self.wfile.write(body_out)
-                else:
-                    self.send_response(response.status_code)
-                    self.send_header("Content-Type", response.headers.get("content-type", "application/json"))
-                    self.send_header("Content-Length", str(len(body_out)))
-                    self.end_headers()
-                    self.wfile.write(body_out)
-                if should_record_speed and response.status_code < 400:
-                    _record_bridge_speed(
-                        metrics_model,
-                        started_ms=started_ms,
-                        first_byte_ms=first_byte_ms,
-                        output_tokens=output_tokens,
-                        provider_scope=getattr(self.server, "speed_scope", None),
-                        server=self.server,
-                    )
+                except BrokenPipeError:
+                    raise
+                except Exception as exc:
+                    token = _native_fallback_error_token(exc)
+                    if not response_started and token in retry_tokens and not is_last_route:
+                        next_route = forward_routes[route_index + 1]
+                        _log_native_fallback(
+                            from_route=route,
+                            to_route=next_route,
+                            model_name=str(route_payload.get("model") or ""),
+                            reason=token,
+                            request_url=target_url,
+                        )
+                        _write_route_status(
+                            "fallback",
+                            str(route_payload.get("model") or ""),
+                            token,
+                            status_paths=getattr(self.server, "route_status_paths", None),
+                        )
+                        continue
+                    if response_started:
+                        return
+                    raise
         except BrokenPipeError:
             return  # 客户端已断开（Ctrl+C），静默忽略
         except Exception as exc:
@@ -3482,6 +3714,7 @@ def gateway_claude_bridge(
     reasoning_effort="medium",
     proxy_url="",
     no_proxy="",
+    native_fallback_routes=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -3520,6 +3753,7 @@ def gateway_claude_bridge(
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
+    server.native_fallback_routes = list(native_fallback_routes or [])
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier
