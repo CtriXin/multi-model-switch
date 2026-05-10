@@ -38,6 +38,12 @@ The patch engine intentionally supports only data-driven field patches. It does 
 | Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | Thinking toggle metadata only; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
+MiMo long context is opt-in by model suffix. Keep ordinary `mimo-v2.5-pro`
+at 262144 tokens; expose `mimo-v2.5-pro[1m]` only on direct MiMo routes. The
+Token Plan Anthropic endpoint rejects the literal suffixed API model, so MMS
+keeps `[1m]` as a local selector and forwards `mimo-v2.5-pro` with the
+`context-1m-2025-08-07` Anthropic beta header.
+
 ## Source References
 
 - OpenAI Responses API: https://platform.openai.com/docs/api-reference/responses

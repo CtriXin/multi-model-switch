@@ -434,7 +434,8 @@ def profile_model_alias(
             continue
         if base_tokens and not any(token in base_l for token in base_tokens):
             continue
-        if model == _lower(key) or model == _normalize_model(alias):
+        match_target = conditions.get("match_target", True) is not False
+        if model == _lower(key) or (match_target and model == _normalize_model(alias)):
             return alias
     return ""
 

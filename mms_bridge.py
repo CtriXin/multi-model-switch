@@ -140,6 +140,35 @@ _CLAUDE_HEADER_PREFIX_PASSTHROUGH = (
 )
 
 
+_ONE_M_CONTEXT_SUFFIX = "[1m]"
+_MIMO_1M_CONTEXT_BETA = "context-1m-2025-08-07"
+
+
+def _requests_mimo_1m_context(model_name):
+    return _normalize_model_name(model_name) == f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}"
+
+
+def _merge_header_token(headers, header_name, token):
+    if not token:
+        return
+    existing_key = None
+    for key in headers:
+        if key.lower() == header_name.lower():
+            existing_key = key
+            break
+    if existing_key is None:
+        headers[header_name] = token
+        return
+    parts = [
+        part.strip()
+        for part in str(headers.get(existing_key) or "").split(",")
+        if part.strip()
+    ]
+    if token not in parts:
+        parts.append(token)
+    headers[existing_key] = ",".join(parts)
+
+
 def _copy_passthrough_headers(headers, names=_CODEX_HEADER_PASSTHROUGH, prefixes=()):
     """复制需要保留给上游的请求头，避免丢失上游对原始客户端的识别信息。"""
     copied = {}
@@ -286,6 +315,11 @@ def _normalize_model_name(model_name):
     if "/" in normalized:
         normalized = normalized.rsplit("/", 1)[-1]
     return normalized
+
+
+def _is_claude_shell_model(model_name):
+    normalized = _normalize_model_name(model_name)
+    return not normalized or normalized.startswith(("claude-", "sonnet-", "opus-", "haiku-"))
 
 
 def _is_domestic_model(model_name):
@@ -1843,9 +1877,12 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             self._json(200, _block_resp)
                         return
 
-        # ── 模型名映射：将 Claude Code 发来的 claude-* 替换为真实模型名 ──
+        # ── 模型名映射：只将 Claude Code 壳模型替换为真实模型名 ──
+        # 用户通过 /model 明确选择的非 Claude 模型必须保留，否则 Claude Code 会看到
+        # selected model 与返回模型不一致并报 "selected model" 错误。
         heavy_model = getattr(self.server, "heavy_model", None)
-        if heavy_model and "model" in payload:
+        incoming_model = payload.get("model") if isinstance(payload, dict) else ""
+        if heavy_model and "model" in payload and _is_claude_shell_model(incoming_model):
             payload["model"] = heavy_model
 
         # ── 智能路由：3-tier (light/medium/heavy) + sticky escalation ──
@@ -2003,6 +2040,7 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             return
         # 国产模型继续走 Anthropic Messages 路径（gateway 负责格式转换）
 
+        enable_mimo_1m_context = _requests_mimo_1m_context(resolved_model)
         wire_model = profile_model_alias(
             resolved_model,
             protocol="anthropic_messages",
@@ -2013,6 +2051,11 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if wire_model:
             payload["model"] = wire_model
             resolved_model = wire_model
+        if enable_mimo_1m_context:
+            # MiMo Token Plan documents the [1m] selector for Claude Code, but
+            # its Messages API currently accepts the base model plus 1M beta.
+            payload["model"] = resolved_model.replace(_ONE_M_CONTEXT_SUFFIX, "")
+            resolved_model = str(payload["model"] or "")
 
         # 非 Claude 模型：优先按 declarative provider profile 调整 body。
         profile_id = apply_profile_body_patches(
@@ -2071,6 +2114,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         # Anthropic API 需要 version；若客户端没显式带，保守回退到官方默认值。
         if "anthropic-version" not in {name.lower() for name in fwd_headers}:
             fwd_headers["anthropic-version"] = "2023-06-01"
+        if enable_mimo_1m_context:
+            _merge_header_token(fwd_headers, "anthropic-beta", _MIMO_1M_CONTEXT_BETA)
 
         client_wants_stream = bool(payload.get("stream"))
         stream = client_wants_stream

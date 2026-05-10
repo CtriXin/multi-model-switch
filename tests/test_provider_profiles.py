@@ -115,6 +115,17 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
     ) == 262_144
+    assert profiles.profile_context_window(
+        "mimo-v2.5-pro[1m]",
+        provider_id="mimo",
+        base_url="https://api.xiaomimimo.com/anthropic",
+    ) == 1_000_000
+    assert profiles.profile_model_alias(
+        "mimo-v2.5-pro[1m]",
+        protocol="anthropic_messages",
+        provider_id="mimo-direct-anthropic",
+        base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    ) == "mimo-v2.5-pro"
     assert profiles.profile_model_alias(
         "mimo-v2.5-pro",
         protocol="anthropic_messages",

@@ -253,6 +253,12 @@ _MODEL_CONTEXT_WINDOWS = {
     "gpt-5.4-pro": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 200_000  # 未知模型的安全默认值
+_ONE_M_CONTEXT_SUFFIX = "[1m]"
+_ONE_M_SUFFIX_CONTEXT_WINDOWS = {
+    # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
+    "mimo-v2.5-pro": 1_000_000,
+}
+
 
 
 def _provider_id_set_from_env(env_name):
@@ -337,17 +343,22 @@ def _load_model_context_overrides():
 
 
 def _lookup_context_window(model_name, provider_id=None):
-    clean = str(model_name or "").replace("[1m]", "").strip()
-    if not clean:
+    raw_model = str(model_name or "").strip()
+    if not raw_model:
         return None
 
     provider_key = str(provider_id or "").strip()
+    raw_lower = raw_model.lower()
+    has_1m_suffix = _ONE_M_CONTEXT_SUFFIX in raw_lower
+    clean = raw_model.replace(_ONE_M_CONTEXT_SUFFIX, "").replace(_ONE_M_CONTEXT_SUFFIX.upper(), "").strip()
     lower = clean.lower()
     overrides = _load_model_context_overrides()
 
-    if provider_key:
+    def _provider_override_lookup(candidate, candidate_lower):
+        if not provider_key:
+            return None
         provider_overrides = overrides.get("provider_overrides", {})
-        direct = provider_overrides.get(f"{provider_key}:{clean}")
+        direct = provider_overrides.get(f"{provider_key}:{candidate}")
         if direct is not None:
             return direct
         for key, value in provider_overrides.items():
@@ -355,16 +366,41 @@ def _lookup_context_window(model_name, provider_id=None):
                 override_provider, override_model = key.split(":", 1)
             except ValueError:
                 continue
-            if override_provider == provider_key and override_model.lower() == lower:
+            if override_provider == provider_key and override_model.lower() == candidate_lower:
                 return value
+        return None
 
-    models = overrides.get("models", {})
-    direct = models.get(clean)
-    if direct is not None:
-        return direct
-    for key, value in models.items():
-        if key.lower() == lower:
-            return value
+    def _model_override_lookup(candidate, candidate_lower):
+        models = overrides.get("models", {})
+        direct = models.get(candidate)
+        if direct is not None:
+            return direct
+        for key, value in models.items():
+            if key.lower() == candidate_lower:
+                return value
+        return None
+
+    # Exact [1m] overrides must win before suffix stripping.
+    provider_exact = _provider_override_lookup(raw_model, raw_lower)
+    if provider_exact is not None:
+        return provider_exact
+    model_exact = _model_override_lookup(raw_model, raw_lower)
+    if model_exact is not None:
+        return model_exact
+
+    if has_1m_suffix:
+        suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
+        if suffixed_window is not None:
+            return suffixed_window
+
+    if provider_key:
+        provider_clean = _provider_override_lookup(clean, lower)
+        if provider_clean is not None:
+            return provider_clean
+
+    model_clean = _model_override_lookup(clean, lower)
+    if model_clean is not None:
+        return model_clean
 
     profiled = profile_context_window(clean, provider_id=provider_id or "")
     if profiled is not None:
@@ -406,8 +442,9 @@ def _effective_context_window(*models, enable_claude_1m=True, provider_id=None):
     for m in models:
         if not m:
             continue
-        clean = m.replace("[1m]", "").strip()
-        w = _lookup_context_window(clean, provider_id=provider_id)
+        raw_model = str(m).strip()
+        clean = raw_model.replace("[1m]", "").strip()
+        w = _lookup_context_window(raw_model, provider_id=provider_id)
         if not enable_claude_1m:
             lower = clean.lower()
             if lower.startswith("claude-") and "haiku" not in lower:
