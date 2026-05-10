@@ -127,3 +127,48 @@ def test_review_launch_mimo_1m_adds_context_beta(monkeypatch):
     assert captured["url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages"
     assert captured["json"]["model"] == "mimo-v2.5-pro"
     assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_review_launch_mimo_1m_safe_reviewer_alias_adds_context_beta(monkeypatch):
+    import httpx
+    from mms_review_launch import _call_model_anthropic_messages
+
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"content": [{"type": "text", "text": "Verdict: PASS"}]}
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None, timeout=None):
+            captured["headers"] = headers or {}
+            captured["json"] = json or {}
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    asyncio.run(
+        _call_model_anthropic_messages(
+            provider={
+                "id": "mimo-direct-anthropic",
+                "protocols": ["anthropic_messages"],
+                "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+                "api_key": "test-key",
+            },
+            model_name="mimo-v2.5-pro+1m",
+            prompt="review this",
+            max_tokens=1234,
+        )
+    )
+
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
+    assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]

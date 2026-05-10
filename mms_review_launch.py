@@ -66,6 +66,7 @@ HIGH_CONTEXT_REVIEW_MODEL_PREFIXES = ("kimi", "minimax", "mimo", "deepseek", "qw
 ANTHROPIC_STREAM_MODEL_PREFIXES = ("kimi", "qwen")
 SENSITIVE_QUERY_KEY_PARTS = ("key", "token", "secret", "credential", "password", "auth")
 MIMO_1M_CONTEXT_SELECTOR = "mimo-v2.5-pro[1m]"
+MIMO_1M_REVIEWER_ALIAS = "mimo-v2.5-pro+1m"
 MIMO_1M_CONTEXT_BETA = "context-1m-2025-08-07"
 CONTEXT_COMPACT_TRIGGER_RATIO = 0.70
 CONTEXT_SAFETY_MARGIN_TOKENS = 4096
@@ -157,6 +158,13 @@ def _context_window_from_mms_core(model_name: str) -> int | None:
     return value if isinstance(value, int) and value > 0 else None
 
 
+def _profile_model_name(model_name: str) -> str:
+    normalized = str(model_name or "").strip().lower()
+    if normalized == MIMO_1M_REVIEWER_ALIAS:
+        return MIMO_1M_CONTEXT_SELECTOR
+    return model_name
+
+
 def _route_context_window_tokens(model_name: str, candidate: dict[str, Any] | None) -> int | None:
     provider = candidate.get("provider") if isinstance(candidate, dict) else {}
     if not isinstance(provider, dict):
@@ -166,7 +174,7 @@ def _route_context_window_tokens(model_name: str, candidate: dict[str, Any] | No
     provider_id = str(provider.get("id") or provider.get("provider_id") or "")
     provider_profile = str(provider.get("profile") or provider.get("provider_profile") or "")
     profiled = profile_context_window(
-        model_name,
+        _profile_model_name(model_name),
         runtime=provider,
         provider_id=provider_id,
         base_url=base_url,
@@ -892,7 +900,7 @@ def _merge_header_token(headers: dict[str, str], name: str, token: str) -> None:
 
 
 def _needs_mimo_1m_context_beta(provider: dict[str, Any], model_name: str, base_url: str) -> bool:
-    if str(model_name or "").strip().lower() != MIMO_1M_CONTEXT_SELECTOR:
+    if str(model_name or "").strip().lower() not in {MIMO_1M_CONTEXT_SELECTOR, MIMO_1M_REVIEWER_ALIAS}:
         return False
     provider_id = str(provider.get("id") or provider.get("provider_id") or "").lower()
     base_l = str(base_url or "").lower()
@@ -903,6 +911,8 @@ def _wire_model_for_protocol(provider: dict[str, Any], protocol: str, model_name
     base_url = _provider_base_url_for_protocol(provider, protocol)
     if protocol != ANTHROPIC_MESSAGES_PROTOCOL:
         return model_name
+    if str(model_name or "").strip().lower() == MIMO_1M_REVIEWER_ALIAS:
+        return "mimo-v2.5-pro"
     provider_id = str(provider.get("id") or "")
     provider_profile = str(provider.get("profile") or provider.get("provider_profile") or "")
     return (
