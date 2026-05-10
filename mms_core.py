@@ -1813,10 +1813,6 @@ def _native_clis_for_model(model_name):
         return ["codex"]
     if normalized.startswith("gemini-"):
         return ["gemini"]
-    if normalized.startswith("qwen"):
-        return ["qwen"]
-    if normalized.startswith("kimi"):
-        return ["kimi"]
     return []
 
 

@@ -141,3 +141,61 @@ def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
     family_names = [entry["family"] for entry in families]
     assert "DeepSeek" in family_names
     assert "其他" not in family_names
+
+
+def test_claude_provider_options_allow_qwen_kimi_anthropic_direct(monkeypatch):
+    import mms_core
+
+    relay = {
+        "id": "relay",
+        "enabled": True,
+        "api_key": "sk-relay",
+        "role": "auto",
+        "priority": 100,
+        "supported_clis": ["claude", "qwen", "kimi"],
+        "protocols": ["anthropic_messages", "openai_chat_completions"],
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "openai_base_url": "https://relay.example.com/v1",
+        "models_endpoint": "manual",
+        "fallback_models": ["qwen3.5-plus", "kimi-for-coding"],
+    }
+    direct_qwen = {
+        "id": "direct-qwen",
+        "enabled": True,
+        "api_key": "sk-qwen",
+        "role": "fallback",
+        "priority": 200,
+        "supported_clis": ["claude"],
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+        "models_endpoint": "manual",
+        "fallback_models": ["qwen3.5-plus"],
+    }
+    direct_kimi = {
+        "id": "direct-kimi",
+        "enabled": True,
+        "api_key": "sk-kimi",
+        "role": "fallback",
+        "priority": 200,
+        "supported_clis": ["claude"],
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://api.kimi.com/coding/",
+        "models_endpoint": "manual",
+        "fallback_models": ["kimi-for-coding"],
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args, **_kwargs: [(relay, None), (direct_qwen, None), (direct_kimi, None)],
+    )
+    monkeypatch.setattr(mms_core, "_account_options_for_model", lambda *_args, **_kwargs: [])
+
+    options = mms_core._build_provider_options_map(
+        {},
+        "claude",
+        relay,
+        [],
+        ["qwen3.5-plus", "kimi-for-coding"],
+    )
+
+    assert [item["provider_id"] for item in options["qwen3.5-plus"]] == ["relay", "direct-qwen"]
