@@ -139,6 +139,10 @@ def resolve_provider_profile(
             best_profile = profile
             best_score = score
     if not best_id:
+        hinted_id = _relay_model_profile_hint(provider_id=provider, base_url=base, model_name=model)
+        hinted_profile = profiles.get(hinted_id)
+        if isinstance(hinted_profile, dict):
+            return hinted_id, copy.deepcopy(hinted_profile)
         return "", {}
     return best_id, copy.deepcopy(best_profile)
 
@@ -273,6 +277,28 @@ def _normalize_effort(value: Any, config: dict[str, Any]) -> str:
     return raw or _lower(config.get("default"))
 
 
+def _normalize_budget(value: Any, config: dict[str, Any]) -> int | None:
+    raw = value if value not in (None, "") else config.get("default")
+    mapping = config.get("map") if isinstance(config.get("map"), dict) else {}
+    raw_key = _lower(raw)
+    if raw_key in mapping:
+        raw = mapping[raw_key]
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _relay_model_profile_hint(*, provider_id: str, base_url: str, model_name: str) -> str:
+    provider_l = _lower(provider_id)
+    base_l = _lower(base_url)
+    model_l = _normalize_model(model_name)
+    is_newapi_relay = "newapi" in provider_l or "newapi" in base_l
+    if is_newapi_relay and (model_l.startswith("qwen") or model_l.startswith("qwq")):
+        return "dashscope-openai"
+    return ""
+
+
 def apply_profile_body_patches(
     payload: dict[str, Any],
     *,
@@ -327,6 +353,21 @@ def apply_profile_body_patches(
             effort_value = _normalize_effort(reasoning_effort, effort_config)
             if effort_value:
                 _set_path(payload, str(effort_config["path"]), effort_value)
+
+    budget_by_protocol = _effective_section(profile, "budget", model_name or payload.get("model", ""))
+    budget_config = budget_by_protocol.get(protocol) if isinstance(budget_by_protocol.get(protocol), dict) else {}
+    if budget_config.get("path"):
+        thinking = _effective_section(profile, "thinking", model_name or payload.get("model", ""))
+        effective_enabled = thinking_enabled
+        if effective_enabled is None:
+            default_enabled = thinking.get("default_enabled")
+            effective_enabled = default_enabled if isinstance(default_enabled, bool) else None
+        if effective_enabled is False:
+            _delete_path(payload, str(budget_config["path"]))
+        else:
+            budget_value = _normalize_budget(reasoning_effort, budget_config)
+            if budget_value is not None:
+                _set_path(payload, str(budget_config["path"]), budget_value)
     return profile_id
 
 

@@ -65,6 +65,8 @@ HIGH_CONTEXT_REVIEW_MAX_PROMPT_CHARS = 500000
 HIGH_CONTEXT_REVIEW_MODEL_PREFIXES = ("kimi", "minimax", "mimo", "deepseek", "qwen", "glm", "gpt-", "o1-", "o3-", "o4-", "codex-")
 ANTHROPIC_STREAM_MODEL_PREFIXES = ("kimi", "qwen")
 SENSITIVE_QUERY_KEY_PARTS = ("key", "token", "secret", "credential", "password", "auth")
+MIMO_1M_CONTEXT_SELECTOR = "mimo-v2.5-pro[1m]"
+MIMO_1M_CONTEXT_BETA = "context-1m-2025-08-07"
 CONTEXT_COMPACT_TRIGGER_RATIO = 0.70
 CONTEXT_SAFETY_MARGIN_TOKENS = 4096
 CONTEXT_CHAR_PER_TOKEN = 4
@@ -880,6 +882,23 @@ def _safe_endpoint_trace(provider: dict[str, Any], protocol: str) -> dict[str, s
     return trace
 
 
+def _merge_header_token(headers: dict[str, str], name: str, token: str) -> None:
+    existing_key = next((key for key in headers if key.lower() == name.lower()), name)
+    existing = headers.get(existing_key, "")
+    tokens = [item.strip() for item in str(existing).split(",") if item.strip()]
+    if token not in tokens:
+        tokens.append(token)
+    headers[existing_key] = ", ".join(tokens)
+
+
+def _needs_mimo_1m_context_beta(provider: dict[str, Any], model_name: str, base_url: str) -> bool:
+    if str(model_name or "").strip().lower() != MIMO_1M_CONTEXT_SELECTOR:
+        return False
+    provider_id = str(provider.get("id") or provider.get("provider_id") or "").lower()
+    base_l = str(base_url or "").lower()
+    return "mimo" in provider_id or "xiaomimimo.com" in base_l
+
+
 def _wire_model_for_protocol(provider: dict[str, Any], protocol: str, model_name: str) -> str:
     base_url = _provider_base_url_for_protocol(provider, protocol)
     if protocol != ANTHROPIC_MESSAGES_PROTOCOL:
@@ -1299,6 +1318,8 @@ async def _call_model_anthropic_messages(
         base_url=base_url,
         model_name=model_name,
     )
+    if _needs_mimo_1m_context_beta(provider, model_name, base_url):
+        _merge_header_token(headers, "anthropic-beta", MIMO_1M_CONTEXT_BETA)
 
     timeout = httpx.Timeout(connect=20, write=20, read=read_timeout_seconds, pool=20)
     async with httpx.AsyncClient() as client:
