@@ -858,6 +858,12 @@ def _set_session_home_hint(env, session_home):
     return env
 
 
+def _set_codex_home_hint(env, session_home):
+    if session_home:
+        env["CODEX_HOME"] = os.path.join(session_home, ".codex")
+    return env
+
+
 def _model_name_from_info(model_info):
     if isinstance(model_info, str):
         return model_info.strip()
@@ -5088,6 +5094,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         env["XDG_CONFIG_HOME"] = xdg_config_home
         _set_session_home_hint(env, session_home)
         if cli_name == "codex":
+            _set_codex_home_hint(env, session_home)
             _set_codex_resume_writeback_root(env, codex_resume_writeback_root)
         _install_session_command_wrappers(session_home, env)
         host_context_env = _install_host_context_env(
@@ -7805,6 +7812,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _inject_real_home_hints(env, include_xdg=True)
     _inject_selected_model_name(env, model_info=model_info)
     env["HOME"] = session_home
+    _set_codex_home_hint(env, session_home)
     _set_session_home_hint(env, session_home)
     _set_codex_resume_writeback_root(env, gateway_codex_dir)
     env["OPENAI_API_KEY"] = openai_key

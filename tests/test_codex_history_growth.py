@@ -261,6 +261,7 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     assert copied_sessions[0].name == "account-session-2.jsonl"
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "account-installation\n"
+    assert env["CODEX_HOME"] == str(session_codex)
     assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(account_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["bytes"] > 0
@@ -317,6 +318,7 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert (session_codex / "memories").is_symlink()
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
+    assert env["CODEX_HOME"] == str(session_codex)
     assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(gateway_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
     assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 2
