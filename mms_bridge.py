@@ -2007,13 +2007,21 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             self._json(200, _block_resp)
                         return
 
-        # ── 模型名映射：只将 Claude Code 壳模型替换为真实模型名 ──
-        # 用户通过 /model 明确选择的非 Claude 模型必须保留，否则 Claude Code 会看到
-        # selected model 与返回模型不一致并报 "selected model" 错误。
+        # ── 模型名映射：通常只将 Claude Code 壳模型替换为真实模型名 ──
+        # 用户通过 /model 明确选择的非 Claude 模型必须保留；MiMo [1m]
+        # 例外需要把 Claude Code 可校验的 base model 重新映射到本地 selector，
+        # 后续转发阶段会发 base model + 1M beta。
         heavy_model = getattr(self.server, "heavy_model", None)
         incoming_model = payload.get("model") if isinstance(payload, dict) else ""
-        if heavy_model and "model" in payload and _is_claude_shell_model(incoming_model):
-            payload["model"] = heavy_model
+        if heavy_model and "model" in payload:
+            heavy_base_model = str(heavy_model or "").replace(_ONE_M_CONTEXT_SUFFIX, "").strip()
+            if _is_claude_shell_model(incoming_model):
+                payload["model"] = heavy_model
+            elif (
+                _requests_mimo_1m_context(heavy_model)
+                and _normalize_model_name(incoming_model) == _normalize_model_name(heavy_base_model)
+            ):
+                payload["model"] = heavy_model
 
         # ── 智能路由：3-tier (light/medium/heavy) + sticky escalation ──
         light_model = getattr(self.server, "light_model", None)

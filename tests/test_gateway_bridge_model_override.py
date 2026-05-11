@@ -90,3 +90,15 @@ def test_gateway_bridge_maps_mimo_1m_selector_to_wire_model_and_beta(monkeypatch
     assert captured["status"] == 200
     assert captured["json"]["model"] == "mimo-v2.5-pro"
     assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_gateway_bridge_maps_mimo_base_request_to_1m_selector_when_heavy_is_1m(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "mimo-v2.5-pro",
+        heavy_model="mimo-v2.5-pro[1m]",
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
+    assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]

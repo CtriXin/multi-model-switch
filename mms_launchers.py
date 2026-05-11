@@ -6205,17 +6205,41 @@ def _is_claude_family_model_name(model_name):
     return any(token in lower for token in ("claude", "opus", "sonnet", "haiku"))
 
 
+def _is_mimo_one_m_context_selector(model_name):
+    normalized = _normalized_model_name(model_name).lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized == f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}"
+
+
 def _claude_visible_model_name(model_name, *, fallback_model=""):
     """Return a model name safe for Claude Code's selected-model validation."""
     normalized = _normalized_model_name(model_name)
     if not normalized:
-        return ""
+        return _normalized_model_name(fallback_model)
     if (
         _ONE_M_CONTEXT_SUFFIX in normalized.lower()
         and not _is_claude_family_model_name(normalized)
+        and _is_mimo_one_m_context_selector(normalized)
     ):
-        return _normalized_model_name(fallback_model) or _strip_one_m_context_suffix(normalized)
+        return _strip_one_m_context_suffix(normalized)
     return normalized
+
+
+def _apply_claude_visible_model_overrides(target, model_name, *, fallback_model=""):
+    visible_model = _claude_visible_model_name(model_name, fallback_model=fallback_model)
+    if not visible_model:
+        return ""
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_REASONING_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        target[key] = visible_model
+    return visible_model
 
 
 def _claude_resume_model_name(*candidates):
@@ -6246,7 +6270,10 @@ def _with_1m_suffix(model_name, *, enable_1m=True):
         return normalized
     lower = normalized.lower()
     if _ONE_M_CONTEXT_SUFFIX in lower:
-        if not _is_claude_family_model_name(normalized):
+        if (
+            not _is_claude_family_model_name(normalized)
+            and _is_mimo_one_m_context_selector(normalized)
+        ):
             return _strip_one_m_context_suffix(normalized)
         return normalized
     if not enable_1m:
@@ -7339,7 +7366,8 @@ def _claude_gateway_env(
     # 非 Claude 模型默认仍可用于 status；但 non-Claude [1m] selector 不能进入
     # ANTHROPIC_MODEL，否则 Claude Code compact/resume 会按字面模型名校验失败。
     if display_model:
-        required_settings_env["ANTHROPIC_MODEL"] = _claude_visible_model_name(
+        _apply_claude_visible_model_overrides(
+            required_settings_env,
             display_model,
             fallback_model=(
                 required_settings_env.get("ANTHROPIC_MODEL")
@@ -7441,7 +7469,8 @@ def _claude_gateway_env(
         if selected_model:
             _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
         if display_model:
-            env["ANTHROPIC_MODEL"] = _claude_visible_model_name(
+            _apply_claude_visible_model_overrides(
+                env,
                 display_model,
                 fallback_model=env.get("ANTHROPIC_MODEL")
                 or selected_model
