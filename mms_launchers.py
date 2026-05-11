@@ -6189,6 +6189,35 @@ def _normalized_model_name(model_name):
     return model_name.strip()
 
 
+def _strip_one_m_context_suffix(model_name):
+    normalized = _normalized_model_name(model_name)
+    if not normalized:
+        return ""
+    return (
+        normalized.replace(_ONE_M_CONTEXT_SUFFIX, "")
+        .replace(_ONE_M_CONTEXT_SUFFIX.upper(), "")
+        .strip()
+    )
+
+
+def _is_claude_family_model_name(model_name):
+    lower = _strip_one_m_context_suffix(model_name).lower()
+    return any(token in lower for token in ("claude", "opus", "sonnet", "haiku"))
+
+
+def _claude_visible_model_name(model_name, *, fallback_model=""):
+    """Return a model name safe for Claude Code's selected-model validation."""
+    normalized = _normalized_model_name(model_name)
+    if not normalized:
+        return ""
+    if (
+        _ONE_M_CONTEXT_SUFFIX in normalized.lower()
+        and not _is_claude_family_model_name(normalized)
+    ):
+        return _normalized_model_name(fallback_model) or _strip_one_m_context_suffix(normalized)
+    return normalized
+
+
 def _claude_resume_model_name(*candidates):
     for candidate in candidates:
         normalized = _normalized_model_name(candidate)
@@ -6209,18 +6238,23 @@ def _primary_claude_model(model_info):
 
 def _with_1m_suffix(model_name, *, enable_1m=True):
     """对 opus/sonnet Claude 模型追加 [1m] 后缀以启用 1M context。
-    Haiku 不支持 1M。非 Claude 模型原样返回。
-    Claude Code 会在 API 请求前自动剥离 [1m]，不影响 bridge/proxy。
+    Haiku 不支持 1M。非 Claude 模型不能把 [1m] 暴露给 Claude Code model slot。
+    Claude Code 会在 API 请求前自动剥离 Claude-family 的 [1m]。
     """
+    normalized = _normalized_model_name(model_name)
+    if not normalized:
+        return normalized
+    lower = normalized.lower()
+    if _ONE_M_CONTEXT_SUFFIX in lower:
+        if not _is_claude_family_model_name(normalized):
+            return _strip_one_m_context_suffix(normalized)
+        return normalized
     if not enable_1m:
-        return model_name
-    if not model_name or "[1m]" in model_name:
-        return model_name
-    lower = model_name.lower()
+        return normalized
     # opus 和 sonnet 支持 1M context
     if any(k in lower for k in ("opus", "sonnet")) and "haiku" not in lower:
-        return model_name + "[1m]"
-    return model_name
+        return normalized + _ONE_M_CONTEXT_SUFFIX
+    return normalized
 
 
 def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
@@ -7302,10 +7336,18 @@ def _claude_gateway_env(
             selected_model,
             enable_1m=enable_claude_1m,
         )
-    # 非 Claude 模型：ANTHROPIC_MODEL 用真实模型名让 status line 显示正确
-    # 其余 DEFAULT_*_MODEL slot 保持 Claude 壳名供 Claude Code 内部 slot 匹配
+    # 非 Claude 模型默认仍可用于 status；但 non-Claude [1m] selector 不能进入
+    # ANTHROPIC_MODEL，否则 Claude Code compact/resume 会按字面模型名校验失败。
     if display_model:
-        required_settings_env["ANTHROPIC_MODEL"] = display_model
+        required_settings_env["ANTHROPIC_MODEL"] = _claude_visible_model_name(
+            display_model,
+            fallback_model=(
+                required_settings_env.get("ANTHROPIC_MODEL")
+                or selected_model
+                or heavy_model
+                or best_model
+            ),
+        )
     with _timed_launch_step(_timings, "write session settings"):
         host_context_env = _install_host_context_env(
             {},
@@ -7399,7 +7441,13 @@ def _claude_gateway_env(
         if selected_model:
             _apply_claude_model_overrides(env, selected_model, enable_1m=enable_claude_1m)
         if display_model:
-            env["ANTHROPIC_MODEL"] = display_model
+            env["ANTHROPIC_MODEL"] = _claude_visible_model_name(
+                display_model,
+                fallback_model=env.get("ANTHROPIC_MODEL")
+                or selected_model
+                or heavy_model
+                or best_model,
+            )
         if not sensitive_provider:
             env.setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
         env = _configure_agent_pack_session_env(env, agent_pack=agent_pack)
