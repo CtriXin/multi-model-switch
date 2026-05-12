@@ -632,7 +632,16 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
                         {"type": "command", "command": "echo 'CAVEMAN MODE ACTIVE. global default'"},
                     ],
                 },
-            ]
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {"type": "command", "command": "/old/codex-rtk-rewrite.sh"},
+                        {"type": "command", "command": "/old/rtk-rewrite.sh"},
+                    ],
+                }
+            ],
         }
     }
 
@@ -648,6 +657,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
             ]
         }
     ]
+    assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
         base_hooks,
@@ -662,6 +672,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "/tmp/notify.sh" in enabled_commands
     assert "echo 'CAVEMAN MODE ACTIVE. session default'" in enabled_commands
     assert enabled_commands.count("echo 'CAVEMAN MODE ACTIVE. session default'") == 1
+    assert "PreToolUse" not in enabled["hooks"]
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():

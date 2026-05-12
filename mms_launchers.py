@@ -3063,6 +3063,18 @@ def _is_caveman_hook_command(command_text):
     return any(marker in command_text for marker in markers)
 
 
+def _is_codex_rtk_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "codex-rtk-rewrite.sh",
+        "rtk-rewrite.sh",
+        "rtk rewrite",
+    )
+    return any(marker in command_text for marker in markers)
+
+
 def _is_ecc_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
@@ -3337,6 +3349,7 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
 def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
     hooks_data = _filter_hook_commands(payload.get("hooks"), _is_caveman_hook_command)
+    hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
     if enable_caveman:
         caveman_root = _resolve_caveman_root()
         if caveman_root:
