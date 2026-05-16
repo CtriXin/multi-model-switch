@@ -846,3 +846,36 @@ def test_core_opencode_model_route_uses_peer_model_when_primary_model_is_fresh_u
 
     assert route["model"] == "kimi-for-coding"
     assert route["protocol"] == "anthropic_messages"
+
+
+def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_load_opencode_route_health_latest",
+        lambda *_args, **_kwargs: {
+            "lite_pro|builder_primary|gpt-5.5|gpt|openai_chat_completions": {
+                "profile": "lite_pro",
+                "role": "builder_primary",
+                "status": "live_healthy",
+            },
+            "lite_pro|explore_primary|glm-5-turbo|newapi|anthropic_messages": {
+                "profile": "lite_pro",
+                "role": "explore_primary",
+                "status": "degraded",
+            },
+            "lite_pro|reviewer_primary|mimo-v2.5-pro|newapi|anthropic_messages": {
+                "profile": "lite_pro",
+                "role": "reviewer_primary",
+                "status": "blocked",
+            },
+        },
+    )
+
+    lite_pro = next(option for option in mms_core._opencode_profile_menu_options() if option["id"] == "lite_pro")
+
+    assert "health: 1/9 healthy" in lite_pro["summary"]
+    assert "1 degraded" in lite_pro["summary"]
+    assert "1 blocked" in lite_pro["summary"]
+    assert "6 untested" in lite_pro["summary"]
