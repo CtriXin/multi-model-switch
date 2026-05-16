@@ -86,6 +86,20 @@ def test_opencode_model_limit_includes_required_output_value():
     assert config["limit"]["output"] == 16384
 
 
+def test_opencode_model_config_marks_official_vision_models_only():
+    import mms_launchers
+
+    for model in ("mimo-v2.5", "K2.6", "kimi-k2.5", "qwen3.5-plus", "qwen3.6-plus", "gpt-5.3-codex"):
+        config = mms_launchers._opencode_model_config(_runtime(), model)
+        assert config["attachment"] is True
+        assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+
+    for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro", "MiniMax-M2.7"):
+        config = mms_launchers._opencode_model_config(_runtime(), model)
+        assert "attachment" not in config
+        assert "modalities" not in config
+
+
 def test_opencode_provider_base_url_adds_v1_after_gateway_openai_prefix():
     import mms_launchers
 
@@ -391,6 +405,14 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
         supported_clis=["codex"],
         protocols=["anthropic_messages", "openai_chat_completions"],
     )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
     models = [
         "gpt-5.5",
         "gpt-5.4",
@@ -400,6 +422,11 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
         "deepseek-v4-pro",
         "glm-5.1",
     ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro"])],
+    )
 
     model_info, runtime = mms_core._resolve_opencode_profile_runtime(
         cfg,
@@ -421,6 +448,9 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
     assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
+    reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
+    assert reviewer_route["provider_id"] == "mimo-direct-anthropic"
+    assert reviewer_route["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
     assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")

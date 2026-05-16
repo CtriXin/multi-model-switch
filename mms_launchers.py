@@ -1674,6 +1674,19 @@ OPENCODE_DEFAULT_OUTPUT_LIMIT = 8192
 OPENCODE_LITE_DEFAULT_AGENT = "mobius-builder"
 OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT = 35
 OPENCODE_LAUNCH_PREFLIGHT_PROMPT = "MMS OpenCode launch preflight. Reply exactly OK and nothing else."
+OPENCODE_IMAGE_INPUT_MODELS = {
+    "gpt-5.3-codex",
+    "gpt-5.4",
+    "gpt-5.5",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "k2.6",
+    "kimi-k2.5",
+    "mimo-v2.5",
+    "qwen3.5-plus",
+    "qwen3.6-plus",
+}
 
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -8200,6 +8213,12 @@ def _opencode_model_config(runtime, model_name):
         config["limit"] = {
             "context": context_window,
             "output": _opencode_output_limit(runtime),
+        }
+    if model.lower() in OPENCODE_IMAGE_INPUT_MODELS:
+        config["attachment"] = True
+        config["modalities"] = {
+            "input": ["text", "image"],
+            "output": ["text"],
         }
     return config
 
