@@ -6138,6 +6138,8 @@ def _provider_supports_cli_name(provider, cli_name):
             item in supported_clis for item in ("codex", "qwen", "kimi")
         ):
             return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     return cli_name in supported_clis
 
 
@@ -6618,6 +6620,8 @@ def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model
 def _runtime_source_kind_label(runtime):
     if not runtime:
         return "网关"
+    if runtime.get("runtime_kind") == "opencode_profile":
+        return "OpenCode"
     auth_mode = runtime.get("auth_mode")
     if auth_mode == "broker_profile" or runtime.get("runtime_kind") == "broker":
         return "Broker"
@@ -6972,6 +6976,10 @@ def _confirm_context_lines(cli, runtime):
         runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
         if runtime_id:
             lines.append(("Source", runtime_id))
+    if cli == "opencode":
+        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
+        if profile_label:
+            lines.append(("Profile", profile_label))
     if cli == "claude" and runtime.get("auth_mode") == "oauth":
         if _fake_upstream_enabled():
             lines.append(("Fake", "ON"))
@@ -7673,10 +7681,16 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         source_kind = _runtime_source_kind_label(runtime)
         source_label = runtime.get("name", runtime.get("id", "default"))
         source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
+    profile_line = ""
+    if cli == "opencode" and runtime:
+        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
+        if profile_label:
+            profile_line = f"[bold]Profile:[/bold] {profile_label}\n"
     panel_text = (
         f"[bold]CLI:[/bold]    {cli}\n"
         f"[bold]模型:[/bold]   {model_display}\n"
         f"{source_line}"
+        f"{profile_line}"
         f"[bold]启动:[/bold]   {mode_str}\n"
         f"[bold]环境:[/bold]   {env_str}\n"
         f"\n"
@@ -7686,6 +7700,445 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
 
     choice = Prompt.ask("操作", choices=["", "s", "q"], default="")
     return choice
+
+
+_OPENCODE_PROFILE_OPTIONS = [
+    {
+        "id": "lite_pro",
+        "label": "OpenCode Lite Pro / fallback roster",
+        "summary": "5.5 主 agent + 国产 explore/review/fix 双路 fallback；session-local config。",
+    },
+    {
+        "id": "lite",
+        "label": "OpenCode Lite / custom agents",
+        "summary": "固定 mobius-builder + read-only/review/fix subagents；session-local config；绕过 OMO。",
+    },
+    {
+        "id": "heavy_omo",
+        "label": "OpenCode Heavy / OMO",
+        "summary": "使用现有全局 OpenCode + OMO 配置；MMS 不写全局配置。",
+    },
+    {
+        "id": "raw",
+        "label": "OpenCode Raw",
+        "summary": "纯 OpenCode；session-local provider config；不加载 OMO，也不加载 custom agents。",
+    },
+]
+
+_OPENCODE_DEFAULT_MODEL_PREFERENCES = (
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5.2-codex",
+)
+
+_OPENCODE_LITE_PRO_SPECS = (
+    {
+        "key": "builder_primary",
+        "agent": "mobius-builder-pro",
+        "models": ("gpt-5.5", "gpt-5.4"),
+    },
+    {
+        "key": "builder_fallback",
+        "agent": "mobius-builder-stable",
+        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
+    },
+    {
+        "key": "explore_primary",
+        "agent": "mobius-explore-glm",
+        "models": ("glm-5-turbo", "glm-5.1", "glm-5"),
+    },
+    {
+        "key": "explore_fallback",
+        "agent": "mobius-explore-kimi",
+        "models": ("kimi-for-coding", "kimi-k2.5"),
+    },
+    {
+        "key": "reviewer_primary",
+        "agent": "mobius-reviewer-mimo",
+        "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"),
+    },
+    {
+        "key": "reviewer_fallback",
+        "agent": "mobius-reviewer-deepseek",
+        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
+    },
+    {
+        "key": "fixer_primary",
+        "agent": "mobius-fixer-deepseek",
+        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
+    },
+    {
+        "key": "fixer_fallback",
+        "agent": "mobius-fixer-glm",
+        "models": ("glm-5.1", "glm-5-turbo", "glm-5"),
+    },
+    {
+        "key": "fixer_final",
+        "agent": "mobius-fixer-gpt54",
+        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
+    },
+)
+
+
+def _opencode_profile_label(profile_id):
+    for option in _OPENCODE_PROFILE_OPTIONS:
+        if option["id"] == profile_id:
+            return option["label"]
+    return profile_id or "OpenCode Lite / custom agents"
+
+
+def _opencode_profile_menu_options():
+    return [
+        {
+            "id": option["id"],
+            "label": option["label"],
+            "summary": option["summary"],
+        }
+        for option in _OPENCODE_PROFILE_OPTIONS
+    ]
+
+
+def _select_opencode_profile(use_tui=False):
+    if use_tui:
+        try:
+            from mms_tui import select_channel_action_tui
+            return select_channel_action_tui(
+                "OpenCode Profile",
+                [
+                    ("Lite Pro", "5.5 + fallbacks"),
+                    ("Lite", "custom agents"),
+                    ("Heavy", "global OMO"),
+                    ("Raw", "pure fallback"),
+                ],
+                [(option["id"], option["label"]) for option in _OPENCODE_PROFILE_OPTIONS],
+            )
+        except Exception:
+            return None
+
+    _ensure_rich()
+    table = Table(title="OpenCode Profile")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("Profile", style="green")
+    table.add_column("说明", style="dim")
+    for idx, option in enumerate(_OPENCODE_PROFILE_OPTIONS, 1):
+        table.add_row(str(idx), option["label"], option["summary"])
+    console.print(table)
+    while True:
+        try:
+            choice = IntPrompt.ask("选择 OpenCode profile")
+            if 1 <= choice <= len(_OPENCODE_PROFILE_OPTIONS):
+                return _OPENCODE_PROFILE_OPTIONS[choice - 1]["id"]
+            console.print(f"[red]请输入 1-{len(_OPENCODE_PROFILE_OPTIONS)}[/red]")
+        except KeyboardInterrupt:
+            return None
+
+
+def _apply_opencode_profile(runtime, profile_id):
+    runtime = dict(runtime or {})
+    profile_id = str(profile_id or "lite").strip() or "lite"
+    runtime["opencode_profile"] = profile_id
+    runtime["opencode_profile_label"] = _opencode_profile_label(profile_id)
+    if profile_id == "heavy_omo":
+        runtime["opencode_use_global_config"] = True
+        runtime["opencode_pure"] = False
+        runtime["opencode_lite_agents"] = False
+        runtime["opencode_agent"] = ""
+    elif profile_id == "raw":
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = False
+        runtime["opencode_agent"] = ""
+    elif profile_id == "lite_pro":
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "mobius-builder-pro"
+        runtime["opencode_default_agent"] = "mobius-builder-pro"
+        runtime["opencode_roster"] = "lite_pro"
+        runtime["opencode_launch_preflight"] = True
+        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
+        runtime["opencode_launch_fallback_agents"] = {
+            "builder_primary": "mobius-builder-pro",
+            "builder_fallback": "mobius-builder-stable",
+        }
+    else:
+        runtime["opencode_use_global_config"] = False
+        runtime["opencode_pure"] = True
+        runtime["opencode_lite_agents"] = True
+        runtime["opencode_agent"] = "mobius-builder"
+    return runtime
+
+
+def _opencode_default_model_rank(model_name):
+    normalized = str(model_name or "").strip().lower()
+    for idx, preferred in enumerate(_OPENCODE_DEFAULT_MODEL_PREFERENCES):
+        if normalized == preferred:
+            return idx
+    family, _ = _infer_model_family(normalized)
+    if family == "GPT":
+        return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES)
+    return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES) + 100
+
+
+def _opencode_provider_protocols(provider):
+    protocols = provider.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    return [str(item).strip() for item in protocols if str(item).strip()]
+
+
+def _opencode_normalized_openai_base_url(provider):
+    base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    path = urlparse(base_url).path.rstrip("/")
+    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
+    if last_segment != "v1":
+        return f"{base_url}/v1"
+    return base_url
+
+
+def _opencode_normalized_anthropic_base_url(provider):
+    base_url = str(_provider_anthropic_base_url(provider) or "").strip().rstrip("/")
+    if not base_url and "anthropic_messages" in _opencode_provider_protocols(provider):
+        base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    path = urlparse(base_url).path.rstrip("/")
+    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
+    if last_segment != "v1":
+        return f"{base_url}/v1"
+    return base_url
+
+
+def _opencode_route_transport(provider, model_name):
+    protocols = _opencode_provider_protocols(provider)
+    family, _ = _infer_model_family(model_name)
+    openai_base_url = _opencode_normalized_openai_base_url(provider)
+    anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
+    openai_family = family == "GPT"
+    if not openai_family and "anthropic_messages" in protocols and anthropic_base_url:
+        return "anthropic_messages", openai_base_url, anthropic_base_url
+    if "openai_chat_completions" in protocols and openai_base_url:
+        return "openai_chat_completions", openai_base_url, anthropic_base_url
+    if "anthropic_messages" in protocols and anthropic_base_url:
+        return "anthropic_messages", openai_base_url, anthropic_base_url
+    return "", openai_base_url, anthropic_base_url
+
+
+def _opencode_route_candidate_score(provider, model_name, sequence):
+    role = _normalize_role(provider.get("role", "auto"))
+    priority = _runtime_priority_for_model(provider, model_name)
+    return (
+        ROLE_WEIGHTS.get(role, 1),
+        -int(priority or DEFAULT_PRIORITY),
+        str(_provider_label(provider)),
+        int(sequence),
+    )
+
+
+def _find_opencode_model_route(
+    cfg,
+    default_provider,
+    default_models,
+    model_names,
+    *,
+    route_key="route",
+):
+    wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
+    if not wanted:
+        return None
+    wanted_lower = [item.lower() for item in wanted]
+    scored = []
+    for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
+        if not provider.get("enabled", True):
+            continue
+        if not provider.get("api_key"):
+            continue
+        if not _provider_supports_cli_name(provider, "opencode"):
+            continue
+        models = _provider_effective_models(provider, cached_models, cfg)
+        by_lower = {str(model or "").strip().lower(): str(model or "").strip() for model in models if str(model or "").strip()}
+        for model_rank, wanted_model in enumerate(wanted_lower):
+            actual_model = by_lower.get(wanted_model)
+            if not actual_model:
+                continue
+            if not _provider_supports_model_for_cli(provider, "opencode", actual_model):
+                continue
+            protocol, openai_base_url, anthropic_base_url = _opencode_route_transport(provider, actual_model)
+            if not protocol:
+                continue
+            family, _ = _infer_model_family(actual_model)
+            protocol_rank = 0 if (family != "GPT" and protocol == "anthropic_messages") or family == "GPT" else 1
+            score = (model_rank, protocol_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
+            route = {
+                "id": route_key,
+                "model": actual_model,
+                "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
+                "provider_name": _provider_label(provider),
+                "protocol": protocol,
+                "openai_base_url": openai_base_url,
+                "anthropic_base_url": anthropic_base_url if protocol == "anthropic_messages" else "",
+                "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
+                "protocols": _opencode_provider_protocols(provider),
+            }
+            scored.append((score, route))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0])
+    return scored[0][1]
+
+
+def _append_unique_opencode_route(routes, route):
+    if not route:
+        return None
+    key = (route.get("id"), route.get("provider_id"), route.get("openai_base_url"), route.get("model"))
+    for existing in routes:
+        existing_key = (existing.get("id"), existing.get("provider_id"), existing.get("openai_base_url"), existing.get("model"))
+        if existing_key == key:
+            return existing
+    routes.append(route)
+    return route
+
+
+def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
+    routes = []
+    agent_models = {}
+    gpt_fallback = _find_opencode_model_route(
+        cfg,
+        default_provider,
+        default_models,
+        ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
+        route_key="gpt_fallback",
+    )
+
+    for spec in _OPENCODE_LITE_PRO_SPECS:
+        route = _find_opencode_model_route(
+            cfg,
+            default_provider,
+            default_models,
+            spec["models"],
+            route_key=spec["key"],
+        )
+        if route is None and spec["key"] != "builder_primary":
+            route = gpt_fallback
+        route = _append_unique_opencode_route(routes, dict(route, id=spec["key"]) if route else None)
+        if route:
+            agent_models[spec["agent"]] = spec["key"]
+
+    builder_route = next((route for route in routes if route.get("id") == "builder_primary"), None)
+    if builder_route is None:
+        builder_route = gpt_fallback
+        builder_route = _append_unique_opencode_route(routes, dict(builder_route, id="builder_primary") if builder_route else None)
+        if builder_route:
+            agent_models["mobius-builder-pro"] = "builder_primary"
+    if builder_route is None:
+        return None, None
+
+    runtime = dict(builder_route)
+    runtime["id"] = str(builder_route.get("provider_id") or "opencode-lite-pro")
+    runtime["name"] = "OpenCode Lite Pro"
+    runtime["auth_mode"] = "api_key"
+    runtime["runtime_kind"] = "provider"
+    runtime["model"] = builder_route["model"]
+    runtime["api_key"] = builder_route.get("api_key", "")
+    runtime["openai_base_url"] = builder_route.get("openai_base_url", "")
+    runtime["protocols"] = ["openai_chat_completions"]
+    runtime["supported_clis"] = ["opencode"]
+    runtime["opencode_routes"] = routes
+    runtime["opencode_agent_model_keys"] = agent_models
+    runtime["opencode_default_route_key"] = "builder_primary"
+    runtime["opencode_builder_fallback_agent"] = "mobius-builder-stable"
+    model_info = {"model": builder_route["model"], "profile": "lite_pro"}
+    return model_info, _apply_opencode_profile(runtime, "lite_pro")
+
+
+def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, profile_id):
+    """Resolve fixed OpenCode profile runtime without asking for a model/channel."""
+    profile_id = str(profile_id or "lite").strip() or "lite"
+    if profile_id == "heavy_omo":
+        runtime = {
+            "id": "global-opencode-omo",
+            "name": "Global OpenCode / OMO",
+            "runtime_kind": "opencode_profile",
+            "auth_mode": "global_config",
+        }
+        return {"model": "global-omo"}, _apply_opencode_profile(runtime, profile_id)
+    if profile_id == "lite_pro":
+        return _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models)
+
+    candidates = []
+    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if not provider.get("api_key"):
+            continue
+        protocols = provider.get("protocols", [])
+        if isinstance(protocols, str):
+            protocols = [protocols]
+        if "openai_chat_completions" not in protocols:
+            continue
+        if not _provider_openai_base_url(provider):
+            continue
+        if not _provider_supports_cli_name(provider, "opencode"):
+            continue
+
+        models = _provider_effective_models(provider, cached_models, cfg)
+        if not models:
+            continue
+        role = _normalize_role(provider.get("role", "auto"))
+        provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
+        provider_name = _provider_label(provider)
+        openai_only = "anthropic_messages" not in protocols
+
+        for model_name in models:
+            normalized = str(model_name or "").strip()
+            if not normalized or not _mms_model_visible(normalized):
+                continue
+            if not _provider_supports_model_for_cli(provider, "opencode", normalized):
+                continue
+            family, _ = _infer_model_family(normalized)
+            # Lite/Raw must not inherit cache-sensitive dual-protocol domestic models
+            # such as K2.6, because OpenCode drives this lane through chat/completions.
+            if family != "GPT" and not openai_only:
+                continue
+            model_rank = _opencode_default_model_rank(normalized)
+            family_rank = 0 if family == "GPT" else 1
+            priority = _runtime_priority_for_model(provider, normalized)
+            candidates.append((
+                family_rank,
+                model_rank,
+                ROLE_WEIGHTS.get(role, 1),
+                -int(priority or DEFAULT_PRIORITY),
+                provider_name,
+                normalized,
+                provider_id,
+                len(candidates),
+                provider,
+                family,
+            ))
+
+    if not candidates:
+        return None, None
+
+    candidates.sort()
+    _family_rank, _model_rank, _role, _priority, _pname, model_name, _pid, _seq, provider, family = candidates[0]
+    runtime = _runtime_with_priority(provider, model_name=model_name, family_name=family)
+    runtime["model"] = model_name
+    return {"model": model_name}, _apply_opencode_profile(runtime, profile_id)
+
+
+def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
+    if not isinstance(runtime, dict):
+        return runtime
+    profile_id = runtime.get("opencode_profile")
+    if not profile_id:
+        profile_id = _select_opencode_profile(use_tui=use_tui)
+    if not profile_id:
+        return None
+    return _apply_opencode_profile(runtime, profile_id)
 
 
 def save_preset_interactive(cfg, cli, model_info):
@@ -8136,6 +8589,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             provider_options_by_cli=provider_options_by_cli,
             provider_options_loader_by_cli=provider_options_loader_by_cli,
             broker_enabled_by_cli=_broker_enabled_by_cli(current_cfg, current_cli_names),
+            profile_options_by_cli={"opencode": _opencode_profile_menu_options()},
         )
 
         if result == "fallback":
@@ -8165,6 +8619,27 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if _launch_broker_experiment_interactive(current_cfg, cli):
                 return True
             continue
+
+        # ── OpenCode profile ──
+        if action_type == "profile" and cli == "opencode":
+            model_info, runtime_runtime = _resolve_opencode_profile_runtime(
+                current_cfg,
+                current_provider,
+                default_models,
+                action_data,
+            )
+            if runtime_runtime is None:
+                console.print("[yellow]OpenCode Lite/Raw 未找到安全的 OpenAI-compatible GPT provider；请用 Heavy/OMO 或先配置 GPT provider。[/yellow]")
+                continue
+            _trace_record(
+                "opencode profile",
+                cli=cli,
+                profile=runtime_runtime.get("opencode_profile"),
+                model=model_info.get("model") if isinstance(model_info, dict) else model_info,
+                provider=runtime_runtime.get("id"),
+            )
+            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="opencode profile")
+            # fall through to confirm
 
         # ── Provider 浏览 ──
         if action_type == "provider_browse":
@@ -8510,7 +8985,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 if runtime_from_best_provider:
                     _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
-        elif action_type not in ("provider_browse", "load_balance", "last", "family"):
+        elif action_type not in ("profile", "provider_browse", "load_balance", "last", "family"):
             continue
 
         # ── 公共：确认页 + 启动 ──
@@ -8518,6 +8993,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             from mms_installer import check_and_offer_install
             if not check_and_offer_install(cli):
                 return True
+
+        if cli == "opencode":
+            runtime_runtime = _select_and_apply_opencode_profile(runtime_runtime, use_tui=True)
+            if runtime_runtime is None:
+                continue
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
@@ -10455,6 +10935,10 @@ def handle_test_command(argv, subcommand_name="test"):
     return _run_script_subcommand("smoke_cli_channels.py", argv, subcommand_name)
 
 
+def handle_opencode_smoke_command(argv):
+    return _run_script_subcommand("smoke_opencode_profile.py", argv, "opencode-smoke")
+
+
 def _is_help_request(argv):
     if not argv:
         return False
@@ -10504,7 +10988,7 @@ def main():
     preloaded_command_cfg = None
     if not help_request and len(argv) >= 1:
         command = argv[0]
-        if command not in {"guard", "logs", "fake-upstream", "exposure"}:
+        if command not in {"guard", "logs", "fake-upstream", "exposure", "opencode-smoke"}:
             preloaded_command_cfg = _load_command_config()
             _refresh_routes_export_for_hive(
                 preloaded_command_cfg,
@@ -10560,6 +11044,8 @@ def main():
             raise SystemExit(handle_doctor_command(argv[1:]))
         if command in {"test", "smoke"}:
             raise SystemExit(handle_test_command(argv[1:], subcommand_name=command))
+        if command == "opencode-smoke":
+            raise SystemExit(handle_opencode_smoke_command(argv[1:]))
         if command == "env":
             handle_env_command(preloaded_command_cfg if preloaded_command_cfg is not None else _load_command_config(), argv[1:])
             return
@@ -10594,6 +11080,7 @@ def main():
             f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
+            f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} chat ...        进入 chat 子命令\n"
@@ -10784,6 +11271,10 @@ def main():
                     if not check_and_offer_install(cli):
                         return
                 console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
+                if cli == "opencode":
+                    runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+                    if runtime is None:
+                        return
                 action = confirm_launch(cli, model_info, once, runtime=runtime)
                 if action == "q":
                     return
@@ -10822,6 +11313,10 @@ def main():
             if model:
                 _trace_record("manual select", model=model)
             model_info = {} if _uses_managed_entry(runtime, cli) else model
+            if cli == "opencode":
+                runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+                if runtime is None:
+                    return
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
@@ -10857,6 +11352,10 @@ def main():
             if model:
                 _trace_record("manual select", model=model)
             model_info = {} if _uses_managed_entry(runtime, cli) else model
+            if cli == "opencode":
+                runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+                if runtime is None:
+                    return
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
@@ -10908,6 +11407,10 @@ def main():
                 return
             _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
+        if cli == "opencode":
+            runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+            if runtime is None:
+                return
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
@@ -10964,6 +11467,10 @@ def main():
                 return
             _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
+        if cli == "opencode":
+            runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+            if runtime is None:
+                return
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
@@ -10997,6 +11504,10 @@ def main():
         if not check_and_offer_install(cli):
             return
 
+    if cli == "opencode":
+        runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
+        if runtime is None:
+            return
     action = confirm_launch(cli, model_info, once, runtime=runtime)
     if action == "q":
         return

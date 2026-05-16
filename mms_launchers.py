@@ -1671,6 +1671,9 @@ OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 OPENCODE_PROVIDER_ID = "mms"
 OPENCODE_API_KEY_ENV = "MMS_OPENCODE_API_KEY"
 OPENCODE_DEFAULT_OUTPUT_LIMIT = 8192
+OPENCODE_LITE_DEFAULT_AGENT = "mobius-builder"
+OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT = 35
+OPENCODE_LAUNCH_PREFLIGHT_PROMPT = "MMS OpenCode launch preflight. Reply exactly OK and nothing else."
 
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -4756,6 +4759,8 @@ def _provider_supports_cli(provider, cli):
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "qwen", "kimi")
         ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
             return True
     return cli in supported_clis
 
@@ -7851,6 +7856,275 @@ def _opencode_model_ref(model_name):
     return f"{OPENCODE_PROVIDER_ID}/{model_name}"
 
 
+def _opencode_route_provider_ref(route, index=0):
+    route = route if isinstance(route, dict) else {}
+    route_id = _opencode_config_slug(route.get("id") or route.get("provider_id") or index, f"route_{index}")
+    return f"{OPENCODE_PROVIDER_ID}-{route_id}"
+
+
+def _opencode_route_env_key(provider_ref):
+    suffix = "".join(
+        ch.upper() if ch.isalnum() else "_"
+        for ch in str(provider_ref or "").strip()
+    ).strip("_")
+    return f"{OPENCODE_API_KEY_ENV}_{suffix or 'ROUTE'}"
+
+
+def _opencode_route_model_ref(route, index=0):
+    route = route if isinstance(route, dict) else {}
+    provider_ref = str(route.get("provider_ref") or _opencode_route_provider_ref(route, index)).strip()
+    model = str(route.get("model") or "").strip()
+    if not provider_ref or not model:
+        return ""
+    return f"{provider_ref}/{model}"
+
+
+def _opencode_runtime_routes(runtime, selected_model=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw_routes = runtime.get("opencode_routes")
+    if isinstance(raw_routes, list) and raw_routes:
+        routes = []
+        for index, raw in enumerate(raw_routes):
+            if not isinstance(raw, dict):
+                continue
+            model = str(raw.get("model") or "").strip()
+            base_url = str(raw.get("openai_base_url") or raw.get("base_url") or "").strip().rstrip("/")
+            anthropic_base_url = str(raw.get("anthropic_base_url") or "").strip().rstrip("/")
+            protocol = str(raw.get("protocol") or "").strip()
+            if not protocol:
+                protocol = "anthropic_messages" if anthropic_base_url and not base_url else "openai_chat_completions"
+            api_key = str(raw.get("api_key") or raw.get("openai_api_key") or "").strip()
+            provider_base_url = anthropic_base_url if protocol == "anthropic_messages" else base_url
+            if not model or not provider_base_url:
+                continue
+            route = dict(raw)
+            route["model"] = model
+            route["protocol"] = protocol
+            route["openai_base_url"] = base_url
+            route["anthropic_base_url"] = anthropic_base_url
+            route["api_key"] = api_key
+            route["provider_ref"] = str(route.get("provider_ref") or _opencode_route_provider_ref(route, index)).strip()
+            routes.append(route)
+        if routes:
+            return routes
+
+    return [
+        {
+            "id": "default",
+            "model": model_name,
+            "provider_id": runtime.get("id") or OPENCODE_PROVIDER_ID,
+            "provider_name": runtime.get("name") or runtime.get("id") or "MMS",
+            "protocol": "openai_chat_completions",
+            "openai_base_url": _opencode_provider_base_url(runtime),
+            "anthropic_base_url": "",
+            "api_key": str(runtime.get("openai_api_key") or runtime.get("api_key") or ""),
+            "provider_ref": OPENCODE_PROVIDER_ID,
+        }
+        for model_name in _opencode_model_names(runtime, selected_model)
+    ]
+
+
+def _opencode_agent_model_refs(runtime, routes):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    by_key = {
+        str(route.get("id") or "").strip(): _opencode_route_model_ref(route, index)
+        for index, route in enumerate(routes or [])
+    }
+    refs = {}
+    raw = runtime.get("opencode_agent_model_keys")
+    if isinstance(raw, dict):
+        for agent, key in raw.items():
+            ref = by_key.get(str(key or "").strip())
+            if ref:
+                refs[str(agent)] = ref
+    for index, route in enumerate(routes or []):
+        key = str(route.get("id") or "").strip()
+        ref = _opencode_route_model_ref(route, index)
+        if key and ref:
+            refs.setdefault(key, ref)
+    return refs
+
+
+def _opencode_env_bool(name, default=False):
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    return bool(default)
+
+
+def _opencode_runtime_bool(runtime, key, default=False):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if key not in runtime:
+        return bool(default)
+    value = runtime.get(key)
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    return bool(default)
+
+
+def _opencode_launch_preflight_enabled(runtime):
+    default = _opencode_runtime_bool(runtime, "opencode_launch_preflight", False)
+    return _opencode_env_bool("MMS_OPENCODE_LAUNCH_PREFLIGHT", default)
+
+
+def _opencode_preflight_timeout():
+    return _bounded_env_int("MMS_OPENCODE_PREFLIGHT_TIMEOUT", OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT) or OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT
+
+
+def _opencode_route_by_id(routes):
+    indexed = {}
+    for index, route in enumerate(routes or []):
+        key = str((route or {}).get("id") or "").strip()
+        if key and key not in indexed:
+            indexed[key] = (index, route)
+    return indexed
+
+
+def _opencode_launch_candidates(runtime, routes, selected_model=""):
+    """Build deterministic launch failover candidates without random routing."""
+    runtime = runtime if isinstance(runtime, dict) else {}
+    routes = routes or []
+    candidates = []
+    seen = set()
+    default_route_key = str(runtime.get("opencode_default_route_key") or "").strip()
+    route_keys = []
+    if default_route_key:
+        route_keys.append(default_route_key)
+    configured = runtime.get("opencode_launch_fallback_route_keys")
+    if isinstance(configured, str):
+        configured = [configured]
+    if isinstance(configured, (list, tuple)):
+        route_keys.extend(str(item or "").strip() for item in configured)
+    if not route_keys and routes:
+        route_keys.append(str(routes[0].get("id") or "").strip())
+
+    fallback_agents = runtime.get("opencode_launch_fallback_agents")
+    fallback_agents = fallback_agents if isinstance(fallback_agents, dict) else {}
+    default_agent = str(runtime.get("opencode_agent", OPENCODE_LITE_DEFAULT_AGENT) or "").strip()
+    route_index = _opencode_route_by_id(routes)
+    for key in route_keys:
+        if not key or key in seen:
+            continue
+        item = route_index.get(key)
+        if not item:
+            continue
+        index, route = item
+        model_ref = _opencode_route_model_ref(route, index)
+        if not model_ref:
+            continue
+        seen.add(key)
+        candidates.append(
+            {
+                "route_key": key,
+                "route": route,
+                "model_ref": model_ref,
+                "agent": str(fallback_agents.get(key) or default_agent or "").strip(),
+            }
+        )
+
+    if not candidates and selected_model:
+        candidates.append(
+            {
+                "route_key": "selected_model",
+                "route": {},
+                "model_ref": _opencode_model_ref(selected_model),
+                "agent": default_agent,
+            }
+        )
+    return candidates
+
+
+def _opencode_run_preflight(env, agent, model_ref, timeout=None):
+    timeout = int(timeout or _opencode_preflight_timeout())
+    cmd = ["opencode", "run", "--pure"]
+    if agent:
+        cmd += ["--agent", agent]
+    cmd += ["-m", model_ref, OPENCODE_LAUNCH_PREFLIGHT_PROMPT]
+    started = perf_counter()
+    try:
+        completed = subprocess.run(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        combined = f"{completed.stdout}\n{completed.stderr}"
+        return {
+            "ok": completed.returncode == 0 and "OK" in combined.upper(),
+            "returncode": completed.returncode,
+            "elapsed_sec": round(perf_counter() - started, 3),
+            "stdout": " ".join(str(completed.stdout or "").split())[:500],
+            "stderr": " ".join(str(completed.stderr or "").split())[:500],
+        }
+    except FileNotFoundError:
+        return {
+            "ok": False,
+            "returncode": "not_found",
+            "elapsed_sec": round(perf_counter() - started, 3),
+            "stdout": "",
+            "stderr": "opencode not found",
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "returncode": "timeout",
+            "elapsed_sec": timeout,
+            "stdout": " ".join(str(exc.stdout or "").split())[:500],
+            "stderr": " ".join(str(exc.stderr or "").split())[:500],
+        }
+
+
+def _opencode_select_launch_candidate(runtime, routes, model, env):
+    candidates = _opencode_launch_candidates(runtime, routes, model)
+    if not candidates:
+        return "", "", []
+    if not _opencode_launch_preflight_enabled(runtime):
+        first = candidates[0]
+        return first["model_ref"], first.get("agent") or "", []
+
+    checks = []
+    console.print("[dim]OpenCode Lite Pro preflight: 检查 primary builder route...[/dim]")
+    for candidate in candidates:
+        check = _opencode_run_preflight(
+            env,
+            candidate.get("agent") or "",
+            candidate.get("model_ref") or "",
+        )
+        check.update(
+            {
+                "route_key": candidate.get("route_key"),
+                "model_ref": candidate.get("model_ref"),
+                "agent": candidate.get("agent") or "",
+            }
+        )
+        checks.append(check)
+        if check.get("ok"):
+            if candidate.get("route_key") != candidates[0].get("route_key"):
+                console.print(
+                    f"[yellow]OpenCode primary route failed; using fallback "
+                    f"{candidate.get('route_key')} ({candidate.get('model_ref')}).[/yellow]"
+                )
+            return candidate["model_ref"], candidate.get("agent") or "", checks
+        console.print(
+            f"[yellow]⚠ OpenCode route {candidate.get('route_key')} "
+            f"preflight failed: {check.get('returncode')}[/yellow]"
+        )
+
+    return "", "", checks
+
+
 def _opencode_output_limit(runtime):
     runtime = runtime if isinstance(runtime, dict) else {}
     for key in ("opencode_output_limit", "output_limit", "max_output_tokens"):
@@ -7880,6 +8154,27 @@ def _opencode_provider_base_url(runtime):
 
 def _opencode_gateway_health_check(runtime):
     runtime = runtime if isinstance(runtime, dict) else {}
+    routes = _opencode_runtime_routes(runtime, _resolve_model(runtime))
+    if len(routes) > 1:
+        seen = set()
+        for route in routes:
+            protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+            route_base_url = route.get("anthropic_base_url") if protocol == "anthropic_messages" else route.get("openai_base_url")
+            key = (route.get("provider_id"), protocol, route_base_url)
+            if key in seen:
+                continue
+            seen.add(key)
+            health_runtime = dict(runtime)
+            health_runtime["id"] = route.get("provider_id") or health_runtime.get("id")
+            if protocol == "anthropic_messages":
+                health_runtime["openai_base_url"] = ""
+                health_runtime["anthropic_base_url"] = route.get("anthropic_base_url") or health_runtime.get("anthropic_base_url")
+            else:
+                health_runtime["openai_base_url"] = route.get("openai_base_url") or health_runtime.get("openai_base_url")
+                health_runtime["anthropic_base_url"] = ""
+            health_runtime["api_key"] = route.get("api_key") or health_runtime.get("api_key")
+            gateway_health_check(health_runtime)
+        return
     health_runtime = dict(runtime)
     health_runtime["openai_base_url"] = _opencode_provider_base_url(runtime)
     gateway_health_check(health_runtime)
@@ -7909,32 +8204,357 @@ def _opencode_model_config(runtime, model_name):
     return config
 
 
-def _build_opencode_config_payload(runtime, model_name=""):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    model_names = _opencode_model_names(runtime, model_name)
-    provider_name = str(runtime.get("name") or runtime.get("id") or "MMS").strip() or "MMS"
-    provider_config = {
-        "npm": "@ai-sdk/openai-compatible",
-        "name": provider_name,
-        "options": {
-            "baseURL": _opencode_provider_base_url(runtime),
-            "apiKey": f"{{env:{OPENCODE_API_KEY_ENV}}}",
+def _opencode_lite_agent_configs(model_ref):
+    """Return session-local OpenCode agents for the MMS lite lane."""
+    if not model_ref:
+        return {}
+
+    safe_read_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "rg *": "allow",
+        "git status*": "allow",
+        "git diff*": "allow",
+        "git log*": "allow",
+    }
+    test_bash = {
+        **safe_read_bash,
+        "npm test*": "ask",
+        "npm run *": "ask",
+        "npx tsc*": "ask",
+        "python* -m pytest*": "ask",
+        "pytest*": "ask",
+    }
+    common_read_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+
+    return {
+        "mobius-explore": {
+            "description": "Fast read-only codebase exploration for the MMS OpenCode lite lane",
+            "mode": "subagent",
+            "model": model_ref,
+            "temperature": 0.1,
+            "steps": 8,
+            "permission": {
+                **common_read_permissions,
+                "edit": "deny",
+                "bash": safe_read_bash,
+                "task": "deny",
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "deny",
+            },
+            "prompt": (
+                "Read code and local docs only. Do not edit files. Return concise "
+                "findings with paths, symbols, risks, and the next suggested action."
+            ),
         },
-        "models": {
-            name: _opencode_model_config(runtime, name)
-            for name in model_names
+        "mobius-builder": {
+            "description": "Daily implementation agent for the MMS OpenCode lite lane",
+            "mode": "primary",
+            "model": model_ref,
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": {
+                **common_read_permissions,
+                "edit": "ask",
+                "bash": test_bash,
+                "task": {
+                    "*": "deny",
+                    "mobius-explore": "allow",
+                    "mobius-reviewer": "ask",
+                    "mobius-fixer": "ask",
+                },
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": (
+                "Implement scoped changes. Prefer existing project conventions. Keep "
+                "edits small. Use subagents only when their result materially reduces "
+                "risk. Do not claim done until validation or a clear blocker is recorded."
+            ),
+        },
+        "mobius-reviewer": {
+            "description": "Read-only review agent for code, scope, tests, and evidence",
+            "mode": "subagent",
+            "model": model_ref,
+            "variant": "high",
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": {
+                **common_read_permissions,
+                "edit": "deny",
+                "bash": test_bash,
+                "task": "deny",
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "deny",
+            },
+            "prompt": (
+                "Review like a release gate. Lead with bugs, regressions, missing "
+                "tests, scope drift, and evidence gaps. Do not edit files."
+            ),
+        },
+        "mobius-fixer": {
+            "description": "Focused repair agent for one known failing test, review finding, or bug",
+            "mode": "subagent",
+            "model": model_ref,
+            "temperature": 0.2,
+            "steps": 12,
+            "permission": {
+                **common_read_permissions,
+                "edit": "ask",
+                "bash": test_bash,
+                "task": "deny",
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": (
+                "Fix only the named failure. Do not broaden scope. Report changed "
+                "files, validation run, remaining risk, and any blocker."
+            ),
         },
     }
+
+
+def _opencode_lite_pro_agent_configs(agent_models):
+    """Return deterministic Lite Pro roster with named fallback agents."""
+    agent_models = agent_models if isinstance(agent_models, dict) else {}
+    builder_model = agent_models.get("mobius-builder-pro") or next(iter(agent_models.values()), "")
+    if not builder_model:
+        return {}
+
+    safe_read_bash = {
+        "*": "ask",
+        "pwd": "allow",
+        "ls *": "allow",
+        "rg *": "allow",
+        "git status*": "allow",
+        "git diff*": "allow",
+        "git log*": "allow",
+    }
+    test_bash = {
+        **safe_read_bash,
+        "npm test*": "ask",
+        "npm run *": "ask",
+        "npx tsc*": "ask",
+        "python* -m pytest*": "ask",
+        "pytest*": "ask",
+    }
+    common_read_permissions = {
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "list": "allow",
+    }
+
+    def _agent_model(name, fallback=builder_model):
+        return str(agent_models.get(name) or fallback or builder_model)
+
+    read_only_permission = {
+        **common_read_permissions,
+        "edit": "deny",
+        "bash": safe_read_bash,
+        "task": "deny",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "deny",
+    }
+    fix_permission = {
+        **common_read_permissions,
+        "edit": "ask",
+        "bash": test_bash,
+        "task": "deny",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+
+    return {
+        "mobius-builder-pro": {
+            "description": "Lite Pro primary builder with deterministic fallback policy",
+            "mode": "primary",
+            "model": _agent_model("mobius-builder-pro"),
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": {
+                **common_read_permissions,
+                "edit": "ask",
+                "bash": test_bash,
+                "task": {
+                    "*": "deny",
+                    "mobius-builder-stable": "ask",
+                    "mobius-explore-glm": "allow",
+                    "mobius-explore-kimi": "ask",
+                    "mobius-reviewer-mimo": "ask",
+                    "mobius-reviewer-deepseek": "ask",
+                    "mobius-fixer-deepseek": "ask",
+                    "mobius-fixer-glm": "ask",
+                    "mobius-fixer-gpt54": "ask",
+                },
+                "webfetch": "ask",
+                "websearch": "ask",
+                "external_directory": "ask",
+            },
+            "prompt": (
+                "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-mimo, "
+                "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
+                "confidence, misses evidence, or validation still fails, call the paired fallback "
+                "agent. Use mobius-builder-stable only when the primary model/channel is suspect "
+                "or the final result remains unstable. Record which fallback was used."
+            ),
+        },
+        "mobius-builder-stable": {
+            "description": "Stable GPT fallback builder for Lite Pro",
+            "mode": "primary",
+            "model": _agent_model("mobius-builder-stable"),
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": fix_permission,
+            "prompt": (
+                "Fallback builder. Take over only after primary path fails or is low confidence. "
+                "Keep scope small, preserve existing edits, validate, and report exact changed files."
+            ),
+        },
+        "mobius-explore-glm": {
+            "description": "Lite Pro primary read-only explorer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-explore-glm"),
+            "temperature": 0.1,
+            "steps": 8,
+            "permission": read_only_permission,
+            "prompt": "Read code/docs only. Return concise map: files, symbols, risks, next action. No edits.",
+        },
+        "mobius-explore-kimi": {
+            "description": "Lite Pro fallback read-only explorer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-explore-kimi", _agent_model("mobius-explore-glm")),
+            "temperature": 0.1,
+            "steps": 8,
+            "permission": read_only_permission,
+            "prompt": "Fallback explorer. Re-check unclear areas and contradictions. No edits.",
+        },
+        "mobius-reviewer-mimo": {
+            "description": "Lite Pro primary read-only reviewer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-reviewer-mimo"),
+            "variant": "high",
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": read_only_permission,
+            "prompt": "Review as release gate. Lead with bugs, regressions, missing tests, and evidence gaps. No edits.",
+        },
+        "mobius-reviewer-deepseek": {
+            "description": "Lite Pro fallback read-only reviewer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-reviewer-deepseek", _agent_model("mobius-reviewer-mimo")),
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": read_only_permission,
+            "prompt": "Second reviewer. Focus on findings missed by first reviewer and validation gaps. No edits.",
+        },
+        "mobius-fixer-deepseek": {
+            "description": "Lite Pro primary focused fixer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-fixer-deepseek"),
+            "temperature": 0.2,
+            "steps": 12,
+            "permission": fix_permission,
+            "prompt": "Fix one named failure only. Do not broaden scope. Report validation and remaining risk.",
+        },
+        "mobius-fixer-glm": {
+            "description": "Lite Pro fallback focused fixer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-fixer-glm", _agent_model("mobius-fixer-deepseek")),
+            "temperature": 0.2,
+            "steps": 12,
+            "permission": fix_permission,
+            "prompt": "Fallback fixer. Repair only the remaining named failure after primary fixer. Keep scope tight.",
+        },
+        "mobius-fixer-gpt54": {
+            "description": "Lite Pro final stable fixer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-fixer-gpt54", _agent_model("mobius-builder-stable")),
+            "variant": "high",
+            "temperature": 0.2,
+            "steps": 12,
+            "permission": fix_permission,
+            "prompt": "Final fallback fixer. Use when domestic fixers fail or validation remains unstable.",
+        },
+    }
+
+
+def _build_opencode_config_payload(runtime, model_name=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    routes = _opencode_runtime_routes(runtime, model_name)
+    providers = {}
+    for index, route in enumerate(routes):
+        provider_ref = str(route.get("provider_ref") or _opencode_route_provider_ref(route, index)).strip()
+        if not provider_ref:
+            continue
+        env_key = _opencode_route_env_key(provider_ref) if provider_ref != OPENCODE_PROVIDER_ID else OPENCODE_API_KEY_ENV
+        protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+        if protocol == "anthropic_messages":
+            provider_npm = "@ai-sdk/anthropic"
+            base_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
+        else:
+            provider_npm = "@ai-sdk/openai-compatible"
+            base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")
+        provider_name = str(
+            route.get("provider_name")
+            or route.get("provider_id")
+            or runtime.get("name")
+            or runtime.get("id")
+            or "MMS"
+        ).strip() or "MMS"
+        provider_config = providers.setdefault(
+            provider_ref,
+            {
+                "npm": provider_npm,
+                "name": provider_name,
+                "env": [env_key],
+                "options": {
+                    "baseURL": base_url,
+                    "apiKey": f"{{env:{env_key}}}",
+                },
+                "models": {},
+            },
+        )
+        provider_config["models"][route["model"]] = _opencode_model_config(
+            {**runtime, "id": route.get("provider_id") or runtime.get("id")},
+            route["model"],
+        )
     payload = {
         "$schema": "https://opencode.ai/config.json",
         "autoupdate": False,
         "share": "disabled",
-        "provider": {OPENCODE_PROVIDER_ID: provider_config},
+        "provider": providers,
     }
-    if model_names:
-        model_ref = _opencode_model_ref(model_names[0])
+    if routes:
+        model_ref = _opencode_route_model_ref(routes[0], 0)
+        default_route_key = str(runtime.get("opencode_default_route_key") or "").strip()
+        if default_route_key:
+            for index, route in enumerate(routes):
+                if str(route.get("id") or "").strip() == default_route_key:
+                    model_ref = _opencode_route_model_ref(route, index)
+                    break
         payload["model"] = model_ref
         payload["small_model"] = model_ref
+        if runtime.get("opencode_lite_agents", True) is not False:
+            payload["default_agent"] = str(
+                runtime.get("opencode_default_agent") or OPENCODE_LITE_DEFAULT_AGENT
+            ).strip() or OPENCODE_LITE_DEFAULT_AGENT
+            if str(runtime.get("opencode_roster") or "").strip() == "lite_pro":
+                payload["agent"] = _opencode_lite_pro_agent_configs(_opencode_agent_model_refs(runtime, routes))
+            else:
+                payload["agent"] = _opencode_lite_agent_configs(model_ref)
     if not runtime.get("bypass"):
         payload["permission"] = {
             "edit": "ask",
@@ -7972,6 +8592,29 @@ def _opencode_export_config_path(runtime, model):
     )
 
 
+def _opencode_apply_route_env(env, runtime, selected_model=""):
+    routes = _opencode_runtime_routes(runtime, selected_model)
+    default_key = ""
+    default_base = ""
+    default_anthropic_base = ""
+    for index, route in enumerate(routes):
+        provider_ref = str(route.get("provider_ref") or _opencode_route_provider_ref(route, index)).strip()
+        env_key = _opencode_route_env_key(provider_ref) if provider_ref != OPENCODE_PROVIDER_ID else OPENCODE_API_KEY_ENV
+        api_key = str(route.get("api_key") or runtime.get("openai_api_key") or runtime.get("api_key") or "")
+        env[env_key] = api_key
+        if not default_key:
+            default_key = api_key
+            default_base = str(route.get("openai_base_url") or "").strip().rstrip("/")
+            default_anthropic_base = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
+    env[OPENCODE_API_KEY_ENV] = default_key or str(runtime.get("openai_api_key") or runtime.get("api_key") or "")
+    env["OPENAI_API_KEY"] = env[OPENCODE_API_KEY_ENV]
+    env["OPENAI_BASE_URL"] = default_base or _opencode_provider_base_url(runtime)
+    if default_anthropic_base:
+        env["ANTHROPIC_API_KEY"] = env[OPENCODE_API_KEY_ENV]
+        env["ANTHROPIC_BASE_URL"] = default_anthropic_base
+    return routes
+
+
 def _opencode_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = _resolve_model(model_info or runtime)
@@ -8003,9 +8646,7 @@ def _opencode_gateway_env(runtime, model_info=None):
     config_path = os.path.join(config_dir, "opencode.json")
     _write_opencode_config(config_path, runtime, model)
 
-    env[OPENCODE_API_KEY_ENV] = str(runtime.get("openai_api_key") or runtime.get("api_key") or "")
-    env["OPENAI_API_KEY"] = env[OPENCODE_API_KEY_ENV]
-    env["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
+    _opencode_apply_route_env(env, runtime, selected_model=model)
     env["OPENCODE_CONFIG"] = config_path
     env["OPENCODE_CONFIG_DIR"] = config_dir
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
@@ -8026,15 +8667,67 @@ def _opencode_gateway_env(runtime, model_info=None):
     return env
 
 
+def _opencode_global_omo_env(runtime):
+    env = os.environ.copy()
+    _inject_real_home_hints(env)
+    env["OPENCODE_CLIENT"] = "mms"
+    env["MMS_OPENCODE_PROFILE"] = "heavy_omo"
+    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
+    _apply_runtime_locale_profile(env, runtime)
+    _apply_runtime_ip_stack_profile(env, runtime)
+    return env
+
+
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
+    profile = str((runtime or {}).get("opencode_profile") or "lite").strip().lower() or "lite"
+    if profile in {"heavy", "heavy_omo", "omo"} or (runtime or {}).get("opencode_use_global_config"):
+        env = _opencode_global_omo_env(runtime)
+        cmd = ["opencode"]
+        agent = str((runtime or {}).get("opencode_agent") or "").strip()
+        if agent:
+            cmd += ["--agent", agent]
+        _exec_or_run(cmd, env, once)
+        return
+
     _opencode_gateway_health_check(runtime)
     model = _resolve_model(model_info)
-    if not model:
+    routes = _opencode_runtime_routes(runtime, model)
+    env = _opencode_gateway_env(runtime, model_info=model_info)
+    launch_model_ref, launch_agent, preflight_checks = _opencode_select_launch_candidate(runtime, routes, model, env)
+    if not launch_model_ref and preflight_checks:
+        console.print("[red]OpenCode Lite Pro preflight 全部失败；未启动可能坏掉的 primary route。[/red]")
+        console.print("[dim]可运行 `mms opencode-smoke --profile lite_pro --live` 查看完整 Moebius trace。[/dim]")
+        sys.exit(2)
+    if not launch_model_ref:
         console.print("[red]OpenCode 启动需要先选择一个模型[/red]")
         sys.exit(1)
-    env = _opencode_gateway_env(runtime, model_info=model_info)
-    cmd = ["opencode", "-m", _opencode_model_ref(model)]
+    launch_model_name = launch_model_ref.rsplit("/", 1)[-1]
+    _inject_selected_model_name(env, launch_model_name)
+    env["MMS_OPENCODE_LAUNCH_MODEL"] = launch_model_ref
+    env["MMS_OPENCODE_LAUNCH_AGENT"] = str(launch_agent or "")
+    if env.get("MMS_SESSION_HOME"):
+        launch_model_info = dict(model_info) if isinstance(model_info, dict) else {}
+        launch_model_info["model"] = launch_model_name
+        launch_model_info["opencode_model_ref"] = launch_model_ref
+        _install_session_packet_env(
+            env,
+            cli="opencode",
+            runtime=runtime,
+            model_info=launch_model_info,
+            session_home=env.get("MMS_SESSION_HOME"),
+            features={
+                "opencode_launch_preflight": bool(preflight_checks),
+                "opencode_launch_route": launch_model_ref,
+            },
+        )
+    cmd = ["opencode"]
+    if runtime.get("opencode_pure", True) is not False:
+        cmd.append("--pure")
+    agent = str(launch_agent or runtime.get("opencode_agent", OPENCODE_LITE_DEFAULT_AGENT) or "").strip()
+    if agent:
+        cmd += ["--agent", agent]
+    cmd += ["-m", launch_model_ref]
     _exec_or_run(cmd, env, once)
 
 
@@ -8066,6 +8759,15 @@ LAUNCHERS = {
 
 def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if cli == "opencode":
+        profile = str(runtime.get("opencode_profile") or "").strip().lower()
+        if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
+            return {
+                "OPENCODE_CLIENT": "mms",
+                "MMS_OPENCODE_PROFILE": "heavy_omo",
+            }
+
     if runtime.get("auth_mode") == "broker_profile":
         return {}
     if runtime.get("auth_mode") == "oauth_bridge":
@@ -8089,9 +8791,7 @@ def get_export_env(cli, runtime):
         model = _resolve_model(runtime)
         config_path = _opencode_export_config_path(runtime, model)
         _write_opencode_config(config_path, runtime, model)
-        exports[OPENCODE_API_KEY_ENV] = api_key
-        exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _opencode_provider_base_url(runtime)
+        _opencode_apply_route_env(exports, runtime, selected_model=model)
         exports["OPENCODE_CONFIG"] = config_path
         exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
         exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
@@ -8158,6 +8858,11 @@ def _show_launch_info(cli, runtime, auth_mode):
                 console.print(f"[dim]{' | '.join(parts)}[/dim]")
     except Exception:
         pass
+
+    if cli == "opencode":
+        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "lite").strip()
+        if profile_label:
+            console.print(f"[dim]OpenCode profile: {profile_label}[/dim]")
 
     if cli == "claude":
         try:

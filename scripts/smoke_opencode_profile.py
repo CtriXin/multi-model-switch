@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""Smoke MMS-generated OpenCode profile config and optional live agent routes."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+import mms_core
+import mms_launchers
+
+MOEBIUS_RUN = Path("/Users/xin/auto-skills/CtriXin-repo/moebius/scripts/moebius_run.py")
+
+
+def _now_slug() -> str:
+    return time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+
+
+def _trim(value: str, limit: int = 1200) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _safe_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(payload)
+    cleaned.pop("env", None)
+    return cleaned
+
+
+def _init_trace(repo_root: Path, trace_id: str, profile: str, live: bool) -> None:
+    trace_root = repo_root / ".ai" / "trace"
+    trace_root.mkdir(parents=True, exist_ok=True)
+    if not MOEBIUS_RUN.exists():
+        return
+    cmd = [
+        sys.executable,
+        str(MOEBIUS_RUN),
+        "trace",
+        "init",
+        "--run-id",
+        f"mms-opencode-smoke-{_now_slug()}",
+        "--task-id",
+        "mms-opencode-profile-smoke",
+        "--milestone",
+        "S-opencode-smoke",
+        "--goal",
+        f"Smoke OpenCode profile {profile} live={live}",
+        "--repo-root",
+        str(repo_root),
+        "--trace-root",
+        str(trace_root),
+        "--trace-id",
+        trace_id,
+        "--backend",
+        "opencode",
+        "--source",
+        "mms",
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def _record_trace_event(repo_root: Path, trace_id: str, status: str, data: dict[str, Any]) -> None:
+    trace_root = repo_root / ".ai" / "trace"
+    if not MOEBIUS_RUN.exists():
+        return
+    cmd = [
+        sys.executable,
+        str(MOEBIUS_RUN),
+        "trace",
+        "event",
+        "--trace-id",
+        trace_id,
+        "--trace-root",
+        str(trace_root),
+        "--event-type",
+        "opencode_profile_smoke",
+        "--module",
+        "mms_opencode",
+        "--action",
+        "smoke",
+        "--status",
+        status,
+        "--backend",
+        "opencode",
+        "--lane",
+        "lite_pro",
+        "--data-json",
+        json.dumps(_safe_event_payload(data), ensure_ascii=False),
+    ]
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def _resolve_profile(profile: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    cfg = mms_core.load_config()
+    if cfg is None:
+        raise RuntimeError("未找到 MMS config")
+    cfg = mms_core.apply_local_overrides(cfg)
+    provider = mms_core.ensure_provider_credentials(cfg)
+    default_models = mms_core._probe_models(provider, emit_output=False).get("models")
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(cfg, provider, default_models, profile)
+    if runtime is None:
+        raise RuntimeError(f"无法解析 OpenCode profile: {profile}")
+    return model_info, runtime
+
+
+def _build_temp_env(runtime: dict[str, Any], model_info: dict[str, Any], temp_root: Path) -> tuple[dict[str, str], Path, dict[str, Any]]:
+    home = temp_root / "home"
+    config_dir = home / ".config" / "opencode"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "opencode.json"
+    model = str(model_info.get("model") or runtime.get("model") or "")
+    payload = mms_launchers._build_opencode_config_payload(runtime, model)
+    config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    env = os.environ.copy()
+    mms_launchers._scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    env["HOME"] = str(home)
+    env["XDG_CONFIG_HOME"] = str(home / ".config")
+    env["OPENCODE_CONFIG"] = str(config_path)
+    env["OPENCODE_CONFIG_DIR"] = str(config_dir)
+    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    env["OPENCODE_CLIENT"] = "mms-smoke"
+    mms_launchers._opencode_apply_route_env(env, runtime, selected_model=model)
+    return env, config_path, payload
+
+
+def _agent_model_map(payload: dict[str, Any]) -> dict[str, str]:
+    agents = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
+    return {
+        str(name): str(config.get("model") or payload.get("model") or "")
+        for name, config in agents.items()
+        if isinstance(config, dict)
+    }
+
+
+def _route_lookup(runtime: dict[str, Any], model: str) -> dict[str, dict[str, Any]]:
+    routes = mms_launchers._opencode_runtime_routes(runtime, model)
+    return {
+        mms_launchers._opencode_route_model_ref(route, index): route
+        for index, route in enumerate(routes)
+    }
+
+
+def _configured_transport_evidence(route: dict[str, Any], *, fallback_used: bool, fallback_reason: str) -> dict[str, Any]:
+    protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+    if protocol == "anthropic_messages":
+        base_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
+        request_url = f"{base_url}/messages" if base_url else ""
+    else:
+        base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")
+        request_url = f"{base_url}/chat/completions" if base_url else ""
+    return {
+        "schema": "cache_transport_evidence.v1",
+        "model": route.get("model"),
+        "provider_id": route.get("provider_id"),
+        "protocol": protocol,
+        "request_url": request_url,
+        "route_source": "mms_opencode_profile",
+        "provider_profile": "anthropic" if protocol == "anthropic_messages" else "openai_compatible",
+        "fallback_used": bool(fallback_used),
+        "fallback_reason": fallback_reason,
+        "usage": {
+            "cache_read_tokens": None,
+            "cache_write_tokens": None,
+            "cache_creation_input_tokens": None,
+        },
+        "evidence_note": "configured OpenCode provider route; OpenCode CLI stdout does not expose raw upstream request log",
+    }
+
+
+def _run_agent_list(env: dict[str, str], timeout: int) -> dict[str, Any]:
+    completed = subprocess.run(
+        ["opencode", "--pure", "agent", "list"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+    return {
+        "cmd": "opencode --pure agent list",
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "_raw": f"{completed.stdout}\n{completed.stderr}",
+        "stdout": _trim(completed.stdout),
+        "stderr": _trim(completed.stderr),
+    }
+
+
+def _run_live_agent(
+    env: dict[str, str],
+    agent: str,
+    model_ref: str,
+    timeout: int,
+    routes_by_model_ref: dict[str, dict[str, Any]],
+    *,
+    primary_model_ref: str,
+) -> dict[str, Any]:
+    message = "MMS OpenCode route smoke. Reply exactly OK and nothing else."
+    cmd = ["opencode", "run", "--pure", "--agent", agent, "-m", model_ref, message]
+    started = time.time()
+    route = routes_by_model_ref.get(model_ref, {})
+    fallback_used = bool(primary_model_ref and model_ref != primary_model_ref)
+    try:
+        completed = subprocess.run(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        elapsed = round(time.time() - started, 3)
+        combined = f"{completed.stdout}\n{completed.stderr}"
+        return {
+            "agent": agent,
+            "model": model_ref,
+            "route_id": route.get("id"),
+            "provider_id": route.get("provider_id"),
+            "ok": completed.returncode == 0 and "OK" in combined.upper(),
+            "returncode": completed.returncode,
+            "elapsed_sec": elapsed,
+            "stdout": _trim(completed.stdout),
+            "stderr": _trim(completed.stderr),
+            "cache_transport_evidence": _configured_transport_evidence(
+                route,
+                fallback_used=fallback_used,
+                fallback_reason="smoke selected non-primary route" if fallback_used else "",
+            ),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "agent": agent,
+            "model": model_ref,
+            "route_id": route.get("id"),
+            "provider_id": route.get("provider_id"),
+            "ok": False,
+            "returncode": "timeout",
+            "elapsed_sec": timeout,
+            "stdout": _trim(exc.stdout or ""),
+            "stderr": _trim(exc.stderr or ""),
+            "cache_transport_evidence": _configured_transport_evidence(
+                route,
+                fallback_used=fallback_used,
+                fallback_reason="smoke selected non-primary route" if fallback_used else "",
+            ),
+        }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Smoke MMS OpenCode profile config; --live performs real model calls.")
+    parser.add_argument("--profile", default="lite_pro", choices=["lite_pro", "lite", "raw"], help="OpenCode profile to smoke")
+    parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
+    parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
+    parser.add_argument("--timeout", type=int, default=90, help="Timeout per opencode command")
+    parser.add_argument("--json", action="store_true", help="Print JSON only")
+    parser.add_argument("--trace-id", help="Existing/new Moebius trace id")
+    args = parser.parse_args()
+
+    repo_root = Path(os.environ.get("MMS_TARGET_REPO") or ROOT_DIR).resolve()
+    trace_id = args.trace_id or f"trc-{_now_slug()}-opencode-smoke"
+    _init_trace(repo_root, trace_id, args.profile, args.live)
+
+    result: dict[str, Any] = {
+        "schema": "mms.opencode_profile_smoke.v1",
+        "profile": args.profile,
+        "live": bool(args.live),
+        "trace_id": trace_id,
+        "trace_path": str(repo_root / ".ai" / "trace" / trace_id),
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "agents": {},
+        "checks": [],
+    }
+
+    try:
+        model_info, runtime = _resolve_profile(args.profile)
+        result["model_info"] = model_info
+        result["runtime"] = {
+            "id": runtime.get("id"),
+            "name": runtime.get("name"),
+            "profile": runtime.get("opencode_profile"),
+            "agent": runtime.get("opencode_agent"),
+        }
+        result["routes"] = [
+            {
+                "id": route.get("id"),
+                "model": route.get("model"),
+                "provider_id": route.get("provider_id"),
+                "protocol": route.get("protocol"),
+                "openai_base_url": route.get("openai_base_url"),
+                "anthropic_base_url": route.get("anthropic_base_url"),
+            }
+            for route in runtime.get("opencode_routes", [])
+            if isinstance(route, dict)
+        ]
+        with tempfile.TemporaryDirectory(prefix="mms-opencode-smoke-") as tmp:
+            env, config_path, payload = _build_temp_env(runtime, model_info, Path(tmp))
+            result["config_path"] = str(config_path)
+            result["default_model"] = payload.get("model")
+            result["default_agent"] = payload.get("default_agent")
+            result["agents"] = _agent_model_map(payload)
+            routes_by_ref = _route_lookup(runtime, model_info.get("model") or runtime.get("model") or "")
+            result["launch_candidates"] = [
+                {
+                    "route_key": item.get("route_key"),
+                    "agent": item.get("agent"),
+                    "model": item.get("model_ref"),
+                }
+                for item in mms_launchers._opencode_launch_candidates(
+                    runtime,
+                    mms_launchers._opencode_runtime_routes(runtime, model_info.get("model") or runtime.get("model") or ""),
+                    model_info.get("model") or runtime.get("model") or "",
+                )
+            ]
+            list_check = _run_agent_list(env, args.timeout)
+            expected_agents = set(result["agents"])
+            listed = str(list_check.pop("_raw", ""))
+            list_check["all_agents_listed"] = all(agent in listed for agent in expected_agents)
+            list_check["ok"] = bool(list_check["ok"] and list_check["all_agents_listed"])
+            result["checks"].append(list_check)
+
+            if args.live:
+                target_agents = args.agent or sorted(result["agents"])
+                for agent in target_agents:
+                    model_ref = result["agents"].get(agent)
+                    if not model_ref:
+                        result["checks"].append({"agent": agent, "ok": False, "status": "missing_agent"})
+                        continue
+                    result["checks"].append(
+                        _run_live_agent(
+                            env,
+                            agent,
+                            model_ref,
+                            args.timeout,
+                            routes_by_ref,
+                            primary_model_ref=str(result.get("default_model") or ""),
+                        )
+                    )
+    except Exception as exc:  # noqa: BLE001 - command should produce durable failure JSON
+        result["error"] = str(exc)
+        result["ok"] = False
+    else:
+        result["ok"] = all(bool(item.get("ok")) for item in result.get("checks", []))
+
+    trace_dir = repo_root / ".ai" / "trace" / trace_id
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    result_path = trace_dir / "opencode-smoke-result.json"
+    result["result_path"] = str(result_path)
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _record_trace_event(repo_root, trace_id, "pass" if result.get("ok") else "fail", result)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        status = "PASS" if result.get("ok") else "FAIL"
+        print(f"[{status}] profile={args.profile} live={args.live} trace={trace_id}")
+        print(f"result={result_path}")
+        print(f"default={result.get('default_agent')} {result.get('default_model')}")
+        for agent, model in sorted((result.get("agents") or {}).items()):
+            print(f"agent={agent} model={model}")
+        for check in result.get("checks", []):
+            label = check.get("agent") or check.get("cmd") or check.get("status") or "check"
+            print(f"check={'PASS' if check.get('ok') else 'FAIL'} {label}")
+
+    return 0 if result.get("ok") else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

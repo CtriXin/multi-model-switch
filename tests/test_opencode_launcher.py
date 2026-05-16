@@ -29,9 +29,20 @@ def test_opencode_config_uses_openai_compatible_provider():
 
     assert payload["model"] == "mms/deepseek-reasoner"
     assert payload["small_model"] == "mms/deepseek-reasoner"
+    assert payload["default_agent"] == "mobius-builder"
     assert payload["autoupdate"] is False
     assert payload["share"] == "disabled"
     assert payload["permission"] == {"edit": "ask", "bash": "ask"}
+    assert sorted(payload["agent"]) == [
+        "mobius-builder",
+        "mobius-explore",
+        "mobius-fixer",
+        "mobius-reviewer",
+    ]
+    assert payload["agent"]["mobius-builder"]["mode"] == "primary"
+    assert payload["agent"]["mobius-explore"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-reviewer"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-fixer"]["permission"]["edit"] == "ask"
 
     provider = payload["provider"]["mms"]
     assert provider["npm"] == "@ai-sdk/openai-compatible"
@@ -45,6 +56,20 @@ def test_opencode_config_uses_openai_compatible_provider():
     if "limit" in reasoner:
         assert isinstance(reasoner["limit"]["context"], int)
         assert reasoner["limit"]["output"] == mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+
+
+def test_opencode_config_can_disable_lite_agents_for_raw_profile():
+    import mms_launchers
+
+    payload = json.loads(
+        mms_launchers._build_opencode_config_content(
+            _runtime(models=["deepseek-chat"], opencode_lite_agents=False),
+            "deepseek-chat",
+        )
+    )
+
+    assert "agent" not in payload
+    assert "default_agent" not in payload
 
 
 def test_opencode_model_limit_includes_required_output_value():
@@ -181,10 +206,48 @@ def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
         once=True,
     )
 
-    assert captured["cmd"] == ["opencode", "-m", "mms/deepseek-chat"]
+    assert captured["cmd"] == ["opencode", "--pure", "--agent", "mobius-builder", "-m", "mms/deepseek-chat"]
     assert captured["env"]["HOME"] == "/tmp/opencode-session"
     assert captured["once"] is True
     assert captured["health_base_url"] == "http://129.146.32.12:3000/openai/v1"
+
+
+def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_opencode_gateway_health_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("session config should not be used")),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_opencode_gateway_env",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("session env should not be used")),
+    )
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+
+    def fake_exec(cmd, env, once, **_kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["once"] = once
+
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+
+    mms_launchers.launch_opencode(
+        {"model": "deepseek-chat"},
+        _runtime(opencode_profile="heavy_omo", opencode_use_global_config=True),
+        once=True,
+    )
+
+    assert captured["cmd"] == ["opencode"]
+    assert captured["env"]["OPENCODE_CLIENT"] == "mms"
+    assert captured["env"]["MMS_OPENCODE_PROFILE"] == "heavy_omo"
+    assert captured["once"] is True
 
 
 def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
@@ -207,14 +270,373 @@ def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
     assert payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
 
 
+def test_get_export_env_for_heavy_omo_does_not_write_session_config(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    runtime = _runtime(model="deepseek-chat", opencode_profile="heavy_omo", opencode_use_global_config=True)
+
+    exports = mms_launchers.get_export_env("opencode", runtime)
+
+    assert exports == {
+        "OPENCODE_CLIENT": "mms",
+        "MMS_OPENCODE_PROFILE": "heavy_omo",
+    }
+    assert not (real_home / ".config" / "mms" / "opencode-gateway").exists()
+
+
+def test_get_export_env_for_heavy_omo_does_not_require_provider_credentials():
+    import mms_launchers
+
+    exports = mms_launchers.get_export_env(
+        "opencode",
+        {"opencode_profile": "heavy_omo", "opencode_use_global_config": True},
+    )
+
+    assert exports == {
+        "OPENCODE_CLIENT": "mms",
+        "MMS_OPENCODE_PROFILE": "heavy_omo",
+    }
+
+
 def test_core_provider_supports_opencode_cli():
     import mms_core
 
     provider = _runtime()
+    anthropic_provider = _runtime(
+        supported_clis=["claude"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        base_url="https://anthropic.example/v1",
+    )
 
     assert "opencode" in mms_core.CLI_NAMES
     assert mms_core._provider_supports_cli_name(provider, "opencode") is True
     assert mms_core._provider_supports_model_for_cli(provider, "opencode", "deepseek-chat") is True
+    assert mms_core._provider_supports_cli_name(anthropic_provider, "opencode") is True
+
+
+def test_core_opencode_profiles_are_fixed_launch_shapes():
+    import mms_core
+
+    lite = mms_core._apply_opencode_profile(_runtime(), "lite")
+    lite_pro = mms_core._apply_opencode_profile(_runtime(), "lite_pro")
+    heavy = mms_core._apply_opencode_profile(_runtime(), "heavy_omo")
+    raw = mms_core._apply_opencode_profile(_runtime(), "raw")
+
+    assert lite["opencode_pure"] is True
+    assert lite["opencode_agent"] == "mobius-builder"
+    assert lite["opencode_lite_agents"] is True
+    assert lite_pro["opencode_agent"] == "mobius-builder-pro"
+    assert lite_pro["opencode_launch_preflight"] is True
+    assert lite_pro["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
+    assert heavy["opencode_use_global_config"] is True
+    assert heavy["opencode_lite_agents"] is False
+    assert raw["opencode_pure"] is True
+    assert raw["opencode_agent"] == ""
+    assert raw["opencode_lite_agents"] is False
+
+
+def test_core_opencode_profile_runtime_uses_fixed_safe_gpt_not_kimi():
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="dual-protocol",
+        name="Dual Protocol",
+        supported_clis=["codex"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        ["K2.6", "gpt-5.4"],
+        "lite",
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime["id"] == "dual-protocol"
+    assert runtime["model"] == "gpt-5.4"
+    assert runtime["opencode_profile"] == "lite"
+    assert runtime["opencode_agent"] == "mobius-builder"
+
+
+def test_core_opencode_heavy_profile_uses_global_runtime_without_model_provider():
+    import mms_core
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        {"providers": []},
+        {},
+        [],
+        "heavy_omo",
+    )
+
+    assert model_info == {"model": "global-omo"}
+    assert runtime["runtime_kind"] == "opencode_profile"
+    assert runtime["opencode_use_global_config"] is True
+
+
+def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "glm-5-turbo",
+        "kimi-for-coding",
+        "mimo-v2.5-pro",
+        "deepseek-v4-pro",
+        "glm-5.1",
+    ]
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "lite_pro",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.5", "profile": "lite_pro"}
+    assert runtime["opencode_agent"] == "mobius-builder-pro"
+    assert runtime["opencode_launch_preflight"] is True
+    assert runtime["opencode_launch_fallback_agents"]["builder_fallback"] == "mobius-builder-stable"
+    assert payload["model"].endswith("/gpt-5.5")
+    assert payload["default_agent"] == "mobius-builder-pro"
+    assert payload["agent"]["mobius-builder-pro"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-builder-stable"]["mode"] == "primary"
+    assert payload["agent"]["mobius-builder-stable"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
+    assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
+    assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert len(payload["provider"]) >= 7
+    assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
+    assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/anthropic"
+    assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai-compatible"
+
+
+def test_core_opencode_lite_pro_uses_openai_routes_when_anthropic_unavailable(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    safe_provider = _runtime(
+        id="safe-openai",
+        name="Safe OpenAI",
+        supported_clis=["codex"],
+        protocols=["openai_chat_completions"],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        safe_provider,
+        [
+            "gpt-5.5",
+            "gpt-5.4",
+            "mimo-v2.5-pro",
+            "glm-5-turbo",
+            "kimi-for-coding",
+            "deepseek-v4-pro",
+            "glm-5.1",
+        ],
+        "lite_pro",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
+    assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
+    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
+
+
+def test_launch_opencode_lite_pro_uses_profile_default_model_ref(monkeypatch):
+    import mms_launchers
+
+    runtime = _runtime(
+        opencode_profile="lite_pro",
+        opencode_agent="mobius-builder-pro",
+        opencode_roster="lite_pro",
+        opencode_default_route_key="builder_primary",
+        opencode_routes=[
+            {
+                "id": "builder_primary",
+                "model": "gpt-5.5",
+                "provider_id": "gpt",
+                "provider_name": "GPT",
+                "openai_base_url": "https://gpt.example/v1",
+                "api_key": "sk-gpt",
+            },
+            {
+                "id": "builder_fallback",
+                "model": "gpt-5.4",
+                "provider_id": "gpt",
+                "provider_name": "GPT",
+                "openai_base_url": "https://gpt.example/v1",
+                "api_key": "sk-gpt",
+            },
+        ],
+    )
+    captured = {}
+    monkeypatch.setattr(mms_launchers, "_opencode_gateway_health_check", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_opencode_gateway_env", lambda *_args, **_kwargs: {"HOME": "/tmp/opencode"})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once, **_kwargs: captured.update({"cmd": cmd, "env": env, "once": once}),
+    )
+
+    mms_launchers.launch_opencode({"model": "gpt-5.5"}, runtime, once=True)
+
+    assert captured["cmd"] == [
+        "opencode",
+        "--pure",
+        "--agent",
+        "mobius-builder-pro",
+        "-m",
+        "mms-builder_primary/gpt-5.5",
+    ]
+
+
+def test_launch_opencode_lite_pro_prefers_fallback_when_primary_preflight_fails(monkeypatch):
+    import mms_launchers
+
+    runtime = _runtime(
+        opencode_profile="lite_pro",
+        opencode_agent="mobius-builder-pro",
+        opencode_roster="lite_pro",
+        opencode_launch_preflight=True,
+        opencode_default_route_key="builder_primary",
+        opencode_launch_fallback_route_keys=["builder_primary", "builder_fallback"],
+        opencode_launch_fallback_agents={
+            "builder_primary": "mobius-builder-pro",
+            "builder_fallback": "mobius-builder-stable",
+        },
+        opencode_routes=[
+            {
+                "id": "builder_primary",
+                "model": "gpt-5.5",
+                "provider_id": "gpt55",
+                "provider_name": "GPT 5.5",
+                "openai_base_url": "https://gpt55.example/v1",
+                "api_key": "sk-gpt55",
+            },
+            {
+                "id": "builder_fallback",
+                "model": "gpt-5.4",
+                "provider_id": "gpt54",
+                "provider_name": "GPT 5.4",
+                "openai_base_url": "https://gpt54.example/v1",
+                "api_key": "sk-gpt54",
+            },
+        ],
+    )
+    captured = {"preflight": []}
+
+    monkeypatch.setattr(mms_launchers, "_opencode_gateway_health_check", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_opencode_gateway_env",
+        lambda *_args, **_kwargs: {"HOME": "/tmp/opencode", "MMS_SESSION_HOME": ""},
+    )
+
+    def fake_preflight(_env, agent, model_ref, timeout=None):
+        captured["preflight"].append((agent, model_ref))
+        return {"ok": model_ref.endswith("/gpt-5.4"), "returncode": 0 if model_ref.endswith("/gpt-5.4") else 1}
+
+    monkeypatch.setattr(mms_launchers, "_opencode_run_preflight", fake_preflight)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_exec_or_run",
+        lambda cmd, env, once, **_kwargs: captured.update({"cmd": cmd, "env": env, "once": once}),
+    )
+
+    mms_launchers.launch_opencode({"model": "gpt-5.5"}, runtime, once=True)
+
+    assert captured["preflight"] == [
+        ("mobius-builder-pro", "mms-builder_primary/gpt-5.5"),
+        ("mobius-builder-stable", "mms-builder_fallback/gpt-5.4"),
+    ]
+    assert captured["cmd"] == [
+        "opencode",
+        "--pure",
+        "--agent",
+        "mobius-builder-stable",
+        "-m",
+        "mms-builder_fallback/gpt-5.4",
+    ]
+    assert captured["env"]["MMS_MODEL_NAME"] == "gpt-5.4"
+    assert captured["env"]["MMS_OPENCODE_LAUNCH_MODEL"] == "mms-builder_fallback/gpt-5.4"
+
+
+def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypatch):
+    import mms_core
+    import mms_launchers
+    import mms_tui
+
+    captured = {}
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="dual-protocol",
+        name="Dual Protocol",
+        supported_clis=["codex"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+
+    monkeypatch.setattr(
+        mms_core,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["K2.6", "gpt-5.4"]},
+    )
+    monkeypatch.setattr(mms_core, "_build_model_families_for_cli", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_core, "_make_provider_options_loader", lambda *_args, **_kwargs: (lambda _model: []))
+    monkeypatch.setattr(mms_core, "_get_scene_usage", lambda: ({}, {}))
+    monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: True)
+    monkeypatch.setattr(mms_core, "_build_confirm_preview_catalog", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(mms_launchers, "get_export_env", lambda _cli, _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_caveman_available_for_cli", lambda _cli: False)
+    monkeypatch.setattr(mms_launchers, "_ecc_available_for_claude", lambda: False)
+    monkeypatch.setattr(mms_launchers, "_omc_available_for_claude", lambda: False)
+
+    def fake_select_family_tui(*_args, **kwargs):
+        captured["profile_options"] = kwargs.get("profile_options_by_cli")
+        return ("profile", "opencode", "lite")
+
+    def fake_confirm_tui(cli, model_info, **kwargs):
+        captured["cli"] = cli
+        captured["model_info"] = model_info
+        captured["runtime"] = kwargs.get("runtime")
+        return "q"
+
+    monkeypatch.setattr(mms_tui, "select_family_tui", fake_select_family_tui)
+    monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
+
+    assert mms_core._handle_tui_scene_selection(cfg, [], provider, False, ["opencode"]) is True
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == [
+        "lite_pro",
+        "lite",
+        "heavy_omo",
+        "raw",
+    ]
+    assert captured["cli"] == "opencode"
+    assert captured["model_info"] == {"model": "gpt-5.4"}
+    assert captured["runtime"]["id"] == "dual-protocol"
+    assert captured["runtime"]["opencode_profile"] == "lite"
 
 
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
