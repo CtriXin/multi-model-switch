@@ -21,10 +21,24 @@ import mms_core
 import mms_launchers
 
 MOEBIUS_RUN = Path("/Users/xin/auto-skills/CtriXin-repo/moebius/scripts/moebius_run.py")
+HEALTH_SCHEMA = "mms.opencode_route_health.v1"
+HEALTH_LATEST_SCHEMA = "mms.opencode_route_health_latest.v1"
+HEALTH_DIR = Path(".ai") / "opencode-health"
+HEALTH_LEDGER_NAME = "route-health.jsonl"
+HEALTH_LATEST_NAME = "latest.json"
+SLOW_ROUTE_THRESHOLD_SEC = 30.0
 
 
 def _now_slug() -> str:
     return time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _iso_from_epoch(value: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value))
 
 
 def _trim(value: str, limit: int = 1200) -> str:
@@ -179,6 +193,247 @@ def _configured_transport_evidence(route: dict[str, Any], *, fallback_used: bool
     }
 
 
+def _is_gpt_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    return normalized.startswith("gpt-") or normalized.startswith("o1") or normalized.startswith("o3")
+
+
+def _protocol_correct(route: dict[str, Any], evidence: dict[str, Any]) -> bool:
+    model = str(route.get("model") or evidence.get("model") or "").strip()
+    protocol = str(evidence.get("protocol") or route.get("protocol") or "").strip()
+    anthropic_base_url = str(route.get("anthropic_base_url") or "").strip()
+    if model and not _is_gpt_model(model) and anthropic_base_url:
+        return protocol == "anthropic_messages"
+    return bool(protocol)
+
+
+def _combined_check_text(check: dict[str, Any]) -> str:
+    return " ".join(
+        str(check.get(key) or "")
+        for key in ("returncode", "stdout", "stderr", "error", "status")
+    ).lower()
+
+
+def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
+    evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
+    if not _protocol_correct(route, evidence):
+        return "cache_sensitive_wrong_protocol"
+    if check.get("ok"):
+        return "ok"
+    if check.get("returncode") == "timeout":
+        return "timeout"
+
+    text = _combined_check_text(check)
+    if any(token in text for token in ("401", "403", "unauthorized", "auth", "invalid api key", "api key")):
+        return "auth_error"
+    if "429" in text or "rate limit" in text or "rate_limited" in text:
+        return "rate_limited"
+    if "overloaded" in text or "capacity" in text or "529" in text:
+        return "overloaded"
+    if any(token in text for token in ("model not found", "invalid model", "model_not_found")):
+        return "model_not_found"
+    if any(token in text for token in ("protocol", "anthropic-version", "messages api", "chat/completions")):
+        return "protocol_mismatch"
+    if any(token in text for token in ("500", "502", "503", "504", "5xx")):
+        return "provider_5xx"
+    if any(token in text for token in ("econn", "enotfound", "etimedout", "socket", "fetch failed", "network")):
+        return "network_error"
+    if str(check.get("returncode")) == "0" and not str(check.get("stdout") or "").strip():
+        return "empty_response"
+    if check.get("returncode") not in (None, 0, "0"):
+        return "tool_cli_error"
+    return "unknown_error"
+
+
+def _health_status(error_class: str, latency_sec: float | None) -> str:
+    if error_class == "ok":
+        if latency_sec is not None and latency_sec > SLOW_ROUTE_THRESHOLD_SEC:
+            return "degraded"
+        return "live_healthy"
+    if error_class in {"auth_error", "cache_sensitive_wrong_protocol", "protocol_mismatch"}:
+        return "blocked"
+    return "unhealthy"
+
+
+def _health_score(
+    *,
+    ok: bool,
+    error_class: str,
+    status: str,
+    protocol_correct: bool,
+    latency_sec: float | None,
+    evidence: dict[str, Any],
+) -> int:
+    score = 0
+    if ok:
+        score += 40
+    if protocol_correct:
+        score += 25
+    else:
+        score -= 100
+    if latency_sec is not None and latency_sec <= SLOW_ROUTE_THRESHOLD_SEC:
+        score += 10
+    if evidence.get("schema") == "cache_transport_evidence.v1" and evidence.get("request_url"):
+        score += 10
+    if error_class not in {"ok"}:
+        score -= 60
+    if status == "blocked":
+        score = min(score, 0)
+    return max(-100, min(100, score))
+
+
+def _route_health_key(row: dict[str, Any]) -> str:
+    parts = [
+        row.get("profile"),
+        row.get("role"),
+        row.get("model"),
+        row.get("provider_id"),
+        row.get("protocol"),
+    ]
+    return "|".join(str(part or "") for part in parts)
+
+
+def _build_route_health_row(result: dict[str, Any], check: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
+    evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
+    role = str(check.get("role") or check.get("route_id") or route.get("id") or "").strip()
+    model = str(route.get("model") or evidence.get("model") or check.get("model") or "").strip()
+    provider_id = str(route.get("provider_id") or evidence.get("provider_id") or check.get("provider_id") or "").strip()
+    protocol = str(evidence.get("protocol") or route.get("protocol") or check.get("protocol") or "").strip()
+    request_url = str(evidence.get("request_url") or check.get("request_url") or "").strip()
+    latency_sec = check.get("latency_sec", check.get("elapsed_sec"))
+    try:
+        latency_value = round(float(latency_sec), 3)
+    except (TypeError, ValueError):
+        latency_value = None
+    protocol_ok = _protocol_correct(route, evidence)
+    error_class = _classify_error(check, route)
+    status = _health_status(error_class, latency_value)
+    row: dict[str, Any] = {
+        "schema": HEALTH_SCHEMA,
+        "profile": result.get("profile"),
+        "trace_id": result.get("trace_id"),
+        "source_result_path": result.get("result_path"),
+        "role": role,
+        "route_id": role,
+        "agent": check.get("agent"),
+        "model": model,
+        "provider_id": provider_id,
+        "protocol": protocol,
+        "request_url": request_url,
+        "route_source": evidence.get("route_source") or "mms_opencode_profile",
+        "provider_profile": evidence.get("provider_profile") or (
+            "anthropic" if protocol == "anthropic_messages" else "openai_compatible"
+        ),
+        "started_at": check.get("started_at"),
+        "finished_at": check.get("finished_at") or result.get("generated_at"),
+        "elapsed_sec": latency_value,
+        "latency_sec": latency_value,
+        "status": status,
+        "error_class": error_class,
+        "health_score": _health_score(
+            ok=bool(check.get("ok")),
+            error_class=error_class,
+            status=status,
+            protocol_correct=protocol_ok,
+            latency_sec=latency_value,
+            evidence=evidence,
+        ),
+        "fallback_used": bool(evidence.get("fallback_used") or check.get("fallback_used")),
+        "fallback_reason": str(evidence.get("fallback_reason") or check.get("fallback_reason") or ""),
+        "cache_transport_evidence": evidence,
+    }
+    row["route_key"] = _route_health_key(row)
+    return row
+
+
+def _load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _latest_health_payload(ledger_path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get("route_key") or _route_health_key(row))
+        existing = latest.get(key)
+        if existing is None or str(row.get("finished_at") or "") >= str(existing.get("finished_at") or ""):
+            latest[key] = row
+    status_counts: dict[str, int] = {}
+    for row in latest.values():
+        status = str(row.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "schema": HEALTH_LATEST_SCHEMA,
+        "generated_at": _now_iso(),
+        "ledger_path": str(ledger_path),
+        "route_count": len(latest),
+        "status_counts": dict(sorted(status_counts.items())),
+        "routes": {
+            key: latest[key]
+            for key in sorted(
+                latest,
+                key=lambda item: (
+                    str(latest[item].get("profile") or ""),
+                    str(latest[item].get("role") or ""),
+                    str(latest[item].get("model") or ""),
+                    str(latest[item].get("provider_id") or ""),
+                    str(latest[item].get("protocol") or ""),
+                ),
+            )
+        },
+    }
+
+
+def _write_health_ledgers(repo_root: Path, result: dict[str, Any]) -> dict[str, Any]:
+    if not result.get("live"):
+        return {"enabled": False, "reason": "dry_smoke"}
+
+    routes_by_id = {
+        str(route.get("id") or ""): route
+        for route in result.get("routes", [])
+        if isinstance(route, dict)
+    }
+    rows: list[dict[str, Any]] = []
+    for check in result.get("checks", []):
+        if not isinstance(check, dict) or not check.get("agent"):
+            continue
+        route_id = str(check.get("route_id") or check.get("role") or "")
+        rows.append(_build_route_health_row(result, check, routes_by_id.get(route_id, {})))
+
+    health_dir = repo_root / HEALTH_DIR
+    health_dir.mkdir(parents=True, exist_ok=True)
+    ledger_path = health_dir / HEALTH_LEDGER_NAME
+    latest_path = health_dir / HEALTH_LATEST_NAME
+    if rows:
+        with ledger_path.open("a", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    all_rows = _load_jsonl_rows(ledger_path)
+    latest_payload = _latest_health_payload(ledger_path, all_rows)
+    tmp_path = latest_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(latest_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp_path.replace(latest_path)
+    return {
+        "enabled": True,
+        "rows_written": len(rows),
+        "ledger_path": str(ledger_path),
+        "latest_path": str(latest_path),
+        "status_counts": latest_payload.get("status_counts", {}),
+        "route_count": latest_payload.get("route_count", 0),
+    }
+
+
 def _run_agent_list(env: dict[str, str], timeout: int) -> dict[str, Any]:
     completed = subprocess.run(
         ["opencode", "--pure", "agent", "list"],
@@ -211,8 +466,10 @@ def _run_live_agent(
     message = "MMS OpenCode route smoke. Reply exactly OK and nothing else."
     cmd = ["opencode", "run", "--pure", "--agent", agent, "-m", model_ref, message]
     started = time.time()
+    started_at = _iso_from_epoch(started)
     route = routes_by_model_ref.get(model_ref, {})
     fallback_used = bool(primary_model_ref and model_ref != primary_model_ref)
+    fallback_reason = "smoke selected non-primary route" if fallback_used else ""
     try:
         completed = subprocess.run(
             cmd,
@@ -223,40 +480,61 @@ def _run_live_agent(
             timeout=timeout,
             check=False,
         )
-        elapsed = round(time.time() - started, 3)
+        finished = time.time()
+        elapsed = round(finished - started, 3)
         combined = f"{completed.stdout}\n{completed.stderr}"
+        evidence = _configured_transport_evidence(
+            route,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+        )
         return {
             "agent": agent,
             "model": model_ref,
+            "role": route.get("id"),
             "route_id": route.get("id"),
             "provider_id": route.get("provider_id"),
+            "protocol": evidence.get("protocol"),
+            "request_url": evidence.get("request_url"),
             "ok": completed.returncode == 0 and "OK" in combined.upper(),
             "returncode": completed.returncode,
+            "started_at": started_at,
+            "finished_at": _iso_from_epoch(finished),
             "elapsed_sec": elapsed,
+            "latency_sec": elapsed,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
             "stdout": _trim(completed.stdout),
             "stderr": _trim(completed.stderr),
-            "cache_transport_evidence": _configured_transport_evidence(
-                route,
-                fallback_used=fallback_used,
-                fallback_reason="smoke selected non-primary route" if fallback_used else "",
-            ),
+            "cache_transport_evidence": evidence,
         }
     except subprocess.TimeoutExpired as exc:
+        finished = time.time()
+        elapsed = round(finished - started, 3)
+        evidence = _configured_transport_evidence(
+            route,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+        )
         return {
             "agent": agent,
             "model": model_ref,
+            "role": route.get("id"),
             "route_id": route.get("id"),
             "provider_id": route.get("provider_id"),
+            "protocol": evidence.get("protocol"),
+            "request_url": evidence.get("request_url"),
             "ok": False,
             "returncode": "timeout",
-            "elapsed_sec": timeout,
+            "started_at": started_at,
+            "finished_at": _iso_from_epoch(finished),
+            "elapsed_sec": elapsed,
+            "latency_sec": elapsed,
+            "fallback_used": fallback_used,
+            "fallback_reason": fallback_reason,
             "stdout": _trim(exc.stdout or ""),
             "stderr": _trim(exc.stderr or ""),
-            "cache_transport_evidence": _configured_transport_evidence(
-                route,
-                fallback_used=fallback_used,
-                fallback_reason="smoke selected non-primary route" if fallback_used else "",
-            ),
+            "cache_transport_evidence": evidence,
         }
 
 
@@ -359,6 +637,12 @@ def main() -> int:
     trace_dir.mkdir(parents=True, exist_ok=True)
     result_path = trace_dir / "opencode-smoke-result.json"
     result["result_path"] = str(result_path)
+    if args.live:
+        try:
+            result["health"] = _write_health_ledgers(repo_root, result)
+        except Exception as exc:  # noqa: BLE001 - health persistence is part of live smoke correctness
+            result["health_error"] = str(exc)
+            result["ok"] = False
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _record_trace_event(repo_root, trace_id, "pass" if result.get("ok") else "fail", result)
 
