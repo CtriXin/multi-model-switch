@@ -7785,15 +7785,42 @@ def _opencode_profile_label(profile_id):
     return profile_id or "OpenCode Lite / custom agents"
 
 
+def _opencode_lite_pro_health_summary_text(repo_root=None):
+    latest = _load_opencode_route_health_latest(repo_root)
+    expected = len(_OPENCODE_LITE_PRO_SPECS)
+    counts = {"live_healthy": 0, "degraded": 0, "unhealthy": 0, "blocked": 0, "untested": 0}
+    seen_roles = set()
+    for row in latest.values():
+        if not isinstance(row, dict) or row.get("profile") != "lite_pro":
+            continue
+        role = str(row.get("role") or row.get("route_id") or "").strip()
+        if role:
+            seen_roles.add(role)
+        status = str(row.get("status") or "untested")
+        counts[status if status in counts else "untested"] += 1
+    counts["untested"] += max(0, expected - len(seen_roles))
+    if counts["live_healthy"] == expected:
+        return f"health: {expected}/{expected} healthy"
+    parts = [f"{counts['live_healthy']}/{expected} healthy"]
+    for status in ("degraded", "unhealthy", "blocked", "untested"):
+        if counts[status]:
+            parts.append(f"{counts[status]} {status}")
+    return "health: " + ", ".join(parts)
+
+
 def _opencode_profile_menu_options():
-    return [
-        {
+    options = []
+    lite_pro_health = _opencode_lite_pro_health_summary_text()
+    for option in _OPENCODE_PROFILE_OPTIONS:
+        summary = option["summary"]
+        if option["id"] == "lite_pro" and lite_pro_health:
+            summary = f"{summary} {lite_pro_health}"
+        options.append({
             "id": option["id"],
             "label": option["label"],
-            "summary": option["summary"],
-        }
-        for option in _OPENCODE_PROFILE_OPTIONS
-    ]
+            "summary": summary,
+        })
+    return options
 
 
 def _select_opencode_profile(use_tui=False):
