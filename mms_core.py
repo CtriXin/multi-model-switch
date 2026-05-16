@@ -7935,6 +7935,109 @@ def _opencode_route_candidate_score(provider, model_name, sequence):
     )
 
 
+_OPENCODE_HEALTH_REL_PATH = os.path.join(".ai", "opencode-health", "latest.json")
+_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC = 15 * 60
+_OPENCODE_HEALTH_STATUS_RANK = {
+    "live_healthy": 0,
+    "degraded": 1,
+    "untested": 2,
+    "unhealthy": 3,
+    "blocked": 4,
+}
+
+
+def _opencode_health_repo_root(repo_root=None):
+    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.abspath(__file__))).strip()
+    return os.path.abspath(os.path.expanduser(root))
+
+
+def _opencode_health_latest_path(repo_root=None):
+    return os.path.join(_opencode_health_repo_root(repo_root), _OPENCODE_HEALTH_REL_PATH)
+
+
+def _opencode_route_health_key(profile, role, model, provider_id, protocol):
+    return "|".join(str(item or "") for item in (profile, role, model, provider_id, protocol))
+
+
+def _load_opencode_route_health_latest(repo_root=None):
+    path = _opencode_health_latest_path(repo_root)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    routes = payload.get("routes")
+    if not isinstance(routes, dict):
+        return {}
+    latest = {}
+    for key, row in routes.items():
+        if isinstance(row, dict):
+            latest[str(key)] = dict(row)
+    return latest
+
+
+def _opencode_parse_health_timestamp(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _opencode_route_health_for_route(latest_health, profile, role, route):
+    if not isinstance(route, dict):
+        return None
+    key = _opencode_route_health_key(
+        profile,
+        role or route.get("id"),
+        route.get("model"),
+        route.get("provider_id"),
+        route.get("protocol"),
+    )
+    row = latest_health.get(key) if isinstance(latest_health, dict) else None
+    return row if isinstance(row, dict) else None
+
+
+def _opencode_route_health_is_fresh(row, *, now=None, ttl_sec=_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC):
+    finished_at = _opencode_parse_health_timestamp(row.get("finished_at") if isinstance(row, dict) else None)
+    if finished_at is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    age = (current - finished_at).total_seconds()
+    return age >= 0 and age <= ttl_sec
+
+
+def _opencode_route_health_allows_route(row, *, now=None):
+    if not row:
+        return True
+    status = str(row.get("status") or "untested")
+    if status == "blocked":
+        return False
+    if status == "unhealthy" and _opencode_route_health_is_fresh(row, now=now):
+        return False
+    return True
+
+
+def _opencode_route_health_sort_key(row):
+    status = str((row or {}).get("status") or "untested")
+    return (
+        _OPENCODE_HEALTH_STATUS_RANK.get(status, _OPENCODE_HEALTH_STATUS_RANK["untested"]),
+        -int((row or {}).get("health_score") or 0),
+        str((row or {}).get("finished_at") or ""),
+    )
+
+
 def _find_opencode_model_route(
     cfg,
     default_provider,
