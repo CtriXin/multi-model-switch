@@ -7754,6 +7754,7 @@ _OPENCODE_LITE_PRO_SPECS = (
         "key": "reviewer_primary",
         "agent": "mobius-reviewer-mimo",
         "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"),
+        "route_policy": "mimo_direct",
     },
     {
         "key": "reviewer_fallback",
@@ -7962,6 +7963,26 @@ def _opencode_route_candidate_score(provider, model_name, sequence):
     )
 
 
+def _opencode_provider_matches_route_policy(provider, route_policy):
+    policy = str(route_policy or "").strip()
+    if not policy:
+        return True
+    provider_id = str(provider.get("id") or "").strip().lower()
+    provider_name = str(_provider_label(provider) or "").strip().lower()
+    base_urls = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            provider.get("base_url"),
+            provider.get("openai_base_url"),
+            provider.get("anthropic_base_url"),
+        )
+    )
+    identity = f"{provider_id} {provider_name}"
+    if policy == "mimo_direct":
+        return "xiaomimimo.com" in base_urls or "mimo-direct" in identity or "xiaomi-direct" in identity
+    return False
+
+
 _OPENCODE_HEALTH_REL_PATH = os.path.join(".ai", "opencode-health", "latest.json")
 _OPENCODE_HEALTH_UNHEALTHY_TTL_SEC = 15 * 60
 _OPENCODE_HEALTH_STATUS_RANK = {
@@ -8072,6 +8093,7 @@ def _find_opencode_model_route(
     model_names,
     *,
     route_key="route",
+    route_policy="",
 ):
     wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
     if not wanted:
@@ -8081,6 +8103,8 @@ def _find_opencode_model_route(
     scored = []
     for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
         if not provider.get("enabled", True):
+            continue
+        if not _opencode_provider_matches_route_policy(provider, route_policy):
             continue
         if not provider.get("api_key"):
             continue
@@ -8155,6 +8179,7 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
             default_models,
             spec["models"],
             route_key=spec["key"],
+            route_policy=spec.get("route_policy", ""),
         )
         if route is None and spec["key"] != "builder_primary":
             route = gpt_fallback
