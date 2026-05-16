@@ -522,7 +522,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert qwen_route["protocol"] == "anthropic_messages"
 
 
-def test_core_opencode_lite_pro_uses_openai_routes_when_anthropic_unavailable(monkeypatch):
+def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavailable(monkeypatch):
     import mms_core
     import mms_launchers
 
@@ -550,11 +550,57 @@ def test_core_opencode_lite_pro_uses_openai_routes_when_anthropic_unavailable(mo
     )
     payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
 
-    assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
-    assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
-    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/deepseek-v4-pro")
-    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
-    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-builder-pro"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/gpt-5.4")
+    non_gpt_chat_routes = [
+        route for route in runtime["opencode_routes"]
+        if route["protocol"] == "openai_chat_completions" and not route["model"].startswith("gpt-")
+    ]
+    assert non_gpt_chat_routes == []
+
+
+def test_core_opencode_lite_pro_rejects_gpt_anthropic_routes(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    anthropic_only = _runtime(
+        id="gpt-anthropic",
+        name="GPT Anthropic",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://anthropic-gpt.example/v1",
+        models=["gpt-5.5"],
+    )
+    openai_provider = _runtime(
+        id="gpt-openai",
+        name="GPT OpenAI",
+        supported_clis=["opencode"],
+        protocols=["openai_chat_completions"],
+        openai_base_url="https://openai-gpt.example/v1",
+        models=["gpt-5.4"],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(anthropic_only, ["gpt-5.5"]), (openai_provider, ["gpt-5.4"])],
+    )
+
+    route = mms_core._find_opencode_model_route(
+        cfg,
+        anthropic_only,
+        ["gpt-5.5", "gpt-5.4"],
+        ("gpt-5.5", "gpt-5.4"),
+        route_key="builder_primary",
+    )
+
+    assert route["model"] == "gpt-5.4"
+    assert route["provider_id"] == "gpt-openai"
+    assert route["protocol"] == "openai_chat_completions"
 
 
 def test_launch_opencode_lite_pro_uses_profile_default_model_ref(monkeypatch):

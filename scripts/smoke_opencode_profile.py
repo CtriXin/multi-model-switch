@@ -201,8 +201,7 @@ def _is_gpt_model(model: str) -> bool:
 def _protocol_correct(route: dict[str, Any], evidence: dict[str, Any]) -> bool:
     model = str(route.get("model") or evidence.get("model") or "").strip()
     protocol = str(evidence.get("protocol") or route.get("protocol") or "").strip()
-    anthropic_base_url = str(route.get("anthropic_base_url") or "").strip()
-    if model and not _is_gpt_model(model) and anthropic_base_url:
+    if model and not _is_gpt_model(model):
         return protocol == "anthropic_messages"
     return bool(protocol)
 
