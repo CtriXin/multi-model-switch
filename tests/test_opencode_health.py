@@ -129,3 +129,33 @@ def test_opencode_health_blocks_cache_sensitive_non_gpt_chat_completion():
     assert row["status"] == "blocked"
     assert row["error_class"] == "cache_sensitive_wrong_protocol"
     assert row["health_score"] < 0
+
+
+def test_opencode_health_summary_reads_latest_snapshot(tmp_path):
+    health_dir = tmp_path / ".ai" / "opencode-health"
+    health_dir.mkdir(parents=True)
+    key = "lite_pro|explore_primary|glm-5-turbo|newapi|anthropic_messages"
+    (health_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "schema": "mms.opencode_route_health_latest.v1",
+                "routes": {
+                    key: {
+                        "status": "degraded",
+                        "error_class": "ok",
+                        "health_score": 75,
+                        "latency_sec": 31.2,
+                        "finished_at": "2026-05-16T10:00:00Z",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = smoke._health_summary_for_routes(tmp_path, "lite_pro", [_route()])
+
+    assert summary["status_counts"] == {"degraded": 1}
+    assert summary["routes"][0]["role"] == "explore_primary"
+    assert summary["routes"][0]["status"] == "degraded"
+    assert summary["routes"][0]["error_class"] == "ok"

@@ -68,7 +68,7 @@ Live smoke performs real OpenCode model calls and records a Moebius trace artifa
 ./mms opencode-smoke --profile lite_pro --live
 ```
 
-Use `--agent <name>` to test one agent. Without `--agent`, live smoke dispatches one small OpenCode task per configured Lite Pro agent/model, including the fallback lanes. Every smoke writes `.ai/trace/<trace_id>/opencode-smoke-result.json` with routes, launch candidates, checks, and configured transport evidence.
+Use `--agent <name>` to test one agent. Use `--health-summary` to include the current repo-local route health table from `.ai/opencode-health/latest.json` without making extra model calls. Without `--agent`, live smoke dispatches one small OpenCode task per configured Lite Pro agent/model, including the fallback lanes. Every smoke writes `.ai/trace/<trace_id>/opencode-smoke-result.json` with routes, launch candidates, checks, and configured transport evidence.
 
 When `--live` is used, the smoke also appends one route health row per tested agent to `.ai/opencode-health/route-health.jsonl` and refreshes `.ai/opencode-health/latest.json`. Each row records `model`, `provider_id`, `protocol`, `request_url`, `role`, `agent`, `status`, `error_class`, `latency_sec`, `fallback_reason`, and `cache_transport_evidence`. Dry smoke does not mutate the health ledger.
 
