@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -669,3 +670,83 @@ def test_launchers_validate_existing_openai_provider_for_opencode():
 
     assert mms_launchers._provider_supports_cli(provider, "opencode") is True
     mms_launchers.validate_provider_for_cli("opencode", provider)
+
+
+def test_core_opencode_loads_repo_local_route_health_latest(tmp_path):
+    import mms_core
+
+    health_dir = tmp_path / ".ai" / "opencode-health"
+    health_dir.mkdir(parents=True)
+    key = "lite_pro|explore_primary|glm-5-turbo|newapi|anthropic_messages"
+    (health_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "schema": "mms.opencode_route_health_latest.v1",
+                "routes": {
+                    key: {
+                        "status": "live_healthy",
+                        "health_score": 85,
+                        "finished_at": "2026-05-16T10:00:00Z",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    latest = mms_core._load_opencode_route_health_latest(tmp_path)
+    row = mms_core._opencode_route_health_for_route(
+        latest,
+        "lite_pro",
+        "explore_primary",
+        {
+            "id": "explore_primary",
+            "model": "glm-5-turbo",
+            "provider_id": "newapi",
+            "protocol": "anthropic_messages",
+        },
+    )
+
+    assert row["status"] == "live_healthy"
+    assert row["health_score"] == 85
+
+
+def test_core_opencode_route_health_filters_blocked_and_fresh_unhealthy():
+    import mms_core
+
+    now = datetime(2026, 5, 16, 10, 10, tzinfo=timezone.utc)
+    fresh_unhealthy = {
+        "status": "unhealthy",
+        "finished_at": (now - timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+    }
+    stale_unhealthy = {
+        "status": "unhealthy",
+        "finished_at": (now - timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
+    }
+
+    assert mms_core._opencode_route_health_allows_route({"status": "blocked"}, now=now) is False
+    assert mms_core._opencode_route_health_allows_route(fresh_unhealthy, now=now) is False
+    assert mms_core._opencode_route_health_allows_route(stale_unhealthy, now=now) is True
+    assert mms_core._opencode_route_health_allows_route({"status": "degraded"}, now=now) is True
+
+
+def test_core_opencode_route_health_sort_order_is_deterministic():
+    import mms_core
+
+    rows = [
+        {"status": "unhealthy", "health_score": -25, "finished_at": "2026-05-16T10:00:00Z"},
+        {"status": "degraded", "health_score": 65, "finished_at": "2026-05-16T10:00:00Z"},
+        {"status": "live_healthy", "health_score": 85, "finished_at": "2026-05-16T10:00:00Z"},
+        {"status": "untested", "health_score": 0, "finished_at": ""},
+        {"status": "blocked", "health_score": -100, "finished_at": "2026-05-16T10:00:00Z"},
+    ]
+
+    ordered = sorted(rows, key=mms_core._opencode_route_health_sort_key)
+
+    assert [row["status"] for row in ordered] == [
+        "live_healthy",
+        "degraded",
+        "untested",
+        "unhealthy",
+        "blocked",
+    ]
