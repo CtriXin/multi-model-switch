@@ -300,6 +300,7 @@ def select_family_tui(
     provider_options_by_cli=None,
     provider_options_loader_by_cli=None,
     broker_enabled_by_cli=None,
+    profile_options_by_cli=None,
 ):
     """主 TUI — H6 双栏风格：左栏品类列表，右栏模型预览。
 
@@ -313,6 +314,7 @@ def select_family_tui(
 
     Returns:
         ("family", cli_name, family_name) | ("last", cli_name, dict) |
+        ("profile", cli_name, profile_id) |
         ("load_balance", cli_name, None) | ("settings", cli_name, None) |
         ("broker", cli_name, None) |
         ("connect", cli_name, None) | ("provider_browse", cli_name, None) | None
@@ -352,19 +354,34 @@ def select_family_tui(
             detail = families_detail.get(cli, {})
             provider_options_map = (provider_options_by_cli or {}).get(cli, {})
             provider_options_loader = (provider_options_loader_by_cli or {}).get(cli)
+            profile_options = list((profile_options_by_cli or {}).get(cli) or [])
             broker_available = False
 
             # 上次使用
             cli_last = (last_used or {}).get(cli)
-            has_last = cli_last and cli_last.get("model") and not search_query
+            use_profile_menu = bool(profile_options)
+            has_last = cli_last and cli_last.get("model") and not search_query and not use_profile_menu
 
             # 构建列表项：默认折叠冷门 family；搜索时平铺所有匹配项
             cold_expanded = bool(cold_expanded_by_cli.get(cli))
-            items = _build_family_menu_items(
-                families,
-                search_query=search_query,
-                cold_expanded=cold_expanded,
-            )
+            if use_profile_menu:
+                query = search_query.lower().strip()
+                profile_items = []
+                for option in profile_options:
+                    haystack = " ".join(
+                        str(option.get(key) or "")
+                        for key in ("id", "label", "summary")
+                    ).lower()
+                    if query and query not in haystack:
+                        continue
+                    profile_items.append(option)
+                items = [("profile", option) for option in profile_items]
+            else:
+                items = _build_family_menu_items(
+                    families,
+                    search_query=search_query,
+                    cold_expanded=cold_expanded,
+                )
             visible_family_count = sum(1 for itype, _idata in items if itype == "family")
 
             max_idx = len(items) - 1
@@ -429,7 +446,7 @@ def select_family_tui(
             # -- 搜索栏 --
             if search_query:
                 _safe_addstr(stdscr, row, ll, f"/ {search_query}_", curses.color_pair(4) | curses.A_BOLD)
-                info = f"{visible_family_count}/{len(families)}"
+                info = f"{len(items)}/{len(profile_options)}" if use_profile_menu else f"{visible_family_count}/{len(families)}"
                 _safe_addstr(stdscr, row, lr - len(info), info, curses.A_DIM)
                 row += 1
 
@@ -481,6 +498,17 @@ def select_family_tui(
                         _safe_addstr(stdscr, y, ll + 2, label, bucket_attr)
                         cnt = str(count)
                         _safe_addstr(stdscr, y, lr - len(cnt), cnt, curses.A_DIM)
+                elif itype == "profile":
+                    label = str(idata.get("label") or idata.get("id") or "Profile")
+                    badge = str(idata.get("badge") or "").strip()
+                    display = f"{badge} {label}" if badge else label
+                    if is_sel:
+                        _safe_addstr(stdscr, y, ll + 1, " " * max(1, left_w - 4), curses.color_pair(1) | curses.A_REVERSE)
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, display, curses.color_pair(1) | curses.A_BOLD | curses.A_REVERSE, max_w=left_w - 5)
+                    else:
+                        _safe_addstr(stdscr, y, ll, ".", curses.color_pair(5) | curses.A_DIM)
+                        _safe_addstr(stdscr, y, ll + 2, display, curses.color_pair(2), max_w=left_w - 4)
 
             # -- 右栏预览 --
             if has_last and sel_idx == -1 and cli_last:
@@ -530,6 +558,16 @@ def select_family_tui(
                 if len(cold_families) > len(preview_lines):
                     _safe_addstr(stdscr, content_y + len(preview_lines), rl,
                                  f"... +{len(cold_families) - len(preview_lines)}", curses.A_DIM)
+            elif items and 0 <= sel_idx < len(items) and items[sel_idx][0] == "profile":
+                option = items[sel_idx][1]
+                preview_lines = [
+                    str(option.get("label") or option.get("id") or "Profile"),
+                    str(option.get("summary") or ""),
+                ]
+                for mi, text in enumerate([line for line in preview_lines if line]):
+                    my = content_y + mi
+                    attr = curses.color_pair(5) | curses.A_BOLD if mi == 0 else curses.color_pair(2)
+                    _safe_addstr(stdscr, my, rl, text, attr, max_w=right_w - 3)
 
             # -- 底栏 --
             bot_y = content_y + len(items)
@@ -541,6 +579,13 @@ def select_family_tui(
                     [(_L("Esc 清除", "Esc Clear"), curses.color_pair(4) | curses.A_DIM)],
                     [(_L("BS 删字", "BS Delete"), curses.A_DIM)],
                     [(_L("Enter 确认", "Enter Confirm"), curses.color_pair(1) | curses.A_DIM)],
+                ]
+            elif use_profile_menu:
+                footer_actions = [
+                    [("Tab", curses.color_pair(4) | curses.A_BOLD), (_L(" 切CLI", " Switch CLI"), curses.color_pair(4) | curses.A_DIM)],
+                    [("Enter", curses.color_pair(1) | curses.A_BOLD), (" Profile", curses.color_pair(1) | curses.A_DIM)],
+                    [("O", curses.color_pair(4) | curses.A_BOLD), (_L(" 接入", " Connect"), curses.color_pair(4) | curses.A_DIM)],
+                    [("S", curses.color_pair(1) | curses.A_BOLD), (_L(" 设置", " Settings"), curses.A_DIM)],
                 ]
             else:
                 footer_actions = [
@@ -616,6 +661,8 @@ def select_family_tui(
                         return ("submodel", cli, selected)
                 elif itype == "cold_bucket":
                     cold_expanded_by_cli[cli] = not bool(idata.get("expanded"))
+                elif itype == "profile":
+                    return ("profile", cli, idata.get("id"))
             elif key in (10, 13, curses.KEY_ENTER):
                 if has_last and sel_idx == -1:
                     return ("last", cli, cli_last)
@@ -644,13 +691,15 @@ def select_family_tui(
                         return ("submodel", cli, selected)
                 elif itype == "cold_bucket":
                     cold_expanded_by_cli[cli] = not bool(idata.get("expanded"))
+                elif itype == "profile":
+                    return ("profile", cli, idata.get("id"))
             elif key in (ord('r'), ord('R')) and not search_query and has_last:
                 return ("last", cli, cli_last)
-            elif key in (ord('l'), ord('L')) and not search_query:
+            elif key in (ord('l'), ord('L')) and not search_query and not use_profile_menu:
                 return ("load_balance", cli, None)
             elif key in (ord('s'), ord('S')) and not search_query:
                 return ("settings", cli, None)
-            elif key in (ord('p'), ord('P')) and not search_query:
+            elif key in (ord('p'), ord('P')) and not search_query and not use_profile_menu:
                 return ("provider_browse", cli, None)
             elif key in (ord('o'), ord('O')) and not search_query:
                 return ("connect", cli, None)
