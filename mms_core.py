@@ -7991,11 +7991,10 @@ def _opencode_route_transport(provider, model_name):
     family, _ = _infer_model_family(model_name)
     openai_base_url = _opencode_normalized_openai_base_url(provider)
     anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
-    openai_family = family == "GPT"
-    if not openai_family and "anthropic_messages" in protocols and anthropic_base_url:
-        return "anthropic_messages", openai_base_url, anthropic_base_url
-    if "openai_chat_completions" in protocols and openai_base_url:
-        return "openai_chat_completions", openai_base_url, anthropic_base_url
+    if family == "GPT":
+        if "openai_chat_completions" in protocols and openai_base_url:
+            return "openai_chat_completions", openai_base_url, anthropic_base_url
+        return "", openai_base_url, anthropic_base_url
     if "anthropic_messages" in protocols and anthropic_base_url:
         return "anthropic_messages", openai_base_url, anthropic_base_url
     return "", openai_base_url, anthropic_base_url

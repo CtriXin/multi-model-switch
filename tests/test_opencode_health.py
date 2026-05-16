@@ -112,7 +112,7 @@ def test_opencode_health_ledger_appends_rows_and_refreshes_latest(tmp_path):
 def test_opencode_health_blocks_cache_sensitive_non_gpt_chat_completion():
     wrong_route = _route(
         protocol="openai_chat_completions",
-        anthropic_base_url="https://newapi.example/v1",
+        anthropic_base_url="",
     )
     wrong_check = _check(
         cache_transport_evidence=smoke._configured_transport_evidence(
