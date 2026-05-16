@@ -87,7 +87,7 @@ When `--live` is used, the smoke also appends one route health row per tested ag
 
 MMS reads `.ai/opencode-health/latest.json` as repo-local health input only. `blocked` routes are not eligible for automatic fallback, fresh `unhealthy` routes are temporarily filtered, then route preference is deterministic: `live_healthy`, `degraded`, `untested`, stale `unhealthy`, `blocked`. Lite Pro route selection applies that health input inside each role: same model on another healthy channel first, then the role's peer model, then the existing stable GPT fallback path.
 
-The OpenCode profile menu appends a compact Lite Pro health hint such as `health: 9/9 healthy` or `health: 7/9 healthy, 1 degraded, 1 blocked`.
+The OpenCode profile menu appends compact health hints to Lite Pro profiles, such as `health: 9/9 healthy` for `lite_pro` or `health: 14/14 healthy` for `lite_pro_orchestrated`.
 
 ## Guardrails
 

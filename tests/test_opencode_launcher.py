@@ -962,12 +962,26 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
                 "role": "reviewer_primary",
                 "status": "blocked",
             },
+            "lite_pro_orchestrated|executor_primary|deepseek-v4-pro|newapi|anthropic_messages": {
+                "profile": "lite_pro_orchestrated",
+                "role": "executor_primary",
+                "status": "live_healthy",
+            },
+            "lite_pro_orchestrated|executor_qwen|qwen3.6-plus|newapi|anthropic_messages": {
+                "profile": "lite_pro_orchestrated",
+                "role": "executor_qwen",
+                "status": "degraded",
+            },
         },
     )
 
     lite_pro = next(option for option in mms_core._opencode_profile_menu_options() if option["id"] == "lite_pro")
+    orchestrated = next(option for option in mms_core._opencode_profile_menu_options() if option["id"] == "lite_pro_orchestrated")
 
     assert "health: 1/9 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
     assert "6 untested" in lite_pro["summary"]
+    assert "health: 1/14 healthy" in orchestrated["summary"]
+    assert "1 degraded" in orchestrated["summary"]
+    assert "12 untested" in orchestrated["summary"]
