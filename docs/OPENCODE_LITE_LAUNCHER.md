@@ -5,6 +5,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 ## Decision
 
 - `OpenCode Lite Pro` is the default high-confidence custom-agent lane.
+- `OpenCode Lite Pro Orchestrated` keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
 - `OpenCode Lite` remains a stable single-model custom-agent lane.
 - `OpenCode Heavy / OMO` keeps using the existing global OpenCode + OMO setup.
 - `OpenCode Raw` is a pure fallback with no OMO and no custom agents.
@@ -21,6 +22,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 | Profile | Launch shape | Config source | Use case |
 | --- | --- | --- | --- |
 | `lite_pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary and named fallback agents |
+| `lite_pro_orchestrated` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with executor chain for implementation |
 | `lite` | `opencode --pure --agent mobius-builder -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Stable single-model coding lane |
 | `heavy_omo` | `opencode` | Existing global OpenCode + OMO config | Heavy OMO/fanout lane |
 | `raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
@@ -40,6 +42,16 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 | `mobius-fixer-gpt54` | subagent | `gpt-5.4` | final fixer fallback | ask |
 
 GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages`. They must not fall back to `chat/completions` silently. MiMo has an extra direct-only policy: if direct MiMo is unavailable, Lite Pro falls through to the stable route fallback instead of using shared relay MiMo.
+
+## Lite Pro Orchestrated
+
+`lite_pro_orchestrated` uses the same launch shape and route guardrails as Lite Pro, but changes the work split:
+
+- `mobius-builder-pro` / `gpt-5.5` is coordinator only: `edit=deny`, plans, delegates, inspects diffs, and accepts/rejects executor output.
+- Primary executor chain: `mobius-executor-deepseek` → `mobius-executor-glm` → `mobius-executor-qwen` → `mobius-executor-gpt54`.
+- `mobius-explore-qwen` is available as an extra read-only Qwen explorer for broad repo/API context.
+- Executor agents have edit/test permissions and must return changed files, validation commands, results, risks, and blockers.
+- If acceptance fails, the coordinator sends a bounded failure packet to the next executor instead of editing directly.
 
 Fallback is deterministic, not random. There are two layers:
 
