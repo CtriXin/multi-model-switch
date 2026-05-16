@@ -434,6 +434,41 @@ def _write_health_ledgers(repo_root: Path, result: dict[str, Any]) -> dict[str, 
     }
 
 
+def _health_summary_for_routes(repo_root: Path, profile: str, routes: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = mms_core._load_opencode_route_health_latest(repo_root)
+    route_rows: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        role = str(route.get("id") or "").strip()
+        row = mms_core._opencode_route_health_for_route(latest, profile, role, route)
+        status = str((row or {}).get("status") or "untested")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        route_rows.append(
+            {
+                "role": role,
+                "model": route.get("model"),
+                "provider_id": route.get("provider_id"),
+                "protocol": route.get("protocol"),
+                "status": status,
+                "error_class": (row or {}).get("error_class") or ("untested" if row is None else ""),
+                "health_score": (row or {}).get("health_score"),
+                "latency_sec": (row or {}).get("latency_sec"),
+                "finished_at": (row or {}).get("finished_at"),
+                "fallback_reason": (row or {}).get("fallback_reason") or "",
+            }
+        )
+    return {
+        "schema": "mms.opencode_route_health_summary.v1",
+        "profile": profile,
+        "latest_path": mms_core._opencode_health_latest_path(repo_root),
+        "route_count": len(route_rows),
+        "status_counts": dict(sorted(status_counts.items())),
+        "routes": route_rows,
+    }
+
+
 def _run_agent_list(env: dict[str, str], timeout: int) -> dict[str, Any]:
     completed = subprocess.run(
         ["opencode", "--pure", "agent", "list"],
@@ -545,6 +580,7 @@ def main() -> int:
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
     parser.add_argument("--timeout", type=int, default=90, help="Timeout per opencode command")
     parser.add_argument("--json", action="store_true", help="Print JSON only")
+    parser.add_argument("--health-summary", action="store_true", help="Include repo-local route health summary from latest.json")
     parser.add_argument("--trace-id", help="Existing/new Moebius trace id")
     args = parser.parse_args()
 
@@ -643,6 +679,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - health persistence is part of live smoke correctness
             result["health_error"] = str(exc)
             result["ok"] = False
+    if args.health_summary:
+        result["health_summary"] = _health_summary_for_routes(
+            repo_root,
+            args.profile,
+            [route for route in result.get("routes", []) if isinstance(route, dict)],
+        )
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _record_trace_event(repo_root, trace_id, "pass" if result.get("ok") else "fail", result)
 
@@ -658,6 +700,19 @@ def main() -> int:
         for check in result.get("checks", []):
             label = check.get("agent") or check.get("cmd") or check.get("status") or "check"
             print(f"check={'PASS' if check.get('ok') else 'FAIL'} {label}")
+        if args.health_summary:
+            summary = result.get("health_summary") or {}
+            print(f"health={summary.get('status_counts', {})} latest={summary.get('latest_path')}")
+            for row in summary.get("routes", []):
+                print(
+                    "route-health="
+                    f"{row.get('status')} "
+                    f"{row.get('role')} "
+                    f"{row.get('model')} "
+                    f"{row.get('provider_id')} "
+                    f"{row.get('protocol')} "
+                    f"error={row.get('error_class')}"
+                )
 
     return 0 if result.get("ok") else 2
 
