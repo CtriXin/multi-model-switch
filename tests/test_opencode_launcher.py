@@ -347,6 +347,9 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert lite_pro["opencode_agent"] == "mobius-builder-pro"
     assert lite_pro["opencode_launch_preflight"] is True
     assert lite_pro["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
+    orchestrated = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated")
+    assert orchestrated["opencode_agent"] == "mobius-builder-pro"
+    assert orchestrated["opencode_roster"] == "lite_pro_orchestrated"
     assert heavy["opencode_use_global_config"] is True
     assert heavy["opencode_lite_agents"] is False
     assert raw["opencode_pure"] is True
@@ -459,6 +462,64 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
     assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/anthropic"
     assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai-compatible"
+
+
+def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {"providers": [], "account": {"defaults": {}}, "accounts": []}
+    provider = _runtime(
+        id="mixed",
+        name="Mixed",
+        supported_clis=["codex"],
+        protocols=["anthropic_messages", "openai_chat_completions"],
+    )
+    mimo_direct = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        supported_clis=["opencode"],
+        protocols=["anthropic_messages"],
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    )
+    models = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "glm-5-turbo",
+        "glm-5.1",
+        "kimi-for-coding",
+        "deepseek-v4-pro",
+        "qwen3.6-plus",
+    ]
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro"])],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        provider,
+        models,
+        "lite_pro_orchestrated",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.5", "profile": "lite_pro_orchestrated"}
+    assert runtime["opencode_roster"] == "lite_pro_orchestrated"
+    builder = payload["agent"]["mobius-builder-pro"]
+    assert builder["permission"]["edit"] == "deny"
+    assert builder["permission"]["task"]["mobius-executor-deepseek"] == "allow"
+    assert "Do not edit files directly" in builder["prompt"]
+    assert payload["agent"]["mobius-builder-stable"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-executor-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-executor-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-executor-qwen"]["model"].endswith("/qwen3.6-plus")
+    assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.6-plus")
+    qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "executor_qwen")
+    assert qwen_route["protocol"] == "anthropic_messages"
 
 
 def test_core_opencode_lite_pro_uses_openai_routes_when_anthropic_unavailable(monkeypatch):
@@ -660,6 +721,7 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     assert mms_core._handle_tui_scene_selection(cfg, [], provider, False, ["opencode"]) is True
     assert [item["id"] for item in captured["profile_options"]["opencode"]] == [
         "lite_pro",
+        "lite_pro_orchestrated",
         "lite",
         "heavy_omo",
         "raw",

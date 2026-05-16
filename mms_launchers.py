@@ -8343,7 +8343,7 @@ def _opencode_lite_agent_configs(model_ref):
     }
 
 
-def _opencode_lite_pro_agent_configs(agent_models):
+def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     """Return deterministic Lite Pro roster with named fallback agents."""
     agent_models = agent_models if isinstance(agent_models, dict) else {}
     builder_model = agent_models.get("mobius-builder-pro") or next(iter(agent_models.values()), "")
@@ -8377,6 +8377,32 @@ def _opencode_lite_pro_agent_configs(agent_models):
     def _agent_model(name, fallback=builder_model):
         return str(agent_models.get(name) or fallback or builder_model)
 
+    direct_builder_task_permission = {
+        "*": "deny",
+        "mobius-builder-stable": "ask",
+        "mobius-explore-glm": "allow",
+        "mobius-explore-kimi": "ask",
+        "mobius-reviewer-mimo": "ask",
+        "mobius-reviewer-deepseek": "ask",
+        "mobius-fixer-deepseek": "ask",
+        "mobius-fixer-glm": "ask",
+        "mobius-fixer-gpt54": "ask",
+    }
+    orchestrator_task_permission = {
+        "*": "deny",
+        "mobius-explore-glm": "allow",
+        "mobius-explore-kimi": "ask",
+        "mobius-explore-qwen": "ask",
+        "mobius-executor-deepseek": "allow",
+        "mobius-executor-glm": "ask",
+        "mobius-executor-qwen": "ask",
+        "mobius-executor-gpt54": "ask",
+        "mobius-reviewer-mimo": "ask",
+        "mobius-reviewer-deepseek": "ask",
+        "mobius-fixer-deepseek": "ask",
+        "mobius-fixer-glm": "ask",
+        "mobius-fixer-gpt54": "ask",
+    }
     read_only_permission = {
         **common_read_permissions,
         "edit": "deny",
@@ -8395,40 +8421,52 @@ def _opencode_lite_pro_agent_configs(agent_models):
         "websearch": "ask",
         "external_directory": "ask",
     }
+    builder_permission = {
+        **common_read_permissions,
+        "edit": "deny" if orchestrated else "ask",
+        "bash": test_bash,
+        "task": orchestrator_task_permission if orchestrated else direct_builder_task_permission,
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
+    builder_prompt = (
+        "You are the orchestrator only. Do not edit files directly. First gather "
+        "context with mobius-explore-glm, mobius-explore-kimi, or mobius-explore-qwen "
+        "as needed, then delegate implementation to mobius-executor-deepseek with a "
+        "bounded task, target files, acceptance criteria, and validation commands. "
+        "Inspect the returned diff and validation evidence. If acceptance fails or "
+        "confidence is low, send the failure packet to mobius-executor-glm; if still "
+        "failing, use mobius-executor-qwen; use mobius-executor-gpt54 only as the "
+        "final stable executor. Review with mobius-reviewer-mimo, then "
+        "mobius-reviewer-deepseek when risk remains. Record which executor/reviewer "
+        "was used."
+    ) if orchestrated else (
+        "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-mimo, "
+        "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
+        "confidence, misses evidence, or validation still fails, call the paired fallback "
+        "agent. Use mobius-builder-stable only when the primary model/channel is suspect "
+        "or the final result remains unstable. Record which fallback was used."
+    )
+    stable_prompt = (
+        "Fallback orchestrator. Do not edit files directly. Take over only after primary "
+        "orchestration fails or is low confidence. Delegate implementation to the executor "
+        "chain, inspect validation evidence, and keep scope small."
+    ) if orchestrated else (
+        "Fallback builder. Take over only after primary path fails or is low confidence. "
+        "Keep scope small, preserve existing edits, validate, and report exact changed files."
+    )
+    stable_permission = builder_permission if orchestrated else fix_permission
 
-    return {
+    agents = {
         "mobius-builder-pro": {
             "description": "Lite Pro primary builder with deterministic fallback policy",
             "mode": "primary",
             "model": _agent_model("mobius-builder-pro"),
             "variant": "high",
             "temperature": 0.2,
-            "permission": {
-                **common_read_permissions,
-                "edit": "ask",
-                "bash": test_bash,
-                "task": {
-                    "*": "deny",
-                    "mobius-builder-stable": "ask",
-                    "mobius-explore-glm": "allow",
-                    "mobius-explore-kimi": "ask",
-                    "mobius-reviewer-mimo": "ask",
-                    "mobius-reviewer-deepseek": "ask",
-                    "mobius-fixer-deepseek": "ask",
-                    "mobius-fixer-glm": "ask",
-                    "mobius-fixer-gpt54": "ask",
-                },
-                "webfetch": "ask",
-                "websearch": "ask",
-                "external_directory": "ask",
-            },
-            "prompt": (
-                "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-mimo, "
-                "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
-                "confidence, misses evidence, or validation still fails, call the paired fallback "
-                "agent. Use mobius-builder-stable only when the primary model/channel is suspect "
-                "or the final result remains unstable. Record which fallback was used."
-            ),
+            "permission": builder_permission,
+            "prompt": builder_prompt,
         },
         "mobius-builder-stable": {
             "description": "Stable GPT fallback builder for Lite Pro",
@@ -8436,11 +8474,8 @@ def _opencode_lite_pro_agent_configs(agent_models):
             "model": _agent_model("mobius-builder-stable"),
             "variant": "high",
             "temperature": 0.2,
-            "permission": fix_permission,
-            "prompt": (
-                "Fallback builder. Take over only after primary path fails or is low confidence. "
-                "Keep scope small, preserve existing edits, validate, and report exact changed files."
-            ),
+            "permission": stable_permission,
+            "prompt": stable_prompt,
         },
         "mobius-explore-glm": {
             "description": "Lite Pro primary read-only explorer",
@@ -8459,6 +8494,15 @@ def _opencode_lite_pro_agent_configs(agent_models):
             "steps": 8,
             "permission": read_only_permission,
             "prompt": "Fallback explorer. Re-check unclear areas and contradictions. No edits.",
+        },
+        "mobius-explore-qwen": {
+            "description": "Lite Pro long-context read-only Qwen explorer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-explore-qwen", _agent_model("mobius-explore-glm")),
+            "temperature": 0.1,
+            "steps": 8,
+            "permission": read_only_permission,
+            "prompt": "Qwen explorer. Use for broad repo context, API surfaces, and missing cross-file links. No edits.",
         },
         "mobius-reviewer-mimo": {
             "description": "Lite Pro primary read-only reviewer",
@@ -8508,6 +8552,55 @@ def _opencode_lite_pro_agent_configs(agent_models):
             "prompt": "Final fallback fixer. Use when domestic fixers fail or validation remains unstable.",
         },
     }
+    if not orchestrated:
+        agents.pop("mobius-explore-qwen", None)
+    if orchestrated:
+        executor_prompt = (
+            "Implement only the assigned scope. Edit files directly if needed, but do "
+            "not broaden design or start unrelated refactors. Run listed validation "
+            "commands when available. Return changed files, commands, results, risks, "
+            "and any blocker."
+        )
+        agents.update({
+            "mobius-executor-deepseek": {
+                "description": "Lite Pro primary implementation executor",
+                "mode": "subagent",
+                "model": _agent_model("mobius-executor-deepseek"),
+                "temperature": 0.2,
+                "steps": 16,
+                "permission": fix_permission,
+                "prompt": executor_prompt,
+            },
+            "mobius-executor-glm": {
+                "description": "Lite Pro structured repair executor",
+                "mode": "subagent",
+                "model": _agent_model("mobius-executor-glm", _agent_model("mobius-executor-deepseek")),
+                "temperature": 0.2,
+                "steps": 16,
+                "permission": fix_permission,
+                "prompt": "Second executor. Fix only the acceptance failures from the first executor. " + executor_prompt,
+            },
+            "mobius-executor-qwen": {
+                "description": "Lite Pro Qwen implementation executor",
+                "mode": "subagent",
+                "model": _agent_model("mobius-executor-qwen", _agent_model("mobius-executor-glm")),
+                "temperature": 0.2,
+                "steps": 16,
+                "permission": fix_permission,
+                "prompt": "Third executor. Focus on integration, long-context consistency, and missing edge cases. " + executor_prompt,
+            },
+            "mobius-executor-gpt54": {
+                "description": "Lite Pro final stable implementation executor",
+                "mode": "subagent",
+                "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
+                "variant": "high",
+                "temperature": 0.2,
+                "steps": 16,
+                "permission": fix_permission,
+                "prompt": "Final stable executor. Use only after domestic executors fail or validation remains unstable. " + executor_prompt,
+            },
+        })
+    return agents
 
 
 def _build_opencode_config_payload(runtime, model_name=""):
@@ -8570,8 +8663,12 @@ def _build_opencode_config_payload(runtime, model_name=""):
             payload["default_agent"] = str(
                 runtime.get("opencode_default_agent") or OPENCODE_LITE_DEFAULT_AGENT
             ).strip() or OPENCODE_LITE_DEFAULT_AGENT
-            if str(runtime.get("opencode_roster") or "").strip() == "lite_pro":
-                payload["agent"] = _opencode_lite_pro_agent_configs(_opencode_agent_model_refs(runtime, routes))
+            roster = str(runtime.get("opencode_roster") or "").strip()
+            if roster in {"lite_pro", "lite_pro_orchestrated"}:
+                payload["agent"] = _opencode_lite_pro_agent_configs(
+                    _opencode_agent_model_refs(runtime, routes),
+                    orchestrated=roster == "lite_pro_orchestrated",
+                )
             else:
                 payload["agent"] = _opencode_lite_agent_configs(model_ref)
     if not runtime.get("bypass"):

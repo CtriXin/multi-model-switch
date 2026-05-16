@@ -7709,6 +7709,11 @@ _OPENCODE_PROFILE_OPTIONS = [
         "summary": "5.5 主 agent + 国产 explore/review/fix 双路 fallback；session-local config。",
     },
     {
+        "id": "lite_pro_orchestrated",
+        "label": "OpenCode Lite Pro Orchestrated / executor chain",
+        "summary": "5.5 只做总控；国产 executor 负责改代码，DeepSeek→GLM→Qwen→5.4 兜底。",
+    },
+    {
         "id": "lite",
         "label": "OpenCode Lite / custom agents",
         "summary": "固定 mobius-builder + read-only/review/fix subagents；session-local config；绕过 OMO。",
@@ -7783,6 +7788,46 @@ _OPENCODE_LITE_PRO_SPECS = (
 )
 
 
+_OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
+    {
+        "key": "explore_qwen",
+        "agent": "mobius-explore-qwen",
+        "models": ("qwen3.6-plus", "qwen3.5-plus"),
+    },
+    {
+        "key": "executor_primary",
+        "agent": "mobius-executor-deepseek",
+        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
+    },
+    {
+        "key": "executor_glm",
+        "agent": "mobius-executor-glm",
+        "models": ("glm-5.1", "glm-5-turbo", "glm-5"),
+    },
+    {
+        "key": "executor_qwen",
+        "agent": "mobius-executor-qwen",
+        "models": ("qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"),
+    },
+    {
+        "key": "executor_gpt54",
+        "agent": "mobius-executor-gpt54",
+        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
+    },
+)
+
+
+def _opencode_lite_pro_specs(profile_id="lite_pro"):
+    specs = list(_OPENCODE_LITE_PRO_SPECS)
+    if str(profile_id or "").strip() == "lite_pro_orchestrated":
+        insert_at = next(
+            (index + 1 for index, spec in enumerate(specs) if spec.get("key") == "explore_fallback"),
+            len(specs),
+        )
+        specs[insert_at:insert_at] = list(_OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS)
+    return tuple(specs)
+
+
 def _opencode_profile_label(profile_id):
     for option in _OPENCODE_PROFILE_OPTIONS:
         if option["id"] == profile_id:
@@ -7792,7 +7837,7 @@ def _opencode_profile_label(profile_id):
 
 def _opencode_lite_pro_health_summary_text(repo_root=None):
     latest = _load_opencode_route_health_latest(repo_root)
-    expected = len(_OPENCODE_LITE_PRO_SPECS)
+    expected = len(_opencode_lite_pro_specs("lite_pro"))
     counts = {"live_healthy": 0, "degraded": 0, "unhealthy": 0, "blocked": 0, "untested": 0}
     seen_roles = set()
     for row in latest.values():
@@ -7878,13 +7923,13 @@ def _apply_opencode_profile(runtime, profile_id):
         runtime["opencode_pure"] = True
         runtime["opencode_lite_agents"] = False
         runtime["opencode_agent"] = ""
-    elif profile_id == "lite_pro":
+    elif profile_id in {"lite_pro", "lite_pro_orchestrated"}:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
         runtime["opencode_lite_agents"] = True
         runtime["opencode_agent"] = "mobius-builder-pro"
         runtime["opencode_default_agent"] = "mobius-builder-pro"
-        runtime["opencode_roster"] = "lite_pro"
+        runtime["opencode_roster"] = profile_id
         runtime["opencode_launch_preflight"] = True
         runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
         runtime["opencode_launch_fallback_agents"] = {
@@ -8098,6 +8143,7 @@ def _find_opencode_model_route(
     *,
     route_key="route",
     route_policy="",
+    profile_id="lite_pro",
 ):
     wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
     if not wanted:
@@ -8138,7 +8184,7 @@ def _find_opencode_model_route(
                 "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
                 "protocols": _opencode_provider_protocols(provider),
             }
-            health_row = _opencode_route_health_for_route(latest_health, "lite_pro", route_key, route)
+            health_row = _opencode_route_health_for_route(latest_health, profile_id, route_key, route)
             if not _opencode_route_health_allows_route(health_row):
                 continue
             health_rank = _opencode_route_health_sort_key(health_row)
@@ -8165,7 +8211,7 @@ def _append_unique_opencode_route(routes, route):
     return route
 
 
-def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
+def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
     routes = []
     agent_models = {}
     gpt_fallback = _find_opencode_model_route(
@@ -8174,9 +8220,10 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
         default_models,
         ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
         route_key="gpt_fallback",
+        profile_id=profile_id,
     )
 
-    for spec in _OPENCODE_LITE_PRO_SPECS:
+    for spec in _opencode_lite_pro_specs(profile_id):
         route = _find_opencode_model_route(
             cfg,
             default_provider,
@@ -8184,6 +8231,7 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
             spec["models"],
             route_key=spec["key"],
             route_policy=spec.get("route_policy", ""),
+            profile_id=profile_id,
         )
         if route is None and spec["key"] != "builder_primary":
             route = gpt_fallback
@@ -8214,8 +8262,8 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models):
     runtime["opencode_agent_model_keys"] = agent_models
     runtime["opencode_default_route_key"] = "builder_primary"
     runtime["opencode_builder_fallback_agent"] = "mobius-builder-stable"
-    model_info = {"model": builder_route["model"], "profile": "lite_pro"}
-    return model_info, _apply_opencode_profile(runtime, "lite_pro")
+    model_info = {"model": builder_route["model"], "profile": profile_id}
+    return model_info, _apply_opencode_profile(runtime, profile_id)
 
 
 def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, profile_id):
@@ -8229,8 +8277,8 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
             "auth_mode": "global_config",
         }
         return {"model": "global-omo"}, _apply_opencode_profile(runtime, profile_id)
-    if profile_id == "lite_pro":
-        return _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models)
+    if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+        return _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=profile_id)
 
     candidates = []
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):

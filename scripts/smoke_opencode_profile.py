@@ -575,7 +575,12 @@ def _run_live_agent(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke MMS OpenCode profile config; --live performs real model calls.")
-    parser.add_argument("--profile", default="lite_pro", choices=["lite_pro", "lite", "raw"], help="OpenCode profile to smoke")
+    parser.add_argument(
+        "--profile",
+        default="lite_pro",
+        choices=["lite_pro", "lite_pro_orchestrated", "lite", "raw"],
+        help="OpenCode profile to smoke",
+    )
     parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
     parser.add_argument("--timeout", type=int, default=90, help="Timeout per opencode command")
