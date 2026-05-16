@@ -8054,6 +8054,7 @@ def _find_opencode_model_route(
     if not wanted:
         return None
     wanted_lower = [item.lower() for item in wanted]
+    latest_health = _load_opencode_route_health_latest()
     scored = []
     for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
         if not provider.get("enabled", True):
@@ -8075,7 +8076,6 @@ def _find_opencode_model_route(
                 continue
             family, _ = _infer_model_family(actual_model)
             protocol_rank = 0 if (family != "GPT" and protocol == "anthropic_messages") or family == "GPT" else 1
-            score = (model_rank, protocol_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
             route = {
                 "id": route_key,
                 "model": actual_model,
@@ -8087,6 +8087,14 @@ def _find_opencode_model_route(
                 "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
                 "protocols": _opencode_provider_protocols(provider),
             }
+            health_row = _opencode_route_health_for_route(latest_health, "lite_pro", route_key, route)
+            if not _opencode_route_health_allows_route(health_row):
+                continue
+            health_rank = _opencode_route_health_sort_key(health_row)
+            score = (model_rank, health_rank, protocol_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
+            if health_row:
+                route["health_status"] = health_row.get("status")
+                route["health_score"] = health_row.get("health_score")
             scored.append((score, route))
     if not scored:
         return None

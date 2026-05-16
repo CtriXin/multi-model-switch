@@ -750,3 +750,99 @@ def test_core_opencode_route_health_sort_order_is_deterministic():
         "unhealthy",
         "blocked",
     ]
+
+
+def test_core_opencode_model_route_skips_blocked_same_model_channel(monkeypatch):
+    import mms_core
+
+    provider_a = _runtime(
+        id="channel-a",
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        supported_clis=["opencode"],
+        openai_base_url="https://a.example/v1",
+        models=["glm-5-turbo"],
+    )
+    provider_b = _runtime(
+        id="channel-b",
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        supported_clis=["opencode"],
+        openai_base_url="https://b.example/v1",
+        models=["glm-5-turbo"],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(provider_a, ["glm-5-turbo"]), (provider_b, ["glm-5-turbo"])],
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_load_opencode_route_health_latest",
+        lambda *_args, **_kwargs: {
+            "lite_pro|explore_primary|glm-5-turbo|channel-a|anthropic_messages": {
+                "status": "blocked",
+                "health_score": -100,
+                "finished_at": "2026-05-16T10:00:00Z",
+            },
+            "lite_pro|explore_primary|glm-5-turbo|channel-b|anthropic_messages": {
+                "status": "live_healthy",
+                "health_score": 85,
+                "finished_at": "2026-05-16T10:00:00Z",
+            },
+        },
+    )
+
+    route = mms_core._find_opencode_model_route(
+        {"providers": []},
+        provider_a,
+        ["glm-5-turbo"],
+        ("glm-5-turbo",),
+        route_key="explore_primary",
+    )
+
+    assert route["provider_id"] == "channel-b"
+    assert route["health_status"] == "live_healthy"
+
+
+def test_core_opencode_model_route_uses_peer_model_when_primary_model_is_fresh_unhealthy(monkeypatch):
+    import mms_core
+
+    provider = _runtime(
+        id="domestic",
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        supported_clis=["opencode"],
+        openai_base_url="https://domestic.example/v1",
+        models=["glm-5-turbo", "kimi-for-coding"],
+    )
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, ["glm-5-turbo", "kimi-for-coding"])])
+    monkeypatch.setattr(
+        mms_core,
+        "_load_opencode_route_health_latest",
+        lambda *_args, **_kwargs: {
+            "lite_pro|explore_primary|glm-5-turbo|domestic|anthropic_messages": {
+                "status": "unhealthy",
+                "health_score": -25,
+                "finished_at": "2026-05-16T10:00:00Z",
+            },
+            "lite_pro|explore_primary|kimi-for-coding|domestic|anthropic_messages": {
+                "status": "untested",
+                "health_score": 0,
+                "finished_at": "",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_opencode_route_health_is_fresh",
+        lambda row, **_kwargs: row.get("status") == "unhealthy",
+    )
+
+    route = mms_core._find_opencode_model_route(
+        {"providers": []},
+        provider,
+        ["glm-5-turbo", "kimi-for-coding"],
+        ("glm-5-turbo", "kimi-for-coding"),
+        route_key="explore_primary",
+    )
+
+    assert route["model"] == "kimi-for-coding"
+    assert route["protocol"] == "anthropic_messages"
