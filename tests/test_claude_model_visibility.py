@@ -19,6 +19,15 @@ def test_filter_visible_models_keeps_claude_family():
     ]
 
 
+def test_default_mms_hides_openrouter_private_opus():
+    import mms_core
+
+    assert mms_core._mms_model_visible("anthropic/claude-opus-4.7") is False
+    assert mms_core._filter_visible_models(["anthropic/claude-opus-4.7", "claude-opus-4-6"]) == [
+        "claude-opus-4-6"
+    ]
+
+
 def test_builtin_scene_catalog_keeps_claude_cli_with_claude_and_bridge_variants():
     import mms_core
 

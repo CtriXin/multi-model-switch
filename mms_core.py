@@ -528,12 +528,17 @@ def _model_info_looks_domestic(model_info):
 
 
 _MMS_HIDDEN_MODEL_FAMILIES = set()
+_MMS_HIDDEN_MODELS = {
+    "anthropic/claude-opus-4.7",
+}
 
 
 def _mms_model_visible(model_name):
     normalized = str(model_name or "").strip()
     if not normalized:
         return True
+    if normalized.lower() in _MMS_HIDDEN_MODELS:
+        return False
     family, _ = _infer_model_family(normalized)
     return family not in _MMS_HIDDEN_MODEL_FAMILIES
 
