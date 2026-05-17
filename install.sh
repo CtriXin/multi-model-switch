@@ -1180,6 +1180,28 @@ ensure_node18_npm_for_optional_pack() {
     return 1
 }
 
+brainkeeper_node_command() {
+    local candidate=""
+    local path_node=""
+
+    path_node="$(command -v node 2>/dev/null || true)"
+    for candidate in \
+        "$REAL_HOME/.nvm/versions/node/"*/bin/node \
+        "/opt/homebrew/bin/node" \
+        "/usr/local/bin/node" \
+        "/usr/bin/node" \
+        "$path_node"; do
+        [ -n "$candidate" ] || continue
+        [ -x "$candidate" ] || continue
+        if "$candidate" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' >/dev/null 2>&1; then
+            printf "%s\n" "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 install_named_cli() {
     local cli_name="$1"
     local cli_path=""
@@ -2041,6 +2063,7 @@ brainkeeper_git_available() {
 write_brainkeeper_mcp_config() {
     local settings_path="$REAL_HOME/.claude/settings.json"
     local server_path="$REAL_HOME/.local/share/brainkeeper/dist/server.js"
+    local node_command=""
     local py_output=""
 
     if [ ! -f "$server_path" ]; then
@@ -2048,7 +2071,13 @@ write_brainkeeper_mcp_config() {
         return 1
     fi
 
-    py_output="$("$(_python_bin)" - "$settings_path" "$server_path" <<'PY'
+    node_command="$(brainkeeper_node_command || true)"
+    if [ -z "$node_command" ]; then
+        echo "⚠ $(t "找不到 Node.js 18+，跳过 BrainKeeper MCP 配置" "Node.js 18+ not found, skipping BrainKeeper MCP config")"
+        return 1
+    fi
+
+    py_output="$("$(_python_bin)" - "$settings_path" "$server_path" "$node_command" <<'PY'
 import json
 import shutil
 import sys
@@ -2057,6 +2086,7 @@ from pathlib import Path
 
 settings_path = Path(sys.argv[1])
 server_path = sys.argv[2]
+node_command = sys.argv[3]
 settings_path.parent.mkdir(parents=True, exist_ok=True)
 
 data = {}
@@ -2084,7 +2114,7 @@ if legacy and ("mindkeeper" in legacy_text or "brainkeeper" in legacy_text):
     mcp_servers.pop("mindkeeper", None)
 
 mcp_servers["brainkeeper"] = {
-    "command": "node",
+    "command": node_command,
     "args": [server_path],
     "type": "stdio",
 }
@@ -2735,20 +2765,23 @@ fi
 export HOME="$REAL_HOME"
 export MMS_REAL_HOME="$REAL_HOME"
 
-for NODE_BIN in "$REAL_HOME/.nvm/versions/node/"*/bin/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node node; do
-  case "$NODE_BIN" in
-    */*)
-      if [ -x "$NODE_BIN" ]; then
-        exec "$NODE_BIN" "$CLI_PATH" "$@"
-      fi
-      ;;
-    *)
-      if command -v "$NODE_BIN" >/dev/null 2>&1; then
-        exec "$NODE_BIN" "$CLI_PATH" "$@"
-      fi
-      ;;
-  esac
-done
+find_brainkeeper_node() {
+  PATH_NODE="$(command -v node 2>/dev/null || true)"
+  for NODE_BIN in "$REAL_HOME/.nvm/versions/node/"*/bin/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node "$PATH_NODE"; do
+    [ -n "$NODE_BIN" ] || continue
+    [ -x "$NODE_BIN" ] || continue
+    if "$NODE_BIN" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' >/dev/null 2>&1; then
+      printf '%s\n' "$NODE_BIN"
+      return 0
+    fi
+  done
+  return 1
+}
+
+NODE_BIN="$(find_brainkeeper_node || true)"
+if [ -n "$NODE_BIN" ]; then
+  exec "$NODE_BIN" "$CLI_PATH" "$@"
+fi
 
 printf '%s\n' "Node.js not found; install Node.js 18+ or rerun MMS installer with --install-brainkeeper-context." >&2
 exit 127

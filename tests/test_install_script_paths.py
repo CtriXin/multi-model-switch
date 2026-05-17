@@ -252,10 +252,14 @@ def test_install_script_installs_brainkeeper_shortcuts_and_archive_fallback():
 
     assert 'BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"' in text
     assert "ensure_node18_npm_for_optional_pack" in text
+    assert "brainkeeper_node_command" in text
     assert "install_brainkeeper_from_archive" in text
     assert "BrainKeeper archive fallback" in text
+    assert '"command": node_command' in text
     assert 'write_brainkeeper_bin_wrapper "bk"' in text
     assert 'write_brainkeeper_bin_wrapper "brainkeeper"' in text
+    assert "find_brainkeeper_node" in text
+    assert "Number(process.versions.node.split" in text
     assert "[ -x \"$BIN_DIR/bk\" ]" in text
     assert "[ -x \"$BIN_DIR/brainkeeper\" ]" in text
 
