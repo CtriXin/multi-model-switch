@@ -9352,8 +9352,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
         if action == "b":
             continue
+        if cli in {"claude", "codex", "opencode"}:
+            runtime_runtime["bypass"] = bool(bypass)
         if bypass:
-            runtime_runtime["bypass"] = True
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
                 from mms_launchers import _enforce_claude_network_guard_or_exit, _claude_bypass_requires_proxy
                 _enforce_claude_network_guard_or_exit(

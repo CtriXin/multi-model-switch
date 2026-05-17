@@ -33,7 +33,7 @@ def test_opencode_config_uses_openai_compatible_provider():
     assert payload["default_agent"] == "mobius-builder"
     assert payload["autoupdate"] is False
     assert payload["share"] == "disabled"
-    assert payload["permission"] == {"edit": "ask", "bash": "ask"}
+    assert payload["permission"] == "allow"
     assert sorted(payload["agent"]) == [
         "mobius-builder",
         "mobius-explore",
@@ -71,6 +71,19 @@ def test_opencode_config_can_disable_lite_agents_for_raw_profile():
 
     assert "agent" not in payload
     assert "default_agent" not in payload
+
+
+def test_opencode_config_can_disable_default_bypass():
+    import mms_launchers
+
+    payload = json.loads(
+        mms_launchers._build_opencode_config_content(
+            _runtime(models=["deepseek-chat"], bypass=False),
+            "deepseek-chat",
+        )
+    )
+
+    assert payload["permission"] == {"edit": "ask", "bash": "ask"}
 
 
 def test_opencode_model_limit_includes_required_output_value():
@@ -196,7 +209,35 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert env["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert env["OPENCODE_CLIENT"] == "mms"
+    assert env["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
+    assert env["MMS_OPENCODE_BYPASS"] == "1"
     assert "OPENCODE_CONFIG_CONTENT" not in env
+
+
+def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setenv("OPENCODE_PERMISSION", mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV)
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(bypass=False),
+        model_info={"model": "deepseek-chat"},
+    )
+    config_payload = json.loads(Path(env["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
+
+    assert "OPENCODE_PERMISSION" not in env
+    assert env["MMS_OPENCODE_BYPASS"] == "0"
+    assert config_payload["permission"] == {"edit": "ask", "bash": "ask"}
 
 
 def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
@@ -276,7 +317,45 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     assert "OPENCODE_CONFIG" not in captured["env"]
     assert captured["env"]["OPENCODE_CLIENT"] == "mms"
     assert captured["env"]["MMS_OPENCODE_PROFILE"] == "heavy_omo"
+    assert captured["env"]["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
+    assert captured["env"]["MMS_OPENCODE_BYPASS"] == "1"
     assert captured["once"] is True
+
+
+def test_opencode_run_preflight_uses_bypass_flag(monkeypatch):
+    import mms_launchers
+
+    captured = {"cmds": []}
+
+    class Completed:
+        returncode = 0
+        stdout = "OK"
+        stderr = ""
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmds"].append(cmd)
+        return Completed()
+
+    monkeypatch.setattr(mms_launchers.subprocess, "run", fake_run)
+
+    enabled = mms_launchers._opencode_run_preflight(
+        {"HOME": "/tmp/opencode"},
+        "mobius-builder",
+        "mms/deepseek-chat",
+        timeout=1,
+    )
+    disabled = mms_launchers._opencode_run_preflight(
+        {"HOME": "/tmp/opencode"},
+        "mobius-builder",
+        "mms/deepseek-chat",
+        timeout=1,
+        bypass=False,
+    )
+
+    assert enabled["ok"] is True
+    assert disabled["ok"] is True
+    assert mms_launchers.OPENCODE_BYPASS_FLAG in captured["cmds"][0]
+    assert mms_launchers.OPENCODE_BYPASS_FLAG not in captured["cmds"][1]
 
 
 def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
@@ -294,6 +373,8 @@ def test_get_export_env_exposes_opencode_file_config(monkeypatch, tmp_path):
     assert exports["OPENAI_API_KEY"] == "sk-runtime"
     assert exports["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert exports["OPENCODE_CONFIG_DIR"] == str(Path(exports["OPENCODE_CONFIG"]).parent)
+    assert exports["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
+    assert exports["MMS_OPENCODE_BYPASS"] == "1"
     assert "OPENCODE_CONFIG_CONTENT" not in exports
     assert payload["model"] == "mms/deepseek-chat"
     assert payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
@@ -311,6 +392,8 @@ def test_get_export_env_for_heavy_omo_does_not_write_session_config(monkeypatch,
 
     assert exports == {
         "OPENCODE_CLIENT": "mms",
+        "OPENCODE_PERMISSION": mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV,
+        "MMS_OPENCODE_BYPASS": "1",
         "MMS_OPENCODE_PROFILE": "heavy_omo",
     }
     assert not (real_home / ".config" / "mms" / "opencode-gateway").exists()
@@ -326,6 +409,8 @@ def test_get_export_env_for_heavy_omo_does_not_require_provider_credentials():
 
     assert exports == {
         "OPENCODE_CLIENT": "mms",
+        "OPENCODE_PERMISSION": mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV,
+        "MMS_OPENCODE_BYPASS": "1",
         "MMS_OPENCODE_PROFILE": "heavy_omo",
     }
 
@@ -749,7 +834,7 @@ def test_launch_opencode_lite_pro_prefers_fallback_when_primary_preflight_fails(
         lambda *_args, **_kwargs: {"HOME": "/tmp/opencode", "MMS_SESSION_HOME": ""},
     )
 
-    def fake_preflight(_env, agent, model_ref, timeout=None):
+    def fake_preflight(_env, agent, model_ref, timeout=None, **_kwargs):
         captured["preflight"].append((agent, model_ref))
         return {"ok": model_ref.endswith("/gpt-5.4"), "returncode": 0 if model_ref.endswith("/gpt-5.4") else 1}
 

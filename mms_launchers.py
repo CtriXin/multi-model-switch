@@ -1795,6 +1795,29 @@ OPENCODE_PROVIDER_ID = "mms"
 OPENCODE_API_KEY_ENV = "MMS_OPENCODE_API_KEY"
 OPENCODE_DEFAULT_OUTPUT_LIMIT = 8192
 OPENCODE_LITE_DEFAULT_AGENT = "mobius-builder"
+OPENCODE_BYPASS_FLAG = "--dangerously-skip-permissions"
+OPENCODE_BYPASS_PERMISSION_ENV = json.dumps(
+    {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "bash": "allow",
+        "task": "allow",
+        "external_directory": "allow",
+        "todowrite": "allow",
+        "question": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "repo_clone": "allow",
+        "repo_overview": "allow",
+        "lsp": "allow",
+        "doom_loop": "allow",
+        "skill": "allow",
+    },
+    separators=(",", ":"),
+)
 OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT = 35
 OPENCODE_LAUNCH_PREFLIGHT_PROMPT = "MMS OpenCode launch preflight. Reply exactly OK and nothing else."
 OPENCODE_IMAGE_INPUT_MODELS = {
@@ -8398,9 +8421,11 @@ def _opencode_launch_candidates(runtime, routes, selected_model=""):
     return candidates
 
 
-def _opencode_run_preflight(env, agent, model_ref, timeout=None):
+def _opencode_run_preflight(env, agent, model_ref, timeout=None, bypass=True):
     timeout = int(timeout or _opencode_preflight_timeout())
     cmd = ["opencode", "run", "--pure"]
+    if bool(bypass):
+        cmd.append(OPENCODE_BYPASS_FLAG)
     if agent:
         cmd += ["--agent", agent]
     cmd += ["-m", model_ref, OPENCODE_LAUNCH_PREFLIGHT_PROMPT]
@@ -8456,6 +8481,7 @@ def _opencode_select_launch_candidate(runtime, routes, model, env):
             env,
             candidate.get("agent") or "",
             candidate.get("model_ref") or "",
+            bypass=_opencode_bypass_enabled(runtime),
         )
         check.update(
             {
@@ -9016,12 +9042,32 @@ def _build_opencode_config_payload(runtime, model_name=""):
                 )
             else:
                 payload["agent"] = _opencode_lite_agent_configs(model_ref)
-    if not runtime.get("bypass"):
+    if _opencode_bypass_enabled(runtime):
+        payload["permission"] = "allow"
+    else:
         payload["permission"] = {
             "edit": "ask",
             "bash": "ask",
         }
     return payload
+
+
+def _opencode_bypass_enabled(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    value = runtime.get("bypass")
+    if value is None:
+        return True
+    return bool(value)
+
+
+def _opencode_apply_bypass_env(env, runtime):
+    if _opencode_bypass_enabled(runtime):
+        env["OPENCODE_PERMISSION"] = OPENCODE_BYPASS_PERMISSION_ENV
+        env["MMS_OPENCODE_BYPASS"] = "1"
+    else:
+        env.pop("OPENCODE_PERMISSION", None)
+        env["MMS_OPENCODE_BYPASS"] = "0"
+    return env
 
 
 def _build_opencode_config_content(runtime, model_name=""):
@@ -9090,7 +9136,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"):
+    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION"):
         env.pop(key, None)
     _inject_real_home_hints(env)
     _inject_selected_model_name(env, model, model_info=model_info)
@@ -9106,6 +9152,7 @@ def _opencode_gateway_env(runtime, model_info=None):
     env["OPENCODE_CONFIG_DIR"] = config_dir
     env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
     env["OPENCODE_CLIENT"] = "mms"
+    _opencode_apply_bypass_env(env, runtime)
 
     _apply_runtime_network_profile(env, runtime, validate_proxy=False)
     _apply_runtime_locale_profile(env, runtime)
@@ -9124,7 +9171,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
 def _opencode_global_omo_env(runtime):
     env = os.environ.copy()
-    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"):
+    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION"):
         env.pop(key, None)
     _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = _real_user_path()
@@ -9134,6 +9181,7 @@ def _opencode_global_omo_env(runtime):
     env["MMS_HOME_ISOLATION_MODE"] = "raw"
     env["OPENCODE_CLIENT"] = "mms"
     env["MMS_OPENCODE_PROFILE"] = "heavy_omo"
+    _opencode_apply_bypass_env(env, runtime)
     _apply_runtime_network_profile(env, runtime, validate_proxy=False)
     _apply_runtime_locale_profile(env, runtime)
     _apply_runtime_ip_stack_profile(env, runtime)
@@ -9223,10 +9271,11 @@ def get_export_env(cli, runtime):
     if cli == "opencode":
         profile = str(runtime.get("opencode_profile") or "").strip().lower()
         if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
-            return {
+            exports = {
                 "OPENCODE_CLIENT": "mms",
                 "MMS_OPENCODE_PROFILE": "heavy_omo",
             }
+            return _opencode_apply_bypass_env(exports, runtime)
 
     if runtime.get("auth_mode") == "broker_profile":
         return {}
@@ -9256,6 +9305,7 @@ def get_export_env(cli, runtime):
         exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
         exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
         exports["OPENCODE_CLIENT"] = "mms"
+        _opencode_apply_bypass_env(exports, runtime)
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()

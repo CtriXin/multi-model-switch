@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.8.1`
+Current tagged version: `v2.8.2`
 
 Key changes in this generation:
 
@@ -35,6 +35,7 @@ Key changes in this generation:
 - Codex resume write-back across isolated MMS-managed launches
 - OpenCode profiles: `Orchestrated`, `Roster`, and `Raw` with repo-local health feedback
 - OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, domestic models via Anthropic `/v1/messages`
+- OpenCode bypass is enabled by default through permission `allow`; `opencode run` preflight also uses `--dangerously-skip-permissions`
 - model fallback order: same-model second channel, same-role peer, then stable GPT fallback
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
@@ -84,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.8.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.8.2/install.sh | bash -s --
 ```
 
 Verify the install:

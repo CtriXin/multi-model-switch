@@ -3125,7 +3125,7 @@ def confirm_tui(
 
     返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
     action: "" = 启动, "b" = 返回, "q" = 取消
-    bypass: bool, 仅 codex/claude 有效，True 时附加 --dangerously-bypass-approvals-and-sandbox
+    bypass: bool, codex/claude/opencode 有效；OpenCode 会启用 permission allow / run bypass
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     caveman_enabled: bool，仅 codex/claude 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
@@ -3361,10 +3361,11 @@ def confirm_tui(
 
     profile_caps = _confirm_profile_capabilities(model_info, runtime=runtime)
     model_tokens = profile_caps["tokens"] or _model_tokens(model_info)
-    has_bypass = cli in ("codex", "claude")
+    has_bypass = cli in ("codex", "claude", "opencode")
+    has_reasoning_controls = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
-    has_thinking = has_bypass and bool(profile_caps["thinking_supported"])
-    has_effort = has_bypass and bool(profile_caps["effort_supported"])
+    has_thinking = has_reasoning_controls and bool(profile_caps["thinking_supported"])
+    has_effort = has_reasoning_controls and bool(profile_caps["effort_supported"])
     effort_values = _confirm_effort_values(profile_caps, model_tokens)
     effort_default = str(reasoning_effort_default or "high").strip().lower()
     if effort_default not in effort_values:
