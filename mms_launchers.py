@@ -9064,6 +9064,35 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     return agents
 
 
+def _opencode_permission_bypass_value(value):
+    if isinstance(value, dict):
+        return {
+            str(key): _opencode_permission_bypass_value(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_opencode_permission_bypass_value(item) for item in value]
+    if isinstance(value, str) and value.strip().lower() == "ask":
+        return "allow"
+    return value
+
+
+def _opencode_apply_agent_bypass_permissions(agents):
+    """Auto-approve explicit ask permissions while preserving deny boundaries."""
+    if not isinstance(agents, dict):
+        return agents
+    updated = {}
+    for name, agent in agents.items():
+        if not isinstance(agent, dict):
+            updated[name] = agent
+            continue
+        next_agent = dict(agent)
+        if "permission" in next_agent:
+            next_agent["permission"] = _opencode_permission_bypass_value(next_agent.get("permission"))
+        updated[name] = next_agent
+    return updated
+
+
 def _build_opencode_config_payload(runtime, model_name=""):
     runtime = runtime if isinstance(runtime, dict) else {}
     routes = _opencode_runtime_routes(runtime, model_name)
@@ -9137,6 +9166,8 @@ def _build_opencode_config_payload(runtime, model_name=""):
                 payload["agent"] = _opencode_lite_agent_configs(model_ref)
     if _opencode_bypass_enabled(runtime):
         payload["permission"] = "allow"
+        if "agent" in payload:
+            payload["agent"] = _opencode_apply_agent_bypass_permissions(payload.get("agent"))
     else:
         payload["permission"] = {
             "edit": "ask",

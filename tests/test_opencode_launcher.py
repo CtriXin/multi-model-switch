@@ -43,7 +43,7 @@ def test_opencode_config_uses_openai_compatible_provider():
     assert payload["agent"]["mobius-builder"]["mode"] == "primary"
     assert payload["agent"]["mobius-explore"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-reviewer"]["permission"]["edit"] == "deny"
-    assert payload["agent"]["mobius-fixer"]["permission"]["edit"] == "ask"
+    assert payload["agent"]["mobius-fixer"]["permission"]["edit"] == "allow"
 
     provider = payload["provider"]["mms"]
     assert provider["npm"] == "@ai-sdk/openai-compatible"
@@ -84,6 +84,7 @@ def test_opencode_config_can_disable_default_bypass():
     )
 
     assert payload["permission"] == {"edit": "ask", "bash": "ask"}
+    assert payload["agent"]["mobius-fixer"]["permission"]["edit"] == "ask"
 
 
 def test_opencode_model_limit_includes_required_output_value():
@@ -622,6 +623,8 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     builder = payload["agent"]["mobius-builder-pro"]
     assert builder["permission"]["edit"] == "deny"
     assert builder["permission"]["task"]["mobius-executor-deepseek"] == "allow"
+    assert builder["permission"]["task"]["mobius-explore-qwen"] == "allow"
+    assert builder["permission"]["task"]["mobius-executor-qwen"] == "allow"
     assert "Do not edit files directly" in builder["prompt"]
     assert payload["agent"]["mobius-builder-stable"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-executor-deepseek"]["model"].endswith("/deepseek-v4-pro")
