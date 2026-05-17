@@ -6214,8 +6214,10 @@ def _provider_effective_models(provider, cached_models, cfg=None):
             base_source = "manual"
         else:
             _schedule_probe_refresh(provider, cfg, reason="cache_miss")
-            base_models = []
-            base_source = "remote"
+            # Cold-cache startup must not hide user-configured model families while
+            # the remote /models probe refreshes in the background.
+            base_models = list(provider.get("fallback_models") or [])
+            base_source = "fallback" if base_models else "remote"
     else:
         base_models = list(cached_models or [])
         base_source = "remote"

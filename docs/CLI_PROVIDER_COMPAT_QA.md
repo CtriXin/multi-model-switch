@@ -42,6 +42,16 @@
 - 模型是否真的能被请求成功
 - fallback / extra / hidden model 是否影响最终展示
 
+Qwen / Kimi 现在是 provider model family，不再是独立 CLI launcher。删除直连
+`qwen` / `kimi` CLI 不应导致 family 消失；旧配置里的 `supported_clis =
+["qwen", "kimi"]` 会按 provider 协议归一到真实 CLI（通常是 `claude` /
+`codex`）。如果同一个 channel/key 在新机器只显示部分 family，优先检查：
+
+- provider 配置是否包含同样的 `fallback_models` / `extra_models`
+- `credentials.sh` 是否指向同一个 provider id、base URL 和 key
+- 本机是否是 cold probe cache；MMS 会先用静态模型列表显示，同时后台刷新 `/models`
+- 是否被 `hidden_models` 或项目级 model policy 隐藏
+
 ### 3. Bridge / probe / fallback 是高风险区
 
 凡是涉及下面这些点的改动，都应该视为高风险：

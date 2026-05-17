@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.5.1`
+Current tagged version: `v2.5.2`
 
 Key changes in this generation:
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.5.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.5.2/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -93,6 +93,12 @@ mms doctor
 mms test --provider <id> --cli claude
 mms test --provider <id> --cli codex
 ```
+
+Model families are provider models, not direct `qwen`/`kimi` CLI installs. On a
+fresh machine, MMS shows configured `fallback_models` / `extra_models`
+immediately while refreshing `/models` in the background; if a family is still
+missing on the same key, compare provider config/credentials and run
+`mms models` or `mms doctor full`.
 
 ## Quick Start
 

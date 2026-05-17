@@ -152,6 +152,78 @@ def test_build_model_families_for_cli_keeps_deepseek_out_of_other(monkeypatch):
     assert "其他" not in family_names
 
 
+def test_cold_cache_provider_uses_configured_fallback_models(monkeypatch):
+    import mms_core
+
+    scheduled = []
+    provider = {
+        "id": "cold-relay",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["claude"],
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "models_endpoint": "/models",
+        "fallback_models": ["qwen3.6-plus", "kimi-for-coding"],
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_schedule_probe_refresh",
+        lambda runtime, _cfg=None, reason="": scheduled.append((runtime["id"], reason)) or True,
+    )
+
+    assert mms_core._provider_effective_models(provider, None, {}) == [
+        "qwen3.6-plus",
+        "kimi-for-coding",
+    ]
+    assert scheduled == [("cold-relay", "cache_miss")]
+
+
+def test_cold_cache_provider_fallback_models_keep_qwen_kimi_families(monkeypatch):
+    import mms_core
+
+    provider = {
+        "id": "cold-relay",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["claude"],
+        "protocols": ["anthropic_messages"],
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "models_endpoint": "/models",
+        "fallback_models": ["qwen3.6-plus", "kimi-for-coding"],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_schedule_probe_refresh", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_load_usage_stats", lambda: {"sources": {}})
+
+    families = mms_core._build_model_families_for_cli({}, "claude", {}, [])
+
+    family_names = [entry["family"] for entry in families]
+    assert "Qwen" in family_names
+    assert "Kimi" in family_names
+
+
+def test_cold_cache_provider_without_static_models_stays_empty(monkeypatch):
+    import mms_core
+
+    scheduled = []
+    provider = {
+        "id": "remote-only",
+        "enabled": True,
+        "models_endpoint": "/models",
+    }
+    monkeypatch.setattr(
+        mms_core,
+        "_schedule_probe_refresh",
+        lambda runtime, _cfg=None, reason="": scheduled.append((runtime["id"], reason)) or True,
+    )
+
+    assert mms_core._provider_effective_models(provider, None, {}) == []
+    assert scheduled == [("remote-only", "cache_miss")]
+
+
 def test_claude_provider_options_allow_qwen_kimi_anthropic_direct(monkeypatch):
     import mms_core
 

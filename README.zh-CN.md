@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.5.1`
+当前 tagged version：`v2.5.2`
 
 这一代的重点：
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.5.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.5.2/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -93,6 +93,11 @@ mms doctor
 mms test --provider <id> --cli claude
 mms test --provider <id> --cli codex
 ```
+
+模型 family 来自 provider model，不依赖直装 `qwen`/`kimi` CLI。全新电脑没有
+probe cache 时，MMS 会先显示已配置的 `fallback_models` / `extra_models`，
+同时后台刷新 `/models`；同一个 key 仍缺 family 时，优先对比 provider
+config/credentials，并跑 `mms models` 或 `mms doctor full`。
 
 ## 快速使用
 
