@@ -3476,6 +3476,224 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disable
     return payload
 
 
+def _codex_hook_event_state_key(event_name):
+    import re
+
+    raw = str(event_name or "").strip()
+    if not raw:
+        return ""
+    raw = raw.replace("-", "_").replace(" ", "_")
+    raw = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", raw)
+    raw = re.sub(r"(?<=[A-Z])([A-Z][a-z])", r"_\1", raw)
+    raw = re.sub(r"[^A-Za-z0-9]+", "_", raw)
+    return raw.strip("_").lower()
+
+
+def _codex_hook_fingerprint(hook):
+    if not isinstance(hook, dict):
+        return ""
+    try:
+        return json.dumps(hook, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except Exception:
+        return ""
+
+
+def _codex_hook_index(hooks_payload):
+    positions = {}
+    by_fingerprint = {}
+    by_command = {}
+    payload = hooks_payload if isinstance(hooks_payload, dict) else {}
+    hooks_data = payload.get("hooks") if isinstance(payload.get("hooks"), dict) else {}
+    for event_name, groups in hooks_data.items():
+        event_key = _codex_hook_event_state_key(event_name)
+        if not event_key or not isinstance(groups, list):
+            continue
+        for group_index, group in enumerate(groups):
+            if not isinstance(group, dict):
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                continue
+            for hook_index, hook in enumerate(hook_items):
+                if not isinstance(hook, dict):
+                    continue
+                command = str(hook.get("command") or "").strip()
+                if not command:
+                    continue
+                record = {
+                    "event": event_key,
+                    "group_index": group_index,
+                    "hook_index": hook_index,
+                    "command": command,
+                    "fingerprint": _codex_hook_fingerprint(hook),
+                }
+                positions[(event_key, group_index, hook_index)] = record
+                if record["fingerprint"]:
+                    by_fingerprint.setdefault((event_key, record["fingerprint"]), []).append(record)
+                by_command.setdefault((event_key, command), []).append(record)
+    return {
+        "positions": positions,
+        "by_fingerprint": by_fingerprint,
+        "by_command": by_command,
+    }
+
+
+def _decode_toml_basic_key(value):
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        return str(value or "").replace('\\"', '"').replace("\\\\", "\\")
+
+
+def _codex_hook_trust_records_from_config(config_text):
+    import re
+
+    text = str(config_text or "")
+    header_pattern = re.compile(
+        r'^\[hooks\.state\."((?:\\.|[^"\\])*)"\]\s*$',
+        flags=re.MULTILINE,
+    )
+    records = []
+    for match in header_pattern.finditer(text):
+        raw_key = _decode_toml_basic_key(match.group(1))
+        try:
+            hooks_path, event_key, group_index, hook_index = raw_key.rsplit(":", 3)
+            group_index = int(group_index)
+            hook_index = int(hook_index)
+        except Exception:
+            continue
+        next_header = re.search(r"^\[", text[match.end():], flags=re.MULTILINE)
+        block_end = match.end() + next_header.start() if next_header else len(text)
+        block = text[match.end():block_end]
+        hash_match = re.search(r'^\s*trusted_hash\s*=\s*"([^"]+)"\s*$', block, flags=re.MULTILINE)
+        if not hash_match:
+            continue
+        records.append(
+            {
+                "key": raw_key,
+                "hooks_path": hooks_path,
+                "event": event_key,
+                "group_index": group_index,
+                "hook_index": hook_index,
+                "trusted_hash": hash_match.group(1),
+            }
+        )
+    return records
+
+
+def _collect_codex_hook_trust_seed_sources(codex_roots):
+    config_texts = []
+    hook_payloads = {}
+    seen_roots = set()
+    for root in codex_roots or []:
+        root = str(root or "").strip()
+        if not root:
+            continue
+        try:
+            real_root = os.path.realpath(root)
+        except OSError:
+            real_root = root
+        if real_root in seen_roots:
+            continue
+        seen_roots.add(real_root)
+        config_path = os.path.join(root, "config.toml")
+        try:
+            with open(config_path, "r", encoding="utf-8") as handle:
+                config_texts.append(handle.read())
+        except Exception:
+            pass
+        hooks_path = os.path.join(root, "hooks.json")
+        hooks_payload = _load_json_dict_unlocked(hooks_path)
+        if hooks_payload:
+            hook_payloads[hooks_path] = hooks_payload
+    return config_texts, hook_payloads
+
+
+def _append_codex_session_hook_trust_states(
+    config_text,
+    *,
+    target_hooks_path,
+    target_hooks,
+    trust_config_texts=None,
+    source_hook_payloads_by_path=None,
+):
+    text = str(config_text or "")
+    target_hooks_path = str(target_hooks_path or "").strip()
+    if not target_hooks_path or not isinstance(target_hooks, dict):
+        return text
+    target_index = _codex_hook_index(target_hooks)
+    if not target_index["positions"]:
+        return text
+
+    source_payloads = {}
+    for path, payload in (source_hook_payloads_by_path or {}).items():
+        path = str(path or "").strip()
+        if path and isinstance(payload, dict):
+            source_payloads[path] = payload
+    source_payloads[target_hooks_path] = target_hooks
+    source_indexes = {}
+
+    def _source_index(path):
+        path = str(path or "").strip()
+        if not path:
+            return _codex_hook_index({})
+        if path not in source_indexes:
+            payload = source_payloads.get(path)
+            if not isinstance(payload, dict) and os.path.isfile(path):
+                payload = _load_json_dict_unlocked(path)
+            source_indexes[path] = _codex_hook_index(payload if isinstance(payload, dict) else {})
+        return source_indexes[path]
+
+    seed_texts = [text]
+    for seed_text in trust_config_texts or []:
+        if seed_text:
+            seed_texts.append(str(seed_text))
+
+    existing_keys = {record["key"] for record in _codex_hook_trust_records_from_config(text)}
+    pending = {}
+    for seed_text in seed_texts:
+        for trust_record in _codex_hook_trust_records_from_config(seed_text):
+            source_record = _source_index(trust_record["hooks_path"])["positions"].get(
+                (
+                    trust_record["event"],
+                    trust_record["group_index"],
+                    trust_record["hook_index"],
+                )
+            )
+            if not source_record:
+                continue
+            candidates = []
+            if source_record.get("fingerprint"):
+                candidates = target_index["by_fingerprint"].get(
+                    (trust_record["event"], source_record["fingerprint"]),
+                    [],
+                )
+            if not candidates:
+                candidates = target_index["by_command"].get(
+                    (trust_record["event"], source_record["command"]),
+                    [],
+                )
+            for target_record in candidates:
+                target_key = (
+                    f"{target_hooks_path}:{target_record['event']}:"
+                    f"{target_record['group_index']}:{target_record['hook_index']}"
+                )
+                if target_key in existing_keys or target_key in pending:
+                    continue
+                pending[target_key] = trust_record["trusted_hash"]
+
+    if not pending:
+        return text
+    if text and not text.endswith("\n"):
+        text += "\n"
+    for target_key, trusted_hash in pending.items():
+        if text and not text.endswith("\n\n"):
+            text += "\n"
+        text += f"[hooks.state.{_toml_quote(target_key)}]\n"
+        text += f"trusted_hash = {_toml_quote(trusted_hash)}\n"
+    return text
+
+
 def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
     extra_source_root = str(extra_source_root or "").strip()
     if not extra_source_root:
@@ -5741,11 +5959,67 @@ def _sync_codex_bounded_resume_back(session_codex_dir, target_codex_dir):
                 max_files,
                 max_file_bytes=max_file_bytes,
             )
+        hook_trust = _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir)
+        if hook_trust:
+            manifest["hook_trust"] = hook_trust
         try:
             atomic_write_json(os.path.join(target_codex_dir, _CODEX_RESUME_WRITEBACK_MANIFEST), manifest, mode=0o600)
         except Exception:
             pass
     return manifest
+
+
+def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
+    session_codex_dir = str(session_codex_dir or "").strip()
+    target_codex_dir = str(target_codex_dir or "").strip()
+    if not session_codex_dir or not target_codex_dir:
+        return {}
+    session_hooks_path = os.path.join(session_codex_dir, "hooks.json")
+    session_config_path = os.path.join(session_codex_dir, "config.toml")
+    if not os.path.isfile(session_hooks_path) or not os.path.isfile(session_config_path):
+        return {}
+    session_hooks = _load_json_dict_unlocked(session_hooks_path)
+    if not session_hooks:
+        return {}
+
+    try:
+        with open(session_config_path, "r", encoding="utf-8") as handle:
+            session_config_text = handle.read()
+    except Exception:
+        return {}
+
+    os.makedirs(target_codex_dir, exist_ok=True)
+    target_hooks_path = os.path.join(target_codex_dir, "hooks.json")
+    target_config_path = os.path.join(target_codex_dir, "config.toml")
+    existing_target_hooks = _load_json_dict_unlocked(target_hooks_path)
+    try:
+        with open(target_config_path, "r", encoding="utf-8") as handle:
+            target_config_text = handle.read()
+    except Exception:
+        target_config_text = ""
+
+    source_payloads = {session_hooks_path: session_hooks}
+    if existing_target_hooks:
+        source_payloads[target_hooks_path] = existing_target_hooks
+    rendered_config = _append_codex_session_hook_trust_states(
+        target_config_text,
+        target_hooks_path=target_hooks_path,
+        target_hooks=session_hooks,
+        trust_config_texts=[target_config_text, session_config_text],
+        source_hook_payloads_by_path=source_payloads,
+    )
+    before_keys = {record["key"] for record in _codex_hook_trust_records_from_config(target_config_text)}
+    after_keys = {record["key"] for record in _codex_hook_trust_records_from_config(rendered_config)}
+    try:
+        atomic_write_json(target_hooks_path, session_hooks, mode=0o600)
+        atomic_write_text(target_config_path, rendered_config, mode=0o600)
+    except Exception:
+        return {}
+    return {
+        "status": "synced",
+        "trusted_entries": len(after_keys),
+        "added_entries": max(0, len(after_keys - before_keys)),
+    }
 
 
 def _sync_codex_bounded_resume_back_from_env(env):
@@ -7779,6 +8053,13 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     sessions_dir = os.path.join(gateway_base, "s")
     session_home = os.path.join(sessions_dir, str(os.getpid()))
     os.makedirs(session_home, exist_ok=True)
+    precleanup_trust_texts, precleanup_trust_payloads = _collect_codex_hook_trust_seed_sources(
+        _codex_sibling_session_roots(
+            sessions_dir,
+            exclude_session_home=session_home,
+            max_roots=24,
+        )
+    )
     _cleanup_stale_sessions(sessions_dir)
 
     # symlink gateway_base 下的非 s 子项到 session_home
@@ -7809,6 +8090,34 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    real_codex_dir = _real_user_path(".codex")
+    real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
+    gateway_codex_dir = os.path.join(gateway_base, ".codex")
+    sibling_codex_roots = _codex_sibling_session_roots(
+        sessions_dir,
+        exclude_session_home=session_home,
+    )
+    trust_config_texts, trust_hook_payloads = _collect_codex_hook_trust_seed_sources(
+        [real_codex_dir, gateway_codex_dir] + sibling_codex_roots
+    )
+    trust_config_texts = precleanup_trust_texts + trust_config_texts
+    trust_hook_payloads = {**precleanup_trust_payloads, **trust_hook_payloads}
+    base_hooks = {}
+    session_hooks = None
+    hooks_path = os.path.join(codex_dir, "hooks.json")
+    if enable_caveman or os.path.exists(real_hooks_path):
+        try:
+            with open(real_hooks_path, "r", encoding="utf-8") as f:
+                base_hooks = _json.load(f)
+        except Exception:
+            base_hooks = {}
+        if isinstance(base_hooks, dict):
+            trust_hook_payloads[real_hooks_path] = base_hooks
+        session_hooks = _build_codex_session_hooks(
+            base_hooks,
+            enable_caveman=enable_caveman,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
 
     def _set_top_level_scalar(text, key, value):
         import re
@@ -7972,6 +8281,13 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                 disabled_session_surfaces=disabled_session_surfaces,
             )
             config_text = _normalize_toml_layout(config_text)
+            config_text = _append_codex_session_hook_trust_states(
+                config_text,
+                target_hooks_path=hooks_path,
+                target_hooks=session_hooks,
+                trust_config_texts=trust_config_texts,
+                source_hook_payloads_by_path=trust_hook_payloads,
+            )
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
@@ -7995,25 +8311,19 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
                 disabled_session_surfaces=disabled_session_surfaces,
             )
             config_text = _normalize_toml_layout(config_text)
+            config_text = _append_codex_session_hook_trust_states(
+                config_text,
+                target_hooks_path=hooks_path,
+                target_hooks=session_hooks,
+                trust_config_texts=trust_config_texts,
+                source_hook_payloads_by_path=trust_hook_payloads,
+            )
             with open(gateway_config, "w", encoding="utf-8") as f:
                 f.write(config_text)
         except Exception:
             pass
 
-    real_codex_dir = _real_user_path(".codex")
-    real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
-    if enable_caveman or os.path.exists(real_hooks_path):
-        try:
-            with open(real_hooks_path, "r", encoding="utf-8") as f:
-                base_hooks = _json.load(f)
-        except Exception:
-            base_hooks = {}
-        session_hooks = _build_codex_session_hooks(
-            base_hooks,
-            enable_caveman=enable_caveman,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
-        hooks_path = os.path.join(codex_dir, "hooks.json")
+    if session_hooks is not None:
         atomic_write_json(hooks_path, session_hooks, mode=0o600)
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等），
@@ -8026,14 +8336,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)
             _materialize_codex_session_entry(entry, src, dst)
-    gateway_codex_dir = os.path.join(gateway_base, ".codex")
     source_roots = [gateway_codex_dir]
-    source_roots.extend(
-        _codex_sibling_session_roots(
-            sessions_dir,
-            exclude_session_home=session_home,
-        )
-    )
+    source_roots.extend(sibling_codex_roots)
     source_roots.append(real_codex_dir)
     _seed_codex_bounded_resume(source_roots, codex_dir)
     _overlay_caveman_session_entries(
