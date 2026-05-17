@@ -3447,7 +3447,12 @@ def confirm_tui(
             info_lines.append((_confirm_label("Model"), model_display, "plain"))
             info_lines.append((_confirm_label("Launch"), _L("一次性命令", "One-shot command") if once else _L("交互会话", "Interactive session"), "plain"))
             if has_bypass:
-                info_lines.append((_confirm_label("Bypass"), f"[Tab] {_L('开启', 'On') if bypass_mode else _L('关闭', 'Off')}", "bypass"))
+                bypass_text = (
+                    _L("当前开启 · Tab 关闭", "On · Tab to Off")
+                    if bypass_mode
+                    else _L("当前关闭 · Tab 开启", "Off · Tab to On")
+                )
+                info_lines.append((_confirm_label("Bypass"), bypass_text, "bypass"))
             if has_claude_1m:
                 one_m_text = _L("开启", "On") if claude_1m_mode else _L("关闭", "Off")
                 info_lines.append(("1M", f"[M] {one_m_text}", "one_m"))
@@ -3504,7 +3509,7 @@ def confirm_tui(
                 if disable_mode:
                     footer_actions.append([("Space", curses.color_pair(2) | curses.A_BOLD), (" ", 0), (_L("切禁用", "Toggle disable"), curses.color_pair(2) | curses.A_DIM)])
             if has_bypass:
-                footer_actions.append([("Tab", curses.color_pair(4) | curses.A_BOLD), (" ", 0), (_L("切模式", "Switch mode"), curses.color_pair(4) | curses.A_DIM)])
+                footer_actions.append([("Tab", curses.color_pair(4) | curses.A_BOLD), (" ", 0), (_L("切 Bypass", "Toggle Bypass"), curses.color_pair(4) | curses.A_DIM)])
             if has_claude_1m:
                 footer_actions.append([("M", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_DIM)])
             if has_caveman:
