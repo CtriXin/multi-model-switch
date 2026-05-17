@@ -1798,6 +1798,7 @@ _CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainke
 _CLAUDE_MINDKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-start-hook.sh")
 _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-end-hook.sh")
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
+_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -1835,7 +1836,7 @@ _CLAUDE_SETTINGS_INHERIT_KEYS = (
 )
 _CLAUDE_SESSION_MCP_SERVER_ALLOWLIST = (
     "brainkeeper",
-    "mindkeeper",
+    "codegraph",
 )
 _CLAUDE_SETTINGS_INHERIT_SCALAR_KEYS = ("theme",)
 _CLAUDE_SESSION_SOURCE_ENTRY_ALLOWLIST = (
@@ -2321,6 +2322,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_START_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
+        _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
@@ -2330,6 +2332,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-start-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2618,12 +2621,17 @@ def _hook_command_exists(hook_items, command_path):
     return False
 
 
-def _append_command_hook(hooks_data, event_name, command_path, matcher=None):
+def _append_command_hook(hooks_data, event_name, command_path, matcher=None, timeout=None, status_message=None):
     if not command_path or not os.path.isfile(command_path):
         return hooks_data
 
     merged = dict(hooks_data) if isinstance(hooks_data, dict) else {}
     event_groups = list(merged.get(event_name) or [])
+    hook_payload = {"type": "command", "command": command_path}
+    if timeout is not None:
+        hook_payload["timeout"] = timeout
+    if status_message:
+        hook_payload["statusMessage"] = str(status_message)
 
     for group in event_groups:
         if not isinstance(group, dict):
@@ -2637,11 +2645,11 @@ def _append_command_hook(hooks_data, event_name, command_path, matcher=None):
             merged[event_name] = event_groups
             return merged
         if isinstance(hook_items, list):
-            hook_items.append({"type": "command", "command": command_path})
+            hook_items.append(dict(hook_payload))
             merged[event_name] = event_groups
             return merged
 
-    new_group = {"hooks": [{"type": "command", "command": command_path}]}
+    new_group = {"hooks": [dict(hook_payload)]}
     if matcher is not None:
         new_group["matcher"] = matcher
     event_groups.append(new_group)
@@ -2719,6 +2727,14 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         "UserPromptSubmit",
         _CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK,
         matcher="",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "SessionStart",
+        _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK,
+        matcher="",
+        timeout=20,
+        status_message="Syncing CodeGraph",
     )
     return hooks_data
 

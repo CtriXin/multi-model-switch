@@ -7237,6 +7237,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             return _L("监控 token 用量", "Monitor token usage"), _L("BrainKeeper token 监控", "BrainKeeper token monitor")
         if "map-auto-index" in lower_target or basename == "map-auto-index.sh":
             return _L("Map 自动索引", "Map auto-index"), _L("刷新项目结构索引", "Refresh project structure index")
+        if "codegraph-auto-index" in lower_target or basename == "claude-codegraph-auto-index.sh":
+            return "CodeGraph 自动索引", _L("刷新项目 CodeGraph 索引", "Refresh project CodeGraph index")
         if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":

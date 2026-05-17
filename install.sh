@@ -789,7 +789,7 @@ download_remote_source() {
 write_version_metadata() {
     ensure_install_ref_resolved
     mkdir -p "$(dirname "$VERSION_META_PATH")"
-    python3 - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
+    "$(_python_bin)" - "$VERSION_META_PATH" "$RESOLVED_INSTALL_REF" "$INSTALL_CHANNEL" "$INSTALL_LANG" <<'PY'
 import json
 import re
 import sys
@@ -821,7 +821,7 @@ PY
 
 write_language_config() {
     mkdir -p "$(dirname "$CONFIG_PATH")"
-    python3 - "$CONFIG_PATH" "$INSTALL_LANG" <<'PY'
+    "$(_python_bin)" - "$CONFIG_PATH" "$INSTALL_LANG" <<'PY'
 import os
 import sys
 
@@ -1077,6 +1077,21 @@ ensure_node22() {
     echo "✓ $(t "Node.js 已切换到本次安装进程" "Node.js switched for this install process") $(node --version)"
 }
 
+ensure_nvm_node22() {
+    export NVM_DIR="$REAL_HOME/.nvm"
+
+    if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+        echo "$(t "未检测到 nvm，开始安装..." "nvm not found, installing...")"
+        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null bash
+    fi
+
+    # shellcheck disable=SC1090
+    . "$NVM_DIR/nvm.sh"
+    nvm install 22
+    nvm use 22 >/dev/null
+    echo "✓ $(t "Node.js 已切换到本次安装进程" "Node.js switched for this install process") $(node --version)"
+}
+
 run_optional_command() {
     local label="$1"
     local status=0
@@ -1128,6 +1143,21 @@ ensure_brew_package() {
     run_optional_command "$label" brew install "$package_name"
 }
 
+npm_global_install_with_nvm_fallback() {
+    local label="$1"
+    local package_name="$2"
+
+    if command -v npm >/dev/null 2>&1; then
+        if run_optional_command "$label" npm install -g "$package_name"; then
+            return 0
+        fi
+    fi
+
+    echo "⚠ $(t "npm 全局安装失败或不可用，尝试 MMS-managed nvm Node.js 22 fallback。" "npm global install failed or is unavailable; trying MMS-managed nvm Node.js 22 fallback.")"
+    ensure_nvm_node22 || return 1
+    run_optional_command "$label (nvm)" npm install -g "$package_name"
+}
+
 install_named_cli() {
     local cli_name="$1"
     local cli_path=""
@@ -1154,10 +1184,10 @@ install_named_cli() {
 
             echo "⚠ $(t "Claude native installer 未完成，尝试 npm fallback（不会切默认 Node）。" "Claude native installer did not complete; trying npm fallback without changing default Node.")"
             if ! command -v npm >/dev/null 2>&1; then
-                ensure_node22 || true
+                ensure_nvm_node22 || true
             fi
             if command -v npm >/dev/null 2>&1; then
-                run_optional_command "Claude Code (npm fallback)" npm install -g @anthropic-ai/claude-code || true
+                npm_global_install_with_nvm_fallback "Claude Code (npm fallback)" @anthropic-ai/claude-code || true
             fi
             if cli_path="$(find_cli_binary claude 2>/dev/null)"; then
                 echo "✓ Claude Code ($cli_path)"
@@ -1172,11 +1202,9 @@ install_named_cli() {
                 return 0
             fi
             if ! command -v npm >/dev/null 2>&1; then
-                ensure_node22 || true
+                ensure_nvm_node22 || true
             fi
-            if command -v npm >/dev/null 2>&1; then
-                run_optional_command "Codex CLI" npm install -g @openai/codex@latest || true
-            fi
+            npm_global_install_with_nvm_fallback "Codex CLI" @openai/codex@latest || true
             if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
                 echo "✓ Codex CLI ($cli_path)"
                 return 0
@@ -1221,7 +1249,7 @@ append_claude_hook_command() {
 
     shift 4
 
-    py_output="$(python3 - "$settings_path" "$hook_event" "$matcher" "$command_to_add" "$@" <<'PY'
+    py_output="$("$(_python_bin)" - "$settings_path" "$hook_event" "$matcher" "$command_to_add" "$@" <<'PY'
 import json
 import shutil
 import sys
@@ -1325,7 +1353,7 @@ merge_claude_settings_template() {
         return 1
     fi
 
-    py_output="$(python3 - "$settings_path" "$template_path" <<'PY'
+    py_output="$("$(_python_bin)" - "$settings_path" "$template_path" <<'PY'
 import json
 import shutil
 import sys
@@ -1664,6 +1692,7 @@ ensure_supported_python() {
 create_python_venv() {
     local venv_python="$VENV_DIR/bin/python"
     local broken_backup=""
+    local managed_python=""
 
     mkdir -p "$MMS_HOME"
 
@@ -1682,11 +1711,19 @@ create_python_venv() {
 
     if [ ! -x "$venv_python" ]; then
         if ! "$(_python_bin)" -m venv "$VENV_DIR"; then
-            echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
-            if command -v apt-get >/dev/null 2>&1; then
-                echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
+            echo "⚠ $(t "当前 Python 无法创建 venv，尝试 MMS-managed Python fallback..." "Current Python cannot create a venv; trying MMS-managed Python fallback...")"
+            rm -rf "$VENV_DIR"
+            managed_python="$(bootstrap_managed_python || true)"
+            if [ -n "$managed_python" ]; then
+                PYTHON_CMD="$managed_python"
             fi
-            exit 1
+            if [ -z "$managed_python" ] || ! "$(_python_bin)" -m venv "$VENV_DIR"; then
+                echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
+                if command -v apt-get >/dev/null 2>&1; then
+                    echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
+                fi
+                exit 1
+            fi
         fi
     fi
 
@@ -2249,7 +2286,7 @@ enable_brainkeeper_token_monitor_hook() {
     cp "$hook_source" "$hook_target"
     chmod +x "$hook_target"
 
-    py_output="$(python3 - "$claude_dir/settings.json" "$hook_target" <<'PY'
+    py_output="$("$(_python_bin)" - "$claude_dir/settings.json" "$hook_target" <<'PY'
 import json
 import shutil
 import sys
@@ -2354,7 +2391,7 @@ enable_brainkeeper_context_restore_hint_hook() {
     cp "$hook_source" "$hook_target"
     chmod +x "$hook_target"
 
-    py_output="$(python3 - "$claude_dir/settings.json" "$hook_target" <<'PY'
+    py_output="$("$(_python_bin)" - "$claude_dir/settings.json" "$hook_target" <<'PY'
 import json
 import shutil
 import sys
@@ -2599,7 +2636,7 @@ write_ops_env_safe_config() {
         return 0
     fi
 
-    python3 - "$template_path" "$target_path" "$REAL_HOME" <<'PY'
+    "$(_python_bin)" - "$template_path" "$target_path" "$REAL_HOME" <<'PY'
 from pathlib import Path
 import sys
 

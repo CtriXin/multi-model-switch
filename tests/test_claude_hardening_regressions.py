@@ -39,7 +39,7 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
 
-def test_build_claude_session_settings_injects_only_hive_and_brainkeeper_mcp_servers(monkeypatch):
+def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -72,12 +72,15 @@ def test_build_claude_session_settings_injects_only_hive_and_brainkeeper_mcp_ser
                 "demo": {"command": "demo"},
                 "hive": {"command": "/tmp/hive-mcp.sh", "args": [], "type": "stdio"},
                 "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
+                "codegraph": {"command": "node", "args": ["/tmp/codegraph.js"], "type": "stdio"},
+                "mindkeeper": {"command": "node", "args": ["/tmp/mindkeeper.js"], "type": "stdio"},
             },
         }
     )
 
     assert result["mcpServers"] == {
         "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
+        "codegraph": {"command": "node", "args": ["/tmp/codegraph.js"], "type": "stdio"},
         "hive": {
             "command": "/tmp/hive-session-only.sh",
             "args": [],
@@ -93,7 +96,7 @@ def test_build_claude_session_settings_injects_only_hive_and_brainkeeper_mcp_ser
     }
 
 
-def test_build_claude_session_settings_keeps_legacy_mindkeeper_mcp(monkeypatch):
+def test_build_claude_session_settings_drops_deprecated_mindkeeper_mcp(monkeypatch):
     import mms_launchers
 
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
@@ -110,7 +113,7 @@ def test_build_claude_session_settings_keeps_legacy_mindkeeper_mcp(monkeypatch):
         }
     )
 
-    assert result["mcpServers"]["mindkeeper"]["args"] == ["/tmp/mindkeeper.js"]
+    assert "mcpServers" not in result
 
 
 def test_default_session_mcp_servers_prefer_brainkeeper_over_legacy(monkeypatch, tmp_path):
@@ -207,7 +210,7 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
                 ]
             },
         },
-        disabled_session_surfaces={"mcp": ["hive"], "hooks": ["/tmp/drop.sh"]},
+        disabled_session_surfaces={"mcp": ["hive"], "hooks": ["/tmp/drop.sh", mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK]},
     )
 
     assert "hive" not in result["mcpServers"]
@@ -220,6 +223,31 @@ def test_build_claude_session_settings_respects_session_disabled_surfaces(monkey
     ]
     assert "/tmp/drop.sh" not in commands
     assert "/tmp/keep.sh" in commands
+    assert mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK not in commands
+
+
+def test_build_claude_session_settings_adds_codegraph_auto_index_hook(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    result = mms_launchers._build_claude_session_settings({})
+    hooks = [
+        hook
+        for group in result["hooks"]["SessionStart"]
+        for hook in group["hooks"]
+        if hook.get("type") == "command"
+    ]
+
+    codegraph_hook = next(
+        hook for hook in hooks if hook["command"] == mms_launchers._CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK
+    )
+    assert codegraph_hook["timeout"] == 20
+    assert codegraph_hook["statusMessage"] == "Syncing CodeGraph"
 
 
 def test_resolve_hive_root_prefers_installed_hive_home_for_installed_mms(monkeypatch, tmp_path):

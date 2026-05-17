@@ -152,8 +152,9 @@ def test_install_script_uses_native_claude_and_official_codex_installs():
     installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
 
     assert "https://claude.ai/install.sh" in text
-    assert "npm install -g @anthropic-ai/claude-code" in text
-    assert "npm install -g @openai/codex@latest" in text
+    assert "npm_global_install_with_nvm_fallback" in text
+    assert "@anthropic-ai/claude-code" in text
+    assert "@openai/codex@latest" in text
     assert "npm install -g @openai/codex@latest" in installer_text
 
 
