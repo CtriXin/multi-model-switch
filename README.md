@@ -23,9 +23,9 @@ It helps you:
 - inject session-scoped skills and hooks without editing global config
 - diagnose provider, route, cache, and exposed runtime state before blaming a model
 
-## Current Release
+## Current Version
 
-Latest release: `v2.0.2`
+Current tagged version: `v2.4.0`
 
 Key changes in this generation:
 
@@ -33,8 +33,11 @@ Key changes in this generation:
 - profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
 - Claude resume persistence through `.claude/projects`
 - Codex resume write-back across isolated MMS-managed launches
-- OpenCode launch through session-local OpenAI-compatible config
-- profile-aware Thinking/Effort controls in the launch confirmation screen
+- OpenCode profiles: `Orchestrated`, `Roster`, and `Raw` with repo-local health feedback
+- OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, domestic models via Anthropic `/v1/messages`
+- model fallback order: same-model second channel, same-role peer, then stable GPT fallback
+- runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
+- installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
@@ -49,9 +52,25 @@ Default behavior:
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
 - links `mms` into `~/.local/bin`
+- creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
+- if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
+- discovers installed `claude` / `codex` across PATH, Homebrew, and NVM versions
 - keeps the legacy `ccs` shim installable with `--install-legacy-ccs`, but no longer exposes it by default
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
+
+Fresh-machine install with optional CLI bootstrap:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex --write-shell-rc
+```
+
+Shell support:
+
+- Bash/Zsh: `--write-shell-rc` writes `~/.local/bin` into the active shell rc.
+- Fish: `--write-shell-rc` writes `~/.config/fish/conf.d/mms.fish`.
+- Ghostty/iTerm/Terminal: reopen the tab after install, or run `exec $SHELL -l`.
+- If you do not write shell rc, run `~/.local/bin/mms` immediately; direct `mms` works after PATH is loaded.
 
 Set the UI language during install:
 
@@ -63,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.2/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.4.0/install.sh | bash -s --
 ```
 
 Verify the install:

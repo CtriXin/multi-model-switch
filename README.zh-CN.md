@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-最新 release：`v2.0.2`
+当前 tagged version：`v2.4.0`
 
 这一代的重点：
 
@@ -33,8 +33,11 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - bridge / launcher / chat / discuss / router 共享 profile-driven auth/body/thinking/effort patch
 - Claude 通过 `.claude/projects` 恢复项目级 resume
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
-- OpenCode 通过 session-local OpenAI-compatible config 启动
-- 启动确认页按 provider profile 显示 Thinking/Effort 与默认值
+- OpenCode profiles：`Orchestrated`、`Roster`、`Raw`，并写入 repo-local health feedback
+- OpenCode Lite Pro mixed routes：GPT 走 OpenAI-compatible Responses/Chat，国产模型走 Anthropic `/v1/messages`
+- fallback 顺序：同模型第二通道、同 role peer、stable GPT fallback
+- runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
+- installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
@@ -49,9 +52,25 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
 - 把 `mms` 链接到 `~/.local/bin`
+- 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
+- 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
+- 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex`
 - legacy `ccs` shim 仍可通过 `--install-legacy-ccs` 显式安装，但默认不再暴露
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
+
+全新电脑可直接带 CLI bootstrap 安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex --write-shell-rc
+```
+
+Shell 支持：
+
+- Bash/Zsh：`--write-shell-rc` 会把 `~/.local/bin` 写入当前 shell rc。
+- Fish：`--write-shell-rc` 会写入 `~/.config/fish/conf.d/mms.fish`。
+- Ghostty/iTerm/Terminal：安装后重开 tab，或执行 `exec $SHELL -l`。
+- 如果不写 shell rc，马上可执行 `~/.local/bin/mms`；PATH 加载后可直接输入 `mms`。
 
 安装时指定 UI 语言：
 
@@ -63,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.0.2/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.4.0/install.sh | bash -s --
 ```
 
 安装后自检：

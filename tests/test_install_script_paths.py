@@ -147,11 +147,14 @@ def test_version_output_shows_current_stable_and_latest(tmp_path):
     assert "Planned install ref: v1.16.6" in completed.stdout
 
 
-def test_install_script_uses_npm_for_claude_code_install():
+def test_install_script_uses_native_claude_and_official_codex_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
 
+    assert "https://claude.ai/install.sh" in text
     assert "npm install -g @anthropic-ai/claude-code" in text
-    assert "claude.ai/install.sh" not in text
+    assert "npm install -g @openai/codex@latest" in text
+    assert "npm install -g @openai/codex@latest" in installer_text
 
 
 def test_repo_entrypoints_use_env_python():
@@ -174,8 +177,21 @@ def test_install_script_selects_supported_python_for_venv():
 
     assert "find_supported_python()" in text
     assert "python3.13" in text
+    assert "bootstrap_managed_python()" in text
+    assert "https://astral.sh/uv/install.sh" in text
+    assert 'UV_NO_MODIFY_PATH=1' in text
     assert 'if ! "$(_python_bin)" -m venv "$VENV_DIR"; then' in text
     assert 'PYTHON_CMD="$resolved_python"' in text
+
+
+def test_install_script_supports_fish_and_non_mutating_nvm_bootstrap():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "write_fish_path_rc()" in text
+    assert "fish_add_path -g" in text
+    assert "Ghostty/iTerm/Terminal" in text
+    assert "PROFILE=/dev/null" in text
+    assert "nvm alias default" not in text
 
 
 def test_install_script_copies_vendor_directory():

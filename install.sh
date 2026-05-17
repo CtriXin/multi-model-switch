@@ -42,6 +42,7 @@ OMC_INSTALL_REF="${OMC_INSTALL_REF:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
+BOOTSTRAP_PYTHON_VERSION="${MMS_BOOTSTRAP_PYTHON_VERSION:-3.13}"
 PYTHON_CMD="${MMS_INSTALL_PYTHON:-${MMS_PYTHON:-}}"
 INSTALL_LANG="zh"
 INSTALL_LANG_EXPLICIT=0
@@ -83,6 +84,11 @@ fi
 MMS_HOME="$REAL_HOME/.mms"
 BIN_DIR="$REAL_HOME/.local/bin"
 VENV_DIR="$MMS_HOME/.venv"
+MMS_UV_BIN_DIR="$MMS_HOME/bin"
+MMS_UV_BIN="$MMS_UV_BIN_DIR/uv"
+MMS_UV_PYTHON_DIR="$MMS_HOME/uv-python/install"
+MMS_UV_PYTHON_BIN_DIR="$MMS_HOME/uv-python/bin"
+MMS_UV_CACHE_DIR="$MMS_HOME/uv-cache"
 CREDENTIALS_PATH="$REAL_HOME/.config/mms/credentials.sh"
 CONFIG_PATH="$REAL_HOME/.config/mms/config.toml"
 VERSION_META_PATH="$REAL_HOME/.config/mms/version.json"
@@ -225,6 +231,33 @@ confirm_from_tty() {
     esac
 }
 
+fetch_url_stdout() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl --retry 3 --retry-delay 2 --connect-timeout 10 -fsSL "$url"
+        return $?
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO- "$url"
+        return $?
+    fi
+    return 1
+}
+
+download_url_to_file() {
+    local url="$1"
+    local output="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl --retry 3 --retry-delay 2 --connect-timeout 10 -fsSL "$url" -o "$output"
+        return $?
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO "$output" "$url"
+        return $?
+    fi
+    return 1
+}
+
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
@@ -254,7 +287,8 @@ $(t "说明:" "Notes:")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
   - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
-  - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）" "--install-cli optionally installs claude/codex (comma-separated)")
+  - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）；Claude 优先 official native installer，Codex 优先 npm official package" "--install-cli optionally installs claude/codex (comma-separated); Claude prefers the official native installer, Codex prefers the official npm package")
+  - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "--install-legacy-ccs 可显式恢复旧 ccs 命令链接；默认只链接 mms" "--install-legacy-ccs explicitly restores the legacy ccs command link; by default only mms is linked")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
@@ -347,6 +381,7 @@ prompt_optional_install_choices() {
     local cli_name=""
     local cli_command=""
     local cli_label=""
+    local cli_path=""
 
     if ! can_prompt_interactively; then
         return 0
@@ -597,8 +632,8 @@ prompt_optional_install_choices() {
                 ;;
         esac
 
-        if command -v "$cli_command" >/dev/null 2>&1; then
-            echo "  ✓ $(t "已检测到" "Detected"): $cli_label"
+        if cli_path="$(find_cli_binary "$cli_command" 2>/dev/null)"; then
+            echo "  ✓ $(t "已检测到" "Detected"): $cli_label ($cli_path)"
             continue
         fi
 
@@ -624,7 +659,8 @@ resolve_latest_tag() {
         return 0
     fi
     local resolved_tag=""
-    resolved_tag="$(python3 - <<'PY'
+    if command -v python3 >/dev/null 2>&1; then
+        resolved_tag="$(python3 - <<'PY'
 import json
 import re
 import sys
@@ -657,7 +693,19 @@ if not semver:
 semver.sort(reverse=True)
 print(semver[0][1])
 PY
-)" || return 1
+)" || true
+    fi
+    if [ -z "$resolved_tag" ]; then
+        resolved_tag="$(
+            fetch_url_stdout "https://api.github.com/repos/CtriXin/multi-model-switch/tags?per_page=100" \
+                | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' \
+                | awk -F'[v.]' '{ printf "%09d %09d %09d %s\n", $2, $3, $4, $0 }' \
+                | sort -r \
+                | head -n 1 \
+                | awk '{ print $4 }'
+        )" || true
+    fi
+    [ -n "$resolved_tag" ] || return 1
     LATEST_TAG_CACHE="$resolved_tag"
     printf "%s" "$resolved_tag"
 }
@@ -672,7 +720,8 @@ resolve_latest_release_tag() {
         return 0
     fi
     local resolved_release_tag=""
-    resolved_release_tag="$(python3 - <<'PY'
+    if command -v python3 >/dev/null 2>&1; then
+        resolved_release_tag="$(python3 - <<'PY'
 import json
 import sys
 from urllib.request import Request, urlopen
@@ -690,7 +739,16 @@ if not tag:
     sys.exit(1)
 print(tag)
 PY
-)" || return 1
+)" || true
+    fi
+    if [ -z "$resolved_release_tag" ]; then
+        resolved_release_tag="$(
+            fetch_url_stdout "https://api.github.com/repos/CtriXin/multi-model-switch/releases/latest" \
+                | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                | head -n 1
+        )" || true
+    fi
+    [ -n "$resolved_release_tag" ] || return 1
     LATEST_RELEASE_TAG_CACHE="$resolved_release_tag"
     printf "%s" "$resolved_release_tag"
 }
@@ -711,7 +769,7 @@ download_remote_source() {
     fi
 
     echo "$(t "正在下载源码归档" "Downloading source archive"): $archive_url"
-    if ! curl --retry 3 --retry-delay 2 --connect-timeout 10 -fsSL "$archive_url" -o "$tarball"; then
+    if ! download_url_to_file "$archive_url" "$tarball"; then
         echo "❌ $(t "下载源码归档失败，请检查网络后重试；中国网络环境下建议稍后再试或改用 --ref main" "Failed to download the source archive. Please check your network and retry; in China, try again later or use --ref main")"
         return 1
     fi
@@ -856,6 +914,126 @@ node_version_label() {
     node --version 2>/dev/null || true
 }
 
+find_cli_binary() {
+    local command_name="$1"
+    local candidate=""
+    local dir=""
+
+    if [ -z "$command_name" ]; then
+        return 1
+    fi
+
+    candidate="$(command -v "$command_name" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        printf "%s\n" "$candidate"
+        return 0
+    fi
+
+    for dir in \
+        "$BIN_DIR" \
+        "/opt/homebrew/bin" \
+        "/usr/local/bin" \
+        "$REAL_HOME/.npm-global/bin" \
+        "$REAL_HOME/.bun/bin" \
+        "$REAL_HOME/.cargo/bin" \
+        "$REAL_HOME/.nvm/versions/node/"*/bin \
+        "/usr/bin" \
+        "/bin"; do
+        [ -d "$dir" ] || continue
+        candidate="$dir/$command_name"
+        if [ -x "$candidate" ]; then
+            printf "%s\n" "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+shell_name() {
+    basename "${SHELL:-}" 2>/dev/null || true
+}
+
+write_posix_path_rc() {
+    local target="$1"
+    local marker="# Added by MMS"
+    local path_line='export PATH="$HOME/.local/bin:$PATH"'
+
+    [ -n "$target" ] || return 1
+    mkdir -p "$(dirname "$target")"
+    touch "$target"
+    if ! grep -q "$marker" "$target" 2>/dev/null; then
+        {
+            echo ""
+            echo "$marker"
+            echo "$path_line"
+        } >> "$target"
+        echo "✓ PATH $(t "已写入" "written to") $target"
+    fi
+}
+
+write_fish_path_rc() {
+    local target="$REAL_HOME/.config/fish/conf.d/mms.fish"
+    local marker="# Added by MMS"
+    local path_line='fish_add_path -g "$HOME/.local/bin"'
+
+    mkdir -p "$(dirname "$target")"
+    if ! grep -q "$marker" "$target" 2>/dev/null; then
+        {
+            echo "$marker"
+            echo "$path_line"
+        } >> "$target"
+        echo "✓ PATH $(t "已写入" "written to") $target"
+    fi
+}
+
+write_shell_path_config() {
+    local shell_base=""
+    shell_base="$(shell_name)"
+
+    case "$shell_base" in
+        fish)
+            write_fish_path_rc
+            ;;
+        zsh)
+            write_posix_path_rc "$REAL_HOME/.zshrc"
+            ;;
+        bash)
+            write_posix_path_rc "$REAL_HOME/.bashrc"
+            if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
+                write_posix_path_rc "$REAL_HOME/.bash_profile"
+            fi
+            ;;
+        *)
+            if [ -f "$REAL_HOME/.zshrc" ]; then
+                write_posix_path_rc "$REAL_HOME/.zshrc"
+            elif [ -f "$REAL_HOME/.bashrc" ]; then
+                write_posix_path_rc "$REAL_HOME/.bashrc"
+            elif [ -d "$REAL_HOME/.config/fish" ]; then
+                write_fish_path_rc
+            else
+                write_posix_path_rc "$REAL_HOME/.profile"
+            fi
+            ;;
+    esac
+}
+
+print_path_setup_hint() {
+    local shell_base=""
+    shell_base="$(shell_name)"
+
+    echo "⚠ $(t "未修改你的 shell 配置。" "Your shell config was not modified.")"
+    echo "  $(t "当前 shell 里可直接运行绝对路径:" "You can run the absolute path now:")"
+    echo "    $BIN_DIR/mms"
+    echo "  $(t "如需以后直接输入 mms，请添加 PATH:" "To type mms directly later, add PATH:")"
+    echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "  fish:"
+    echo "    mkdir -p ~/.config/fish/conf.d"
+    echo "    echo 'fish_add_path -g \"\$HOME/.local/bin\"' > ~/.config/fish/conf.d/mms.fish"
+    echo "  $(t "或重新执行:" "Or rerun:") bash install.sh --write-shell-rc"
+    echo "  $(t "Ghostty/iTerm/Terminal 只需重开 tab，或执行 exec \$SHELL -l。" "Ghostty/iTerm/Terminal: reopen the tab, or run exec \$SHELL -l.")"
+}
+
 node_meets_min_major() {
     local required_major="$1"
     local current_major
@@ -876,6 +1054,7 @@ ensure_node22() {
 
     echo ""
     echo "$(t "未检测到可直接复用的 Node.js 22，开始准备 Node.js 22（通过 nvm）..." "No reusable Node.js 22 detected; preparing Node.js 22 (via nvm)...")"
+    echo "  $(t "只影响本次安装和 MMS CLI 发现；不会改默认 Node，也不会写 shell rc。" "Only affects this install and MMS CLI discovery; no default Node switch and no shell rc writes.")"
     export NVM_DIR="$REAL_HOME/.nvm"
 
     if [ -s "$NVM_DIR/nvm.sh" ]; then
@@ -888,7 +1067,7 @@ ensure_node22() {
         fi
     else
         echo "$(t "未检测到 nvm，开始安装..." "nvm not found, installing...")"
-        curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | bash
+        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null bash
     fi
 
     # shellcheck disable=SC1090
@@ -951,20 +1130,64 @@ ensure_brew_package() {
 
 install_named_cli() {
     local cli_name="$1"
+    local cli_path=""
+    local status=0
 
     case "$cli_name" in
         claude)
-            if command -v claude >/dev/null 2>&1; then
-                echo "✓ Claude Code"
+            if cli_path="$(find_cli_binary claude 2>/dev/null)"; then
+                echo "✓ Claude Code ($cli_path)"
+                return 0
+            fi
+
+            echo ""
+            echo "→ $(t "正在处理" "Processing") Claude Code"
+            echo "  curl -fsSL https://claude.ai/install.sh | bash"
+            set +e
+            fetch_url_stdout "https://claude.ai/install.sh" | env HOME="$REAL_HOME" bash
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ] && cli_path="$(find_cli_binary claude 2>/dev/null)"; then
+                echo "✓ Claude Code ($cli_path)"
+                return 0
+            fi
+
+            echo "⚠ $(t "Claude native installer 未完成，尝试 npm fallback（不会切默认 Node）。" "Claude native installer did not complete; trying npm fallback without changing default Node.")"
+            if ! command -v npm >/dev/null 2>&1; then
+                ensure_node22 || true
+            fi
+            if command -v npm >/dev/null 2>&1; then
+                run_optional_command "Claude Code (npm fallback)" npm install -g @anthropic-ai/claude-code || true
+            fi
+            if cli_path="$(find_cli_binary claude 2>/dev/null)"; then
+                echo "✓ Claude Code ($cli_path)"
+                return 0
+            fi
+            echo "⚠ $(t "Claude Code 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli claude。" "Claude Code install did not complete; MMS is still installed, rerun --install-cli claude later.")"
+            return 1
+            ;;
+        codex)
+            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
+                echo "✓ Codex CLI ($cli_path)"
                 return 0
             fi
             if ! command -v npm >/dev/null 2>&1; then
-                ensure_brew_package "npm" "node" "Node.js (npm)" || return 1
+                ensure_node22 || true
             fi
-            run_optional_command "Claude Code" npm install -g @anthropic-ai/claude-code
-            ;;
-        codex)
-            ensure_brew_package "codex" "codex" "Codex CLI"
+            if command -v npm >/dev/null 2>&1; then
+                run_optional_command "Codex CLI" npm install -g @openai/codex@latest || true
+            fi
+            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
+                echo "✓ Codex CLI ($cli_path)"
+                return 0
+            fi
+            ensure_brew_package "codex" "codex" "Codex CLI" || true
+            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
+                echo "✓ Codex CLI ($cli_path)"
+                return 0
+            fi
+            echo "⚠ $(t "Codex CLI 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli codex。" "Codex CLI install did not complete; MMS is still installed, rerun --install-cli codex later.")"
+            return 1
             ;;
         *)
             echo "⚠ $(t "未知 CLI，跳过" "Unknown CLI, skipping"): $cli_name"
@@ -1244,10 +1467,14 @@ repair_managed_claude_settings() {
     local session_template_path="$SOURCE_DIR/claude-settings.template.json"
     local snapshot_path="${MMS_HOME:-$REAL_HOME/.mms}/state/claude-global-managed-snapshot.json"
 
-    merge_claude_settings_template "$REAL_HOME/.claude/settings.json" "$global_template_path" || true
-    mkdir -p "$(dirname "$snapshot_path")"
-    cp "$global_template_path" "$snapshot_path" 2>/dev/null || true
-    merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
+    if [ -f "$global_template_path" ]; then
+        merge_claude_settings_template "$REAL_HOME/.claude/settings.json" "$global_template_path" || true
+        mkdir -p "$(dirname "$snapshot_path")"
+        cp "$global_template_path" "$snapshot_path" 2>/dev/null || true
+    fi
+    if [ -f "$session_template_path" ]; then
+        merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
+    fi
 }
 
 _python_bin() {
@@ -1278,6 +1505,8 @@ find_supported_python() {
     local candidate=""
     for candidate in \
         "$PYTHON_CMD" \
+        "$MMS_UV_PYTHON_BIN_DIR/python$BOOTSTRAP_PYTHON_VERSION" \
+        "$MMS_UV_PYTHON_BIN_DIR/python3" \
         python3.13 \
         python3.12 \
         python3.11 \
@@ -1297,6 +1526,79 @@ find_supported_python() {
             return 0
         fi
     done
+    return 1
+}
+
+find_uv_managed_python() {
+    local uv_bin=""
+    local candidate=""
+    for uv_bin in \
+        "$MMS_UV_BIN" \
+        "$(command -v uv 2>/dev/null || true)" \
+        "$BIN_DIR/uv"; do
+        [ -x "$uv_bin" ] || continue
+        candidate="$(
+            UV_PYTHON_INSTALL_DIR="$MMS_UV_PYTHON_DIR" \
+            UV_PYTHON_BIN_DIR="$MMS_UV_PYTHON_BIN_DIR" \
+            UV_CACHE_DIR="$MMS_UV_CACHE_DIR" \
+            "$uv_bin" python find "$BOOTSTRAP_PYTHON_VERSION" 2>/dev/null || true
+        )"
+        if _python_candidate_works "$candidate"; then
+            printf "%s\n" "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+bootstrap_uv() {
+    local uv_bin=""
+
+    if [ -x "$MMS_UV_BIN" ]; then
+        printf "%s\n" "$MMS_UV_BIN"
+        return 0
+    fi
+
+    uv_bin="$(command -v uv 2>/dev/null || true)"
+    if [ -n "$uv_bin" ] && [ -x "$uv_bin" ]; then
+        printf "%s\n" "$uv_bin"
+        return 0
+    fi
+
+    mkdir -p "$MMS_UV_BIN_DIR"
+    echo "   $(t "正在安装 MMS-managed uv（不写 shell rc）..." "Installing MMS-managed uv (without shell rc writes)...")" >&2
+    if fetch_url_stdout "https://astral.sh/uv/install.sh" | env UV_INSTALL_DIR="$MMS_UV_BIN_DIR" UV_NO_MODIFY_PATH=1 INSTALLER_NO_MODIFY_PATH=1 sh >&2; then
+        if [ -x "$MMS_UV_BIN" ]; then
+            printf "%s\n" "$MMS_UV_BIN"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+bootstrap_managed_python() {
+    local uv_bin=""
+    local candidate=""
+
+    uv_bin="$(bootstrap_uv)" || return 1
+    [ -x "$uv_bin" ] || return 1
+
+    mkdir -p "$MMS_UV_PYTHON_DIR" "$MMS_UV_PYTHON_BIN_DIR" "$MMS_UV_CACHE_DIR"
+    echo "   $(t "正在安装 MMS-managed Python" "Installing MMS-managed Python") $BOOTSTRAP_PYTHON_VERSION..." >&2
+    if ! UV_PYTHON_INSTALL_DIR="$MMS_UV_PYTHON_DIR" \
+        UV_PYTHON_BIN_DIR="$MMS_UV_PYTHON_BIN_DIR" \
+        UV_CACHE_DIR="$MMS_UV_CACHE_DIR" \
+        "$uv_bin" python install "$BOOTSTRAP_PYTHON_VERSION" >&2; then
+        return 1
+    fi
+
+    candidate="$(find_uv_managed_python || true)"
+    if _python_candidate_works "$candidate"; then
+        printf "%s\n" "$candidate"
+        return 0
+    fi
+
     return 1
 }
 
@@ -1327,42 +1629,36 @@ ensure_supported_python() {
         return
     fi
 
-    if ! command -v python3 >/dev/null 2>&1; then
-        echo "❌ $(t "未找到 python3" "python3 not found")"
-        if command -v brew >/dev/null 2>&1; then
-            echo "   $(t "正在通过 brew 安装隔离可用的 Python 3.11..." "Installing an isolated Python 3.11 via brew...")"
-            brew install python@3.11
-            resolved_python="$(find_supported_python || true)"
-            if [ -n "$resolved_python" ]; then
-                PYTHON_CMD="$resolved_python"
-                echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
-                return
-            fi
-        else
-            echo "   $(t "请先安装 Python 3.11+" "Please install Python 3.11+ first"): https://www.python.org/downloads/"
-            exit 1
+    echo "⚠ $(t "未检测到 Python 3.11+，准备安装 MMS-managed Python，不覆盖系统 Python。" "Python 3.11+ not found; preparing MMS-managed Python without overriding system Python.")"
+    resolved_python="$(bootstrap_managed_python || true)"
+    if [ -n "$resolved_python" ]; then
+        PYTHON_CMD="$resolved_python"
+        echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
+        return
+    fi
+
+    if command -v brew >/dev/null 2>&1; then
+        echo "   $(t "MMS-managed Python 安装失败，回退到 brew 安装 python@3.11（不切默认版本）..." "MMS-managed Python install failed; falling back to brew python@3.11 without switching defaults...")"
+        brew install python@3.11
+        resolved_python="$(find_supported_python || true)"
+        if [ -n "$resolved_python" ]; then
+            PYTHON_CMD="$resolved_python"
+            echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
+            return
         fi
     fi
 
-    if ! python_meets_min_version; then
+    if command -v python3 >/dev/null 2>&1 && ! python_meets_min_version; then
         echo "❌ $(t "MMS 需要 Python 3.11 或更高版本" "MMS requires Python 3.11 or newer")"
         echo "   $(t "当前版本" "Current version"): $(python3 --version 2>/dev/null || python_version_string)"
-        if command -v brew >/dev/null 2>&1; then
-            echo "   $(t "正在通过 brew 安装隔离可用的 Python 3.11..." "Installing an isolated Python 3.11 via brew...")"
-            brew install python@3.11
-            resolved_python="$(find_supported_python || true)"
-            if [ -n "$resolved_python" ]; then
-                PYTHON_CMD="$resolved_python"
-                echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
-                return
-            fi
-        elif command -v apt-get >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
             echo "   $(t "Debian/Ubuntu 可先安装" "On Debian/Ubuntu, install"): sudo apt-get install python3.11 python3.11-venv"
         fi
         exit 1
     fi
 
-    echo "✓ Python: $("$(_python_bin)" --version) ($(_python_bin))"
+    echo "❌ $(t "无法准备 Python 3.11+；请安装 curl/wget 后重试，或设置 MMS_INSTALL_PYTHON=/path/to/python3.11+" "Could not prepare Python 3.11+; install curl/wget and retry, or set MMS_INSTALL_PYTHON=/path/to/python3.11+")"
+    exit 1
 }
 
 create_python_venv() {
@@ -1527,6 +1823,8 @@ print_version_overview() {
 
 run_install_check() {
     local node_label=""
+    local cli_name=""
+    local cli_path=""
 
     print_version_overview
 
@@ -1548,6 +1846,15 @@ run_install_check() {
         echo "• $(t "未检测到 Node.js（仅影响可选 Map/Node 安装路径）" "Node.js not found (only affects optional Map/Node install paths)")"
     fi
 
+    for cli_name in claude codex opencode; do
+        cli_path="$(find_cli_binary "$cli_name" 2>/dev/null || true)"
+        if [ -n "$cli_path" ]; then
+            echo "✓ $(t "已检测到 CLI" "CLI detected"): $cli_name ($cli_path)"
+        else
+            echo "• $(t "未检测到 CLI" "CLI not found"): $cli_name"
+        fi
+    done
+
     if [ -x "$VENV_DIR/bin/python" ]; then
         echo "✓ $(t "已存在虚拟环境" "Virtual environment present"): $VENV_DIR"
     else
@@ -1556,6 +1863,11 @@ run_install_check() {
 
     if [ -L "$BIN_DIR/mms" ]; then
         echo "✓ $(t "已存在 mms 命令链接" "mms symlink present"): $BIN_DIR/mms"
+        if [[ ":$PATH:" = *":$BIN_DIR:"* ]]; then
+            echo "✓ $(t "~/.local/bin 已在 PATH" "~/.local/bin is on PATH"): mms"
+        else
+            echo "• $(t "~/.local/bin 不在当前 PATH；可运行绝对路径或用 --write-shell-rc 写入 bash/zsh/fish 配置" "~/.local/bin is not on PATH; run the absolute path or use --write-shell-rc for bash/zsh/fish config"): $BIN_DIR/mms"
+        fi
     else
         echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
     fi
@@ -2843,7 +3155,7 @@ echo "• $(t "内建 session assets" "Bundled session assets"): on"
 echo "  $(t "安装后会自带 Caveman、weber、web-access、agent-browser、TOON、token-saver；按 session 注入，不改全局 hooks/config。" "Install includes Caveman, weber, web-access, agent-browser, TOON, and token-saver; they are injected per session without changing global hooks/config.")"
 
     if [ "$ENSURE_NODE22" -eq 1 ]; then
-        echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，这可能更新你的 shell 配置。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; that may update your shell config.")"
+        echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
 fi
 
 # ── 1. 检查 Python3 ──
@@ -2951,36 +3263,10 @@ fi
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-    PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
-
     if [ "$WRITE_SHELL_RC" -eq 1 ]; then
-        SHELL_RC=""
-        if [ -f "$REAL_HOME/.zshrc" ]; then
-            SHELL_RC="$REAL_HOME/.zshrc"
-        elif [ -f "$REAL_HOME/.bashrc" ]; then
-            SHELL_RC="$REAL_HOME/.bashrc"
-        elif [ -f "$REAL_HOME/.bash_profile" ]; then
-            SHELL_RC="$REAL_HOME/.bash_profile"
-        fi
-
-        MARKER="# Added by MMS"
-        if [ -n "$SHELL_RC" ]; then
-            if ! grep -q "$MARKER" "$SHELL_RC" 2>/dev/null; then
-                echo "" >> "$SHELL_RC"
-                echo "$MARKER" >> "$SHELL_RC"
-                echo "$PATH_LINE" >> "$SHELL_RC"
-                echo "✓ PATH $(t "已写入" "written to") $SHELL_RC"
-            fi
-        else
-            echo "⚠ $(t "未找到 shell 配置文件，请手动添加:" "No shell rc file found. Please add manually:")"
-            echo "  $PATH_LINE"
-        fi
+        write_shell_path_config
     else
-        echo "⚠ $(t "未修改你的 shell 配置。" "Your shell config was not modified.")"
-        echo "  $(t "当前安装不会自动写入 ~/.zshrc / ~/.bashrc。" "This install does not automatically write to ~/.zshrc or ~/.bashrc.")"
-        echo "  $(t "如需全局可用，请手动添加:" "To make MMS globally available, add:")"
-        echo "    $PATH_LINE"
-        echo "  $(t "或重新执行" "Or rerun"): bash install.sh --write-shell-rc"
+        print_path_setup_hint
     fi
 fi
 
@@ -2993,6 +3279,11 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "===================================="
     echo ""
     echo "  $(t "运行" "Run") $BIN_DIR/mms $(t "开始使用 / 升级后继续使用" "to start using MMS / keep using it after upgrades")"
+    if [[ ":$PATH:" = *":$BIN_DIR:"* ]]; then
+        echo "  $(t "当前 shell 已可直接运行:" "Current shell can run directly:") mms"
+    else
+        echo "  $(t "当前 shell 还未加载 ~/.local/bin；可先运行绝对路径，或重开 Ghostty/iTerm/Terminal tab 后输入 mms。" "Current shell has not loaded ~/.local/bin yet; run the absolute path now, or reopen your Ghostty/iTerm/Terminal tab and type mms.")"
+    fi
     echo ""
     echo "  $(t "常用命令:" "Common commands:")"
     echo "    mms              $(t "交互选择场景" "open the interactive launcher")"
