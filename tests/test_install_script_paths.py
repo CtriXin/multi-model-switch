@@ -166,7 +166,7 @@ def test_node22_setup_does_not_override_nvm_default():
 
     assert "nvm alias default" not in install_text
     assert "nvm alias default" not in installer_text
-    assert "不覆盖用户默认 Node" in installer_text
+    assert "@qwen-code/qwen-code" not in installer_text
 
 
 def test_install_script_copies_vendor_directory():

@@ -199,3 +199,40 @@ def test_claude_provider_options_allow_qwen_kimi_anthropic_direct(monkeypatch):
     )
 
     assert [item["provider_id"] for item in options["qwen3.5-plus"]] == ["relay", "direct-qwen"]
+    assert [item["provider_id"] for item in options["kimi-for-coding"]] == ["relay", "direct-kimi"]
+
+
+def test_qwen_and_kimi_models_bridge_through_claude_not_direct_cli():
+    import mms_core
+
+    provider = {
+        "id": "mixed-provider",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "supported_clis": ["claude"],
+    }
+
+    assert mms_core._native_clis_for_model("qwen3-coder-plus") == []
+    assert mms_core._native_clis_for_model("kimi-k2.5") == []
+    assert mms_core._provider_supports_model_for_cli(provider, "claude", "qwen3-coder-plus") is True
+    assert mms_core._provider_supports_model_for_cli(provider, "claude", "kimi-k2.5") is True
+
+
+def test_legacy_qwen_kimi_supported_clis_are_normalized_to_real_clis():
+    import mms_core
+
+    normalized = mms_core.resolve_provider_context(
+        {
+            "providers": [
+                {
+                    "id": "legacy",
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["qwen", "kimi"],
+                }
+            ]
+        },
+        "legacy",
+    )
+
+    assert normalized["supported_clis"] == ["claude", "codex"]
+

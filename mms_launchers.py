@@ -1763,8 +1763,6 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "claude": "anthropic_messages",
     "codex": "openai_chat_completions",
     "opencode": "openai_chat_completions",
-    "qwen": "openai_chat_completions",
-    "kimi": "openai_chat_completions",
 }
 OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
 OPENCODE_PROVIDER_ID = "mms"
@@ -4889,10 +4887,21 @@ def _provider_supports_cli(provider, cli):
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
+    protocols = _provider_protocols(provider)
+    normalized = set()
+    for item in supported_clis:
+        name = str(item or "").strip().lower()
+        if name in {"qwen", "kimi"}:
+            if "anthropic_messages" in protocols:
+                normalized.add("claude")
+            if "openai_chat_completions" in protocols:
+                normalized.add("codex")
+            continue
+        normalized.add(name)
+    supported_clis = normalized
     if cli == "opencode" and "opencode" not in supported_clis:
-        protocols = _provider_protocols(provider)
         if "openai_chat_completions" in protocols and any(
-            item in supported_clis for item in ("codex", "qwen", "kimi")
+            item in supported_clis for item in ("codex", "claude")
         ):
             return True
         if "anthropic_messages" in protocols and "claude" in supported_clis:
@@ -4937,7 +4946,7 @@ def validate_provider_for_cli(cli, provider):
     if cli == "claude" and not _anthropic_base_url(provider) and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置任何 API 地址[/red]")
         sys.exit(1)
-    if cli in {"codex", "opencode", "qwen", "kimi"} and not _openai_base_url(provider):
+    if cli in {"codex", "opencode"} and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
         sys.exit(1)
 
@@ -8027,63 +8036,6 @@ def launch_codex(model_info, runtime, once=False):
         )
 
 
-def launch_qwen(model_info, provider, once=False):
-    """启动 Qwen，通过 CLI flags 配置"""
-    api_key = provider["api_key"]
-    model = _resolve_model(model_info)
-    cmd = [
-        "qwen",
-        "--openai-base-url", _openai_base_url(provider),
-        "--openai-api-key", api_key,
-    ]
-    if model:
-        cmd += ["-m", model]
-
-    env = os.environ.copy()
-    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    _inject_selected_model_name(env, model)
-    _apply_runtime_network_profile(env, provider, validate_proxy=False)
-    _apply_runtime_locale_profile(env, provider)
-    _apply_runtime_ip_stack_profile(env, provider)
-    _exec_or_run(cmd, env, once)
-
-
-def launch_kimi(model_info, provider, once=False):
-    """启动 Kimi：优先走自定义 provider，无配置时退回 OAuth。"""
-    api_key = provider["api_key"]
-    model = _resolve_model(model_info)
-    env = os.environ.copy()
-    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    _inject_selected_model_name(env, model)
-    _apply_runtime_network_profile(env, provider, validate_proxy=False)
-    _apply_runtime_locale_profile(env, provider)
-    _apply_runtime_ip_stack_profile(env, provider)
-    cmd = ["kimi"]
-
-    if _openai_base_url(provider) and api_key and model:
-        provider_name = provider.get("id", "mms-openai")
-        model_id = f"{provider_name}/{model}"
-        config_toml = (
-            f'default_model = "{model_id}"\n'
-            f'[models."{model_id}"]\n'
-            f'provider = "{provider_name}"\n'
-            f'model = "{model}"\n'
-            f'capabilities = ["thinking"]\n'
-            f'[providers."{provider_name}"]\n'
-            f'type = "openai_legacy"\n'
-            f'base_url = "{_openai_base_url(provider)}"\n'
-            f'api_key = "{api_key}"\n'
-        )
-        config_path = _write_runtime_config("kimi-", config_toml)
-        cmd += ["--config", config_path]
-        _exec_or_run(cmd, env, once, cleanup_path=config_path)
-        return
-
-    if model:
-        cmd += ["-m", model]
-    _exec_or_run(cmd, env, once)
-
-
 def _opencode_model_names(runtime, selected_model=""):
     seen = set()
     models = []
@@ -9113,8 +9065,6 @@ LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "opencode": launch_opencode,
-    "qwen": launch_qwen,
-    "kimi": launch_kimi,
     "gemini": launch_gemini,
 }
 
@@ -9158,9 +9108,6 @@ def get_export_env(cli, runtime):
         exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
         exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
         exports["OPENCODE_CLIENT"] = "mms"
-    elif cli == "kimi":
-        exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()

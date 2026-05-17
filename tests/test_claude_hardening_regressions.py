@@ -2748,35 +2748,6 @@ def test_count_live_session_dirs_keeps_child_pid_backed_session_alive(monkeypatc
     assert mms_launchers._count_live_session_dirs(str(sessions_dir)) == 1
 
 
-def test_launch_qwen_scrubs_inherited_openai_and_proxy_parent_env(monkeypatch):
-    import mms_launchers
-
-    captured = {}
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-parent")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:15721/v1")
-    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:15721")
-    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
-    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime=None: env)
-    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
-    monkeypatch.setattr(
-        mms_launchers,
-        "_exec_or_run",
-        lambda cmd, env, once=False, **kwargs: captured.update({"cmd": list(cmd), "env": dict(env)}),
-    )
-
-    mms_launchers.launch_qwen(
-        "qwen3.5-plus",
-        {"id": "qwen-a", "api_key": "sk-runtime", "openai_base_url": "https://api.example.com/v1"},
-        once=True,
-    )
-
-    assert captured["cmd"][:3] == ["qwen", "--openai-base-url", "https://api.example.com/v1"]
-    assert captured["env"]["MMS_MODEL_NAME"] == "qwen3.5-plus"
-    assert "OPENAI_API_KEY" not in captured["env"]
-    assert "OPENAI_BASE_URL" not in captured["env"]
-    assert "HTTP_PROXY" not in captured["env"]
-
-
 def test_launch_claude_oauth_is_manual_only(monkeypatch, tmp_path, capsys):
     import mms_launchers
 

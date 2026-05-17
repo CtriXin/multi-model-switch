@@ -10,7 +10,7 @@
 
 ## What MMS Does
 
-MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, `qwen`, `kimi`, and `gemini`.
+MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `gemini`; Qwen/Kimi remain provider models, not standalone CLI launchers.
 
 Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 

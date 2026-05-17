@@ -8,7 +8,7 @@ default = "default"
 id = "default"
 name = "Default Gateway"
 protocols = ["anthropic_messages", "openai_chat_completions"]
-supported_clis = ["claude", "codex", "qwen", "kimi"]
+supported_clis = ["claude", "codex", "opencode"]
 enabled = true
 # proxy = "http://127.0.0.1:7890" # 可选：通道级强制 proxy；预探测和实际启动都走它
 # no_proxy = ""                   # 可选：传给 NO_PROXY
@@ -35,7 +35,7 @@ haiku = "claude-haiku-4-5-20251001"
 subagent = "claude-sonnet-4-6"
 
 [presets.cheap]
-cli = "qwen"
+cli = "claude"
 provider = "default"
 model = "qwen3-coder-plus"
 

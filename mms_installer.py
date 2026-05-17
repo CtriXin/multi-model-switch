@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from shutil import which
 
 from mms_runtime import resolve_cli_binary
 
@@ -27,8 +26,6 @@ INSTALL_COMMANDS = {
     "codex": "brew install codex",
     "opencode": "curl -fsSL https://opencode.ai/install | bash",
     "gemini": "npm install -g @google/gemini-cli",
-    "qwen": "npm install -g @qwen-code/qwen-code",
-    "kimi": "uv tool install kimi-cli",
 }
 
 CLI_DESCRIPTIONS = {
@@ -36,103 +33,7 @@ CLI_DESCRIPTIONS = {
     "codex": "Codex CLI (OpenAI)",
     "opencode": "OpenCode CLI",
     "gemini": "Gemini CLI (Google)",
-    "qwen": "Qwen Code (Alibaba)",
-    "kimi": "Kimi CLI (Moonshot)",
 }
-
-NVM_INSTALL = "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
-NODE22_INSTALL = (
-    'export NVM_DIR="$HOME/.nvm" && '
-    '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-    'nvm install 22 && nvm use 22'
-)
-
-NVM_NODE22_PREFIX = (
-    'export NVM_DIR="$HOME/.nvm" && '
-    '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-    'nvm use 22 >/dev/null && '
-)
-
-
-def _node_major_version():
-    if not which("node"):
-        return None
-
-    try:
-        result = subprocess.run(
-            ["node", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
-    except Exception:
-        return None
-
-    version = result.stdout.strip().lstrip("v")
-    major = version.split(".", 1)[0]
-    return int(major) if major.isdigit() else None
-
-
-def _nvm_has_node22():
-    try:
-        result = subprocess.run(
-            [
-                "/bin/bash",
-                "-lc",
-                'export NVM_DIR="$HOME/.nvm"; '
-                '[ -s "$NVM_DIR/nvm.sh" ] || exit 1; '
-                '. "$NVM_DIR/nvm.sh"; '
-                'nvm version 22'
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except Exception:
-        return False
-
-    return result.returncode == 0 and result.stdout.strip() != "N/A"
-
-
-def _use_nvm_node22():
-    return _run_install(
-        "node",
-        'export NVM_DIR="$HOME/.nvm" && '
-        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-        'nvm use 22',
-    )
-
-
-def _ensure_node22():
-    major = _node_major_version()
-    if major is not None and major >= 22:
-        console.print(f"[green]✓ Node.js v{major} 已满足 Qwen 依赖[/green]")
-        return True
-
-    if _nvm_has_node22():
-        console.print("[green]✓ 检测到 nvm 已安装 Node.js 22，仅本次安装使用；不修改默认 Node[/green]")
-        return _use_nvm_node22()
-
-    console.print("[yellow]Qwen 安装前需要 Node.js 22+[/yellow]")
-    console.print("[dim]将通过 nvm 安装 Node.js 22；不修改 nvm 默认版本，不覆盖用户默认 Node。[/dim]")
-
-    if not Confirm.ask("是否继续安装 nvm / Node.js 22？"):
-        console.print("[yellow]跳过 Node.js 安装[/yellow]")
-        return False
-
-    if not _run_install("nvm", NVM_INSTALL):
-        return False
-    return _run_install("node", NODE22_INSTALL)
-
-
-def _install_command_for_cli(cli_name, cmd):
-    if cli_name != "qwen":
-        return cmd
-    if _node_major_version() is not None and _node_major_version() >= 22:
-        return cmd
-    return NVM_NODE22_PREFIX + cmd
-
 
 def check_and_offer_install(cli_name):
     """检查 CLI 是否安装，未安装则提示安装"""
@@ -153,10 +54,7 @@ def check_and_offer_install(cli_name):
         console.print("[yellow]跳过安装[/yellow]")
         return False
 
-    if cli_name == "qwen" and not _ensure_node22():
-        return False
-
-    return _run_install(cli_name, _install_command_for_cli(cli_name, cmd))
+    return _run_install(cli_name, cmd)
 
 
 def install_cli(cli_name):
@@ -176,14 +74,10 @@ def install_cli(cli_name):
             pass
         return
 
-    if cli_name == "qwen" and not _ensure_node22():
-        return
-
     cmd = INSTALL_COMMANDS[cli_name]
     console.print(f"正在安装 {CLI_DESCRIPTIONS.get(cli_name, cli_name)}...")
-    install_cmd = _install_command_for_cli(cli_name, cmd)
-    console.print(f"[dim]$ {install_cmd}[/dim]")
-    _run_install(cli_name, install_cmd)
+    console.print(f"[dim]$ {cmd}[/dim]")
+    _run_install(cli_name, cmd)
 
 
 def _run_install(cli_name, cmd):

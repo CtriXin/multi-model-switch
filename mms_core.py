@@ -233,8 +233,8 @@ MMC_DELEGATED_OAUTH_CLIS = ("claude",)
 DEFAULT_PRIORITY = 100
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
-DIRECT_CLI_MODES = {"qwen", "kimi"}
-DEFAULT_KIMI_MODEL = "kimi-k2.5"
+DIRECT_CLI_MODES = set()
+LEGACY_PROVIDER_CLI_ALIASES = {"qwen", "kimi"}
 UPDATE_CHECK_INTERVAL_SEC = 24 * 60 * 60
 UPDATE_PROMPT_INTERVAL_SEC = 24 * 60 * 60
 UPDATE_NOTICE_VERSION_GAP = 3
@@ -584,7 +584,7 @@ SCENES = {
     "常规任务": {
         "emoji": "⚡",
         "desc": "简单问答、日常杂活",
-        "cli": "qwen",
+        "cli": "claude",
         "model": "qwen3-max-2026-01-23",
     },
     "主力编码": {
@@ -642,7 +642,7 @@ SCENES = {
     "中文主力": {
         "emoji": "🇨🇳",
         "desc": "中文内容、国内业务",
-        "cli": "kimi",
+        "cli": "claude",
         "model": "kimi-k2.5",
     },
     "文字产出": {
@@ -700,10 +700,7 @@ SCENES = {
 }
 
 CLI_NAMES = ["claude", "codex", "opencode", "gemini"]
-CLI_MODEL_FAMILY_HINTS = {
-    "qwen": ("qwen",),
-    "kimi": ("kimi",),
-}
+CLI_MODEL_FAMILY_HINTS = {}
 SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
@@ -817,6 +814,34 @@ def _default_provider():
         "enabled": True,
         "role": "auto",
     }
+
+
+def _normalize_supported_clis(value, protocols=None):
+    if isinstance(value, str):
+        raw_items = [value]
+    else:
+        raw_items = list(value or [])
+    protocol_set = {str(item).strip() for item in (protocols or []) if str(item).strip()}
+    normalized = []
+    seen = set()
+
+    def add(cli_name):
+        if cli_name in CLI_NAMES and cli_name not in seen:
+            normalized.append(cli_name)
+            seen.add(cli_name)
+
+    for item in raw_items:
+        cli_name = str(item or "").strip().lower()
+        if not cli_name:
+            continue
+        if cli_name in LEGACY_PROVIDER_CLI_ALIASES:
+            if "anthropic_messages" in protocol_set:
+                add("claude")
+            if "openai_chat_completions" in protocol_set:
+                add("codex")
+            continue
+        add(cli_name)
+    return normalized
 
 
 def _default_account_home(account_id):
@@ -1305,10 +1330,10 @@ def _normalize_provider(provider):
     if not merged["protocols"]:
         merged["protocols"] = list(DEFAULT_PROVIDER_PROTOCOLS)
 
-    supported_clis = merged.get("supported_clis", CLI_NAMES)
-    if isinstance(supported_clis, str):
-        supported_clis = [supported_clis]
-    merged["supported_clis"] = [str(item).strip() for item in supported_clis if str(item).strip()]
+    merged["supported_clis"] = _normalize_supported_clis(
+        merged.get("supported_clis", CLI_NAMES),
+        protocols=merged["protocols"],
+    )
     if not merged["supported_clis"]:
         merged["supported_clis"] = list(CLI_NAMES)
 
@@ -1878,7 +1903,7 @@ def _model_cli_modes(model_name):
     native = set(_native_clis_for_model(model_name))
     bridge = set(_bridge_clis_for_model(model_name))
     modes = {}
-    for cli_name in ("claude", "codex", "gemini", "qwen", "kimi"):
+    for cli_name in ("claude", "codex", "gemini"):
         if cli_name in native:
             modes[cli_name] = "native"
         elif cli_name in bridge:
@@ -1891,7 +1916,7 @@ def _model_cli_modes(model_name):
 def _model_cli_summary(model_name):
     modes = _model_cli_modes(model_name)
     parts = []
-    for cli_name in ("claude", "codex", "gemini", "qwen", "kimi"):
+    for cli_name in ("claude", "codex", "gemini"):
         mode = modes.get(cli_name)
         if mode == "native":
             parts.append(f"{cli_name}:native")
@@ -3397,7 +3422,7 @@ def save_api_credentials(base_url, api_key):
 
 
 def resolve_provider_context(cfg, provider_id=None):
-    provider = dict(get_provider_definition(cfg, provider_id))
+    provider = _normalize_provider(get_provider_definition(cfg, provider_id))
     credentials = load_provider_credentials(provider["id"])
     provider["base_url"] = credentials["base_url"]
     provider["openai_base_url"] = credentials["openai_base_url"] or provider.get("default_openai_base_url", "")
@@ -3443,7 +3468,7 @@ def _default_config(role=MODE_ALL):
                 "haiku": "claude-haiku-4-5-20251001",
                 "subagent": "claude-sonnet-4-6",
             },
-            "cheap": {"cli": "qwen", "model": "qwen3-coder-plus"},
+            "cheap": {"cli": "claude", "model": "qwen3-coder-plus"},
             "codex-gpt": {"cli": "codex", "model": "gpt-5.4"},
         },
     }
@@ -6131,7 +6156,7 @@ def _provider_supports_cli_name(provider, cli_name):
         if isinstance(protocols, str):
             protocols = [protocols]
         if "openai_chat_completions" in protocols and any(
-            item in supported_clis for item in ("codex", "qwen", "kimi")
+            item in supported_clis for item in ("codex", "claude")
         ):
             return True
         if "anthropic_messages" in protocols and "claude" in supported_clis:
@@ -6144,9 +6169,6 @@ def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
     if cli_name == "claude" and normalized_model:
         if _model_matches_account_cli("claude", normalized_model):
             return _provider_supports_cli_name(provider, "claude")
-        native_clis = _native_clis_for_model(normalized_model)
-        if native_clis:
-            return any(_provider_supports_cli_name(provider, native_cli) for native_cli in native_clis)
         bridge_clis = _bridge_clis_for_model(normalized_model)
         return cli_name in bridge_clis and _provider_supports_cli_name(provider, cli_name)
 
@@ -7671,7 +7693,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "kimi") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = _runtime_source_kind_label(runtime)
@@ -8404,13 +8426,10 @@ def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, ro
         models_list = display_models(available_models, role, recommend)
         return True, select_model_interactive(models_list)
 
-    if cli == "kimi":
-        return True, DEFAULT_KIMI_MODEL
-
-    available_models = cli_models if cli == "qwen" else (cli_models or models_cache)
+    available_models = cli_models or models_cache
     if not _ensure_models_cache_available(available_models):
         return False, None
-    models_list = display_models(available_models, role, recommend if cli != "qwen" else None)
+    models_list = display_models(available_models, role, recommend)
     return True, select_model_interactive(models_list)
 
 
@@ -10418,7 +10437,10 @@ def _validate_config(cfg):
             supported_clis = item.get("supported_clis", [])
             if isinstance(supported_clis, str):
                 supported_clis = [supported_clis]
-            invalid_clis = [value for value in supported_clis if value not in CLI_NAMES]
+            invalid_clis = [
+                value for value in supported_clis
+                if value not in CLI_NAMES and value not in LEGACY_PROVIDER_CLI_ALIASES
+            ]
             if invalid_clis:
                 errors.append(f"模型源 {provider_id} 存在不支持的 CLI: {', '.join(invalid_clis)}")
             if _normalize_priority(item.get("priority", DEFAULT_PRIORITY)) != item.get("priority", DEFAULT_PRIORITY):
@@ -11318,7 +11340,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/qwen/kimi/gemini)")
+                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/gemini)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带场景编号）")
@@ -11603,35 +11625,26 @@ def main():
         _trace_record("custom mode", cli=cli)
         if args.account or args.provider:
             _trace_record("CLI flags", account=args.account, provider=args.provider)
-        if cli == "kimi":
-            runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
-            )
-            if runtime is None:
-                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-                return
-            model = DEFAULT_KIMI_MODEL
-        else:
-            aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
-            if not _ensure_models_cache_available(aggregated):
-                return
-            model, custom_provider_id = _select_custom_model(
-                aggregated,
-                cli,
-                role=role,
-                recommend=recommend if cli != "qwen" else None,
-                use_tui=False,
-            )
-            if model is None:
-                return
-            runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
-                model_info={"model": model}
-            )
-            if runtime is None:
-                console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
-                return
-            _trace_record("manual select", model=model, provider=custom_provider_id)
+        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+        if not _ensure_models_cache_available(aggregated):
+            return
+        model, custom_provider_id = _select_custom_model(
+            aggregated,
+            cli,
+            role=role,
+            recommend=recommend,
+            use_tui=False,
+        )
+        if model is None:
+            return
+        runtime, cli_models, cli = _choose_runtime_source(
+            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
+            model_info={"model": model}
+        )
+        if runtime is None:
+            console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
+            return
+        _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
         if cli == "opencode":
             runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
@@ -11663,35 +11676,26 @@ def main():
         _trace_record("custom mode", cli=cli)
         if args.account or args.provider:
             _trace_record("CLI flags", account=args.account, provider=args.provider)
-        if cli == "kimi":
-            runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=args.provider
-            )
-            if runtime is None:
-                console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-                return
-            model = DEFAULT_KIMI_MODEL
-        else:
-            aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
-            if not _ensure_models_cache_available(aggregated):
-                return
-            model, custom_provider_id = _select_custom_model(
-                aggregated,
-                cli,
-                role=role,
-                recommend=recommend if cli != "qwen" else None,
-                use_tui=False,
-            )
-            if model is None:
-                return
-            runtime, cli_models, cli = _choose_runtime_source(
-                cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
-                model_info={"model": model}
-            )
-            if runtime is None:
-                console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
-                return
-            _trace_record("manual select", model=model, provider=custom_provider_id)
+        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+        if not _ensure_models_cache_available(aggregated):
+            return
+        model, custom_provider_id = _select_custom_model(
+            aggregated,
+            cli,
+            role=role,
+            recommend=recommend,
+            use_tui=False,
+        )
+        if model is None:
+            return
+        runtime, cli_models, cli = _choose_runtime_source(
+            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
+            model_info={"model": model}
+        )
+        if runtime is None:
+            console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
+            return
+        _trace_record("manual select", model=model, provider=custom_provider_id)
         model_info = model
         if cli == "opencode":
             runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
