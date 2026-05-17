@@ -35,7 +35,7 @@ def test_cli_resolver_finds_claude_in_other_nvm_version(tmp_path, monkeypatch):
 
     resolved = mms_runtime.resolve_cli_binary("claude", env={"HOME": str(home), "PATH": str(node20)})
 
-    assert resolved == str(claude.resolve())
+    assert resolved == str(claude)
 
 
 def test_prepare_cli_command_prepends_resolved_bin_dir(tmp_path):
@@ -53,6 +53,30 @@ def test_prepare_cli_command_prepends_resolved_bin_dir(tmp_path):
         env={"HOME": str(home), "PATH": "/usr/bin"},
     )
 
-    assert binary == str(claude.resolve())
-    assert cmd[0] == str(claude.resolve())
+    assert binary == str(claude)
+    assert cmd[0] == str(claude)
     assert env["PATH"].split(":")[0] == str(node22.resolve())
+
+
+def test_cli_resolver_preserves_nvm_bin_symlink(tmp_path):
+    import mms_runtime
+
+    home = tmp_path / "home"
+    node22 = home / ".nvm" / "versions" / "node" / "v22.19.0" / "bin"
+    package_bin = home / ".nvm" / "versions" / "node" / "v22.19.0" / "lib" / "node_modules" / "pkg" / "bin"
+    node22.mkdir(parents=True)
+    package_bin.mkdir(parents=True)
+    target = package_bin / "claude.js"
+    target.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    target.chmod(0o755)
+    symlink = node22 / "claude"
+    symlink.symlink_to(target)
+
+    cmd, env, binary = mms_runtime.prepare_cli_command(
+        ["claude"],
+        env={"HOME": str(home), "PATH": "/usr/bin"},
+    )
+
+    assert binary == str(symlink)
+    assert cmd[0] == str(symlink)
+    assert env["PATH"].split(":")[0] == str(node22)

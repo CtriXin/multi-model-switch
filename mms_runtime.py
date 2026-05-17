@@ -93,14 +93,15 @@ def resolve_cli_binary(command_name, env=None, real_home=None):
             continue
         path_value = candidate if os.path.isabs(candidate) else shutil.which(candidate, path=search_path)
         if path_value and os.path.isfile(path_value) and os.access(path_value, os.X_OK):
-            return os.path.realpath(path_value)
+            return os.path.abspath(path_value)
     return ""
 
 
 def prepend_binary_dir_to_path(env, binary_path):
     if not isinstance(env, dict):
         env = os.environ.copy()
-    binary_dir = os.path.dirname(os.path.realpath(binary_path))
+    # Keep NVM/global-bin symlinks intact so npm CLIs use the matching node in that bin dir.
+    binary_dir = os.path.dirname(os.path.abspath(binary_path))
     current = str(env.get("PATH") or os.defpath)
     parts = [item for item in current.split(os.pathsep) if item]
     if binary_dir not in parts:
