@@ -7701,28 +7701,23 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
 _OPENCODE_PROFILE_OPTIONS = [
     {
         "id": "lite_pro",
-        "label": "OpenCode Lite Pro / fallback roster",
-        "summary": "5.5 主 agent + 国产 explore/review/fix 双路 fallback；session-local config。",
+        "label": "5.5 Pro",
+        "summary": "5.5 主写；国产 explore/review/fix fallback；session-local。",
     },
     {
         "id": "lite_pro_orchestrated",
-        "label": "OpenCode Lite Pro Orchestrated / executor chain",
-        "summary": "5.5 只做总控；国产 executor 负责改代码，DeepSeek→GLM→Qwen→5.4 兜底。",
-    },
-    {
-        "id": "lite",
-        "label": "OpenCode Lite / custom agents",
-        "summary": "固定 mobius-builder + read-only/review/fix subagents；session-local config；绕过 OMO。",
+        "label": "5.5 Multi-Agent",
+        "summary": "5.5 总控；多层 executor：DeepSeek→GLM→Qwen→5.4。",
     },
     {
         "id": "heavy_omo",
-        "label": "OpenCode Heavy / OMO",
-        "summary": "使用现有全局 OpenCode + OMO 配置；MMS 不写全局配置。",
+        "label": "OMO",
+        "summary": "读取 global OpenCode + OMO；MMS 不写全局配置。",
     },
     {
         "id": "raw",
-        "label": "OpenCode Raw",
-        "summary": "纯 OpenCode；session-local provider config；不加载 OMO，也不加载 custom agents。",
+        "label": "Raw",
+        "summary": "纯 OpenCode；session-local；无 OMO/agents。",
     },
 ]
 
@@ -7825,27 +7820,34 @@ def _opencode_lite_pro_specs(profile_id="lite_pro"):
 
 
 def _opencode_profile_label(profile_id):
+    if str(profile_id or "").strip() == "lite":
+        return "Lite"
     for option in _OPENCODE_PROFILE_OPTIONS:
         if option["id"] == profile_id:
             return option["label"]
-    return profile_id or "OpenCode Lite / custom agents"
+    return profile_id or "Raw"
 
 
 def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"):
     profile_id = str(profile_id or "lite_pro").strip() or "lite_pro"
     latest = _load_opencode_route_health_latest(repo_root)
-    expected = len(_opencode_lite_pro_specs(profile_id))
+    expected_roles = {str(spec.get("key") or "").strip() for spec in _opencode_lite_pro_specs(profile_id)}
+    expected = len(expected_roles)
     counts = {"live_healthy": 0, "degraded": 0, "unhealthy": 0, "blocked": 0, "untested": 0}
-    seen_roles = set()
+    role_rows = {}
     for row in latest.values():
         if not isinstance(row, dict) or row.get("profile") != profile_id:
             continue
         role = str(row.get("role") or row.get("route_id") or "").strip()
-        if role:
-            seen_roles.add(role)
+        if role not in expected_roles:
+            continue
+        existing = role_rows.get(role)
+        if existing is None or str(row.get("finished_at") or "") >= str(existing.get("finished_at") or ""):
+            role_rows[role] = row
+    for row in role_rows.values():
         status = str(row.get("status") or "untested")
         counts[status if status in counts else "untested"] += 1
-    counts["untested"] += max(0, expected - len(seen_roles))
+    counts["untested"] += max(0, expected - len(role_rows))
     if counts["live_healthy"] == expected:
         return f"health: {expected}/{expected} healthy"
     parts = [f"{counts['live_healthy']}/{expected} healthy"]
@@ -7880,9 +7882,9 @@ def _select_opencode_profile(use_tui=False):
             return select_channel_action_tui(
                 "OpenCode Profile",
                 [
-                    ("Lite Pro", "5.5 + fallbacks"),
-                    ("Lite", "custom agents"),
-                    ("Heavy", "global OMO"),
+                    ("5.5 Pro", "fallback roster"),
+                    ("5.5 Multi-Agent", "orchestrated executor chain"),
+                    ("OMO", "global config"),
                     ("Raw", "pure fallback"),
                 ],
                 [(option["id"], option["label"]) for option in _OPENCODE_PROFILE_OPTIONS],

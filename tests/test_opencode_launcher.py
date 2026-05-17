@@ -810,9 +810,14 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     assert [item["id"] for item in captured["profile_options"]["opencode"]] == [
         "lite_pro",
         "lite_pro_orchestrated",
-        "lite",
         "heavy_omo",
         "raw",
+    ]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == [
+        "5.5 Pro",
+        "5.5 Multi-Agent",
+        "OMO",
+        "Raw",
     ]
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.4"}
@@ -1059,6 +1064,13 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
                 "profile": "lite_pro_orchestrated",
                 "role": "executor_qwen",
                 "status": "degraded",
+                "finished_at": "2026-05-16T10:00:00Z",
+            },
+            "lite_pro_orchestrated|executor_qwen|qwen3.6-plus|newapi|openai_chat_completions": {
+                "profile": "lite_pro_orchestrated",
+                "role": "executor_qwen",
+                "status": "live_healthy",
+                "finished_at": "2026-05-15T10:00:00Z",
             },
         },
     )
@@ -1066,6 +1078,8 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     lite_pro = next(option for option in mms_core._opencode_profile_menu_options() if option["id"] == "lite_pro")
     orchestrated = next(option for option in mms_core._opencode_profile_menu_options() if option["id"] == "lite_pro_orchestrated")
 
+    assert lite_pro["label"] == "5.5 Pro"
+    assert orchestrated["label"] == "5.5 Multi-Agent"
     assert "health: 1/9 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
