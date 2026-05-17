@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.7.0`
+Current tagged version: `v2.8.0`
 
 Key changes in this generation:
 
@@ -40,6 +40,7 @@ Key changes in this generation:
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
+- optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
 ## Install Or Upgrade
@@ -83,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.7.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.8.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -230,6 +231,10 @@ bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
+
+`--install-brainkeeper-context` installs BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
+
+`--install-ops-env-safe` is path-only: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so isolated sessions can inspect known host paths. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
 
 Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
 

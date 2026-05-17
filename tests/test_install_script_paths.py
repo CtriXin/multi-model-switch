@@ -239,12 +239,25 @@ def test_install_check_reports_legacy_ccs_as_disabled_by_default(tmp_path):
 def test_install_script_updates_chinese_optional_copy():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "BrainKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。" in text
+    assert "BrainKeeper 上下文包会安装 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。" in text
     assert "--install-brainkeeper-context" in text
     assert "--install-mindkeeper-context" in text
     assert "--brainkeeper-ref" in text
     assert "--mindkeeper-ref" in text
     assert "Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。" in text
+
+
+def test_install_script_installs_brainkeeper_shortcuts_and_archive_fallback():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"' in text
+    assert "ensure_node18_npm_for_optional_pack" in text
+    assert "install_brainkeeper_from_archive" in text
+    assert "BrainKeeper archive fallback" in text
+    assert 'write_brainkeeper_bin_wrapper "bk"' in text
+    assert 'write_brainkeeper_bin_wrapper "brainkeeper"' in text
+    assert "[ -x \"$BIN_DIR/bk\" ]" in text
+    assert "[ -x \"$BIN_DIR/brainkeeper\" ]" in text
 
 
 def test_install_script_has_optional_token_saver_pack():

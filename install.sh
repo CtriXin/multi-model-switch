@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.2.0}}"
+BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
 MINDKEEPER_DEFAULT_REF="$BRAINKEEPER_DEFAULT_REF"
@@ -145,7 +145,9 @@ optional_rtk_installed() {
 optional_brainkeeper_context_installed() {
     [ -f "$REAL_HOME/.claude/commands/distill.md" ] \
         && [ -f "$REAL_HOME/.claude/commands/cz.md" ] \
-        && [ -x "$REAL_HOME/.claude/hooks/token-monitor-hook.sh" ]
+        && [ -x "$REAL_HOME/.claude/hooks/token-monitor-hook.sh" ] \
+        && [ -x "$BIN_DIR/bk" ] \
+        && [ -x "$BIN_DIR/brainkeeper" ]
 }
 
 optional_map_installed() {
@@ -276,8 +278,8 @@ $(t "说明:" "Notes:")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
-  - $(t "--install-brainkeeper-context 会安装 BrainKeeper MCP、Claude 的 /distill /cz 命令和 token monitor hook；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs BrainKeeper MCP plus Claude /distill /cz commands and the token monitor hook; by default it pins the MMS-tested BrainKeeper tag")
-  - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.2.0 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.2.0 / main")
+  - $(t "--install-brainkeeper-context 会安装 BrainKeeper MCP、Claude 的 /distill /cz /cr 命令、token hooks，并写入 bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
+  - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.4.1 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.4.1 / main")
   - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
@@ -422,14 +424,14 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " BrainKeeper 上下文包" "BrainKeeper context pack"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
-            echo "  BrainKeeper context pack installs Claude /distill, /cz, and the token monitor hook."
+            echo "  BrainKeeper context pack installs BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands."
             echo "  By default MMS pins BrainKeeper to ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}."
             if confirm_from_tty "Install BrainKeeper context pack for Claude? [y/N]: " "n"; then
                 INSTALL_BRAINKEEPER_CONTEXT=1
             fi
         else
             echo "可选上下文工具"
-            echo "  BrainKeeper 上下文包会为 Claude 安装 /distill、/cz 和 token 监控 hook。"
+            echo "  BrainKeeper 上下文包会安装 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。"
             echo "  默认会锁定到 ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}。"
             if confirm_from_tty "是否安装 BrainKeeper 上下文包（Claude）？[y/N]: " "n"; then
                 INSTALL_BRAINKEEPER_CONTEXT=1
@@ -1156,6 +1158,26 @@ npm_global_install_with_nvm_fallback() {
     echo "⚠ $(t "npm 全局安装失败或不可用，尝试 MMS-managed nvm Node.js 22 fallback。" "npm global install failed or is unavailable; trying MMS-managed nvm Node.js 22 fallback.")"
     ensure_nvm_node22 || return 1
     run_optional_command "$label (nvm)" npm install -g "$package_name"
+}
+
+ensure_node18_npm_for_optional_pack() {
+    local label="$1"
+
+    if node_meets_min_major 18 && command -v npm >/dev/null 2>&1; then
+        echo "✓ $label Node.js: $(node_version_label || true)"
+        return 0
+    fi
+
+    echo "⚠ $(t "缺少 Node.js 18+/npm，尝试 MMS-managed nvm Node.js 22 fallback。" "Node.js 18+/npm is missing; trying MMS-managed nvm Node.js 22 fallback."): $label"
+    ensure_nvm_node22 || return 1
+
+    if node_meets_min_major 18 && command -v npm >/dev/null 2>&1; then
+        echo "✓ $label Node.js: $(node_version_label || true)"
+        return 0
+    fi
+
+    echo "⚠ $(t "仍未检测到可用 Node.js 18+/npm，跳过" "Still no usable Node.js 18+/npm detected, skipping"): $label"
+    return 1
 }
 
 install_named_cli() {
@@ -1915,6 +1937,12 @@ run_install_check() {
         echo "• $(t "legacy ccs 命令链接未启用（默认不再创建）" "legacy ccs symlink disabled (no longer created by default)"): $BIN_DIR/ccs"
     fi
 
+    if optional_brainkeeper_context_installed; then
+        echo "✓ $(t "BrainKeeper context pack 已安装" "BrainKeeper context pack installed"): $REAL_HOME/.local/share/brainkeeper"
+    else
+        echo "• $(t "BrainKeeper context pack 未安装或命令链接不完整（可选）" "BrainKeeper context pack not installed or command wrappers incomplete (optional)"): --install-brainkeeper-context"
+    fi
+
     if [ -f "$MMS_HOME/vendor/weber/SKILL.md" ]; then
         echo "✓ $(t "内建 weber session asset 已存在" "Bundled weber session asset present"): $MMS_HOME/vendor/weber"
     else
@@ -1995,29 +2023,220 @@ install_optional_rtk() {
     enable_rtk_codex_integration || true
 }
 
+brainkeeper_git_available() {
+    local git_bin=""
+
+    git_bin="$(command -v git 2>/dev/null || true)"
+    [ -n "$git_bin" ] || return 1
+
+    if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ] \
+        && [ "$git_bin" = "/usr/bin/git" ] \
+        && ! xcode-select -p >/dev/null 2>&1; then
+        return 1
+    fi
+
+    "$git_bin" --version >/dev/null 2>&1
+}
+
+write_brainkeeper_mcp_config() {
+    local settings_path="$REAL_HOME/.claude/settings.json"
+    local server_path="$REAL_HOME/.local/share/brainkeeper/dist/server.js"
+    local py_output=""
+
+    if [ ! -f "$server_path" ]; then
+        echo "⚠ $(t "找不到 BrainKeeper MCP server，跳过 MCP 配置" "BrainKeeper MCP server not found, skipping MCP config"): $server_path"
+        return 1
+    fi
+
+    py_output="$("$(_python_bin)" - "$settings_path" "$server_path" <<'PY'
+import json
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+settings_path = Path(sys.argv[1])
+server_path = sys.argv[2]
+settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+data = {}
+backup_path = None
+if settings_path.exists():
+    try:
+        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        backup_path = settings_path.with_name(
+            f"{settings_path.name}.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(settings_path, backup_path)
+        data = {}
+
+mcp_servers = data.get("mcpServers")
+if not isinstance(mcp_servers, dict):
+    mcp_servers = {}
+data["mcpServers"] = mcp_servers
+
+legacy = mcp_servers.get("mindkeeper")
+legacy_text = json.dumps(legacy, ensure_ascii=False).lower() if legacy else ""
+if legacy and ("mindkeeper" in legacy_text or "brainkeeper" in legacy_text):
+    mcp_servers.pop("mindkeeper", None)
+
+mcp_servers["brainkeeper"] = {
+    "command": "node",
+    "args": [server_path],
+    "type": "stdio",
+}
+settings_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+if backup_path is not None:
+    print(f"BACKUP:{backup_path}")
+PY
+)"
+
+    if [ -n "$py_output" ]; then
+        echo "$py_output" | while IFS= read -r line; do
+            case "$line" in
+                BACKUP:*)
+                    echo "⚠ $(t "检测到损坏的 Claude settings，已备份" "Detected invalid Claude settings, backup created"): ${line#BACKUP:}"
+                    ;;
+            esac
+        done
+    fi
+
+    echo "✓ $(t "已配置 BrainKeeper MCP" "BrainKeeper MCP configured"): $settings_path"
+    return 0
+}
+
+install_brainkeeper_from_archive() {
+    local effective_brainkeeper_ref="$1"
+    local install_dir="$REAL_HOME/.local/share/brainkeeper"
+    local tmp_dir=""
+    local archive_path=""
+    local archive_url=""
+    local extracted_dir=""
+    local new_dir=""
+    local backup_dir=""
+    local status=0
+
+    if ! ensure_node18_npm_for_optional_pack "BrainKeeper"; then
+        return 1
+    fi
+
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mms-brainkeeper.XXXXXX")"
+    archive_path="$tmp_dir/brainkeeper.tar.gz"
+
+    case "$effective_brainkeeper_ref" in
+        ""|main)
+            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/heads/main.tar.gz"
+            ;;
+        v[0-9]*)
+            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/tags/${effective_brainkeeper_ref}.tar.gz"
+            ;;
+        *)
+            archive_url="https://github.com/CtriXin/brainkeeper/archive/refs/heads/${effective_brainkeeper_ref}.tar.gz"
+            ;;
+    esac
+
+    echo "→ $(t "正在处理 BrainKeeper archive 安装" "Processing BrainKeeper archive install")"
+    echo "  $archive_url"
+    if ! download_url_to_file "$archive_url" "$archive_path"; then
+        echo "⚠ $(t "BrainKeeper archive 下载失败" "BrainKeeper archive download failed"): $archive_url"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+    if ! tar -xzf "$archive_path" -C "$tmp_dir"; then
+        echo "⚠ $(t "BrainKeeper archive 解压失败" "BrainKeeper archive extraction failed")"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    extracted_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    if [ -z "$extracted_dir" ] || [ ! -f "$extracted_dir/package.json" ]; then
+        echo "⚠ $(t "BrainKeeper archive 结构异常" "BrainKeeper archive has an unexpected structure")"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    new_dir="${install_dir}.new.$$"
+    backup_dir="${install_dir}.bak.$$"
+    rm -rf "$new_dir" "$backup_dir"
+    mv "$extracted_dir" "$new_dir"
+    mkdir -p "$(dirname "$install_dir")"
+    if [ -e "$install_dir" ]; then
+        mv "$install_dir" "$backup_dir"
+    fi
+    if ! mv "$new_dir" "$install_dir"; then
+        [ -e "$backup_dir" ] && mv "$backup_dir" "$install_dir"
+        rm -rf "$tmp_dir" "$new_dir"
+        echo "⚠ $(t "BrainKeeper archive 安装失败，已尝试恢复旧版本" "BrainKeeper archive install failed; attempted to restore previous version")"
+        return 1
+    fi
+
+    (
+        cd "$install_dir"
+        npm install --production --ignore-scripts
+        if [ ! -f "$install_dir/dist/server.js" ] || [ ! -f "$install_dir/dist/cli.js" ]; then
+            npm install --ignore-scripts
+            npx tsc
+        fi
+    ) || status=$?
+
+    if [ "$status" -ne 0 ]; then
+        rm -rf "$install_dir"
+        [ -e "$backup_dir" ] && mv "$backup_dir" "$install_dir"
+        rm -rf "$tmp_dir"
+        echo "⚠ $(t "BrainKeeper 依赖安装或构建失败，已尝试恢复旧版本" "BrainKeeper dependency install or build failed; attempted to restore previous version")"
+        return "$status"
+    fi
+
+    rm -rf "$backup_dir" "$tmp_dir"
+    write_brainkeeper_mcp_config || true
+    echo "✓ $(t "BrainKeeper archive 已安装" "BrainKeeper archive installed"): $install_dir"
+    return 0
+}
+
 run_brainkeeper_installer() {
     local local_installer=""
     local effective_brainkeeper_ref="${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
+    local candidate=""
 
-    local_installer="$(dirname "$SOURCE_DIR")/brainkeeper/install.sh"
-    if [ -f "$local_installer" ]; then
-        run_optional_command \
+    if ! ensure_node18_npm_for_optional_pack "BrainKeeper"; then
+        return 1
+    fi
+
+    if brainkeeper_git_available; then
+        for candidate in \
+            "$(dirname "$SOURCE_DIR")/brainkeeper/install.sh" \
+            "$SOURCE_DIR/../../../brainkeeper/install.sh" \
+            "$(dirname "$SOURCE_DIR")/mindkeeper/install.sh" \
+            "$SOURCE_DIR/../../../mindkeeper/install.sh"; do
+            if [ -f "$candidate" ]; then
+                local_installer="$candidate"
+                break
+            fi
+        done
+
+        if [ -f "$local_installer" ]; then
+            if run_optional_command \
+                "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
+                env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"; then
+                return 0
+            fi
+        fi
+
+        if run_optional_command \
             "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
-            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"
-        return 0
+            env HOME="$REAL_HOME" BRAINKEEPER_INSTALL_REF="$effective_brainkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/brainkeeper/main/install.sh | bash -s -- --ref "$BRAINKEEPER_INSTALL_REF"'; then
+            return 0
+        fi
+
+        echo "⚠ $(t "BrainKeeper git 安装失败，改用 archive fallback。" "BrainKeeper git install failed; trying archive fallback.")"
+    else
+        echo "⚠ $(t "未检测到可用 git/Xcode Command Line Tools，改用 BrainKeeper archive fallback。" "Usable git/Xcode Command Line Tools not found; using BrainKeeper archive fallback.")"
     fi
 
-    local_installer="$(dirname "$SOURCE_DIR")/mindkeeper/install.sh"
-    if [ -f "$local_installer" ]; then
-        run_optional_command \
-            "$(t "BrainKeeper MCP 安装（legacy MindKeeper 本地源）" "BrainKeeper MCP install (legacy local MindKeeper source)")" \
-            env HOME="$REAL_HOME" bash "$local_installer" --ref "$effective_brainkeeper_ref"
-        return 0
-    fi
-
-    run_optional_command \
-        "$(t "BrainKeeper MCP 安装" "BrainKeeper MCP install")" \
-        env HOME="$REAL_HOME" BRAINKEEPER_INSTALL_REF="$effective_brainkeeper_ref" bash -lc 'set -o pipefail; curl -fsSL https://raw.githubusercontent.com/CtriXin/brainkeeper/main/install.sh | bash -s -- --ref "$BRAINKEEPER_INSTALL_REF"'
+    install_brainkeeper_from_archive "$effective_brainkeeper_ref"
 }
 
 write_brainkeeper_distill_command() {
@@ -2478,11 +2697,73 @@ PY
     return 0
 }
 
+write_brainkeeper_bin_wrapper() {
+    local command_name="$1"
+    local target="$BIN_DIR/$command_name"
+    local cli_path="$REAL_HOME/.local/share/brainkeeper/dist/cli.js"
+    local marker="Managed by MMS BrainKeeper context pack"
+    local tmp_file=""
+
+    if [ ! -f "$cli_path" ]; then
+        echo "⚠ $(t "找不到 BrainKeeper CLI，跳过命令链接" "BrainKeeper CLI not found, skipping command wrapper"): $cli_path"
+        return 1
+    fi
+
+    mkdir -p "$BIN_DIR"
+    if [ -L "$target" ]; then
+        rm -f "$target"
+    elif [ -e "$target" ] && ! grep -Fq "$marker" "$target" 2>/dev/null; then
+        echo "⚠ $(t "检测到已有自定义命令，跳过覆盖" "Detected custom command, skipping overwrite"): $target"
+        return 1
+    fi
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mms-brainkeeper-bin.XXXXXX")"
+    cat > "$tmp_file" <<'EOF'
+#!/bin/sh
+# Managed by MMS BrainKeeper context pack
+REAL_HOME="${MMS_REAL_HOME:-${REAL_HOME:-${ORIGINAL_HOME:-$HOME}}}"
+case "$REAL_HOME" in
+  */.config/mms/*) REAL_HOME="${REAL_HOME%%/.config/mms/*}" ;;
+esac
+
+CLI_PATH="$REAL_HOME/.local/share/brainkeeper/dist/cli.js"
+if [ ! -f "$CLI_PATH" ]; then
+  printf '%s\n' "BrainKeeper CLI not found: $CLI_PATH" >&2
+  exit 127
+fi
+
+export HOME="$REAL_HOME"
+export MMS_REAL_HOME="$REAL_HOME"
+
+for NODE_BIN in "$REAL_HOME/.nvm/versions/node/"*/bin/node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node node; do
+  case "$NODE_BIN" in
+    */*)
+      if [ -x "$NODE_BIN" ]; then
+        exec "$NODE_BIN" "$CLI_PATH" "$@"
+      fi
+      ;;
+    *)
+      if command -v "$NODE_BIN" >/dev/null 2>&1; then
+        exec "$NODE_BIN" "$CLI_PATH" "$@"
+      fi
+      ;;
+  esac
+done
+
+printf '%s\n' "Node.js not found; install Node.js 18+ or rerun MMS installer with --install-brainkeeper-context." >&2
+exit 127
+EOF
+    mv "$tmp_file" "$target"
+    chmod 755 "$target"
+    echo "✓ $(t "已安装命令" "Installed command"): $target"
+    return 0
+}
+
 install_optional_brainkeeper_context() {
     echo ""
     echo "$(t "正在安装 BrainKeeper context pack..." "Installing BrainKeeper context pack...")"
 
-    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json、~/.claude/commands/ 和 ~/.claude/hooks/；若缺少 jq 会尝试安装。" "This optional pack updates ~/.claude/settings.json, ~/.claude/commands/, and ~/.claude/hooks/; it also attempts to install jq if missing.")"
+    echo "⚠ $(t "这个可选包会修改 ~/.claude/settings.json、~/.claude/commands/、~/.claude/hooks/，并写入 ~/.local/bin/bk 与 ~/.local/bin/brainkeeper；若缺少 Node/npm 会尝试用 nvm 准备本次安装环境。" "This optional pack updates ~/.claude/settings.json, ~/.claude/commands/, ~/.claude/hooks/, and writes ~/.local/bin/bk plus ~/.local/bin/brainkeeper; if Node/npm is missing it tries an nvm fallback for this install.")"
 
     run_brainkeeper_installer || true
     ensure_brew_package "jq" "jq" "jq" || true
@@ -2497,6 +2778,9 @@ install_optional_brainkeeper_context() {
     write_brainkeeper_cr_command || true
     enable_brainkeeper_token_monitor_hook || true
     enable_brainkeeper_context_restore_hint_hook || true
+    write_brainkeeper_mcp_config || true
+    write_brainkeeper_bin_wrapper "bk" || true
+    write_brainkeeper_bin_wrapper "brainkeeper" || true
 }
 
 run_map_installer() {
@@ -3150,7 +3434,7 @@ fi
 
 if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
     echo "• $(t "附带安装 BrainKeeper context pack" "Optional BrainKeeper context pack"): on"
-    echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，不包含 Hive 能力。" "This writes Claude MCP / command / hook config and does not include Hive features.")"
+    echo "  $(t "会写入 Claude 的 MCP / 命令 / hook 配置，并安装 bk/brainkeeper 命令；不包含 Hive 能力。" "This writes Claude MCP / command / hook config and installs bk/brainkeeper commands; it does not include Hive features.")"
     echo "  $(t "BrainKeeper 版本" "BrainKeeper ref"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
 fi
 
@@ -3348,8 +3632,8 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ]; then
-        echo "  $(t "BrainKeeper context pack 已安装：Claude /distill、/cz、BrainKeeper MCP、token monitor hook、context restore hint hook。" "BrainKeeper context pack installed: Claude /distill, /cz, BrainKeeper MCP, the token monitor hook, and the context restore hint hook.")"
-        echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically.")"
+        echo "  $(t "BrainKeeper context pack 已安装：BrainKeeper MCP、Claude /distill /cz /cr、token hooks、bk/brainkeeper 命令。" "BrainKeeper context pack installed: BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands.")"
+        echo "  $(t "这次不包含 Hive compact/restore，也不会自动给 Codex 写入独立 slash command；命令入口在 ~/.local/bin。" "This does not include Hive compact/restore and does not add a separate Codex slash command automatically; command wrappers live in ~/.local/bin.")"
         echo ""
     fi
 

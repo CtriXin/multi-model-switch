@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.7.0`
+当前 tagged version：`v2.8.0`
 
 这一代的重点：
 
@@ -40,6 +40,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
+- 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
 ## 安装 / 升级
@@ -83,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.7.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.8.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -229,6 +230,10 @@ bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-ops-env-safe
 ```
+
+`--install-brainkeeper-context` 会安装 BrainKeeper MCP、Claude `/distill` / `/cz` / `/cr`、token hooks，以及 `~/.local/bin/bk` 和 `~/.local/bin/brainkeeper`。如果缺 Node/npm，会用 nvm 准备本次安装用的 Node 22，不改用户默认 Node；如果没有 Xcode/git，会 fallback 到 GitHub archive 下载。
+
+`--install-ops-env-safe` 是 path-only：写入 Codex skill、Claude `/ops-env-safe` 和 `~/.config/mms/ops-env-safe.toml`，让隔离 session 能查宿主路径。它不设置真实 `HOME`/`XDG_*`，也不导出 auth secret。
 
 旧参数 `--install-mindkeeper-context` 和 `--mindkeeper-ref` 仍作为 BrainKeeper 安装的 deprecated alias 兼容。
 
