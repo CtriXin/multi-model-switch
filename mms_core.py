@@ -3292,6 +3292,8 @@ def _print_trace(cli_name, model_info, runtime):
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False):
+    if cli_name == "claude":
+        runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
     if _trace_enabled:
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
@@ -3544,6 +3546,86 @@ def _provider_has_configured_base_url(provider):
         or _provider_anthropic_base_url(provider)
         or str(provider.get("base_url", "")).strip().rstrip("/")
     )
+
+
+def _config_truthy(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def _runtime_with_vision_sidecar(cfg, runtime):
+    if not isinstance(runtime, dict) or runtime.get("vision_sidecar"):
+        return runtime
+    raw = cfg.get("vision_sidecar") if isinstance(cfg, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    if raw and not _config_truthy(raw.get("enabled"), default=True):
+        return runtime
+
+    model = str(
+        os.environ.get("MMS_VISION_SIDECAR_MODEL")
+        or raw.get("model")
+        or raw.get("vision_model")
+        or "K2.6"
+    ).strip()
+    explicit_provider_id = str(
+        os.environ.get("MMS_VISION_SIDECAR_PROVIDER")
+        or raw.get("provider_id")
+        or raw.get("provider")
+        or ""
+    ).strip()
+    preferred_ids = (
+        [explicit_provider_id]
+        if explicit_provider_id
+        else ["direct-kimi", "newapi-personal-kimi", "newapi-personal-tokyo", "xin"]
+    )
+    providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
+    all_ids = [
+        str(item.get("id") or "").strip()
+        for item in providers
+        if isinstance(item, dict) and item.get("id")
+    ]
+    candidate_ids = []
+    for provider_id in preferred_ids + all_ids:
+        if provider_id and provider_id not in candidate_ids:
+            candidate_ids.append(provider_id)
+
+    model_l = model.lower()
+    for provider_id in candidate_ids:
+        try:
+            provider = resolve_provider_context(cfg, provider_id)
+        except Exception:
+            continue
+        if not provider or not provider.get("enabled", True):
+            continue
+        api_key = str(provider.get("api_key") or provider.get("openai_api_key") or "").strip()
+        anthropic_url = _provider_anthropic_base_url(provider)
+        if not api_key or not anthropic_url:
+            continue
+        if not explicit_provider_id:
+            try:
+                cached = _load_probe_file_cache(provider_id, allow_stale=True)
+                cached_models = (cached or {}).get("raw_models") or (cached or {}).get("models")
+                models = _provider_effective_models(provider, cached_models, cfg)
+            except Exception:
+                models = []
+            if models and model_l not in {str(item or "").strip().lower() for item in models}:
+                continue
+        updated = dict(runtime)
+        updated["vision_sidecar"] = {
+            "enabled": True,
+            "provider_id": provider_id,
+            "provider_profile": str(provider.get("profile") or provider.get("provider_profile") or ""),
+            "model": model,
+            "anthropic_base_url": anthropic_url,
+            "api_key": api_key,
+            "proxy_url": str(provider.get("proxy") or "").strip(),
+            "no_proxy": str(provider.get("no_proxy") or "").strip(),
+        }
+        return updated
+    return runtime
 
 
 def _account_label(account):

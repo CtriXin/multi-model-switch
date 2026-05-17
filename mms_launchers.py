@@ -2853,6 +2853,15 @@ def _runtime_reasoning_effort(runtime, default="high"):
     return _normalize_reasoning_effort((runtime or {}).get("reasoning_effort", default), default=default)
 
 
+def _runtime_vision_sidecar(runtime):
+    sidecar = (runtime or {}).get("vision_sidecar")
+    if not isinstance(sidecar, dict):
+        return {}
+    if not sidecar.get("enabled", True):
+        return {}
+    return dict(sidecar)
+
+
 def _resolve_native_fallback_routes(runtime, model_name):
     try:
         from mms_native_fallback import resolve_native_fallback_routes
@@ -6667,6 +6676,11 @@ def launch_claude(model_info, runtime, once=False):
             _reasoning_effort = "high"
         if _gpt_openai_url and _is_gpt_model(probe_model):
             console.print(f"[dim]thinking: {'on' if _thinking_enabled else 'off'} · effort: {_reasoning_effort}[/dim]")
+        _vision_sidecar = _runtime_vision_sidecar(runtime)
+        if _vision_sidecar:
+            console.print(
+                f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"
+            )
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -6695,7 +6709,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                     reasoning_enabled=_thinking_enabled,
                                                     reasoning_effort=_reasoning_effort,
-                                                    native_fallback_routes=native_fallback_routes)
+                                                    native_fallback_routes=native_fallback_routes,
+                                                    vision_sidecar=_vision_sidecar)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -6734,6 +6749,7 @@ def launch_claude(model_info, runtime, once=False):
                     reasoning_enabled=_thinking_enabled,
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
+                    vision_sidecar=_vision_sidecar,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -6791,7 +6807,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 reasoning_enabled=_thinking_enabled,
-                                                reasoning_effort=_reasoning_effort)
+                                                reasoning_effort=_reasoning_effort,
+                                                vision_sidecar=_vision_sidecar)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -6826,7 +6843,8 @@ def launch_claude(model_info, runtime, once=False):
                                                 proxy_url=runtime.get("proxy"),
                                                 no_proxy=runtime.get("no_proxy"),
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
-                                                minimal_claude_header_passthrough=minimal_claude_header_passthrough)
+                                                minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                                                vision_sidecar=_vision_sidecar)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -6868,7 +6886,8 @@ def launch_claude(model_info, runtime, once=False):
                                                     proxy_url=runtime.get("proxy"),
                                                     no_proxy=runtime.get("no_proxy"),
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
-                                                    minimal_claude_header_passthrough=minimal_claude_header_passthrough)
+                                                    minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                                                    vision_sidecar=_vision_sidecar)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,

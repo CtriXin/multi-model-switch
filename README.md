@@ -25,13 +25,14 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.9.1`
+Current tagged version: `v2.9.2`
 
 Key changes in this generation:
 
 - provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
 - profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
 - Claude resume persistence through `.claude/projects`
+- Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches
 - OpenCode profiles: `Orchestrated`, `Roster`, and `Raw` with repo-local health feedback
 - OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, domestic models via Anthropic `/v1/messages`
@@ -85,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.2/install.sh | bash -s --
 ```
 
 Verify the install:

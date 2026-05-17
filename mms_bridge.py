@@ -428,6 +428,21 @@ _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
 _DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
+_KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES = (
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-v4-",
+    "glm-5",
+    "glm-5.1",
+    "glm-5-turbo",
+    "kimi-for-coding",
+    "mimo-v2.5",
+    "mimo-v2-pro",
+    "qwen-plus",
+    "qwen3-max",
+    "qwen3.5-plus",
+    "qwen3.6-plus",
+)
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
     "You are Codex, based on GPT-5. You are running as a coding agent"
@@ -454,6 +469,306 @@ def _is_claude_shell_model(model_name):
 
 def _is_domestic_model(model_name):
     return _normalize_model_name(model_name).startswith(_DOMESTIC_MODEL_PREFIXES)
+
+
+def _selector_base_model_name(model_name):
+    normalized = _normalize_model_name(model_name)
+    if normalized.endswith(_ONE_M_CONTEXT_SUFFIX):
+        normalized = normalized[:-len(_ONE_M_CONTEXT_SUFFIX)]
+    return normalized
+
+
+def _is_image_content_block(value):
+    if not isinstance(value, dict):
+        return False
+    block_type = str(value.get("type") or "").strip().lower()
+    return block_type in {"image", "input_image"}
+
+
+def _count_image_blocks_recursive(value):
+    if isinstance(value, dict):
+        if _is_image_content_block(value):
+            return 1
+        return sum(_count_image_blocks_recursive(child) for child in value.values())
+    if isinstance(value, list):
+        return sum(_count_image_blocks_recursive(item) for item in value)
+    return 0
+
+
+def _payload_has_image_input(value):
+    return _count_image_blocks_recursive(value) > 0
+
+
+def _model_rejects_image_input(model_name):
+    normalized = _selector_base_model_name(model_name)
+    return normalized.startswith(_KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES)
+
+
+def _unsupported_image_input_payload(model_name):
+    model = str(model_name or "").strip() or "selected model"
+    return {
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": (
+                "MMS capability guard: model "
+                f"{model} does not support image input. "
+                "Open a text-only chat, remove image history, or switch to a vision-capable model such as gpt-5.4."
+            ),
+        },
+    }
+
+
+def _vision_sidecar_enabled(config):
+    if not isinstance(config, dict):
+        return False
+    value = config.get("enabled", True)
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def _vision_sidecar_gateway_url(config):
+    if not isinstance(config, dict):
+        return ""
+    return str(
+        config.get("anthropic_base_url")
+        or config.get("gateway_url")
+        or config.get("base_url")
+        or ""
+    ).strip().rstrip("/")
+
+
+def _vision_sidecar_target_url(config):
+    gateway_url = _vision_sidecar_gateway_url(config)
+    if not gateway_url:
+        return ""
+    return gateway_url + ("/messages" if gateway_url.endswith("/v1") else "/v1/messages")
+
+
+def _image_block_for_anthropic(block):
+    if not isinstance(block, dict):
+        return None
+    block_type = str(block.get("type") or "").strip().lower()
+    if block_type == "image":
+        return copy.deepcopy(block)
+    if block_type != "input_image":
+        return None
+    image_url = block.get("image_url") or block.get("url") or ""
+    if isinstance(image_url, dict):
+        image_url = image_url.get("url") or ""
+    image_url = str(image_url or "").strip()
+    if image_url.startswith("data:") and ";base64," in image_url:
+        header, data = image_url.split(";base64,", 1)
+        media_type = header.replace("data:", "", 1) or "image/png"
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": data,
+            },
+        }
+    if image_url:
+        return {
+            "type": "image",
+            "source": {
+                "type": "url",
+                "url": image_url,
+            },
+        }
+    return None
+
+
+def _collect_image_blocks(value):
+    images = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if _is_image_content_block(node):
+                image_block = _image_block_for_anthropic(node)
+                if image_block is not None:
+                    images.append(image_block)
+                return
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(value)
+    return images
+
+
+def _strip_image_blocks(value, *, parent_key=""):
+    if isinstance(value, dict):
+        if _is_image_content_block(value):
+            return None, True
+        changed = False
+        cleaned = {}
+        for key, child in value.items():
+            next_child, child_changed = _strip_image_blocks(child, parent_key=str(key))
+            changed = changed or child_changed
+            if child_changed and next_child is None:
+                continue
+            cleaned[key] = next_child
+        return cleaned, changed
+    if isinstance(value, list):
+        changed = False
+        cleaned = []
+        for item in value:
+            next_item, item_changed = _strip_image_blocks(item, parent_key=parent_key)
+            changed = changed or item_changed
+            if item_changed and next_item is None:
+                continue
+            cleaned.append(next_item)
+        if changed and parent_key == "content" and not cleaned:
+            cleaned.append({
+                "type": "text",
+                "text": "[MMS removed image input; see vision sidecar summary appended to this request.]",
+            })
+        return cleaned, changed
+    return value, False
+
+
+def _messages_without_images(messages):
+    cleaned = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        next_message, _ = _strip_image_blocks(copy.deepcopy(message))
+        cleaned.append(next_message)
+    return cleaned
+
+
+def _append_vision_sidecar_text(payload, vision_text, sidecar_model):
+    messages = payload.setdefault("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+        payload["messages"] = messages
+    note = (
+        f"[MMS vision sidecar by {sidecar_model or 'vision model'}]\n"
+        "当前主模型不支持 image input；MMS 已先用 vision sidecar 读取用户图片。\n"
+        "图片内容如下：\n"
+        f"{str(vision_text or '').strip()}"
+    ).strip()
+    block = {"type": "text", "text": "\n\n" + note}
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            message["content"] = [{"type": "text", "text": content}, block]
+        elif isinstance(content, list):
+            content.append(block)
+        else:
+            message["content"] = [block]
+        return
+    messages.append({"role": "user", "content": [block]})
+
+
+def _extract_anthropic_text(response_payload):
+    parts = []
+    if not isinstance(response_payload, dict):
+        return ""
+    for block in response_payload.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            text = str(block.get("text") or "").strip()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts).strip()
+
+
+def _build_vision_sidecar_payload(original_payload, sidecar_model, image_blocks):
+    user_text = []
+    for message in (original_payload.get("messages") or [])[-8:]:
+        if isinstance(message, dict) and message.get("role") == "user":
+            text = _extract_user_text(message.get("content", ""))
+            if text:
+                user_text.append(text)
+    prompt = (
+        "你是 MMS vision sidecar。任务：只读取图片，为后续 text-only LLM 提供可靠文字上下文。\n"
+        "请用中文输出：1) 视觉内容概述 2) 关键文字/OCR 3) 与用户问题相关的细节。\n"
+        "不要回答用户最终问题，只描述图片事实。\n"
+    )
+    if user_text:
+        prompt += "\n用户文本上下文：\n" + "\n\n".join(user_text[-4:])
+    content = [{"type": "text", "text": prompt}]
+    content.extend(copy.deepcopy(image_blocks))
+    return {
+        "model": sidecar_model,
+        "max_tokens": int((original_payload.get("max_tokens") or 1500)),
+        "stream": False,
+        "messages": [{"role": "user", "content": content}],
+    }
+
+
+def _apply_vision_sidecar(payload, sidecar_config, handler):
+    if not _vision_sidecar_enabled(sidecar_config):
+        return None, "disabled"
+    _ensure_httpx()
+    if httpx is None:
+        return None, "missing_httpx"
+    image_blocks = _collect_image_blocks(payload.get("messages"))
+    if not image_blocks:
+        return None, "no_collectable_image_blocks"
+    sidecar_model = str(sidecar_config.get("model") or "K2.6").strip()
+    target_url = _vision_sidecar_target_url(sidecar_config)
+    api_key = str(
+        sidecar_config.get("api_key")
+        or sidecar_config.get("gateway_key")
+        or sidecar_config.get("anthropic_api_key")
+        or ""
+    ).strip()
+    if not sidecar_model or not target_url or not api_key:
+        return None, "missing_config"
+    sidecar_payload = _build_vision_sidecar_payload(payload, sidecar_model, image_blocks)
+    provider_id = str(sidecar_config.get("provider_id") or "vision-sidecar").strip()
+    provider_profile = str(sidecar_config.get("provider_profile") or sidecar_config.get("profile") or "").strip()
+    apply_profile_body_patches(
+        sidecar_payload,
+        protocol="anthropic_messages",
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=_vision_sidecar_gateway_url(sidecar_config),
+        model_name=sidecar_model,
+        thinking_enabled=False,
+        reasoning_effort="medium",
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    }
+    apply_profile_auth_headers(
+        headers,
+        protocol="anthropic_messages",
+        api_key=api_key,
+        provider_id=provider_id,
+        profile_id=provider_profile,
+        base_url=_vision_sidecar_gateway_url(sidecar_config),
+        model_name=sidecar_model,
+    )
+    response = httpx.post(
+        target_url,
+        headers=headers,
+        json=sidecar_payload,
+        timeout=int(sidecar_config.get("timeout", 120) or 120),
+        **_route_httpx_kwargs(getattr(handler, "server", None), sidecar_config, target_url),
+    )
+    if response.status_code >= 400:
+        body = response.content.decode("utf-8", errors="replace")
+        return None, f"http_{response.status_code}:{body[:300]}"
+    try:
+        vision_text = _extract_anthropic_text(json.loads(response.content.decode("utf-8")))
+    except Exception:
+        vision_text = ""
+    if not vision_text:
+        return None, "empty_response"
+    rewritten = copy.deepcopy(payload)
+    rewritten["messages"] = _messages_without_images(rewritten.get("messages"))
+    _append_vision_sidecar_text(rewritten, vision_text, sidecar_model)
+    return rewritten, ""
 
 
 def _domestic_model_supports_thinking(model_name):
@@ -2151,6 +2466,24 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
 
+        resolved_model_for_guard = str(payload.get("model") or "")
+        if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(resolved_model_for_guard):
+            sidecar_payload, sidecar_error = _apply_vision_sidecar(
+                payload,
+                getattr(self.server, "vision_sidecar", {}) or {},
+                self,
+            )
+            if sidecar_payload is not None:
+                payload = sidecar_payload
+            elif sidecar_error and sidecar_error != "disabled":
+                error_payload = _unsupported_image_input_payload(resolved_model_for_guard)
+                error_payload["error"]["message"] += f" Vision sidecar failed: {sidecar_error}."
+                self._json(400, error_payload)
+                return
+            else:
+                self._json(400, _unsupported_image_input_payload(resolved_model_for_guard))
+                return
+
         _ensure_httpx()
         if httpx is None:
             self._json(502, {"type": "error", "error": {"type": "api_error", "message": "缺少 httpx，无法代理请求"}})
@@ -3725,6 +4058,7 @@ def gateway_claude_bridge(
     proxy_url="",
     no_proxy="",
     native_fallback_routes=None,
+    vision_sidecar=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -3764,6 +4098,7 @@ def gateway_claude_bridge(
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
+    server.vision_sidecar = dict(vision_sidecar or {})
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

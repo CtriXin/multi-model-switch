@@ -316,3 +316,26 @@ def test_legacy_qwen_kimi_supported_clis_are_normalized_to_real_clis():
     )
 
     assert normalized["supported_clis"] == ["claude", "codex"]
+
+
+def test_runtime_with_vision_sidecar_auto_uses_direct_kimi(monkeypatch):
+    import mms_core
+
+    cfg = {"providers": [{"id": "direct-kimi", "enabled": True}]}
+    direct_kimi = {
+        "id": "direct-kimi",
+        "enabled": True,
+        "api_key": "sk-kimi",
+        "anthropic_base_url": "https://api.kimi.com/coding/",
+        "supported_clis": ["claude"],
+        "models_endpoint": "manual",
+        "fallback_models": ["K2.6"],
+    }
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _cfg, _pid: direct_kimi)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda *_args, **_kwargs: None)
+
+    runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "mimo", "auth_mode": "api_key"})
+
+    assert runtime["vision_sidecar"]["provider_id"] == "direct-kimi"
+    assert runtime["vision_sidecar"]["model"] == "K2.6"
+    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://api.kimi.com/coding"

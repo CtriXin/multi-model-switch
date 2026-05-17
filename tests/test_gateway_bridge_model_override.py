@@ -5,7 +5,14 @@ import json
 import types
 
 
-def _run_gateway_bridge_once(monkeypatch, incoming_model: str, *, heavy_model: str = "mimo-v2.5") -> dict:
+def _run_gateway_bridge_once(
+    monkeypatch,
+    incoming_model: str,
+    *,
+    heavy_model: str = "mimo-v2.5",
+    messages: list[dict] | None = None,
+    vision_sidecar: dict | None = None,
+) -> dict:
     import mms_bridge
 
     captured: dict = {}
@@ -16,6 +23,15 @@ def _run_gateway_bridge_once(monkeypatch, incoming_model: str, *, heavy_model: s
         content = b'{"type":"message","role":"assistant","model":"ok","content":[],"stop_reason":"end_turn"}'
 
     def fake_post(url, **kwargs):
+        captured.setdefault("post_calls", []).append({"url": url, **kwargs})
+        captured["post_called"] = True
+        if "vision.example.com" in url:
+            class VisionResponse:
+                status_code = 200
+                headers = {"content-type": "application/json"}
+                content = b'{"type":"message","role":"assistant","content":[{"type":"text","text":"red square"}],"stop_reason":"end_turn"}'
+
+            return VisionResponse()
         captured["url"] = url
         captured["json"] = kwargs.get("json")
         captured["headers"] = kwargs.get("headers", {})
@@ -28,7 +44,7 @@ def _run_gateway_bridge_once(monkeypatch, incoming_model: str, *, heavy_model: s
     raw_body = json.dumps(
         {
             "model": incoming_model,
-            "messages": [{"role": "user", "content": "ping"}],
+            "messages": messages or [{"role": "user", "content": "ping"}],
             "stream": False,
         }
     ).encode("utf-8")
@@ -61,12 +77,14 @@ def _run_gateway_bridge_once(monkeypatch, incoming_model: str, *, heavy_model: s
         reasoning_effort="high",
         minimal_claude_header_passthrough=False,
         strip_upstream_user_agent=False,
+        vision_sidecar=vision_sidecar or {},
     )
     handler.send_response = lambda code: captured.setdefault("status", code)
     handler.send_header = lambda *args, **kwargs: None
     handler.end_headers = lambda: None
 
     handler.do_POST()
+    captured["body"] = handler.wfile.getvalue()
     return captured
 
 
@@ -102,3 +120,139 @@ def test_gateway_bridge_maps_mimo_base_request_to_1m_selector_when_heavy_is_1m(m
     assert captured["status"] == 200
     assert captured["json"]["model"] == "mimo-v2.5-pro"
     assert "context-1m-2025-08-07" in captured["headers"]["anthropic-beta"]
+
+
+def test_gateway_bridge_rejects_known_text_only_model_image_input_before_upstream(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=image_messages,
+    )
+    body = json.loads(captured["body"].decode("utf-8"))
+
+    assert captured["status"] == 400
+    assert captured.get("post_called") is not True
+    assert "does not support image input" in body["error"]["message"]
+    assert "gpt-5.4" in body["error"]["message"]
+
+
+def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=image_messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 2
+    assert captured["post_calls"][0]["json"]["model"] == "K2.6"
+    assert captured["json"]["model"] == "mimo-v2.5-pro"
+    assert "red square" in json.dumps(captured["json"], ensure_ascii=False)
+    assert not any(
+        isinstance(block, dict) and block.get("type") == "image"
+        for message in captured["json"]["messages"]
+        for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+    )
+
+
+def test_gateway_bridge_uses_vision_sidecar_for_nested_tool_result_image(monkeypatch):
+    image_messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "screenshot",
+                    "input": {},
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_1",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": "iVBORw0KGgo=",
+                            },
+                        }
+                    ],
+                },
+                {"type": "text", "text": "what changed?"},
+            ],
+        },
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5-pro[1m]",
+        messages=image_messages,
+        vision_sidecar={
+            "enabled": True,
+            "provider_id": "direct-kimi",
+            "provider_profile": "kimi-code",
+            "model": "K2.6",
+            "anthropic_base_url": "https://vision.example.com",
+            "api_key": "sk-vision",
+        },
+    )
+
+    assert captured["status"] == 200
+    assert len(captured["post_calls"]) == 2
+    sidecar_json = captured["post_calls"][0]["json"]
+    assert any(block.get("type") == "image" for block in sidecar_json["messages"][0]["content"])
+    forwarded = json.dumps(captured["json"]["messages"], ensure_ascii=False)
+    assert '"type": "image"' not in forwarded
+    assert "red square" in forwarded
