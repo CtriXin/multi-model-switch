@@ -37,21 +37,40 @@ function checkPort(port, host = '127.0.0.1', timeoutMs = 2000) {
 
 // --- Chrome 调试端口检测（DevToolsActivePort 多路径 + 常见端口回退） ---
 
+function chromeProfileHomes() {
+  const candidates = [
+    process.env.WEB_ACCESS_HOST_HOME,
+    process.env.HOST_HOME,
+    process.env.REAL_HOME,
+    safeUserHome(),
+    os.homedir(),
+  ];
+  return [...new Set(candidates.filter((home) => typeof home === 'string' && home.trim()))];
+}
+
+function safeUserHome() {
+  try {
+    return os.userInfo().homedir;
+  } catch {
+    return '';
+  }
+}
+
 function activePortFiles() {
-  const home = os.homedir();
+  const homes = chromeProfileHomes();
   const localAppData = process.env.LOCALAPPDATA || '';
   switch (os.platform()) {
     case 'darwin':
-      return [
+      return homes.flatMap((home) => [
         path.join(home, 'Library/Application Support/Google/Chrome/DevToolsActivePort'),
         path.join(home, 'Library/Application Support/Google/Chrome Canary/DevToolsActivePort'),
         path.join(home, 'Library/Application Support/Chromium/DevToolsActivePort'),
-      ];
+      ]);
     case 'linux':
-      return [
+      return homes.flatMap((home) => [
         path.join(home, '.config/google-chrome/DevToolsActivePort'),
         path.join(home, '.config/chromium/DevToolsActivePort'),
-      ];
+      ]);
     case 'win32':
       return [
         path.join(localAppData, 'Google/Chrome/User Data/DevToolsActivePort'),

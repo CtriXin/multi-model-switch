@@ -36,24 +36,45 @@ if (typeof globalThis.WebSocket !== 'undefined') {
 }
 
 // --- 自动发现 Chrome 调试端口 ---
+function chromeProfileHomes() {
+  const candidates = [
+    process.env.WEB_ACCESS_HOST_HOME,
+    process.env.HOST_HOME,
+    process.env.REAL_HOME,
+    safeUserHome(),
+    os.homedir(),
+  ];
+  return [...new Set(candidates.filter((home) => typeof home === 'string' && home.trim()))];
+}
+
+function safeUserHome() {
+  try {
+    return os.userInfo().homedir;
+  } catch {
+    return '';
+  }
+}
+
 async function discoverChromePort() {
   // 1. 尝试读 DevToolsActivePort 文件
   const possiblePaths = [];
   const platform = os.platform();
 
   if (platform === 'darwin') {
-    const home = os.homedir();
-    possiblePaths.push(
-      path.join(home, 'Library/Application Support/Google/Chrome/DevToolsActivePort'),
-      path.join(home, 'Library/Application Support/Google/Chrome Canary/DevToolsActivePort'),
-      path.join(home, 'Library/Application Support/Chromium/DevToolsActivePort'),
-    );
+    for (const home of chromeProfileHomes()) {
+      possiblePaths.push(
+        path.join(home, 'Library/Application Support/Google/Chrome/DevToolsActivePort'),
+        path.join(home, 'Library/Application Support/Google/Chrome Canary/DevToolsActivePort'),
+        path.join(home, 'Library/Application Support/Chromium/DevToolsActivePort'),
+      );
+    }
   } else if (platform === 'linux') {
-    const home = os.homedir();
-    possiblePaths.push(
-      path.join(home, '.config/google-chrome/DevToolsActivePort'),
-      path.join(home, '.config/chromium/DevToolsActivePort'),
-    );
+    for (const home of chromeProfileHomes()) {
+      possiblePaths.push(
+        path.join(home, '.config/google-chrome/DevToolsActivePort'),
+        path.join(home, '.config/chromium/DevToolsActivePort'),
+      );
+    }
   } else if (platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA || '';
     possiblePaths.push(
@@ -122,10 +143,10 @@ async function connect() {
     const discovered = await discoverChromePort();
     if (!discovered) {
       throw new Error(
-        'Chrome 未开启远程调试端口。请用以下方式启动 Chrome：\n' +
-        '  macOS: /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222\n' +
-        '  Linux: google-chrome --remote-debugging-port=9222\n' +
-        '  或在 chrome://flags 中搜索 "remote debugging" 并启用'
+        'Chrome 未开启远程调试端口。请在日常 Chrome 地址栏打开 chrome://inspect/#remote-debugging，' +
+        '勾选 Allow remote debugging for this browser instance，然后重启 Chrome。\n' +
+        '不要从隔离 agent shell 直接运行个人 Chrome binary；这会让宿主 profile 找不到宿主 Keychain。\n' +
+        '如果必须用命令启动个人 Chrome，请用宿主环境启动器：mms-chrome-host'
       );
     }
     chromePort = discovered.port;

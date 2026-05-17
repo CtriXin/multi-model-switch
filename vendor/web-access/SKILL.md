@@ -5,6 +5,7 @@ github: https://github.com/eze-is/web-access
 description:
   所有联网操作必须通过此 skill 处理，包括：搜索、网页抓取、登录后操作、网络交互等。
   触发场景：用户要求搜索信息、查看网页内容、访问需要登录的网站、操作网页界面、抓取社交媒体内容（小红书、微博、推特等）、读取动态渲染页面、以及任何需要真实浏览器环境的网络任务。
+  安全边界：隔离 HOME 下不得直接启动个人 Chrome；必须连接已启动 Chrome 或用 mms-chrome-host。
 metadata:
   author: 一泽Eze
   version: "2.5.0"
@@ -29,6 +30,14 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 ```
 温馨提示：部分站点对浏览器自动化操作检测严格，存在账号封禁风险。已内置防护措施但无法完全避免，Agent 继续操作即视为接受。
 ```
+
+
+### 隔离 HOME / Keychain 安全规则
+
+- 如果 agent shell 的 `HOME` 是隔离目录（例如 `.config/mms/codex-gateway/s/*`），禁止直接启动用户的个人 Chrome：不要运行 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`，也不要在隔离 `HOME` 下裸跑 `open -a "Google Chrome"`。这会让 Chrome 使用宿主 profile 但找不到宿主 Keychain，造成钥匙串弹窗、登录态解密失败和高 CPU。
+- 需要登录态时，只连接已经由用户/宿主环境启动的 Chrome；若 Chrome 未连接，引导用户在地址栏打开 `chrome://inspect/#remote-debugging` 并启用 **Allow remote debugging for this browser instance**。
+- 必须由命令启动个人 Chrome 时，使用宿主环境启动器：`mms-chrome-host`（MMS session 内置）或 `/Users/xin/.local/bin/mms-chrome-host`。不要从隔离 `HOME` 直接启动 Chrome binary。
+- 不需要登录态时，使用 Playwright/agent-browser 或显式临时 `--user-data-dir`；不要复用用户个人 profile。
 
 ## 浏览哲学
 
