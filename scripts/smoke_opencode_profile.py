@@ -234,6 +234,8 @@ def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
         return "timeout"
 
     text = _combined_check_text(check)
+    if "reasoning_content" in text and "must be passed back" in text:
+        return "reasoning_content_roundtrip_required"
     if any(token in text for token in ("401", "403", "unauthorized", "auth", "invalid api key", "api key")):
         return "auth_error"
     if "429" in text or "rate limit" in text or "rate_limited" in text:
@@ -262,7 +264,12 @@ def _health_status(error_class: str, latency_sec: float | None) -> str:
         return "live_healthy"
     if error_class == "cache_unfriendly_chat_completions":
         return "degraded"
-    if error_class in {"auth_error", "cache_sensitive_wrong_protocol", "protocol_mismatch"}:
+    if error_class in {
+        "auth_error",
+        "cache_sensitive_wrong_protocol",
+        "protocol_mismatch",
+        "reasoning_content_roundtrip_required",
+    }:
         return "blocked"
     return "unhealthy"
 

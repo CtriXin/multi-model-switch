@@ -549,17 +549,17 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-builder-stable"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
-    assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
-    assert reviewer_route["provider_id"] == "mimo-direct-anthropic"
-    assert reviewer_route["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
-    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert reviewer_route["provider_id"] == "mixed"
+    assert reviewer_route["protocol"] == "openai_responses"
+    assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
     assert len(payload["provider"]) >= 7
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
-    assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/anthropic"
+    assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/openai"
     assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai"
     builder_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_primary")
     assert builder_route["protocol"] == "openai_responses"
@@ -618,7 +618,15 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert payload["agent"]["mobius-executor-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-executor-qwen"]["model"].endswith("/qwen3.6-plus")
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.6-plus")
+    executor_models = {
+        payload["agent"][name]["model"].rsplit("/", 1)[-1]
+        for name in payload["agent"]
+        if name.startswith("mobius-executor-")
+    }
+    assert payload["agent"]["mobius-reviewer-gpt55"]["model"].rsplit("/", 1)[-1] not in executor_models
     qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "executor_qwen")
     assert qwen_route["protocol"] == "anthropic_messages"
 
@@ -654,7 +662,8 @@ def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavail
     assert payload["agent"]["mobius-builder-pro"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/gpt-5.4")
-    assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/gpt-5.4")
     assert all(
@@ -1130,6 +1139,34 @@ def test_core_opencode_model_route_uses_peer_model_when_primary_model_is_fresh_u
 
     assert route["model"] == "kimi-for-coding"
     assert route["protocol"] == "anthropic_messages"
+
+
+def test_opencode_smoke_classifies_reasoning_content_roundtrip_as_blocked():
+    from scripts import smoke_opencode_profile
+
+    route = {
+        "id": "reviewer_primary",
+        "model": "mimo-v2.5-pro",
+        "provider_id": "mimo-direct-anthropic",
+        "protocol": "anthropic_messages",
+    }
+    check = {
+        "ok": False,
+        "returncode": 1,
+        "stderr": "Param Incorrect: The reasoning_content in the thinking mode must be passed back to the API.",
+        "cache_transport_evidence": {
+            "schema": "cache_transport_evidence.v1",
+            "model": "mimo-v2.5-pro",
+            "provider_id": "mimo-direct-anthropic",
+            "protocol": "anthropic_messages",
+            "request_url": "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages",
+        },
+    }
+
+    error_class = smoke_opencode_profile._classify_error(check, route)
+
+    assert error_class == "reasoning_content_roundtrip_required"
+    assert smoke_opencode_profile._health_status(error_class, 0.5) == "blocked"
 
 
 def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch):

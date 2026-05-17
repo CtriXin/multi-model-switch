@@ -7783,14 +7783,13 @@ _OPENCODE_LITE_PRO_SPECS = (
     },
     {
         "key": "reviewer_primary",
-        "agent": "mobius-reviewer-mimo",
-        "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"),
-        "route_policy": "mimo_direct",
+        "agent": "mobius-reviewer-gpt55",
+        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
     },
     {
         "key": "reviewer_fallback",
-        "agent": "mobius-reviewer-deepseek",
-        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
+        "agent": "mobius-reviewer-gpt54",
+        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
     },
     {
         "key": "fixer_primary",

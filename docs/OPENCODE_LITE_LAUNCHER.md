@@ -13,7 +13,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
 - Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
 - Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
-- Lite Pro only accepts MiMo routes from direct MiMo providers (`xiaomimimo.com` or `mimo-direct` IDs); shared relays such as `newapi-personal-tokyo` are skipped for MiMo because direct is faster and avoids relay-specific timeouts.
+- Lite Pro no longer uses MiMo as the default tool-loop reviewer. Direct MiMo stays available for explicit multimodal/OMO lanes, but MiMo Anthropic tool loops can require `reasoning_content` round-trip data that OpenCode does not replay reliably yet.
 - Lite Pro launch runs a tiny OpenCode preflight against the primary builder route. If `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session.
 - MMS does not delete or rewrite global OMO config.
 - MMS does not write `~/.config/opencode/opencode.json`, `~/.config/opencode/oh-my-openagent.jsonc`, or `~/.config/mms/config.toml` for this profile selection.
@@ -35,13 +35,13 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 | `mobius-builder-stable` | primary | `gpt-5.4` | launch/builder fallback | ask |
 | `mobius-explore-glm` | subagent | `glm-5-turbo` via Anthropic | primary explorer | deny |
 | `mobius-explore-kimi` | subagent | `kimi-for-coding` via Anthropic | fallback explorer | deny |
-| `mobius-reviewer-mimo` | subagent | `mimo-v2.5-pro` via direct MiMo Anthropic | primary reviewer | deny |
-| `mobius-reviewer-deepseek` | subagent | `deepseek-v4-pro` via Anthropic | fallback reviewer | deny |
+| `mobius-reviewer-gpt55` | subagent | `gpt-5.5` via Responses | primary release-gate reviewer | deny |
+| `mobius-reviewer-gpt54` | subagent | `gpt-5.4` via Responses | stable reviewer outage fallback | deny |
 | `mobius-fixer-deepseek` | subagent | `deepseek-v4-pro` via Anthropic | primary fixer | ask |
 | `mobius-fixer-glm` | subagent | `glm-5.1` via Anthropic | fallback fixer | ask |
 | `mobius-fixer-gpt54` | subagent | `gpt-5.4` | final fixer fallback | ask |
 
-GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages`. They must not fall back to `chat/completions` silently. MiMo has an extra direct-only policy: if direct MiMo is unavailable, Lite Pro falls through to the stable route fallback instead of using shared relay MiMo.
+GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages`. They must not fall back to `chat/completions` silently. MiMo remains direct-only when used by a future explicit route, but it is not the default code-review gate until the `reasoning_content` replay issue is fixed.
 
 ## Lite Pro Orchestrated
 
@@ -50,6 +50,7 @@ GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite
 - `mobius-builder-pro` / `gpt-5.5` is coordinator only: `edit=deny`, plans, delegates, inspects diffs, and accepts/rejects executor output.
 - Primary executor chain: `mobius-executor-deepseek` → `mobius-executor-glm` → `mobius-executor-qwen` → `mobius-executor-gpt54`.
 - `mobius-explore-qwen` is available as an extra read-only Qwen explorer for broad repo/API context.
+- Review is separated from executors: `mobius-reviewer-gpt55` is the release gate, and `mobius-reviewer-gpt54` is only a reviewer-route outage fallback. The coordinator prompt tells OpenCode not to let executor/fixer agents self-approve their own output.
 - Executor agents have edit/test permissions and must return changed files, validation commands, results, risks, and blockers.
 - If acceptance fails, the coordinator sends a bounded failure packet to the next executor instead of editing directly.
 
@@ -97,4 +98,4 @@ The OpenCode profile menu appends compact health hints to Lite Pro profiles, suc
 - Keep `heavy_omo` global-config based until a separate audited OMO overlay is implemented.
 - Do not use `K2.6` in Lite Pro through `chat/completions`; if added later, keep it on Anthropic `/v1/messages` and validate with live smoke first.
 - Do not assign GLM/Kimi/DeepSeek/MiMo dual-protocol cache-sensitive routes to Lite Pro's OpenCode `chat/completions` lane; prefer Anthropic `/v1/messages`.
-- Do not route MiMo through shared relays in Lite Pro; use direct MiMo only.
+- Do not route MiMo through shared relays in Lite Pro; use direct MiMo only, and avoid using it as a multi-turn tool-loop reviewer until `reasoning_content` round-trip support is verified.

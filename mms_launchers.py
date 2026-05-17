@@ -8750,8 +8750,8 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-builder-stable": "ask",
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
-        "mobius-reviewer-mimo": "ask",
-        "mobius-reviewer-deepseek": "ask",
+        "mobius-reviewer-gpt55": "ask",
+        "mobius-reviewer-gpt54": "ask",
         "mobius-fixer-deepseek": "ask",
         "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
@@ -8765,8 +8765,8 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-executor-glm": "ask",
         "mobius-executor-qwen": "ask",
         "mobius-executor-gpt54": "ask",
-        "mobius-reviewer-mimo": "ask",
-        "mobius-reviewer-deepseek": "ask",
+        "mobius-reviewer-gpt55": "ask",
+        "mobius-reviewer-gpt54": "ask",
         "mobius-fixer-deepseek": "ask",
         "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
@@ -8806,15 +8806,16 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "Inspect the returned diff and validation evidence. If acceptance fails or "
         "confidence is low, send the failure packet to mobius-executor-glm; if still "
         "failing, use mobius-executor-qwen; use mobius-executor-gpt54 only as the "
-        "final stable executor. Review with mobius-reviewer-mimo, then "
-        "mobius-reviewer-deepseek when risk remains. Record which executor/reviewer "
-        "was used."
+        "final stable executor. Use mobius-reviewer-gpt55 as the release gate; use "
+        "mobius-reviewer-gpt54 only for reviewer-route outage. Do not let an "
+        "executor/fixer self-approve its own work. Record which executor/reviewer was used."
     ) if orchestrated else (
-        "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-mimo, "
+        "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-gpt55, "
         "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
         "confidence, misses evidence, or validation still fails, call the paired fallback "
-        "agent. Use mobius-builder-stable only when the primary model/channel is suspect "
-        "or the final result remains unstable. Record which fallback was used."
+        "agent. Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
+        "mobius-builder-stable only when the primary model/channel is suspect or the final "
+        "result remains unstable. Record which fallback was used."
     )
     stable_prompt = (
         "Fallback orchestrator. Do not edit files directly. Take over only after primary "
@@ -8872,24 +8873,32 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "permission": read_only_permission,
             "prompt": "Qwen explorer. Use for broad repo context, API surfaces, and missing cross-file links. No edits.",
         },
-        "mobius-reviewer-mimo": {
-            "description": "Lite Pro primary read-only reviewer",
+        "mobius-reviewer-gpt55": {
+            "description": "Lite Pro high-risk release-gate reviewer",
             "mode": "subagent",
-            "model": _agent_model("mobius-reviewer-mimo"),
+            "model": _agent_model("mobius-reviewer-gpt55"),
             "variant": "high",
             "temperature": 0.1,
             "steps": 10,
             "permission": read_only_permission,
-            "prompt": "Review as release gate. Lead with bugs, regressions, missing tests, and evidence gaps. No edits.",
+            "prompt": (
+                "Review as the release gate. Lead with bugs, regressions, missing tests, "
+                "and evidence gaps. Do not self-approve executor/fixer output. No edits."
+            ),
         },
-        "mobius-reviewer-deepseek": {
-            "description": "Lite Pro fallback read-only reviewer",
+        "mobius-reviewer-gpt54": {
+            "description": "Lite Pro stable fallback read-only reviewer",
             "mode": "subagent",
-            "model": _agent_model("mobius-reviewer-deepseek", _agent_model("mobius-reviewer-mimo")),
+            "model": _agent_model("mobius-reviewer-gpt54", _agent_model("mobius-reviewer-gpt55")),
+            "variant": "high",
             "temperature": 0.1,
             "steps": 10,
             "permission": read_only_permission,
-            "prompt": "Second reviewer. Focus on findings missed by first reviewer and validation gaps. No edits.",
+            "prompt": (
+                "Fallback reviewer for primary reviewer outage. Focus on findings missed by "
+                "the release gate and validation gaps. If mobius-executor-gpt54 made the "
+                "edits, prefer the gpt-5.5 reviewer when available. No edits."
+            ),
         },
         "mobius-fixer-deepseek": {
             "description": "Lite Pro primary focused fixer",
