@@ -106,11 +106,15 @@ def test_opencode_model_config_marks_official_vision_models_only():
         config = mms_launchers._opencode_model_config(_runtime(), model)
         assert config["attachment"] is True
         assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+        if model == "mimo-v2.5":
+            assert config["reasoning"] is False
 
     for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro", "MiniMax-M2.7"):
         config = mms_launchers._opencode_model_config(_runtime(), model)
         assert "attachment" not in config
         assert "modalities" not in config
+        if model == "mimo-v2.5-pro":
+            assert config["reasoning"] is False
 
 
 def test_opencode_provider_base_url_adds_v1_after_gateway_openai_prefix():
@@ -558,6 +562,8 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert reviewer_route["provider_id"] == "mixed"
     assert reviewer_route["protocol"] == "openai_responses"
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
+    assert payload["provider"]["mms-reviewer_mimo"]["models"]["mimo-v2.5-pro"]["reasoning"] is False
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
@@ -624,6 +630,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
     assert payload["agent"]["mobius-vision-qwen"]["model"].endswith("/qwen3.6-plus")
     assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.6-plus")
@@ -1224,10 +1231,10 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
 
     assert lite_pro["label"] == "5.5 Pro"
     assert orchestrated["label"] == "5.5 Multi-Agent"
-    assert "health: 1/12 healthy" in lite_pro["summary"]
+    assert "health: 1/13 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
-    assert "9 untested" in lite_pro["summary"]
-    assert "health: 1/17 healthy" in orchestrated["summary"]
+    assert "10 untested" in lite_pro["summary"]
+    assert "health: 1/18 healthy" in orchestrated["summary"]
     assert "1 degraded" in orchestrated["summary"]
-    assert "15 untested" in orchestrated["summary"]
+    assert "16 untested" in orchestrated["summary"]

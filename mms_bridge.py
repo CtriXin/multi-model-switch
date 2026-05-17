@@ -426,7 +426,7 @@ _DOMESTIC_THINKING_BLOCK_PREFIXES = ("mimo",)
 _QWEN_THINKING_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
-_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek",)
+_DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
@@ -2233,6 +2233,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                     thinking_enabled=bool(getattr(self.server, "reasoning_enabled", True)),
                     reasoning_effort=getattr(self.server, "reasoning_effort", "high"),
                 )
+                if _domestic_model_requires_reasoning_content_roundtrip(resolved_model):
+                    _preserve_domestic_reasoning_roundtrip(route_payload, resolved_model)
                 if not profile_id and _is_domestic_model(resolved_model):
                     _apply_domestic_reasoning_controls(
                         route_payload,

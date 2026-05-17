@@ -269,6 +269,7 @@
         "https://platform.xiaomimimo.com/docs/zh-CN/api/chat/anthropic-api?target=%E8%AF%B7%E6%B1%82%E4%BD%93",
         "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md",
         "https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md",
+        "https://platform.xiaomimimo.com/static/docs/usage-guide/passing-back-reasoning_content.md",
         "https://platform.xiaomimimo.com/static/docs/integration/codex.md",
         "https://platform.xiaomimimo.com/static/docs/integration/claudecode.md"
       ],
@@ -292,7 +293,7 @@
         "supported": true,
         "ui": "thinking_toggle",
         "default_enabled": true,
-        "roundtrip": "anthropic_thinking_blocks"
+        "roundtrip": "anthropic_thinking_blocks+reasoning_content"
       },
       "body_patches": {
         "openai_chat": {

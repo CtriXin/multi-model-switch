@@ -2304,6 +2304,26 @@ def test_apply_domestic_reasoning_controls_does_not_add_reasoning_content_for_no
     assert "reasoning_content" not in payload["messages"][0]
 
 
+def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "mimo step"},
+                    {"type": "tool_use", "id": "toolu_mimo", "name": "Read", "input": {"file": "x"}},
+                ],
+            }
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
+
+    assert payload["messages"][0]["reasoning_content"] == "mimo step"
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 

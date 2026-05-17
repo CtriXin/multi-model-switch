@@ -8569,6 +8569,11 @@ def _opencode_config_slug(value, default="default"):
     return cleaned or default
 
 
+def _opencode_model_requires_reasoning_roundtrip_guard(model_name):
+    normalized = str(model_name or "").strip().lower()
+    return normalized.startswith("mimo-")
+
+
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
@@ -8588,6 +8593,8 @@ def _opencode_model_config(runtime, model_name):
             "input": ["text", "image"],
             "output": ["text"],
         }
+    if _opencode_model_requires_reasoning_roundtrip_guard(model):
+        config["reasoning"] = False
     return config
 
 
@@ -8755,6 +8762,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-vision-qwen": "ask",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
+        "mobius-reviewer-mimo": "ask",
         "mobius-fixer-deepseek": "ask",
         "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
@@ -8773,6 +8781,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-executor-gpt54": "ask",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
+        "mobius-reviewer-mimo": "ask",
         "mobius-fixer-deepseek": "ask",
         "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
@@ -8817,7 +8826,9 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "failing, use mobius-executor-qwen; use mobius-executor-gpt54 only as the "
         "final stable executor. Use mobius-reviewer-gpt55 as the release gate; use "
         "mobius-reviewer-gpt54 only for reviewer-route outage. Do not let an "
-        "executor/fixer self-approve its own work. Record which executor/reviewer was used."
+        "executor/fixer self-approve its own work. When direct MiMo is available, use "
+        "mobius-reviewer-mimo for an additional CN/vision critique, not as the final gate. "
+        "Record which executor/reviewer was used."
     ) if orchestrated else (
         "Primary path: explore with mobius-explore-glm; when images are present and the "
         "active model is not image-capable, ask mobius-vision-mimo, mobius-vision-kimi, "
@@ -8825,7 +8836,9 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-reviewer-gpt55, "
         "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
         "confidence, misses evidence, or validation still fails, call the paired fallback "
-        "agent. Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
+        "agent. When direct MiMo is available, ask mobius-reviewer-mimo for an additional "
+        "CN/vision critique, but keep GPT as the final release gate. Use "
+        "mobius-reviewer-gpt54 only for reviewer-route outage. Use "
         "mobius-builder-stable only when the primary model/channel is suspect or the final "
         "result remains unstable. Record which fallback was used."
     )
@@ -8968,6 +8981,20 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "steps": 8,
             "permission": read_only_permission,
             "prompt": config["prompt"],
+        }
+    if "mobius-reviewer-mimo" in agent_models:
+        agents["mobius-reviewer-mimo"] = {
+            "description": "Lite Pro direct MiMo critique reviewer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-reviewer-mimo"),
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": read_only_permission,
+            "prompt": (
+                "Supplemental reviewer. Focus on Chinese reasoning, multimodal/visual "
+                "risks, counterexamples, and product-quality concerns. No edits. Do not "
+                "act as the final release gate."
+            ),
         }
     if orchestrated:
         executor_prompt = (

@@ -146,6 +146,7 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
     ) == ""
     refs = profiles.provider_profile_references()
     assert "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md" in refs["mimo"]
+    assert "https://platform.xiaomimimo.com/static/docs/usage-guide/passing-back-reasoning_content.md" in refs["mimo"]
 
 
 def test_deepseek_context_and_wire_model_are_profile_driven(monkeypatch, tmp_path):
