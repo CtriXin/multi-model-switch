@@ -1067,7 +1067,7 @@ ensure_node22() {
         fi
     else
         echo "$(t "未检测到 nvm，开始安装..." "nvm not found, installing...")"
-        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null bash
+        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null METHOD=script bash
     fi
 
     # shellcheck disable=SC1090
@@ -1082,7 +1082,7 @@ ensure_nvm_node22() {
 
     if [ ! -s "$NVM_DIR/nvm.sh" ]; then
         echo "$(t "未检测到 nvm，开始安装..." "nvm not found, installing...")"
-        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null bash
+        fetch_url_stdout "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_VERSION}/install.sh" | PROFILE=/dev/null METHOD=script bash
     fi
 
     # shellcheck disable=SC1090

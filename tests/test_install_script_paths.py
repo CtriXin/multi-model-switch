@@ -192,6 +192,7 @@ def test_install_script_supports_fish_and_non_mutating_nvm_bootstrap():
     assert "fish_add_path -g" in text
     assert "Ghostty/iTerm/Terminal" in text
     assert "PROFILE=/dev/null" in text
+    assert "METHOD=script" in text
     assert "nvm alias default" not in text
 
 
