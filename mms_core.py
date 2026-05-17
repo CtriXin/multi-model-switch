@@ -3557,6 +3557,64 @@ def _config_truthy(value, default=False):
     return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
 
 
+def _vision_sidecar_model_candidates_for_provider(provider_id):
+    normalized = str(provider_id or "").strip().lower()
+    if "mimo" in normalized:
+        return ["mimo-v2.5", "mimo-v2-omni"]
+    if "kimi" in normalized:
+        return ["K2.6", "K2.6-code-preview", "kimi-k2.5", "kimi-for-coding"]
+    if "qwen" in normalized:
+        return ["qwen3.6-plus", "qwen3.5-plus"]
+    return ["K2.6"]
+
+
+def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
+    configured = (raw.get("candidates") or raw.get("routes")) if isinstance(raw, dict) else None
+    pairs = []
+
+    def _append(provider_id, model):
+        provider_id = str(provider_id or "").strip()
+        model = str(model or "").strip()
+        if provider_id and model and (provider_id, model) not in pairs:
+            pairs.append((provider_id, model))
+
+    if isinstance(configured, list):
+        for item in configured:
+            if not isinstance(item, dict):
+                continue
+            provider_id = item.get("provider_id") or item.get("provider")
+            model = item.get("model") or item.get("vision_model")
+            _append(provider_id, model)
+
+    if explicit_model:
+        for provider_id in provider_ids:
+            _append(provider_id, explicit_model)
+        return pairs
+
+    if explicit_provider_id:
+        for model in _vision_sidecar_model_candidates_for_provider(explicit_provider_id):
+            _append(explicit_provider_id, model)
+        return pairs
+
+    preferred_pairs = [
+        ("mimo-direct-anthropic", "mimo-v2.5"),
+        ("direct-mimo", "mimo-v2.5"),
+        ("direct-kimi", "K2.6"),
+        ("newapi-personal-kimi", "K2.6-code-preview"),
+        ("newapi-personal-kimi", "kimi-k2.5"),
+        ("direct-qwen", "qwen3.6-plus"),
+        ("newapi-personal-qwen", "qwen3.6-plus"),
+        ("newapi-personal-tokyo", "K2.6"),
+        ("xin", "K2.6"),
+    ]
+    for provider_id, model in preferred_pairs:
+        _append(provider_id, model)
+    for provider_id in provider_ids:
+        for model in _vision_sidecar_model_candidates_for_provider(provider_id):
+            _append(provider_id, model)
+    return pairs
+
+
 def _runtime_with_vision_sidecar(cfg, runtime):
     if not isinstance(runtime, dict) or runtime.get("vision_sidecar"):
         return runtime
@@ -3565,11 +3623,11 @@ def _runtime_with_vision_sidecar(cfg, runtime):
     if raw and not _config_truthy(raw.get("enabled"), default=True):
         return runtime
 
-    model = str(
+    explicit_model = str(
         os.environ.get("MMS_VISION_SIDECAR_MODEL")
         or raw.get("model")
         or raw.get("vision_model")
-        or "K2.6"
+        or ""
     ).strip()
     explicit_provider_id = str(
         os.environ.get("MMS_VISION_SIDECAR_PROVIDER")
@@ -3593,8 +3651,12 @@ def _runtime_with_vision_sidecar(cfg, runtime):
         if provider_id and provider_id not in candidate_ids:
             candidate_ids.append(provider_id)
 
-    model_l = model.lower()
-    for provider_id in candidate_ids:
+    for provider_id, model in _vision_sidecar_candidate_pairs(
+        raw,
+        candidate_ids,
+        explicit_model=explicit_model,
+        explicit_provider_id=explicit_provider_id,
+    ):
         try:
             provider = resolve_provider_context(cfg, provider_id)
         except Exception:
@@ -3612,6 +3674,7 @@ def _runtime_with_vision_sidecar(cfg, runtime):
                 models = _provider_effective_models(provider, cached_models, cfg)
             except Exception:
                 models = []
+            model_l = model.lower()
             if models and model_l not in {str(item or "").strip().lower() for item in models}:
                 continue
         updated = dict(runtime)
@@ -7084,6 +7147,12 @@ def _confirm_context_lines(cli, runtime):
         runtime_id = str(runtime.get("id") or runtime.get("name") or "").strip()
         if runtime_id:
             lines.append(("Source", runtime_id))
+        if cli == "claude":
+            sidecar = runtime.get("vision_sidecar") if isinstance(runtime.get("vision_sidecar"), dict) else {}
+            if sidecar and sidecar.get("enabled", True):
+                provider_id = str(sidecar.get("provider_id") or "-").strip() or "-"
+                model = str(sidecar.get("model") or "-").strip() or "-"
+                lines.append(("Vision", f"{provider_id}/{model}"))
     if cli == "opencode":
         profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
         if profile_label:
@@ -9355,6 +9424,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime = _select_and_apply_opencode_profile(runtime_runtime, use_tui=True)
             if runtime_runtime is None:
                 continue
+        if cli == "claude":
+            runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)

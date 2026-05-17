@@ -339,3 +339,57 @@ def test_runtime_with_vision_sidecar_auto_uses_direct_kimi(monkeypatch):
     assert runtime["vision_sidecar"]["provider_id"] == "direct-kimi"
     assert runtime["vision_sidecar"]["model"] == "K2.6"
     assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://api.kimi.com/coding"
+
+
+def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "providers": [
+            {"id": "mimo-direct-anthropic", "enabled": True},
+            {"id": "direct-kimi", "enabled": True},
+        ]
+    }
+    providers = {
+        "mimo-direct-anthropic": {
+            "id": "mimo-direct-anthropic",
+            "enabled": True,
+            "api_key": "sk-mimo",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic/",
+            "supported_clis": ["claude"],
+        },
+        "direct-kimi": {
+            "id": "direct-kimi",
+            "enabled": True,
+            "api_key": "sk-kimi",
+            "anthropic_base_url": "https://api.kimi.com/coding/",
+            "supported_clis": ["claude"],
+        },
+    }
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda _cfg, pid: providers[pid])
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda *_args, **_kwargs: None)
+
+    runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "glm", "auth_mode": "api_key"})
+
+    assert runtime["vision_sidecar"]["provider_id"] == "mimo-direct-anthropic"
+    assert runtime["vision_sidecar"]["model"] == "mimo-v2.5"
+    assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic"
+
+
+def test_confirm_context_lines_show_claude_vision_sidecar():
+    import mms_core
+
+    lines = mms_core._confirm_context_lines(
+        "claude",
+        {
+            "id": "mimo",
+            "auth_mode": "api_key",
+            "vision_sidecar": {
+                "enabled": True,
+                "provider_id": "mimo-direct-anthropic",
+                "model": "mimo-v2.5",
+            },
+        },
+    )
+
+    assert ("Vision", "mimo-direct-anthropic/mimo-v2.5") in lines
