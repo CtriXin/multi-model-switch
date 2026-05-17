@@ -42,7 +42,13 @@ NVM_INSTALL = "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/i
 NODE22_INSTALL = (
     'export NVM_DIR="$HOME/.nvm" && '
     '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-    'nvm install 22 && nvm alias default 22 && nvm use 22'
+    'nvm install 22 && nvm use 22'
+)
+
+NVM_NODE22_PREFIX = (
+    'export NVM_DIR="$HOME/.nvm" && '
+    '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+    'nvm use 22 >/dev/null && '
 )
 
 
@@ -92,7 +98,7 @@ def _use_nvm_node22():
         "node",
         'export NVM_DIR="$HOME/.nvm" && '
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-        'nvm alias default 22 && nvm use 22',
+        'nvm use 22',
     )
 
 
@@ -103,11 +109,11 @@ def _ensure_node22():
         return True
 
     if _nvm_has_node22():
-        console.print("[green]✓ 检测到 nvm 已安装 Node.js 22，直接切换[/green]")
+        console.print("[green]✓ 检测到 nvm 已安装 Node.js 22，仅本次安装使用；不修改默认 Node[/green]")
         return _use_nvm_node22()
 
     console.print("[yellow]Qwen 安装前需要 Node.js 22+[/yellow]")
-    console.print("[dim]将通过 nvm 安装 Node.js 22；nvm 可能写入你的 shell 配置。[/dim]")
+    console.print("[dim]将通过 nvm 安装 Node.js 22；不修改 nvm 默认版本，不覆盖用户默认 Node。[/dim]")
 
     if not Confirm.ask("是否继续安装 nvm / Node.js 22？"):
         console.print("[yellow]跳过 Node.js 安装[/yellow]")
@@ -116,6 +122,14 @@ def _ensure_node22():
     if not _run_install("nvm", NVM_INSTALL):
         return False
     return _run_install("node", NODE22_INSTALL)
+
+
+def _install_command_for_cli(cli_name, cmd):
+    if cli_name != "qwen":
+        return cmd
+    if _node_major_version() is not None and _node_major_version() >= 22:
+        return cmd
+    return NVM_NODE22_PREFIX + cmd
 
 
 def check_and_offer_install(cli_name):
@@ -140,7 +154,7 @@ def check_and_offer_install(cli_name):
     if cli_name == "qwen" and not _ensure_node22():
         return False
 
-    return _run_install(cli_name, cmd)
+    return _run_install(cli_name, _install_command_for_cli(cli_name, cmd))
 
 
 def install_cli(cli_name):
@@ -164,8 +178,9 @@ def install_cli(cli_name):
 
     cmd = INSTALL_COMMANDS[cli_name]
     console.print(f"正在安装 {CLI_DESCRIPTIONS.get(cli_name, cli_name)}...")
-    console.print(f"[dim]$ {cmd}[/dim]")
-    _run_install(cli_name, cmd)
+    install_cmd = _install_command_for_cli(cli_name, cmd)
+    console.print(f"[dim]$ {install_cmd}[/dim]")
+    _run_install(cli_name, install_cmd)
 
 
 def _run_install(cli_name, cmd):

@@ -154,6 +154,21 @@ def test_install_script_uses_npm_for_claude_code_install():
     assert "claude.ai/install.sh" not in text
 
 
+def test_repo_entrypoints_use_env_python():
+    for entrypoint in ("mms", "ccs", "mmc", "mmslogs"):
+        first_line = (ROOT_DIR / entrypoint).read_text(encoding="utf-8").splitlines()[0]
+        assert first_line == "#!/usr/bin/env python3"
+
+
+def test_node22_setup_does_not_override_nvm_default():
+    install_text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
+
+    assert "nvm alias default" not in install_text
+    assert "nvm alias default" not in installer_text
+    assert "不覆盖用户默认 Node" in installer_text
+
+
 def test_install_script_copies_vendor_directory():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

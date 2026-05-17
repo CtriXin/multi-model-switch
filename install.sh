@@ -881,9 +881,8 @@ ensure_node22() {
         # shellcheck disable=SC1090
         . "$NVM_DIR/nvm.sh"
         if [ "$(nvm version 22)" != "N/A" ]; then
-            nvm alias default 22 >/dev/null
             nvm use 22 >/dev/null
-            echo "✓ $(t "检测到 nvm 已安装" "Detected existing nvm Node.js installation"): $(node --version)"
+            echo "✓ $(t "检测到 nvm 已安装；仅本次安装进程使用，不修改默认 Node" "Detected existing nvm Node.js installation; using it for this install only, default Node unchanged"): $(node --version)"
             return
         fi
     else
@@ -894,9 +893,8 @@ ensure_node22() {
     # shellcheck disable=SC1090
     . "$NVM_DIR/nvm.sh"
     nvm install 22
-    nvm alias default 22
     nvm use 22 >/dev/null
-    echo "✓ $(t "Node.js 已切换到" "Node.js switched to") $(node --version)"
+    echo "✓ $(t "Node.js 已切换到本次安装进程" "Node.js switched for this install process") $(node --version)"
 }
 
 run_optional_command() {
