@@ -104,6 +104,7 @@ from mms_fake_upstream import (
 )
 from mms_i18n import normalize_language, set_language, pick as _L
 from mms_state_io import resolve_legacy_config_dir, resolve_mms_config_dir, resolve_real_user_home
+from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
 _PROBE_DEBUG_DIR = os.path.join(
@@ -7247,7 +7248,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         if os.path.isabs(path_text):
             normalized = os.path.abspath(path_text)
             real_home = os.path.abspath(resolve_real_user_home())
-            cwd = os.path.abspath(os.getcwd())
+            cwd = os.path.abspath(_safe_getcwd())
             try:
                 if os.path.commonpath([normalized, cwd]) == cwd:
                     return f".{os.sep}{os.path.relpath(normalized, cwd)}"
@@ -10946,7 +10947,7 @@ def handle_session_command(argv):
         from mms_chat import chat_main
         from mms_session import resolve_session_ref
 
-        resolved_id, error = resolve_session_ref(args.session_ref, cwd=os.getcwd())
+        resolved_id, error = resolve_session_ref(args.session_ref, cwd=_safe_getcwd())
         if not resolved_id:
             console.print(f"[red]{error or f'找不到 session: {args.session_ref}'}[/red]")
             return

@@ -38,6 +38,7 @@ from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
+from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
 codex_claude_bridge = None
@@ -843,7 +844,7 @@ def _install_host_context_env(env, *, cli, runtime=None, model_info=None, sessio
             real_home=_host_context_real_home(),
             cli=cli,
             model=_selected_model_name(model_info=model_info),
-            cwd=os.getcwd(),
+            cwd=_safe_getcwd(),
             tool_bins=_host_tool_context(session_home, env),
         )
     except Exception:
@@ -5322,7 +5323,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 _copy_claude_state_json(account_json, session_json, mode="oauth")
             except Exception:
                 pass
-        current_project = os.path.realpath(os.getcwd())
+        current_project = os.path.realpath(_safe_getcwd())
         current_project_state = _load_real_claude_project_state(current_project)
         session_state = {}
         if os.path.exists(session_json):
@@ -5788,7 +5789,7 @@ def _seed_codex_bounded_resume(source_roots, session_codex_dir):
                 dst,
                 max_files,
                 max_file_bytes=max_file_bytes,
-                project_path=os.getcwd(),
+                project_path=_safe_getcwd(),
             )
             manifest["seeded"]["dirs"][entry] = {
                 "status": "seeded",
@@ -5884,7 +5885,7 @@ def _copy_resume_dir_back(src_root, dst_root, max_files, *, max_file_bytes):
             except OSError:
                 continue
             session_cwd = _codex_session_file_cwd(src)
-            project_match = bool(_path_is_same_or_child(session_cwd, os.getcwd()))
+            project_match = bool(_path_is_same_or_child(session_cwd, _safe_getcwd()))
             allowed_bytes = max_file_bytes
             if project_match:
                 allowed_bytes = max(
@@ -6415,7 +6416,7 @@ def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_clau
         console.print(f"[red]未找到 MMC 入口: {mmc_entry}[/red]")
         sys.exit(1)
 
-    workspace = os.path.realpath(os.getcwd())
+    workspace = os.path.realpath(_safe_getcwd())
     locale_env = _runtime_locale_env(runtime)
     timezone_name = _validate_timezone_or_exit(
         runtime.get("timezone") or DEFAULT_ACCOUNT_TIMEZONE,
@@ -7232,7 +7233,7 @@ def launch_claude(model_info, runtime, once=False):
     claude_bin = _resolve_real_home_command_path("claude", env) or "claude"
     cmd = [claude_bin]
     if runtime.get("bypass"):
-        cmd += ["--add-dir", os.path.realpath(os.getcwd())]
+        cmd += ["--add-dir", os.path.realpath(_safe_getcwd())]
         cmd.append("--dangerously-skip-permissions")
     console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
     session_home = env.get("HOME")
@@ -7504,7 +7505,7 @@ def _backfill_claude_project_resume_files(target_projects_dir, current_cwd, acco
     if not target_projects_dir:
         return
     os.makedirs(target_projects_dir, exist_ok=True)
-    current_cwd = os.path.realpath(current_cwd or os.getcwd())
+    current_cwd = os.path.realpath(current_cwd or _safe_getcwd())
     current_session_home = os.path.realpath(current_session_home) if current_session_home else ""
     expected_account = _normalized_claude_slot_account(account_id)
 
@@ -7570,7 +7571,7 @@ def _prepare_claude_session_tree(
     source_claude_dir=None,
     allowed_source_entries=None,
 ):
-    current_cwd = os.path.realpath(os.getcwd())
+    current_cwd = os.path.realpath(_safe_getcwd())
     normalized_account_id = str(account_id or "").strip()
     store = ensure_claude_project_store(current_cwd, account_id=normalized_account_id)
     skip_real_entries = set(skip_real_entries or ())
@@ -7693,7 +7694,7 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
         pid = int(os.path.basename(str(session_home)))
     except (TypeError, ValueError):
         return
-    cwd = marker.get("cwd") or os.getcwd()
+    cwd = marker.get("cwd") or _safe_getcwd()
     account_id = str(marker.get("account_id") or "").strip()
     account_home = str(marker.get("account_home") or "").strip()
     if not stale_cleanup:
@@ -7764,7 +7765,7 @@ def _claude_gateway_env(
     real_json = _real_user_path(".claude.json")
     gw_json = os.path.join(gateway_home, ".claude.json")
     data: dict = {}
-    current_project = os.path.realpath(os.getcwd())
+    current_project = os.path.realpath(_safe_getcwd())
     current_project_state = _load_real_claude_project_state(current_project)
     resume_model = _claude_resume_model_name(display_model, selected_model, heavy_model)
     gw_existing = {}
@@ -8264,8 +8265,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             with open(source_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
-            config_text = _set_project_base_url(config_text, os.getcwd(), base_url)
-            config_text = _set_project_scalar(config_text, os.getcwd(), "trust_level", "trusted")
+            config_text = _set_project_base_url(config_text, _safe_getcwd(), base_url)
+            config_text = _set_project_scalar(config_text, _safe_getcwd(), "trust_level", "trusted")
             config_text = _rewrite_table_block(
                 config_text,
                 "model_providers.custom",
@@ -8300,7 +8301,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             f.write('wire_api = "responses"\n')
             f.write('requires_openai_auth = true\n')
             f.write(f'base_url = "{base_url}"\n')
-            f.write(f'\n[projects."{os.getcwd()}"]\n')
+            f.write(f'\n[projects."{_safe_getcwd()}"]\n')
             f.write(f'base_url = "{base_url}"\n')
             f.write('trust_level = "trusted"\n')
         try:
@@ -9744,11 +9745,11 @@ def get_export_env(cli, runtime):
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
             exports["MMS_CONTEXT_BIN"] = context_script
-            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(os.getcwd(), ".mms", "context-store"))
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
         if token_saver_script:
             exports["TOKEN_SAVER_BIN"] = token_saver_script
             exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
-            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(os.getcwd(), ".mms", "context-store"))
+            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
         first_script = toon_script or context_script or token_saver_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"

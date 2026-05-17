@@ -434,3 +434,36 @@ def test_get_export_env_exposes_context_bin_for_export_only_launch(monkeypatch, 
     assert codex_exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
     assert claude_exports["PATH"] == f"{context_script.parent}:$PATH"
     assert codex_exports["PATH"] == f"{context_script.parent}:$PATH"
+
+
+def test_get_export_env_survives_deleted_current_directory(monkeypatch, tmp_path):
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    import mms_state_io
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    context_script = tmp_path / "mms-context"
+    context_script.write_text("#!/bin/sh\nprintf 'context\\n'\n", encoding="utf-8")
+    context_script.chmod(0o755)
+
+    def _raise_deleted_cwd():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setenv("PWD", str(repo_dir))
+    monkeypatch.setattr(mms_state_io.os, "getcwd", _raise_deleted_cwd)
+    monkeypatch.setattr(mms_launchers, "_mms_toon_script_path", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_mms_context_script_path", lambda: str(context_script))
+    monkeypatch.setattr(mms_launchers, "_token_saver_script_path", lambda: "")
+    monkeypatch.setattr(mms_launchers, "validate_provider_for_cli", lambda *_args, **_kwargs: None)
+
+    exports = mms_launchers.get_export_env(
+        "claude",
+        {
+            "id": "relay-a",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://anthropic.example.com",
+        },
+    )
+
+    assert exports["MMS_CONTEXT_BIN"] == str(context_script)
+    assert exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")

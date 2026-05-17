@@ -38,6 +38,33 @@ def resolve_real_user_home(env=None):
     return home
 
 
+def resolve_current_workdir(env=None, fallback=None):
+    env = env or os.environ
+    try:
+        cwd = os.getcwd()
+        if cwd:
+            return os.path.abspath(cwd)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+    for key in ("PWD", "OLDPWD"):
+        raw = str(env.get(key) or "").strip()
+        if not raw:
+            continue
+        candidate = os.path.abspath(os.path.expanduser(raw))
+        if os.path.isdir(candidate):
+            return candidate
+
+    raw_fallback = str(fallback or "").strip()
+    if raw_fallback:
+        candidate = os.path.abspath(os.path.expanduser(raw_fallback))
+        if os.path.isdir(candidate):
+            return candidate
+    return resolve_real_user_home(env)
+
+
 def resolve_mms_config_dir(env=None):
     env = env or os.environ
     explicit = str(env.get("MMS_CONFIG_DIR") or env.get("CCS_CONFIG_DIR") or "").strip()
