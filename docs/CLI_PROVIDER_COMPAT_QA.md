@@ -109,11 +109,14 @@ Qwen / Kimi 现在是 provider model family，不再是独立 CLI launcher。删
 - `gateway/provider/api_key` 新 session 若要支持 shared resume，只能回填当前 `project + runtime/account + launch model` 的安全 resume pointer（如 `projects[project].lastSessionId`）；不同窗口切换 `claude/gpt/qwen/kimi` 时不能复用上一个模型的 `sessionId`
 - Claude session `~/.claude/` 不再大面积继承真实目录；默认只保留 project-scoped 持久项，再额外 allowlist 静态 tooling surface（如 `skills` / `.mcp.json` / `CLAUDE.md` / `RTK.md` / `commands` / `hooks`）
 - Claude session `~/Library/` 只暴露 `Keychains` 这类最小必要依赖；不要把整个 `Library` symlink 进去
+- Claude session 只暴露真实 `~/.local/bin`，不要把整棵 `~/.local` symlink 进去
 - Claude bypass 应区分路径：
   - 官方 `Claude` account 的 bypass 继续要求 proxy 并 fail-closed
   - 显式 sensitive Claude provider 的 bypass 也要求 proxy 并 fail-closed
   - 普通 `api_key/gateway provider` 仍应走 network guard，但不应因为“没配 proxy”被一刀切误拦
-- 隔离 session 里会修改 global state 的命令（如 `claude update`、`pm2`、`npm/pnpm/yarn/corepack`）应通过 wrapper 强制回到 real `HOME/XDG/PM2_HOME`；找不到 real binary 时宁可 fail-closed，也不要掉回隔离态安装/更新
+- 隔离 session 里会修改 global state 或触发 GUI/Keychain 的命令（如 `open`、`security`、`git/ssh/gh`、`pm2`、`npm/pnpm/yarn/corepack`）应通过 wrapper 强制回到 real `HOME/XDG/PM2_HOME`；找不到 real binary 时宁可 fail-closed，也不要掉回隔离态安装/更新
+- 需要打开用户 Chrome 时使用 session 内置 `mms-chrome-host` / `BROWSER` wrapper；不要在隔离 HOME 下直接启动 Chrome binary
+- statusline / background helper 默认不得读取 macOS Keychain；如确需 Claude OAuth usage，必须由用户显式设置 `MMS_STATUSLINE_KEYCHAIN_USAGE=1` 或运行 `mms usage --keychain` / 设置 `MMS_ALLOW_KEYCHAIN_READ=1`
 - stale OAuth session cleanup 不应把旧 session state 再回写到账户目录
 - gateway / proxy 健康检查应按 provider scope 独立记录，并且只把真实成功的 `2xx` 当作可用；`401/403/404/5xx` 不应被当成“线路健康”
 - 本地 bridge 不应先探测空闲端口再二次 bind；应直接 `bind(127.0.0.1, 0)` 取内核分配端口，并在 yield 前完成 ready wait，避免首请求 `connection refused`
@@ -136,7 +139,7 @@ Qwen / Kimi 现在是 provider model family，不再是独立 CLI launcher。删
 6. 启动环境里的 timezone / IPv4-first 符合预期
 7. Claude settings / `.claude.json` / `.claude` / `Library` 的继承面符合 allowlist 预期
 8. stale cache / fallback cache 不会把错误结论跨 provider、跨 URL、跨 session 固化下来
-9. 隔离 session 内执行 `claude/pm2/npm/pnpm/npx/yarn/corepack` 时，会明确落到 real `HOME`，不会把 global 安装/更新写进 session HOME
+9. 隔离 session 内执行 `open/security/git/ssh/gh/pm2/npm/pnpm/npx/yarn/corepack/node` 时，会明确落到 real `HOME`，不会把 global 安装/更新写进 session HOME；`claude/codex/opencode` 本体不能被 wrapper 截走
 10. Anthropic `429` 时不会继续 fanout 到其它 candidate URL，OAuth 路径也不会继承父进程里的 `ANTHROPIC_*` 认证环境
 11. gateway/proxy 健康检查不会把 `401/403/404` 误判成“线路可用”，多 provider 之间也不会共享同一条 health 记录
 12. local bridge 在 yield 前已经 listen，首请求不会因为端口竞争或未 ready 而偶发 `connection refused`

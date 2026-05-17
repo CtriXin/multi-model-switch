@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.6.0`
+当前 tagged version：`v2.7.0`
 
 这一代的重点：
 
@@ -37,6 +37,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - OpenCode Lite Pro mixed routes：GPT 走 OpenAI-compatible Responses/Chat，国产模型走 Anthropic `/v1/messages`
 - fallback 顺序：同模型第二通道、同 role peer、stable GPT fallback
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
+- 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
@@ -82,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.6.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.7.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -152,7 +153,7 @@ MMS
 ├── 运行时隔离
 │   ├── Claude: session HOME + .claude/projects resume
 │   ├── Codex: bounded .codex seed + write-back
-│   ├── OpenCode: session HOME + inline OpenAI-compatible config
+│   ├── OpenCode: real HOME + session-local XDG/config
 │   └── bridge: 需要时启动本地协议适配
 └── Session 能力包
     ├── token-saver / TOON
@@ -174,6 +175,8 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 - provider/account 失败时，不应静默切到另一个全局账号。
 - Claude 语义在 route 支持时优先走 `Anthropic /v1/messages`。
 - `OpenAI /v1/chat/completions` 是 fallback transport，不是等价默认值。
+- 隔离 session 里的 GUI/Keychain/browser 启动走 real-home wrapper；OpenCode 只把 config/state 留在 session-local XDG。
+- 后台 helper 默认不读 macOS Keychain；只有显式设置 `MMS_STATUSLINE_KEYCHAIN_USAGE=1`、`MMS_ALLOW_KEYCHAIN_READ=1` 或运行 `mms usage --keychain` 才查询 Claude OAuth usage。
 - session pack 注入到隔离 session，不是全局默认 hook。
 - resume 数据有边界、有 scope，避免 startup 膨胀和账号串线。
 

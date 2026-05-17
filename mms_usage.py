@@ -15,6 +15,7 @@ API key 环境变量（在 shell 里 export 后运行 mms usage）:
 用法:
   mms usage              显示所有账号/厂商状态（模型列表读缓存）
   mms usage --refresh    联网重新拉取各厂商最新模型列表并更新缓存
+  mms usage --keychain   显式允许读取 macOS Keychain 里的当前 Claude OAuth token
 """
 import asyncio
 import base64
@@ -183,6 +184,10 @@ def _get_cached_models(env_var: str, cache: dict) -> tuple[list[str], bool]:
 
 def _keychain_claude_token() -> tuple[str | None, str | None]:
     """Returns (access_token, email) from macOS Keychain 'Claude Code-credentials'."""
+    from mms_account_state import keychain_reads_enabled
+
+    if not keychain_reads_enabled():
+        return None, None
     try:
         r = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
@@ -339,7 +344,7 @@ async def _section_claude(accounts: list[dict]) -> None:
     table.add_column("7d 重置")
     table.add_column("状态", style="dim")
 
-    # Build token pool: keychain (current active) + all cached tokens
+    # Build token pool: opt-in keychain (current active) + all cached tokens.
     from mms_account_state import load_cached_claude_tokens
     kc_token, kc_email = _keychain_claude_token()
     cached_tokens: list[dict] = load_cached_claude_tokens()
@@ -717,10 +722,13 @@ def usage_main(cfg: dict, argv: list[str] | None = None) -> None:
     import sys
     args = argv if argv is not None else sys.argv[2:]
     refresh = "--refresh" in args or "-r" in args
+    keychain = "--keychain" in args
+    if keychain:
+        os.environ["MMS_ALLOW_KEYCHAIN_READ"] = "1"
+        args = [item for item in args if item != "--keychain"]
     _ensure_rich()
 
-    # Always cache the currently-active keychain token on each run,
-    # so it's available for future runs even after account switching.
+    # Keychain reads are opt-in because macOS may show an access prompt.
     from mms_account_state import cache_current_claude_token
     cache_current_claude_token()
 

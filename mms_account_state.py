@@ -14,8 +14,15 @@ from mms_state_io import atomic_write_json, locked_state_file
 _MMS_TOKEN_CACHE_DIR = os.path.expanduser("~/.mms/token_cache")
 
 
+def keychain_reads_enabled() -> bool:
+    raw = str(os.environ.get("MMS_ALLOW_KEYCHAIN_READ") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _read_keychain_claude_oauth() -> dict | None:
     """Return the claudeAiOauth dict from macOS Keychain, or None."""
+    if not keychain_reads_enabled():
+        return None
     try:
         r = subprocess.run(
             ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
@@ -162,8 +169,7 @@ def activated_claude_account_state(home_dir):
                 dst.write(src.read())
             os.chmod(live_path, 0o600)
         yield
-        # After CLI session: cache the keychain token (keyed by account UUID)
-        # so that `mms usage` can query any account independently later.
+        # Optional only: Keychain reads can create macOS prompts, so default off.
         cache_current_claude_token()
     finally:
         try:

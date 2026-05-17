@@ -34,7 +34,7 @@ from mms_fake_upstream import (
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_provider_profiles import profile_context_window
-from mms_runtime import prepare_cli_command
+from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -813,10 +813,7 @@ def _host_context_real_home():
 
 
 def _host_tool_context(session_home, env=None):
-    path_value = ""
-    if isinstance(env, dict):
-        path_value = str(env.get("PATH") or "").strip()
-    filtered_path = _filter_real_home_wrapper_path(path_value or os.environ.get("PATH", "")) or os.defpath
+    filtered_path = _real_home_wrapper_search_path(session_home, env)
     tools = resolve_tool_bins(_SESSION_REAL_HOME_WRAPPER_COMMANDS, path=filtered_path)
     wrapper_dir = os.path.join(str(session_home or "").strip(), ".mms", "bin")
     for name, payload in tools.items():
@@ -876,6 +873,21 @@ def _set_codex_soft_home(env, session_home):
     env["MMS_SOFT_HOME"] = "1"
     _set_session_home_hint(env, session_home)
     _set_codex_home_hint(env, session_home)
+    return env
+
+
+def _set_opencode_soft_home(env, session_home):
+    """Keep real HOME for GUI/Keychain; keep OpenCode XDG state session-local."""
+    real_home = _real_user_path()
+    env["HOME"] = real_home
+    env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
+    env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
+    env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
+    env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
+    env["MMS_HOME_ISOLATION_MODE"] = "soft"
+    env["MMS_SOFT_HOME"] = "1"
+    env["MMS_OPENCODE_SOFT_HOME"] = "1"
+    _set_session_home_hint(env, session_home)
     return env
 
 
@@ -1869,6 +1881,15 @@ _CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST = _CLAUDE_FAIL_CLOSED_SOURCE_ENTRY_
 _CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST = ("Keychains",)
 _CLAUDE_OAUTH_MANUAL_ONLY_EXIT_CODE = 86
 _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
+    "open",
+    "osascript",
+    "security",
+    "git",
+    "ssh",
+    "ssh-add",
+    "scp",
+    "sftp",
+    "brew",
     "gh",
     "lark-cli",
     "rh",
@@ -1879,6 +1900,10 @@ _SESSION_REAL_HOME_WRAPPER_COMMANDS = (
     "npx",
     "yarn",
     "corepack",
+    "node",
+    "uv",
+    "docker",
+    "docker-compose",
 )
 _CLAUDE_OAUTH_STATE_TOP_LEVEL_ALLOWLIST = (
     "userID",
@@ -5072,11 +5097,8 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         )
         with locked_state_file(session_json):
             atomic_write_json(session_json, session_state, mode=0o600)
-        # symlink .local
-        real_local = _real_user_path(".local")
-        gw_local = os.path.join(session_home, ".local")
-        if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
-            os.symlink(real_local, gw_local)
+        # Claude Code 只需要发现 $HOME/.local/bin/claude；不要暴露整棵 ~/.local。
+        _link_real_local_bin(session_home)
         # 仅暴露 Keychain 依赖，避免把整个 ~/Library 带进 Claude session。
         _link_claude_library_entries(session_home)
         _link_shared_dotfiles(session_home)
@@ -5130,11 +5152,8 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             dst = os.path.join(session_home, entry)
             if not os.path.exists(dst) and not os.path.islink(dst):
                 os.symlink(src, dst)
-        # symlink Library（macOS Keychain）
-        real_library = _real_user_path("Library")
-        session_library = os.path.join(session_home, "Library")
-        if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
-            os.symlink(real_library, session_library)
+        # 只暴露 Keychains，避免隔离 HOME 下启动 GUI/Chrome 时继承整棵 Library。
+        _link_claude_library_entries(session_home)
         _link_shared_dotfiles(session_home)
         if cli_name == "codex":
             _scrub_claude_oauth_env(env)
@@ -5729,6 +5748,22 @@ def _link_shared_dotfiles(session_home):
             os.symlink(src, dst)
 
 
+def _link_real_local_bin(session_home):
+    real_bin = _real_user_path(".local", "bin")
+    if not os.path.isdir(real_bin):
+        return
+    session_local = os.path.join(session_home, ".local")
+    if os.path.islink(session_local):
+        try:
+            os.unlink(session_local)
+        except OSError:
+            return
+    os.makedirs(session_local, exist_ok=True)
+    dst = os.path.join(session_local, "bin")
+    if not os.path.exists(dst) and not os.path.islink(dst):
+        os.symlink(real_bin, dst)
+
+
 def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
     real_library = _real_user_path("Library")
     if not os.path.isdir(real_library):
@@ -5753,13 +5788,16 @@ def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_E
         os.symlink(src, dst)
 
 
-def _filter_real_home_wrapper_path(path_value):
+def _filter_real_home_wrapper_path(path_value, *, session_home=None):
     raw_path = str(path_value or "")
     if not raw_path:
         return ""
-    session_home = os.path.abspath(os.path.expanduser(str(os.environ.get("HOME") or "").strip()))
     real_home = os.path.abspath(os.path.expanduser(_real_user_home()))
-    strip_session_entries = bool(session_home) and session_home != real_home
+    session_roots = []
+    for candidate in (session_home, os.environ.get("HOME") or ""):
+        normalized_candidate = os.path.abspath(os.path.expanduser(str(candidate or "").strip()))
+        if normalized_candidate and normalized_candidate != real_home and normalized_candidate not in session_roots:
+            session_roots.append(normalized_candidate)
     filtered = []
     for part in raw_path.split(os.pathsep):
         normalized = os.path.abspath(os.path.expanduser(str(part or "").strip()))
@@ -5767,10 +5805,94 @@ def _filter_real_home_wrapper_path(path_value):
             continue
         if normalized.endswith(os.path.join(".mms", "bin")):
             continue
-        if strip_session_entries and normalized.startswith(session_home + os.sep):
+        if any(normalized.startswith(root + os.sep) for root in session_roots):
             continue
         filtered.append(part)
     return os.pathsep.join(filtered)
+
+
+def _dedupe_path_parts(parts):
+    seen = set()
+    result = []
+    for part in parts:
+        normalized = str(part or "").strip()
+        if not normalized:
+            continue
+        key = os.path.abspath(os.path.expanduser(normalized))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def _real_home_wrapper_search_path(session_home, env=None):
+    real_home = _real_user_home()
+    path_parts = []
+    for path_value in (
+        str(env.get("PATH") or "") if isinstance(env, dict) else "",
+        os.environ.get("PATH", ""),
+    ):
+        filtered = _filter_real_home_wrapper_path(path_value, session_home=session_home)
+        if filtered:
+            path_parts.extend(filtered.split(os.pathsep))
+    try:
+        path_parts.extend(
+            cli_search_dirs(
+                {
+                    "HOME": real_home,
+                    "REAL_HOME": real_home,
+                    "MMS_REAL_HOME": real_home,
+                    "ORIGINAL_HOME": real_home,
+                    "PATH": os.pathsep.join(path_parts) or os.defpath,
+                },
+                real_home=real_home,
+            )
+        )
+    except Exception:
+        pass
+    return os.pathsep.join(_dedupe_path_parts(path_parts)) or os.defpath
+
+
+def _write_real_home_script(path, lines):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+    os.chmod(path, 0o755)
+
+
+def _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env):
+    chrome_host_path = os.path.join(wrapper_dir, "mms-chrome-host")
+    real_home = _real_user_home()
+    wrapper = [
+        "#!/bin/sh",
+        f'export HOME={json.dumps(real_home)}',
+        f'export MMS_REAL_HOME={json.dumps(real_home)}',
+        f'export REAL_HOME={json.dumps(real_home)}',
+        f'export ORIGINAL_HOME={json.dumps(real_home)}',
+        f"export PATH={wrapper_path_env}",
+        f'export XDG_CONFIG_HOME={json.dumps(_real_user_path(".config"))}',
+        f'export XDG_CACHE_HOME={json.dumps(_real_user_path(".cache"))}',
+        f'export XDG_DATA_HOME={json.dumps(_real_user_path(".local", "share"))}',
+        f'export XDG_STATE_HOME={json.dumps(_real_user_path(".local", "state"))}',
+        *_real_home_wrapper_scrub_lines(),
+        'case "$(uname -s 2>/dev/null || printf unknown)" in',
+        "  Darwin)",
+        '    if [ -x /usr/bin/open ]; then exec /usr/bin/open -a "Google Chrome" "$@"; fi',
+        "    ;;",
+        "esac",
+        'for _mms_browser in google-chrome-stable google-chrome chromium chromium-browser; do',
+        '  _mms_browser_bin="$(command -v "$_mms_browser" 2>/dev/null || true)"',
+        '  if [ -n "$_mms_browser_bin" ]; then exec "$_mms_browser_bin" "$@"; fi',
+        "done",
+        'printf "%s\\n" "mms: Chrome host launcher could not find Google Chrome" >&2',
+        "exit 127",
+        "",
+    ]
+    _write_real_home_script(chrome_host_path, wrapper)
+    if isinstance(env, dict):
+        env["MMS_CHROME_HOST_BIN"] = chrome_host_path
+        env["BROWSER"] = chrome_host_path
+    return chrome_host_path
 
 
 def _install_session_command_wrappers(session_home, env):
@@ -5779,7 +5901,7 @@ def _install_session_command_wrappers(session_home, env):
     os.makedirs(wrapper_dir, exist_ok=True)
 
     real_home = _real_user_home()
-    current_path = _filter_real_home_wrapper_path(os.environ.get("PATH", ""))
+    current_path = _real_home_wrapper_search_path(session_home, env)
     wrapper_path_env = json.dumps(current_path or os.defpath)
     xdg_config_home = json.dumps(_real_user_path(".config"))
     xdg_cache_home = json.dumps(_real_user_path(".cache"))
@@ -5815,9 +5937,9 @@ def _install_session_command_wrappers(session_home, env):
                 "",
             ]
         )
-        with open(wrapper_path, "w", encoding="utf-8") as handle:
-            handle.write(wrapper)
-        os.chmod(wrapper_path, 0o755)
+        _write_real_home_script(wrapper_path, wrapper.splitlines())
+
+    _install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env)
 
     toon_script = _mms_toon_script_path()
     if toon_script:
@@ -5878,12 +6000,11 @@ def _resolve_real_home_command_path(command_name, env=None):
     command_name = str(command_name or "").strip()
     if not command_name:
         return ""
-    path_value = ""
     if isinstance(env, dict):
-        path_value = str(env.get("PATH") or "").strip()
-    if not path_value:
-        path_value = os.environ.get("PATH", "")
-    filtered_path = _filter_real_home_wrapper_path(path_value) or os.defpath
+        session_home = str(env.get("MMS_SESSION_HOME") or os.environ.get("HOME") or "").strip()
+    else:
+        session_home = os.environ.get("HOME", "")
+    filtered_path = _real_home_wrapper_search_path(session_home, env) or os.defpath
     return shutil.which(command_name, path=filtered_path) or ""
 
 
@@ -7378,12 +7499,9 @@ def _claude_gateway_env(
     if isinstance(_timings, list):
         _timings.append(("claude state seed", perf_counter() - state_step_start))
 
-    # ── .local symlink：Claude Code 检测 $HOME/.local/bin/claude（installMethod=native）──
+    # ── .local/bin symlink：Claude Code 检测 $HOME/.local/bin/claude（installMethod=native）──
     with _timed_launch_step(_timings, "link shared home entries"):
-        real_local = _real_user_path(".local")
-        gw_local = os.path.join(gateway_home, ".local")
-        if os.path.isdir(real_local) and not os.path.exists(gw_local) and not os.path.islink(gw_local):
-            os.symlink(real_local, gw_local)
+        _link_real_local_bin(gateway_home)
 
         # ── Library allowlist：仅保留 Keychain 依赖 ──
         _link_claude_library_entries(gateway_home)
@@ -7629,11 +7747,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         dst = os.path.join(session_home, entry)
         if not os.path.exists(dst) and not os.path.islink(dst):
             os.symlink(src, dst)
-    # symlink Library（macOS Keychain）
-    real_library = _real_user_path("Library")
-    session_library = os.path.join(session_home, "Library")
-    if os.path.isdir(real_library) and not os.path.exists(session_library) and not os.path.islink(session_library):
-        os.symlink(real_library, session_library)
+    # Codex 已使用 soft-home；这里只清理旧的 broad Library symlink 并保留最小 Keychains。
+    _link_claude_library_entries(session_home)
 
     _link_shared_dotfiles(session_home)
     _sync_codex_session_claude_json(
@@ -8971,10 +9086,6 @@ def _opencode_gateway_env(runtime, model_info=None):
     os.makedirs(session_home, exist_ok=True)
     _cleanup_stale_sessions(sessions_dir)
 
-    real_local = _real_user_path(".local")
-    session_local = os.path.join(session_home, ".local")
-    if os.path.isdir(real_local) and not os.path.exists(session_local) and not os.path.islink(session_local):
-        os.symlink(real_local, session_local)
     _link_shared_dotfiles(session_home)
 
     env = os.environ.copy()
@@ -8983,9 +9094,7 @@ def _opencode_gateway_env(runtime, model_info=None):
         env.pop(key, None)
     _inject_real_home_hints(env)
     _inject_selected_model_name(env, model, model_info=model_info)
-    env["HOME"] = session_home
-    env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
-    _set_session_home_hint(env, session_home)
+    _set_opencode_soft_home(env, session_home)
 
     config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
     os.makedirs(config_dir, exist_ok=True)
@@ -9015,7 +9124,14 @@ def _opencode_gateway_env(runtime, model_info=None):
 
 def _opencode_global_omo_env(runtime):
     env = os.environ.copy()
-    _inject_real_home_hints(env)
+    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"):
+        env.pop(key, None)
+    _inject_real_home_hints(env, include_xdg=True)
+    env["HOME"] = _real_user_path()
+    env["XDG_CACHE_HOME"] = _real_user_path(".cache")
+    env["XDG_DATA_HOME"] = _real_user_path(".local", "share")
+    env["XDG_STATE_HOME"] = _real_user_path(".local", "state")
+    env["MMS_HOME_ISOLATION_MODE"] = "raw"
     env["OPENCODE_CLIENT"] = "mms"
     env["MMS_OPENCODE_PROFILE"] = "heavy_omo"
     _apply_runtime_network_profile(env, runtime, validate_proxy=False)

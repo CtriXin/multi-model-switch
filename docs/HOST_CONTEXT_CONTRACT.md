@@ -84,8 +84,10 @@ Allowed env hints:
 - `MMS_WEB_ACCESS_CHECK_DEPS`
 - `MMS_CHROME_DEBUG_PORT`
 - `MMS_CHROME_EXTENSION_ID`
+- `MMS_CHROME_HOST_BIN`
+- `BROWSER` when it points to the session `mms-chrome-host` wrapper
 
-Protected env values that must not be injected from the real host:
+Protected env values that must not be injected from the real host by default:
 
 - real `HOME`
 - real `XDG_CONFIG_HOME`
@@ -95,6 +97,8 @@ Protected env values that must not be injected from the real host:
 - token or auth env such as `GH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, Lark tokens, or provider credentials
 
 Host-auth tools should be exposed through session wrappers or a future host-exec capability, not by copying credential files into the isolated session.
+
+Exceptions must be explicit per launcher: Codex uses real `HOME` with isolated `CODEX_HOME`, and OpenCode uses real `HOME` with session-local `XDG_*` plus `OPENCODE_CONFIG`. Claude OAuth/gateway remains hard-isolated and only exposes Keychains through allowlisted links plus real-home wrappers.
 
 ## Where To Record Future Entries
 

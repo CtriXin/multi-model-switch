@@ -1766,6 +1766,34 @@ def test_link_claude_library_entries_replaces_broad_library_symlink(monkeypatch,
     assert not (session_library / "Preferences").exists()
 
 
+def test_link_real_local_bin_replaces_broad_local_symlink(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_bin = real_home / ".local" / "bin"
+    real_share = real_home / ".local" / "share"
+    real_bin.mkdir(parents=True)
+    real_share.mkdir()
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    session_home = tmp_path / "session"
+    session_home.mkdir()
+    os.symlink(real_home / ".local", session_home / ".local")
+
+    mms_launchers._link_real_local_bin(str(session_home))
+
+    session_local = session_home / ".local"
+    assert session_local.is_dir()
+    assert not session_local.is_symlink()
+    assert os.path.islink(session_local / "bin")
+    assert not (session_local / "share").exists()
+
+
 def test_finalize_claude_slot_stale_cleanup_skips_sync(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2869,6 +2897,23 @@ def test_anthropic_usage_ignores_ambient_env_and_respects_account_proxy(monkeypa
     assert captured["transport_kwargs"]["local_address"] == "0.0.0.0"
 
 
+def test_keychain_reads_are_opt_in(monkeypatch):
+    import mms_account_state
+    import mms_usage
+
+    monkeypatch.delenv("MMS_ALLOW_KEYCHAIN_READ", raising=False)
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("Keychain should not be read by default")
+
+    monkeypatch.setattr(mms_account_state.subprocess, "run", fail_run)
+    monkeypatch.setattr(mms_usage.subprocess, "run", fail_run)
+
+    assert mms_account_state._read_keychain_claude_oauth() is None
+    assert mms_account_state.cache_current_claude_token() is None
+    assert mms_usage._keychain_claude_token() == (None, None)
+
+
 def test_install_session_command_wrappers_covers_global_mutating_commands(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -2876,6 +2921,7 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
     isolated_home = tmp_path / "isolated-home"
     real_home.mkdir()
     isolated_home.mkdir()
+    (real_home / ".nvm" / "versions" / "node" / "v22.19.0" / "bin").mkdir(parents=True)
 
     monkeypatch.setenv(
         "PATH",
@@ -2897,19 +2943,45 @@ def test_install_session_command_wrappers_covers_global_mutating_commands(monkey
     mms_launchers._install_session_command_wrappers(str(session_home), env)
 
     wrapper_dir = session_home / ".mms" / "bin"
-    for command_name in ("pm2", "npm", "pnpm", "npx", "yarn", "corepack"):
+    for command_name in (
+        "open",
+        "osascript",
+        "security",
+        "git",
+        "ssh",
+        "ssh-add",
+        "brew",
+        "pm2",
+        "npm",
+        "pnpm",
+        "npx",
+        "yarn",
+        "corepack",
+        "node",
+        "uv",
+        "docker",
+        "docker-compose",
+    ):
         wrapper_path = wrapper_dir / command_name
         assert wrapper_path.exists()
         script = wrapper_path.read_text(encoding="utf-8")
         assert f'command -v "{command_name}"' in script
         assert str(isolated_home / ".mms" / "bin") not in script
         assert str(isolated_home / ".local" / "bin") not in script
+        assert str(real_home / ".nvm" / "versions" / "node" / "v22.19.0" / "bin") in script
         assert f'export HOME="{real_home}"' in script
         assert f'export XDG_CONFIG_HOME="{real_home / ".config"}"' in script
         assert 'ANTHROPIC_*|CLAUDE_CODE_*|OPENAI_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY' in script
         assert 'unset "$_mms_var"' in script
     assert f'export PM2_HOME="{real_home / ".pm2"}"' in (wrapper_dir / "pm2").read_text(encoding="utf-8")
+    chrome_host = wrapper_dir / "mms-chrome-host"
+    assert chrome_host.exists()
+    assert f'export HOME="{real_home}"' in chrome_host.read_text(encoding="utf-8")
+    assert env["BROWSER"] == str(chrome_host)
+    assert env["MMS_CHROME_HOST_BIN"] == str(chrome_host)
     assert not (wrapper_dir / "claude").exists()
+    assert not (wrapper_dir / "codex").exists()
+    assert not (wrapper_dir / "opencode").exists()
     assert env["PATH"].startswith(str(wrapper_dir) + os.pathsep)
 
 

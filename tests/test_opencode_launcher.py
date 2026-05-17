@@ -179,14 +179,20 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
         model_info={"model": "deepseek-chat"},
     )
 
-    session_home = Path(env["HOME"])
+    session_home = Path(env["MMS_SESSION_HOME"])
     config_path = Path(env["OPENCODE_CONFIG"])
     assert session_home.is_dir()
     assert config_path == session_home / ".config" / "opencode" / "opencode.json"
     config_payload = json.loads(config_path.read_text(encoding="utf-8"))
     assert config_payload["provider"]["mms"]["options"]["apiKey"] == "{env:MMS_OPENCODE_API_KEY}"
+    assert env["HOME"] == str(real_home)
     assert env["XDG_CONFIG_HOME"] == str(session_home / ".config")
+    assert env["XDG_CACHE_HOME"] == str(session_home / ".cache")
+    assert env["XDG_DATA_HOME"] == str(session_home / ".local" / "share")
+    assert env["XDG_STATE_HOME"] == str(session_home / ".local" / "state")
     assert env["MMS_SESSION_HOME"] == str(session_home)
+    assert env["MMS_HOME_ISOLATION_MODE"] == "soft"
+    assert env["MMS_OPENCODE_SOFT_HOME"] == "1"
     assert env["MMS_OPENCODE_API_KEY"] == "sk-runtime"
     assert env["OPENAI_BASE_URL"] == "https://api.deepseek.com/v1"
     assert env["OPENCODE_CLIENT"] == "mms"
@@ -231,6 +237,7 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     import mms_launchers
 
     captured = {}
+    real_home = Path("/tmp/mms-real-home")
 
     monkeypatch.setattr(
         mms_launchers,
@@ -245,6 +252,10 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
     monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setenv("HOME", "/tmp/mms-isolated-home")
+    monkeypatch.setenv("OPENCODE_CONFIG", "/tmp/isolated-opencode.json")
 
     def fake_exec(cmd, env, once, **_kwargs):
         captured["cmd"] = cmd
@@ -260,6 +271,9 @@ def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     )
 
     assert captured["cmd"] == ["opencode"]
+    assert captured["env"]["HOME"] == str(real_home)
+    assert captured["env"]["XDG_CONFIG_HOME"] == str(real_home / ".config")
+    assert "OPENCODE_CONFIG" not in captured["env"]
     assert captured["env"]["OPENCODE_CLIENT"] == "mms"
     assert captured["env"]["MMS_OPENCODE_PROFILE"] == "heavy_omo"
     assert captured["once"] is True

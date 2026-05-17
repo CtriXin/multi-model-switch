@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.6.0`
+Current tagged version: `v2.7.0`
 
 Key changes in this generation:
 
@@ -37,6 +37,7 @@ Key changes in this generation:
 - OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, domestic models via Anthropic `/v1/messages`
 - model fallback order: same-model second channel, same-role peer, then stable GPT fallback
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
+- real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
@@ -82,7 +83,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.6.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.7.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -153,7 +154,7 @@ MMS
 ├── Runtime Isolation
 │   ├── Claude: session HOME + .claude/projects resume
 │   ├── Codex: bounded .codex seed + write-back
-│   ├── OpenCode: session HOME + inline OpenAI-compatible config
+│   ├── OpenCode: real HOME + session-local XDG/config
 │   └── bridge: local protocol adapters when needed
 └── Session Packs
     ├── token-saver / TOON
@@ -175,6 +176,8 @@ MMS tries to fail closed inside the selected runtime.
 - A failed provider/account should not silently become another global account.
 - Claude semantics prefer `Anthropic /v1/messages` when a route supports it.
 - `OpenAI /v1/chat/completions` is fallback transport, not an invisible equivalent.
+- GUI/Keychain/browser launches from isolated sessions go through real-home wrappers; OpenCode keeps config/state session-local with real `HOME`.
+- Background helpers do not read macOS Keychain unless `MMS_STATUSLINE_KEYCHAIN_USAGE=1`, `MMS_ALLOW_KEYCHAIN_READ=1`, or `mms usage --keychain` is explicitly used.
 - Session packs are injected into the isolated session; they are not global default hooks.
 - Resume data is bounded and scoped so startup stays usable and account state stays isolated.
 

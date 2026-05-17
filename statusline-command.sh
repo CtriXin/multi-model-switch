@@ -264,7 +264,10 @@ _refresh_usage_bg() {
     fi
     (
         touch "$USAGE_LOCK"
-        token=$(security find-generic-password -s "Claude" -a "accessToken" -w 2>/dev/null)
+        token=""
+        if [ "${MMS_STATUSLINE_KEYCHAIN_USAGE:-0}" = "1" ]; then
+            token=$(security find-generic-password -s "Claude" -a "accessToken" -w 2>/dev/null)
+        fi
         if [ -n "$token" ]; then
             curl -s --connect-timeout 2 --max-time 5 \
                 -H "Authorization: Bearer $token" \
