@@ -461,7 +461,9 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert len(payload["provider"]) >= 7
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
     assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/anthropic"
-    assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai-compatible"
+    assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai"
+    builder_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_primary")
+    assert builder_route["protocol"] == "openai_responses"
 
 
 def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):
@@ -556,6 +558,11 @@ def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavail
     assert payload["agent"]["mobius-reviewer-deepseek"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/gpt-5.4")
+    assert all(
+        route["protocol"] == "openai_responses"
+        for route in runtime["opencode_routes"]
+        if route["model"].startswith("gpt-")
+    )
     non_gpt_chat_routes = [
         route for route in runtime["opencode_routes"]
         if route["protocol"] == "openai_chat_completions" and not route["model"].startswith("gpt-")
@@ -600,7 +607,42 @@ def test_core_opencode_lite_pro_rejects_gpt_anthropic_routes(monkeypatch):
 
     assert route["model"] == "gpt-5.4"
     assert route["provider_id"] == "gpt-openai"
-    assert route["protocol"] == "openai_chat_completions"
+    assert route["protocol"] == "openai_responses"
+
+
+def test_core_opencode_lite_pro_prefers_responses_over_healthy_gpt_chat(monkeypatch):
+    import mms_core
+
+    provider = _runtime(
+        id="gpt-openai",
+        name="GPT OpenAI",
+        supported_clis=["opencode"],
+        protocols=["openai_chat_completions"],
+        openai_base_url="https://openai-gpt.example/v1",
+        models=["gpt-5.5"],
+    )
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, ["gpt-5.5"])])
+    monkeypatch.setattr(
+        mms_core,
+        "_load_opencode_route_health_latest",
+        lambda *_args, **_kwargs: {
+            "lite_pro|builder_primary|gpt-5.5|gpt-openai|openai_chat_completions": {
+                "status": "live_healthy",
+                "health_score": 80,
+                "finished_at": "2026-05-16T10:00:00Z",
+            }
+        },
+    )
+
+    route = mms_core._find_opencode_model_route(
+        {"providers": []},
+        provider,
+        ["gpt-5.5"],
+        ("gpt-5.5",),
+        route_key="builder_primary",
+    )
+
+    assert route["protocol"] == "openai_responses"
 
 
 def test_launch_opencode_lite_pro_uses_profile_default_model_ref(monkeypatch):
@@ -993,7 +1035,7 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
         mms_core,
         "_load_opencode_route_health_latest",
         lambda *_args, **_kwargs: {
-            "lite_pro|builder_primary|gpt-5.5|gpt|openai_chat_completions": {
+            "lite_pro|builder_primary|gpt-5.5|gpt|openai_responses": {
                 "profile": "lite_pro",
                 "role": "builder_primary",
                 "status": "live_healthy",

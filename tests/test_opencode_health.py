@@ -77,6 +77,66 @@ def test_opencode_health_row_contains_required_route_fields():
     assert row["cache_transport_evidence"]["schema"] == "cache_transport_evidence.v1"
 
 
+def test_opencode_health_records_gpt_responses_as_cache_friendly():
+    route = _route(
+        id="builder_primary",
+        model="gpt-5.5",
+        provider_id="uscrsopenai",
+        protocol="openai_responses",
+        openai_base_url="https://openai.example/v1",
+        anthropic_base_url="",
+    )
+    check = _check(
+        agent="mobius-builder-pro",
+        model="mms-builder_primary/gpt-5.5",
+        role="builder_primary",
+        route_id="builder_primary",
+        provider_id="uscrsopenai",
+        cache_transport_evidence=smoke._configured_transport_evidence(
+            route,
+            fallback_used=False,
+            fallback_reason="",
+        ),
+    )
+
+    row = smoke._build_route_health_row(_result([]), check, route)
+
+    assert row["protocol"] == "openai_responses"
+    assert row["request_url"] == "https://openai.example/v1/responses"
+    assert row["provider_profile"] == "openai"
+    assert row["status"] == "live_healthy"
+    assert row["error_class"] == "ok"
+
+
+def test_opencode_health_marks_gpt_chat_as_cache_unfriendly_degraded():
+    route = _route(
+        id="builder_fallback",
+        model="gpt-5.4",
+        provider_id="gpt-chat",
+        protocol="openai_chat_completions",
+        openai_base_url="https://chat.example/v1",
+        anthropic_base_url="",
+    )
+    check = _check(
+        agent="mobius-builder-stable",
+        model="mms-builder_fallback/gpt-5.4",
+        role="builder_fallback",
+        route_id="builder_fallback",
+        provider_id="gpt-chat",
+        cache_transport_evidence=smoke._configured_transport_evidence(
+            route,
+            fallback_used=True,
+            fallback_reason="responses unavailable",
+        ),
+    )
+
+    row = smoke._build_route_health_row(_result([]), check, route)
+
+    assert row["protocol"] == "openai_chat_completions"
+    assert row["status"] == "degraded"
+    assert row["error_class"] == "cache_unfriendly_chat_completions"
+
+
 def test_opencode_health_ledger_appends_rows_and_refreshes_latest(tmp_path):
     result = _result(
         [

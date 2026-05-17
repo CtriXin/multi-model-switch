@@ -8857,6 +8857,9 @@ def _build_opencode_config_payload(runtime, model_name=""):
         if protocol == "anthropic_messages":
             provider_npm = "@ai-sdk/anthropic"
             base_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
+        elif protocol == "openai_responses":
+            provider_npm = "@ai-sdk/openai"
+            base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")
         else:
             provider_npm = "@ai-sdk/openai-compatible"
             base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")

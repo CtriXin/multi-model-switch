@@ -171,6 +171,9 @@ def _configured_transport_evidence(route: dict[str, Any], *, fallback_used: bool
     if protocol == "anthropic_messages":
         base_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
         request_url = f"{base_url}/messages" if base_url else ""
+    elif protocol == "openai_responses":
+        base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")
+        request_url = f"{base_url}/responses" if base_url else ""
     else:
         base_url = str(route.get("openai_base_url") or "").strip().rstrip("/")
         request_url = f"{base_url}/chat/completions" if base_url else ""
@@ -181,7 +184,9 @@ def _configured_transport_evidence(route: dict[str, Any], *, fallback_used: bool
         "protocol": protocol,
         "request_url": request_url,
         "route_source": "mms_opencode_profile",
-        "provider_profile": "anthropic" if protocol == "anthropic_messages" else "openai_compatible",
+        "provider_profile": "anthropic" if protocol == "anthropic_messages" else (
+            "openai" if protocol == "openai_responses" else "openai_compatible"
+        ),
         "fallback_used": bool(fallback_used),
         "fallback_reason": fallback_reason,
         "usage": {
@@ -201,6 +206,8 @@ def _is_gpt_model(model: str) -> bool:
 def _protocol_correct(route: dict[str, Any], evidence: dict[str, Any]) -> bool:
     model = str(route.get("model") or evidence.get("model") or "").strip()
     protocol = str(evidence.get("protocol") or route.get("protocol") or "").strip()
+    if model and _is_gpt_model(model):
+        return protocol in {"openai_responses", "openai_chat_completions"}
     if model and not _is_gpt_model(model):
         return protocol == "anthropic_messages"
     return bool(protocol)
@@ -217,6 +224,10 @@ def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
     evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
     if not _protocol_correct(route, evidence):
         return "cache_sensitive_wrong_protocol"
+    model = str(route.get("model") or evidence.get("model") or "").strip()
+    protocol = str(evidence.get("protocol") or route.get("protocol") or "").strip()
+    if model and _is_gpt_model(model) and protocol == "openai_chat_completions":
+        return "cache_unfriendly_chat_completions"
     if check.get("ok"):
         return "ok"
     if check.get("returncode") == "timeout":
@@ -249,6 +260,8 @@ def _health_status(error_class: str, latency_sec: float | None) -> str:
         if latency_sec is not None and latency_sec > SLOW_ROUTE_THRESHOLD_SEC:
             return "degraded"
         return "live_healthy"
+    if error_class == "cache_unfriendly_chat_completions":
+        return "degraded"
     if error_class in {"auth_error", "cache_sensitive_wrong_protocol", "protocol_mismatch"}:
         return "blocked"
     return "unhealthy"
@@ -321,7 +334,9 @@ def _build_route_health_row(result: dict[str, Any], check: dict[str, Any], route
         "request_url": request_url,
         "route_source": evidence.get("route_source") or "mms_opencode_profile",
         "provider_profile": evidence.get("provider_profile") or (
-            "anthropic" if protocol == "anthropic_messages" else "openai_compatible"
+            "anthropic" if protocol == "anthropic_messages" else (
+                "openai" if protocol == "openai_responses" else "openai_compatible"
+            )
         ),
         "started_at": check.get("started_at"),
         "finished_at": check.get("finished_at") or result.get("generated_at"),
