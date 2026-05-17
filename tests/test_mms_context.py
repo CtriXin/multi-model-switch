@@ -9,8 +9,8 @@ import sys
 
 def _import_mms_launchers(monkeypatch, tmp_path):
     monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path / "mms-config"))
-    sys.modules.pop("mms_core", None)
-    sys.modules.pop("mms_launchers", None)
+    monkeypatch.delitem(sys.modules, "mms_core", raising=False)
+    monkeypatch.delitem(sys.modules, "mms_launchers", raising=False)
     import mms_launchers
 
     return mms_launchers
