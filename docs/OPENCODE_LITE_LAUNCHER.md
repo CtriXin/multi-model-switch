@@ -11,8 +11,8 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - `OpenCode Raw` is a pure fallback with no OMO and no custom agents.
 - In the OpenCode tab, MMS shows this profile selector first; Lite/Lite Pro/Raw do not ask the user to choose a channel/model before profile selection.
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
-- Lite Pro uses mixed OpenCode providers: OpenAI-family routes use `@ai-sdk/openai-compatible`; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
-- Lite Pro fail-closes protocol selection: GPT routes require `openai_chat_completions`, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
+- Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
+- Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
 - Lite Pro only accepts MiMo routes from direct MiMo providers (`xiaomimimo.com` or `mimo-direct` IDs); shared relays such as `newapi-personal-tokyo` are skipped for MiMo because direct is faster and avoids relay-specific timeouts.
 - Lite Pro launch runs a tiny OpenCode preflight against the primary builder route. If `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session.
 - MMS does not delete or rewrite global OMO config.

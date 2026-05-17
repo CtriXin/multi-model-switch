@@ -7991,17 +7991,29 @@ def _opencode_normalized_anthropic_base_url(provider):
 
 
 def _opencode_route_transport(provider, model_name):
+    candidates = _opencode_route_transport_candidates(provider, model_name)
+    if not candidates:
+        openai_base_url = _opencode_normalized_openai_base_url(provider)
+        anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
+        return "", openai_base_url, anthropic_base_url
+    return candidates[0]
+
+
+def _opencode_route_transport_candidates(provider, model_name):
     protocols = _opencode_provider_protocols(provider)
     family, _ = _infer_model_family(model_name)
     openai_base_url = _opencode_normalized_openai_base_url(provider)
     anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
+    candidates = []
     if family == "GPT":
+        if openai_base_url:
+            candidates.append(("openai_responses", openai_base_url, anthropic_base_url))
         if "openai_chat_completions" in protocols and openai_base_url:
-            return "openai_chat_completions", openai_base_url, anthropic_base_url
-        return "", openai_base_url, anthropic_base_url
+            candidates.append(("openai_chat_completions", openai_base_url, anthropic_base_url))
+        return candidates
     if "anthropic_messages" in protocols and anthropic_base_url:
-        return "anthropic_messages", openai_base_url, anthropic_base_url
-    return "", openai_base_url, anthropic_base_url
+        candidates.append(("anthropic_messages", openai_base_url, anthropic_base_url))
+    return candidates
 
 
 def _opencode_route_candidate_score(provider, model_name, sequence):
@@ -8171,31 +8183,28 @@ def _find_opencode_model_route(
                 continue
             if not _provider_supports_model_for_cli(provider, "opencode", actual_model):
                 continue
-            protocol, openai_base_url, anthropic_base_url = _opencode_route_transport(provider, actual_model)
-            if not protocol:
-                continue
-            family, _ = _infer_model_family(actual_model)
-            protocol_rank = 0 if (family != "GPT" and protocol == "anthropic_messages") or family == "GPT" else 1
-            route = {
-                "id": route_key,
-                "model": actual_model,
-                "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
-                "provider_name": _provider_label(provider),
-                "protocol": protocol,
-                "openai_base_url": openai_base_url,
-                "anthropic_base_url": anthropic_base_url if protocol == "anthropic_messages" else "",
-                "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
-                "protocols": _opencode_provider_protocols(provider),
-            }
-            health_row = _opencode_route_health_for_route(latest_health, profile_id, route_key, route)
-            if not _opencode_route_health_allows_route(health_row):
-                continue
-            health_rank = _opencode_route_health_sort_key(health_row)
-            score = (model_rank, health_rank, protocol_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
-            if health_row:
-                route["health_status"] = health_row.get("status")
-                route["health_score"] = health_row.get("health_score")
-            scored.append((score, route))
+            for protocol, openai_base_url, anthropic_base_url in _opencode_route_transport_candidates(provider, actual_model):
+                protocol_rank = 0 if protocol in {"openai_responses", "anthropic_messages"} else 1
+                route = {
+                    "id": route_key,
+                    "model": actual_model,
+                    "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
+                    "provider_name": _provider_label(provider),
+                    "protocol": protocol,
+                    "openai_base_url": openai_base_url,
+                    "anthropic_base_url": anthropic_base_url if protocol == "anthropic_messages" else "",
+                    "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
+                    "protocols": _opencode_provider_protocols(provider),
+                }
+                health_row = _opencode_route_health_for_route(latest_health, profile_id, route_key, route)
+                if not _opencode_route_health_allows_route(health_row):
+                    continue
+                health_rank = _opencode_route_health_sort_key(health_row)
+                score = (model_rank, protocol_rank, health_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
+                if health_row:
+                    route["health_status"] = health_row.get("status")
+                    route["health_score"] = health_row.get("health_score")
+                scored.append((score, route))
     if not scored:
         return None
     scored.sort(key=lambda item: item[0])
