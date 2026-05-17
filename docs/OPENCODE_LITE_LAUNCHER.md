@@ -4,11 +4,11 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 
 ## Decision
 
-- `OpenCode Lite Pro` is the default high-confidence custom-agent lane.
-- `OpenCode Lite Pro Orchestrated` keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
-- `OpenCode Lite` remains a stable single-model custom-agent lane.
-- `OpenCode Heavy / OMO` keeps using the existing global OpenCode + OMO setup.
-- `OpenCode Raw` is a pure fallback with no OMO and no custom agents.
+- `5.5 Pro` is the default high-confidence custom-agent lane.
+- `5.5 Multi-Agent` keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
+- `OMO` keeps using the existing global OpenCode + OMO setup.
+- `Raw` is a pure fallback with no OMO and no custom agents.
+- `lite` remains supported by profile ID for compatibility, but is hidden from the selector.
 - In the OpenCode tab, MMS shows this profile selector first; Lite/Lite Pro/Raw do not ask the user to choose a channel/model before profile selection.
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
 - Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
@@ -22,11 +22,10 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 
 | Profile | Launch shape | Config source | Use case |
 | --- | --- | --- | --- |
-| `lite_pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary and named fallback agents |
-| `lite_pro_orchestrated` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with executor chain for implementation |
-| `lite` | `opencode --pure --agent mobius-builder -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Stable single-model coding lane |
-| `heavy_omo` | `opencode` | Existing global OpenCode + OMO config | Heavy OMO/fanout lane |
-| `raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
+| `lite_pro` / `5.5 Pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary and named fallback agents |
+| `lite_pro_orchestrated` / `5.5 Multi-Agent` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with executor chain for implementation |
+| `heavy_omo` / `OMO` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
+| `raw` / `Raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
 
 ## Lite Pro Roster
 
