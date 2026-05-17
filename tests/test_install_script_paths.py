@@ -169,6 +169,15 @@ def test_node22_setup_does_not_override_nvm_default():
     assert "@qwen-code/qwen-code" not in installer_text
 
 
+def test_install_script_selects_supported_python_for_venv():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "find_supported_python()" in text
+    assert "python3.13" in text
+    assert 'if ! "$(_python_bin)" -m venv "$VENV_DIR"; then' in text
+    assert 'PYTHON_CMD="$resolved_python"' in text
+
+
 def test_install_script_copies_vendor_directory():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

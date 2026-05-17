@@ -42,6 +42,7 @@ OMC_INSTALL_REF="${OMC_INSTALL_REF:-}"
 NVM_INSTALL_VERSION="${NVM_INSTALL_VERSION:-v0.40.3}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=11
+PYTHON_CMD="${MMS_INSTALL_PYTHON:-${MMS_PYTHON:-}}"
 INSTALL_LANG="zh"
 INSTALL_LANG_EXPLICIT=0
 WRITE_SHELL_RC=0
@@ -1249,15 +1250,65 @@ repair_managed_claude_settings() {
     merge_claude_settings_template "$HOME/.claude/settings.json" "$session_template_path" || true
 }
 
+_python_bin() {
+    if [ -n "$PYTHON_CMD" ]; then
+        printf "%s\n" "$PYTHON_CMD"
+    else
+        printf "%s\n" "python3"
+    fi
+}
+
+_python_candidate_works() {
+    local candidate="$1"
+    [ -n "$candidate" ] || return 1
+    if [[ "$candidate" == */* ]]; then
+        [ -x "$candidate" ] || return 1
+    else
+        command -v "$candidate" >/dev/null 2>&1 || return 1
+    fi
+    "$candidate" - "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR" <<'PY' >/dev/null 2>&1
+import sys
+major = int(sys.argv[1])
+minor = int(sys.argv[2])
+raise SystemExit(0 if sys.version_info >= (major, minor) else 1)
+PY
+}
+
+find_supported_python() {
+    local candidate=""
+    for candidate in \
+        "$PYTHON_CMD" \
+        python3.13 \
+        python3.12 \
+        python3.11 \
+        /opt/homebrew/bin/python3.13 \
+        /opt/homebrew/bin/python3.12 \
+        /opt/homebrew/bin/python3.11 \
+        /usr/local/bin/python3.13 \
+        /usr/local/bin/python3.12 \
+        /usr/local/bin/python3.11 \
+        python3; do
+        if _python_candidate_works "$candidate"; then
+            if [[ "$candidate" == */* ]]; then
+                printf "%s\n" "$candidate"
+            else
+                command -v "$candidate" 2>/dev/null
+            fi
+            return 0
+        fi
+    done
+    return 1
+}
+
 python_version_string() {
-    python3 - <<'PY'
+    "$(_python_bin)" - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 PY
 }
 
 python_meets_min_version() {
-    python3 - "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR" <<'PY'
+    "$(_python_bin)" - "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR" <<'PY'
 import sys
 
 major = int(sys.argv[1])
@@ -1267,11 +1318,26 @@ PY
 }
 
 ensure_supported_python() {
+    local resolved_python=""
+
+    resolved_python="$(find_supported_python || true)"
+    if [ -n "$resolved_python" ]; then
+        PYTHON_CMD="$resolved_python"
+        echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
+        return
+    fi
+
     if ! command -v python3 >/dev/null 2>&1; then
         echo "❌ $(t "未找到 python3" "python3 not found")"
         if command -v brew >/dev/null 2>&1; then
-            echo "   $(t "正在通过 brew 安装..." "Installing via brew...")"
-            brew install python3
+            echo "   $(t "正在通过 brew 安装隔离可用的 Python 3.11..." "Installing an isolated Python 3.11 via brew...")"
+            brew install python@3.11
+            resolved_python="$(find_supported_python || true)"
+            if [ -n "$resolved_python" ]; then
+                PYTHON_CMD="$resolved_python"
+                echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
+                return
+            fi
         else
             echo "   $(t "请先安装 Python 3.11+" "Please install Python 3.11+ first"): https://www.python.org/downloads/"
             exit 1
@@ -1282,14 +1348,21 @@ ensure_supported_python() {
         echo "❌ $(t "MMS 需要 Python 3.11 或更高版本" "MMS requires Python 3.11 or newer")"
         echo "   $(t "当前版本" "Current version"): $(python3 --version 2>/dev/null || python_version_string)"
         if command -v brew >/dev/null 2>&1; then
-            echo "   $(t "可尝试" "Try"): brew install python@3.11"
+            echo "   $(t "正在通过 brew 安装隔离可用的 Python 3.11..." "Installing an isolated Python 3.11 via brew...")"
+            brew install python@3.11
+            resolved_python="$(find_supported_python || true)"
+            if [ -n "$resolved_python" ]; then
+                PYTHON_CMD="$resolved_python"
+                echo "✓ Python: $("$PYTHON_CMD" --version) ($PYTHON_CMD)"
+                return
+            fi
         elif command -v apt-get >/dev/null 2>&1; then
             echo "   $(t "Debian/Ubuntu 可先安装" "On Debian/Ubuntu, install"): sudo apt-get install python3.11 python3.11-venv"
         fi
         exit 1
     fi
 
-    echo "✓ Python3: $(python3 --version)"
+    echo "✓ Python: $("$(_python_bin)" --version) ($(_python_bin))"
 }
 
 create_python_venv() {
@@ -1312,7 +1385,7 @@ create_python_venv() {
     fi
 
     if [ ! -x "$venv_python" ]; then
-        if ! python3 -m venv "$VENV_DIR"; then
+        if ! "$(_python_bin)" -m venv "$VENV_DIR"; then
             echo "❌ $(t "创建 Python 虚拟环境失败" "Failed to create the Python virtual environment")"
             if command -v apt-get >/dev/null 2>&1; then
                 echo "   $(t "Debian/Ubuntu 通常需要先安装 python3-venv 或 python3.11-venv" "On Debian/Ubuntu, install python3-venv or python3.11-venv first"): sudo apt-get install python3-venv"
@@ -1381,7 +1454,7 @@ rewrite_shebang() {
     local target="$1"
     local python_path="$2"
 
-    python3 - "$target" "$python_path" <<'PY'
+    "$(_python_bin)" - "$target" "$python_path" <<'PY'
 from pathlib import Path
 import sys
 
@@ -1457,14 +1530,15 @@ run_install_check() {
 
     print_version_overview
 
-    if command -v python3 >/dev/null 2>&1; then
+    if find_supported_python >/dev/null 2>&1; then
+        PYTHON_CMD="$(find_supported_python)"
         if python_meets_min_version; then
-            echo "✓ $(t "Python 版本满足要求" "Python version is supported"): $(python3 --version)"
+            echo "✓ $(t "Python 版本满足要求" "Python version is supported"): $("$(_python_bin)" --version)"
         else
-            echo "✗ $(t "Python 版本过低，需要 3.11+" "Python version is too old; 3.11+ is required"): $(python3 --version)"
+            echo "✗ $(t "Python 版本过低，需要 3.11+" "Python version is too old; 3.11+ is required"): $("$(_python_bin)" --version)"
         fi
     else
-        echo "✗ $(t "未检测到 python3" "python3 not found")"
+        echo "✗ $(t "未检测到 Python 3.11+" "Python 3.11+ not found")"
     fi
 
     node_label="$(node_version_label || true)"
