@@ -8750,6 +8750,9 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-builder-stable": "ask",
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
+        "mobius-vision-mimo": "ask",
+        "mobius-vision-kimi": "ask",
+        "mobius-vision-qwen": "ask",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
         "mobius-fixer-deepseek": "ask",
@@ -8761,6 +8764,9 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
         "mobius-explore-qwen": "ask",
+        "mobius-vision-mimo": "ask",
+        "mobius-vision-kimi": "ask",
+        "mobius-vision-qwen": "ask",
         "mobius-executor-deepseek": "allow",
         "mobius-executor-glm": "ask",
         "mobius-executor-qwen": "ask",
@@ -8801,7 +8807,10 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     builder_prompt = (
         "You are the orchestrator only. Do not edit files directly. First gather "
         "context with mobius-explore-glm, mobius-explore-kimi, or mobius-explore-qwen "
-        "as needed, then delegate implementation to mobius-executor-deepseek with a "
+        "as needed. If the task includes images and the active model is not image-capable, "
+        "delegate visual inspection to mobius-vision-mimo, mobius-vision-kimi, or "
+        "mobius-vision-qwen before implementation. Then delegate implementation to "
+        "mobius-executor-deepseek with a "
         "bounded task, target files, acceptance criteria, and validation commands. "
         "Inspect the returned diff and validation evidence. If acceptance fails or "
         "confidence is low, send the failure packet to mobius-executor-glm; if still "
@@ -8810,7 +8819,10 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-reviewer-gpt54 only for reviewer-route outage. Do not let an "
         "executor/fixer self-approve its own work. Record which executor/reviewer was used."
     ) if orchestrated else (
-        "Primary path: explore with mobius-explore-glm, review with mobius-reviewer-gpt55, "
+        "Primary path: explore with mobius-explore-glm; when images are present and the "
+        "active model is not image-capable, ask mobius-vision-mimo, mobius-vision-kimi, "
+        "or mobius-vision-qwen for a structured visual read; review with "
+        "mobius-reviewer-gpt55, "
         "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
         "confidence, misses evidence, or validation still fails, call the paired fallback "
         "agent. Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
@@ -8931,6 +8943,32 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     }
     if not orchestrated:
         agents.pop("mobius-explore-qwen", None)
+    optional_vision_agents = {
+        "mobius-vision-mimo": {
+            "description": "Lite Pro MiMo image understanding helper",
+            "prompt": "Read attached images/screenshots only. Return structured observations, visible text, UI risks, and uncertainties. No edits.",
+        },
+        "mobius-vision-kimi": {
+            "description": "Lite Pro Kimi image understanding fallback",
+            "prompt": "Fallback vision helper. Read attached images/screenshots and return concise structured observations. No edits.",
+        },
+        "mobius-vision-qwen": {
+            "description": "Lite Pro Qwen image understanding fallback",
+            "prompt": "Qwen vision helper. Use for screenshots, diagrams, and visual UI context. Return observations only. No edits.",
+        },
+    }
+    for name, config in optional_vision_agents.items():
+        if name not in agent_models:
+            continue
+        agents[name] = {
+            "description": config["description"],
+            "mode": "subagent",
+            "model": _agent_model(name),
+            "temperature": 0.1,
+            "steps": 8,
+            "permission": read_only_permission,
+            "prompt": config["prompt"],
+        }
     if orchestrated:
         executor_prompt = (
             "Implement only the assigned scope. Edit files directly if needed, but do "

@@ -527,7 +527,7 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     monkeypatch.setattr(
         mms_core,
         "_provider_candidates",
-        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro"])],
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
     )
 
     model_info, runtime = mms_core._resolve_opencode_profile_runtime(
@@ -549,6 +549,10 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-builder-stable"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
+    assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
+    vision_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_primary")
+    assert vision_route["provider_id"] == "mimo-direct-anthropic"
+    assert payload["provider"]["mms-vision_primary"]["models"]["mimo-v2.5"]["attachment"] is True
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     reviewer_route = next(route for route in runtime["opencode_routes"] if route["id"] == "reviewer_primary")
     assert reviewer_route["provider_id"] == "mixed"
@@ -596,7 +600,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     monkeypatch.setattr(
         mms_core,
         "_provider_candidates",
-        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro"])],
+        lambda *_args: [(provider, models), (mimo_direct, ["mimo-v2.5-pro", "mimo-v2.5"])],
     )
 
     model_info, runtime = mms_core._resolve_opencode_profile_runtime(
@@ -620,6 +624,8 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
+    assert payload["agent"]["mobius-vision-qwen"]["model"].endswith("/qwen3.6-plus")
     assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.6-plus")
     executor_models = {
         payload["agent"][name]["model"].rsplit("/", 1)[-1]
@@ -629,6 +635,8 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].rsplit("/", 1)[-1] not in executor_models
     qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "executor_qwen")
     assert qwen_route["protocol"] == "anthropic_messages"
+    vision_qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_qwen")
+    assert vision_qwen_route["protocol"] == "anthropic_messages"
 
 
 def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavailable(monkeypatch):
@@ -1216,10 +1224,10 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
 
     assert lite_pro["label"] == "5.5 Pro"
     assert orchestrated["label"] == "5.5 Multi-Agent"
-    assert "health: 1/9 healthy" in lite_pro["summary"]
+    assert "health: 1/12 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
-    assert "6 untested" in lite_pro["summary"]
-    assert "health: 1/14 healthy" in orchestrated["summary"]
+    assert "9 untested" in lite_pro["summary"]
+    assert "health: 1/17 healthy" in orchestrated["summary"]
     assert "1 degraded" in orchestrated["summary"]
-    assert "12 untested" in orchestrated["summary"]
+    assert "15 untested" in orchestrated["summary"]

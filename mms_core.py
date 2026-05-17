@@ -7782,6 +7782,25 @@ _OPENCODE_LITE_PRO_SPECS = (
         "models": ("kimi-for-coding", "kimi-k2.5"),
     },
     {
+        "key": "vision_primary",
+        "agent": "mobius-vision-mimo",
+        "models": ("mimo-v2.5", "mimo-v2-omni"),
+        "route_policy": "mimo_direct",
+        "gpt_fallback": False,
+    },
+    {
+        "key": "vision_kimi",
+        "agent": "mobius-vision-kimi",
+        "models": ("kimi-k2.5", "K2.6", "kimi-k2.6"),
+        "gpt_fallback": False,
+    },
+    {
+        "key": "vision_qwen",
+        "agent": "mobius-vision-qwen",
+        "models": ("qwen3.6-plus", "qwen3.5-plus"),
+        "gpt_fallback": False,
+    },
+    {
         "key": "reviewer_primary",
         "agent": "mobius-reviewer-gpt55",
         "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
@@ -8273,7 +8292,7 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
             route_policy=spec.get("route_policy", ""),
             profile_id=profile_id,
         )
-        if route is None and spec["key"] != "builder_primary":
+        if route is None and spec["key"] != "builder_primary" and spec.get("gpt_fallback", True) is not False:
             route = gpt_fallback
         route = _append_unique_opencode_route(routes, dict(route, id=spec["key"]) if route else None)
         if route:
