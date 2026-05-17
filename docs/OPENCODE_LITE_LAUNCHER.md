@@ -9,7 +9,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - `OMO` keeps using the existing global OpenCode + OMO setup.
 - `Raw` is a pure fallback with no OMO and no custom agents.
 - `lite` remains supported by profile ID for compatibility, but is hidden from the selector.
-- In the OpenCode tab, MMS shows this profile selector first; Lite/Lite Pro/Raw do not ask the user to choose a channel/model before profile selection.
+- In the OpenCode tab, MMS shows this profile selector first; session-local profiles do not ask the user to choose a channel/model before profile selection.
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
 - Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
 - Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
