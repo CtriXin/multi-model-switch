@@ -244,4 +244,3 @@ def test_legacy_qwen_kimi_supported_clis_are_normalized_to_real_clis():
     )
 
     assert normalized["supported_clis"] == ["claude", "codex"]
-
