@@ -252,7 +252,7 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
         validate_proxy=False,
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert not (session_codex / "history.jsonl").is_symlink()
     assert _lines(session_codex / "history.jsonl") == ["account-history-3", "account-history-4"]
     assert not (session_codex / "sessions").is_symlink()
@@ -308,7 +308,7 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
         base_url="http://127.0.0.1:12345/v1",
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert not (session_codex / "history.jsonl").is_symlink()
     assert _lines(session_codex / "history.jsonl") == ["gateway-history-2", "gateway-history-3"]
     assert not (session_codex / "sessions").is_symlink()

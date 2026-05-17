@@ -797,6 +797,8 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     env["MMS_REAL_HOME"] = real_home
     env["ORIGINAL_HOME"] = real_home
     env["REAL_HOME"] = real_home
+    env["WEB_ACCESS_HOST_HOME"] = real_home
+    env["HOST_HOME"] = real_home
     env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
     if include_xdg:
         env["XDG_CONFIG_HOME"] = _real_user_path(".config")
@@ -862,6 +864,18 @@ def _set_session_home_hint(env, session_home):
 def _set_codex_home_hint(env, session_home):
     if session_home:
         env["CODEX_HOME"] = os.path.join(session_home, ".codex")
+    return env
+
+
+def _set_codex_soft_home(env, session_home):
+    """Keep real HOME for tools; isolate Codex config/auth in CODEX_HOME."""
+    real_home = _real_user_path()
+    env["HOME"] = real_home
+    env["XDG_CONFIG_HOME"] = _real_user_path(".config")
+    env["MMS_HOME_ISOLATION_MODE"] = "soft"
+    env["MMS_SOFT_HOME"] = "1"
+    _set_session_home_hint(env, session_home)
+    _set_codex_home_hint(env, session_home)
     return env
 
 
@@ -1158,7 +1172,7 @@ def _build_home_context(env, runtime, cli_name):
     account_home = _normalize_path(runtime.get("home_dir") or "")
     xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
     gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    expected_session_home = auth_mode == "oauth" and cli_name in {"claude", "codex"}
+    expected_session_home = auth_mode == "oauth" and cli_name == "claude"
     config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
     locale_value = str(env.get("LC_ALL") or env.get("LANG") or _runtime_locale_env(runtime).get("LANG") or "").strip()
     return {
@@ -4581,11 +4595,14 @@ def inspect_runtime_exposure(cli, runtime):
         notes.append("Claude provider/gateway 模式也会在 session settings.json 中暴露 statusLine / hooks / env。")
     elif cli == "codex" and auth_mode == "oauth":
         session_home = os.path.join(account_home, "s", str(os.getpid())) if account_home else ""
-        process_env["HOME"] = session_home
+        process_env["HOME"] = _real_user_path()
         process_env["MMS_SESSION_HOME"] = session_home
-        process_env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config") if session_home else ""
+        process_env["CODEX_HOME"] = os.path.join(session_home, ".codex") if session_home else ""
+        process_env["XDG_CONFIG_HOME"] = _real_user_path(".config")
+        process_env["MMS_HOME_ISOLATION_MODE"] = "soft"
+        process_env["MMS_SOFT_HOME"] = "1"
         home_info["session_home"] = session_home
-        notes.append("Codex OAuth 主要通过进程环境与 session HOME/XDG 路径感知隔离态。")
+        notes.append("Codex 使用 soft-home：真实 HOME + 隔离 CODEX_HOME。")
     elif cli == "gemini" and auth_mode == "oauth":
         process_env["GEMINI_CLI_HOME"] = account_home
         home_info["session_home"] = account_home
@@ -5156,13 +5173,14 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
-        xdg_config_home = os.path.join(session_home, ".config")
-        env["HOME"] = session_home
-        env["XDG_CONFIG_HOME"] = xdg_config_home
-        _set_session_home_hint(env, session_home)
         if cli_name == "codex":
-            _set_codex_home_hint(env, session_home)
+            _set_codex_soft_home(env, session_home)
             _set_codex_resume_writeback_root(env, codex_resume_writeback_root)
+        else:
+            xdg_config_home = os.path.join(session_home, ".config")
+            env["HOME"] = session_home
+            env["XDG_CONFIG_HOME"] = xdg_config_home
+            _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
         host_context_env = _install_host_context_env(
             env,
@@ -7878,9 +7896,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env, include_xdg=True)
     _inject_selected_model_name(env, model_info=model_info)
-    env["HOME"] = session_home
-    _set_codex_home_hint(env, session_home)
-    _set_session_home_hint(env, session_home)
+    _set_codex_soft_home(env, session_home)
     _set_codex_resume_writeback_root(env, gateway_codex_dir)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url

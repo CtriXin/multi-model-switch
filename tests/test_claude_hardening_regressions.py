@@ -947,7 +947,7 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
         model_info={"model": "gpt-5.4"},
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     hooks_payload = json.loads((session_codex / "hooks.json").read_text(encoding="utf-8"))
     commands = [
         item["command"]
@@ -1001,7 +1001,7 @@ def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tm
         "https://relay.example.com",
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "web-access")
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
@@ -1040,7 +1040,7 @@ def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch,
         "https://relay.example.com",
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "agent-browser")
     assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
@@ -1104,12 +1104,12 @@ def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypat
         "https://relay.example.com",
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     toon_wrapper = Path(env["MMS_TOON_BIN"])
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "toon")
     assert (session_codex / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
-    assert toon_wrapper == Path(env["HOME"]) / ".mms" / "bin" / "mms-toon"
+    assert toon_wrapper == Path(env["MMS_SESSION_HOME"]) / ".mms" / "bin" / "mms-toon"
     assert toon_wrapper.exists()
     assert f'exec "{toon_script}" "$@"' in toon_wrapper.read_text(encoding="utf-8")
     assert env["PATH"].startswith(str(toon_wrapper.parent) + os.pathsep)
@@ -2625,7 +2625,9 @@ def test_account_env_scrubs_claude_oauth_parent_env_for_codex(monkeypatch, tmp_p
     assert "ANTHROPIC_BASE_URL" not in env
     assert "CLAUDE_CODE_SUBAGENT_MODEL" not in env
     assert "OPENAI_API_KEY" not in env
-    assert env["HOME"].startswith(str(account_home / "s"))
+    assert env["HOME"] == str(real_home)
+    assert env["CODEX_HOME"].startswith(str(account_home / "s"))
+    assert env["MMS_HOME_ISOLATION_MODE"] == "soft"
 
 
 def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_path):
@@ -2653,7 +2655,7 @@ def test_account_env_materializes_web_access_skill_for_codex(monkeypatch, tmp_pa
         model_info={"model": "gpt-5.4"},
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert env["MMS_MODEL_NAME"] == "gpt-5.4"
     assert env["WEB_ACCESS_HOST_HOME"] == str(real_home)
     assert env["MMS_WEB_ACCESS_PROXY"] == "http://127.0.0.1:3456"
@@ -2693,7 +2695,7 @@ def test_account_env_materializes_agent_browser_skill_for_codex(monkeypatch, tmp
         validate_proxy=False,
     )
 
-    session_codex = Path(env["HOME"]) / ".codex"
+    session_codex = Path(env["CODEX_HOME"])
     assert os.path.islink(session_codex / "skills" / "keep-skill")
     assert os.path.islink(session_codex / "skills" / "agent-browser")
     assert (session_codex / "skills" / "agent-browser" / "SKILL.md").read_text(encoding="utf-8") == "# agent-browser\n"
