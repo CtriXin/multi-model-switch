@@ -43,6 +43,7 @@ from mmc_session_index import (
     record_claude_session_start,
 )
 from mms_state_io import atomic_write_json, locked_state_file
+from mms_runtime import prepend_binary_dir_to_path, resolve_cli_binary
 
 _SAFE_PARENT_ENV_KEYS = (
     "TERM",
@@ -2405,9 +2406,9 @@ def _attach_child_process_group(child) -> None:
 
 
 def _resolve_claude_binary(env: dict[str, str]) -> str:
-    path_value = str(env.get("PATH") or os.defpath)
-    binary = shutil.which("claude", path=path_value)
+    binary = resolve_cli_binary("claude", env=env, real_home=str(_real_user_home()))
     if binary:
+        env.update(prepend_binary_dir_to_path(env, binary))
         return _assert_safe_binary_path(binary, label="claude")
     raise SystemExit("mmc: 未找到 claude 可执行文件")
 

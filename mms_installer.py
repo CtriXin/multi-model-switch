@@ -4,6 +4,8 @@ import subprocess
 import sys
 from shutil import which
 
+from mms_runtime import resolve_cli_binary
+
 Confirm = None
 
 
@@ -134,7 +136,7 @@ def _install_command_for_cli(cli_name, cmd):
 
 def check_and_offer_install(cli_name):
     """检查 CLI 是否安装，未安装则提示安装"""
-    if which(cli_name):
+    if resolve_cli_binary(cli_name):
         return True
 
     desc = CLI_DESCRIPTIONS.get(cli_name, cli_name)
@@ -164,11 +166,12 @@ def install_cli(cli_name):
         console.print(f"支持: {', '.join(INSTALL_COMMANDS.keys())}")
         sys.exit(1)
 
-    if which(cli_name):
+    existing = resolve_cli_binary(cli_name)
+    if existing:
         console.print(f"[green]{cli_name} 已安装[/green]")
         # Show version
         try:
-            subprocess.run([cli_name, "--version"], timeout=10)
+            subprocess.run([existing, "--version"], timeout=10)
         except Exception:
             pass
         return

@@ -34,6 +34,7 @@ from mms_fake_upstream import (
 from mms_host_context import host_capability_env, resolve_tool_bins, write_host_context
 from mms_project_store import CLAUDE_PERSISTENT_ENTRIES, claude_raw_entry_path, ensure_claude_project_store, read_slot_marker, write_slot_marker
 from mms_provider_profiles import profile_context_window
+from mms_runtime import prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
 from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
@@ -7968,6 +7969,7 @@ def launch_codex(model_info, runtime, once=False):
                 cmd.append("--dangerously-bypass-approvals-and-sandbox")
             exit_code = 0
             try:
+                cmd, env, _ = prepare_cli_command(cmd, env)
                 result = subprocess.run(cmd, env=env)
                 exit_code = result.returncode
             except KeyboardInterrupt:
@@ -9373,8 +9375,7 @@ def _exec_or_run(
     bridge_info=None,
 ):
     """默认用 execvp；需要清理临时文件时回退到 subprocess。"""
-    from shutil import which
-    exe = which(cmd[0])
+    cmd, env, exe = prepare_cli_command(cmd, env)
     if not exe:
         console.print(f"[red]{cmd[0]} 未找到，请先安装[/red]")
         sys.exit(1)

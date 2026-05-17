@@ -8528,8 +8528,8 @@ def _launch_broker_experiment_interactive(cfg, cli_name):
 # ── CLI Selection (fallback) ───────────────────────────
 
 def check_cli_installed(cli_name):
-    from shutil import which
-    return which(cli_name) is not None
+    from mms_runtime import resolve_cli_binary
+    return bool(resolve_cli_binary(cli_name))
 
 
 def select_cli(cli_names=None):

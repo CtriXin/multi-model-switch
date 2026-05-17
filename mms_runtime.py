@@ -9,6 +9,7 @@ import sys
 
 
 MIN_PYTHON = (3, 11)
+NODE_CLI_NAMES = {"claude", "gemini"}
 
 
 def _dedupe(values):
@@ -21,6 +22,105 @@ def _dedupe(values):
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _real_home_from_env(env=None):
+    source = env if isinstance(env, dict) else os.environ
+    home = (
+        source.get("REAL_HOME")
+        or source.get("MMS_REAL_HOME")
+        or source.get("ORIGINAL_HOME")
+        or source.get("HOME")
+        or os.path.expanduser("~")
+    )
+    marker = f"{os.path.sep}.config{os.path.sep}mms{os.path.sep}"
+    if marker in home:
+        home = home.split(marker, 1)[0]
+    return os.path.abspath(os.path.expanduser(str(home)))
+
+
+def _semver_key(path_value):
+    name = os.path.basename(str(path_value or "").rstrip(os.path.sep))
+    if name.startswith("v"):
+        name = name[1:]
+    parts = []
+    for item in name.split("."):
+        if item.isdigit():
+            parts.append(int(item))
+        else:
+            break
+    return tuple(parts)
+
+
+def _nvm_bin_dirs(real_home):
+    root = os.path.join(real_home, ".nvm", "versions", "node")
+    if not os.path.isdir(root):
+        return []
+    versions = [
+        os.path.join(root, name)
+        for name in os.listdir(root)
+        if os.path.isdir(os.path.join(root, name))
+    ]
+    versions.sort(key=_semver_key, reverse=True)
+    return [os.path.join(version, "bin") for version in versions]
+
+
+def cli_search_dirs(env=None, real_home=None):
+    source = env if isinstance(env, dict) else os.environ
+    home = os.path.abspath(os.path.expanduser(real_home or _real_home_from_env(source)))
+    path_dirs = str(source.get("PATH") or os.defpath).split(os.pathsep)
+    preferred = [
+        os.path.join(home, ".local", "bin"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ]
+    return _dedupe([*path_dirs, *preferred, *_nvm_bin_dirs(home), "/usr/bin", "/bin"])
+
+
+def resolve_cli_binary(command_name, env=None, real_home=None):
+    name = str(command_name or "").strip()
+    if not name:
+        return ""
+    source = env if isinstance(env, dict) else os.environ
+    override = str(source.get(f"MMS_{name.upper()}_BIN") or "").strip()
+    candidates = [override] if override else []
+    search_path = os.pathsep.join(cli_search_dirs(source, real_home=real_home))
+    found = shutil.which(name, path=search_path)
+    if found:
+        candidates.append(found)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path_value = candidate if os.path.isabs(candidate) else shutil.which(candidate, path=search_path)
+        if path_value and os.path.isfile(path_value) and os.access(path_value, os.X_OK):
+            return os.path.realpath(path_value)
+    return ""
+
+
+def prepend_binary_dir_to_path(env, binary_path):
+    if not isinstance(env, dict):
+        env = os.environ.copy()
+    binary_dir = os.path.dirname(os.path.realpath(binary_path))
+    current = str(env.get("PATH") or os.defpath)
+    parts = [item for item in current.split(os.pathsep) if item]
+    if binary_dir not in parts:
+        env = dict(env)
+        env["PATH"] = os.pathsep.join([binary_dir, *parts])
+    return env
+
+
+def prepare_cli_command(cmd, env=None, real_home=None):
+    if not cmd:
+        return [], env if isinstance(env, dict) else os.environ.copy(), ""
+    command_name = str(cmd[0] or "").strip()
+    if os.path.isabs(command_name):
+        binary = command_name if os.path.exists(command_name) else ""
+    else:
+        binary = resolve_cli_binary(command_name, env=env, real_home=real_home)
+    if not binary:
+        return list(cmd), env if isinstance(env, dict) else os.environ.copy(), ""
+    prepared_env = prepend_binary_dir_to_path(env if isinstance(env, dict) else os.environ.copy(), binary)
+    return [binary, *list(cmd[1:])], prepared_env, binary
 
 
 def _resolve_python(candidate):
