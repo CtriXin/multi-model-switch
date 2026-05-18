@@ -15,7 +15,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
 - Direct MiMo is available again as a supplemental CN/vision reviewer. It is not the final release gate, and MMS-generated OpenCode config disables MiMo model reasoning by default until OpenCode can replay MiMo `reasoning_content` in tool loops.
 - Lite Pro includes optional vision helper agents. If the active coding/review model cannot read images, the coordinator can ask MiMo/Kimi/Qwen vision helpers to inspect screenshots first, then pass structured observations back to the main workflow.
-- Lite Pro launch runs a tiny OpenCode preflight against the primary builder route. If `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session.
+- Lite Pro launch does not make a live model request by default. Set `MMS_OPENCODE_LAUNCH_PREFLIGHT=1` to run a tiny OpenCode preflight against the primary builder route; if `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session.
 - MMS does not delete or rewrite global OMO config.
 - MMS does not write `~/.config/opencode/opencode.json`, `~/.config/opencode/oh-my-openagent.jsonc`, or `~/.config/mms/config.toml` for this profile selection.
 
@@ -65,7 +65,7 @@ GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite
 
 Fallback is deterministic, not random. There are two layers:
 
-1. Launch fallback: `builder_primary` (`mobius-builder-pro` / `gpt-5.5`) is preflighted first. If it fails, MMS tries `builder_fallback` (`mobius-builder-stable` / `gpt-5.4`) and launches that route when healthy. Set `MMS_OPENCODE_LAUNCH_PREFLIGHT=0` to disable the live launch preflight.
+1. Launch fallback: `builder_primary` (`mobius-builder-pro` / `gpt-5.5`) is selected first without a live request. Set `MMS_OPENCODE_LAUNCH_PREFLIGHT=1` to preflight it; if it fails, MMS tries `builder_fallback` (`mobius-builder-stable` / `gpt-5.4`) and launches that route when healthy.
 2. Agent fallback: the primary builder prompt tells it to use the first lane, then call the paired fallback agent when a subagent fails, returns low confidence, misses evidence, or validation still fails.
 
 ## Lite Stable Agents

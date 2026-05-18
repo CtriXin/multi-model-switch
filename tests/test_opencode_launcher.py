@@ -524,7 +524,7 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert lite["opencode_agent"] == "mobius-builder"
     assert lite["opencode_lite_agents"] is True
     assert lite_pro["opencode_agent"] == "mobius-builder-pro"
-    assert lite_pro["opencode_launch_preflight"] is True
+    assert lite_pro["opencode_launch_preflight"] is False
     assert lite_pro["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
     orchestrated = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated")
     assert orchestrated["opencode_agent"] == "mobius-builder-pro"
@@ -620,7 +620,7 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
 
     assert model_info == {"model": "gpt-5.5", "profile": "lite_pro"}
     assert runtime["opencode_agent"] == "mobius-builder-pro"
-    assert runtime["opencode_launch_preflight"] is True
+    assert runtime["opencode_launch_preflight"] is False
     assert runtime["opencode_launch_fallback_agents"]["builder_fallback"] == "mobius-builder-stable"
     assert payload["model"].endswith("/gpt-5.5")
     assert payload["default_agent"] == "mobius-builder-pro"
@@ -649,6 +649,19 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["provider"]["mms-builder_primary"]["npm"] == "@ai-sdk/openai"
     builder_route = next(route for route in runtime["opencode_routes"] if route["id"] == "builder_primary")
     assert builder_route["protocol"] == "openai_responses"
+
+
+def test_opencode_lite_pro_preflight_is_opt_in(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    runtime = mms_core._apply_opencode_profile(_runtime(), "lite_pro")
+
+    monkeypatch.delenv("MMS_OPENCODE_LAUNCH_PREFLIGHT", raising=False)
+    assert mms_launchers._opencode_launch_preflight_enabled(runtime) is False
+
+    monkeypatch.setenv("MMS_OPENCODE_LAUNCH_PREFLIGHT", "1")
+    assert mms_launchers._opencode_launch_preflight_enabled(runtime) is True
 
 
 def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeypatch):

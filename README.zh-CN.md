@@ -36,7 +36,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
 - OpenCode profiles：`Orchestrated`、`Roster`、`Raw`，并写入 repo-local health feedback
 - OpenCode Lite Pro mixed routes：GPT 走 OpenAI-compatible Responses/Chat，国产模型走 Anthropic `/v1/messages`
-- OpenCode 默认开启 bypass：通过 permission `allow` 生效，subagent 里的 `ask` 会自动放行但保留显式 `deny` 边界，`opencode run` preflight 同时使用 `--dangerously-skip-permissions`
+- OpenCode 默认开启 bypass：通过 permission `allow` 生效，subagent 里的 `ask` 会自动放行但保留显式 `deny` 边界；可选的 `opencode run` preflight 会使用 `--dangerously-skip-permissions`
 - fallback 顺序：同模型第二通道、同 role peer、stable GPT fallback
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容

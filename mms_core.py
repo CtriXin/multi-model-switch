@@ -8244,7 +8244,7 @@ def _apply_opencode_profile(runtime, profile_id):
         runtime["opencode_agent"] = "mobius-builder-pro"
         runtime["opencode_default_agent"] = "mobius-builder-pro"
         runtime["opencode_roster"] = profile_id
-        runtime["opencode_launch_preflight"] = True
+        runtime["opencode_launch_preflight"] = False
         runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
         runtime["opencode_launch_fallback_agents"] = {
             "builder_primary": "mobius-builder-pro",
