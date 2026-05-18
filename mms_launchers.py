@@ -6740,6 +6740,9 @@ def _claude_visible_model_name(model_name, *, fallback_model=""):
     normalized = _normalized_model_name(model_name)
     if not normalized:
         return _normalized_model_name(fallback_model)
+    fallback = _normalized_model_name(fallback_model) or "claude-sonnet-4-6"
+    if not _is_claude_family_model_name(normalized):
+        return fallback
     if (
         _ONE_M_CONTEXT_SUFFIX in normalized.lower()
         and not _is_claude_family_model_name(normalized)
@@ -7192,10 +7195,50 @@ def launch_claude(model_info, runtime, once=False):
 
         else:
             # 3c. 探测失败且无 bridge 无负载均衡 → 保底继续
-            console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
-            env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model, display_model=_display_model)
-            state_home = None
-            cleanup_ctx = None
+            configured_anthropic_url = str(_anthropic_base_url(runtime) or "").strip().rstrip("/")
+            if configured_anthropic_url:
+                bridge_gw_url = configured_anthropic_url
+                if not bridge_gw_url.endswith("/v1"):
+                    bridge_gw_url += "/v1"
+                console.print(
+                    "[yellow]⚠ Anthropic 端点探测失败，改用配置端点启动本地 bridge；"
+                    "non-Claude 模型与 vision sidecar 仍由 bridge 接管[/yellow]"
+                )
+                native_fallback_routes = _resolve_native_fallback_routes(runtime, probe_model)
+                cleanup_ctx = _gateway_claude_bridge_context(
+                    bridge_gw_url,
+                    runtime["api_key"],
+                    heavy_model=probe_model,
+                    advertised_models=advertised_models,
+                    speed_scope=speed_scope,
+                    route_status_paths=route_status_paths,
+                    provider_id=provider_id,
+                    provider_profile=provider_profile,
+                    openai_url=_gpt_openai_url,
+                    proxy_url=runtime.get("proxy"),
+                    no_proxy=runtime.get("no_proxy"),
+                    strip_upstream_user_agent=strip_upstream_user_agent,
+                    minimal_claude_header_passthrough=minimal_claude_header_passthrough,
+                    reasoning_enabled=_thinking_enabled,
+                    reasoning_effort=_reasoning_effort,
+                    native_fallback_routes=native_fallback_routes,
+                    vision_sidecar=_vision_sidecar,
+                )
+                bridge_cfg = cleanup_ctx.__enter__()
+                env = _prepare_claude_env_with_status(
+                    runtime,
+                    base_url=bridge_cfg["base_url"],
+                    auth_token=bridge_cfg["api_key"],
+                    heavy_model=_env_model,
+                    selected_model=_env_model,
+                    display_model=_display_model,
+                )
+                state_home = None
+            else:
+                console.print("[yellow]⚠ Anthropic 端点探测失败，尝试继续（可在 provider 配置 bridge_source_cli 启用自动降级）[/yellow]")
+                env = _prepare_claude_env_with_status(runtime, base_url=None, selected_model=_env_model, display_model=_display_model)
+                state_home = None
+                cleanup_ctx = None
 
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["API_TIMEOUT_MS"] = "3000000"

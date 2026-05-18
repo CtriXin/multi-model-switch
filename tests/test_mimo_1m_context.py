@@ -95,7 +95,7 @@ def test_non_mimo_1m_selector_is_not_stripped_by_mimo_guard():
     assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "deepseek-v4-pro[1m]"
 
 
-def test_mimo_1m_gateway_env_keeps_selector_in_mms_status_only(monkeypatch, tmp_path):
+def test_mimo_1m_gateway_env_keeps_selector_in_status_and_claude_shell_slots(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -154,11 +154,11 @@ def test_mimo_1m_gateway_env_keeps_selector_in_mms_status_only(monkeypatch, tmp_
         "ANTHROPIC_REASONING_MODEL",
         "CLAUDE_CODE_SUBAGENT_MODEL",
     ):
-        assert env[key] == "mimo-v2.5-pro"
-        assert settings["env"][key] == "mimo-v2.5-pro"
+        assert env[key] == "claude-sonnet-4-6[1m]"
+        assert settings["env"][key] == "claude-sonnet-4-6[1m]"
 
 
-def test_mimo_base_gateway_env_keeps_base_model_in_all_claude_slots(monkeypatch, tmp_path):
+def test_mimo_base_gateway_env_keeps_status_and_claude_shell_slots(monkeypatch, tmp_path):
     import mms_launchers
 
     session_home = tmp_path / "gateway-session"
@@ -217,5 +217,5 @@ def test_mimo_base_gateway_env_keeps_base_model_in_all_claude_slots(monkeypatch,
         "ANTHROPIC_REASONING_MODEL",
         "CLAUDE_CODE_SUBAGENT_MODEL",
     ):
-        assert env[key] == "mimo-v2.5-pro"
-        assert settings["env"][key] == "mimo-v2.5-pro"
+        assert env[key] == "claude-sonnet-4-6[1m]"
+        assert settings["env"][key] == "claude-sonnet-4-6[1m]"

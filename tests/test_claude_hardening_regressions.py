@@ -2167,6 +2167,81 @@ def test_resolve_anthropic_base_url_openai_base_url_only_keeps_bridge_fallback_w
     assert method == "openai_fallback_failed"
 
 
+def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            captured["bridge_entered"] = True
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            captured["bridge_exited"] = True
+
+    def fake_bridge(gateway_url, gateway_key, **kwargs):
+        captured["gateway_url"] = gateway_url
+        captured["gateway_key"] = gateway_key
+        captured["bridge_kwargs"] = kwargs
+        return FakeBridge()
+
+    def fake_prepare(runtime, **kwargs):
+        captured["prepare_kwargs"] = kwargs
+        return {"HOME": str(tmp_path / "session"), "PATH": "/usr/bin"}
+
+    def fake_exec(cmd, env, once, **kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["exec_kwargs"] = kwargs
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda _runtime: {})
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["mimo-v2.5-pro"], "base_source": "test"},
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_anthropic_base_url", lambda *_args, **_kwargs: (None, "failed"))
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+
+    mms_launchers.launch_claude(
+        {"model": "mimo-v2.5-pro"},
+        {
+            "id": "mimo-direct-anthropic",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+            "vision_sidecar": {
+                "enabled": True,
+                "provider_id": "mimo-direct-anthropic",
+                "model": "mimo-v2.5",
+                "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+                "api_key": "sk-vision",
+            },
+        },
+        once=True,
+    )
+
+    assert captured["gateway_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1"
+    assert captured["bridge_kwargs"]["heavy_model"] == "mimo-v2.5-pro"
+    assert captured["bridge_kwargs"]["vision_sidecar"]["model"] == "mimo-v2.5"
+    assert captured["prepare_kwargs"]["auth_token"] == "bridge-token"
+    assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
+    assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5-pro"
+    assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
+
+
 def test_load_probe_file_cache_marks_stale_and_preserves_error(monkeypatch, tmp_path):
     import mms_core
 
