@@ -24,7 +24,7 @@ Weber is a router, not a replacement for browser tools. Use it to choose the sma
 
 ```bash
 WEB_ACCESS_HOST_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')" \
-  node /Users/xin/.codex/skills/web-access/scripts/check-deps.mjs
+  node "${WEB_ACCESS_SKILL_DIR:-$WEB_ACCESS_HOST_HOME/.codex/skills/web-access}/scripts/check-deps.mjs"
 ```
 
 - If the proxy is stale, kill only the `3456` listener and rerun `check-deps`; do not kill/restart the user's Chrome unless explicitly asked.

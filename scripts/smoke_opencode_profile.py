@@ -20,7 +20,10 @@ if str(ROOT_DIR) not in sys.path:
 import mms_core
 import mms_launchers
 
-MOEBIUS_RUN = Path("/Users/xin/auto-skills/CtriXin-repo/moebius/scripts/moebius_run.py")
+MOEBIUS_RUN = Path(
+    os.environ.get("MMS_MOEBIUS_RUN")
+    or ROOT_DIR.parent / "moebius" / "scripts" / "moebius_run.py"
+).expanduser()
 HEALTH_SCHEMA = "mms.opencode_route_health.v1"
 HEALTH_LATEST_SCHEMA = "mms.opencode_route_health_latest.v1"
 HEALTH_DIR = Path(".ai") / "opencode-health"

@@ -73,6 +73,6 @@
 
   <!-- Bottom info -->
   <text x="600" y="610" text-anchor="middle" fill="#6b7280" font-family="monospace" font-size="14">
-    curl -fsSL mms.dev/install.sh | bash · MIT License
+    curl -fsSL mms.dev/install.sh | bash · Apache-2.0 License
   </text>
 </svg>

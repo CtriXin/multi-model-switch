@@ -6,6 +6,7 @@ node_modules/
 package-lock.json
 test-results/
 .ai/
+.omc/
 docs/archive/todo-archive-*.md
 docs/archive/todo-snapshot-*.md
 .claude/
@@ -65,6 +66,8 @@ apps/worktree-app-store-launch/
 # local AI context / scratch files
 EOF
 DESIGN_V3_SPEC.md
+AI_PROJECT_CONTEXT.md
+HANDOFF_WEB_APP.md
 AGENTS.md
 CLAUDE.md
 AI_BOOTSTRAP.md

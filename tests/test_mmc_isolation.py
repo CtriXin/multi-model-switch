@@ -221,7 +221,7 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mmc_core,
         "_collect_safe_tool_path_dirs",
-        lambda _names: ["/opt/homebrew/bin", "/Users/demo/.cargo/bin"],
+        lambda _names: ["/opt/homebrew/bin", "/home/demo/.cargo/bin"],
     )
 
     env = mmc_core._build_process_env(args, session_home)
@@ -238,7 +238,7 @@ def test_build_process_env_uses_private_path_and_tmpdir(monkeypatch, tmp_path):
     assert env["NPM_CONFIG_CACHE"] == str((session_home / ".cache" / "npm").resolve())
     assert env["NODE_GYP_DIR"] == str((session_home / ".cache" / "node-gyp").resolve())
     assert path_parts[0] == str((session_home / ".mmc" / "bin").resolve())
-    assert path_parts[1:3] == ["/opt/homebrew/bin", "/Users/demo/.cargo/bin"]
+    assert path_parts[1:3] == ["/opt/homebrew/bin", "/home/demo/.cargo/bin"]
     assert env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
     assert env["API_TIMEOUT_MS"] == "3000000"
     assert Path(env["XDG_RUNTIME_DIR"]).is_dir()

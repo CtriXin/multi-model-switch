@@ -2,7 +2,7 @@
 
 [English README](./README.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 > 一个 launcher-first 的本地 AI Coding CLI 运行时管理器：用一个入口选择模型、provider、session 能力包和隔离的 Claude/Codex HOME，同时避免把真实全局账号状态当成 fallback 池。
 
@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.9.6`
+当前 tagged version：`v2.9.7`
 
 这一代的重点：
 
@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.6/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.7/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -298,4 +298,4 @@ git diff --check
 
 ## License
 
-MIT
+Apache-2.0

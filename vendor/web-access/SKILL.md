@@ -36,7 +36,7 @@ node "${CLAUDE_SKILL_DIR}/scripts/check-deps.mjs"
 
 - 如果 agent shell 的 `HOME` 是隔离目录（例如 `.config/mms/codex-gateway/s/*`），禁止直接启动用户的个人 Chrome：不要运行 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`，也不要在隔离 `HOME` 下裸跑 `open -a "Google Chrome"`。这会让 Chrome 使用宿主 profile 但找不到宿主 Keychain，造成钥匙串弹窗、登录态解密失败和高 CPU。
 - 需要登录态时，只连接已经由用户/宿主环境启动的 Chrome；若 Chrome 未连接，引导用户在地址栏打开 `chrome://inspect/#remote-debugging` 并启用 **Allow remote debugging for this browser instance**。
-- 必须由命令启动个人 Chrome 时，使用宿主环境启动器：`mms-chrome-host`（MMS session 内置）或 `/Users/xin/.local/bin/mms-chrome-host`。不要从隔离 `HOME` 直接启动 Chrome binary。
+- 必须由命令启动个人 Chrome 时，使用宿主环境启动器：`mms-chrome-host`（MMS session 内置）或 `~/.local/bin/mms-chrome-host`。不要从隔离 `HOME` 直接启动 Chrome binary。
 - 不需要登录态时，使用 Playwright/agent-browser 或显式临时 `--user-data-dir`；不要复用用户个人 profile。
 
 ## 浏览哲学

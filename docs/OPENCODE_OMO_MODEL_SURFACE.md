@@ -4,7 +4,7 @@
 
 - 更新时间：2026-05-10T06:01:56-04:00
 - 全量 smoke：35/35 通过
-- 实际配置文件：`/Users/xin/.config/opencode/opencode.json`、`/Users/xin/.config/opencode/oh-my-openagent.jsonc`
+- 实际配置文件：`~/.config/opencode/opencode.json`、`~/.config/opencode/oh-my-openagent.jsonc`
 - repo 内只保存说明文档；真实 OpenCode 配置不进 git。
 
 ## 先说清楚：Agent 和 Category

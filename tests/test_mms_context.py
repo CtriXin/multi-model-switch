@@ -467,3 +467,52 @@ def test_get_export_env_survives_deleted_current_directory(monkeypatch, tmp_path
 
     assert exports["MMS_CONTEXT_BIN"] == str(context_script)
     assert exports["MMS_CONTEXT_DIR"] == str(repo_dir / ".mms" / "context-store")
+
+
+def test_resolve_current_workdir_does_not_fallback_to_real_home(monkeypatch, tmp_path):
+    import mms_state_io
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    deleted_repo = tmp_path / "deleted-repo"
+
+    def _raise_deleted_cwd():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(mms_state_io.os, "getcwd", _raise_deleted_cwd)
+
+    resolved = mms_state_io.resolve_current_workdir(
+        {
+            "PWD": str(deleted_repo),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+        }
+    )
+
+    assert resolved == str(deleted_repo)
+    assert resolved != str(real_home)
+
+
+def test_resolve_current_workdir_uses_session_home_as_last_safe_fallback(monkeypatch, tmp_path):
+    import mms_state_io
+
+    real_home = tmp_path / "real-home"
+    session_home = tmp_path / "session-home"
+    real_home.mkdir()
+    session_home.mkdir()
+
+    def _raise_deleted_cwd():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(mms_state_io.os, "getcwd", _raise_deleted_cwd)
+
+    resolved = mms_state_io.resolve_current_workdir(
+        {
+            "MMS_SESSION_HOME": str(session_home),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+        }
+    )
+
+    assert resolved == str(session_home)
+    assert resolved != str(real_home)

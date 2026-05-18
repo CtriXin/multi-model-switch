@@ -38,7 +38,21 @@ def resolve_real_user_home(env=None):
     return home
 
 
+def _path_from_env_value(raw):
+    raw = str(raw or "").strip()
+    if not raw:
+        return ""
+    expanded = os.path.expanduser(raw)
+    if os.path.isabs(expanded):
+        return os.path.normpath(expanded)
+    try:
+        return os.path.abspath(expanded)
+    except OSError:
+        return os.path.normpath(expanded)
+
+
 def resolve_current_workdir(env=None, fallback=None):
+    """Resolve project/workspace cwd without silently trusting real HOME."""
     env = env or os.environ
     try:
         cwd = os.getcwd()
@@ -49,20 +63,23 @@ def resolve_current_workdir(env=None, fallback=None):
     except OSError:
         pass
 
-    for key in ("PWD", "OLDPWD"):
-        raw = str(env.get(key) or "").strip()
-        if not raw:
-            continue
-        candidate = os.path.abspath(os.path.expanduser(raw))
-        if os.path.isdir(candidate):
+    for key in ("MMS_WORKSPACE", "MMS_PROJECT_ROOT", "MMS_CWD", "MMS_HOST_CWD", "PWD", "OLDPWD"):
+        candidate = _path_from_env_value(env.get(key))
+        if candidate:
             return candidate
 
-    raw_fallback = str(fallback or "").strip()
+    raw_fallback = _path_from_env_value(fallback)
     if raw_fallback:
-        candidate = os.path.abspath(os.path.expanduser(raw_fallback))
-        if os.path.isdir(candidate):
+        return raw_fallback
+
+    # Last safe choice for deleted-cwd sessions is the isolated session home,
+    # not the real user HOME. Real HOME is exposed separately via MMS_REAL_HOME.
+    for key in ("MMS_SESSION_HOME", "CODEX_HOME", "GEMINI_CLI_HOME"):
+        candidate = _path_from_env_value(env.get(key))
+        if candidate:
             return candidate
-    return resolve_real_user_home(env)
+
+    raise RuntimeError("unable to resolve current workdir after cwd disappeared")
 
 
 def resolve_mms_config_dir(env=None):

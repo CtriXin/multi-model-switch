@@ -2,7 +2,7 @@
 
 [简体中文 README](./README.zh-CN.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 > A launcher-first runtime manager for local AI coding CLIs. Use one entrypoint to choose models, providers, session packs, and isolated Claude/Codex homes without turning your real global account state into a fallback pool.
 
@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.9.6`
+Current tagged version: `v2.9.7`
 
 Key changes in this generation:
 
@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.6/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.7/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -299,4 +299,4 @@ Release checklist:
 
 ## License
 
-MIT
+Apache-2.0

@@ -21,7 +21,7 @@ Move local/off-scope payloads out of the active tree without deleting them.
 Path:
 
 ```text
-/Users/xin/auto-skills/CtriXin-repo/multi-model-switch.scope-archive-20260427T035916-0400
+../multi-model-switch.scope-archive-20260427T035916-0400
 ```
 
 Contains:
@@ -48,7 +48,7 @@ Main moved categories:
 Path:
 
 ```text
-/Users/xin/auto-skills/CtriXin-repo/multi-model-switch.cleanup-quarantine-20260427T030228-0400
+../multi-model-switch.cleanup-quarantine-20260427T030228-0400
 ```
 
 Contains larger ignored/generated payloads moved earlier:
@@ -66,13 +66,13 @@ Contains larger ignored/generated payloads moved earlier:
 Restore scope archive payload:
 
 ```bash
-/Users/xin/auto-skills/CtriXin-repo/multi-model-switch.scope-archive-20260427T035916-0400/restore.sh
+../multi-model-switch.scope-archive-20260427T035916-0400/restore.sh
 ```
 
 Restore physical cleanup payload:
 
 ```bash
-/Users/xin/auto-skills/CtriXin-repo/multi-model-switch.cleanup-quarantine-20260427T030228-0400/restore.sh
+../multi-model-switch.cleanup-quarantine-20260427T030228-0400/restore.sh
 ```
 
 Both scripts refuse to overwrite existing target paths.
@@ -99,5 +99,5 @@ Both scripts refuse to overwrite existing target paths.
 - `.ai/regression-reports/2026-04-27-mms-physical-cleanup.md`
 - `.ai/plan/handoff.md`
 - `.ai/plan/packet.json`
-- `/Users/xin/issue-tracking/issues/multi-model-switch/mms-scope-verticalization-20260427/issue.md`
-- `/Users/xin/issue-tracking/issues/multi-model-switch/mms-physical-cleanup-20260427/issue.md`
+- local issue-tracking entry: `multi-model-switch/mms-scope-verticalization-20260427`
+- local issue-tracking entry: `multi-model-switch/mms-physical-cleanup-20260427`

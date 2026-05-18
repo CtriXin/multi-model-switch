@@ -1,6 +1,6 @@
 {
-  "name": "mms-web",
-  "version": "2.7.0",
+  "name": "multi-model-switch",
+  "version": "2.9.7",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -8,13 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "cd apps/web && npm run dev",
     "dev:api": "cd apps/runtime-api && python3 -m uvicorn main:app --reload --port 8000",
-    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "build": "cd apps/web && npm run build",
-    "type-check": "cd apps/web && vue-tsc --noEmit"
-  },
-  "devDependencies": {
-    "concurrently": "^8.2.2"
+    "dev": "npm run dev:api",
+    "build": "python3 -m py_compile mms*.py mmc*.py scripts/*.py",
+    "type-check": "npm run build"
   }
 }

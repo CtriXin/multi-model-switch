@@ -223,7 +223,7 @@ def test_copy_claude_state_json_strips_restore_state(tmp_path):
     src.write_text(
         json.dumps(
             {
-                "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+                "projects": {"/tmp/demo-project": {"lastSessionId": "abc", "lastCost": 99}},
                 "lastSessionId": "global-session",
                 "lastCost": 123,
                 "bypassPermissionsModeAccepted": True,
@@ -373,7 +373,7 @@ def test_sync_claude_session_state_back_to_account_strips_restore_state(tmp_path
         json.dumps(
             {
                 "userID": "device-b",
-                "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+                "projects": {"/tmp/demo-project": {"lastSessionId": "abc", "lastCost": 99}},
                 "lastSessionId": "global-session",
                 "lastCost": 123,
                 "numStartups": 3,
@@ -1364,7 +1364,7 @@ def test_strip_claude_restore_state_removes_project_resume_noise():
 
     result = _strip_claude_restore_state(
         {
-            "projects": {"/Users/shareit": {"lastSessionId": "abc", "lastCost": 99}},
+            "projects": {"/tmp/demo-project": {"lastSessionId": "abc", "lastCost": 99}},
             "lastSessionId": "global-session",
             "lastCost": 123,
             "bypassPermissionsModeAccepted": True,

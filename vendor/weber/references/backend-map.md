@@ -24,7 +24,7 @@ For logged-in Chrome tasks, `web-access` CDP is a required route, not just a pre
 
 ```bash
 WEB_ACCESS_HOST_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')" \
-  node /Users/xin/.codex/skills/web-access/scripts/check-deps.mjs
+  node "${WEB_ACCESS_SKILL_DIR:-$WEB_ACCESS_HOST_HOME/.codex/skills/web-access}/scripts/check-deps.mjs"
 ```
 
 If stuck, kill only the `3456` proxy listener and rerun the check; do not restart the user's Chrome unless explicitly asked.
