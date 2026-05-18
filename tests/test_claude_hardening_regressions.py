@@ -13,6 +13,13 @@ from pathlib import Path
 import pytest
 
 
+def _write_executable(path: Path, text: str = "#!/bin/sh\nexit 0\n") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatch):
     import mms_launchers
 
@@ -41,17 +48,25 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
 
-def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monkeypatch):
+def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monkeypatch, tmp_path):
     import mms_launchers
 
+    fake_node = _write_executable(tmp_path / "bin" / "node")
+    fake_python = _write_executable(tmp_path / "bin" / "python3")
+    hive_bin = _write_executable(tmp_path / "hive" / "mcp-server.sh")
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: {"node": str(fake_node), "python3": str(fake_python)}.get(name, ""),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
         "_default_hive_session_mcp_server",
         lambda: {
-            "command": "/tmp/hive-session-only.sh",
+            "command": str(hive_bin),
             "args": [],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
@@ -81,16 +96,16 @@ def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monk
     )
 
     assert result["mcpServers"] == {
-        "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
-        "codegraph": {"command": "node", "args": ["/tmp/codegraph.js"], "type": "stdio"},
+        "brainkeeper": {"command": str(fake_node), "args": ["/tmp/brainkeeper.js"], "type": "stdio"},
+        "codegraph": {"command": str(fake_node), "args": ["/tmp/codegraph.js"], "type": "stdio"},
         "hive": {
-            "command": "/tmp/hive-session-only.sh",
+            "command": str(hive_bin),
             "args": [],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
         },
         "pilot": {
-            "command": "python3",
+            "command": str(fake_python),
             "args": ["/tmp/pilot/scripts/pilot_mcp_server.py"],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
@@ -141,11 +156,19 @@ def test_default_session_mcp_servers_prefer_brainkeeper_over_legacy(monkeypatch,
     }
 
 
-def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_mcp_servers(monkeypatch):
+def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_mcp_servers(monkeypatch, tmp_path):
     import mms_launchers
 
+    fake_node = _write_executable(tmp_path / "bin" / "node")
+    fake_python = _write_executable(tmp_path / "bin" / "python3")
+    hive_bin = _write_executable(tmp_path / "hive" / "bin" / "mcp-server.sh")
     monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
     monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: {"node": str(fake_node), "python3": str(fake_python)}.get(name, ""),
+    )
     monkeypatch.setattr(
         mms_launchers,
         "_default_session_mcp_servers",
@@ -161,7 +184,7 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_
         mms_launchers,
         "_default_hive_session_mcp_server",
         lambda: {
-            "command": "/tmp/hive/bin/mcp-server.sh",
+            "command": str(hive_bin),
             "args": [],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
@@ -180,8 +203,9 @@ def test_build_claude_session_settings_falls_back_to_local_hive_and_brainkeeper_
 
     result = mms_launchers._build_claude_session_settings({})
 
-    assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert result["mcpServers"]["hive"]["command"] == str(hive_bin)
     assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
+    assert result["mcpServers"]["brainkeeper"]["command"] == str(fake_node)
     assert result["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper/dist/server.js"]
     assert result["mcpServers"]["pilot"]["args"] == ["/tmp/pilot/scripts/pilot_mcp_server.py"]
 
@@ -303,6 +327,9 @@ def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeyp
 
     real_home = tmp_path / "real-home"
     real_home.mkdir(parents=True)
+    fake_node = _write_executable(tmp_path / "bin" / "node")
+    fake_python = _write_executable(tmp_path / "bin" / "python3")
+    hive_bin = _write_executable(tmp_path / "hive" / "bin" / "mcp-server.sh")
     (real_home / ".claude.json").write_text(
         json.dumps(
             {
@@ -324,9 +351,14 @@ def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeyp
     )
     monkeypatch.setattr(
         mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: {"node": str(fake_node), "python3": str(fake_python)}.get(name, ""),
+    )
+    monkeypatch.setattr(
+        mms_launchers,
         "_default_hive_session_mcp_server",
         lambda: {
-            "command": "/tmp/hive/bin/mcp-server.sh",
+            "command": str(hive_bin),
             "args": [],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
@@ -348,7 +380,7 @@ def test_append_codex_mcp_servers_from_claude_json_injects_hive_fallback(monkeyp
     assert '[mcp_servers.demo]' in rendered
     assert '[mcp_servers.hive]' in rendered
     assert '[mcp_servers.pilot]' in rendered
-    assert 'command = "/tmp/hive/bin/mcp-server.sh"' in rendered
+    assert f'command = "{hive_bin}"' in rendered
     assert 'args = ["/tmp/pilot/scripts/pilot_mcp_server.py"]' in rendered
     assert 'HOME = "/tmp/real-home"' in rendered
 
@@ -358,6 +390,7 @@ def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp
 
     real_home = tmp_path / "real-home"
     real_home.mkdir(parents=True)
+    fake_node = _write_executable(tmp_path / "bin" / "node")
     (real_home / ".claude.json").write_text(
         json.dumps(
             {
@@ -374,6 +407,11 @@ def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp
         "_real_user_path",
         lambda *parts: str(real_home.joinpath(*parts)),
     )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: str(fake_node) if name == "node" else "",
+    )
     monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
     monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
 
@@ -387,16 +425,69 @@ def test_append_codex_mcp_servers_respects_session_disabled_mcp(monkeypatch, tmp
     assert 'args = ["/tmp/keep.js"]' in rendered
 
 
-def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch):
+def test_append_codex_mcp_servers_rewrites_codegraph_to_real_home_binary(monkeypatch, tmp_path):
     import mms_launchers
 
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    codegraph_bin = _write_executable(tmp_path / "nvm" / "bin" / "codegraph")
+    (real_home / ".claude.json").write_text(
+        json.dumps({"mcpServers": {"codegraph": {"command": "codegraph", "args": ["serve", "--mcp"]}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: str(codegraph_bin) if name == "codegraph" else "",
+    )
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json("")
+
+    assert "[mcp_servers.codegraph]" in rendered
+    assert f'command = "{codegraph_bin}"' in rendered
+    assert 'args = ["serve", "--mcp"]' in rendered
+
+
+def test_append_codex_mcp_servers_drops_missing_bare_codegraph(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir(parents=True)
+    (real_home / ".claude.json").write_text(
+        json.dumps({"mcpServers": {"codegraph": {"command": "codegraph", "args": ["serve", "--mcp"]}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda name, env=None: "")
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    rendered = mms_launchers._append_codex_mcp_servers_from_claude_json('base_url = "https://example.test"\n')
+
+    assert "[mcp_servers.codegraph]" not in rendered
+    assert rendered == 'base_url = "https://example.test"\n'
+
+
+def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallback(monkeypatch, tmp_path):
+    import mms_launchers
+
+    fake_python = _write_executable(tmp_path / "bin" / "python3")
+    hive_bin = _write_executable(tmp_path / "hive" / "bin" / "mcp-server.sh")
     monkeypatch.setattr(mms_launchers, "_load_real_claude_settings", lambda: {})
     monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
     monkeypatch.setattr(
         mms_launchers,
+        "_resolve_real_home_command_path",
+        lambda name, env=None: str(fake_python) if name == "python3" else "",
+    )
+    monkeypatch.setattr(
+        mms_launchers,
         "_default_hive_session_mcp_server",
         lambda: {
-            "command": "/tmp/hive/bin/mcp-server.sh",
+            "command": str(hive_bin),
             "args": [],
             "env": {"HOME": "/tmp/real-home"},
             "type": "stdio",
@@ -415,10 +506,28 @@ def test_inject_managed_mcp_servers_into_claude_state_adds_hive_and_pilot_fallba
 
     result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
 
-    assert result["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert result["mcpServers"]["hive"]["command"] == str(hive_bin)
     assert result["mcpServers"]["hive"]["env"]["HOME"] == "/tmp/real-home"
     assert result["mcpServers"]["pilot"]["args"] == ["/tmp/pilot/scripts/pilot_mcp_server.py"]
     assert result["mcpServers"]["pilot"]["env"]["HOME"] == "/tmp/real-home"
+
+
+def test_inject_managed_mcp_servers_drops_unresolvable_existing_codegraph(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_real_claude_settings",
+        lambda: {"mcpServers": {"codegraph": {"command": "codegraph", "args": ["serve", "--mcp"]}}},
+    )
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda name, env=None: "")
+
+    result = mms_launchers._inject_managed_mcp_servers_into_claude_state({})
+
+    assert "mcpServers" not in result
 
 
 def test_build_claude_session_settings_strips_execution_surfaces_for_oauth_claude(monkeypatch):
@@ -738,6 +847,51 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
     assert "PreToolUse" not in enabled["hooks"]
+
+
+def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(monkeypatch, tmp_path):
+    import mms_launchers
+
+    caveman_root = tmp_path / "caveman"
+    hooks_dir = caveman_root / "hooks"
+    hooks_dir.mkdir(parents=True)
+    (hooks_dir / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (hooks_dir / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+    monkeypatch.setenv("MMS_CAVEMAN_ROOT", str(caveman_root))
+    compact_command = (
+        'CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
+        'CLAUDE_CONFIG_DIR="$HOME/.codex" node "/real/caveman-activate.js"'
+    )
+    base_hooks = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/tmp/notify.sh"}]},
+                {
+                    "matcher": "startup|resume",
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/map.sh"},
+                        {
+                            "type": "command",
+                            "command": compact_command,
+                            "timeout": 5,
+                            "statusMessage": "Loading caveman mode",
+                        },
+                        {"type": "command", "command": "/tmp/looop.sh"},
+                    ],
+                },
+            ]
+        }
+    }
+
+    rendered = mms_launchers._build_codex_session_hooks(base_hooks, enable_caveman=True)
+
+    session_group = rendered["hooks"]["SessionStart"][1]
+    assert [hook["command"] for hook in session_group["hooks"]] == [
+        "/tmp/map.sh",
+        compact_command,
+        "/tmp/looop.sh",
+    ]
+    assert session_group["hooks"][1]["statusMessage"] == "Loading caveman mode"
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
@@ -3564,6 +3718,8 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     (real_home / ".local").mkdir(parents=True)
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
+    fake_node = _write_executable(tmp_path / "bin" / "node")
+    hive_bin = _write_executable(tmp_path / "hive" / "bin" / "mcp-server.sh")
     monkeypatch.chdir(repo_dir)
 
     (real_home / ".claude.json").write_text(
@@ -3621,8 +3777,8 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
         mms_launchers,
         "_session_managed_mcp_servers",
         lambda _settings=None, **_kwargs: {
-            "hive": {"command": "/tmp/hive/bin/mcp-server.sh", "args": [], "type": "stdio"},
-            "brainkeeper": {"command": "node", "args": ["/tmp/brainkeeper/dist/server.js"], "type": "stdio"},
+            "hive": {"command": str(hive_bin), "args": [], "type": "stdio"},
+            "brainkeeper": {"command": str(fake_node), "args": ["/tmp/brainkeeper/dist/server.js"], "type": "stdio"},
         },
     )
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
@@ -3642,7 +3798,8 @@ def test_claude_gateway_env_seeds_ui_state_and_sanitized_project_trust(monkeypat
     assert session_state["numStartups"] == 9
     assert session_state["tipsHistory"]["theme-command"] == 508
     assert session_state["tipsHistory"]["terminal-setup"] == 515
-    assert session_state["mcpServers"]["hive"]["command"] == "/tmp/hive/bin/mcp-server.sh"
+    assert session_state["mcpServers"]["hive"]["command"] == str(hive_bin)
+    assert session_state["mcpServers"]["brainkeeper"]["command"] == str(fake_node)
     assert session_state["mcpServers"]["brainkeeper"]["args"] == ["/tmp/brainkeeper/dist/server.js"]
     project_state = session_state["projects"][str(repo_dir.resolve())]
     assert project_state["hasTrustDialogAccepted"] is True

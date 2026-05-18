@@ -3389,6 +3389,49 @@ def _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces=None)
     }
 
 
+def _mcp_command_has_path(command):
+    command = str(command or "").strip()
+    return bool(command and (os.path.isabs(command) or os.sep in command))
+
+
+def _normalize_session_mcp_server_spec(name, spec, *, env=None):
+    """Make inherited MCP commands session-safe; drop missing local CLIs."""
+    if not isinstance(spec, dict):
+        return None
+    normalized = copy.deepcopy(spec)
+    url = normalized.get("url")
+    if isinstance(url, str) and url.strip():
+        return normalized
+
+    command = str(normalized.get("command") or "").strip()
+    if not command:
+        return None
+    if _mcp_command_has_path(command):
+        if os.path.isabs(command) and (not os.path.isfile(command) or not os.access(command, os.X_OK)):
+            return None
+        normalized["command"] = command
+        return normalized
+
+    resolved = _resolve_real_home_command_path(command, env)
+    if not resolved:
+        return None
+    normalized["command"] = resolved
+    return normalized
+
+
+def _normalize_session_mcp_servers(mcp_servers, *, disabled_session_surfaces=None, env=None):
+    filtered = _filter_mcp_servers_by_disabled(mcp_servers, disabled_session_surfaces)
+    normalized = {}
+    for name, spec in filtered.items():
+        key = str(name or "").strip()
+        if not key:
+            continue
+        safe_spec = _normalize_session_mcp_server_spec(key, spec, env=env)
+        if safe_spec:
+            normalized[key] = safe_spec
+    return normalized
+
+
 def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
     if not isinstance(hooks_data, dict):
         return {}
@@ -3478,6 +3521,81 @@ def _caveman_codex_hook_payload(caveman_root):
     }
 
 
+def _codex_shell_hook_payload(command_text, *, timeout=None, status_message=None):
+    command_text = str(command_text or "").strip()
+    if not command_text:
+        return {}
+    payload = {"type": "command", "command": command_text}
+    if timeout is not None:
+        payload["timeout"] = timeout
+    if status_message:
+        payload["statusMessage"] = str(status_message)
+    return payload
+
+
+def _codex_caveman_session_hook(caveman_root):
+    hook_payload = _caveman_codex_hook_payload(caveman_root)
+    return _codex_shell_hook_payload(
+        hook_payload.get("command"),
+        timeout=hook_payload.get("timeout"),
+        status_message=hook_payload.get("statusMessage"),
+    )
+
+
+def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
+    if not enable_caveman:
+        return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
+
+    caveman_root = _resolve_caveman_root()
+    replacement = _codex_caveman_session_hook(caveman_root) if caveman_root else {}
+    replaced = False
+    configured = {}
+
+    for event_name, groups in (hooks_data if isinstance(hooks_data, dict) else {}).items():
+        if not isinstance(groups, list):
+            continue
+        kept_groups = []
+        for group in groups:
+            if not isinstance(group, dict):
+                kept_groups.append(group)
+                continue
+            hook_items = group.get("hooks")
+            if not isinstance(hook_items, list):
+                kept_groups.append(dict(group))
+                continue
+            kept_hooks = []
+            for hook in hook_items:
+                if not isinstance(hook, dict):
+                    kept_hooks.append(hook)
+                    continue
+                command = str(hook.get("command") or "")
+                if _is_caveman_hook_command(command):
+                    existing_compact = "CAVEMAN_HOOK_COMPACT=1" in command and str(event_name) == "SessionStart"
+                    if not replaced and str(event_name) == "SessionStart" and (existing_compact or replacement):
+                        kept_hooks.append(dict(hook) if existing_compact else dict(replacement))
+                        replaced = True
+                    continue
+                kept_hooks.append(dict(hook))
+            if kept_hooks:
+                next_group = dict(group)
+                next_group["hooks"] = kept_hooks
+                kept_groups.append(next_group)
+        if kept_groups:
+            configured[event_name] = kept_groups
+
+    if not replaced and replacement:
+        configured = _append_shell_command_hook(
+            configured,
+            "SessionStart",
+            replacement.get("command"),
+            matcher="startup|resume",
+            timeout=replacement.get("timeout"),
+            status_message=replacement.get("statusMessage"),
+        )
+    return configured
+
+
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
     hooks_data = _filter_hook_commands(hooks_data, _is_caveman_hook_command)
     if not enable_caveman:
@@ -3552,20 +3670,7 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
 
 def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
-    hooks_data = _filter_hook_commands(payload.get("hooks"), _is_caveman_hook_command)
-    hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
-    if enable_caveman:
-        caveman_root = _resolve_caveman_root()
-        if caveman_root:
-            hook_payload = _caveman_codex_hook_payload(caveman_root)
-            hooks_data = _append_shell_command_hook(
-                hooks_data,
-                "SessionStart",
-                hook_payload.get("command"),
-                matcher="startup|resume",
-                timeout=hook_payload.get("timeout"),
-                status_message=hook_payload.get("statusMessage"),
-            )
+    hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     if hooks_data:
         payload["hooks"] = hooks_data
@@ -4323,7 +4428,7 @@ def _ensure_session_only_claude_mcp_servers(settings_data, *, disabled_session_s
     pilot_spec = _default_pilot_session_mcp_server()
     if pilot_spec and not (isinstance(merged.get("pilot"), dict) and str(merged.get("pilot", {}).get("command") or "").strip()):
         merged["pilot"] = copy.deepcopy(pilot_spec)
-    merged = _filter_mcp_servers_by_disabled(merged, disabled_session_surfaces)
+    merged = _normalize_session_mcp_servers(merged, disabled_session_surfaces=disabled_session_surfaces)
 
     if merged:
         settings_data["mcpServers"] = merged
@@ -4362,8 +4467,7 @@ def _session_managed_mcp_servers(settings_data, *, allow_execution_surfaces=True
         pilot_spec = _default_pilot_session_mcp_server()
         if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
             inherited.setdefault("pilot", copy.deepcopy(pilot_spec))
-    inherited = _filter_mcp_servers_by_disabled(inherited, disabled_session_surfaces)
-    return inherited
+    return _normalize_session_mcp_servers(inherited, disabled_session_surfaces=disabled_session_surfaces)
 
 
 def _inject_managed_mcp_servers_into_claude_state(
@@ -4398,6 +4502,7 @@ def _inject_managed_mcp_servers_into_claude_state(
             spec = existing.get(name)
             if isinstance(spec, dict) and str(spec.get("command") or "").strip():
                 merged[name] = copy.deepcopy(spec)
+    merged = _normalize_session_mcp_servers(merged, disabled_session_surfaces=disabled_session_surfaces)
     if merged:
         state["mcpServers"] = merged
     else:
@@ -6604,9 +6709,9 @@ def _sync_codex_session_claude_json(session_home, *, disabled_session_surfaces=N
             return
         data = _sanitize_codex_claude_state_payload(loaded)
         if isinstance(data.get("mcpServers"), dict):
-            data["mcpServers"] = _filter_mcp_servers_by_disabled(
+            data["mcpServers"] = _normalize_session_mcp_servers(
                 data.get("mcpServers"),
-                disabled_session_surfaces,
+                disabled_session_surfaces=disabled_session_surfaces,
             )
             if not data["mcpServers"]:
                 data.pop("mcpServers", None)
@@ -6705,7 +6810,7 @@ def _append_codex_mcp_servers_from_claude_json(config_text, *, disabled_session_
     pilot_spec = _default_pilot_session_mcp_server()
     if isinstance(pilot_spec, dict) and str(pilot_spec.get("command") or "").strip():
         servers.setdefault("pilot", pilot_spec)
-    servers = _filter_mcp_servers_by_disabled(servers, disabled_session_surfaces)
+    servers = _normalize_session_mcp_servers(servers, disabled_session_surfaces=disabled_session_surfaces)
 
     if not servers:
         return config_text
