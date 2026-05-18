@@ -1185,8 +1185,11 @@ def _build_home_context(env, runtime, cli_name):
     account_home = _normalize_path(runtime.get("home_dir") or "")
     xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
     gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    expected_session_home = auth_mode == "oauth" and cli_name == "claude"
     config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
+    expected_session_home = auth_mode == "oauth" and (
+        cli_name == "claude"
+        or (cli_name == "codex" and effective_home and effective_home != real_home)
+    )
     locale_value = str(env.get("LC_ALL") or env.get("LANG") or _runtime_locale_env(runtime).get("LANG") or "").strip()
     return {
         "cli": str(cli_name or "").strip(),

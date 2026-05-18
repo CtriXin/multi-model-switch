@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.9.7`
+当前 tagged version：`v2.9.8`
 
 这一代的重点：
 
@@ -86,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.7/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.8/install.sh | bash -s --
 ```
 
 安装后自检：
