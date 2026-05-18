@@ -559,6 +559,35 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
 
 
+def test_filter_claude_session_hooks_drops_stale_managed_stop_hook(tmp_path):
+    import mms_launchers
+
+    keep_hook = tmp_path / "keep.sh"
+    keep_hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    stale_hook = tmp_path / "old" / "hooks" / "brainkeeper-session-end-hook.sh"
+
+    filtered = mms_launchers._filter_claude_session_hooks(
+        {
+            "Stop": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": str(stale_hook)},
+                        {"type": "command", "command": str(keep_hook)},
+                    ]
+                }
+            ]
+        }
+    )
+
+    commands = [
+        item["command"]
+        for group in filtered["Stop"]
+        for item in group["hooks"]
+    ]
+    assert str(stale_hook) not in commands
+    assert str(keep_hook) in commands
+
+
 def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypatch, tmp_path):
     import mms_launchers
 

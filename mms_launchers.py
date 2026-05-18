@@ -5,6 +5,7 @@ import copy
 import inspect
 import json
 import os
+import shlex
 import shutil
 import sys
 import subprocess
@@ -2809,7 +2810,7 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
     hooks_data = hooks_data if isinstance(hooks_data, dict) else {}
     if not allow_execution_surfaces:
         return {}
-    return hooks_data
+    return _filter_missing_managed_hook_commands(hooks_data)
 
 
 def _caveman_available_for_cli(cli_name):
@@ -3234,6 +3235,66 @@ def _is_omc_hook_command(command_text):
         "wiki-session-end.mjs",
     )
     return any(marker in command_text for marker in markers)
+
+
+def _is_mms_managed_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "claude-feishu-webfetch-guard.sh",
+        "hive-compact-hook.sh",
+        "brainkeeper-session-start-hook.sh",
+        "brainkeeper-session-end-hook.sh",
+        "brainkeeper-token-monitor-hook.sh",
+        "mindkeeper-session-start-hook.sh",
+        "mindkeeper-session-end-hook.sh",
+        "mindkeeper-token-monitor-hook.sh",
+        "claude-codegraph-auto-index.sh",
+        "caveman-activate.js",
+        "caveman-mode-tracker.js",
+        "everything-claude-code",
+        "oh-my-claudecode",
+    )
+    return any(marker in command_text for marker in markers)
+
+
+def _hook_command_targets_exist(command_text):
+    command_text = str(command_text or "").strip()
+    if not command_text:
+        return True
+    try:
+        parts = shlex.split(command_text)
+    except ValueError:
+        parts = command_text.split()
+    if not parts:
+        return True
+
+    candidates = []
+    first = parts[0]
+    if os.path.isabs(first):
+        candidates.append(first)
+
+    runner = os.path.basename(first)
+    if runner in {"bash", "sh", "zsh", "node", "python", "python3"}:
+        for token in parts[1:]:
+            if token.startswith("-"):
+                continue
+            if os.path.isabs(token):
+                candidates.append(token)
+            break
+
+    if not candidates:
+        return True
+    return all(os.path.exists(candidate) for candidate in candidates)
+
+
+def _filter_missing_managed_hook_commands(hooks_data):
+    return _filter_hook_commands(
+        hooks_data,
+        lambda command: _is_mms_managed_hook_command(command)
+        and not _hook_command_targets_exist(command),
+    )
 
 
 def _filter_hook_commands(hooks_data, predicate):
