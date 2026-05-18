@@ -3127,7 +3127,7 @@ def confirm_tui(
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, codex/claude/opencode 有效；OpenCode 会启用 permission allow / run bypass
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
-    caveman_enabled: bool，仅 codex/claude 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+    caveman_enabled: bool，仅 claude/codex/opencode 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
     reasoning_effort: str，仅 GPT / 支持 effort 的路径有效

@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.9.14`
+Current tagged version: `v2.10.0`
 
 Key changes in this generation:
 
@@ -41,7 +41,8 @@ Key changes in this generation:
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`; Claude/Codex/OpenCode injection stays session-local
+- silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
@@ -86,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.14/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -219,7 +220,7 @@ MMS can expose capabilities per session without writing global hooks/config.
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. OpenCode now receives session-local Caveman / token-saver / TOON / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
 
 ## Optional Installer Packs
 

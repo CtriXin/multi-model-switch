@@ -7277,7 +7277,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         "hooks": {"always": [], "caveman": [], "ecc": [], "omc": []},
     }
 
-    if cli not in {"claude", "codex"}:
+    if cli not in {"claude", "codex", "opencode"}:
         return preview
 
     try:
@@ -7295,6 +7295,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _load_real_claude_settings,
             _merge_claude_settings,
             _merge_mms_session_hooks,
+            _opencode_rtk_plugin_path,
             _resolve_agent_browser_root,
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
@@ -7739,7 +7740,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 "omc",
                 _configure_claude_omc_hooks({}, enable_omc=True),
             )
-    else:
+    elif cli == "codex":
         real_claude_json = os.path.join(resolve_real_user_home(), ".claude.json")
         try:
             with open(real_claude_json, "r", encoding="utf-8") as f:
@@ -7776,6 +7777,20 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         if has_caveman:
             caveman_hooks = _build_codex_session_hooks({}, enable_caveman=True)
             _append_hooks("caveman", (caveman_hooks or {}).get("hooks"))
+    elif cli == "opencode":
+        rtk_plugin = _opencode_rtk_plugin_path(runtime)
+        if rtk_plugin:
+            _append(
+                "hooks",
+                "always",
+                title="RTK OpenCode plugin",
+                summary=_L("静默改写高 token Bash 命令", "Silently rewrite token-heavy Bash commands"),
+                details=[
+                    (_L("类型", "Type"), "OpenCode plugin"),
+                    (_L("路径", "Path"), rtk_plugin),
+                ],
+                disable_key="opencode-rtk",
+            )
 
     if allow_execution_surfaces:
         for pack_key, enabled in (("ecc", has_ecc), ("omc", has_omc)):
@@ -9612,13 +9627,14 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-        if cli in {"claude", "codex"}:
+        if cli in {"claude", "codex", "opencode"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
-            runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
-            runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
             runtime_runtime["disabled_session_surfaces"] = (
                 disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
             )
+        if cli in {"claude", "codex"}:
+            runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
+            runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 

@@ -557,7 +557,11 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
         for item in group["hooks"]
     ]
     assert "/tmp/keep-session-start.sh" in session_start_commands
-    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in session_start_commands
+    caveman_activate_commands = [command for command in session_start_commands if "caveman-activate.js" in command]
+    assert len(caveman_activate_commands) == 1
+    assert "CAVEMAN_HOOK_COMPACT=1" in caveman_activate_commands[0]
+    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_activate_commands[0]
+    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_activate_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-mode-tracker.js"}"' in user_prompt_commands
 
 
@@ -819,6 +823,22 @@ def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
 
     assert result.stdout == ""
     assert "[map] Index up to date." in result.stderr
+
+
+def test_rtk_hook_is_silent_when_dependencies_are_missing(tmp_path):
+    script_path = Path(__file__).resolve().parents[1] / "hooks" / "rtk-rewrite.sh"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script_path)],
+        input='{"tool_input":{"command":"cat big.log"}}',
+        env={"PATH": str(tmp_path)},
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 def test_append_codex_session_hook_trust_states_reuses_global_trust_after_reindex(tmp_path):

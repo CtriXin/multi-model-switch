@@ -2814,7 +2814,7 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
 
 
 def _caveman_available_for_cli(cli_name):
-    return str(cli_name or "").strip() in {"claude", "codex"} and bool(_resolve_caveman_root())
+    return str(cli_name or "").strip() in {"claude", "codex", "opencode"} and bool(_resolve_caveman_root())
 
 
 def _normalize_caveman_mode(value, default="disable"):
@@ -3408,7 +3408,11 @@ def _session_skill_disabled(disabled_session_surfaces, skill_name):
 
 def _caveman_claude_activate_command(caveman_root):
     script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
-    return f"node {json.dumps(script_path)}"
+    return (
+        "CAVEMAN_HOOK_COMPACT=1 "
+        "CAVEMAN_HOOK_EVENT=SessionStart "
+        f"node {json.dumps(script_path)}"
+    )
 
 
 def _caveman_claude_tracker_command(caveman_root):
@@ -3452,14 +3456,23 @@ def _caveman_codex_hook_payload(caveman_root):
                     return dict(hook)
     except Exception:
         pass
+    context = (
+        "CAVEMAN MODE ACTIVE (full). Drop articles/filler/pleasantries/hedging. "
+        "Fragments OK. Code/commits/security: write normal. Off: stop caveman/normal mode."
+    )
+    payload = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context,
+            }
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return {
         "type": "command",
-        "command": (
-            "echo 'CAVEMAN MODE ACTIVE. Rules: Drop articles/filler/pleasantries/hedging. "
-            "Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step]. "
-            "Not: Sure! I would be happy to help you with that. Yes: Bug in auth middleware. "
-            "Fix: Code/commits/security: write normal. User says stop caveman or normal mode to deactivate.'"
-        ),
+        "command": f"printf '%s' {shlex.quote(payload)}",
         "timeout": 5,
         "statusMessage": "Loading caveman mode",
     }
@@ -4042,6 +4055,26 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
         return
     if os.path.isdir(os.path.join(vendor_root, "commands")):
         _overlay_session_entry_dir(parent_dir, overlay_root, "commands", vendor_root)
+
+
+def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None, runtime=None):
+    if not config_dir or not session_home:
+        return
+    os.makedirs(config_dir, exist_ok=True)
+    plugin_runtime = dict(runtime or {}) if isinstance(runtime, dict) else {}
+    plugin_runtime["disabled_session_surfaces"] = disabled_session_surfaces
+    _overlay_opencode_rtk_plugin(config_dir, plugin_runtime)
+    if enable_caveman:
+        _overlay_caveman_session_entries(
+            config_dir,
+            session_home,
+            enable_caveman=True,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+    _overlay_web_access_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_weber_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -9049,6 +9082,44 @@ def _opencode_model_config(runtime, model_name):
     return config
 
 
+def _opencode_rtk_plugin_path(runtime=None):
+    disabled_hooks = _normalize_session_surface_disabled(
+        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
+    ).get("hooks", set())
+    if "opencode-rtk" in disabled_hooks:
+        return ""
+    if not _opencode_runtime_bool(runtime or {}, "opencode_rtk", True):
+        return ""
+    if not _opencode_env_bool("MMS_OPENCODE_RTK", True):
+        return ""
+    if not shutil.which("rtk"):
+        return ""
+    plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "opencode-rtk.ts")
+    return plugin_path if os.path.isfile(plugin_path) else ""
+
+
+def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
+    plugin_path = _opencode_rtk_plugin_path(runtime)
+    if not plugin_path:
+        return False
+    plugins_dir = os.path.join(config_dir, "plugins")
+    os.makedirs(plugins_dir, exist_ok=True)
+    target_path = os.path.join(plugins_dir, "mms-rtk.ts")
+    try:
+        if os.path.islink(target_path) or os.path.isfile(target_path):
+            os.unlink(target_path)
+        elif os.path.isdir(target_path):
+            shutil.rmtree(target_path)
+        os.symlink(plugin_path, target_path)
+    except OSError:
+        shutil.copy2(plugin_path, target_path)
+    return True
+
+
+def _opencode_rtk_plugin_enabled(runtime=None):
+    return bool(_opencode_rtk_plugin_path(runtime))
+
+
 def _opencode_lite_agent_configs(model_ref):
     """Return session-local OpenCode agents for the MMS lite lane."""
     if not model_ref:
@@ -9681,6 +9752,8 @@ def _opencode_apply_route_env(env, runtime, selected_model=""):
 def _opencode_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = _resolve_model(model_info or runtime)
+    disabled_session_surfaces = runtime.get("disabled_session_surfaces")
+    enable_caveman = _runtime_caveman_enabled(runtime)
     gateway_base = _real_user_path(".config", "mms", "opencode-gateway")
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
@@ -9702,6 +9775,13 @@ def _opencode_gateway_env(runtime, model_info=None):
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "opencode.json")
     _write_opencode_config(config_path, runtime, model)
+    _overlay_opencode_session_assets(
+        config_dir,
+        session_home,
+        enable_caveman=enable_caveman,
+        disabled_session_surfaces=disabled_session_surfaces,
+        runtime=runtime,
+    )
 
     _opencode_apply_route_env(env, runtime, selected_model=model)
     env["OPENCODE_CONFIG"] = config_path
@@ -9720,7 +9800,14 @@ def _opencode_gateway_env(runtime, model_info=None):
         runtime=runtime,
         model_info=model_info,
         session_home=session_home,
-        features={},
+        features={
+            "caveman": enable_caveman,
+            "opencode_rtk": _opencode_rtk_plugin_enabled(runtime),
+            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
+            "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
+            "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
+            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+        },
     )
     return env
 

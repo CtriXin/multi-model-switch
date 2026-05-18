@@ -18,6 +18,13 @@ def _runtime(**overrides):
     return runtime
 
 
+def _write_skill(root: Path, name: str) -> Path:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    return skill_dir
+
+
 def test_opencode_config_uses_openai_compatible_provider():
     import mms_launchers
 
@@ -57,6 +64,21 @@ def test_opencode_config_uses_openai_compatible_provider():
     if "limit" in reasoner:
         assert isinstance(reasoner["limit"]["context"], int)
         assert reasoner["limit"]["output"] == mms_launchers.OPENCODE_DEFAULT_OUTPUT_LIMIT
+
+
+def test_opencode_config_keeps_local_rtk_plugin_out_of_json(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: "/tmp/opencode-rtk.ts")
+
+    payload = json.loads(
+        mms_launchers._build_opencode_config_content(
+            _runtime(models=["deepseek-chat"]),
+            "deepseek-chat",
+        )
+    )
+
+    assert "plugin" not in payload
 
 
 def test_opencode_config_can_disable_lite_agents_for_raw_profile():
@@ -217,6 +239,55 @@ def test_opencode_gateway_env_writes_session_local_config(monkeypatch, tmp_path)
     assert env["OPENCODE_PERMISSION"] == mms_launchers.OPENCODE_BYPASS_PERMISSION_ENV
     assert env["MMS_OPENCODE_BYPASS"] == "1"
     assert "OPENCODE_CONFIG_CONTENT" not in env
+
+
+def test_opencode_gateway_env_materializes_session_assets(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    caveman_root = tmp_path / "caveman"
+    (caveman_root / "skills").mkdir(parents=True)
+    _write_skill(caveman_root / "skills", "caveman")
+    web_access = _write_skill(tmp_path / "web-access-root", "web-access")
+    weber = _write_skill(tmp_path / "weber-root", "weber")
+    toon = _write_skill(tmp_path / "toon-root", "toon")
+    token_saver = _write_skill(tmp_path / "token-root", "token-saver")
+
+    monkeypatch.setattr(mms_launchers, "_real_user_home", lambda: str(real_home))
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, *_args, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
+    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(web_access))
+    monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: str(weber))
+    monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: str(toon))
+    monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: str(token_saver))
+    rtk_plugin = tmp_path / "opencode-rtk.ts"
+    rtk_plugin.write_text("export const RtkOpenCodePlugin = async () => ({})\n", encoding="utf-8")
+    monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: str(rtk_plugin))
+
+    env = mms_launchers._opencode_gateway_env(
+        _runtime(caveman_mode="enable"),
+        model_info={"model": "deepseek-chat"},
+    )
+
+    config_dir = Path(env["OPENCODE_CONFIG_DIR"])
+    payload = json.loads(Path(env["OPENCODE_CONFIG"]).read_text(encoding="utf-8"))
+    assert "plugin" not in payload
+    assert (config_dir / "plugins" / "mms-rtk.ts").is_symlink()
+    assert (config_dir / "plugins" / "mms-rtk.ts").resolve() == rtk_plugin
+    for name in ("caveman", "web-access", "weber", "toon", "token-saver"):
+        assert (config_dir / "skills" / name).is_symlink()
+        assert (config_dir / "skills" / name / "SKILL.md").exists()
+    packet = json.loads(Path(env["MMS_SESSION_PACKET_JSON"]).read_text(encoding="utf-8"))
+    features = {row["name"]: row["status"] for row in packet["features"]}
+    assert features["caveman"] == "enabled"
+    assert features["opencode_rtk"] == "enabled"
+    assert features["web_access"] == "enabled"
 
 
 def test_opencode_gateway_env_can_disable_bypass(monkeypatch, tmp_path):

@@ -4,10 +4,11 @@ import mms_core
 import mms_launchers
 
 
-def _write_skill(root: Path, name: str) -> None:
+def _write_skill(root: Path, name: str) -> Path:
     skill_dir = root / "skills" / name
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+    return skill_dir
 
 
 def test_build_confirm_preview_catalog_disables_execution_surfaces_for_claude_oauth():
@@ -251,3 +252,35 @@ def test_build_confirm_preview_catalog_collects_omc_bundle(monkeypatch, tmp_path
     assert "OMC 关键词检测" in {item["title"] for item in preview["hooks"]["omc"]}
     mcp_item = preview["mcp"]["omc"][0]
     assert any(label == "路径" and value for label, value in mcp_item["details"])
+
+
+def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp_path):
+    caveman_root = tmp_path / "caveman"
+    _write_skill(caveman_root, "caveman")
+    web_access = _write_skill(tmp_path / "web-access-root", "web-access")
+    weber = _write_skill(tmp_path / "weber-root", "weber")
+    toon = _write_skill(tmp_path / "toon-root", "toon")
+    token_saver = _write_skill(tmp_path / "token-root", "token-saver")
+
+    monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: "/tmp/opencode-rtk.ts")
+    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(web_access))
+    monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: str(weber))
+    monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: str(toon))
+    monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: str(token_saver))
+    monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
+
+    preview = mms_core._build_confirm_preview_catalog(
+        "opencode",
+        {"opencode_profile": "lite_pro"},
+        has_caveman=True,
+    )
+
+    assert {item["title"] for item in preview["skills"]["always"]} >= {
+        "web-access",
+        "weber",
+        "toon",
+        "token-saver",
+    }
+    assert {item["title"] for item in preview["skills"]["caveman"]} == {"caveman"}
+    assert any(item["title"] == "RTK OpenCode plugin" for item in preview["hooks"]["always"])

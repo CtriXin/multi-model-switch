@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.9.14`
+当前 tagged version：`v2.10.0`
 
 这一代的重点：
 
@@ -41,7 +41,8 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
-- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`
+- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`；Claude/Codex/OpenCode 都保持 session-local 注入
+- silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
@@ -86,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.9.14/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -218,7 +219,7 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 | `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | 已安装时检测 | 规划和开源贡献入口 |
 
-启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。ECC 和 OMC 默认关闭，只有在 Claude 启动确认页选择后才注入。
+启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。OpenCode 现在会拿到 session-local Caveman / token-saver / TOON / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。ECC 和 OMC 默认关闭，只有在 Claude 启动确认页选择后才注入。
 
 ## 可选安装包
 

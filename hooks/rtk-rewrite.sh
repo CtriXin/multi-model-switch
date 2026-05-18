@@ -6,13 +6,18 @@
 # This is a thin delegating hook: all rewrite logic lives in `rtk rewrite`,
 # which is the single source of truth.
 
+rtk_debug() {
+  [ "${MMS_RTK_HOOK_DEBUG:-0}" = "1" ] || return 0
+  printf '%s\n' "$*" >&2
+}
+
 if ! command -v jq &>/dev/null; then
-  echo "[rtk] WARNING: jq is not installed. Hook cannot rewrite commands." >&2
+  rtk_debug "[rtk] WARNING: jq is not installed. Hook cannot rewrite commands."
   exit 0
 fi
 
 if ! command -v rtk &>/dev/null; then
-  echo "[rtk] WARNING: rtk is not installed or not in PATH. Hook cannot rewrite commands." >&2
+  rtk_debug "[rtk] WARNING: rtk is not installed or not in PATH. Hook cannot rewrite commands."
   exit 0
 fi
 
@@ -21,7 +26,7 @@ if [ -n "$RTK_VERSION" ]; then
   MAJOR=$(echo "$RTK_VERSION" | cut -d. -f1)
   MINOR=$(echo "$RTK_VERSION" | cut -d. -f2)
   if [ "$MAJOR" -eq 0 ] && [ "$MINOR" -lt 23 ]; then
-    echo "[rtk] WARNING: rtk $RTK_VERSION is too old (need >= 0.23.0)." >&2
+    rtk_debug "[rtk] WARNING: rtk $RTK_VERSION is too old (need >= 0.23.0)."
     exit 0
   fi
 fi
