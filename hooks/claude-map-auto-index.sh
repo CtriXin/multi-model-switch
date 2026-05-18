@@ -14,4 +14,10 @@ if [ ! -f "$HOOK_SCRIPT" ]; then
   exit 0
 fi
 
-node "$HOOK_SCRIPT" || true
+# Codex treats stdout that starts like JSON (for example "[map] ...") as hook
+# JSON and reports invalid output. Keep optional Map progress off stdout.
+if output="$(node "$HOOK_SCRIPT" 2>&1)" && [ -n "$output" ] && [ "${MMS_MAP_HOOK_DEBUG:-0}" = "1" ]; then
+  printf '%s\n' "$output" >&2
+fi
+
+exit 0

@@ -16,12 +16,38 @@ const flagPath = path.join(claudeDir, '.caveman-active');
 const settingsPath = path.join(claudeDir, 'settings.json');
 
 const mode = getDefaultMode();
+const hookEventName = (process.env.CAVEMAN_HOOK_EVENT || '').trim();
+const compactOutput = /^(1|true|yes|on)$/i.test(process.env.CAVEMAN_HOOK_COMPACT || '');
+
+function emitContext(context) {
+  if (!context) {
+    process.exit(0);
+  }
+  if (hookEventName) {
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName,
+        additionalContext: context
+      }
+    }));
+  } else {
+    process.stdout.write(context);
+  }
+  process.exit(0);
+}
+
+function compactRules(label) {
+  return (
+    'CAVEMAN MODE ACTIVE (' + label + '). ' +
+    'Drop articles/filler/pleasantries/hedging. Fragments OK. ' +
+    'Code/commits/security: write normal. Off: stop caveman/normal mode.'
+  );
+}
 
 // "off" mode — skip activation entirely, don't write flag or emit rules
 if (mode === 'off') {
   try { fs.unlinkSync(flagPath); } catch (e) {}
-  process.stdout.write('OK');
-  process.exit(0);
+  emitContext('');
 }
 
 // 1. Write flag file (symlink-safe)
@@ -40,12 +66,14 @@ safeWriteFlag(flagPath, mode);
 const INDEPENDENT_MODES = new Set(['commit', 'review', 'compress']);
 
 if (INDEPENDENT_MODES.has(mode)) {
-  process.stdout.write('CAVEMAN MODE ACTIVE — level: ' + mode + '. Behavior defined by /caveman-' + mode + ' skill.');
-  process.exit(0);
+  emitContext('CAVEMAN MODE ACTIVE (' + mode + '). Behavior defined by /caveman-' + mode + ' skill.');
 }
 
 // Resolve the canonical label for wenyan alias
 const modeLabel = mode === 'wenyan' ? 'wenyan-full' : mode;
+if (compactOutput) {
+  emitContext(compactRules(modeLabel));
+}
 
 // Read SKILL.md — the single source of truth for caveman behavior.
 // Plugin installs: __dirname = <plugin_root>/hooks/, SKILL.md at <plugin_root>/skills/caveman/SKILL.md
@@ -120,7 +148,7 @@ try {
     }
   }
 
-  if (!hasStatusline) {
+  if (!hasStatusline && !hookEventName) {
     const isWindows = process.platform === 'win32';
     const scriptName = isWindows ? 'caveman-statusline.ps1' : 'caveman-statusline.sh';
     const scriptPath = path.join(__dirname, scriptName);
@@ -140,4 +168,4 @@ try {
   // Silent fail — don't block session start over statusline detection
 }
 
-process.stdout.write(output);
+emitContext(output);

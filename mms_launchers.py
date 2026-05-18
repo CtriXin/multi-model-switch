@@ -3416,7 +3416,27 @@ def _caveman_claude_tracker_command(caveman_root):
     return f"node {json.dumps(script_path)}"
 
 
+def _caveman_codex_activate_command(caveman_root):
+    script_path = os.path.join(caveman_root, "hooks", "caveman-activate.js")
+    if not os.path.isfile(script_path):
+        return ""
+    return (
+        "CAVEMAN_HOOK_COMPACT=1 "
+        "CAVEMAN_HOOK_EVENT=SessionStart "
+        'CLAUDE_CONFIG_DIR="$HOME/.codex" '
+        f"node {json.dumps(script_path)}"
+    )
+
+
 def _caveman_codex_hook_payload(caveman_root):
+    command = _caveman_codex_activate_command(caveman_root)
+    if command:
+        return {
+            "type": "command",
+            "command": command,
+            "timeout": 5,
+            "statusMessage": "Loading caveman [CAVEMAN]",
+        }
     hooks_path = os.path.join(caveman_root, ".codex", "hooks.json")
     try:
         with open(hooks_path, "r", encoding="utf-8") as f:

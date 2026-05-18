@@ -4,6 +4,8 @@ import asyncio
 import io
 import json
 import os
+import shutil
+import subprocess
 import types
 from datetime import datetime
 from pathlib import Path
@@ -727,8 +729,10 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in enabled_commands
-    assert "echo 'CAVEMAN MODE ACTIVE. session default'" in enabled_commands
-    assert enabled_commands.count("echo 'CAVEMAN MODE ACTIVE. session default'") == 1
+    caveman_commands = [command for command in enabled_commands if "caveman-activate.js" in command]
+    assert len(caveman_commands) == 1
+    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
+    assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -760,6 +764,61 @@ def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
 
     assert "/tmp/drop.sh" not in commands
     assert "/tmp/keep.sh" in commands
+
+
+def test_caveman_codex_activate_outputs_valid_session_start_json(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for caveman hook smoke")
+    script_path = Path(__file__).resolve().parents[1] / "vendor" / "caveman" / "hooks" / "caveman-activate.js"
+    result = subprocess.run(
+        [node, str(script_path)],
+        env={
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": str(tmp_path / ".codex"),
+            "CAVEMAN_DEFAULT_MODE": "full",
+            "CAVEMAN_HOOK_COMPACT": "1",
+            "CAVEMAN_HOOK_EVENT": "SessionStart",
+        },
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert context.startswith("CAVEMAN MODE ACTIVE (full).")
+    assert "STATUSLINE SETUP NEEDED" not in context
+
+
+def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_node = fake_bin / "node"
+    fake_node.write_text("#!/usr/bin/env bash\nprintf '[map] Index up to date.\\n'\n", encoding="utf-8")
+    fake_node.chmod(0o755)
+    map_hook = tmp_path / "map" / "dist" / "hooks" / "session-start.js"
+    map_hook.parent.mkdir(parents=True)
+    map_hook.write_text("// fake map hook\n", encoding="utf-8")
+    script_path = Path(__file__).resolve().parents[1] / "hooks" / "claude-map-auto-index.sh"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script_path)],
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "MMS_REAL_HOME": str(tmp_path),
+            "MAP_INSTALL_DIR": str(tmp_path / "map"),
+            "MMS_MAP_HOOK_DEBUG": "1",
+        },
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout == ""
+    assert "[map] Index up to date." in result.stderr
 
 
 def test_append_codex_session_hook_trust_states_reuses_global_trust_after_reindex(tmp_path):
@@ -1126,7 +1185,10 @@ def test_codex_gateway_env_materializes_session_caveman_hooks_and_assets(monkeyp
         for item in group["hooks"]
     ]
     assert "/tmp/notify.sh" in commands
-    assert "echo 'CAVEMAN MODE ACTIVE. session default'" in commands
+    caveman_commands = [command for command in commands if "caveman-activate.js" in command]
+    assert len(caveman_commands) == 1
+    assert "CAVEMAN_HOOK_COMPACT=1" in caveman_commands[0]
+    assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert os.path.islink(session_codex / "commands")
     assert os.path.islink(session_codex / "skills")
     assert os.path.islink(session_codex / "commands" / "keep.toml")
