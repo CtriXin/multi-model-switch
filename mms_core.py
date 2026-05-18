@@ -483,6 +483,7 @@ MODEL_FAMILIES = [
     {"family": "MiniMax", "keywords": ("minimax",),                        "category": "国产系"},
     {"family": "GLM",     "keywords": ("glm",),                            "category": "国产系"},
 ]
+KNOWN_MODEL_FAMILY_NAMES = {entry["family"] for entry in MODEL_FAMILIES}
 DOMESTIC_MODEL_FAMILIES = {"DeepSeek", "Qwen", "Kimi", "Mimo", "MiniMax", "GLM"}
 DOMESTIC_MODEL_KEYWORDS = ("glm", "kimi", "qwen", "mimo", "minimax", "deepseek", "doubao", "seed", "bailian")
 
@@ -795,6 +796,20 @@ _REASONING_MODEL_HINTS = (
     "minimax-m2", "deepseek-reasoner", "doubao-thinking",
 )
 _TOOL_USE_FAMILIES = {"Claude", "GPT", "Gemini", "Qwen", "Kimi", "GLM", "MiniMax"}
+_VISION_CAPABLE_MODEL_NAMES = {
+    "mimo-v2.5",
+    "mimo-v2-omni",
+    "k2.6",
+    "k2.6-code-preview",
+    "kimi-k2.5",
+    "kimi-k2.6",
+    "qwen3.6-plus",
+    "qwen3.5-plus",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+}
+_VISION_CAPABLE_MODEL_HINTS = ("gemini-",)
 
 
 def _normalize_role(value):
@@ -1893,6 +1908,8 @@ def _model_capability_tags(model_name):
         return []
     family, _ = _infer_model_family(model_name)
     tags = []
+    if _model_supports_vision(model_name):
+        tags.append("vision")
     if family in _TOOL_USE_FAMILIES:
         tags.append("tool_use")
     if any(hint in normalized for hint in _REASONING_MODEL_HINTS):
@@ -1903,6 +1920,16 @@ def _model_capability_tags(model_name):
     if "claude" in _bridge_clis_for_model(model_name):
         tags.append("bridge_required")
     return tags
+
+
+def _model_supports_vision(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return False
+    model_id = normalized.rsplit("/", 1)[-1]
+    if model_id in _VISION_CAPABLE_MODEL_NAMES:
+        return True
+    return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
 
 
 def _model_cli_modes(model_name):
@@ -3549,6 +3576,25 @@ def _provider_has_configured_base_url(provider):
     )
 
 
+def _provider_id_variants(provider_id):
+    raw = str(provider_id or "").strip()
+    if not raw:
+        return []
+    variants = [raw]
+    for candidate in (raw.replace("_", "-"), raw.replace("-", "_")):
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def _resolve_config_provider_id(provider_defs, provider_id):
+    provider_defs = provider_defs or {}
+    for candidate in _provider_id_variants(provider_id):
+        if candidate in provider_defs:
+            return candidate
+    return ""
+
+
 def _config_truthy(value, default=False):
     if value is None:
         return bool(default)
@@ -3559,13 +3605,22 @@ def _config_truthy(value, default=False):
 
 def _vision_sidecar_model_candidates_for_provider(provider_id):
     normalized = str(provider_id or "").strip().lower()
+    generic = [
+        "mimo-v2.5",
+        "mimo-v2-omni",
+        "K2.6",
+        "K2.6-code-preview",
+        "kimi-k2.5",
+        "qwen3.6-plus",
+        "qwen3.5-plus",
+    ]
     if "mimo" in normalized:
         return ["mimo-v2.5", "mimo-v2-omni"]
     if "kimi" in normalized:
-        return ["K2.6", "K2.6-code-preview", "kimi-k2.5", "kimi-for-coding"]
+        return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
         return ["qwen3.6-plus", "qwen3.5-plus"]
-    return ["K2.6"]
+    return generic
 
 
 def _vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", explicit_provider_id=""):
@@ -3641,6 +3696,8 @@ def _runtime_with_vision_sidecar(cfg, runtime):
         else ["direct-kimi", "newapi-personal-kimi", "newapi-personal-tokyo", "xin"]
     )
     providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
+    provider_defs = _provider_map(cfg) if isinstance(cfg, dict) else {}
+    explicit_provider_id = _resolve_config_provider_id(provider_defs, explicit_provider_id)
     all_ids = [
         str(item.get("id") or "").strip()
         for item in providers
@@ -3657,6 +3714,8 @@ def _runtime_with_vision_sidecar(cfg, runtime):
         explicit_model=explicit_model,
         explicit_provider_id=explicit_provider_id,
     ):
+        if provider_id not in provider_defs:
+            continue
         try:
             provider = resolve_provider_context(cfg, provider_id)
         except Exception:
@@ -4508,6 +4567,9 @@ def _display_provider_model_table(provider, probe):
     _ensure_rich()
     table = Table(title=f"{provider.get('name', provider.get('id'))} · 模型列表", show_lines=True)
     table.add_column("模型", style="cyan")
+    table.add_column("家族", style="yellow")
+    table.add_column("能力", style="magenta")
+    table.add_column("CLI", style="dim")
     table.add_column("来源", style="green")
     table.add_column("首字节延迟", style="yellow")
     table.add_column("生成速度", style="magenta")
@@ -4533,6 +4595,9 @@ def _display_provider_model_table(provider, probe):
                 updated = f"{updated} (stale)"
         table.add_row(
             model_id,
+            _infer_model_family(model_id)[0],
+            _model_capability_summary(model_id),
+            _model_cli_summary(model_id),
             _model_source_label((probe.get("model_sources") or {}).get(model_id, probe.get("base_source", "remote"))),
             ttfb,
             tps,
@@ -8805,6 +8870,8 @@ def _parse_usage_timestamp(value):
 
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
     if str(family_name or "").strip() == str(preferred_family or "").strip():
+        return False
+    if str(family_name or "").strip() in KNOWN_MODEL_FAMILY_NAMES:
         return False
     if int(total_use or 0) > _FAMILY_COLD_MAX_USE_COUNT:
         return False

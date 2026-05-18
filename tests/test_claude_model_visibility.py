@@ -205,6 +205,24 @@ def test_cold_cache_provider_fallback_models_keep_qwen_kimi_families(monkeypatch
     assert "Kimi" in family_names
 
 
+def test_known_model_families_are_not_collapsed_as_cold():
+    import mms_core
+
+    assert mms_core._family_is_cold_for_tui("Qwen", 0) is False
+    assert mms_core._family_is_cold_for_tui("DeepSeek", 0) is False
+    assert mms_core._family_is_cold_for_tui("GLM", 0) is False
+    assert mms_core._family_is_cold_for_tui("其他", 0) is True
+
+
+def test_model_capability_summary_marks_known_vision_models():
+    import mms_core
+
+    assert "vision" in mms_core._model_capability_tags("K2.6-code-preview")
+    assert "vision" in mms_core._model_capability_tags("mimo-v2.5")
+    assert "vision" in mms_core._model_capability_tags("qwen3.6-plus")
+    assert "vision" not in mms_core._model_capability_tags("mimo-v2.5-pro")
+
+
 def test_cold_cache_provider_without_static_models_stays_empty(monkeypatch):
     import mms_core
 
@@ -374,6 +392,40 @@ def test_runtime_with_vision_sidecar_prefers_direct_mimo_before_kimi(monkeypatch
     assert runtime["vision_sidecar"]["provider_id"] == "mimo-direct-anthropic"
     assert runtime["vision_sidecar"]["model"] == "mimo-v2.5"
     assert runtime["vision_sidecar"]["anthropic_base_url"] == "https://token-plan-cn.xiaomimimo.com/anthropic"
+
+
+def test_runtime_with_vision_sidecar_skips_missing_mimo_and_uses_available_kimi(monkeypatch):
+    import mms_core
+
+    cfg = {
+        "vision_sidecar": {"provider_id": "mimo_direct_anthropic"},
+        "providers": [{"id": "newapi", "enabled": True}],
+    }
+    newapi = {
+        "id": "newapi",
+        "enabled": True,
+        "api_key": "sk-kimi",
+        "anthropic_base_url": "https://relay.example.com/anthropic",
+        "supported_clis": ["claude"],
+        "models_endpoint": "manual",
+        "fallback_models": ["K2.6-code-preview"],
+    }
+    seen = []
+
+    def fake_resolve(_cfg, pid):
+        seen.append(pid)
+        assert pid == "newapi"
+        return newapi
+
+    monkeypatch.setattr(mms_core, "resolve_provider_context", fake_resolve)
+    monkeypatch.setattr(mms_core, "_load_probe_file_cache", lambda *_args, **_kwargs: None)
+
+    runtime = mms_core._runtime_with_vision_sidecar(cfg, {"id": "kimi", "auth_mode": "api_key"})
+
+    assert runtime["vision_sidecar"]["provider_id"] == "newapi"
+    assert runtime["vision_sidecar"]["model"] == "K2.6-code-preview"
+    assert seen
+    assert set(seen) == {"newapi"}
 
 
 def test_confirm_context_lines_show_claude_vision_sidecar():
