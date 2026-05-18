@@ -28,6 +28,8 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 | `heavy_omo` / `OMO` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
 | `raw` / `Raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
 
+Direct launch is also supported, for example `mms opencode --profile lite_pro` or `mmd opencode --profile lite_pro`.
+
 ## Lite Pro Roster
 
 | Agent | Mode | Current resolved model | Fallback role | Edit policy |

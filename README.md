@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.10.0`
+Current tagged version: `v2.10.1`
 
 Key changes in this generation:
 
@@ -87,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.1/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -119,6 +119,7 @@ Direct CLI launch:
 mms claude
 mms codex
 mms opencode
+mms opencode --profile lite_pro
 mms --provider <provider-id> codex
 mms --provider <provider-id> opencode
 mms --account <account-id> claude

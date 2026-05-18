@@ -7984,6 +7984,29 @@ _OPENCODE_PROFILE_OPTIONS = [
     },
 ]
 
+def _normalize_opencode_profile_id(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "pro": "lite_pro",
+        "litepro": "lite_pro",
+        "lite_pro": "lite_pro",
+        "5_5_pro": "lite_pro",
+        "orchestrated": "lite_pro_orchestrated",
+        "multi_agent": "lite_pro_orchestrated",
+        "lite_multi_agent": "lite_pro_orchestrated",
+        "lite_pro_orchestrated": "lite_pro_orchestrated",
+        "omo": "heavy_omo",
+        "heavy": "heavy_omo",
+        "heavy_omo": "heavy_omo",
+        "raw": "raw",
+        "lite": "lite",
+    }
+    return aliases.get(normalized, "")
+
+
 _OPENCODE_DEFAULT_MODEL_PREFERENCES = (
     "gpt-5.4",
     "gpt-5.5",
@@ -8098,7 +8121,7 @@ _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
 
 def _opencode_lite_pro_specs(profile_id="lite_pro"):
     specs = list(_OPENCODE_LITE_PRO_SPECS)
-    if str(profile_id or "").strip() == "lite_pro_orchestrated":
+    if _normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
         insert_at = next(
             (index + 1 for index, spec in enumerate(specs) if spec.get("key") == "explore_fallback"),
             len(specs),
@@ -8108,7 +8131,8 @@ def _opencode_lite_pro_specs(profile_id="lite_pro"):
 
 
 def _opencode_profile_label(profile_id):
-    if str(profile_id or "").strip() == "lite":
+    profile_id = _normalize_opencode_profile_id(profile_id) or str(profile_id or "").strip()
+    if profile_id == "lite":
         return "Lite"
     for option in _OPENCODE_PROFILE_OPTIONS:
         if option["id"] == profile_id:
@@ -8117,7 +8141,7 @@ def _opencode_profile_label(profile_id):
 
 
 def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"):
-    profile_id = str(profile_id or "lite_pro").strip() or "lite_pro"
+    profile_id = _normalize_opencode_profile_id(profile_id) or "lite_pro"
     latest = _load_opencode_route_health_latest(repo_root)
     expected_roles = {str(spec.get("key") or "").strip() for spec in _opencode_lite_pro_specs(profile_id)}
     expected = len(expected_roles)
@@ -8200,7 +8224,7 @@ def _select_opencode_profile(use_tui=False):
 
 def _apply_opencode_profile(runtime, profile_id):
     runtime = dict(runtime or {})
-    profile_id = str(profile_id or "lite").strip() or "lite"
+    profile_id = _normalize_opencode_profile_id(profile_id) or "lite"
     runtime["opencode_profile"] = profile_id
     runtime["opencode_profile_label"] = _opencode_profile_label(profile_id)
     if profile_id == "heavy_omo":
@@ -8566,7 +8590,7 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
 
 def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, profile_id):
     """Resolve fixed OpenCode profile runtime without asking for a model/channel."""
-    profile_id = str(profile_id or "lite").strip() or "lite"
+    profile_id = _normalize_opencode_profile_id(profile_id) or "lite"
     if profile_id == "heavy_omo":
         runtime = {
             "id": "global-opencode-omo",
@@ -11600,6 +11624,7 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
+            f"  {current_command()} opencode --profile lite_pro  直接启动指定 OpenCode profile\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} chat ...        legacy/maintenance-only chat 子命令\n"
@@ -11626,6 +11651,7 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode profile，例如 lite_pro / orchestrated / omo / raw")
     parser.add_argument("--lang", choices=["zh", "en"], help="临时指定 UI 语言")
     parser.add_argument("--trace", action="store_true",
                         help="启动前打印选择链路追踪信息（输出到 stderr）")
@@ -11661,6 +11687,12 @@ def main():
     if args.account and args.provider:
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
         sys.exit(1)
+    requested_opencode_profile = _normalize_opencode_profile_id(args.opencode_profile)
+    if args.opencode_profile and not requested_opencode_profile:
+        valid_profiles = ", ".join(option["id"] for option in _OPENCODE_PROFILE_OPTIONS)
+        parser.error(f"--profile 仅支持 OpenCode profile：lite, {valid_profiles}")
+    if requested_opencode_profile and args.account:
+        parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
 
     # --install
     if args.install:
@@ -11759,6 +11791,11 @@ def main():
 
     # Direct target
     target = once_target or args.target
+    if requested_opencode_profile:
+        if target is None:
+            target = "opencode"
+        elif target != "opencode":
+            parser.error("--profile 仅支持 target=opencode，例如：mms opencode --profile lite_pro")
 
     if target:
         # Is it a scene number?
@@ -11804,6 +11841,35 @@ def main():
                 return
         except ValueError:
             pass
+
+        if target == "opencode" and requested_opencode_profile:
+            cli = "opencode"
+            _trace_record("OpenCode profile target", profile=requested_opencode_profile)
+            profile_provider = ensure_provider_credentials(cfg, args.provider) if args.provider else default_provider
+            profile_models = models_cache
+            if args.provider:
+                profile_models = _probe_models(profile_provider, emit_output=False).get("models")
+            model_info, runtime = _resolve_opencode_profile_runtime(
+                cfg,
+                profile_provider,
+                profile_models,
+                requested_opencode_profile,
+            )
+            if runtime is None:
+                console.print(f"[red]opencode profile {requested_opencode_profile} 当前没有可用运行来源[/red]")
+                return
+            _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice="opencode profile")
+            if not check_cli_installed(cli):
+                from mms_installer import check_and_offer_install
+                if not check_and_offer_install(cli):
+                    return
+            action = confirm_launch(cli, model_info, once, runtime=runtime)
+            if action == "q":
+                return
+            if action == "s":
+                save_preset_interactive(user_cfg, cli, model_info)
+            _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
+            return
 
         # Is it a CLI name?
         if target in visible_clis:
