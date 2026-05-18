@@ -28,6 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.9.12}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -706,6 +707,21 @@ PY
                 | head -n 1 \
                 | awk '{ print $4 }'
         )" || true
+    fi
+    if [ -z "$resolved_tag" ] && command -v git >/dev/null 2>&1; then
+        resolved_tag="$(
+            git ls-remote --tags "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null \
+                | sed 's#refs/tags/##; s#\\^{}##' \
+                | awk '{ print $2 }' \
+                | sort -u \
+                | awk -F'[v.]' '{ printf "%09d %09d %09d %s\n", $2, $3, $4, $0 }' \
+                | sort -r \
+                | head -n 1 \
+                | awk '{ print $4 }'
+        )" || true
+    fi
+    if [ -z "$resolved_tag" ] && [ -n "$DEFAULT_INSTALL_FALLBACK_TAG" ]; then
+        resolved_tag="$DEFAULT_INSTALL_FALLBACK_TAG"
     fi
     [ -n "$resolved_tag" ] || return 1
     LATEST_TAG_CACHE="$resolved_tag"
