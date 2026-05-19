@@ -1,4 +1,5 @@
 import sys
+from types import SimpleNamespace
 
 
 def test_runtime_accepts_current_supported_python():
@@ -17,6 +18,42 @@ def test_runtime_candidate_list_prefers_explicit_python(monkeypatch):
 
     assert candidates[0] == "/tmp/custom-python"
     assert "python3.11" in candidates
+
+
+def test_runtime_reexecs_even_when_reexec_flag_is_inherited(monkeypatch):
+    import mms_runtime
+
+    captured = {}
+    fake_sys = SimpleNamespace(
+        version_info=(3, 9, 0),
+        executable="/usr/bin/python3",
+        argv=["mms", "resume", "--help"],
+        stderr=SimpleNamespace(write=lambda value: captured.setdefault("stderr", value)),
+    )
+
+    monkeypatch.setenv("MMS_PYTHON_REEXEC", "1")
+    monkeypatch.setattr(mms_runtime, "sys", fake_sys)
+    monkeypatch.setattr(mms_runtime, "_candidate_pythons", lambda: ["python3.13"])
+    monkeypatch.setattr(mms_runtime, "_resolve_python", lambda candidate: "/opt/homebrew/bin/python3.13")
+    monkeypatch.setattr(mms_runtime, "_supports_min_python", lambda executable: True)
+
+    def fake_execve(executable, argv, env):
+        captured["executable"] = executable
+        captured["argv"] = argv
+        captured["env"] = env
+        raise RuntimeError("stop after exec capture")
+
+    monkeypatch.setattr(mms_runtime.os, "execve", fake_execve)
+
+    try:
+        mms_runtime.ensure_supported_python("MMS")
+    except RuntimeError as exc:
+        assert str(exc) == "stop after exec capture"
+
+    assert captured["executable"] == "/opt/homebrew/bin/python3.13"
+    assert captured["argv"] == ["/opt/homebrew/bin/python3.13", "mms", "resume", "--help"]
+    assert captured["env"]["MMS_PYTHON_REEXEC"] == "1"
+    assert "stderr" not in captured
 
 
 def test_cli_resolver_finds_claude_in_other_nvm_version(tmp_path, monkeypatch):

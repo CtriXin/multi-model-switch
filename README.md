@@ -35,7 +35,7 @@ Key changes in this generation:
 - Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches
 - OpenCode profiles: `Orchestrated`, `Roster`, and `Raw` with repo-local health feedback
-- OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, domestic models via Anthropic `/v1/messages`
+- OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
 - OpenCode bypass is enabled by default through permission `allow`; subagent `ask` permissions are auto-approved while explicit `deny` boundaries stay intact, and optional `opencode run` preflight uses `--dangerously-skip-permissions`
 - model fallback order: same-model second channel, same-role peer, then stable GPT fallback
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node

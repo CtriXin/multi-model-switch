@@ -13,6 +13,7 @@ import time
 import inspect
 import hashlib
 import tempfile
+import re
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
@@ -3319,13 +3320,16 @@ def _print_trace(cli_name, model_info, runtime):
     print("\n".join(lines), file=sys.stderr)
 
 
-def _launch_with_tracking(cli_name, model_info, runtime, once=False):
+def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=None):
     if cli_name == "claude":
         runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
     if _trace_enabled:
         _print_trace(cli_name, model_info, runtime)
     _record_usage(runtime, cli_name, model_info)
     if runtime and runtime.get("runtime_kind") == "broker" and cli_name == "claude":
+        if extra_args:
+            console.print("[red]broker profile 暂不支持 CLI resume 参数[/red]")
+            raise SystemExit(1)
         model_override = _resolve_model_name(model_info)
         if model_override == "official-default":
             model_override = runtime.get("remote_service_model", "")
@@ -3338,7 +3342,7 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False):
             raise SystemExit(exit_code)
         return
     from mms_launchers import launch_cli
-    launch_cli(cli_name, model_info, runtime, once=once)
+    launch_cli(cli_name, model_info, runtime, once=once, extra_args=extra_args)
 
 
 def _legacy_provider_env_name(provider_id, field):
@@ -8150,6 +8154,12 @@ def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"
     for row in latest.values():
         if not isinstance(row, dict) or row.get("profile") != profile_id:
             continue
+        if (
+            str(row.get("model") or "").strip().lower().startswith("mimo-")
+            and str(row.get("protocol") or "").strip() == "openai_chat_completions"
+            and row.get("error_class") == "cache_sensitive_wrong_protocol"
+        ):
+            continue
         role = str(row.get("role") or row.get("route_id") or "").strip()
         if role not in expected_roles:
             continue
@@ -8300,6 +8310,41 @@ def _opencode_normalized_anthropic_base_url(provider):
     return base_url
 
 
+def _opencode_is_mimo_direct_route(provider, model_name=""):
+    provider_identity = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            provider.get("id"),
+            _provider_label(provider),
+            provider.get("base_url"),
+            provider.get("openai_base_url"),
+            provider.get("anthropic_base_url"),
+        )
+    )
+    return "mimo" in provider_identity or "xiaomimimo.com" in provider_identity
+
+
+def _opencode_mimo_openai_base_from_anthropic(anthropic_base_url):
+    """Derive MiMo's official OpenCode/OpenAI-compatible base from Anthropic base.
+
+    MiMo documents OpenCode with `@ai-sdk/openai-compatible` and `/v1`.
+    Token Plan credentials show Anthropic as `/anthropic[/v1]`, while the
+    matching OpenAI-compatible base is the same host with `/v1`.
+    """
+    base_url = str(anthropic_base_url or "").strip().rstrip("/")
+    if not base_url or "xiaomimimo.com" not in base_url.lower():
+        return ""
+    parsed = urlparse(base_url)
+    path = parsed.path.rstrip("/")
+    if path.endswith("/anthropic/v1"):
+        path = path[: -len("/anthropic/v1")] + "/v1"
+    elif path.endswith("/anthropic"):
+        path = path[: -len("/anthropic")] + "/v1"
+    else:
+        return ""
+    return parsed._replace(path=path or "/v1", params="", query="", fragment="").geturl().rstrip("/")
+
+
 def _opencode_route_transport(provider, model_name):
     candidates = _opencode_route_transport_candidates(provider, model_name)
     if not candidates:
@@ -8321,6 +8366,14 @@ def _opencode_route_transport_candidates(provider, model_name):
         if "openai_chat_completions" in protocols and openai_base_url:
             candidates.append(("openai_chat_completions", openai_base_url, anthropic_base_url))
         return candidates
+    if _opencode_is_mimo_direct_route(provider, model_name):
+        mimo_openai_base_url = openai_base_url or _opencode_mimo_openai_base_from_anthropic(anthropic_base_url)
+        if mimo_openai_base_url:
+            # Official MiMo OpenCode guidance uses the OpenAI-compatible
+            # provider. Do not add Anthropic as a fallback: OpenCode can miss
+            # MiMo reasoning_content there during tool-result loops.
+            candidates.append(("openai_chat_completions", mimo_openai_base_url, anthropic_base_url))
+            return candidates
     if "anthropic_messages" in protocols and anthropic_base_url:
         candidates.append(("anthropic_messages", openai_base_url, anthropic_base_url))
     return candidates
@@ -8426,7 +8479,20 @@ def _opencode_route_health_for_route(latest_health, profile, role, route):
         route.get("protocol"),
     )
     row = latest_health.get(key) if isinstance(latest_health, dict) else None
-    return row if isinstance(row, dict) else None
+    if not isinstance(row, dict):
+        return None
+    model = str(route.get("model") or "").strip().lower()
+    protocol = str(route.get("protocol") or "").strip()
+    if (
+        model.startswith("mimo-")
+        and protocol == "openai_chat_completions"
+        and row.get("error_class") == "cache_sensitive_wrong_protocol"
+    ):
+        # Older smoke policy incorrectly marked direct MiMo OpenAI-compatible
+        # routes as "wrong protocol". The current MiMo OpenCode docs make this
+        # the official protocol, so ignore stale rows until the next smoke run.
+        return None
+    return row
 
 
 def _opencode_route_health_is_fresh(row, *, now=None, ttl_sec=_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC):
@@ -8494,7 +8560,12 @@ def _find_opencode_model_route(
             if not _provider_supports_model_for_cli(provider, "opencode", actual_model):
                 continue
             for protocol, openai_base_url, anthropic_base_url in _opencode_route_transport_candidates(provider, actual_model):
-                protocol_rank = 0 if protocol in {"openai_responses", "anthropic_messages"} else 1
+                if _opencode_is_mimo_direct_route(provider, actual_model):
+                    # MiMo's official OpenCode path is OpenAI-compatible.
+                    # Rank it ahead of any legacy/stale route metadata.
+                    protocol_rank = 0 if protocol == "openai_chat_completions" else 2
+                else:
+                    protocol_rank = 0 if protocol in {"openai_responses", "anthropic_messages"} else 1
                 route = {
                     "id": route_key,
                     "model": actual_model,
@@ -11139,6 +11210,296 @@ def handle_session_command(argv):
     parser.print_help()
 
 
+def _split_cli_prefixed_resume_ref(session_ref):
+    ref = str(session_ref or "").strip()
+    if ":" not in ref:
+        return "", ref
+    prefix, rest = ref.split(":", 1)
+    prefix = prefix.strip().lower()
+    rest = rest.strip()
+    if prefix in {"codex", "claude"} and rest:
+        return prefix, rest
+    return "", ref
+
+
+def _codex_resume_roots():
+    roots = []
+
+    def add(path):
+        normalized = str(path or "").strip()
+        if not normalized:
+            return
+        expanded = os.path.abspath(os.path.expanduser(normalized))
+        if expanded not in roots:
+            roots.append(expanded)
+
+    for env_name in ("MMS_CODEX_RESUME_WRITEBACK_ROOT", "CODEX_HOME"):
+        add(os.environ.get(env_name))
+    real_home = resolve_real_user_home()
+    add(os.path.join(real_home, ".config", "mms", "codex-gateway", ".codex"))
+    add(os.path.join(real_home, ".codex"))
+    return roots
+
+
+def _iter_codex_index_records():
+    seen = set()
+    for root in _codex_resume_roots():
+        path = os.path.join(root, "session_index.jsonl")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except Exception:
+                        continue
+                    session_id = str(item.get("id") or "").strip()
+                    if not session_id or session_id in seen:
+                        continue
+                    seen.add(session_id)
+                    payload = dict(item)
+                    payload["_root"] = root
+                    yield payload
+        except OSError:
+            continue
+
+
+def _resolve_codex_resume_ref(session_ref, *, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    records = list(_iter_codex_index_records())
+    exact = [item for item in records if str(item.get("id") or "").strip() == ref]
+    if exact:
+        return str(exact[0]["id"]), exact[0], None
+    matches = [item for item in records if str(item.get("id") or "").strip().startswith(ref)]
+    if len(matches) == 1:
+        return str(matches[0]["id"]), matches[0], None
+    if len(matches) > 1:
+        return None, None, f"Codex session 前缀不唯一: {ref}"
+    if allow_passthrough:
+        return ref, {"id": ref, "_unindexed": True}, None
+    return None, None, f"找不到 Codex session: {ref}"
+
+
+def _resolve_claude_resume_ref(session_ref, *, allow_passthrough=False):
+    ref = str(session_ref or "").strip()
+    if not ref:
+        return None, None, "session id 不能为空"
+    from mms_session_index import list_indexed_sessions
+
+    sessions = [
+        item for item in list_indexed_sessions(cli_name="claude")
+        if str(item.get("session_id") or "").strip()
+    ]
+    if ref.isdigit():
+        index = int(ref)
+        if 1 <= index <= len(sessions):
+            item = sessions[index - 1]
+            return str(item.get("session_id") or "").strip(), item, None
+        return None, None, f"找不到第 {index} 条 Claude session"
+    exact = [item for item in sessions if str(item.get("session_id") or "").strip() == ref]
+    if exact:
+        return str(exact[0].get("session_id") or "").strip(), exact[0], None
+    matches = [item for item in sessions if str(item.get("session_id") or "").strip().startswith(ref)]
+    if len(matches) == 1:
+        return str(matches[0].get("session_id") or "").strip(), matches[0], None
+    if len(matches) > 1:
+        return None, None, f"Claude session 前缀不唯一: {ref}"
+    if allow_passthrough:
+        return ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, f"找不到 Claude session: {ref}"
+
+
+def _resolve_resume_target(session_ref, cli_hint="auto"):
+    prefix_cli, ref = _split_cli_prefixed_resume_ref(session_ref)
+    cli_hint = prefix_cli or str(cli_hint or "auto").strip().lower()
+    if cli_hint not in {"auto", "codex", "claude"}:
+        return None, None, None, f"不支持的 CLI: {cli_hint}"
+    if cli_hint == "codex":
+        session_id, record, error = _resolve_codex_resume_ref(ref, allow_passthrough=True)
+        return "codex", session_id, record, error
+    if cli_hint == "claude":
+        session_id, record, error = _resolve_claude_resume_ref(ref, allow_passthrough=True)
+        return "claude", session_id, record, error
+
+    codex_id, codex_record, codex_error = _resolve_codex_resume_ref(ref, allow_passthrough=False)
+    claude_id, claude_record, claude_error = _resolve_claude_resume_ref(ref)
+    if codex_id and not claude_id:
+        return "codex", codex_id, codex_record, None
+    if claude_id and not codex_id:
+        return "claude", claude_id, claude_record, None
+    if codex_id and claude_id:
+        return None, None, None, f"session id 同时匹配 Codex 和 Claude，请使用 codex:{ref} 或 claude:{ref}"
+    uuid_cli = _uuid_resume_cli_hint(ref)
+    if uuid_cli == "codex":
+        # Codex UUIDs are usually v7 and may not have been written back into
+        # MMS' bounded index yet; pass the id through to native resume.
+        return "codex", ref, {"id": ref, "_unindexed": True}, None
+    if uuid_cli == "claude":
+        # Claude Code prints v4 session UUIDs in "claude --resume <id>".
+        return "claude", ref, {"session_id": ref, "_unindexed": True}, None
+    return None, None, None, codex_error or claude_error or f"找不到 session: {ref}"
+
+
+def _uuid_resume_cli_hint(session_ref):
+    ref = str(session_ref or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref):
+        return ""
+    version = ref.split("-", 3)[2][:1]
+    if version == "7":
+        return "codex"
+    if version == "4":
+        return "claude"
+    return ""
+
+
+def _first_resume_model(cli_models, default_models, recommend=None):
+    names = []
+    for item in list(cli_models or []) + list(default_models or []):
+        name = str(item.get("model") if isinstance(item, dict) else item or "").strip()
+        if name and name not in names:
+            names.append(name)
+    for preferred in recommend or []:
+        if preferred in names:
+            return preferred
+    return names[0] if names else ""
+
+
+def _session_resume_model(session_record):
+    if not isinstance(session_record, dict):
+        return ""
+    for key in ("resume_model", "selected_model", "display_model", "model"):
+        value = str(session_record.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _resolve_resume_runtime_and_model(
+    cfg,
+    cli,
+    args,
+    default_provider,
+    default_models,
+    session_record,
+):
+    requested_model = str(args.model or "").strip()
+    if requested_model:
+        model_info = {"model": requested_model}
+    elif cli == "claude" and _session_resume_model(session_record):
+        model_info = {"model": _session_resume_model(session_record)}
+    else:
+        last_by_cli, _scene_counts = _get_scene_usage()
+        last_item = last_by_cli.get(cli)
+        last_model_info = last_item.get("model_info") if isinstance(last_item, dict) else None
+        model_info = last_model_info if isinstance(last_model_info, dict) else {}
+
+    account_id = str(args.account or "").strip()
+    provider_id = str(args.provider or "").strip()
+    if cli == "claude" and not account_id and not provider_id and isinstance(session_record, dict):
+        source_id = str(session_record.get("account_id") or "").strip()
+        runtime_kind = str(session_record.get("runtime_kind") or "").strip()
+        if source_id and runtime_kind == "api_key":
+            provider_id = source_id
+        elif source_id and runtime_kind == "oauth":
+            account_id = source_id
+
+    runtime = cli_models = launch_cli_name = None
+    if not account_id and not provider_id:
+        last_by_cli, _scene_counts = _get_scene_usage()
+        last_item = last_by_cli.get(cli)
+        runtime, cli_models, choice = _resolve_last_used_runtime(cfg, cli, last_item, default_models)
+        if runtime is not None:
+            launch_cli_name = cli
+            _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice=choice)
+    if runtime is None:
+        runtime, cli_models, launch_cli_name = _choose_runtime_source(
+            cfg,
+            cli,
+            default_provider,
+            default_models,
+            account_id=account_id or None,
+            provider_id=provider_id or None,
+            model_info=model_info or None,
+            allow_selected_model_accounts=True,
+        )
+
+    if not isinstance(model_info, dict) or not _resolve_model_name(model_info):
+        model_name = _first_resume_model(cli_models, default_models, cfg.get("recommend", {}).get("models", []))
+        model_info = {"model": model_name} if model_name else {}
+    if _resolve_model_name(model_info) == "official-default" and not _uses_managed_entry(runtime or {}, cli):
+        model_name = _first_resume_model(cli_models, default_models, cfg.get("recommend", {}).get("models", []))
+        if model_name:
+            model_info = {"model": model_name}
+    return runtime, cli_models or [], launch_cli_name or cli, model_info
+
+
+def handle_resume_command(argv, preloaded_command_cfg=None, bootstrap_cfg=None, lang_override=None):
+    parser = argparse.ArgumentParser(
+        prog=f"{current_command()} resume",
+        description="通过 Codex/Claude session id 一键恢复 MMS 托管会话",
+    )
+    parser.add_argument("session_ref", help="session id、前缀，或 codex:<id> / claude:<id>")
+    parser.add_argument("prompt", nargs="*", help="恢复后追加给 CLI 的可选 prompt；若 prompt 以 -- 开头请先写 --")
+    parser.add_argument("--cli", choices=["auto", "codex", "claude"], default="auto", help="强制指定恢复目标 CLI")
+    parser.add_argument("--provider", help="临时指定 provider")
+    parser.add_argument("--account", help="临时指定官方账号档案")
+    parser.add_argument("--model", help="临时指定恢复时使用的模型")
+    parser.add_argument("--once", action="store_true", help="以一次性会话模式启动底层 CLI")
+    args = parser.parse_intermixed_args(argv)
+
+    if args.account and args.provider:
+        parser.error("--account 和 --provider 不能同时使用")
+
+    cli, session_id, session_record, error = _resolve_resume_target(args.session_ref, args.cli)
+    if error:
+        console.print(f"[red]{error}[/red]")
+        raise SystemExit(1)
+    if cli not in {"codex", "claude"} or not session_id:
+        console.print(f"[red]无法识别 session: {args.session_ref}[/red]")
+        raise SystemExit(1)
+
+    user_cfg = preloaded_command_cfg or bootstrap_cfg or load_config()
+    if user_cfg is None:
+        user_cfg = setup_wizard(_resolve_ui_language(None, lang_override))
+    cfg = apply_local_overrides(user_cfg)
+    set_language(_resolve_ui_language(cfg, lang_override))
+
+    default_provider = ensure_provider_credentials(cfg)
+    default_provider, models_cache = ensure_models_ready(cfg, default_provider)
+    runtime, _cli_models, launch_cli_name, model_info = _resolve_resume_runtime_and_model(
+        cfg,
+        cli,
+        args,
+        default_provider,
+        models_cache,
+        session_record,
+    )
+    if runtime is None:
+        console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+        raise SystemExit(1)
+    if launch_cli_name != cli:
+        console.print(f"[red]resume 只支持原 CLI 恢复，当前解析为 {launch_cli_name}[/red]")
+        raise SystemExit(1)
+    if cli == "claude":
+        project_path = str((session_record or {}).get("project_path") or (session_record or {}).get("cwd") or "").strip()
+        if project_path and os.path.isdir(project_path):
+            os.chdir(project_path)
+        extra_args = ["--resume", session_id] + list(args.prompt or [])
+    else:
+        extra_args = ["resume", session_id] + list(args.prompt or [])
+
+    source = "未写入 MMS index，交给 Codex 原生 resume 校验" if (session_record or {}).get("_unindexed") else "MMS index"
+    console.print(f"[cyan]恢复 {cli} session:[/cyan] {session_id}")
+    console.print(f"[dim]来源: {source}[/dim]")
+    _launch_with_tracking(cli, model_info, runtime, once=bool(args.once), extra_args=extra_args)
+
+
 def _save_cache_config_value(cfg, key, value):
     updated_cfg = dict(cfg)
     cache_cfg = dict(updated_cfg.get("cache", {}) if isinstance(updated_cfg.get("cache"), dict) else {})
@@ -11573,6 +11934,14 @@ def main():
         if command == "session":
             handle_session_command(argv[1:])
             return
+        if command == "resume":
+            handle_resume_command(
+                argv[1:],
+                preloaded_command_cfg=preloaded_command_cfg,
+                bootstrap_cfg=bootstrap_cfg,
+                lang_override=lang_override,
+            )
+            return
         if command == "cache":
             handle_cache_command(argv[1:])
             return
@@ -11617,6 +11986,7 @@ def main():
             f"  {current_command()} warm [id]       预热模型缓存\n"
             f"  {current_command()} cache ...       查看或调整模型 cache 异步刷新窗口\n"
             f"  {current_command()} session ...     查看托管 session\n"
+            f"  {current_command()} resume <id>     通过 Codex/Claude session id 恢复托管 CLI\n"
             f"  {current_command()} routes ...      查看路由配置\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor [full]   诊断 provider / model / Claude 兼容性（默认 lite）\n"

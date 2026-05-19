@@ -170,18 +170,17 @@ def ensure_supported_python(app_name="MMS"):
     if sys.version_info >= MIN_PYTHON:
         return
 
-    if os.environ.get("MMS_PYTHON_REEXEC") != "1":
-        current = os.path.realpath(sys.executable)
-        for candidate in _candidate_pythons():
-            executable = _resolve_python(candidate)
-            if not executable:
-                continue
-            if os.path.realpath(executable) == current:
-                continue
-            if _supports_min_python(executable):
-                env = os.environ.copy()
-                env["MMS_PYTHON_REEXEC"] = "1"
-                os.execve(executable, [executable, *sys.argv], env)
+    current = os.path.realpath(sys.executable)
+    for candidate in _candidate_pythons():
+        executable = _resolve_python(candidate)
+        if not executable:
+            continue
+        if os.path.realpath(executable) == current:
+            continue
+        if _supports_min_python(executable):
+            env = os.environ.copy()
+            env["MMS_PYTHON_REEXEC"] = "1"
+            os.execve(executable, [executable, *sys.argv], env)
 
     current_version = ".".join(str(part) for part in sys.version_info[:3])
     required = ".".join(str(part) for part in MIN_PYTHON)

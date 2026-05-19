@@ -1838,6 +1838,13 @@ OPENCODE_IMAGE_INPUT_MODELS = {
     "qwen3.5-plus",
     "qwen3.6-plus",
 }
+OPENCODE_MODEL_LIMIT_OVERRIDES = {
+    # MiMo's OpenCode guide advertises 1M context and 131072 output for the
+    # OpenAI-compatible provider config, independent of Claude Code's [1m]
+    # Anthropic selector.
+    "mimo-v2.5-pro": {"context": 1_048_576, "output": 131_072},
+    "mimo-v2.5": {"context": 1_048_576, "output": 131_072},
+}
 
 # agent-im daemon 路径（仅在显式配置时启用，避免公开仓库绑定个人目录）
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
@@ -7066,7 +7073,7 @@ def _apply_claude_model_overrides(target, model_info, *, enable_1m=True):
     return primary_model
 
 
-def launch_claude(model_info, runtime, once=False):
+def launch_claude(model_info, runtime, once=False, extra_args=None):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
     _ensure_bridge_helpers()
     _ensure_speed_stats()
@@ -7460,6 +7467,7 @@ def launch_claude(model_info, runtime, once=False):
                 cleanup_ctx = None
 
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    env["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
     env["API_TIMEOUT_MS"] = "3000000"
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
@@ -7500,6 +7508,8 @@ def launch_claude(model_info, runtime, once=False):
     if runtime.get("bypass"):
         cmd += ["--add-dir", os.path.realpath(_safe_getcwd())]
         cmd.append("--dangerously-skip-permissions")
+    if extra_args:
+        cmd += list(extra_args)
     console.print("[dim]⏳ 正在启动 Claude CLI...[/dim]")
     session_home = env.get("HOME")
     exit_callback = None
@@ -8133,13 +8143,12 @@ def _claude_gateway_env(
     required_settings_env: dict = {
         "ANTHROPIC_AUTH_TOKEN": effective_token,
         "ANTHROPIC_BASE_URL": base_url,
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "MMS_ROUTE_STATUS_PATH": route_status_path,
     }
     if mms_model_name:
         required_settings_env["MMS_MODEL_NAME"] = mms_model_name
-    default_settings_env: dict = {
-        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
-    }
+    default_settings_env: dict = {}
     if sensitive_provider:
         required_settings_env["CLAUDE_CODE_DISABLE_1M_CONTEXT"] = "1"
     else:
@@ -8673,7 +8682,7 @@ def _codex_provider_base_url(base_url):
     return normalized
 
 
-def launch_codex(model_info, runtime, once=False):
+def launch_codex(model_info, runtime, once=False, extra_args=None):
     """启动 Codex，支持 provider 和 OAuth 账号档案两种模式。
     GPT 模型优先直连 Responses API；非 GPT 模型走本地 Chat Completions bridge。"""
     _ensure_bridge_helpers()
@@ -8688,6 +8697,8 @@ def launch_codex(model_info, runtime, once=False):
             cmd += ["-m", model]
         if runtime.get("bypass"):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        if extra_args:
+            cmd += list(extra_args)
         _exec_or_run(cmd, env, once, exit_callback=_codex_resume_writeback_callback(env))
         return
 
@@ -8735,6 +8746,8 @@ def launch_codex(model_info, runtime, once=False):
                 cmd += ["-m", model]
             if runtime.get("bypass"):
                 cmd.append("--dangerously-bypass-approvals-and-sandbox")
+            if extra_args:
+                cmd += list(extra_args)
             exit_code = 0
             try:
                 cmd, env, _ = prepare_cli_command(cmd, env)
@@ -8784,6 +8797,8 @@ def launch_codex(model_info, runtime, once=False):
             cmd += ["-m", model]
         if runtime.get("bypass"):
             cmd.append("--dangerously-bypass-approvals-and-sandbox")
+        if extra_args:
+            cmd += list(extra_args)
         # 本地 responses bridge 运行在当前 Python 进程内；交互模式若 exec 替换自身，
         # bridge 线程会一并消失，Codex 随后访问 127.0.0.1:port 只会得到 5xx/连接失败。
         _exec_or_run(
@@ -9095,7 +9110,7 @@ def _opencode_select_launch_candidate(runtime, routes, model, env):
     return "", "", checks
 
 
-def _opencode_output_limit(runtime):
+def _opencode_explicit_output_limit(runtime):
     runtime = runtime if isinstance(runtime, dict) else {}
     for key in ("opencode_output_limit", "output_limit", "max_output_tokens"):
         try:
@@ -9104,6 +9119,35 @@ def _opencode_output_limit(runtime):
             continue
         if value > 0:
             return value
+    return None
+
+
+def _opencode_output_limit(runtime):
+    explicit = _opencode_explicit_output_limit(runtime)
+    if explicit is not None:
+        return explicit
+    return OPENCODE_DEFAULT_OUTPUT_LIMIT
+
+
+def _opencode_model_limit_override(model_name):
+    model = str(model_name or "").strip().lower()
+    if "/" in model:
+        model = model.rsplit("/", 1)[-1]
+    return OPENCODE_MODEL_LIMIT_OVERRIDES.get(model)
+
+
+def _opencode_model_output_limit(runtime, model_name):
+    explicit = _opencode_explicit_output_limit(runtime)
+    if explicit is not None:
+        return explicit
+    override = _opencode_model_limit_override(model_name)
+    if isinstance(override, dict):
+        try:
+            output = int(override.get("output"))
+        except (TypeError, ValueError):
+            output = 0
+        if output > 0:
+            return output
     return OPENCODE_DEFAULT_OUTPUT_LIMIT
 
 
@@ -9166,15 +9210,23 @@ def _opencode_model_requires_reasoning_roundtrip_guard(model_name):
 def _opencode_model_config(runtime, model_name):
     model = str(model_name or "").strip()
     config = {"name": model}
-    context_window = _effective_context_window(
-        model,
-        enable_claude_1m=False,
-        provider_id=(runtime or {}).get("id"),
-    )
+    limit_override = _opencode_model_limit_override(model)
+    context_window = None
+    if isinstance(limit_override, dict):
+        try:
+            context_window = int(limit_override.get("context"))
+        except (TypeError, ValueError):
+            context_window = None
+    if not context_window:
+        context_window = _effective_context_window(
+            model,
+            enable_claude_1m=False,
+            provider_id=(runtime or {}).get("id"),
+        )
     if context_window:
         config["limit"] = {
             "context": context_window,
-            "output": _opencode_output_limit(runtime),
+            "output": _opencode_model_output_limit(runtime, model),
         }
     if model.lower() in OPENCODE_IMAGE_INPUT_MODELS:
         config["attachment"] = True
@@ -10150,7 +10202,7 @@ def _show_launch_info(cli, runtime, auth_mode):
         pass
 
 
-def launch_cli(cli, model_info, runtime, once=False):
+def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
     """统一启动入口"""
     runtime = dict(runtime)
     launcher = LAUNCHERS.get(cli)
@@ -10205,7 +10257,10 @@ def launch_cli(cli, model_info, runtime, once=False):
     _show_launch_info(cli, runtime, auth_mode)
     console.print("[dim]─" * 40 + "[/dim]\n")
 
-    launcher(model_info, runtime, once=once)
+    if extra_args:
+        launcher(model_info, runtime, once=once, extra_args=list(extra_args))
+    else:
+        launcher(model_info, runtime, once=once)
 
 
 def _write_runtime_config(prefix, content):

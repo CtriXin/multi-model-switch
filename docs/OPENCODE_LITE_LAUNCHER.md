@@ -11,7 +11,7 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - `lite` remains supported by profile ID for compatibility, but is hidden from the selector.
 - In the OpenCode tab, MMS shows this profile selector first; session-local profiles do not ask the user to choose a channel/model before profile selection.
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
-- Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; every non-GPT route with `anthropic_messages` support uses `@ai-sdk/anthropic` and `/v1/messages`.
+- Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; direct MiMo uses the official `@ai-sdk/openai-compatible` `/v1` path; the other non-GPT routes with `anthropic_messages` support use `@ai-sdk/anthropic` and `/v1/messages`.
 - Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
 - Direct MiMo is available again as a supplemental CN/vision reviewer. It is not the final release gate, and MMS-generated OpenCode config disables MiMo model reasoning by default until OpenCode can replay MiMo `reasoning_content` in tool loops.
 - Lite Pro includes optional vision helper agents. If the active coding/review model cannot read images, the coordinator can ask MiMo/Kimi/Qwen vision helpers to inspect screenshots first, then pass structured observations back to the main workflow.
@@ -38,17 +38,17 @@ Direct launch is also supported, for example `mms opencode --profile lite_pro` o
 | `mobius-builder-stable` | primary | `gpt-5.4` | launch/builder fallback | ask |
 | `mobius-explore-glm` | subagent | `glm-5-turbo` via Anthropic | primary explorer | deny |
 | `mobius-explore-kimi` | subagent | `kimi-for-coding` via Anthropic | fallback explorer | deny |
-| `mobius-vision-mimo` | subagent | `mimo-v2.5` via direct MiMo Anthropic | primary image helper | deny |
+| `mobius-vision-mimo` | subagent | `mimo-v2.5` via direct MiMo OpenAI-compatible | primary image helper | deny |
 | `mobius-vision-kimi` | subagent | `kimi-k2.5` / `K2.6` via Anthropic | image helper fallback | deny |
 | `mobius-vision-qwen` | subagent | `qwen3.6-plus` via Anthropic | image helper fallback | deny |
 | `mobius-reviewer-gpt55` | subagent | `gpt-5.5` via Responses | primary release-gate reviewer | deny |
 | `mobius-reviewer-gpt54` | subagent | `gpt-5.4` via Responses | stable reviewer outage fallback | deny |
-| `mobius-reviewer-mimo` | subagent | `mimo-v2.5-pro` via direct MiMo Anthropic | supplemental CN/vision critique reviewer | deny |
+| `mobius-reviewer-mimo` | subagent | `mimo-v2.5-pro` via direct MiMo OpenAI-compatible | supplemental CN/vision critique reviewer | deny |
 | `mobius-fixer-deepseek` | subagent | `deepseek-v4-pro` via Anthropic | primary fixer | ask |
 | `mobius-fixer-glm` | subagent | `glm-5.1` via Anthropic | fallback fixer | ask |
 | `mobius-fixer-gpt54` | subagent | `gpt-5.4` | final fixer fallback | ask |
 
-GLM/Kimi/DeepSeek/MiMo routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages`. They must not fall back to `chat/completions` silently. MiMo remains direct-only and is configured with reasoning disabled in OpenCode-generated model metadata to avoid the official `reasoning_content` tool-loop 400 until OpenCode can replay that field itself.
+GLM/Kimi/DeepSeek routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages`. They must not fall back to `chat/completions` silently. MiMo is the exception: Xiaomi's OpenCode guide uses OpenAI-compatible `/v1`, and warns that OpenCode + Anthropic protocol can miss `reasoning_content` in tool loops. MiMo remains direct-only and is configured with `reasoning=false` in OpenCode-generated model metadata until OpenCode can reliably preserve that field.
 
 ## Lite Pro Orchestrated
 
@@ -106,5 +106,5 @@ The OpenCode profile menu appends compact health hints to Lite Pro profiles, suc
 - Keep destructive shell, deploy, push, and external directory access behind `ask` or `deny`.
 - Keep `heavy_omo` global-config based until a separate audited OMO overlay is implemented.
 - Do not use `K2.6` in Lite Pro through `chat/completions`; if added later, keep it on Anthropic `/v1/messages` and validate with live smoke first.
-- Do not assign GLM/Kimi/DeepSeek/MiMo dual-protocol cache-sensitive routes to Lite Pro's OpenCode `chat/completions` lane; prefer Anthropic `/v1/messages`.
+- Do not assign GLM/Kimi/DeepSeek dual-protocol cache-sensitive routes to Lite Pro's OpenCode `chat/completions` lane; prefer Anthropic `/v1/messages`. Direct MiMo is explicitly OpenAI-compatible `/v1` per Xiaomi's OpenCode guide.
 - Do not route MiMo through shared relays in Lite Pro; use direct MiMo only. In OpenCode-generated configs, keep MiMo `reasoning=false` unless the client path can preserve `reasoning_content` through multi-turn tool calls.

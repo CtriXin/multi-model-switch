@@ -131,6 +131,7 @@ def test_opencode_model_config_marks_official_vision_models_only():
         assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
         if model == "mimo-v2.5":
             assert config["reasoning"] is False
+            assert config["limit"] == {"context": 1048576, "output": 131072}
 
     for model in ("mimo-v2.5-pro", "qwen3-coder-plus", "glm-5.1", "deepseek-v4-pro", "MiniMax-M2.7"):
         config = mms_launchers._opencode_model_config(_runtime(), model)
@@ -138,6 +139,30 @@ def test_opencode_model_config_marks_official_vision_models_only():
         assert "modalities" not in config
         if model == "mimo-v2.5-pro":
             assert config["reasoning"] is False
+            assert config["limit"] == {"context": 1048576, "output": 131072}
+
+
+def test_core_opencode_prefers_mimo_openai_compatible_base_from_anthropic():
+    import mms_core
+
+    provider = _runtime(
+        id="mimo-direct-anthropic",
+        name="MiMo Direct",
+        openai_base_url="",
+        anthropic_base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+        protocols=["anthropic_messages"],
+        supported_clis=["opencode"],
+    )
+
+    candidates = mms_core._opencode_route_transport_candidates(provider, "mimo-v2.5-pro")
+
+    assert candidates == [
+        (
+            "openai_chat_completions",
+            "https://token-plan-cn.xiaomimimo.com/v1",
+            "https://token-plan-cn.xiaomimimo.com/anthropic/v1",
+        )
+    ]
 
 
 def test_opencode_provider_base_url_adds_v1_after_gateway_openai_prefix():

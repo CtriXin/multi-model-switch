@@ -206,11 +206,20 @@ def _is_gpt_model(model: str) -> bool:
     return normalized.startswith("gpt-") or normalized.startswith("o1") or normalized.startswith("o3")
 
 
+def _is_mimo_model(model: str) -> bool:
+    normalized = str(model or "").strip().lower()
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized.startswith("mimo-")
+
+
 def _protocol_correct(route: dict[str, Any], evidence: dict[str, Any]) -> bool:
     model = str(route.get("model") or evidence.get("model") or "").strip()
     protocol = str(evidence.get("protocol") or route.get("protocol") or "").strip()
     if model and _is_gpt_model(model):
         return protocol in {"openai_responses", "openai_chat_completions"}
+    if model and _is_mimo_model(model):
+        return protocol == "openai_chat_completions"
     if model and not _is_gpt_model(model):
         return protocol == "anthropic_messages"
     return bool(protocol)
@@ -225,6 +234,9 @@ def _combined_check_text(check: dict[str, Any]) -> str:
 
 def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
     evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
+    text = _combined_check_text(check)
+    if "reasoning_content" in text and "must be passed back" in text:
+        return "reasoning_content_roundtrip_required"
     if not _protocol_correct(route, evidence):
         return "cache_sensitive_wrong_protocol"
     model = str(route.get("model") or evidence.get("model") or "").strip()
@@ -236,9 +248,6 @@ def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
     if check.get("returncode") == "timeout":
         return "timeout"
 
-    text = _combined_check_text(check)
-    if "reasoning_content" in text and "must be passed back" in text:
-        return "reasoning_content_roundtrip_required"
     if any(token in text for token in ("401", "403", "unauthorized", "auth", "invalid api key", "api key")):
         return "auth_error"
     if "429" in text or "rate limit" in text or "rate_limited" in text:

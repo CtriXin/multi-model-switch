@@ -44,6 +44,11 @@ Token Plan Anthropic endpoint rejects the literal suffixed API model, so MMS
 keeps `[1m]` as a local selector and forwards `mimo-v2.5-pro` with the
 `context-1m-2025-08-07` Anthropic beta header.
 
+MiMo's OpenCode integration is separate from Claude Code: direct MiMo OpenCode
+routes use OpenAI-compatible `/v1` and OpenCode model metadata advertises the
+documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
+`mimo-v2.5`.
+
 ## Source References
 
 - OpenAI Responses API: https://platform.openai.com/docs/api-reference/responses
@@ -53,6 +58,8 @@ keeps `[1m]` as a local selector and forwards `mimo-v2.5-pro` with the
 - MiMo original Anthropic API page: https://platform.xiaomimimo.com/docs/zh-CN/api/chat/anthropic-api?target=%E8%AF%B7%E6%B1%82%E4%BD%93
 - MiMo Anthropic API: https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md
 - MiMo OpenAI API: https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md
+- MiMo OpenCode integration: https://platform.xiaomimimo.com/static/docs/integration/opencode.md
+- MiMo Claude Code integration: https://platform.xiaomimimo.com/static/docs/integration/claudecode.md
 - MiniMax Anthropic API: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 - MiniMax OpenAI API: https://platform.minimaxi.com/docs/api-reference/text-openai-api
 - DeepSeek Chat Completion: https://api-docs.deepseek.com/api/create-chat-completion

@@ -436,8 +436,9 @@ _KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES = (
     "glm-5.1",
     "glm-5-turbo",
     "kimi-for-coding",
-    "mimo-v2.5",
+    "mimo-v2.5-pro",
     "mimo-v2-pro",
+    "mimo-v2-flash",
     "qwen-plus",
     "qwen3-max",
     "qwen3.5-plus",
@@ -989,6 +990,57 @@ def _strip_cache_control(payload):
     for tool in payload.get("tools", []):
         if isinstance(tool, dict):
             tool.pop("cache_control", None)
+
+
+_ANTHROPIC_BILLING_SYSTEM_LINE_RE = re.compile(
+    r"(?im)^[^\n]*x-anthropic-billing-header[^\n]*(?:\n|$)"
+)
+
+
+def _strip_anthropic_billing_system_header(payload):
+    """Remove Claude Code's randomized billing-header line from bridged prompts.
+
+    MMS also sets CLAUDE_CODE_ATTRIBUTION_HEADER=0, but this bridge-side guard
+    protects third-party providers if a future Claude Code version still emits
+    the cache-busting system line.
+    """
+    if not isinstance(payload, dict):
+        return False
+    changed = False
+
+    def clean_text(value):
+        if not isinstance(value, str) or "x-anthropic-billing-header" not in value.lower():
+            return value, False
+        cleaned = _ANTHROPIC_BILLING_SYSTEM_LINE_RE.sub("", value)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip("\n")
+        return cleaned, cleaned != value
+
+    system = payload.get("system")
+    if isinstance(system, str):
+        cleaned, item_changed = clean_text(system)
+        if item_changed:
+            payload["system"] = cleaned
+            changed = True
+    elif isinstance(system, list):
+        next_system = []
+        for block in system:
+            if not isinstance(block, dict):
+                next_system.append(block)
+                continue
+            next_block = dict(block)
+            text_key = "text" if isinstance(next_block.get("text"), str) else "content"
+            cleaned, item_changed = clean_text(next_block.get(text_key))
+            if item_changed:
+                next_block[text_key] = cleaned
+                changed = True
+            if not (
+                str(next_block.get("type") or "").strip().lower() == "text"
+                and not str(next_block.get(text_key) or "").strip()
+            ):
+                next_system.append(next_block)
+        if changed:
+            payload["system"] = next_system
+    return changed
 
 
 def _needs_chatcompletions_bridge(provider_id, model_name, gateway_url=None):
@@ -2465,6 +2517,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
         if path_bare not in ("/v1/messages", "/v1/messages/count_tokens"):
             self._json(404, {"type": "error", "error": {"type": "not_found_error", "message": "not found"}})
             return
+
+        _strip_anthropic_billing_system_header(payload)
 
         resolved_model_for_guard = str(payload.get("model") or "")
         if _payload_has_image_input(payload.get("messages")) and _model_rejects_image_input(resolved_model_for_guard):

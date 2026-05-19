@@ -11,6 +11,7 @@ def _run_gateway_bridge_once(
     *,
     heavy_model: str = "mimo-v2.5",
     messages: list[dict] | None = None,
+    system: str | list[dict] | None = None,
     vision_sidecar: dict | None = None,
 ) -> dict:
     import mms_bridge
@@ -41,13 +42,14 @@ def _run_gateway_bridge_once(
     monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
     monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
 
-    raw_body = json.dumps(
-        {
-            "model": incoming_model,
-            "messages": messages or [{"role": "user", "content": "ping"}],
-            "stream": False,
-        }
-    ).encode("utf-8")
+    payload = {
+        "model": incoming_model,
+        "messages": messages or [{"role": "user", "content": "ping"}],
+        "stream": False,
+    }
+    if system is not None:
+        payload["system"] = system
+    raw_body = json.dumps(payload).encode("utf-8")
 
     handler = mms_bridge._GatewayBridgeHandler.__new__(mms_bridge._GatewayBridgeHandler)
     handler.path = "/v1/messages"
@@ -102,6 +104,22 @@ def test_gateway_bridge_preserves_explicit_non_claude_model_selection(monkeypatc
     assert captured["json"]["model"] == "mimo-v2.5-pro"
 
 
+def test_gateway_bridge_strips_claude_code_billing_system_cache_buster(monkeypatch):
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "mimo-v2.5-pro",
+        system=(
+            "x-anthropic-billing-header: cch=abc12\n"
+            "You are Claude Code.\n"
+            "Keep this instruction."
+        ),
+    )
+
+    assert captured["status"] == 200
+    assert "x-anthropic-billing-header" not in captured["json"]["system"].lower()
+    assert "Keep this instruction." in captured["json"]["system"]
+
+
 def test_gateway_bridge_maps_mimo_1m_selector_to_wire_model_and_beta(monkeypatch):
     captured = _run_gateway_bridge_once(monkeypatch, "mimo-v2.5-pro[1m]")
 
@@ -152,6 +170,36 @@ def test_gateway_bridge_rejects_known_text_only_model_image_input_before_upstrea
     assert captured.get("post_called") is not True
     assert "does not support image input" in body["error"]["message"]
     assert "gpt-5.4" in body["error"]["message"]
+
+
+def test_gateway_bridge_allows_mimo_v25_image_input(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="mimo-v2.5",
+        messages=image_messages,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "mimo-v2.5"
+    assert captured.get("post_called") is True
 
 
 def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monkeypatch):
