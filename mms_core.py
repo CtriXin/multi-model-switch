@@ -85,7 +85,7 @@ def _ensure_rich():
     from rich.text import Text as _Tx
     Panel, Table, Prompt, IntPrompt, Confirm, Text = _P, _T, _Pr, _IP, _C, _Tx
 
-from mms_account_state import seed_claude_state, seed_gemini_state
+from mms_account_state import seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_adapter_registry import TOP_SOURCE_COMPANIES, DEFAULT_ADAPTER_POLICY, PROVIDER_TEMPLATES
 from mms_broker import (
     ensure_broker_config,
@@ -229,9 +229,10 @@ DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 DEFAULT_ACCOUNT_TIMEZONE = "America/Los_Angeles"
 VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
-OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini")
-MMS_MANAGED_OAUTH_CLIS = ("codex", "gemini")
+OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini", "agy")
+MMS_MANAGED_OAUTH_CLIS = ("codex", "agy")
 MMC_DELEGATED_OAUTH_CLIS = ("claude",)
+PROVIDER_CAPABLE_CLIS = ("claude", "codex", "opencode")
 DEFAULT_PRIORITY = 100
 MODE_ALL = "全部模型"
 MODE_RECOMMENDED = "推荐模型"
@@ -707,7 +708,7 @@ SCENES = {
     },
 }
 
-CLI_NAMES = ["claude", "codex", "opencode", "gemini"]
+CLI_NAMES = ["claude", "codex", "opencode", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
 SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
@@ -832,7 +833,7 @@ def _default_provider():
         "id": DEFAULT_PROVIDER_ID,
         "name": "Default Gateway",
         "protocols": list(DEFAULT_PROVIDER_PROTOCOLS),
-        "supported_clis": list(CLI_NAMES),
+        "supported_clis": list(PROVIDER_CAPABLE_CLIS),
         "enabled": True,
         "role": "auto",
     }
@@ -1353,11 +1354,11 @@ def _normalize_provider(provider):
         merged["protocols"] = list(DEFAULT_PROVIDER_PROTOCOLS)
 
     merged["supported_clis"] = _normalize_supported_clis(
-        merged.get("supported_clis", CLI_NAMES),
+        merged.get("supported_clis", PROVIDER_CAPABLE_CLIS),
         protocols=merged["protocols"],
     )
     if not merged["supported_clis"]:
-        merged["supported_clis"] = list(CLI_NAMES)
+        merged["supported_clis"] = list(PROVIDER_CAPABLE_CLIS)
 
     merged["enabled"] = bool(merged.get("enabled", True))
     merged["priority"] = _normalize_priority(merged.get("priority", DEFAULT_PRIORITY))
@@ -1858,8 +1859,6 @@ def _native_clis_for_model(model_name):
         return ["claude"]
     if normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-")):
         return ["codex"]
-    if normalized.startswith("gemini-"):
-        return ["gemini"]
     return []
 
 
@@ -1937,7 +1936,7 @@ def _model_cli_modes(model_name):
     native = set(_native_clis_for_model(model_name))
     bridge = set(_bridge_clis_for_model(model_name))
     modes = {}
-    for cli_name in ("claude", "codex", "gemini"):
+    for cli_name in ("claude", "codex"):
         if cli_name in native:
             modes[cli_name] = "native"
         elif cli_name in bridge:
@@ -1950,7 +1949,7 @@ def _model_cli_modes(model_name):
 def _model_cli_summary(model_name):
     modes = _model_cli_modes(model_name)
     parts = []
-    for cli_name in ("claude", "codex", "gemini"):
+    for cli_name in ("claude", "codex"):
         mode = modes.get(cli_name)
         if mode == "native":
             parts.append(f"{cli_name}:native")
@@ -2161,6 +2160,10 @@ def _snapshot_cli_state(home_dir, cli_name):
         return [
             os.path.join(home_dir, ".gemini", "settings.json"),
             os.path.join(home_dir, ".gemini", ".env"),
+        ]
+    if cli_name == "agy":
+        return [
+            os.path.join(home_dir, ".gemini", "antigravity-cli", "settings.json"),
         ]
     return []
 
@@ -3764,6 +3767,8 @@ def _account_env(account):
     cli_name = account.get("cli")
     if cli_name == "claude":
         seed_claude_state(home_dir)
+    elif cli_name == "agy":
+        seed_agy_state(home_dir)
     env = os.environ.copy()
     _scrub_account_command_env(env)
     if cli_name == "gemini":
@@ -3794,6 +3799,8 @@ def _account_status_command(cli_name):
         return ["codex", "login", "status"]
     if cli_name == "gemini":
         return None
+    if cli_name == "agy":
+        return None
     return None
 
 
@@ -3819,6 +3826,15 @@ def _probe_account_status(account):
         return {
             "state": "manual",
             "summary": "已初始化，待登录" if has_state else "待登录",
+        }
+    if cli_name == "agy":
+        home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+        agy_dir = os.path.join(home_dir, ".gemini", "antigravity-cli")
+        settings_path = os.path.join(agy_dir, "settings.json")
+        has_state = os.path.isdir(agy_dir) or os.path.exists(settings_path)
+        return {
+            "state": "manual",
+            "summary": "已初始化，登录状态需启动 agy 验证" if has_state else "待登录",
         }
     command = _account_status_command(cli_name)
     if command is None:
@@ -3863,6 +3879,8 @@ def _run_account_login(account):
         command = ["codex", "login"]
     elif cli_name == "gemini":
         command = ["gemini"]
+    elif cli_name == "agy":
+        command = ["agy"]
     else:
         console.print(f"[red]不支持的官方账号类型: {cli_name}[/red]")
         sys.exit(1)
@@ -3875,6 +3893,8 @@ def _run_account_login(account):
     )
     if cli_name == "gemini":
         console.print("[dim]Gemini 会在自己的 CLI 内引导 Google 登录；登录完成后按提示重启即可。[/dim]")
+    if cli_name == "agy":
+        console.print("[dim]Antigravity CLI 会在自己的流程内引导 Google 登录；登录完成后按提示重启即可。[/dim]")
     result = subprocess.run(command, env=env)
     if result.returncode != 0:
         sys.exit(result.returncode)
@@ -3977,8 +3997,8 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
     )
     supported_clis = _prompt_csv_values(
         "支持的 CLI（逗号分隔）",
-        current.get("supported_clis", list(CLI_NAMES)),
-        list(CLI_NAMES),
+        current.get("supported_clis", list(PROVIDER_CAPABLE_CLIS)),
+        list(PROVIDER_CAPABLE_CLIS),
     )
     use_custom_models_endpoint = Confirm.ask(
         "模型列表地址与接口地址不同？（高级）",
@@ -4294,11 +4314,11 @@ def _quick_connect_official(cfg, preset_cli=None):
         _L(
             "[bold]官方通道[/bold]\n\n创建一个独立登录目录；创建完成后，回主界面启动该通道时再进入官方 CLI 登录。\n"
             "显示名称给你自己看；系统会自动生成内部标识，避免后续引用丢失。\n"
-            "适合多个 ChatGPT / Claude / Gemini 账号并行使用。\n"
+            "适合多个 ChatGPT / Claude / Antigravity 账号并行使用。\n"
             "[dim]输入 b 返回，q 退出。[/dim]",
             "[bold]Official channel[/bold]\n\nCreate an isolated login directory first; after setup, launch this channel from the main UI to continue the official CLI login flow.\n"
             "The display name is user-facing; MMS auto-generates the stable system ID used by config and follow-up commands.\n"
-            "Use this when you want multiple ChatGPT / Claude / Gemini accounts in parallel.\n"
+            "Use this when you want multiple ChatGPT / Claude / Antigravity accounts in parallel.\n"
             "[dim]Type b to go back, q to cancel.[/dim]",
         ),
         title=_L("快速接入", "Quick Connect"),
@@ -4306,7 +4326,7 @@ def _quick_connect_official(cfg, preset_cli=None):
     ))
     choices = {
         "1": ("codex", "ChatGPT / Codex"),
-        "2": ("gemini", "Gemini"),
+        "2": ("agy", "Antigravity CLI"),
     }
     if preset_cli in MMC_DELEGATED_OAUTH_CLIS:
         console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再新增 Claude 官方账号。[/yellow]")
@@ -4315,7 +4335,7 @@ def _quick_connect_official(cfg, preset_cli=None):
         cli_name = preset_cli
     else:
         console.print("  1. ChatGPT / Codex")
-        console.print("  2. Gemini")
+        console.print("  2. Antigravity CLI")
         try:
             selected = _wizard_prompt(_L("选择官方通道类型", "Select official channel type"), default="1")
         except WizardBack:
@@ -6365,6 +6385,8 @@ def _model_matches_account_cli(cli_name, model_name):
 
 def _provider_supports_cli_name(provider, cli_name):
     provider_id = str(provider.get("id", "")).strip().lower()
+    if cli_name == "agy":
+        return False
     # Kimi coding endpoints currently work on Claude-compatible paths, but not in Codex runtime.
     if cli_name == "codex" and provider_id.startswith("kimi"):
         return False
@@ -7021,9 +7043,19 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
     for cli_name in CLI_NAMES:
-        if cli_name in MMS_MANAGED_OAUTH_CLIS and _accounts_for_cli(cfg, cli_name):
-            visible.append(cli_name)
-            continue
+        if cli_name in MMS_MANAGED_OAUTH_CLIS:
+            if _accounts_for_cli(cfg, cli_name):
+                visible.append(cli_name)
+                continue
+            # Antigravity is an official OAuth-native CLI: show the tab when
+            # the binary exists so users can enter the TUI connect flow first.
+            if cli_name == "agy":
+                try:
+                    if check_cli_installed(cli_name):
+                        visible.append(cli_name)
+                        continue
+                except Exception:
+                    pass
         provider, family_models = _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models)
         if provider is None:
             continue
@@ -7281,7 +7313,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         "hooks": {"always": [], "caveman": [], "ecc": [], "omc": []},
     }
 
-    if cli not in {"claude", "codex", "opencode"}:
+    if cli not in {"claude", "codex", "opencode", "agy"}:
         return preview
 
     try:
@@ -7795,6 +7827,29 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 ],
                 disable_key="opencode-rtk",
             )
+    elif cli == "agy":
+        agy_mcp = _session_managed_mcp_servers(
+            {},
+            allow_execution_surfaces=allow_execution_surfaces,
+            disabled_session_surfaces=runtime.get("disabled_session_surfaces"),
+        )
+        for name in sorted(agy_mcp):
+            mcp_entry = _mcp_detail(agy_mcp.get(name))
+            _append(
+                "mcp",
+                "always",
+                title=name,
+                summary=str(mcp_entry.get("summary") or ""),
+                details=mcp_entry.get("details") or [],
+                disable_key=name,
+            )
+        agy_hooks = _merge_mms_session_hooks({})
+        _append_hooks("always", agy_hooks)
+        if has_caveman:
+            _append_hooks(
+                "caveman",
+                _configure_claude_caveman_hooks({}, enable_caveman=True),
+            )
 
     if allow_execution_surfaces:
         for pack_key, enabled in (("ecc", has_ecc), ("omc", has_omc)):
@@ -7825,7 +7880,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 [{"name": "weber", "path": _skill_path(weber_root)}],
                 _L("会话技能", "Session skill"),
             )
-        if cli == "codex" and _resolve_agent_browser_root():
+        if cli in {"codex", "agy"} and _resolve_agent_browser_root():
             agent_browser_root = _resolve_agent_browser_root()
             _append_skill_entries(
                 "always",
@@ -7938,7 +7993,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "agy") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = _runtime_source_kind_label(runtime)
@@ -8195,6 +8250,61 @@ def _opencode_profile_menu_options():
             "summary": summary,
         })
     return options
+
+
+_AGY_CONNECT_PROFILE_ID = "__connect_agy_oauth__"
+
+
+def _official_account_menu_options(cfg, cli_name):
+    accounts = list(_accounts_for_cli(cfg, cli_name))
+    defaults = cfg.get("account", {}).get("defaults", {}) if isinstance(cfg, dict) else {}
+
+    def _sort_key(account):
+        account_id = str(account.get("id") or "")
+        is_default = account_id == defaults.get(cli_name)
+        return (
+            0 if is_default else 1,
+            -int(account.get("priority", DEFAULT_PRIORITY) or DEFAULT_PRIORITY),
+            _account_label(account),
+            account_id,
+        )
+
+    options = []
+    for account in sorted(accounts, key=_sort_key):
+        account_id = str(account.get("id") or "").strip()
+        if not account_id:
+            continue
+        is_default = account_id == defaults.get(cli_name)
+        summary_parts = [_L("官方 OAuth", "Official OAuth"), account_id]
+        if is_default:
+            summary_parts.append(_L("默认", "default"))
+        options.append({
+            "id": account_id,
+            "label": _account_label(account),
+            "summary": " / ".join(summary_parts),
+            "badge": "*" if is_default else "OAuth",
+        })
+
+    if options or cli_name != "agy":
+        return options
+
+    legacy_gemini_count = len(_accounts_for_cli(cfg, "gemini"))
+    if legacy_gemini_count:
+        summary = _L(
+            "检测到 Gemini CLI 旧账号；Antigravity 需要独立 agy OAuth，按 Enter 或 O 接入。",
+            "Legacy Gemini CLI accounts detected; Antigravity needs a separate agy OAuth account. Press Enter or O to connect.",
+        )
+    else:
+        summary = _L(
+            "还没有 Antigravity OAuth account，按 Enter 或 O 接入。",
+            "No Antigravity OAuth account yet. Press Enter or O to connect.",
+        )
+    return [{
+        "id": _AGY_CONNECT_PROFILE_ID,
+        "label": _L("接入 Antigravity OAuth", "Connect Antigravity OAuth"),
+        "summary": summary,
+        "badge": "O",
+    }]
 
 
 def _select_opencode_profile(use_tui=False):
@@ -9192,7 +9302,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             provider_options_by_cli=provider_options_by_cli,
             provider_options_loader_by_cli=provider_options_loader_by_cli,
             broker_enabled_by_cli=_broker_enabled_by_cli(current_cfg, current_cli_names),
-            profile_options_by_cli={"opencode": _opencode_profile_menu_options()},
+            profile_options_by_cli={
+                "opencode": _opencode_profile_menu_options(),
+                "agy": _official_account_menu_options(current_cfg, "agy"),
+            },
         )
 
         if result == "fallback":
@@ -9206,7 +9319,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
         # ── 接入通道 ──
         if action_type == "connect":
-            current_cfg, changed = run_connect_wizard(current_cfg)
+            if cli == "agy":
+                current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
+            else:
+                current_cfg, changed = run_connect_wizard(current_cfg)
             if changed:
                 _PROBE_CACHE.clear()
                 import shutil as _shutil
@@ -9242,6 +9358,26 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 provider=runtime_runtime.get("id"),
             )
             _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="opencode profile")
+            # fall through to confirm
+        if action_type == "profile" and cli == "agy":
+            if action_data == _AGY_CONNECT_PROFILE_ID:
+                current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
+                if changed:
+                    _PROBE_CACHE.clear()
+                    import shutil as _shutil
+                    _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
+                    current_provider = ensure_provider_credentials(current_cfg)
+                    default_models = _probe_models(current_provider, emit_output=False).get("models")
+                    current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
+                    _families_dirty = True
+                continue
+            runtime_runtime = resolve_account_context(current_cfg, account_id=action_data, cli_name=cli)
+            if runtime_runtime is None or runtime_runtime.get("cli") != cli:
+                console.print(f"[yellow]未找到 {cli} 官方账号: {action_data}[/yellow]")
+                continue
+            model_info = {}
+            _trace_record("official account", cli=cli, account=runtime_runtime.get("id"))
+            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="official account")
             # fall through to confirm
 
         # ── Provider 浏览 ──
@@ -9588,6 +9724,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 if runtime_from_best_provider:
                     _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
+        elif action_type == "profile" and cli not in {"opencode", "agy"}:
+            continue
         elif action_type not in ("profile", "provider_browse", "load_balance", "last", "family"):
             continue
 
@@ -9708,7 +9846,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
         if action == "b":
             continue
-        if cli in {"claude", "codex", "opencode"}:
+        if cli in {"claude", "codex", "opencode", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
@@ -9722,7 +9860,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-        if cli in {"claude", "codex", "opencode"}:
+        if cli in {"claude", "codex", "opencode", "agy"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
             runtime_runtime["disabled_session_surfaces"] = (
                 disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
@@ -10576,7 +10714,7 @@ def _display_config_help():
     console.print(f"  {command} config provider.credentials [id]")
     console.print("\n[bold]Account:[/bold]")
     console.print(f"  {command} config account.list")
-    console.print(f"  {command} config account.add [codex|gemini]")
+    console.print(f"  {command} config account.add \\[codex|agy]")
     console.print(f"  {command} config account.edit <id>")
     console.print(f"  {command} config account.remove <id>")
     console.print(f"  {command} config account.status [id]")
@@ -12007,7 +12145,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/gemini)")
+                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带场景编号）")

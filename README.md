@@ -10,7 +10,7 @@
 
 ## What MMS Does
 
-MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `gemini`; Qwen/Kimi remain provider models, not standalone CLI launchers.
+MMS is not another chat client. It is the local control plane in front of tools such as `claude`, `codex`, `opencode`, and `agy`; Qwen/Kimi/Gemini remain provider models, not standalone CLI launchers.
 
 Scope note: MMS is intentionally launcher-first. Legacy or helper surfaces such as `chat`, `discuss`, and high-context review helpers are maintenance-only unless they directly support launcher/session validation. Long-running planning, execution, compaction policy, and run authority should live in Moebius, Pilot, Ant, or addons instead of expanding MMS.
 
@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.10.3`
+Current tagged version: `v2.11.0`
 
 Key changes in this generation:
 
@@ -41,7 +41,7 @@ Key changes in this generation:
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`; Claude/Codex/OpenCode injection stays session-local
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`; Claude/Codex/OpenCode/Antigravity injection stays session-local
 - silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
@@ -60,7 +60,7 @@ Default behavior:
 - links `mms` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
-- discovers installed `claude` / `codex` across PATH, Homebrew, and NVM versions
+- discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
 - keeps the legacy `ccs` shim installable with `--install-legacy-ccs`, but no longer exposes it by default
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.3/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.11.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -151,7 +151,7 @@ mms logs
 MMS
 ├── Entry
 │   ├── mms TUI
-│   ├── mms claude / mms codex / mms opencode
+│   ├── mms claude / mms codex / mms opencode / mms agy
 │   └── export / presets
 ├── Decision
 │   ├── provider profiles

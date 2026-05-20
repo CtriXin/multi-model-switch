@@ -96,6 +96,41 @@ def test_piped_version_check_does_not_misclassify_repo_cwd_as_local_source():
     assert "local-source" not in completed.stdout
 
 
+def test_piped_version_check_normalizes_git_deref_ref_suffix():
+    env = os.environ.copy()
+    env.update(_version_env_overrides(stable_ref="v1.16.4", latest_tag_ref="refs/tags/v2.10.3^{}"))
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--latest-tag", "--version"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Latest upstream tag (latest tag): v2.10.3" in completed.stdout
+    assert "Planned install ref: v2.10.3" in completed.stdout
+    assert "^{}" not in completed.stdout
+
+
+def test_piped_explicit_ref_normalizes_git_ref_prefix_and_deref_suffix():
+    env = os.environ.copy()
+    env.update(_version_env_overrides())
+    completed = subprocess.run(
+        ["bash", "-s", "--", "--lang", "en", "--ref", "refs/tags/v2.10.3^{}", "--version"],
+        cwd=ROOT_DIR,
+        env=env,
+        input=INSTALL_SCRIPT.read_text(encoding="utf-8"),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "Planned install ref: v2.10.3" in completed.stdout
+    assert "^{}" not in completed.stdout
+
+
 def test_local_install_version_check_reports_local_source_channel():
     env = os.environ.copy()
     env.update(_version_env_overrides())

@@ -9,7 +9,7 @@ import sys
 
 
 MIN_PYTHON = (3, 11)
-NODE_CLI_NAMES = {"claude", "gemini"}
+NODE_CLI_NAMES = {"claude", "agy"}
 
 
 def _dedupe(values):

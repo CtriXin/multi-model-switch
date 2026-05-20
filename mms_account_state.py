@@ -139,6 +139,17 @@ def seed_gemini_state(home_dir):
                 pass
 
 
+def seed_agy_state(home_dir):
+    home_dir = os.path.expanduser(str(home_dir or "").strip())
+    if not home_dir:
+        return
+
+    antigravity_dir = os.path.join(home_dir, ".gemini", "antigravity-cli")
+    os.makedirs(antigravity_dir, exist_ok=True)
+    for dirname in ("cache", "conversations", "logs"):
+        os.makedirs(os.path.join(antigravity_dir, dirname), exist_ok=True)
+
+
 def _claude_state_path(home_dir=None):
     base_dir = os.path.expanduser(str(home_dir or "~").strip())
     return os.path.join(base_dir, ".claude.json")

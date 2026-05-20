@@ -1,4 +1,4 @@
-"""MMS 启动器：按 provider 或账号档案启动四个 CLI。"""
+"""MMS 启动器：按 provider 或账号档案启动 CLI。"""
 
 from contextlib import contextmanager
 import copy
@@ -16,7 +16,7 @@ from time import perf_counter
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from mms_account_state import activated_claude_account_state, seed_claude_state, seed_gemini_state
+from mms_account_state import activated_claude_account_state, seed_agy_state, seed_claude_state, seed_gemini_state
 from mms_i18n import normalize_language
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
@@ -1189,7 +1189,7 @@ def _build_home_context(env, runtime, cli_name):
     config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
     expected_session_home = auth_mode == "oauth" and (
         cli_name == "claude"
-        or (cli_name == "codex" and effective_home and effective_home != real_home)
+        or (cli_name in {"codex", "agy"} and effective_home and effective_home != real_home)
     )
     locale_value = str(env.get("LC_ALL") or env.get("LANG") or _runtime_locale_env(runtime).get("LANG") or "").strip()
     return {
@@ -1253,7 +1253,7 @@ def _validate_home_context_or_exit(context):
             sessions_root = os.path.join(account_home, "s")
             if not _path_is_within(session_home, sessions_root):
                 _block(f"session HOME 不在账号隔离目录内：{session_home}")
-        if cli_name == "codex":
+        if cli_name in {"codex", "agy"}:
             expected_xdg = os.path.join(session_home, ".config")
             if xdg_config_home and xdg_config_home != expected_xdg:
                 _block(f"XDG_CONFIG_HOME 未跟随 session HOME：{xdg_config_home}")
@@ -1473,7 +1473,7 @@ def _claude_bypass_requires_proxy(runtime):
 def _emit_dns_guard_hint(runtime, *, cli_name, auth_mode):
     if auth_mode != "oauth":
         return
-    if cli_name not in {"claude", "codex", "gemini"}:
+    if cli_name not in {"claude", "codex", "gemini", "agy"}:
         return
     dns_mode = _runtime_dns_mode(runtime)
     if dns_mode == "local-risk":
@@ -1795,7 +1795,7 @@ CLI_PROTOCOL_REQUIREMENTS = {
     "codex": "openai_chat_completions",
     "opencode": "openai_chat_completions",
 }
-OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini"}
+OAUTH_CAPABLE_CLIS = {"claude", "codex", "gemini", "agy"}
 OPENCODE_PROVIDER_ID = "mms"
 OPENCODE_API_KEY_ENV = "MMS_OPENCODE_API_KEY"
 OPENCODE_DEFAULT_OUTPUT_LIMIT = 8192
@@ -2821,7 +2821,7 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
 
 
 def _caveman_available_for_cli(cli_name):
-    return str(cli_name or "").strip() in {"claude", "codex", "opencode"} and bool(_resolve_caveman_root())
+    return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
 
 
 def _normalize_caveman_mode(value, default="disable"):
@@ -4169,6 +4169,117 @@ def _overlay_auto_github_contributor_session_entries(parent_dir, session_home, *
         _overlay_session_entry_dir(parent_dir, overlay_root, "commands", vendor_root)
 
 
+def _agy_plugin_dir(account_home):
+    return os.path.join(account_home, ".gemini", "antigravity-cli", "plugins", "mms-session")
+
+
+def _path_under(path, root):
+    try:
+        path_real = os.path.realpath(os.path.abspath(path))
+        root_real = os.path.realpath(os.path.abspath(root))
+        return os.path.commonpath([path_real, root_real]) == root_real
+    except Exception:
+        return False
+
+
+def _ensure_agy_plugin_dir(account_home):
+    antigravity_dir = os.path.join(account_home, ".gemini", "antigravity-cli")
+    plugin_root = os.path.join(antigravity_dir, "plugins")
+    stable_plugin_root = os.path.join(account_home, ".gemini", "config", "plugins")
+    sessions_dir = os.path.join(account_home, "s")
+
+    os.makedirs(antigravity_dir, exist_ok=True)
+    os.makedirs(stable_plugin_root, exist_ok=True)
+
+    if os.path.islink(plugin_root):
+        target = os.path.realpath(plugin_root)
+        if _path_under(target, sessions_dir):
+            os.unlink(plugin_root)
+            os.symlink(stable_plugin_root, plugin_root)
+        elif not os.path.exists(target):
+            os.makedirs(target, exist_ok=True)
+    elif not os.path.exists(plugin_root):
+        os.symlink(stable_plugin_root, plugin_root)
+
+    plugin_dir = os.path.join(plugin_root, "mms-session")
+    os.makedirs(plugin_dir, exist_ok=True)
+    return plugin_dir
+
+
+def _write_agy_plugin_json(plugin_dir):
+    os.makedirs(plugin_dir, exist_ok=True)
+    payload = {
+        "name": "mms-session",
+        "displayName": "MMS Session",
+        "version": "0.1.0",
+        "description": "Session-local MMS skills, hooks, and MCP overlay.",
+    }
+    atomic_write_json(os.path.join(plugin_dir, "plugin.json"), payload, mode=0o600, indent=2)
+
+
+def _remove_file_if_exists(path):
+    try:
+        if os.path.exists(path) or os.path.islink(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _write_agy_mcp_config(plugin_dir, *, disabled_session_surfaces=None):
+    servers = _session_managed_mcp_servers(
+        {},
+        allow_execution_surfaces=True,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+    path = os.path.join(plugin_dir, "mcp_config.json")
+    if servers:
+        atomic_write_json(path, {"mcpServers": servers}, mode=0o600, indent=2)
+    else:
+        _remove_file_if_exists(path)
+
+
+def _write_agy_hooks(plugin_dir, *, enable_caveman=False, disabled_session_surfaces=None):
+    _remove_file_if_exists(os.path.join(plugin_dir, "hooks.json"))
+    hooks_data = _merge_mms_session_hooks({})
+    if enable_caveman:
+        hooks_data = _configure_claude_caveman_hooks(hooks_data, enable_caveman=True)
+    hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
+    hooks_data = _filter_missing_managed_hook_commands(hooks_data)
+    hooks_dir = os.path.join(plugin_dir, "hooks")
+    path = os.path.join(hooks_dir, "hooks.json")
+    if hooks_data:
+        os.makedirs(hooks_dir, exist_ok=True)
+        atomic_write_json(path, {"hooks": hooks_data}, mode=0o600, indent=2)
+    else:
+        _remove_file_if_exists(path)
+
+
+def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=False, disabled_session_surfaces=None):
+    if not account_home or not session_home:
+        return
+    plugin_dir = _ensure_agy_plugin_dir(account_home)
+    _write_agy_plugin_json(plugin_dir)
+    _write_agy_mcp_config(plugin_dir, disabled_session_surfaces=disabled_session_surfaces)
+    _write_agy_hooks(
+        plugin_dir,
+        enable_caveman=enable_caveman,
+        disabled_session_surfaces=disabled_session_surfaces,
+    )
+    if enable_caveman:
+        _overlay_caveman_session_entries(
+            plugin_dir,
+            session_home,
+            enable_caveman=True,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+    _overlay_web_access_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_weber_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_agent_browser_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+
+
 def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None, runtime=None):
     if not config_dir or not session_home:
         return
@@ -5112,6 +5223,19 @@ def inspect_runtime_exposure(cli, runtime):
         process_env["GEMINI_CLI_HOME"] = account_home
         home_info["session_home"] = account_home
         notes.append("Gemini OAuth 当前通过 GEMINI_CLI_HOME 指向账号目录，不走 Claude 那套 session settings。")
+    elif cli == "agy" and auth_mode == "oauth":
+        session_home = os.path.join(account_home, "s", str(os.getpid())) if account_home else ""
+        process_env["HOME"] = session_home
+        process_env["MMS_SESSION_HOME"] = session_home
+        process_env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config") if session_home else ""
+        home_info["session_home"] = session_home
+        home_info["settings_path"] = os.path.join(
+            account_home,
+            ".gemini",
+            "antigravity-cli",
+            "settings.json",
+        ) if account_home else ""
+        notes.append("Antigravity CLI 使用隔离 HOME；账号状态位于 account_home/.gemini/antigravity-cli。")
 
     if _runtime_force_ipv4(runtime):
         process_env["MMS_FORCE_IPV4"] = "1"
@@ -5240,6 +5364,22 @@ def _build_claude_session_settings(
         merged_env,
         agent_pack=agent_pack if allow_execution_surfaces else "none",
     )
+    configured_shell_model = settings_data["env"].get("ANTHROPIC_MODEL")
+    existing_settings_model = settings_data.get("model")
+    fallback_settings_model = (
+        existing_settings_model
+        if _is_claude_family_model_name(existing_settings_model)
+        else "claude-sonnet-4-6"
+    )
+    if configured_shell_model:
+        selected_shell_model = _claude_visible_model_name(
+            configured_shell_model,
+            fallback_model=fallback_settings_model,
+        )
+        if selected_shell_model:
+            settings_data["model"] = selected_shell_model
+    elif existing_settings_model and not _is_claude_family_model_name(existing_settings_model):
+        settings_data["model"] = fallback_settings_model
 
     if managed_mcp_servers:
         settings_data["mcpServers"] = managed_mcp_servers
@@ -5309,6 +5449,21 @@ def _write_claude_session_settings(
     with locked_state_file(settings_path):
         atomic_write_json(settings_path, settings_data, mode=0o600)
     return settings_data, settings_path
+
+
+def _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir):
+    account_settings = _load_claude_settings_from_dir(account_claude_dir)
+    seeded_settings = _sanitize_claude_inherited_settings_payload(
+        account_settings,
+        allow_execution_surfaces=False,
+    )
+    if not seeded_settings:
+        return None
+    os.makedirs(session_claude_dir, exist_ok=True)
+    settings_path = os.path.join(session_claude_dir, "settings.json")
+    with locked_state_file(settings_path):
+        atomic_write_json(settings_path, seeded_settings, mode=0o600)
+    return seeded_settings
 
 
 def _gateway_ping(base_url, api_key, runtime=None):
@@ -5594,6 +5749,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             source_claude_dir=account_claude_dir,
             allowed_source_entries=_CLAUDE_OAUTH_SESSION_SOURCE_ENTRY_ALLOWLIST,
         )
+        _seed_oauth_claude_session_settings(account_claude_dir, session_claude_dir)
         _overlay_web_access_session_entries(
             session_claude_dir,
             session_home,
@@ -5618,6 +5774,40 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         seed_gemini_state(home_dir)
         _scrub_claude_oauth_env(env)
         env["GEMINI_CLI_HOME"] = home_dir
+    elif cli_name == "agy":
+        seed_agy_state(home_dir)
+        _scrub_claude_oauth_env(env)
+        _ensure_account_library_entries(home_dir)
+        sessions_dir = os.path.join(home_dir, "s")
+        session_home = os.path.join(sessions_dir, str(os.getpid()))
+        os.makedirs(session_home, exist_ok=True)
+        _cleanup_stale_sessions(sessions_dir)
+        for entry in os.listdir(home_dir):
+            if entry == "s":
+                continue
+            src = os.path.join(home_dir, entry)
+            dst = os.path.join(session_home, entry)
+            if not os.path.exists(dst) and not os.path.islink(dst):
+                os.symlink(src, dst)
+        _link_account_library_entries(session_home, home_dir)
+        _link_shared_dotfiles(session_home)
+        env["HOME"] = session_home
+        env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
+        _set_session_home_hint(env, session_home)
+        _install_session_command_wrappers(session_home, env)
+        _overlay_agy_session_assets(
+            home_dir,
+            session_home,
+            enable_caveman=_runtime_caveman_enabled(account),
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+        host_context_env = _install_host_context_env(
+            env,
+            cli="agy",
+            runtime=account,
+            model_info=model_info,
+            session_home=session_home,
+        )
     else:
         # codex 等其他 CLI：per-PID 会话隔离
         sessions_dir = os.path.join(home_dir, "s")
@@ -6322,6 +6512,30 @@ def _link_claude_library_entries(session_home, entries=_CLAUDE_SESSION_LIBRARY_E
         if (not os.path.exists(src) and not os.path.islink(src)) or os.path.exists(dst) or os.path.islink(dst):
             continue
         os.symlink(src, dst)
+
+
+def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
+    account_library = os.path.join(account_home, "Library")
+    os.makedirs(account_library, exist_ok=True)
+    for entry in entries:
+        normalized = str(entry or "").strip()
+        if not normalized:
+            continue
+        os.makedirs(os.path.join(account_library, normalized), exist_ok=True)
+    return account_library
+
+
+def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
+    account_library = _ensure_account_library_entries(account_home, entries=entries)
+    session_library = os.path.join(session_home, "Library")
+    if os.path.islink(session_library):
+        if os.path.realpath(session_library) == os.path.realpath(account_library):
+            return
+        os.unlink(session_library)
+    elif os.path.exists(session_library) and not os.path.isdir(session_library):
+        os.unlink(session_library)
+    if not os.path.exists(session_library) and not os.path.islink(session_library):
+        os.symlink(account_library, session_library)
 
 
 def _filter_real_home_wrapper_path(path_value, *, session_home=None):
@@ -10057,11 +10271,29 @@ def launch_gemini(model_info, runtime, once=False):
     _exec_or_run(cmd, env, once)
 
 
+def launch_agy(model_info, runtime, once=False):
+    """启动 Antigravity CLI，当前只支持官方账号档案模式。"""
+    auth_mode = runtime.get("auth_mode", "api_key")
+    if auth_mode != "oauth":
+        console.print("[red]Antigravity CLI 当前只支持官方账号入口，不支持直接使用模型源启动[/red]")
+        sys.exit(1)
+
+    env = _account_env(runtime, model_info=model_info)
+    _prepare_oauth_home_context(runtime, env, "agy")
+    cmd = ["agy"]
+    if runtime.get("bypass"):
+        cmd.append("--dangerously-skip-permissions")
+    if runtime.get("agy_sandbox") or runtime.get("sandbox"):
+        cmd.append("--sandbox")
+    _exec_or_run(cmd, env, once)
+
+
 LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "opencode": launch_opencode,
     "gemini": launch_gemini,
+    "agy": launch_agy,
 }
 
 

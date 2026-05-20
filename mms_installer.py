@@ -25,14 +25,13 @@ INSTALL_COMMANDS = {
     "claude": "curl -fsSL https://claude.ai/install.sh | sh",
     "codex": "npm install -g @openai/codex@latest",
     "opencode": "curl -fsSL https://opencode.ai/install | bash",
-    "gemini": "npm install -g @google/gemini-cli",
 }
 
 CLI_DESCRIPTIONS = {
     "claude": "Claude Code (Anthropic)",
     "codex": "Codex CLI (OpenAI)",
     "opencode": "OpenCode CLI",
-    "gemini": "Gemini CLI (Google)",
+    "agy": "Antigravity CLI (Google)",
 }
 
 def check_and_offer_install(cli_name):

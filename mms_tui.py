@@ -306,7 +306,7 @@ def select_family_tui(
 
     Args:
         families_by_cli: dict[str, list[dict]] — cli_name -> [{family, count}]
-        cli_names: list[str] — ["claude", "codex"]
+        cli_names: list[str] — ["claude", "codex", "opencode", "agy"]
         last_used: dict[str, dict] or None — {cli_name: {"model", "cli", "model_info", ...}}
         families_detail: dict[str, dict] or None — {cli_name: {family: [model_list]}}
         provider_options_by_cli: dict[str, dict] or None — {cli_name: {model_name: [provider_options]}}
@@ -3125,9 +3125,9 @@ def confirm_tui(
 
     返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
     action: "" = 启动, "b" = 返回, "q" = 取消
-    bypass: bool, codex/claude/opencode 有效；OpenCode 会启用 permission allow / run bypass
+    bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow / run bypass
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
-    caveman_enabled: bool，仅 claude/codex/opencode 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+    caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
     reasoning_effort: str，仅 GPT / 支持 effort 的路径有效
@@ -3361,7 +3361,7 @@ def confirm_tui(
 
     profile_caps = _confirm_profile_capabilities(model_info, runtime=runtime)
     model_tokens = profile_caps["tokens"] or _model_tokens(model_info)
-    has_bypass = cli in ("codex", "claude", "opencode")
+    has_bypass = cli in ("codex", "claude", "opencode", "agy")
     has_reasoning_controls = cli in ("codex", "claude")
     has_claude_1m = cli == "claude" and _supports_claude_1m_toggle(model_info)
     has_thinking = has_reasoning_controls and bool(profile_caps["thinking_supported"])

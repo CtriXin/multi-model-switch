@@ -15,8 +15,8 @@
 - 场景选择、CLI tab、模型选择、自定义选择、最近使用与默认来源逻辑
 - `provider` / `account` 的优先级、过滤逻辑、默认来源选择逻辑
 - `runtime` 决策和 `auth_mode` 语义，包括 `api_key`、`oauth`、`oauth_bridge`
-- `claude` / `codex` / `qwen` / `kimi` / `gemini` 的启动参数与环境变量注入
-- bridge 行为，包括 `claude <- codex`、`claude <- gemini`、`codex responses -> chat completions`
+- `claude` / `codex` / `opencode` / `agy` 的启动参数与环境变量注入
+- bridge 行为，包括 `claude <- codex`、`codex responses -> chat completions`
 - 配置文件结构、迁移逻辑、override 读取规则、账号目录隔离规则
 - 本地统计、最近使用、历史启动记录的写入语义
 

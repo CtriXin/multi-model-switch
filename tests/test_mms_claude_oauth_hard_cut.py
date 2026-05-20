@@ -57,6 +57,21 @@ def test_handle_account_add_config_rejects_claude(monkeypatch):
     assert any("Claude OAuth 已迁移到 mmc" in message for message in console.messages)
 
 
+def test_handle_account_add_config_accepts_agy(monkeypatch):
+    import mms_core
+
+    called = []
+    monkeypatch.setattr(
+        mms_core,
+        "_quick_connect_official",
+        lambda cfg, preset_cli=None: called.append((cfg, preset_cli)),
+    )
+
+    mms_core._handle_account_add_config({}, ["agy"])
+
+    assert called == [({}, "agy")]
+
+
 def test_handle_account_login_config_rejects_legacy_claude_account(monkeypatch):
     import mms_core
 

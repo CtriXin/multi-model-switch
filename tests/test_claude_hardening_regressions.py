@@ -48,6 +48,32 @@ def test_build_claude_session_settings_only_inherits_allowlisted_keys(monkeypatc
     assert result["env"]["CLAUDE_CODE_ATTRIBUTION_HEADER"] == "0"
 
 
+def test_build_claude_session_settings_overrides_stale_ccswitch_model(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(
+        mms_launchers,
+        "_load_global_claude_settings_template",
+        lambda: {"model": "qwen3-coder-plus"},
+    )
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_hive_session_mcp_server", lambda: None)
+    monkeypatch.setattr(mms_launchers, "_default_pilot_session_mcp_server", lambda: None)
+
+    result = mms_launchers._build_claude_session_settings(
+        required_env={
+            "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+            "MMS_MODEL_NAME": "gpt-5.5",
+        }
+    )
+
+    assert result["model"] == "claude-sonnet-4-6"
+    assert result["env"]["ANTHROPIC_MODEL"] == "claude-sonnet-4-6"
+    assert result["env"]["MMS_MODEL_NAME"] == "gpt-5.5"
+    assert "qwen3-coder-plus" not in json.dumps(result)
+
+
 def test_build_claude_session_settings_injects_only_allowlisted_mcp_servers(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -3009,6 +3035,7 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
 
     account_home = tmp_path / "account-home"
     account_home.mkdir()
+    (account_home / ".claude").mkdir()
     session_home = account_home / "s" / "1234"
     session_home.mkdir(parents=True)
     real_home = tmp_path / "real-home"
@@ -3027,6 +3054,17 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
                         "projectOnboardingSeenCount": 0,
                     }
                 },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (account_home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "env": {"ANTHROPIC_AUTH_TOKEN": "leak"},
+                "hooks": {"PreToolUse": [{"matcher": "*"}]},
+                "model": "qwen3-coder-plus",
             }
         ),
         encoding="utf-8",
@@ -3101,6 +3139,8 @@ def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_p
     assert project_state["enabledMcpjsonServers"] == []
     assert project_state["disabledMcpjsonServers"] == []
     assert "lastSessionId" not in project_state
+    session_settings = json.loads((Path(env["HOME"]) / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert session_settings == {"theme": "dark"}
 
 
 def test_account_env_fail_closed_when_guarded_limit_reached(monkeypatch, tmp_path):

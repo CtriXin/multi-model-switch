@@ -36,7 +36,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Anthropic / Claude | `claude-*` | `official_native` | 已支持 | 是 | 否，目标 CLI 本身就是 `claude` |
 | 2 | OpenAI / GPT / Codex | `gpt-*` / `o*` / `codex-*` | `official_native + claude_bridge` | 已支持 | 是 | 是 |
-| 3 | Google / Gemini | `gemini-*` | `official_native + claude_bridge` | 已支持 | 是 | 是 |
+| 3 | Google / Antigravity / Gemini | `gemini-*` | `official_native` via `agy` + `provider_api` | 已支持 `agy` 官方入口；Gemini CLI 退为 legacy | 是 | 否，默认不再走 Gemini CLI bridge |
 | 4 | Alibaba Cloud / Qwen | `qwen-*` / `qwen3-*` | `provider_api` | 已支持 provider 路径 + 来源模板 | 否 | 否 |
 | 5 | Moonshot / Kimi | `kimi-*` | `provider_api` | 已支持 provider 路径 + 来源模板 | 有原生登录能力，但未接 adapter | 是，后续若补 OAuth |
 | 6 | MiniMax CN | `minimax-*` / `minimax-m*` | `provider_api` | 规划中 | 否 | 否 |
@@ -47,12 +47,12 @@
 
 ## 为什么不是所有来源都先做 OAuth
 
-当前我们已经验证过两条真正成立的桥接链路：
+当前默认维护的官方 / bridge 路径：
 
 - `claude <- codex`
-- `claude <- gemini`
+- Google 官方入口改走 `agy`，Gemini CLI bridge 不再作为默认维护路径
 
-这两条能成立，是因为对应来源都满足至少一条：
+这些路径能成立，是因为对应来源都满足至少一条：
 
 - 有稳定的官方 CLI/backend
 - 有可复用的官方 SDK/core package
@@ -68,12 +68,12 @@
 
 - `Claude`
 - `Codex`
-- `Gemini`
+- `Antigravity CLI (agy)`
 
-### 已经稳定的 `claude bridge`
+### 当前维护的 `claude bridge`
 
 - `codex OAuth -> claude`
-- `gemini OAuth -> claude`
+- 不再新增 Gemini CLI OAuth bridge；Google 官方入口集中到 `agy`
 
 ### 当前优先按 provider 落地的来源
 
@@ -106,8 +106,9 @@
 
 - OpenAI Codex CLI:
   - https://developers.openai.com/codex/cli
-- Gemini CLI:
-  - https://google-gemini.github.io/gemini-cli/docs/tools/code/
+- Antigravity CLI:
+  - https://antigravity.google/docs/cli-getting-started
+  - https://antigravity.google/docs/gcli-migration
 - Claude Code:
   - https://www.anthropic.com/claude-code
   - https://docs.anthropic.com/en/docs/claude-code/quickstart

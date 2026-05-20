@@ -10,7 +10,7 @@
 
 ## MMS 是什么
 
-MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`opencode`、`gemini` 等本地 AI coding CLI 前面的控制面；Qwen/Kimi 保留为 provider model，不再作为独立 CLI 启动。
+MMS 不是新的 chat 客户端。它是 `claude`、`codex`、`opencode`、`agy` 等本地 AI coding CLI 前面的控制面；Qwen/Kimi/Gemini 保留为 provider model，不再作为独立 CLI 启动。
 
 MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review helper 属于 legacy / maintenance-only 表面，除非直接支持 launcher/session 验证，否则不继续扩展；长期规划、执行、压缩策略和 run authority 应放在 Moebius、Pilot、Ant 或 addons。
 
@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.10.3`
+当前 tagged version：`v2.11.0`
 
 这一代的重点：
 
@@ -41,7 +41,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
-- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`；Claude/Codex/OpenCode 都保持 session-local 注入
+- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
 - session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 把 `mms` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
-- 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex`
+- 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
 - legacy `ccs` shim 仍可通过 `--install-legacy-ccs` 显式安装，但默认不再暴露
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.10.3/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.11.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -150,7 +150,7 @@ mms logs
 MMS
 ├── 入口层
 │   ├── mms TUI
-│   ├── mms claude / mms codex / mms opencode
+│   ├── mms claude / mms codex / mms opencode / mms agy
 │   └── export / presets
 ├── 决策层
 │   ├── provider profiles

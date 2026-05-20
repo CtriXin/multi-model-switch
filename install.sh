@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.10.3}"
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.11.0}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -110,6 +110,14 @@ t() {
     else
         printf "%s" "$zh"
     fi
+}
+
+normalize_install_ref() {
+    local ref="$1"
+    ref="${ref#refs/tags/}"
+    ref="${ref#refs/heads/}"
+    ref="${ref%^{\}}"
+    printf "%s" "$ref"
 }
 
 is_local_source_install() {
@@ -654,7 +662,7 @@ prompt_optional_install_choices() {
 
 resolve_latest_tag() {
     if [ -n "${MMS_INSTALL_LATEST_TAG_OVERRIDE:-}" ]; then
-        printf "%s" "$MMS_INSTALL_LATEST_TAG_OVERRIDE"
+        normalize_install_ref "$MMS_INSTALL_LATEST_TAG_OVERRIDE"
         return 0
     fi
     if [ -n "$LATEST_TAG_CACHE" ]; then
@@ -711,7 +719,7 @@ PY
     if [ -z "$resolved_tag" ] && command -v git >/dev/null 2>&1; then
         resolved_tag="$(
             git ls-remote --tags "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null \
-                | sed 's#refs/tags/##; s#\\^{}##' \
+                | sed 's#refs/tags/##; s#\^{}##' \
                 | awk '{ print $2 }' \
                 | sort -u \
                 | awk -F'[v.]' '{ printf "%09d %09d %09d %s\n", $2, $3, $4, $0 }' \
@@ -723,6 +731,7 @@ PY
     if [ -z "$resolved_tag" ] && [ -n "$DEFAULT_INSTALL_FALLBACK_TAG" ]; then
         resolved_tag="$DEFAULT_INSTALL_FALLBACK_TAG"
     fi
+    resolved_tag="$(normalize_install_ref "$resolved_tag")"
     [ -n "$resolved_tag" ] || return 1
     LATEST_TAG_CACHE="$resolved_tag"
     printf "%s" "$resolved_tag"
@@ -730,7 +739,7 @@ PY
 
 resolve_latest_release_tag() {
     if [ -n "${MMS_INSTALL_LATEST_RELEASE_OVERRIDE:-}" ]; then
-        printf "%s" "$MMS_INSTALL_LATEST_RELEASE_OVERRIDE"
+        normalize_install_ref "$MMS_INSTALL_LATEST_RELEASE_OVERRIDE"
         return 0
     fi
     if [ -n "$LATEST_RELEASE_TAG_CACHE" ]; then
@@ -766,6 +775,7 @@ PY
                 | head -n 1
         )" || true
     fi
+    resolved_release_tag="$(normalize_install_ref "$resolved_release_tag")"
     [ -n "$resolved_release_tag" ] || return 1
     LATEST_RELEASE_TAG_CACHE="$resolved_release_tag"
     printf "%s" "$resolved_release_tag"
@@ -779,6 +789,7 @@ download_remote_source() {
     if [ -z "$ref" ]; then
         return 1
     fi
+    ref="$(normalize_install_ref "$ref")"
 
     if [ "$ref" = "main" ]; then
         archive_url="https://github.com/${REPO_OWNER}/${REPO_NAME}/archive/refs/heads/main.tar.gz"
@@ -911,6 +922,7 @@ resolve_requested_ref() {
     if [ -z "$ref" ]; then
         ref="main"
     fi
+    ref="$(normalize_install_ref "$ref")"
     RESOLVED_INSTALL_REF="$ref"
 }
 
