@@ -226,3 +226,64 @@ def test_handle_resume_command_passes_claude_resume_args_and_project(monkeypatch
     assert captured["chdir"] == str(project)
     assert captured["cli"] == "claude"
     assert captured["extra_args"] == ["--resume", "claude-session", "hello"]
+
+
+def test_codex_writeback_callback_prints_mms_resume_hint(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    session_codex = session_home / ".codex"
+    target_codex = tmp_path / "target-codex"
+    session_codex.mkdir(parents=True)
+    target_codex.mkdir()
+    old_record = {"id": "019e0000-0000-7000-8000-000000000000", "updated_at": "2026-05-19T00:00:00Z"}
+    (session_codex / "session_index.jsonl").write_text(json.dumps(old_record) + "\n", encoding="utf-8")
+
+    console = _FakeConsole()
+    monkeypatch.setattr(mms_launchers, "console", console)
+    monkeypatch.setattr(mms_launchers.sys, "argv", ["mms"])
+    env = {
+        "MMS_SESSION_HOME": str(session_home),
+        mms_launchers._CODEX_RESUME_WRITEBACK_ROOT_ENV: str(target_codex),
+    }
+    callback = mms_launchers._codex_resume_writeback_callback(env)
+
+    new_record = {"id": "019e1111-1111-7000-8000-111111111111", "updated_at": "2026-05-20T00:00:00Z"}
+    (session_codex / "session_index.jsonl").write_text(
+        json.dumps(old_record) + "\n" + json.dumps(new_record) + "\n",
+        encoding="utf-8",
+    )
+
+    callback(0)
+
+    assert any("mms resume codex:019e1111-1111-7000-8000-111111111111" in item for item in console.items)
+    assert (target_codex / "session_index.jsonl").exists()
+
+
+def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "12345"
+    session_home.mkdir()
+    console = _FakeConsole()
+    calls = {}
+    monkeypatch.setattr(mms_launchers, "console", console)
+    monkeypatch.setattr(mms_launchers.sys, "argv", ["mms"])
+    monkeypatch.setattr(
+        mms_launchers,
+        "read_slot_marker",
+        lambda _home: {"cwd": str(tmp_path), "account_id": "acct", "account_home": str(tmp_path / "acct")},
+    )
+    monkeypatch.setattr(mms_launchers, "_sync_claude_session_state_to_account_home", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_record_account_guard_finalize", lambda *_args, **_kwargs: None)
+
+    def fake_finalize(**kwargs):
+        calls.update(kwargs)
+        return {"session_id": "2ea6c1bc-8632-4d5c-94ba-672b4a744871"}
+
+    monkeypatch.setattr(mms_launchers, "finalize_claude_session", fake_finalize)
+
+    mms_launchers._finalize_claude_slot(str(session_home), exit_code=0)
+
+    assert calls["pid"] == 12345
+    assert any("mms resume claude:2ea6c1bc-8632-4d5c-94ba-672b4a744871" in item for item in console.items)

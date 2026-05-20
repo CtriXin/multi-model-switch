@@ -5795,6 +5795,10 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
         env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
         _set_session_home_hint(env, session_home)
         _install_session_command_wrappers(session_home, env)
+        keychain_path = _ensure_agy_account_keychain(home_dir, session_home=session_home)
+        if keychain_path:
+            env["MMS_AGY_KEYCHAIN"] = keychain_path
+        _install_agy_security_wrapper(session_home, home_dir, env)
         _overlay_agy_session_assets(
             home_dir,
             session_home,
@@ -6236,6 +6240,85 @@ def _set_codex_resume_writeback_root(env, target_codex_dir):
         env[_CODEX_RESUME_WRITEBACK_ROOT_ENV] = target_codex_dir
 
 
+def _mms_resume_command_name():
+    invoked = os.path.basename(sys.argv[0] or "").strip().lower()
+    return invoked if invoked in {"mms", "ccs"} else "mms"
+
+
+def _print_mms_resume_hint(cli_name, session_id):
+    cli_name = str(cli_name or "").strip().lower()
+    session_id = str(session_id or "").strip()
+    if (
+        cli_name not in {"codex", "claude"}
+        or not session_id
+        or session_id == "None"
+        or session_id.startswith("pid-")
+    ):
+        return
+    resume_ref = f"{cli_name}:{session_id}"
+    command = f"{_mms_resume_command_name()} resume {shlex.quote(resume_ref)}"
+    console.print(f"[dim][MMS] resume:[/dim] [green]{command}[/green]")
+
+
+def _codex_index_records(codex_dir):
+    path = os.path.join(str(codex_dir or ""), "session_index.jsonl")
+    if not os.path.isfile(path):
+        return []
+    records = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(record, dict) and str(record.get("id") or "").strip():
+                    records.append(record)
+    except OSError:
+        return []
+    return records
+
+
+def _codex_resume_record_fingerprint(record):
+    try:
+        return json.dumps(record if isinstance(record, dict) else {}, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        return ""
+
+
+def _codex_resume_index_snapshot(codex_dir):
+    snapshot = {}
+    for record in _codex_index_records(codex_dir):
+        session_id = str(record.get("id") or "").strip()
+        if session_id:
+            snapshot[session_id] = _codex_resume_record_fingerprint(record)
+    return snapshot
+
+
+def _codex_resume_sort_key(record):
+    if not isinstance(record, dict):
+        return ""
+    return str(record.get("updated_at") or record.get("created_at") or record.get("id") or "").strip()
+
+
+def _codex_resume_hint_session_id(codex_dir, baseline_snapshot):
+    baseline_snapshot = baseline_snapshot if isinstance(baseline_snapshot, dict) else {}
+    changed = []
+    for record in _codex_index_records(codex_dir):
+        session_id = str(record.get("id") or "").strip()
+        if not session_id:
+            continue
+        if baseline_snapshot.get(session_id) != _codex_resume_record_fingerprint(record):
+            changed.append(record)
+    if not changed:
+        return ""
+    changed.sort(key=_codex_resume_sort_key, reverse=True)
+    return str(changed[0].get("id") or "").strip()
+
+
 def _merge_tail_lines(src, dst, max_lines):
     summary = {"status": "missing", "lines": 0, "bytes": 0}
     if not os.path.isfile(src):
@@ -6452,11 +6535,22 @@ def _sync_codex_bounded_resume_back_from_env(env):
 
 
 def _codex_resume_writeback_callback(env):
+    env = env if isinstance(env, dict) else {}
+    session_home = str(env.get("MMS_SESSION_HOME") or env.get("HOME") or "").strip()
+    session_codex_dir = os.path.join(session_home, ".codex") if session_home else ""
+    baseline_snapshot = _codex_resume_index_snapshot(session_codex_dir)
+
     def _callback(_exit_code=None):
+        session_id = ""
         try:
             _sync_codex_bounded_resume_back_from_env(env)
         except Exception:
             pass
+        try:
+            session_id = _codex_resume_hint_session_id(session_codex_dir, baseline_snapshot)
+        except Exception:
+            session_id = ""
+        _print_mms_resume_hint("codex", session_id)
     return _callback
 
 
@@ -6523,6 +6617,100 @@ def _ensure_account_library_entries(account_home, entries=_CLAUDE_SESSION_LIBRAR
             continue
         os.makedirs(os.path.join(account_library, normalized), exist_ok=True)
     return account_library
+
+
+def _macos_security_bin():
+    if sys.platform != "darwin":
+        return ""
+    for candidate in ("/usr/bin/security", shutil.which("security")):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _agy_keychain_path(account_home):
+    return os.path.join(account_home, "Library", "Keychains", "login.keychain-db")
+
+
+def _agy_security_home_env(security_home):
+    env = os.environ.copy()
+    env["HOME"] = security_home
+    env["MMS_SESSION_HOME"] = security_home
+    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    env["XDG_CONFIG_HOME"] = os.path.join(security_home, ".config")
+    env["XDG_CACHE_HOME"] = os.path.join(security_home, ".cache")
+    env["XDG_DATA_HOME"] = os.path.join(security_home, ".local", "share")
+    env["XDG_STATE_HOME"] = os.path.join(security_home, ".local", "state")
+    return env
+
+
+def _run_agy_security_command(security_bin, args, *, security_home, check=False):
+    try:
+        result = subprocess.run(
+            [security_bin, *args],
+            env=_agy_security_home_env(security_home),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        return False
+    return result.returncode == 0 or not check
+
+
+def _ensure_agy_account_keychain(account_home, session_home=None):
+    """Create a per-account default keychain before Antigravity OAuth writes."""
+    account_home = os.path.abspath(os.path.expanduser(str(account_home or "").strip()))
+    if not account_home:
+        return ""
+    keychain_path = _agy_keychain_path(account_home)
+    os.makedirs(os.path.dirname(keychain_path), exist_ok=True)
+    os.makedirs(os.path.join(account_home, "Library", "Preferences"), exist_ok=True)
+
+    security_bin = _macos_security_bin()
+    if not security_bin:
+        return keychain_path
+
+    security_home = os.path.abspath(os.path.expanduser(str(session_home or account_home).strip()))
+    os.makedirs(security_home, exist_ok=True)
+    if not os.path.exists(keychain_path):
+        if not _run_agy_security_command(
+            security_bin,
+            ["create-keychain", "-p", "", keychain_path],
+            security_home=security_home,
+            check=True,
+        ):
+            return keychain_path
+
+    _run_agy_security_command(security_bin, ["set-keychain-settings", "-lut", "21600", keychain_path], security_home=security_home)
+    _run_agy_security_command(security_bin, ["unlock-keychain", "-p", "", keychain_path], security_home=security_home)
+    _run_agy_security_command(security_bin, ["list-keychains", "-d", "user", "-s", keychain_path], security_home=security_home)
+    _run_agy_security_command(security_bin, ["default-keychain", "-d", "user", "-s", keychain_path], security_home=security_home)
+    return keychain_path
+
+
+def _install_agy_security_wrapper(session_home, account_home, env):
+    security_bin = _macos_security_bin()
+    if not security_bin:
+        return ""
+    wrapper_dir = os.path.join(session_home, ".mms", "bin")
+    os.makedirs(wrapper_dir, exist_ok=True)
+    wrapper_path = os.path.join(wrapper_dir, "security")
+    wrapper = [
+        "#!/bin/sh",
+        f'export HOME={json.dumps(session_home)}',
+        f'export MMS_SESSION_HOME={json.dumps(session_home)}',
+        f'export MMS_AGY_ACCOUNT_HOME={json.dumps(account_home)}',
+        f'export PATH={json.dumps("/usr/bin:/bin:/usr/sbin:/sbin")}',
+        f'export XDG_CONFIG_HOME={json.dumps(os.path.join(session_home, ".config"))}',
+        f'export XDG_CACHE_HOME={json.dumps(os.path.join(session_home, ".cache"))}',
+        f'export XDG_DATA_HOME={json.dumps(os.path.join(session_home, ".local", "share"))}',
+        f'export XDG_STATE_HOME={json.dumps(os.path.join(session_home, ".local", "state"))}',
+        f'exec {json.dumps(security_bin)} "$@"',
+        "",
+    ]
+    _write_real_home_script(wrapper_path, wrapper)
+    return wrapper_path
 
 
 def _link_account_library_entries(session_home, account_home, entries=_CLAUDE_SESSION_LIBRARY_ENTRY_ALLOWLIST):
@@ -8188,13 +8376,15 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
     account_home = str(marker.get("account_home") or "").strip()
     if not stale_cleanup:
         _sync_claude_session_state_to_account_home(session_home, account_home)
-    finalize_claude_session(
+    session_payload = finalize_claude_session(
         cwd=cwd,
         pid=pid,
         account_id=account_id,
         exit_code=exit_code,
         stale_cleanup=stale_cleanup,
     )
+    if not stale_cleanup and isinstance(session_payload, dict):
+        _print_mms_resume_hint("claude", session_payload.get("session_id"))
     _record_account_guard_finalize(
         account_id,
         exit_code=exit_code,
@@ -8963,6 +9153,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
             if extra_args:
                 cmd += list(extra_args)
             exit_code = 0
+            resume_exit_callback = _codex_resume_writeback_callback(env)
             try:
                 cmd, env, _ = prepare_cli_command(cmd, env)
                 result = subprocess.run(cmd, env=env)
@@ -8970,7 +9161,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
             except KeyboardInterrupt:
                 exit_code = 130
             finally:
-                _sync_codex_bounded_resume_back_from_env(env)
+                resume_exit_callback(exit_code)
             sys.exit(exit_code)
         return
 

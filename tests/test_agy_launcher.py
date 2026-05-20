@@ -1,4 +1,5 @@
 import os
+import subprocess
 from pathlib import Path
 
 
@@ -199,6 +200,12 @@ def test_account_env_prepares_agy_isolated_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:15721")
 
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_ensure_agy_account_keychain",
+        lambda home, session_home=None: str(Path(home) / "Library" / "Keychains" / "login.keychain-db"),
+    )
+    monkeypatch.setattr(mms_launchers, "_install_agy_security_wrapper", lambda *args, **kwargs: "")
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_link_claude_library_entries", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
@@ -242,6 +249,12 @@ def test_account_env_prepares_distinct_agy_keychains_for_multiple_accounts(monke
     real_keychains.mkdir(parents=True)
 
     monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_ensure_agy_account_keychain",
+        lambda home, session_home=None: str(Path(home) / "Library" / "Keychains" / "login.keychain-db"),
+    )
+    monkeypatch.setattr(mms_launchers, "_install_agy_security_wrapper", lambda *args, **kwargs: "")
     monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=True: env)
     monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_install_host_context_env", lambda *args, **kwargs: {})
@@ -271,6 +284,62 @@ def test_account_env_prepares_distinct_agy_keychains_for_multiple_accounts(monke
     assert keychains_a.resolve() != keychains_b.resolve()
     assert keychains_a.resolve() != real_keychains.resolve()
     assert keychains_b.resolve() != real_keychains.resolve()
+
+
+def test_agy_keychain_initializer_sets_account_local_default(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    session_home = account_home / "s" / "123"
+    session_home.mkdir(parents=True)
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("env", {})))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(mms_launchers, "_macos_security_bin", lambda: "/usr/bin/security")
+    monkeypatch.setattr(mms_launchers.subprocess, "run", fake_run)
+
+    keychain_path = mms_launchers._ensure_agy_account_keychain(
+        str(account_home),
+        session_home=str(session_home),
+    )
+
+    expected_keychain = str(account_home / "Library" / "Keychains" / "login.keychain-db")
+    assert keychain_path == expected_keychain
+    assert (account_home / "Library" / "Preferences").is_dir()
+    assert [call[0][1] for call in calls] == [
+        "create-keychain",
+        "set-keychain-settings",
+        "unlock-keychain",
+        "list-keychains",
+        "default-keychain",
+    ]
+    assert all(call_env["HOME"] == str(session_home) for _cmd, call_env in calls)
+    assert calls[-2][0][-1] == expected_keychain
+    assert calls[-1][0][-1] == expected_keychain
+
+
+def test_agy_security_wrapper_keeps_security_on_account_home(monkeypatch, tmp_path):
+    import mms_launchers
+
+    account_home = tmp_path / "account-home"
+    session_home = account_home / "s" / "123"
+    session_home.mkdir(parents=True)
+    monkeypatch.setattr(mms_launchers, "_macos_security_bin", lambda: "/usr/bin/security")
+
+    wrapper_path = mms_launchers._install_agy_security_wrapper(
+        str(session_home),
+        str(account_home),
+        {},
+    )
+
+    wrapper = Path(wrapper_path).read_text(encoding="utf-8")
+    assert f'export HOME="{session_home}"' in wrapper
+    assert f'export MMS_AGY_ACCOUNT_HOME="{account_home}"' in wrapper
+    assert "REAL_HOME" not in wrapper
+    assert 'exec "/usr/bin/security" "$@"' in wrapper
 
 
 def test_agy_session_assets_overlay_common_skills_mcp_and_hooks(monkeypatch, tmp_path):
