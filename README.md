@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.11.1`
+Current tagged version: `v2.12.0`
 
 Key changes in this generation:
 
@@ -68,7 +68,7 @@ Default behavior:
 Fresh-machine install with optional CLI bootstrap:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex,opencode --write-shell-rc
 ```
 
 Shell support:
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.11.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.12.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -190,6 +190,7 @@ MMS tries to fail closed inside the selected runtime.
 Operational details:
 
 - [Provider profiles](./docs/PROVIDER_PROFILES.md)
+- [User preferences](./docs/MMS_USER_PREFERENCES.md)
 - [Claude cache / protocol runbook](./docs/SERVER_CLAUDE_CACHE_RUNBOOK.md)
 - [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
 - [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
@@ -208,6 +209,17 @@ Provider-specific behavior belongs in data, not in one-off launcher branches.
 - reference URLs for future verification
 
 User overlays can live in the MMS config directory as read-only profile inputs. MMS should not mutate your real `config.toml` just because a model was probed.
+
+## User Preferences
+
+Use `~/.config/mms/preferences.toml` for install-safe daily launch preferences:
+
+- `thinking_mode` / `reasoning_effort`
+- `bypass`, `caveman_mode`, `agent_pack`
+- disabled session `skills` / `mcp` / `hooks`
+- custom bundled asset roots such as `web_access`, `token_saver`, `ecc`, `omc`
+
+LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. This file is still real MMS config: agents may inspect and propose edits, but must not auto-write `~/.config/mms/**` without human confirmation.
 
 ## Session Packs
 
@@ -232,12 +244,20 @@ Install global optional packs only when you want them available outside MMS-mana
 bash install.sh --install-rtk
 bash install.sh --install-brainkeeper-context
 bash install.sh --install-map
+bash install.sh --install-codegraph
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
+bash install.sh --install-toon
 bash install.sh --install-ops-env-safe
 ```
 
 `--install-brainkeeper-context` installs BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
+
+`--install-map` installs Map and enables the Claude SessionStart auto-index hook. This is a global Claude hook; use `--map-ref` to pin the version.
+
+`--install-codegraph` installs the CodeGraph CLI via npm. MMS sessions already include the CodeGraph auto-index hook, and it only runs `init/sync` when a `codegraph` binary is available. Use `--codegraph-package` to override the npm package spec. After install, run `codegraph init -i` in the current repo, or ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
+
+`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default.
 
 `--install-ops-env-safe` is path-only: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so isolated sessions can inspect known host paths. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
 

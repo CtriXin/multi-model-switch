@@ -3370,6 +3370,7 @@ def confirm_tui(
     effort_default = str(reasoning_effort_default or "high").strip().lower()
     if effort_default not in effort_values:
         effort_default = "high" if "high" in effort_values else effort_values[-1]
+    initial_bypass_mode = bool((runtime or {}).get("bypass", True)) if isinstance(runtime, dict) else True
     explicit_thinking_default = _confirm_explicit_thinking_default(runtime)
     profile_thinking_default = profile_caps.get("default_enabled")
     if explicit_thinking_default is not None:
@@ -3397,6 +3398,33 @@ def confirm_tui(
             return _L("OMC · orchestration runtime / team / verify loop", "OMC · orchestration runtime / team / verify loop")
         return _L("关闭", "Off")
 
+    def _initial_disabled_surfaces():
+        payload = (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else {}
+        payload = payload if isinstance(payload, dict) else {}
+        result = {"mcp": set(), "skills": set(), "hooks": set()}
+        aliases = {
+            "mcp": "mcp",
+            "mcps": "mcp",
+            "mcp_servers": "mcp",
+            "skills": "skills",
+            "skill": "skills",
+            "hooks": "hooks",
+            "hook": "hooks",
+        }
+        for raw_key, raw_values in payload.items():
+            key = aliases.get(str(raw_key or "").strip().lower())
+            if key not in result:
+                continue
+            if isinstance(raw_values, str):
+                raw_values = [raw_values]
+            if not isinstance(raw_values, (list, tuple, set)):
+                continue
+            for item in raw_values:
+                value = str(item or "").strip()
+                if value:
+                    result[key].add(value)
+        return result
+
     def _inner(stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
@@ -3407,7 +3435,7 @@ def confirm_tui(
         curses.init_pair(5, curses.COLOR_GREEN, -1)
         curses.init_pair(6, curses.COLOR_MAGENTA, -1)
 
-        bypass_mode = True
+        bypass_mode = initial_bypass_mode
         claude_1m_mode = False
         caveman_mode = bool(has_caveman and caveman_enabled_default)
         agent_pack = default_pack
@@ -3415,7 +3443,7 @@ def confirm_tui(
         effort_mode = effort_default
         panel_index = 0
         preview_selection = {"mcp": 0, "skills": 0, "hooks": 0}
-        preview_disabled = {"mcp": set(), "skills": set(), "hooks": set()}
+        preview_disabled = _initial_disabled_surfaces()
         disable_mode = False
 
         def _disabled_payload():

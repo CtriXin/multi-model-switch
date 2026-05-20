@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.11.1}"
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.12.0}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -36,6 +36,10 @@ MINDKEEPER_DEFAULT_REF="$BRAINKEEPER_DEFAULT_REF"
 MINDKEEPER_INSTALL_REF="$BRAINKEEPER_INSTALL_REF"
 MAP_DEFAULT_REF="${MAP_DEFAULT_REF:-v0.3.1}"
 MAP_INSTALL_REF="${MAP_INSTALL_REF:-}"
+CODEGRAPH_PACKAGE_SPEC="${CODEGRAPH_PACKAGE_SPEC:-@colbymchenry/codegraph@latest}"
+CLAUDE_CLI_PACKAGE_SPEC="${CLAUDE_CLI_PACKAGE_SPEC:-@anthropic-ai/claude-code@latest}"
+CODEX_CLI_PACKAGE_SPEC="${CODEX_CLI_PACKAGE_SPEC:-@openai/codex@latest}"
+OPENCODE_CLI_PACKAGE_SPEC="${OPENCODE_CLI_PACKAGE_SPEC:-opencode-ai@latest}"
 ECC_REPO_URL="${ECC_REPO_URL:-https://github.com/affaan-m/everything-claude-code}"
 ECC_INSTALL_REF="${ECC_INSTALL_REF:-}"
 OMC_REPO_URL="${OMC_REPO_URL:-https://github.com/Yeachan-Heo/oh-my-claudecode}"
@@ -57,12 +61,16 @@ INSTALL_BRAINKEEPER_CONTEXT=0
 INSTALL_BRAINKEEPER_CONTEXT_EXPLICIT=0
 INSTALL_MAP=0
 INSTALL_MAP_EXPLICIT=0
+INSTALL_CODEGRAPH=0
+INSTALL_CODEGRAPH_EXPLICIT=0
 INSTALL_READ_ONCE=0
 INSTALL_READ_ONCE_EXPLICIT=0
 INSTALL_OPS_ENV_SAFE=0
 INSTALL_OPS_ENV_SAFE_EXPLICIT=0
 INSTALL_TOKEN_SAVER=0
 INSTALL_TOKEN_SAVER_EXPLICIT=0
+INSTALL_TOON=0
+INSTALL_TOON_EXPLICIT=0
 INSTALL_ECC=0
 INSTALL_ECC_EXPLICIT=0
 INSTALL_OMC=0
@@ -163,6 +171,10 @@ optional_map_installed() {
     [ -x "$REAL_HOME/.claude/hooks/map-auto-index.sh" ]
 }
 
+optional_codegraph_installed() {
+    find_cli_binary codegraph >/dev/null 2>&1
+}
+
 optional_read_once_installed() {
     [ -x "$REAL_HOME/.claude/read-once/hook.sh" ] \
         && [ -x "$REAL_HOME/.claude/read-once/compact.sh" ]
@@ -177,6 +189,12 @@ optional_token_saver_installed() {
     [ -f "$REAL_HOME/.codex/skills/token-saver/SKILL.md" ] \
         && [ -f "$REAL_HOME/.claude/skills/token-saver/SKILL.md" ] \
         && [ -x "$BIN_DIR/token-saver" ]
+}
+
+optional_toon_installed() {
+    [ -f "$REAL_HOME/.codex/skills/toon/SKILL.md" ] \
+        && [ -f "$REAL_HOME/.claude/skills/toon/SKILL.md" ] \
+        && [ -x "$BIN_DIR/mms-toon" ]
 }
 
 optional_ecc_installed() {
@@ -272,7 +290,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-read-once] [--install-token-saver] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]] [--install-legacy-ccs]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]] [--install-legacy-ccs]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -292,13 +310,16 @@ $(t "说明:" "Notes:")
   - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
   - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
+  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI；MMS session hook 检测到 codegraph 后会自动 init/sync 当前 repo" "--install-codegraph installs the CodeGraph CLI via npm; MMS session hooks auto init/sync the current repo when codegraph is available")
+  - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command")
+  - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command; MMS sessions still bundle TOON by default")
   - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
   - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
-  - $(t "--install-cli 可选安装 claude/codex（支持逗号分隔）；Claude 优先 official native installer，Codex 优先 npm official package" "--install-cli optionally installs claude/codex (comma-separated); Claude prefers the official native installer, Codex prefers the official npm package")
+  - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "--install-legacy-ccs 可显式恢复旧 ccs 命令链接；默认只链接 mms" "--install-legacy-ccs explicitly restores the legacy ccs command link; by default only mms is linked")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -341,7 +362,7 @@ parse_install_cli_arg() {
             continue
         fi
         case "$normalized" in
-            claude|codex)
+            claude|codex|opencode)
                 append_csv_item "$normalized"
                 ;;
             *)
@@ -474,6 +495,32 @@ prompt_optional_install_choices() {
         fi
     fi
 
+    if [ "$INSTALL_CODEGRAPH_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if optional_codegraph_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional code intelligence"
+            else
+                echo "可选代码索引"
+            fi
+            note_optional_pack_detected " CodeGraph CLI" "CodeGraph CLI"
+        elif [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional code intelligence"
+            echo "  CodeGraph installs a local CLI/MCP server; MMS session hooks auto init/sync repos when the binary is available."
+            echo "  It uses npm and may fall back to MMS-managed nvm Node.js 22 without changing your default Node."
+            if confirm_from_tty "Install CodeGraph CLI? [y/N]: " "n"; then
+                INSTALL_CODEGRAPH=1
+            fi
+        else
+            echo "可选代码索引"
+            echo "  CodeGraph 会安装本机 CLI/MCP server；MMS session hook 检测到 binary 后会自动 init/sync 当前 repo。"
+            echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
+            if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
+                INSTALL_CODEGRAPH=1
+            fi
+        fi
+    fi
+
     if [ "$INSTALL_READ_ONCE_EXPLICIT" -eq 0 ]; then
         echo ""
         if optional_read_once_installed; then
@@ -520,6 +567,32 @@ prompt_optional_install_choices() {
             echo "  它让 export-only 会话也能省 token，不需要你记底层命令。"
             if confirm_from_tty "是否为 Codex 和 Claude 安装 Token Saver？[y/N]: " "n"; then
                 INSTALL_TOKEN_SAVER=1
+            fi
+        fi
+    fi
+
+    if [ "$INSTALL_TOON_EXPLICIT" -eq 0 ]; then
+        echo ""
+        if optional_toon_installed; then
+            if [ "$INSTALL_LANG" = "en" ]; then
+                echo "Optional structured context compression"
+            else
+                echo "可选结构化上下文压缩"
+            fi
+            note_optional_pack_detected " TOON" "TOON"
+        elif [ "$INSTALL_LANG" = "en" ]; then
+            echo "Optional structured context compression"
+            echo "  TOON installs a Codex/Claude skill plus the local mms-toon command for export-only sessions."
+            echo "  MMS-launched sessions already receive TOON as a session-local built-in asset."
+            if confirm_from_tty "Install global TOON skill and mms-toon command? [y/N]: " "n"; then
+                INSTALL_TOON=1
+            fi
+        else
+            echo "可选结构化上下文压缩"
+            echo "  TOON 会安装 Codex/Claude 共用 skill 和本机 mms-toon 命令，方便 export-only 会话使用。"
+            echo "  通过 MMS 启动的 session 已经默认内建 TOON session asset。"
+            if confirm_from_tty "是否安装全局 TOON skill 和 mms-toon 命令？[y/N]: " "n"; then
+                INSTALL_TOON=1
             fi
         fi
     fi
@@ -631,7 +704,7 @@ prompt_optional_install_choices() {
     echo ""
     echo "$(t "可选 CLI 工具" "Optional CLI tools")"
 
-    for cli_name in claude codex; do
+    for cli_name in claude codex opencode; do
         case "$cli_name" in
             claude)
                 cli_command="claude"
@@ -640,6 +713,10 @@ prompt_optional_install_choices() {
             codex)
                 cli_command="codex"
                 cli_label="Codex CLI"
+                ;;
+            opencode)
+                cli_command="opencode"
+                cli_label="OpenCode CLI"
                 ;;
         esac
 
@@ -1233,67 +1310,45 @@ brainkeeper_node_command() {
 install_named_cli() {
     local cli_name="$1"
     local cli_path=""
-    local status=0
+    local command_name=""
+    local label=""
+    local package_spec=""
 
     case "$cli_name" in
         claude)
-            if cli_path="$(find_cli_binary claude 2>/dev/null)"; then
-                echo "✓ Claude Code ($cli_path)"
-                return 0
-            fi
-
-            echo ""
-            echo "→ $(t "正在处理" "Processing") Claude Code"
-            echo "  curl -fsSL https://claude.ai/install.sh | bash"
-            set +e
-            fetch_url_stdout "https://claude.ai/install.sh" | env HOME="$REAL_HOME" bash
-            status=$?
-            set -e
-            if [ "$status" -eq 0 ] && cli_path="$(find_cli_binary claude 2>/dev/null)"; then
-                echo "✓ Claude Code ($cli_path)"
-                return 0
-            fi
-
-            echo "⚠ $(t "Claude native installer 未完成，尝试 npm fallback（不会切默认 Node）。" "Claude native installer did not complete; trying npm fallback without changing default Node.")"
-            if ! command -v npm >/dev/null 2>&1; then
-                ensure_nvm_node22 || true
-            fi
-            if command -v npm >/dev/null 2>&1; then
-                npm_global_install_with_nvm_fallback "Claude Code (npm fallback)" @anthropic-ai/claude-code || true
-            fi
-            if cli_path="$(find_cli_binary claude 2>/dev/null)"; then
-                echo "✓ Claude Code ($cli_path)"
-                return 0
-            fi
-            echo "⚠ $(t "Claude Code 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli claude。" "Claude Code install did not complete; MMS is still installed, rerun --install-cli claude later.")"
-            return 1
+            command_name="claude"
+            label="Claude Code"
+            package_spec="$CLAUDE_CLI_PACKAGE_SPEC"
             ;;
         codex)
-            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
-                echo "✓ Codex CLI ($cli_path)"
-                return 0
-            fi
-            if ! command -v npm >/dev/null 2>&1; then
-                ensure_nvm_node22 || true
-            fi
-            npm_global_install_with_nvm_fallback "Codex CLI" @openai/codex@latest || true
-            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
-                echo "✓ Codex CLI ($cli_path)"
-                return 0
-            fi
-            ensure_brew_package "codex" "codex" "Codex CLI" || true
-            if cli_path="$(find_cli_binary codex 2>/dev/null)"; then
-                echo "✓ Codex CLI ($cli_path)"
-                return 0
-            fi
-            echo "⚠ $(t "Codex CLI 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli codex。" "Codex CLI install did not complete; MMS is still installed, rerun --install-cli codex later.")"
-            return 1
+            command_name="codex"
+            label="Codex CLI"
+            package_spec="$CODEX_CLI_PACKAGE_SPEC"
+            ;;
+        opencode)
+            command_name="opencode"
+            label="OpenCode CLI"
+            package_spec="$OPENCODE_CLI_PACKAGE_SPEC"
             ;;
         *)
             echo "⚠ $(t "未知 CLI，跳过" "Unknown CLI, skipping"): $cli_name"
             return 1
             ;;
     esac
+
+    if cli_path="$(find_cli_binary "$command_name" 2>/dev/null)"; then
+        echo "✓ $label ($cli_path)"
+        return 0
+    fi
+
+    npm_global_install_with_nvm_fallback "$label" "$package_spec" || true
+    if cli_path="$(find_cli_binary "$command_name" 2>/dev/null)"; then
+        echo "✓ $label ($cli_path)"
+        return 0
+    fi
+
+    echo "⚠ $(t "$label 安装未完成；MMS 仍可安装，之后可重新运行 --install-cli $cli_name。" "$label install did not complete; MMS is still installed, rerun --install-cli $cli_name later.")"
+    return 1
 }
 
 install_requested_clis() {
@@ -1991,6 +2046,18 @@ run_install_check() {
         echo "✓ $(t "BrainKeeper context pack 已安装" "BrainKeeper context pack installed"): $REAL_HOME/.local/share/brainkeeper"
     else
         echo "• $(t "BrainKeeper context pack 未安装或命令链接不完整（可选）" "BrainKeeper context pack not installed or command wrappers incomplete (optional)"): --install-brainkeeper-context"
+    fi
+
+    if optional_codegraph_installed; then
+        echo "✓ $(t "CodeGraph CLI 已安装" "CodeGraph CLI installed"): $(find_cli_binary codegraph || true)"
+    else
+        echo "• $(t "CodeGraph CLI 未安装（可选）" "CodeGraph CLI not installed (optional)"): --install-codegraph"
+    fi
+
+    if optional_toon_installed; then
+        echo "✓ $(t "TOON 全局 skill/命令已安装" "TOON global skill/command installed"): $BIN_DIR/mms-toon"
+    else
+        echo "• $(t "TOON 全局 skill/命令未安装（可选；MMS session 内建仍可用）" "TOON global skill/command not installed (optional; bundled MMS sessions still work)"): --install-toon"
     fi
 
     if [ -f "$MMS_HOME/vendor/weber/SKILL.md" ]; then
@@ -2913,6 +2980,40 @@ install_optional_map() {
     return 0
 }
 
+install_optional_codegraph() {
+    echo ""
+    echo "$(t "正在安装 CodeGraph..." "Installing CodeGraph...")"
+    echo "⚠ $(t "这个可选包会通过 npm 安装 CodeGraph CLI；不写 ~/.config/mms，也不修改 Claude/Codex 全局配置。" "This optional pack installs the CodeGraph CLI via npm; it does not write ~/.config/mms or change global Claude/Codex config.")"
+    echo "  $(t "MMS 启动的 session 已带 CodeGraph auto-index hook；检测到 codegraph 后才会自动 init/sync。" "MMS-launched sessions already include the CodeGraph auto-index hook; it only init/syncs when codegraph is available.")"
+
+    npm_global_install_with_nvm_fallback "CodeGraph CLI" "$CODEGRAPH_PACKAGE_SPEC" || true
+
+    local codegraph_bin=""
+    codegraph_bin="$(find_cli_binary codegraph || true)"
+    if [ -n "$codegraph_bin" ]; then
+        echo "✓ $(t "CodeGraph 可用" "CodeGraph available"): $codegraph_bin"
+        print_codegraph_init_hint
+    else
+        echo "⚠ $(t "安装后仍未在可搜索路径中找到 codegraph" "codegraph was still not found in searchable paths after install")"
+    fi
+}
+
+print_codegraph_init_hint() {
+    if [ "$INSTALL_LANG" = "en" ]; then
+        echo "  CodeGraph init for the current repo:"
+        echo "    codegraph init -i"
+        echo "  Prompt for an LLM to initialize all repos:"
+        echo "    Find every git repo under this workspace, run 'codegraph init -i' when .codegraph is missing and 'codegraph sync' when it exists, skip node_modules/vendor/build dirs, and report failures."
+        echo "  Tip: keep .codegraph/ local and do not commit it unless your repo intentionally tracks indexes."
+    else
+        echo "  当前 repo 手动初始化："
+        echo "    codegraph init -i"
+        echo "  让 LLM 一键初始化全部 repo 的指令："
+        echo "    找出当前工作区下所有 git repo；没有 .codegraph 就执行 'codegraph init -i'，已有 .codegraph 就执行 'codegraph sync'；跳过 node_modules/vendor/build 目录；最后汇总失败列表。"
+        echo "  提醒：.codegraph/ 建议保持本地，不要提交，除非项目明确要追踪索引。"
+    fi
+}
+
 install_optional_read_once() {
     local claude_dir="$REAL_HOME/.claude"
     local install_dir="$claude_dir/read-once"
@@ -3144,22 +3245,62 @@ install_token_saver_skill_link() {
     return 0
 }
 
-write_token_saver_bin_wrapper() {
+install_toon_skill_link() {
+    local target_skill_dir="$1"
+    local source_skill_dir="$MMS_HOME/vendor/toon"
+    local marker="name: toon"
+    local backup_skill_dir="${target_skill_dir}.bak.$$"
+
+    if [ ! -f "$source_skill_dir/SKILL.md" ]; then
+        echo "⚠ $(t "找不到 TOON skill，跳过" "TOON skill not found, skipping"): $source_skill_dir"
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$target_skill_dir")"
+    if [ -L "$target_skill_dir" ]; then
+        rm -f "$target_skill_dir"
+        ln -s "$source_skill_dir" "$target_skill_dir"
+        echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
+        return 0
+    fi
+
+    if [ -e "$target_skill_dir" ]; then
+        if [ -f "$target_skill_dir/SKILL.md" ] && grep -Fq "$marker" "$target_skill_dir/SKILL.md"; then
+            rm -rf "$backup_skill_dir"
+            mv "$target_skill_dir" "$backup_skill_dir"
+            ln -s "$source_skill_dir" "$target_skill_dir"
+            rm -rf "$backup_skill_dir"
+            echo "✓ $(t "已替换托管 skill 为 symlink" "Replaced managed skill with symlink"): $target_skill_dir"
+            return 0
+        fi
+        echo "⚠ $(t "检测到已有自定义 TOON skill，跳过覆盖" "Detected custom TOON skill, skipping overwrite"): $target_skill_dir"
+        return 1
+    fi
+
+    ln -s "$source_skill_dir" "$target_skill_dir"
+    echo "✓ $(t "已安装 skill" "Installed skill"): $target_skill_dir"
+    return 0
+}
+
+write_mms_script_wrapper() {
     local command_name="$1"
     local source_script="$MMS_HOME/scripts/$command_name"
     local target="$BIN_DIR/$command_name"
-    local marker="Managed by MMS optional token-saver pack"
+    local marker="Managed by MMS optional script wrapper"
+    local legacy_token_saver_marker="Managed by MMS optional token-saver pack"
     local tmp_file=""
 
     if [ ! -f "$source_script" ]; then
-        echo "⚠ $(t "找不到 token-saver 命令脚本，跳过" "token-saver command script not found, skipping"): $source_script"
+        echo "⚠ $(t "找不到 MMS 命令脚本，跳过" "MMS command script not found, skipping"): $source_script"
         return 1
     fi
 
     mkdir -p "$BIN_DIR"
     if [ -L "$target" ]; then
         rm -f "$target"
-    elif [ -e "$target" ] && ! grep -Fq "$marker" "$target" 2>/dev/null; then
+    elif [ -e "$target" ] \
+        && ! grep -Fq "$marker" "$target" 2>/dev/null \
+        && ! grep -Fq "$legacy_token_saver_marker" "$target" 2>/dev/null; then
         echo "⚠ $(t "检测到已有自定义命令，跳过覆盖" "Detected custom command, skipping overwrite"): $target"
         return 1
     fi
@@ -3196,6 +3337,26 @@ install_token_saver_installed_skills_mirror() {
     return 0
 }
 
+install_toon_installed_skills_mirror() {
+    local mirror_dir="$REAL_HOME/auto-skills/installed-skills"
+    local source_skill_dir="$MMS_HOME/vendor/toon"
+    local target="$mirror_dir/toon"
+
+    if [ ! -d "$mirror_dir" ]; then
+        return 0
+    fi
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        echo "⚠ $(t "检测到 installed-skills 自定义 TOON，跳过覆盖" "Detected custom installed-skills TOON, skipping overwrite"): $target"
+        return 1
+    fi
+    if [ -L "$target" ]; then
+        rm -f "$target"
+    fi
+    ln -s "$source_skill_dir" "$target"
+    echo "✓ $(t "已更新 installed-skills 镜像" "Updated installed-skills mirror"): $target"
+    return 0
+}
+
 install_optional_token_saver() {
     echo ""
     echo "$(t "正在安装 Token Saver..." "Installing Token Saver...")"
@@ -3204,10 +3365,22 @@ install_optional_token_saver() {
 
     install_token_saver_skill_link "$REAL_HOME/.codex/skills/token-saver" || true
     install_token_saver_skill_link "$REAL_HOME/.claude/skills/token-saver" || true
-    write_token_saver_bin_wrapper "token-saver" || true
-    write_token_saver_bin_wrapper "mms-context" || true
-    write_token_saver_bin_wrapper "mms-toon" || true
+    write_mms_script_wrapper "token-saver" || true
+    write_mms_script_wrapper "mms-context" || true
+    write_mms_script_wrapper "mms-toon" || true
     install_token_saver_installed_skills_mirror || true
+}
+
+install_optional_toon() {
+    echo ""
+    echo "$(t "正在安装 TOON..." "Installing TOON...")"
+    echo "⚠ $(t "这个可选包会写入 ~/.codex/skills/toon、~/.claude/skills/toon 和 ~/.local/bin/mms-toon；MMS session 内仍默认内建 TOON。" "This optional pack writes ~/.codex/skills/toon, ~/.claude/skills/toon, and ~/.local/bin/mms-toon; MMS sessions still bundle TOON by default.")"
+    echo "  $(t "它不写 ~/.config/mms，也不修改模型、账号、proxy 或 reasoning 配置。" "It does not write ~/.config/mms or change model, account, proxy, or reasoning settings.")"
+
+    install_toon_skill_link "$REAL_HOME/.codex/skills/toon" || true
+    install_toon_skill_link "$REAL_HOME/.claude/skills/toon" || true
+    write_mms_script_wrapper "mms-toon" || true
+    install_toon_installed_skills_mirror || true
 }
 
 validate_ecc_pack_dir() {
@@ -3363,6 +3536,19 @@ while [[ $# -gt 0 ]]; do
             fi
             MAP_INSTALL_REF="$1"
             ;;
+        --install-codegraph)
+            INSTALL_CODEGRAPH=1
+            INSTALL_CODEGRAPH_EXPLICIT=1
+            ;;
+        --codegraph-package)
+            shift
+            if [[ -z "${1:-}" ]]; then
+                echo "❌ $(t "--codegraph-package 需要 npm 包规格" "--codegraph-package requires an npm package spec")"
+                usage
+                exit 1
+            fi
+            CODEGRAPH_PACKAGE_SPEC="$1"
+            ;;
         --install-read-once)
             INSTALL_READ_ONCE=1
             INSTALL_READ_ONCE_EXPLICIT=1
@@ -3370,6 +3556,10 @@ while [[ $# -gt 0 ]]; do
         --install-token-saver)
             INSTALL_TOKEN_SAVER=1
             INSTALL_TOKEN_SAVER_EXPLICIT=1
+            ;;
+        --install-toon)
+            INSTALL_TOON=1
+            INSTALL_TOON_EXPLICIT=1
             ;;
         --install-ops-env-safe)
             INSTALL_OPS_ENV_SAFE=1
@@ -3506,6 +3696,12 @@ if [ "$INSTALL_MAP" -eq 1 ]; then
     echo "  $(t "默认优先复用现有 Node.js 18+；若版本不足则跳过，不会自动改你的默认 Node。" "By default MMS reuses an existing Node.js 18+ and skips Map when unavailable; it does not auto-change your default Node.")"
 fi
 
+if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
+    echo "• $(t "附带安装 CodeGraph CLI" "Optional CodeGraph CLI"): on"
+    echo "  $(t "会通过 npm 安装 codegraph；MMS session hook 检测到后会自动 init/sync 当前 repo。" "This installs codegraph via npm; MMS session hooks auto init/sync the current repo when available.")"
+    echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
+fi
+
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     echo "• $(t "附带安装 read-once" "Optional read-once"): on"
     echo "  $(t "会写入 Claude 的 Read token saver hooks。" "This writes the Claude Read token saver hooks.")"
@@ -3514,6 +3710,11 @@ fi
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     echo "• $(t "附带安装 Token Saver" "Optional Token Saver"): on"
     echo "  $(t "会写入 Codex/Claude skill 和 ~/.local/bin/token-saver/mms-context/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude skills and ~/.local/bin/token-saver/mms-context/mms-toon, without writing ~/.config/mms.")"
+fi
+
+if [ "$INSTALL_TOON" -eq 1 ]; then
+    echo "• $(t "附带安装 TOON" "Optional TOON"): on"
+    echo "  $(t "会写入 Codex/Claude TOON skill 和 ~/.local/bin/mms-toon，不写 ~/.config/mms。" "This writes Codex/Claude TOON skills and ~/.local/bin/mms-toon, without writing ~/.config/mms.")"
 fi
 
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
@@ -3606,11 +3807,17 @@ fi
 if [ "$INSTALL_MAP" -eq 1 ]; then
     install_optional_map || true
 fi
+if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
+    install_optional_codegraph || true
+fi
 if [ "$INSTALL_READ_ONCE" -eq 1 ]; then
     install_optional_read_once || true
 fi
 if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
     install_optional_token_saver || true
+fi
+if [ "$INSTALL_TOON" -eq 1 ]; then
+    install_optional_toon || true
 fi
 if [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ]; then
     install_optional_ops_env_safe || true
@@ -3698,9 +3905,20 @@ if [ -x "$BIN_DIR/mms" ]; then
         echo ""
     fi
 
+    if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
+        echo "  $(t "CodeGraph CLI 可选安装已执行；MMS session start hook 检测到 codegraph 后会自动 init/sync 当前 repo。" "CodeGraph CLI optional install ran; MMS session start hooks auto init/sync the current repo when codegraph is available.")"
+        print_codegraph_init_hint
+        echo ""
+    fi
+
     if [ "$INSTALL_TOKEN_SAVER" -eq 1 ]; then
         echo "  $(t "Token Saver 已安装：Codex/Claude skill、token-saver/mms-context/mms-toon 命令。" "Token Saver installed: Codex/Claude skill plus token-saver/mms-context/mms-toon commands.")"
         echo "  $(t "普通 export-only Codex/Claude 会话现在可以靠 skill 自动使用长输出 ref/snippet。" "Plain export-only Codex/Claude sessions can now use long-output refs/snippets through the skill.")"
+        echo ""
+    fi
+
+    if [ "$INSTALL_TOON" -eq 1 ]; then
+        echo "  $(t "TOON 已安装：Codex/Claude skill 和 mms-toon 命令；MMS session 内仍使用内建 session asset。" "TOON installed: Codex/Claude skill plus the mms-toon command; MMS sessions still use the bundled session asset.")"
         echo ""
     fi
 

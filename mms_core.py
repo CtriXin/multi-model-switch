@@ -145,6 +145,44 @@ OVERRIDE_PATHS = [
     os.path.join(LEGACY_CONFIG_DIR, "override.toml"),
     os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
+PREFERENCES_PATHS = [
+    os.path.join(PRIMARY_CONFIG_DIR, "preferences.toml"),
+]
+PREFERENCES_DOC_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "MMS_USER_PREFERENCES.md")
+PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
+# User-owned preference overlay. Install/update never overwrites this file.
+
+[launch.defaults]
+thinking_mode = "enable"      # enable | disable
+reasoning_effort = "high"     # low | medium | high | xhigh
+caveman_mode = "enable"       # enable | disable
+agent_pack = "none"           # none | ecc | omc
+bypass = true                 # true | false
+
+[launch.cli.codex]
+reasoning_effort = "high"
+
+[launch.cli.claude]
+agent_pack = "ecc"
+
+[launch.cli.agy]
+caveman_mode = "enable"
+
+[session_surfaces.disabled]
+skills = []                   # e.g. ["agent-browser", "token-saver"]
+mcp = []                      # e.g. ["pilot", "hive"]
+hooks = []                    # hook names or paths shown on confirm screen
+
+[assets.roots]
+# Optional custom roots; env vars like MMS_WEB_ACCESS_ROOT still win.
+# web_access = "~/my-skills/web-access"
+# weber = "~/my-skills/weber"
+# token_saver = "~/vendor/token-saver"
+# toon = "~/vendor/toon"
+# caveman = "~/vendor/caveman"
+# ecc = "~/.mms/agent-packs/everything-claude-code"
+# omc = "~/.mms/agent-packs/oh-my-claudecode"
+"""
 CONFIG_AUDIT_LOG = "config-audit.jsonl"
 CONFIG_LOCK_FILE = "config.toml.lock"
 CONFIG_GUARD_FILES = ("AGENTS.md", "CLAUDE.md")
@@ -2815,6 +2853,10 @@ def _existing_override_paths():
     return [path for path in OVERRIDE_PATHS if os.path.exists(path)]
 
 
+def _existing_preferences_paths():
+    return [path for path in PREFERENCES_PATHS if os.path.exists(path)]
+
+
 def _merge_dicts(base, override):
     merged = dict(base)
     for key, value in override.items():
@@ -2824,6 +2866,248 @@ def _merge_dicts(base, override):
         else:
             merged[key] = value
     return merged
+
+
+def _pref_bool(value):
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    return None
+
+
+def _pref_enable_disable(value):
+    enabled = _pref_bool(value)
+    if enabled is True:
+        return "enable"
+    if enabled is False:
+        return "disable"
+    raw = str(value or "").strip().lower()
+    if raw in {"enable", "enabled", "disable", "disabled"}:
+        return "enable" if raw.startswith("enable") else "disable"
+    return ""
+
+
+def _pref_reasoning_effort(value):
+    raw = str(value or "").strip().lower()
+    return raw if raw in {"low", "medium", "high", "xhigh"} else ""
+
+
+def _pref_agent_pack(value):
+    if value is None:
+        return ""
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if not raw:
+        return ""
+    if raw in {"none", "off", "disable", "disabled", "false", "0"}:
+        return "none"
+    if raw in {"ecc", "everything-claude-code"}:
+        return "ecc"
+    if raw in {"omc", "oh-my-claudecode", "oh-my-claude-code"}:
+        return "omc"
+    return ""
+
+
+def _sanitize_surface_list(values):
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result = []
+    seen = set()
+    for item in values:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _sanitize_disabled_session_surfaces(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    aliases = {
+        "mcp": "mcp",
+        "mcps": "mcp",
+        "mcp_servers": "mcp",
+        "skills": "skills",
+        "skill": "skills",
+        "hooks": "hooks",
+        "hook": "hooks",
+    }
+    result = {}
+    for key, values in payload.items():
+        normalized_key = aliases.get(str(key or "").strip().lower())
+        if not normalized_key:
+            continue
+        cleaned = _sanitize_surface_list(values)
+        if cleaned:
+            result[normalized_key] = cleaned
+    return result
+
+
+def _sanitize_launch_preferences(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    result = {}
+    thinking_mode = _pref_enable_disable(payload.get("thinking_mode"))
+    if thinking_mode:
+        result["thinking_mode"] = thinking_mode
+    effort = _pref_reasoning_effort(payload.get("reasoning_effort"))
+    if effort:
+        result["reasoning_effort"] = effort
+    caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
+    if caveman_mode:
+        result["caveman_mode"] = caveman_mode
+    bypass = _pref_bool(payload.get("bypass"))
+    if bypass is not None:
+        result["bypass"] = bypass
+
+    agent_pack = _pref_agent_pack(payload.get("agent_pack"))
+    if not agent_pack and _pref_enable_disable(payload.get("omc_mode")) == "enable":
+        agent_pack = "omc"
+    if not agent_pack and _pref_enable_disable(payload.get("ecc_mode")) == "enable":
+        agent_pack = "ecc"
+    if agent_pack:
+        result["agent_pack"] = agent_pack
+        result["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
+        result["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
+
+    surfaces = _sanitize_disabled_session_surfaces(payload.get("disabled_session_surfaces"))
+    if surfaces:
+        result["disabled_session_surfaces"] = surfaces
+    return result
+
+
+_PREFERENCE_ASSET_ROOT_KEYS = {
+    "agent_browser": "agent_browser",
+    "agent-browser": "agent_browser",
+    "auto_github_contributor": "auto_github_contributor",
+    "auto-github-contributor": "auto_github_contributor",
+    "caveman": "caveman",
+    "ecc": "ecc",
+    "omc": "omc",
+    "token_saver": "token_saver",
+    "token-saver": "token_saver",
+    "toon": "toon",
+    "web_access": "web_access",
+    "web-access": "web_access",
+    "weber": "weber",
+}
+
+
+def _sanitize_asset_roots(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    result = {}
+    for key, value in payload.items():
+        normalized_key = _PREFERENCE_ASSET_ROOT_KEYS.get(str(key or "").strip().lower())
+        path = str(value or "").strip()
+        if not normalized_key or not path:
+            continue
+        result[normalized_key] = os.path.abspath(os.path.expanduser(path))
+    return result
+
+
+def _sanitize_user_preferences(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    launch = raw.get("launch") if isinstance(raw.get("launch"), dict) else {}
+    session_surfaces = raw.get("session_surfaces") if isinstance(raw.get("session_surfaces"), dict) else {}
+    assets = raw.get("assets") if isinstance(raw.get("assets"), dict) else {}
+
+    result = {"launch": {"defaults": {}, "cli": {}}, "session_surfaces": {"disabled": {}}, "assets": {"roots": {}}}
+    result["launch"]["defaults"] = _sanitize_launch_preferences(launch.get("defaults"))
+    cli_tables = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
+    for cli_name, table in cli_tables.items():
+        normalized_cli = str(cli_name or "").strip().lower()
+        if normalized_cli not in set(CLI_NAMES) | {"gemini"}:
+            continue
+        cleaned = _sanitize_launch_preferences(table)
+        if cleaned:
+            result["launch"]["cli"][normalized_cli] = cleaned
+    global_disabled = _sanitize_disabled_session_surfaces(session_surfaces.get("disabled"))
+    if global_disabled:
+        result["session_surfaces"]["disabled"] = global_disabled
+    roots = _sanitize_asset_roots(assets.get("roots"))
+    if roots:
+        result["assets"]["roots"] = roots
+    return result
+
+
+def load_user_preferences():
+    merged = {}
+    for path in _existing_preferences_paths():
+        try:
+            prefs = _load_toml_file(path)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            console.print(f"[yellow]跳过无效 preferences 文件 {path}: {exc}[/yellow]")
+            continue
+        if isinstance(prefs, dict):
+            merged = _merge_dicts(merged, prefs)
+    return _sanitize_user_preferences(merged)
+
+
+def preference_asset_root(asset_name):
+    key = _PREFERENCE_ASSET_ROOT_KEYS.get(str(asset_name or "").strip().lower())
+    if not key:
+        return ""
+    return str(load_user_preferences().get("assets", {}).get("roots", {}).get(key) or "").strip()
+
+
+def _merge_disabled_session_surfaces(*payloads):
+    merged = {"mcp": [], "skills": [], "hooks": []}
+    seen = {key: set() for key in merged}
+    for payload in payloads:
+        cleaned = _sanitize_disabled_session_surfaces(payload)
+        for key, values in cleaned.items():
+            for value in values:
+                if value in seen[key]:
+                    continue
+                seen[key].add(value)
+                merged[key].append(value)
+    return {key: values for key, values in merged.items() if values}
+
+
+def _preference_runtime_overlay(prefs, cli_name):
+    prefs = prefs if isinstance(prefs, dict) else {}
+    launch = prefs.get("launch") if isinstance(prefs.get("launch"), dict) else {}
+    merged = dict(launch.get("defaults") or {})
+    cli_overrides = launch.get("cli") if isinstance(launch.get("cli"), dict) else {}
+    cli_specific = cli_overrides.get(str(cli_name or "").strip().lower())
+    if isinstance(cli_specific, dict):
+        merged = _merge_dicts(merged, cli_specific)
+    global_disabled = (prefs.get("session_surfaces") or {}).get("disabled") if isinstance(prefs.get("session_surfaces"), dict) else {}
+    disabled = _merge_disabled_session_surfaces(global_disabled, merged.get("disabled_session_surfaces"))
+    if disabled:
+        merged["disabled_session_surfaces"] = disabled
+    return merged
+
+
+def _runtime_with_launch_preferences(cfg, runtime, cli_name):
+    if not isinstance(runtime, dict):
+        return runtime
+    if runtime.get("_mms_preferences_applied"):
+        return runtime
+    prefs = (cfg or {}).get("_mms_preferences") if isinstance(cfg, dict) else None
+    if not isinstance(prefs, dict):
+        prefs = load_user_preferences()
+    overlay = _preference_runtime_overlay(prefs, cli_name)
+    if not overlay:
+        result = dict(runtime)
+        result["_mms_preferences_applied"] = True
+        return result
+    result = dict(runtime)
+    existing_disabled = result.get("disabled_session_surfaces")
+    for key, value in overlay.items():
+        if key == "disabled_session_surfaces":
+            continue
+        result[key] = value
+    disabled = _merge_disabled_session_surfaces(existing_disabled, overlay.get("disabled_session_surfaces"))
+    if disabled:
+        result["disabled_session_surfaces"] = disabled
+    result["_mms_preferences_applied"] = True
+    return result
 
 
 def apply_local_overrides(cfg):
@@ -2836,6 +3120,7 @@ def apply_local_overrides(cfg):
             continue
         if isinstance(override_cfg, dict):
             merged = _merge_dicts(merged, override_cfg)
+    merged["_mms_preferences"] = load_user_preferences()
     return merged
 
 
@@ -3324,6 +3609,11 @@ def _print_trace(cli_name, model_info, runtime):
 
 
 def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=None):
+    runtime = _runtime_with_launch_preferences(
+        {"_mms_preferences": load_user_preferences()},
+        runtime,
+        cli_name,
+    )
     if cli_name == "claude":
         runtime = _runtime_with_vision_sidecar(load_config() or {}, runtime)
     if _trace_enabled:
@@ -6904,6 +7194,9 @@ def _choose_runtime_source(
     model_info=None,
     allow_selected_model_accounts=False,
 ):
+    def _with_preferences(runtime, launch_cli):
+        return _runtime_with_launch_preferences(cfg, runtime, launch_cli)
+
     if account_id or provider_id or cli_name not in MMS_MANAGED_OAUTH_CLIS:
         runtime, models = _resolve_launch_runtime(
             cfg, cli_name, default_provider, default_models, account_id=account_id, provider_id=provider_id
@@ -6913,6 +7206,7 @@ def _choose_runtime_source(
             choice = "provider override"
         elif account_id:
             choice = "account override"
+        runtime = _with_preferences(runtime, cli_name)
         _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice=choice)
         return runtime, models, cli_name
 
@@ -6930,14 +7224,16 @@ def _choose_runtime_source(
     if len(options) == 1:
         chosen = options[0]
         launch_cli = chosen.get("launch_cli", cli_name)
-        _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice="single option")
-        return chosen["runtime"], chosen["models"], launch_cli
+        runtime = _with_preferences(chosen["runtime"], launch_cli)
+        _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="single option")
+        return runtime, chosen["models"], launch_cli
 
     if not sys.stdin.isatty():
         chosen = options[default_choice or 0]
         launch_cli = chosen.get("launch_cli", cli_name)
-        _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice="default(no-tty)")
-        return chosen["runtime"], chosen["models"], launch_cli
+        runtime = _with_preferences(chosen["runtime"], launch_cli)
+        _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="default(no-tty)")
+        return runtime, chosen["models"], launch_cli
 
     table = Table(title=f"{cli_name} 使用入口", show_lines=True)
     table.add_column("#", style="cyan", width=4)
@@ -6968,8 +7264,9 @@ def _choose_runtime_source(
             if 1 <= selected <= len(options):
                 chosen = options[selected - 1]
                 launch_cli = chosen.get("launch_cli", cli_name)
-                _trace_runtime_choice("runtime resolve", chosen["runtime"], launch_cli=launch_cli, choice=chosen.get("title"))
-                return chosen["runtime"], chosen["models"], launch_cli
+                runtime = _with_preferences(chosen["runtime"], launch_cli)
+                _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice=chosen.get("title"))
+                return runtime, chosen["models"], launch_cli
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
@@ -9739,6 +10036,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime = _select_and_apply_opencode_profile(runtime_runtime, use_tui=True)
             if runtime_runtime is None:
                 continue
+        runtime_runtime = _runtime_with_launch_preferences(current_cfg, runtime_runtime, cli)
         if cli == "claude":
             runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
 
@@ -9791,7 +10089,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             once=once,
             context_lines=context_lines,
             has_caveman=has_caveman,
-            caveman_enabled_default=has_caveman,
+            caveman_enabled_default=str(runtime_runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
             has_ecc=has_ecc,
             ecc_enabled_default=False,
             has_omc=has_omc,
@@ -9805,6 +10103,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
         disabled_session_surfaces = {}
         agent_pack = "none"
+        confirm_returned_surfaces = False
 
         def _confirm_agent_pack(value):
             raw = str(value or "").strip().lower()
@@ -9816,6 +10115,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             if len(result) >= 8:
                 action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
                 agent_pack = _confirm_agent_pack(pack_value)
+                confirm_returned_surfaces = True
             elif len(result) >= 7:
                 action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
                 agent_pack = _confirm_agent_pack(ecc_enabled)
@@ -9862,9 +10162,15 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
         if cli in {"claude", "codex", "opencode", "agy"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
-            runtime_runtime["disabled_session_surfaces"] = (
-                disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
-            )
+            if confirm_returned_surfaces:
+                runtime_runtime["disabled_session_surfaces"] = (
+                    disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
+                )
+            else:
+                runtime_runtime["disabled_session_surfaces"] = _merge_disabled_session_surfaces(
+                    runtime_runtime.get("disabled_session_surfaces"),
+                    disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {},
+                )
         if cli in {"claude", "codex"}:
             runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
             runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
@@ -10041,6 +10347,21 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "validate":
         _handle_config_validate(cfg)
+        return
+    if key_path in {"preferences", "preferences.help", "preference.help"}:
+        _display_preferences_help()
+        return
+    if key_path in {"preferences.path", "preference.path"}:
+        _display_preferences_path()
+        return
+    if key_path in {"preferences.example", "preference.example"}:
+        _display_preferences_example()
+        return
+    if key_path in {"preferences.doc", "preference.doc"}:
+        console.print(PREFERENCES_DOC_PATH)
+        return
+    if key_path in {"gates", "human-gate", "humangate", "human-gates"}:
+        _display_human_gate_help()
         return
     if key_path == "load-balance.show":
         _handle_load_balance_show_config(cfg)
@@ -10698,6 +11019,8 @@ def _display_config_help():
     console.print(f"  {command} config set <dot.path> <value>")
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
+    console.print(f"  {command} config preferences.help")
+    console.print(f"  {command} config human-gate")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
     console.print("\n[bold]Load Balance:[/bold]")
     console.print(f"  {command} config load-balance.show")
@@ -10724,6 +11047,53 @@ def _display_config_help():
     console.print("\n[bold]其他:[/bold]")
     console.print(f"  {command} config stats")
     console.print(f"  {command} config api.edit")
+
+
+def _display_preferences_path():
+    console.print("[bold]MMS preferences.toml[/bold]")
+    for path in PREFERENCES_PATHS:
+        marker = "active" if os.path.exists(path) else "create-if-needed"
+        console.print(f"  {path}  [dim]({marker})[/dim]")
+    console.print(f"[dim]文档: {PREFERENCES_DOC_PATH}[/dim]")
+    console.print("[yellow]Human gate:[/yellow] agents may inspect/propose, but must not auto-write real ~/.config/mms/** without human confirmation.")
+
+
+def _display_preferences_example():
+    console.print(PREFERENCES_EXAMPLE_TOML.rstrip(), markup=False)
+
+
+def _display_human_gate_help():
+    command = current_command()
+    console.print("[bold]MMS Human Gate[/bold]")
+    console.print("- real config tree `~/.config/mms/**` is human-only for agents.")
+    console.print("- allowed for agents: inspect, explain, generate manual diff, print examples.")
+    console.print("- blocked without human confirmation: writing config.toml, preferences.toml, override.toml, credentials.sh, accounts/**, env/**, usage/account state, or Claude config.")
+    console.print("- required write flow: plan -> backup -> human double check -> audited write -> post-write human double check.")
+    console.print("- `preferences.toml` is safer than `override.toml`, but it is still real user config and stays behind the same human gate.")
+    console.print(f"[dim]LLM entry: run `{command} config preferences.help` and read {PREFERENCES_DOC_PATH} before advising config edits.[/dim]")
+
+
+def _display_preferences_help():
+    command = current_command()
+    console.print("[bold]MMS User Preferences[/bold]")
+    console.print(f"Path: {PREFERENCES_PATHS[0]}")
+    console.print("Purpose: user-owned, install-safe, allowlisted launch preference overlay.")
+    console.print("\n[bold]Commands:[/bold]")
+    console.print(f"  {command} config preferences.path")
+    console.print(f"  {command} config preferences.example")
+    console.print(f"  {command} config preferences.doc")
+    console.print(f"  {command} config human-gate")
+    console.print("\n[bold]Allowed keys:[/bold]")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, agent_pack, bypass")
+    console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
+    console.print("  session_surfaces.disabled: skills, mcp, hooks")
+    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, caveman, ecc, omc, auto_github_contributor")
+    console.print("\n[bold]Denied / ignored:[/bold]")
+    console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
+    console.print("\n[bold]Overlay order:[/bold]")
+    console.print("  config.toml -> override.toml -> preferences.toml launch allowlist -> confirm screen changes -> launcher")
+    console.print(f"[dim]Full doc: {PREFERENCES_DOC_PATH}[/dim]")
+    console.print("[yellow]Human gate:[/yellow] agents can propose edits, but must not auto-write real ~/.config/mms/** without human confirmation.")
 
 
 
@@ -10755,9 +11125,12 @@ def _display_config(cfg, prefix="", depth=0):
         else:
             console.print(f"  [cyan]override_files[/cyan] = {OVERRIDE_PATHS}")
             console.print("  [dim]如需团队共享默认值，可在以上路径创建 override.toml。[/dim]")
+        active_preferences = _existing_preferences_paths()
+        console.print(f"  [cyan]preferences_files[/cyan] = {active_preferences or PREFERENCES_PATHS}")
+        console.print(f"  [dim]用户偏好 allowlist: {current_command()} config preferences.help；真实配置仍受 human-gate 保护。[/dim]")
 
     for k, v in cfg.items():
-        if depth == 0 and k in {"providers", "provider", "accounts", "account"}:
+        if depth == 0 and k in {"providers", "provider", "accounts", "account", "_mms_preferences"}:
             continue
         full_key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
         if isinstance(v, dict):
@@ -11574,6 +11947,7 @@ def _resolve_resume_runtime_and_model(
         model_name = _first_resume_model(cli_models, default_models, cfg.get("recommend", {}).get("models", []))
         if model_name:
             model_info = {"model": model_name}
+    runtime = _runtime_with_launch_preferences(cfg, runtime, launch_cli_name or cli)
     return runtime, cli_models or [], launch_cli_name or cli, model_info
 
 
@@ -11982,7 +12356,33 @@ def _is_help_request(argv):
         return False
     if argv[0] == "help":
         return True
+    if argv[0] == "config" and _is_config_help_request(argv[1:]):
+        return True
     return any(str(arg).strip() in {"-h", "--help"} for arg in argv)
+
+
+def _is_config_help_request(args_rest):
+    if not args_rest:
+        return False
+    key_path = str(args_rest[0] or "").strip()
+    return key_path in {
+        "-h",
+        "--help",
+        "help",
+        "preferences",
+        "preferences.help",
+        "preference.help",
+        "preferences.path",
+        "preference.path",
+        "preferences.example",
+        "preference.example",
+        "preferences.doc",
+        "preference.doc",
+        "gates",
+        "human-gate",
+        "humangate",
+        "human-gates",
+    }
 
 
 def _is_session_prune_dry_run(argv):
@@ -12045,7 +12445,8 @@ def main():
             cfg = bootstrap_cfg
             if cfg is None:
                 cfg = _default_config()
-                save_config(cfg)
+                if not _is_config_help_request(argv[1:]):
+                    save_config(cfg)
             handle_config(cfg, argv[1:])
             return
         if command == "chat":

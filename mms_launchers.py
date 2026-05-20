@@ -25,6 +25,7 @@ from mms_core import (
     _runtime_force_ipv4,
     _runtime_httpx_request,
     detect_working_base_url,
+    preference_asset_root,
 )
 from mms_fake_upstream import (
     ensure_local_proxy as _ensure_fake_upstream_proxy,
@@ -2896,11 +2897,21 @@ def _default_gpt_reasoning_effort(module_path=None):
     return "high" if _is_installed_mms_layout(module_path=module_path) else "xhigh"
 
 
+def _asset_root_preference(asset_name):
+    try:
+        return str(preference_asset_root(asset_name) or "").strip()
+    except Exception:
+        return ""
+
+
 def _resolve_caveman_root():
     candidates = []
     explicit = str(os.environ.get("MMS_CAVEMAN_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("caveman")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "caveman"),
         _real_user_path("auto-skills", "vendor", "caveman"),
@@ -2977,6 +2988,9 @@ def _resolve_ecc_root():
     explicit = str(os.environ.get("MMS_ECC_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("ecc")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "everything-claude-code"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "everything-claude-code"),
@@ -3003,6 +3017,9 @@ def _resolve_omc_root():
     explicit = str(os.environ.get("MMS_OMC_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("omc")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-packs", "oh-my-claudecode"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "oh-my-claudecode"),
@@ -3030,6 +3047,9 @@ def _resolve_web_access_root():
     explicit = str(os.environ.get("MMS_WEB_ACCESS_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("web_access")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "web-access"),
         _real_user_path("auto-skills", "vendor", "web-access"),
@@ -3051,6 +3071,9 @@ def _resolve_weber_root():
     explicit = str(os.environ.get("MMS_WEBER_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("weber")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "weber"),
         _real_user_path("auto-skills", "shared-skills", "weber"),
@@ -3073,6 +3096,9 @@ def _resolve_agent_browser_root():
     explicit = str(os.environ.get("MMS_AGENT_BROWSER_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("agent_browser")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "agent-browser"),
         _real_user_path("auto-skills", "installed-skills", "agent-browser"),
@@ -3095,6 +3121,9 @@ def _resolve_toon_root():
     explicit = str(os.environ.get("MMS_TOON_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("toon")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "toon"),
         _real_user_path("auto-skills", "vendor", "toon"),
@@ -3116,6 +3145,9 @@ def _resolve_token_saver_root():
     explicit = str(os.environ.get("MMS_TOKEN_SAVER_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("token_saver")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "token-saver"),
         _real_user_path("auto-skills", "shared-skills", "token-saver"),
@@ -3138,6 +3170,9 @@ def _resolve_auto_github_contributor_root():
     explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
     if explicit:
         candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("auto_github_contributor")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
     candidates.extend([
         _real_user_path("auto-skills", "installed-skills", "auto-github-contributor"),
         _real_user_path("auto-skills", "vendor", "auto-github-contributor", "skills", "auto-github-contributor"),

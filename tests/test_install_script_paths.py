@@ -182,14 +182,16 @@ def test_version_output_shows_current_stable_and_latest(tmp_path):
     assert "Planned install ref: v1.16.6" in completed.stdout
 
 
-def test_install_script_uses_native_claude_and_official_codex_installs():
+def test_install_script_uses_npm_first_cli_installs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     installer_text = (ROOT_DIR / "mms_installer.py").read_text(encoding="utf-8")
 
-    assert "https://claude.ai/install.sh" in text
+    assert "install_named_cli()" in text
     assert "npm_global_install_with_nvm_fallback" in text
-    assert "@anthropic-ai/claude-code" in text
-    assert "@openai/codex@latest" in text
+    assert 'CLAUDE_CLI_PACKAGE_SPEC="${CLAUDE_CLI_PACKAGE_SPEC:-@anthropic-ai/claude-code@latest}"' in text
+    assert 'CODEX_CLI_PACKAGE_SPEC="${CODEX_CLI_PACKAGE_SPEC:-@openai/codex@latest}"' in text
+    assert 'OPENCODE_CLI_PACKAGE_SPEC="${OPENCODE_CLI_PACKAGE_SPEC:-opencode-ai@latest}"' in text
+    assert "claude|codex|opencode" in text
     assert "npm install -g @openai/codex@latest" in installer_text
 
 
@@ -308,9 +310,9 @@ def test_install_script_has_optional_token_saver_pack():
     assert "install_optional_token_saver" in text
     assert "~/.codex/skills/token-saver" in text
     assert "~/.claude/skills/token-saver" in text
-    assert 'write_token_saver_bin_wrapper "token-saver"' in text
-    assert 'write_token_saver_bin_wrapper "mms-context"' in text
-    assert 'write_token_saver_bin_wrapper "mms-toon"' in text
+    assert 'write_mms_script_wrapper "token-saver"' in text
+    assert 'write_mms_script_wrapper "mms-context"' in text
+    assert 'write_mms_script_wrapper "mms-toon"' in text
 
 
 def test_install_script_has_optional_claude_agent_packs():

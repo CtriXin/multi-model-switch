@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.11.1`
+当前 tagged version：`v2.12.0`
 
 这一代的重点：
 
@@ -68,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 全新电脑可直接带 CLI bootstrap 安装：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex --write-shell-rc
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- --install-cli claude,codex,opencode --write-shell-rc
 ```
 
 Shell 支持：
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.11.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.12.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -189,6 +189,7 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 进一步文档：
 
 - [Provider profiles](./docs/PROVIDER_PROFILES.md)
+- [User preferences](./docs/MMS_USER_PREFERENCES.md)
 - [Claude cache / protocol runbook](./docs/SERVER_CLAUDE_CACHE_RUNBOOK.md)
 - [Agent guardrails](./docs/AGENT_GUARDRAILS.md)
 - [CLI/provider compatibility QA](./docs/CLI_PROVIDER_COMPAT_QA.md)
@@ -207,6 +208,17 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 - 便于后续核验的官方 reference URL
 
 用户自己的 overlay 可以作为只读 profile 输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
+
+## 用户偏好
+
+日常启动偏好写到 `~/.config/mms/preferences.toml`，安装和升级不会覆盖：
+
+- `thinking_mode` / `reasoning_effort`
+- `bypass`、`caveman_mode`、`agent_pack`
+- 禁用 session `skills` / `mcp` / `hooks`
+- 自定义内建 asset root，例如 `web_access`、`token_saver`、`ecc`、`omc`
+
+LLM 可以通过 `mms config preferences.help` 或 `mms config preferences.example` 发现安全 schema。这个文件仍然属于真实 MMS 配置：agent 可以读取、解释、生成建议，但没有 human 确认前不能自动写 `~/.config/mms/**`。
 
 ## Session 能力包
 
@@ -231,12 +243,20 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 bash install.sh --install-rtk
 bash install.sh --install-brainkeeper-context
 bash install.sh --install-map
+bash install.sh --install-codegraph
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
+bash install.sh --install-toon
 bash install.sh --install-ops-env-safe
 ```
 
 `--install-brainkeeper-context` 会安装 BrainKeeper MCP、Claude `/distill` / `/cz` / `/cr`、token hooks，以及 `~/.local/bin/bk` 和 `~/.local/bin/brainkeeper`。如果缺 Node/npm，会用 nvm 准备本次安装用的 Node 22，不改用户默认 Node；如果没有 Xcode/git，会 fallback 到 GitHub archive 下载。
+
+`--install-map` 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；这是全局 Claude hook，可用 `--map-ref` 固定版本。
+
+`--install-codegraph` 会通过 npm 安装 CodeGraph CLI；MMS session 已内建 CodeGraph auto-index hook，只有检测到 `codegraph` binary 时才会自动 `init/sync` 当前 repo。可用 `--codegraph-package` 覆盖 npm 包规格。安装后当前 repo 可手动执行 `codegraph init -i`；也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
+
+`--install-toon` 会安装 Codex/Claude 共用 TOON skill 和本机 `mms-toon` 命令，方便 MMS 之外的 export-only session 使用；MMS 启动的 session 仍默认内建 TOON。
 
 `--install-ops-env-safe` 是 path-only：写入 Codex skill、Claude `/ops-env-safe` 和 `~/.config/mms/ops-env-safe.toml`，让隔离 session 能查宿主路径。它不设置真实 `HOME`/`XDG_*`，也不导出 auth secret。
 

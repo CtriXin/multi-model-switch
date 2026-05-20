@@ -152,6 +152,16 @@
 - 如果确实要继承 global 的非认证状态，必须走 schema/allowlist，并明确排除 token、account identity、owner fingerprint、account 选择提示和请求 credential
 - 任何可能把隔离 session auth state 回写到 real/global HOME 的设计都默认禁止；除非任务明确要求一次性人工导入，而且边界和验证都写清楚
 
+## User Preferences And Human Gate
+
+`~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
+
+- 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
+- LLM / agent 需要先看 `docs/MMS_USER_PREFERENCES.md`，或让用户执行 `mms config preferences.help`
+- agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
+- `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段
+- 如必须写真实配置，仍走 human gate：`plan -> backup -> human double check -> audited write -> post-write human double check`
+
 ## 必须先停下来确认的情况
 
 遇到以下情况，agent 应先停止扩散改动范围，必要时直接向用户确认：
