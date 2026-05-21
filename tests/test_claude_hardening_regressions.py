@@ -875,7 +875,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert "PreToolUse" not in enabled["hooks"]
 
 
-def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(monkeypatch, tmp_path):
+def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_session_hook(monkeypatch, tmp_path):
     import mms_launchers
 
     caveman_root = tmp_path / "caveman"
@@ -888,6 +888,7 @@ def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(mo
         'CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
         'CLAUDE_CONFIG_DIR="$HOME/.codex" node "/real/caveman-activate.js"'
     )
+    stale_echo_command = "echo 'CAVEMAN MODE ACTIVE. stale global default'"
     base_hooks = {
         "hooks": {
             "SessionStart": [
@@ -902,6 +903,7 @@ def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(mo
                             "timeout": 5,
                             "statusMessage": "Loading caveman mode",
                         },
+                        {"type": "command", "command": stale_echo_command},
                         {"type": "command", "command": "/tmp/looop.sh"},
                     ],
                 },
@@ -912,11 +914,18 @@ def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(mo
     rendered = mms_launchers._build_codex_session_hooks(base_hooks, enable_caveman=True)
 
     session_group = rendered["hooks"]["SessionStart"][1]
-    assert [hook["command"] for hook in session_group["hooks"]] == [
+    session_commands = [hook["command"] for hook in session_group["hooks"]]
+    assert session_commands == [
         "/tmp/map.sh",
-        compact_command,
+        (
+            'CAVEMAN_HOOK_COMPACT=1 CAVEMAN_HOOK_EVENT=SessionStart '
+            'CLAUDE_CONFIG_DIR="$HOME/.codex" '
+            f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
+        ),
     ]
-    assert session_group["hooks"][1]["statusMessage"] == "Loading caveman mode"
+    assert compact_command not in session_commands
+    assert stale_echo_command not in session_commands
+    assert session_group["hooks"][1]["statusMessage"] == "Loading caveman [CAVEMAN]"
 
 
 def test_build_codex_session_hooks_strips_inherited_looop_hooks():

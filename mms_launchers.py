@@ -3649,7 +3649,10 @@ def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
                 if _is_caveman_hook_command(command):
                     existing_compact = "CAVEMAN_HOOK_COMPACT=1" in command and str(event_name) == "SessionStart"
                     if not replaced and str(event_name) == "SessionStart" and (existing_compact or replacement):
-                        kept_hooks.append(dict(hook) if existing_compact else dict(replacement))
+                        # MMS session owns caveman activation. Do not preserve
+                        # inherited/global caveman hooks, or SessionStart can
+                        # emit duplicate caveman context in Codex.
+                        kept_hooks.append(dict(replacement) if replacement else dict(hook))
                         replaced = True
                     continue
                 kept_hooks.append(dict(hook))
