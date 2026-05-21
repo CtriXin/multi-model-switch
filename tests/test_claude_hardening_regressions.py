@@ -915,9 +915,46 @@ def test_build_codex_session_hooks_preserves_trusted_compact_caveman_position(mo
     assert [hook["command"] for hook in session_group["hooks"]] == [
         "/tmp/map.sh",
         compact_command,
-        "/tmp/looop.sh",
     ]
     assert session_group["hooks"][1]["statusMessage"] == "Loading caveman mode"
+
+
+def test_build_codex_session_hooks_strips_inherited_looop_hooks():
+    import mms_launchers
+
+    base_hooks = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup|resume",
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/map.sh"},
+                        {"type": "command", "command": "/Users/me/.codex/skills/looop/hooks/session-start.sh"},
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/keep.sh"},
+                        {"type": "command", "command": "/tmp/bugloop-nightly-fix.sh"},
+                    ]
+                }
+            ],
+        }
+    }
+
+    rendered = mms_launchers._build_codex_session_hooks(base_hooks)
+    commands = [
+        hook["command"]
+        for groups in rendered["hooks"].values()
+        for group in groups
+        for hook in group["hooks"]
+    ]
+
+    assert "/tmp/map.sh" in commands
+    assert "/tmp/keep.sh" in commands
+    assert not any("looop" in command or "bugloop" in command for command in commands)
 
 
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
@@ -1003,6 +1040,94 @@ def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
 
     assert result.stdout == ""
     assert "[map] Index up to date." in result.stderr
+
+
+def test_codegraph_hook_does_not_auto_init_missing_index(tmp_path):
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    log_path = tmp_path / "codegraph.log"
+    repo.mkdir()
+    bin_dir.mkdir()
+    fake_git = bin_dir / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--show-toplevel\" ]; then\n"
+        "  printf '%s\\n' \"$REPO_ROOT\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    fake_codegraph = bin_dir / "codegraph"
+    fake_codegraph.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEGRAPH_LOG\"\n",
+        encoding="utf-8",
+    )
+    fake_codegraph.chmod(0o755)
+    script_path = Path(__file__).resolve().parents[1] / "hooks" / "claude-codegraph-auto-index.sh"
+
+    result = subprocess.run(
+        ["/bin/bash", str(script_path)],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "REPO_ROOT": str(repo),
+            "CODEGRAPH_LOG": str(log_path),
+        },
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert not (repo / ".codegraph").exists()
+    assert not log_path.exists()
+
+
+def test_codegraph_hook_syncs_existing_index(tmp_path):
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    log_path = tmp_path / "codegraph.log"
+    repo.mkdir()
+    (repo / ".codegraph").mkdir()
+    bin_dir.mkdir()
+    fake_git = bin_dir / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--show-toplevel\" ]; then\n"
+        "  printf '%s\\n' \"$REPO_ROOT\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_git.chmod(0o755)
+    fake_codegraph = bin_dir / "codegraph"
+    fake_codegraph.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$CODEGRAPH_LOG\"\n",
+        encoding="utf-8",
+    )
+    fake_codegraph.chmod(0o755)
+    script_path = Path(__file__).resolve().parents[1] / "hooks" / "claude-codegraph-auto-index.sh"
+
+    subprocess.run(
+        ["/bin/bash", str(script_path)],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "REPO_ROOT": str(repo),
+            "CODEGRAPH_LOG": str(log_path),
+        },
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert log_path.read_text(encoding="utf-8").strip() == "sync"
 
 
 def test_rtk_hook_is_silent_when_dependencies_are_missing(tmp_path):

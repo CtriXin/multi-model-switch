@@ -40,7 +40,7 @@ args = ["serve", "--mcp"]
 ```
 
 3. In isolated/GUI/NVM launch paths, the MCP child process may not inherit the shell PATH that contains NVM bins, so Codex cannot find `codegraph`.
-4. Hook trust reuse was also weakened by Codex Caveman session generation: MMS filtered Caveman hooks and appended a new Caveman hook later, which could move it behind Looop/Map hooks. Codex trust state keys include event/group/hook position, so reordering can force another `/hooks` review.
+4. Hook trust reuse was also weakened by Codex Caveman session generation: MMS filtered Caveman hooks and appended a new Caveman hook later, which could move it behind Map or inherited automation hooks. Codex trust state keys include event/group/hook position, so reordering can force another `/hooks` review.
 
 ## Fix Implemented
 
@@ -57,6 +57,7 @@ Code changes are in `mms_launchers.py`:
   - `_sync_codex_session_claude_json()`
   - `_append_codex_mcp_servers_from_claude_json()`
 - Added `_configure_codex_caveman_hooks()` so an existing compact `SessionStart` Caveman hook stays in its original position when possible.
+- MMS now strips inherited Looop/bugloop-style Codex hooks from generated session hooks unless a future explicit session surface re-enables them; a normal MMS launch should not enter an autonomous loop just because the real HOME has one installed.
 - Removed noisy/non-session Codex RTK/Caveman variants from generated session hooks while keeping the compact valid-JSON hook.
 
 ## Safety Rules Preserved
@@ -84,7 +85,7 @@ Result:
 - `npm run build --if-present` passed.
 - `git diff --check` passed.
 - Local projection confirmed inherited `codegraph` became an absolute NVM binary path when available.
-- Local projection confirmed Codex `SessionStart` order remained `Map -> Caveman -> Looop` when the global compact hook already used that order.
+- Local projection confirmed Codex `SessionStart` order keeps Map/Caveman stable and no longer inherits Looop/bugloop hooks by default.
 
 ## Regression Tests Added
 

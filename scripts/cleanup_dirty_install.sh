@@ -24,8 +24,9 @@ Behavior:
   - <session-home>/.nvm
   - <session-home>/.config/mms
   - <session-home>/.local/bin/mms
+  - <session-home>/.local/bin/mmc
   - <session-home>/.local/bin/ccs
-  - ~/.local/bin/mms or ~/.local/bin/ccs when they still point into a gateway session path
+  - ~/.local/bin/mms, ~/.local/bin/mmc, or ~/.local/bin/ccs when they still point into a gateway session path
 EOF
 }
 
@@ -79,6 +80,7 @@ collect_session_artifacts() {
 
     for candidate in \
         "$session_home/.local/bin/mms" \
+        "$session_home/.local/bin/mmc" \
         "$session_home/.local/bin/ccs"
     do
         if [ -e "$candidate" ] || [ -L "$candidate" ]; then
@@ -93,6 +95,7 @@ collect_real_home_bin_artifacts() {
 
     for candidate in \
         "$TARGET_HOME/.local/bin/mms" \
+        "$TARGET_HOME/.local/bin/mmc" \
         "$TARGET_HOME/.local/bin/ccs"
     do
         if [ ! -L "$candidate" ]; then

@@ -246,11 +246,30 @@ def test_install_script_copies_session_tool_scripts_directory():
     assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
 
 
+def test_install_script_copies_mmc_entrypoint_and_modules_before_linking():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert '[ -f "$SOURCE_DIR/mmc" ] && cp "$SOURCE_DIR"/mmc "$MMS_HOME/"' in text
+    assert 'for f in "$SOURCE_DIR"/mmc*.py; do' in text
+    assert '[ -f "$MMS_HOME/mmc" ] && chmod +x "$MMS_HOME/mmc"' in text
+    assert '[ -f "$MMS_HOME/mmc" ] && rewrite_shebang "$MMS_HOME/mmc" "$PYTHON_PATH"' in text
+    assert 'ln -sf "$MMS_HOME/mmc" "$BIN_DIR/mmc"' in text
+
+
+def test_install_script_copies_mmslogs_entrypoint_before_linking():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert '[ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"' in text
+    assert '[ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"' in text
+    assert '[ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"' in text
+    assert 'ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"' in text
+
+
 def test_install_script_mentions_bundled_session_assets():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert "Bundled session assets" in text
-    assert "Caveman, weber, web-access, agent-browser, TOON, and token-saver" in text
+    assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
 
 
 def test_install_script_retires_ccs_entrypoint():
@@ -274,15 +293,44 @@ def test_install_check_omits_retired_ccs_status(tmp_path):
     assert "ccs" not in output.lower()
 
 
+def test_install_check_reports_mmc_and_mmslogs_links(tmp_path):
+    home = tmp_path / "home"
+    mms_home = home / ".mms"
+    bin_dir = home / ".local" / "bin"
+    mms_home.mkdir(parents=True)
+    bin_dir.mkdir(parents=True)
+    for name in ("mms", "mmc", "mmslogs"):
+        target = mms_home / name
+        target.write_text("#!/bin/sh\n", encoding="utf-8")
+        (bin_dir / name).symlink_to(target)
+
+    output = _run_install_check(home=home)
+
+    assert str(bin_dir / "mms") in output
+    assert str(bin_dir / "mmc") in output
+    assert str(bin_dir / "mmslogs") in output
+
+
 def test_install_script_updates_chinese_optional_copy():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "BrainKeeper 上下文包会安装 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。" in text
+    assert "BrainKeeper 全量 context pack" in text
     assert "--install-brainkeeper-context" in text
     assert "--install-mindkeeper-context" in text
     assert "--brainkeeper-ref" in text
     assert "--mindkeeper-ref" in text
-    assert "Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。" in text
+    assert "Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。" in text
+
+
+def test_install_script_codegraph_keeps_first_init_manual():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    hook_text = (ROOT_DIR / "hooks" / "claude-codegraph-auto-index.sh").read_text(encoding="utf-8")
+    readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
+
+    assert "首次 codegraph init -i 需要手动执行" in text
+    assert "codegraph init -i" in readme_text
+    assert '"$CODEGRAPH_BIN" init -i' not in hook_text
+    assert '"$CODEGRAPH_BIN" sync' in hook_text
 
 
 def test_install_script_installs_brainkeeper_shortcuts_and_archive_fallback():

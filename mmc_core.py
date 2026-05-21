@@ -210,7 +210,7 @@ _DANGEROUS_PARENT_ENV_PREFIXES = (
     "LD_",
 )
 _DEFAULT_SETUP_LANG = "en_US.UTF-8"
-_DEFAULT_SETUP_TZ = "America/Los_Angeles"
+_DEFAULT_SETUP_TZ = "Asia/Singapore"
 _DEFAULT_LOOPBACK_NO_PROXY = "127.0.0.1,localhost"
 _LAUNCHER_CONFIG_KEYS = (
     "route_id",
@@ -1009,7 +1009,6 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
     env_lc_all = str(os.environ.get("LC_ALL") or "").strip()
     env_lc_ctype = str(os.environ.get("LC_CTYPE") or "").strip()
     env_lc_messages = str(os.environ.get("LC_MESSAGES") or "").strip()
-    env_tz = str(os.environ.get("TZ") or "").strip()
     defaults = {
         "route_id": existing.get("route_id") or "",
         "routes_file": existing.get("routes_file") or "",
@@ -1019,7 +1018,7 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
         "lc_all": existing.get("lc_all") or env_lc_all,
         "lc_ctype": existing.get("lc_ctype") or env_lc_ctype,
         "lc_messages": existing.get("lc_messages") or env_lc_messages,
-        "tz": existing.get("tz") or env_tz or _DEFAULT_SETUP_TZ,
+        "tz": existing.get("tz") or _DEFAULT_SETUP_TZ,
         "bypass": bool(existing.get("bypass", False)),
         "allow_dir": copy.deepcopy(existing.get("allow_dir") or []),
         "set_env": copy.deepcopy(existing.get("set_env") or []),
@@ -1031,9 +1030,9 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
     proxy_check = validate_loopback_proxy_url(proxy)
     if not proxy_check.get("ok"):
         raise SystemExit(f"mmc: {proxy_check.get('detail')}")
-    no_proxy = _prompt_text("NO_PROXY", default=defaults["no_proxy"])
+    no_proxy = _prompt_text("NO_PROXY", default=defaults["no_proxy"]) if proxy else ""
     tz = _prompt_text("TZ", default=defaults["tz"])
-    lang = _prompt_text("LANG", default=defaults["lang"])
+    lang = defaults["lang"]
     bypass = _prompt_yes_no("默认启用 bypassPermissions", default=defaults["bypass"])
     payload = _normalize_launcher_defaults(
         {

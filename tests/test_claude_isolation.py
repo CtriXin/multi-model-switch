@@ -8,6 +8,7 @@ import types
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -593,7 +594,7 @@ def test_normalize_account_keeps_proxy_and_timezone():
     assert account["timezone"] == "Asia/Singapore"
 
 
-def test_normalize_account_defaults_timezone_to_us():
+def test_normalize_account_defaults_timezone_to_singapore():
     from mms_core import DEFAULT_ACCOUNT_TIMEZONE, _normalize_account
 
     account = _normalize_account(
@@ -623,12 +624,30 @@ def test_normalize_provider_keeps_proxy_and_timezone():
     assert provider["timezone"] == "America/Los_Angeles"
 
 
-def test_normalize_provider_defaults_timezone_to_us():
+def test_normalize_provider_defaults_timezone_to_singapore():
     from mms_core import DEFAULT_ACCOUNT_TIMEZONE, _normalize_provider
 
     provider = _normalize_provider({"id": "gateway-default"})
 
     assert provider["timezone"] == DEFAULT_ACCOUNT_TIMEZONE
+
+
+def test_prompt_proxy_fields_skips_no_proxy_when_proxy_empty(monkeypatch):
+    import mms_core
+
+    prompts = []
+
+    def fake_ask(label, **kwargs):
+        prompts.append(str(label))
+        return ""
+
+    monkeypatch.setattr(mms_core, "Prompt", SimpleNamespace(ask=fake_ask))
+
+    proxy, no_proxy = mms_core._prompt_validated_proxy_fields("", "", wizard=False)
+
+    assert (proxy, no_proxy) == ("", "")
+    assert len(prompts) == 1
+    assert "NO_PROXY" not in prompts[0]
 
 
 def test_resolve_interactive_launch_model_selects_fresh_model_for_broker():

@@ -35,14 +35,17 @@ def test_cleanup_dirty_install_dry_run_reports_artifacts_without_removing(tmp_pa
     (real_home / ".local" / "bin").mkdir(parents=True)
 
     (session_home / ".local" / "bin" / "mms").symlink_to(session_home / ".mms" / "bin" / "mms")
+    (session_home / ".local" / "bin" / "mmc").symlink_to(session_home / ".mms" / "bin" / "mmc")
     (session_home / ".local" / "bin" / "ccs").symlink_to(session_home / ".mms" / "bin" / "ccs")
     (real_home / ".local" / "bin" / "mms").symlink_to(session_home / ".mms" / "bin" / "mms")
+    (real_home / ".local" / "bin" / "mmc").symlink_to(session_home / ".mms" / "bin" / "mmc")
 
     completed = _run_cleanup(home=real_home)
 
     assert "dry-run" in completed.stdout
     assert str(session_home / ".mms") in completed.stdout
     assert str(real_home / ".local" / "bin" / "mms") in completed.stdout
+    assert str(real_home / ".local" / "bin" / "mmc") in completed.stdout
     assert (session_home / ".mms").exists()
     assert (real_home / ".local" / "bin" / "mms").is_symlink()
 
@@ -58,10 +61,12 @@ def test_cleanup_dirty_install_apply_removes_only_known_leaked_targets(tmp_path)
     (real_home / ".local" / "bin").mkdir(parents=True)
 
     (session_home / ".local" / "bin" / "mms").symlink_to(leaked_mms / "mms")
+    (session_home / ".local" / "bin" / "mmc").symlink_to(leaked_mms / "mmc")
     (session_home / ".local" / "bin" / "ccs").symlink_to(leaked_mms / "ccs")
     healthy_claude = session_home / ".local" / "bin" / "claude"
     healthy_claude.symlink_to("/usr/local/bin/claude")
     (real_home / ".local" / "bin" / "mms").symlink_to(leaked_mms / "mms")
+    (real_home / ".local" / "bin" / "mmc").symlink_to(leaked_mms / "mmc")
     (real_home / ".local" / "bin" / "ccs").symlink_to(leaked_mms / "ccs")
 
     completed = _run_cleanup("--apply", home=session_home)
@@ -71,7 +76,9 @@ def test_cleanup_dirty_install_apply_removes_only_known_leaked_targets(tmp_path)
     assert not (session_home / ".nvm").exists()
     assert not (session_home / ".config" / "mms").exists()
     assert not (session_home / ".local" / "bin" / "mms").exists()
+    assert not (session_home / ".local" / "bin" / "mmc").exists()
     assert not (session_home / ".local" / "bin" / "ccs").exists()
     assert healthy_claude.is_symlink()
     assert not (real_home / ".local" / "bin" / "mms").exists()
+    assert not (real_home / ".local" / "bin" / "mmc").exists()
     assert not (real_home / ".local" / "bin" / "ccs").exists()

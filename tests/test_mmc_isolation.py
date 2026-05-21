@@ -1600,7 +1600,7 @@ def test_run_default_entry_prompts_and_saves_defaults_when_missing(monkeypatch, 
     monkeypatch.setenv("MMC_REAL_HOME", str(tmp_path / "real-home"))
     monkeypatch.setattr(mmc_core.os, "getcwd", lambda: str(repo_dir))
     monkeypatch.setattr(mmc_core, "_interactive_stdio_available", lambda: True)
-    answers = iter(["http://127.0.0.1:7890", "", "America/Los_Angeles", "zh_CN.UTF-8", "n"])
+    answers = iter(["http://127.0.0.1:7890", "", "", "n"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
     captured = {}
@@ -1616,8 +1616,8 @@ def test_run_default_entry_prompts_and_saves_defaults_when_missing(monkeypatch, 
     assert exit_code == 0
     assert captured == {"proxy": "http://127.0.0.1:7890", "workspace": str(repo_dir)}
     assert saved["proxy"] == "http://127.0.0.1:7890"
-    assert saved["tz"] == "America/Los_Angeles"
-    assert saved["lang"] == "zh_CN.UTF-8"
+    assert saved["tz"] == "Asia/Singapore"
+    assert saved["lang"] == "en_US.UTF-8"
     assert saved["bypass"] is False
 
 
@@ -1632,14 +1632,14 @@ def test_run_setup_interactive_uses_default_lang_and_tz_on_empty_input(monkeypat
     monkeypatch.delenv("LC_CTYPE", raising=False)
     monkeypatch.delenv("LC_MESSAGES", raising=False)
     monkeypatch.delenv("TZ", raising=False)
-    answers = iter(["http://127.0.0.1:7890", "", "", "", "n"])
+    answers = iter(["http://127.0.0.1:7890", "", "", "n"])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
 
     payload = mmc_core._run_setup_interactive(save=False)
 
     assert payload["proxy"] == "http://127.0.0.1:7890"
     assert payload["no_proxy"] == "127.0.0.1,localhost"
-    assert payload["tz"] == "America/Los_Angeles"
+    assert payload["tz"] == "Asia/Singapore"
     assert payload["lang"] == "en_US.UTF-8"
     assert payload["bypass"] is False
 

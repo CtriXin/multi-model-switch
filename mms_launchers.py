@@ -3312,6 +3312,19 @@ def _is_mms_managed_hook_command(command_text):
     return any(marker in command_text for marker in markers)
 
 
+def _is_looop_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    markers = (
+        "looop",
+        "bugloop",
+        "nightly-fix",
+        "nightly-debug",
+    )
+    return any(marker in command_text for marker in markers)
+
+
 def _hook_command_targets_exist(command_text):
     command_text = str(command_text or "").strip()
     if not command_text:
@@ -3596,6 +3609,7 @@ def _codex_caveman_session_hook(caveman_root):
 
 
 def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_looop_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
     if not enable_caveman:
         return _filter_hook_commands(hooks_data, _is_caveman_hook_command)

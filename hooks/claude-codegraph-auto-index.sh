@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Auto-init and sync CodeGraph for the current git worktree on session start.
-# Skips if: not in a git repo, codegraph not installed, or sync/init fails.
+# Sync CodeGraph for the current git worktree on session start.
+# First-time `codegraph init -i` stays manual so the repo does not gain a
+# surprising `.codegraph/` directory just because an agent session started.
+# Skips if: not in a git repo, codegraph not installed, not initialized, or sync fails.
 
 CODEGRAPH_BIN="${CODEGRAPH_BIN:-codegraph}"
 
@@ -18,7 +20,7 @@ fi
 cd "$repo_root"
 
 if [ ! -d ".codegraph" ]; then
-  "$CODEGRAPH_BIN" init -i >/dev/null 2>&1 || true
-else
-  "$CODEGRAPH_BIN" sync >/dev/null 2>&1 || true
+  exit 0
 fi
+
+"$CODEGRAPH_BIN" sync >/dev/null 2>&1 || true

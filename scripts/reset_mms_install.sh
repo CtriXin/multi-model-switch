@@ -24,6 +24,7 @@ Behavior:
   - ~/.mms
   - ~/.config/mms
   - ~/.local/bin/mms
+  - ~/.local/bin/mmc
   - ~/.local/bin/ccs
   - ~/.local/bin/mmslogs
 - does not touch shared Claude/Codex config, global OAuth state, or ~/.claude / ~/.codex
@@ -133,6 +134,7 @@ collect_launcher_artifacts() {
 
     for candidate in \
         "$TARGET_HOME/.local/bin/mms" \
+        "$TARGET_HOME/.local/bin/mmc" \
         "$TARGET_HOME/.local/bin/ccs" \
         "$TARGET_HOME/.local/bin/mmslogs"
     do

@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v2.12.1`
+当前 tagged version：`v3.0.0`
 
 这一代的重点：
 
@@ -41,7 +41,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
-- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`web-access`、`weber`、`agent-browser`；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
+- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
 - session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
@@ -57,11 +57,11 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
-- 把 `mms` 链接到 `~/.local/bin`
+- 把 `mms`、`mmc`、`mmslogs` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
 - 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
-- legacy `ccs` shim 已下线；新安装只暴露 `mms` 命令
+- legacy `ccs` shim 已下线；新安装暴露 `mms` / `mmc` / `mmslogs`，不再暴露 `ccs`
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
 
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.12.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.0.0/install.sh | bash -s --
 ```
 
 安装后自检：
@@ -163,7 +163,7 @@ MMS
 │   └── bridge: 需要时启动本地协议适配
 └── Session 能力包
     ├── token-saver / TOON
-    ├── web-access / weber / agent-browser
+    ├── Web automation bundle
     └── Caveman / OMC / ECC / Pilot
 ```
 
@@ -227,7 +227,7 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 | Pack | 安装状态 | 用途 |
 | --- | --- | --- |
 | `token-saver` / `TOON` | 内建 | 压缩长输出和结构化 handoff |
-| `web-access` / `weber` / `agent-browser` | 内建 | 浏览器和 web 任务路由指导 |
+| Web automation bundle | 内建 | `weber` 负责路由，`web-access` 连接登录态 Chrome，`agent-browser` 负责轻量 headless |
 | `Caveman` | 内建 | 低 token 沟通模式 |
 | `ECC` | MMS-managed 可选包 | Claude engineering workflow / rules / quality hooks |
 | `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
@@ -250,15 +250,19 @@ bash install.sh --install-toon
 bash install.sh --install-ops-env-safe
 ```
 
-`--install-brainkeeper-context` 会安装 BrainKeeper MCP、Claude `/distill` / `/cz` / `/cr`、token hooks，以及 `~/.local/bin/bk` 和 `~/.local/bin/brainkeeper`。如果缺 Node/npm，会用 nvm 准备本次安装用的 Node 22，不改用户默认 Node；如果没有 Xcode/git，会 fallback 到 GitHub archive 下载。
+`--install-brainkeeper-context` 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude `/distill` / `/cz` / `/cr`、token hooks，以及 `~/.local/bin/bk` 和 `~/.local/bin/brainkeeper`。安装目录是 `~/.local/share/brainkeeper`；如果相邻存在 BrainKeeper 仓库，安装器会复用其 `install.sh`，但真正运行的安装仍同步到这个目录。如果缺 Node/npm，会用 nvm 准备本次安装用的 Node 22，不改用户默认 Node；如果没有 Xcode/git，会 fallback 到 GitHub archive 下载。
 
-`--install-map` 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；这是全局 Claude hook，可用 `--map-ref` 固定版本。
+`--install-map` 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；它让 Claude 在进入 repo 时更快理解目录和文件结构。这是全局 Claude hook，可用 `--map-ref` 固定版本。
 
-`--install-codegraph` 会通过 npm 安装 CodeGraph CLI；MMS session 已内建 CodeGraph auto-index hook，只有检测到 `codegraph` binary 时才会自动 `init/sync` 当前 repo。可用 `--codegraph-package` 覆盖 npm 包规格。安装后当前 repo 可手动执行 `codegraph init -i`；也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
+`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。首次 `codegraph init -i` 保持手动，避免新 session 意外生成 `.codegraph/`；repo 初始化后，MMS session hook 检测到 `codegraph` binary 会静默执行 `codegraph sync`。可用 `--codegraph-package` 覆盖 npm 包规格。安装后当前 repo 可手动执行 `codegraph init -i`；也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
 
-`--install-toon` 会安装 Codex/Claude 共用 TOON skill 和本机 `mms-toon` 命令，方便 MMS 之外的 export-only session 使用；MMS 启动的 session 仍默认内建 TOON。
+`--install-read-once` 会安装 Claude Read 省 token hooks；同一个 session 内重复读取未变化文件时给提示，文件变化后优先给 diff。它自动生效，不需要用户记命令。
 
-`--install-ops-env-safe` 是 path-only：写入 Codex skill、Claude `/ops-env-safe` 和 `~/.config/mms/ops-env-safe.toml`，让隔离 session 能查宿主路径。它不设置真实 `HOME`/`XDG_*`，也不导出 auth secret。
+`--install-token-saver` 会安装 Codex/Claude 共用 token-saver skill 和本机命令，用于长日志、测试输出、大范围 `rg`、`git diff/show` 和 noisy diagnostics 的 ref+snippet 收纳。agent 会自动用底层命令；用户只需要说 `/token-saver` 或“省点 context”。
+
+`--install-toon` 会安装 Codex/Claude 共用 TOON skill 和本机 `mms-toon` 命令，用于结构化 JSON/status/handoff 压缩，方便 MMS 之外的 export-only session 使用；MMS 启动的 session 仍默认内建 TOON。不要把 TOON 用在 prose、代码、原始日志、secret 或 CLI/API 要求精确的 JSON 上。
+
+`--install-ops-env-safe` 是高级可选项：写入 Codex skill、Claude `/ops-env-safe` 和 `~/.config/mms/ops-env-safe.toml`，让 export-only 或特殊隔离 session 能查宿主路径。普通 MMS session 已自动带真实 HOME 路径提示和 session host context，通常不用安装它。它不设置真实 `HOME`/`XDG_*`，也不导出 auth secret。
 
 旧参数 `--install-mindkeeper-context` 和 `--mindkeeper-ref` 仍作为 BrainKeeper 安装的 deprecated alias 兼容。
 

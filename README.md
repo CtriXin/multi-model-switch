@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v2.12.1`
+Current tagged version: `v3.0.0`
 
 Key changes in this generation:
 
@@ -41,7 +41,7 @@ Key changes in this generation:
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `web-access`, `weber`, and `agent-browser`; Claude/Codex/OpenCode/Antigravity injection stays session-local
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
 - silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
@@ -57,11 +57,11 @@ Default behavior:
 
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
-- links `mms` into `~/.local/bin`
+- links `mms`, `mmc`, and `mmslogs` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
 - discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- retires the legacy `ccs` shim; new installs expose only the `mms` command
+- retires the legacy `ccs` shim; new installs expose `mms` / `mmc` / `mmslogs`, not `ccs`
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v2.12.1/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.0.0/install.sh | bash -s --
 ```
 
 Verify the install:
@@ -164,7 +164,7 @@ MMS
 │   └── bridge: local protocol adapters when needed
 └── Session Packs
     ├── token-saver / TOON
-    ├── web-access / weber / agent-browser
+    ├── Web automation bundle
     └── Caveman / OMC / ECC / Pilot
 ```
 
@@ -228,7 +228,7 @@ MMS can expose capabilities per session without writing global hooks/config.
 | Pack | Install state | Purpose |
 | --- | --- | --- |
 | `token-saver` / `TOON` | bundled | compact long outputs and structured handoffs |
-| `web-access` / `weber` / `agent-browser` | bundled | browser and web-task routing guidance |
+| Web automation bundle | bundled | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled | compact communication mode |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
@@ -251,15 +251,19 @@ bash install.sh --install-toon
 bash install.sh --install-ops-env-safe
 ```
 
-`--install-brainkeeper-context` installs BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
+`--install-brainkeeper-context` installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. The installed runtime lives at `~/.local/share/brainkeeper`; when a sibling BrainKeeper repo exists, the installer reuses its `install.sh`, but the active install still syncs into that directory. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
 
-`--install-map` installs Map and enables the Claude SessionStart auto-index hook. This is a global Claude hook; use `--map-ref` to pin the version.
+`--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.
 
-`--install-codegraph` installs the CodeGraph CLI via npm. MMS sessions already include the CodeGraph auto-index hook, and it only runs `init/sync` when a `codegraph` binary is available. Use `--codegraph-package` to override the npm package spec. After install, run `codegraph init -i` in the current repo, or ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
+`--install-codegraph` installs the CodeGraph CLI/MCP via npm for symbol search, callers/callees, and code-context retrieval. First-time `codegraph init -i` stays manual so a new session does not create `.codegraph/` unexpectedly; after a repo is initialized, the MMS session hook silently runs `codegraph sync` when a `codegraph` binary is available. Use `--codegraph-package` to override the npm package spec. After install, run `codegraph init -i` in the current repo, or ask an LLM: “Find every git repo under this workspace, run `codegraph init -i` when `.codegraph` is missing and `codegraph sync` when it exists, skip `node_modules/vendor/build`, and report failures.”
 
-`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default.
+`--install-read-once` installs Claude Read token-saving hooks. Within one session it warns on repeated reads of unchanged files and prefers diffs after edits. It works automatically; users do not need to remember a command.
 
-`--install-ops-env-safe` is path-only: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so isolated sessions can inspect known host paths. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
+`--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
+
+`--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
+
+`--install-ops-env-safe` is an advanced-only path hint pack: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so export-only or special isolated sessions can inspect known host paths. Normal MMS sessions already receive real-HOME path hints and session host context, so most users do not need it. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
 
 Legacy `--install-mindkeeper-context` and `--mindkeeper-ref` still work as deprecated aliases for BrainKeeper installs.
 

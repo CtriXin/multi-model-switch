@@ -255,7 +255,7 @@ API_URL_ENV_NAME = "MMS_API_BASE_URL"
 API_KEY_ENV_NAME = "MMS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
-DEFAULT_ACCOUNT_TIMEZONE = "America/Los_Angeles"
+DEFAULT_ACCOUNT_TIMEZONE = "Asia/Singapore"
 VALID_CLAUDE_1M_MODES = {"auto", "enable", "disable"}
 OAUTH_CAPABLE_CLIS = ("claude", "codex", "gemini", "agy")
 MMS_MANAGED_OAUTH_CLIS = ("codex", "agy")
@@ -1169,6 +1169,8 @@ def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wiz
         if error:
             console.print(f"[red]{error}[/red]")
             continue
+        if not proxy:
+            return "", ""
         no_proxy = prompt_fn(_L(no_proxy_label, "NO_PROXY (optional, press Enter to skip)"), default=current_no_proxy or "").strip()
         if proxy:
             console.print(f"[dim]正在测试代理连通性: {target_url}[/dim]")

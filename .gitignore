@@ -84,6 +84,8 @@ apps/*/task_plan.md
 
 # AI tool caches & worktrees
 .ai/cache/
+.antigravitycli/
+.codegraph/
 .sparkring/
 .worktrees/
 

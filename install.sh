@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v2.12.1}"
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.0.0}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -304,20 +304,20 @@ $(t "说明:" "Notes:")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
-  - $(t "--install-brainkeeper-context 会安装 BrainKeeper MCP、Claude 的 /distill /cz /cr 命令、token hooks，并写入 bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
+  - $(t "--install-brainkeeper-context 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude 的 /distill /cz /cr、token hooks、bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
   - $(t "--brainkeeper-ref 可覆盖 BrainKeeper 安装版本，例如 v2.4.1 / main" "--brainkeeper-ref overrides the BrainKeeper install ref, for example v2.4.1 / main")
   - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
-  - $(t "--install-map 会安装 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
+  - $(t "--install-map 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs the project-structure Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
-  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI；MMS session hook 检测到 codegraph 后会自动 init/sync 当前 repo" "--install-codegraph installs the CodeGraph CLI via npm; MMS session hooks auto init/sync the current repo when codegraph is available")
+  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI/MCP，用于 symbol/call graph 代码索引；首次 codegraph init -i 需要用户或 LLM 手动执行，MMS session hook 只自动 sync 已初始化 repo" "--install-codegraph installs the CodeGraph CLI/MCP via npm for symbol/call-graph code indexing; first-time codegraph init -i stays manual/user-or-LLM driven, and MMS session hooks only auto-sync initialized repos")
   - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
-  - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read token saver hooks" "--install-read-once installs read-once and enables the Claude Read token saver hooks")
-  - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command")
-  - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command; MMS sessions still bundle TOON by default")
-  - $(t "--install-ops-env-safe 会安装 path-only 的 host path hints：写入 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板" "--install-ops-env-safe installs path-only host path hints: a Codex skill, a Claude /ops-env-safe command, and a local path-map template")
+  - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read 省 token hooks：同一 session 避免重复全文读文件，改动后优先提示 diff" "--install-read-once installs read-once and enables Claude Read token-saving hooks: avoid repeated full-file rereads in a session and prefer diffs after edits")
+  - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
+  - $(t "--install-toon 会安装 Codex/Claude 共用 TOON skill 和本机 mms-toon 命令，用于结构化 JSON/status/handoff 压缩；MMS session 内仍默认内建 TOON" "--install-toon installs the shared Codex/Claude TOON skill plus the local mms-toon command for structured JSON/status/handoff compression; MMS sessions still bundle TOON by default")
+  - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, and token-saver ship as bundled MMS session assets")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -452,14 +452,16 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " BrainKeeper 上下文包" "BrainKeeper context pack"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional context tools"
-            echo "  BrainKeeper context pack installs BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands."
+            echo "  Full BrainKeeper context pack: installs/updates the BrainKeeper repo into ~/.local/share/brainkeeper."
+            echo "  Adds BrainKeeper MCP, Claude /distill /cz /cr, token hooks, and bk/brainkeeper commands."
             echo "  By default MMS pins BrainKeeper to ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}."
             if confirm_from_tty "Install BrainKeeper context pack for Claude? [y/N]: " "n"; then
                 INSTALL_BRAINKEEPER_CONTEXT=1
             fi
         else
             echo "可选上下文工具"
-            echo "  BrainKeeper 上下文包会安装 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。"
+            echo "  BrainKeeper 全量 context pack：会把 BrainKeeper 仓库安装/更新到 ~/.local/share/brainkeeper。"
+            echo "  同时添加 BrainKeeper MCP、Claude /distill /cz /cr、token hooks，以及 bk/brainkeeper 命令。"
             echo "  默认会锁定到 ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}。"
             if confirm_from_tty "是否安装 BrainKeeper 上下文包（Claude）？[y/N]: " "n"; then
                 INSTALL_BRAINKEEPER_CONTEXT=1
@@ -478,14 +480,16 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " Map 自动索引" "Map auto-index"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
-            echo "  Project map auto-index installs Map and refreshes the project structure index on session start."
+            echo "  Map builds a lightweight project-structure map so Claude can orient in a repo faster."
+            echo "  The SessionStart hook refreshes the structure index automatically."
             echo "  By default MMS reuses an existing Node.js 18+ runtime when available; otherwise Map is skipped unless you explicitly ask for --ensure-node22."
             if confirm_from_tty "Install Map plus the Claude SessionStart auto-index hook? [y/N]: " "n"; then
                 INSTALL_MAP=1
             fi
         else
             echo "可选 Claude hook"
-            echo "  Project map 自动索引会安装 Map，并在会话启动时自动建立或刷新项目结构索引。"
+            echo "  Map 会建立轻量项目结构地图，让 Claude 更快理解 repo。"
+            echo "  SessionStart hook 会在会话启动时自动刷新结构索引。"
             echo "  默认优先复用现有 Node.js 18+；如果没有合适版本，会先跳过 Map，除非你显式要求 --ensure-node22。"
             if confirm_from_tty "是否安装 Map 并启用 Claude 启动自动索引 hook？[y/N]: " "n"; then
                 INSTALL_MAP=1
@@ -504,14 +508,16 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " CodeGraph CLI" "CodeGraph CLI"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional code intelligence"
-            echo "  CodeGraph installs a local CLI/MCP server; MMS session hooks auto init/sync repos when the binary is available."
+            echo "  CodeGraph installs a local CLI/MCP server for symbol search, callers/callees, and code context."
+            echo "  First-time codegraph init -i stays manual; MMS session hooks only auto-sync repos that already have .codegraph/."
             echo "  It uses npm and may fall back to MMS-managed nvm Node.js 22 without changing your default Node."
             if confirm_from_tty "Install CodeGraph CLI? [y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
             fi
         else
             echo "可选代码索引"
-            echo "  CodeGraph 会安装本机 CLI/MCP server；MMS session hook 检测到 binary 后会自动 init/sync 当前 repo。"
+            echo "  CodeGraph 会安装本机 CLI/MCP server，用于 symbol search、callers/callees 和代码上下文检索。"
+            echo "  首次 codegraph init -i 需要手动执行；MMS session hook 只会自动 sync 已有 .codegraph/ 的 repo。"
             echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
             if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
@@ -531,12 +537,14 @@ prompt_optional_install_choices() {
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional Claude hook"
             echo "  Read token saver (read-once) avoids redundant full-file rereads and prefers diffs after edits."
+            echo "  It works automatically for Claude Read; you do not need to remember a command."
             if confirm_from_tty "Install read-once for Claude Read token saving? [y/N]: " "n"; then
                 INSTALL_READ_ONCE=1
             fi
         else
             echo "可选 Claude hook"
             echo "  Read 省 token 工具（read-once）会避免重复全文读取文件，并在改动后优先提供 diff。"
+            echo "  它会自动作用于 Claude Read，不需要你记命令。"
             if confirm_from_tty "是否安装 Claude 的 read-once 读文件省 token hook？[y/N]: " "n"; then
                 INSTALL_READ_ONCE=1
             fi
@@ -555,14 +563,16 @@ prompt_optional_install_choices() {
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional token saving"
             echo "  Token Saver installs a shared Codex/Claude skill and local command for large-output refs/snippets."
-            echo "  It helps export-only sessions use token saving without remembering low-level commands."
+            echo "  Use it for long logs, test output, broad rg, git diff/show, and noisy diagnostics."
+            echo "  Agents use the low-level commands automatically; users can just say /token-saver or ask to save context."
             if confirm_from_tty "Install Token Saver for Codex and Claude? [y/N]: " "n"; then
                 INSTALL_TOKEN_SAVER=1
             fi
         else
             echo "可选省 token 工具"
             echo "  Token Saver 会安装 Codex/Claude 共用 skill 和本机命令，用 ref/snippet 收纳长输出。"
-            echo "  它让 export-only 会话也能省 token，不需要你记底层命令。"
+            echo "  适合长日志、测试输出、大范围 rg、git diff/show 和 noisy diagnostics。"
+            echo "  底层命令由 agent 自动使用；用户只需要说 /token-saver 或“省点 context”。"
             if confirm_from_tty "是否为 Codex 和 Claude 安装 Token Saver？[y/N]: " "n"; then
                 INSTALL_TOKEN_SAVER=1
             fi
@@ -580,43 +590,21 @@ prompt_optional_install_choices() {
             note_optional_pack_detected " TOON" "TOON"
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional structured context compression"
-            echo "  TOON installs a Codex/Claude skill plus the local mms-toon command for export-only sessions."
+            echo "  TOON compresses structured JSON/status/handoff packets for model-to-model context."
+            echo "  It installs a Codex/Claude skill plus the local mms-toon command for export-only sessions."
+            echo "  Do not use it for prose, code, raw logs, secrets, or exact API JSON."
             echo "  MMS-launched sessions already receive TOON as a session-local built-in asset."
             if confirm_from_tty "Install global TOON skill and mms-toon command? [y/N]: " "n"; then
                 INSTALL_TOON=1
             fi
         else
             echo "可选结构化上下文压缩"
-            echo "  TOON 会安装 Codex/Claude 共用 skill 和本机 mms-toon 命令，方便 export-only 会话使用。"
+            echo "  TOON 用来压缩结构化 JSON/status/handoff，方便模型之间传递上下文。"
+            echo "  它会安装 Codex/Claude 共用 skill 和本机 mms-toon 命令，方便 export-only 会话使用。"
+            echo "  不用于 prose、代码、原始日志、secret 或 CLI/API 要求精确的 JSON。"
             echo "  通过 MMS 启动的 session 已经默认内建 TOON session asset。"
             if confirm_from_tty "是否安装全局 TOON skill 和 mms-toon 命令？[y/N]: " "n"; then
                 INSTALL_TOON=1
-            fi
-        fi
-    fi
-
-    if [ "$INSTALL_OPS_ENV_SAFE_EXPLICIT" -eq 0 ]; then
-        echo ""
-        if optional_ops_env_safe_installed; then
-            if [ "$INSTALL_LANG" = "en" ]; then
-                echo "Optional isolated host path hints"
-            else
-                echo "可选隔离路径提示"
-            fi
-            note_optional_pack_detected " ops-env-safe" "ops-env-safe"
-        elif [ "$INSTALL_LANG" = "en" ]; then
-            echo "Optional isolated host path hints"
-            echo "  ops-env-safe installs a path-only Codex skill, a Claude /ops-env-safe command, and a local path-map template."
-            echo "  It does not inject real HOME/XDG or export auth secrets."
-            if confirm_from_tty "Install ops-env-safe path-only host hints? [y/N]: " "n"; then
-                INSTALL_OPS_ENV_SAFE=1
-            fi
-        else
-            echo "可选隔离路径提示"
-            echo "  ops-env-safe 会安装仅路径的 Codex skill、Claude /ops-env-safe 命令和本地路径映射模板。"
-            echo "  它不会注入真实 HOME/XDG，也不会导出认证 secret。"
-            if confirm_from_tty "是否安装 ops-env-safe 仅路径宿主提示？[y/N]: " "n"; then
-                INSTALL_OPS_ENV_SAFE=1
             fi
         fi
     fi
@@ -687,11 +675,13 @@ prompt_optional_install_choices() {
     echo ""
     if [ "$INSTALL_LANG" = "en" ]; then
         echo "Bundled session mode"
-        echo "  Caveman, weber, web-access, agent-browser, TOON, and token-saver ship inside MMS as pinned session assets."
+        echo "  Caveman, TOON, token-saver, and the Web automation bundle ship inside MMS as pinned session assets."
+        echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
         echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config."
     else
         echo "内建 session 模式"
-        echo "  Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起作为内建 session 资产提供。"
+        echo "  Caveman、TOON、token-saver 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
+        echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
         echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置。"
     fi
 
@@ -2033,6 +2023,16 @@ run_install_check() {
     else
         echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
     fi
+    if [ -L "$BIN_DIR/mmc" ]; then
+        echo "✓ $(t "已存在 mmc 命令链接" "mmc symlink present"): $BIN_DIR/mmc"
+    else
+        echo "• $(t "mmc 命令链接尚未创建" "mmc symlink not created yet"): $BIN_DIR/mmc"
+    fi
+    if [ -L "$BIN_DIR/mmslogs" ]; then
+        echo "✓ $(t "已存在 mmslogs 命令链接" "mmslogs symlink present"): $BIN_DIR/mmslogs"
+    else
+        echo "• $(t "mmslogs 命令链接尚未创建" "mmslogs symlink not created yet"): $BIN_DIR/mmslogs"
+    fi
 
 
     if optional_brainkeeper_context_installed; then
@@ -2977,7 +2977,7 @@ install_optional_codegraph() {
     echo ""
     echo "$(t "正在安装 CodeGraph..." "Installing CodeGraph...")"
     echo "⚠ $(t "这个可选包会通过 npm 安装 CodeGraph CLI；不写 ~/.config/mms，也不修改 Claude/Codex 全局配置。" "This optional pack installs the CodeGraph CLI via npm; it does not write ~/.config/mms or change global Claude/Codex config.")"
-    echo "  $(t "MMS 启动的 session 已带 CodeGraph auto-index hook；检测到 codegraph 后才会自动 init/sync。" "MMS-launched sessions already include the CodeGraph auto-index hook; it only init/syncs when codegraph is available.")"
+    echo "  $(t "MMS 启动的 session 已带 CodeGraph sync hook；首次 codegraph init -i 需要手动执行，之后检测到 .codegraph/ 才会自动 sync。" "MMS-launched sessions already include the CodeGraph sync hook; first-time codegraph init -i stays manual, then existing .codegraph/ repos auto-sync.")"
 
     npm_global_install_with_nvm_fallback "CodeGraph CLI" "$CODEGRAPH_PACKAGE_SPEC" || true
 
@@ -3688,7 +3688,7 @@ fi
 
 if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     echo "• $(t "附带安装 CodeGraph CLI" "Optional CodeGraph CLI"): on"
-    echo "  $(t "会通过 npm 安装 codegraph；MMS session hook 检测到后会自动 init/sync 当前 repo。" "This installs codegraph via npm; MMS session hooks auto init/sync the current repo when available.")"
+    echo "  $(t "会通过 npm 安装 codegraph；首次 codegraph init -i 需要手动执行，MMS session hook 只会自动 sync 已初始化 repo。" "This installs codegraph via npm; first-time codegraph init -i stays manual, and MMS session hooks only auto-sync initialized repos.")"
     echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
 fi
 
@@ -3725,7 +3725,7 @@ if [ "$INSTALL_OMC" -eq 1 ]; then
 fi
 
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、weber、web-access、agent-browser、TOON、token-saver；按 session 注入，不改全局 hooks/config。" "Install includes Caveman, weber, web-access, agent-browser, TOON, and token-saver; they are injected per session without changing global hooks/config.")"
+echo "  $(t "安装后会自带 Caveman、TOON、token-saver 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）；按 session 注入，不改全局 hooks/config。" "Install includes Caveman, TOON, token-saver, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless); they are injected per session without changing global hooks/config.")"
 
     if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -3755,6 +3755,8 @@ if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
 fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
+[ -f "$SOURCE_DIR/mmc" ] && cp "$SOURCE_DIR"/mmc "$MMS_HOME/"
+[ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_launchers.py "$MMS_HOME/"
@@ -3767,6 +3769,10 @@ copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scri
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
 done
+# 复制 MMC 私用 Claude OAuth launcher 依赖，避免 fresh install 后 `mmc` 缺文件。
+for f in "$SOURCE_DIR"/mmc*.py; do
+    [ -f "$f" ] && cp "$f" "$MMS_HOME/"
+done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
 write_version_metadata
@@ -3774,6 +3780,8 @@ repair_managed_claude_settings
 write_language_config
 
 chmod +x "$MMS_HOME/mms"
+[ -f "$MMS_HOME/mmc" ] && chmod +x "$MMS_HOME/mmc"
+[ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 [ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
 [ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +
@@ -3782,6 +3790,8 @@ chmod +x "$MMS_HOME/mms"
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
 rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
+[ -f "$MMS_HOME/mmc" ] && rewrite_shebang "$MMS_HOME/mmc" "$PYTHON_PATH"
+[ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
 install_requested_clis
@@ -3820,8 +3830,11 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs 已下线，仅保留 mms 主入口。
+# 创建 primary symlink；legacy ccs 已下线，仅保留 mms/mmc 入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+if [ -e "$MMS_HOME/mmc" ]; then
+    ln -sf "$MMS_HOME/mmc" "$BIN_DIR/mmc"
+fi
 # Remove stale MMS-owned legacy ccs artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/ccs"
 if [ -L "$BIN_DIR/ccs" ]; then
@@ -3871,6 +3884,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
     echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
+    echo "    mmc              $(t "Claude OAuth 私用隔离入口" "private isolated Claude OAuth launcher")"
     echo ""
     echo "  $(t "简单上手示例:" "Quick examples:")"
     echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"
@@ -3880,7 +3894,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
-    echo "  $(t "内建 session assets：Caveman、weber、web-access、agent-browser、TOON、token-saver 会随 MMS 一起提供，按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, weber, web-access, agent-browser, TOON, and token-saver ship with MMS and are injected per session without global hooks/config writes.")"
+    echo "  $(t "内建 session assets：Caveman、TOON、token-saver 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供，按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS and are injected per session without global hooks/config writes.")"
     echo ""
 
     if [ "$INSTALL_RTK" -eq 1 ]; then
@@ -3897,7 +3911,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-        echo "  $(t "CodeGraph CLI 可选安装已执行；MMS session start hook 检测到 codegraph 后会自动 init/sync 当前 repo。" "CodeGraph CLI optional install ran; MMS session start hooks auto init/sync the current repo when codegraph is available.")"
+        echo "  $(t "CodeGraph CLI 可选安装已执行；首次 codegraph init -i 需要手动执行，之后 MMS session start hook 会自动 sync 已初始化 repo。" "CodeGraph CLI optional install ran; first-time codegraph init -i stays manual, then MMS session start hooks auto-sync initialized repos.")"
         print_codegraph_init_hint
         echo ""
     fi
