@@ -946,25 +946,119 @@ def _should_retry_gpt_bridge_without_previous_response_id(status_code, responses
     )
 
 
-def _mms_fail_closed_auth_error_payload(status_code, body_text, *, model_name=""):
-    """将 upstream 401/403 改写成不会误导用户去 /login 的 MMS fail-closed 错误。"""
+def _truncate_upstream_detail(value, limit=480):
+    detail = str(value or "").strip().replace("\n", " ")
+    if len(detail) > limit:
+        return detail[: limit - 3] + "..."
+    return detail
+
+
+def _extract_upstream_error_summary(body_text):
+    body_text = str(body_text or "")
+    summary = {
+        "body": _truncate_upstream_detail(body_text),
+        "message": "",
+        "type": "",
+        "code": "",
+        "request_id": "",
+    }
+    try:
+        data = json.loads(body_text)
+    except Exception:
+        return summary
+    if not isinstance(data, dict):
+        return summary
+    error = data.get("error")
+    if isinstance(error, dict):
+        summary["message"] = _truncate_upstream_detail(error.get("message"), 240)
+        summary["type"] = _truncate_upstream_detail(error.get("type"), 80)
+        summary["code"] = _truncate_upstream_detail(error.get("code"), 80)
+        summary["request_id"] = _truncate_upstream_detail(
+            error.get("request_id") or data.get("request_id"),
+            120,
+        )
+        return summary
+    summary["message"] = _truncate_upstream_detail(data.get("message"), 240)
+    summary["type"] = _truncate_upstream_detail(data.get("type"), 80)
+    summary["code"] = _truncate_upstream_detail(data.get("code"), 80)
+    summary["request_id"] = _truncate_upstream_detail(data.get("request_id"), 120)
+    return summary
+
+
+def _mms_auth_error_category(status_code):
+    if int(status_code or 0) == 401:
+        return (
+            "provider_authentication",
+            "the selected MMS API-key provider/account rejected authentication",
+            "check the selected provider API key/account binding, or switch runtime in MMS",
+        )
+    return (
+        "provider_or_model_permission",
+        "the selected MMS provider/account reached upstream, but the upstream denied this model/path",
+        "check provider model permission, relay policy, quota, or switch runtime in MMS",
+    )
+
+
+def _mms_fail_closed_auth_error_payload(
+    status_code,
+    body_text,
+    *,
+    model_name="",
+    provider_id="",
+    request_url="",
+    route_count=1,
+):
+    """将 upstream 401/403 改写成可诊断、但不会误导用户去 login 的 fail-closed 错误。"""
     status_code = int(status_code or 0)
     model_label = str(model_name or "").strip() or "current model"
-    detail = str(body_text or "").strip().replace("\n", " ")
-    if len(detail) > 240:
-        detail = detail[:237] + "..."
+    provider_label = str(provider_id or "").strip() or "selected-provider"
+    request_path = _fallback_safe_url(request_url)
+    upstream = _extract_upstream_error_summary(body_text)
+    category, meaning, next_step = _mms_auth_error_category(status_code)
+    route_note = ""
+    try:
+        if int(route_count or 0) > 1:
+            route_note = f" routes_tried={int(route_count)}."
+    except Exception:
+        route_note = ""
+    upstream_hint = upstream.get("message") or upstream.get("body")
     message = (
-        f"MMS fail-closed: upstream returned HTTP {status_code} for {model_label}. "
-        "This is an api_key/provider permission error inside the current MMS runtime; "
-        "Claude OAuth login is disabled here. Check provider/model permission or switch runtime in MMS."
+        f"MMS fail-closed: upstream_provider returned HTTP {status_code} "
+        f"({category}). model={model_label} provider={provider_label} path={request_path}."
+        f"{route_note} Meaning: {meaning}. "
+        "MMS stayed inside the current configured runtime; global OAuth or login fallback was not used. "
+        f"Next: {next_step}."
     )
-    if detail:
-        message += f" upstream_body={detail}"
+    if upstream_hint:
+        message += f" Upstream said: {upstream_hint}"
     return {
         "type": "error",
         "error": {
-            "type": "api_error",
+            "type": "mms_upstream_auth_error",
             "message": message,
+            "mms": {
+                "source": "upstream_provider",
+                "category": category,
+                "status_code": status_code,
+                "model": model_label,
+                "provider_id": provider_label,
+                "request_path": request_path,
+                "routes_tried": int(route_count or 1) if str(route_count or "").isdigit() else route_count,
+                "global_oauth_fallback": "disabled",
+                "next": next_step,
+            },
+            "upstream": {
+                key: value
+                for key, value in {
+                    "status_code": status_code,
+                    "type": upstream.get("type"),
+                    "code": upstream.get("code"),
+                    "message": upstream.get("message"),
+                    "request_id": upstream.get("request_id"),
+                    "body": upstream.get("body"),
+                }.items()
+                if value not in (None, "")
+            },
         },
     }
 
@@ -2717,6 +2811,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                         response.status_code,
                                         body,
                                         model_name=metrics_model,
+                                        provider_id=route_provider_id,
+                                        request_url=target_url,
+                                        route_count=len(forward_routes),
                                     ),
                                 )
                                 return
@@ -2794,6 +2891,9 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 response.status_code,
                                 body,
                                 model_name=metrics_model,
+                                provider_id=route_provider_id,
+                                request_url=target_url,
+                                route_count=len(forward_routes),
                             ),
                         )
                         return
@@ -3026,6 +3126,8 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                     response.status_code,
                                     body,
                                     model_name=model_name,
+                                    provider_id=provider_id,
+                                    request_url=target_url,
                                 ),
                             )
                             return
@@ -3655,6 +3757,9 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                     response.status_code,
                                     body_text,
                                     model_name=model_name,
+                                    provider_id=provider_id,
+                                    request_url=target_url,
+                                    route_count=len(forward_routes),
                                 ),
                             )
                             return

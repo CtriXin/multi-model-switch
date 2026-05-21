@@ -4957,9 +4957,17 @@ def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypat
 
     assert captured["code"] == 502
     message = captured["payload"]["error"]["message"]
-    assert "Claude OAuth login is disabled here" in message
+    assert "upstream_provider returned HTTP 403" in message
+    assert "provider_or_model_permission" in message
+    assert "global OAuth or login fallback was not used" in message
     assert "/login" not in message
     assert "HTTP 403" in message
+    assert captured["payload"]["error"]["mms"]["source"] == "upstream_provider"
+    assert captured["payload"]["error"]["mms"]["category"] == "provider_or_model_permission"
+    assert captured["payload"]["error"]["mms"]["model"] == "gpt-5.4"
+    assert captured["payload"]["error"]["mms"]["request_path"] == "/v1/responses"
+    assert captured["payload"]["error"]["upstream"]["message"] == "Permission denied"
+    assert captured["payload"]["error"]["upstream"]["request_id"] == "req-2"
 
 
 def test_responses_proxy_handler_strips_reasoning_when_disabled(monkeypatch):
@@ -5128,9 +5136,16 @@ def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeyp
 
     assert captured["code"] == 502
     message = captured["payload"]["error"]["message"]
-    assert "Claude OAuth login is disabled here" in message
+    assert "upstream_provider returned HTTP 403" in message
+    assert "provider_or_model_permission" in message
+    assert "global OAuth or login fallback was not used" in message
     assert "/login" not in message
     assert "HTTP 403" in message
+    assert captured["payload"]["error"]["mms"]["source"] == "upstream_provider"
+    assert captured["payload"]["error"]["mms"]["model"] == "K2.6-code-preview"
+    assert captured["payload"]["error"]["mms"]["request_path"] == "/v1/messages"
+    assert captured["payload"]["error"]["upstream"]["message"] == "Permission denied"
+    assert captured["payload"]["error"]["upstream"]["request_id"] == "req-3"
 
 
 def test_json_resp_to_sse_invalid_body_returns_error_event():

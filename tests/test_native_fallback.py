@@ -242,6 +242,46 @@ def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
     payload = json.loads(handler.wfile.getvalue().decode())
     assert "MMS fail-closed" in payload["error"]["message"]
     assert "HTTP 403" in payload["error"]["message"]
+    assert "provider_or_model_permission" in payload["error"]["message"]
+    assert payload["error"]["mms"]["source"] == "upstream_provider"
+    assert payload["error"]["mms"]["provider_id"] == "uscrsopenai"
+    assert payload["error"]["mms"]["model"] == "gpt-5.5"
+    assert payload["error"]["mms"]["request_path"] == "/openai/responses"
+    assert payload["error"]["upstream"]["message"] == "Permission denied"
+
+
+def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail():
+    import mms_bridge
+
+    payload = mms_bridge._mms_fail_closed_auth_error_payload(
+        401,
+        '{"error":{"type":"invalid_api_key","message":"bad key","request_id":"req-auth"}}',
+        model_name="gpt-5.5",
+        provider_id="codex-relay",
+        request_url="https://relay.example.com/v1/responses",
+        route_count=2,
+    )
+
+    message = payload["error"]["message"]
+    assert "provider_authentication" in message
+    assert "provider=codex-relay" in message
+    assert "routes_tried=2" in message
+    assert "global OAuth or login fallback was not used" in message
+    assert payload["error"]["type"] == "mms_upstream_auth_error"
+    assert payload["error"]["mms"] == {
+        "source": "upstream_provider",
+        "category": "provider_authentication",
+        "status_code": 401,
+        "model": "gpt-5.5",
+        "provider_id": "codex-relay",
+        "request_path": "/v1/responses",
+        "routes_tried": 2,
+        "global_oauth_fallback": "disabled",
+        "next": "check the selected provider API key/account binding, or switch runtime in MMS",
+    }
+    assert payload["error"]["upstream"]["type"] == "invalid_api_key"
+    assert payload["error"]["upstream"]["message"] == "bad key"
+    assert payload["error"]["upstream"]["request_id"] == "req-auth"
 
 
 def test_chatcompletions_fallback_uses_native_route_profile_and_proxy(monkeypatch):
