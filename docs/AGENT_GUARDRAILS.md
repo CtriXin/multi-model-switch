@@ -6,7 +6,7 @@
 
 - 保护 MMS 的主启动链路稳定：`场景/CLI 选择 -> 模型选择 -> 使用入口选择 -> runtime 决策 -> launcher -> bridge/env 注入 -> 实际 CLI 启动`
 - 保护现有兼容承诺：`mms` 主入口、provider / account 双来源、单次注入策略、本地隔离目录策略
-- `ccs` 已全面退休；只允许保留 stale cleanup / reset 清理逻辑，以及读取现有 `~/.config/mms/credentials.sh` 内历史 `CCS_*` 凭据名的兼容别名；不允许重新引入 `ccs` 入口或 `~/.config/ccs` fallback。
+- `ccs` 已全面退休；只允许保留 stale cleanup / reset 清理逻辑，不允许重新引入 `ccs` 入口、`~/.config/ccs` fallback 或 `CCS_*` 环境变量兼容。
 - 避免 UI 展示、配置状态、启动参数、bridge 实际路由彼此脱节
 
 ## 受保护的稳定面
@@ -132,7 +132,7 @@
 - 私自改变默认模型、默认 provider、默认 account、默认 bridge 策略
 - 私自改变已有字段语义，尤其是 `model_info`、`runtime`、`provider`、`account` 相关字段
 - 把显示层需要的数据和启动层需要的数据混在一起，导致 UI 选项和实际执行不一致
-- 重新引入已退休的 legacy `ccs` shim 或 `~/.config/ccs` 旧配置 fallback；`CCS_*` 只允许作为现有 MMS credentials 的只读别名
+- 重新引入已退休的 legacy `ccs` shim、`~/.config/ccs` 旧配置 fallback 或 `CCS_*` 环境变量兼容
 - 在未验证的情况下改动 HOME/XDG/状态目录隔离逻辑
 - 为了实现新功能，直接覆盖已有选择流程、确认流程或 bridge 路由
 - 把一次性的实验逻辑直接变成默认行为，且没有显式开关或任务上下文说明
