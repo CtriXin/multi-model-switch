@@ -254,7 +254,7 @@ bash install.sh --install-ops-env-safe
 
 `--install-map` 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；它让 Claude 在进入 repo 时更快理解目录和文件结构。这是全局 Claude hook，可用 `--map-ref` 固定版本。
 
-`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。首次 `codegraph init -i` 保持手动，避免新 session 意外生成 `.codegraph/`；repo 初始化后，MMS session hook 检测到 `codegraph` binary 会静默执行 `codegraph sync`。可用 `--codegraph-package` 覆盖 npm 包规格。安装后当前 repo 可手动执行 `codegraph init -i`；也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
+`--install-codegraph` 会通过 npm 安装 CodeGraph CLI/MCP；它提供 symbol search、callers/callees 和代码上下文检索。MMS session 会内建静默的 CodeGraph auto-register hook：git repo 没有 `.codegraph/` 时执行 `codegraph init <repo>` + `codegraph index <repo>`；已有 `.codegraph/` 时执行 `codegraph sync <repo>`。可用 `--codegraph-package` 覆盖 npm 包规格。需要立刻初始化全部 repo 时，也可以直接让 LLM：“找出当前工作区下所有 git repo；没有 `.codegraph` 就执行 `codegraph init -i`，已有 `.codegraph` 就执行 `codegraph sync`；跳过 `node_modules/vendor/build`；最后汇总失败列表。”
 
 `--install-read-once` 会安装 Claude Read 省 token hooks；同一个 session 内重复读取未变化文件时给提示，文件变化后优先给 diff。它自动生效，不需要用户记命令。
 

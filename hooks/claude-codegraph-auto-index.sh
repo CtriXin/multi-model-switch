@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Sync CodeGraph for the current git worktree on session start.
-# First-time `codegraph init -i` stays manual so the repo does not gain a
-# surprising `.codegraph/` directory just because an agent session started.
-# Skips if: not in a git repo, codegraph not installed, not initialized, or sync fails.
+# Auto-register and sync CodeGraph for the current git worktree on session start.
+# Mirrors the user's global Claude hook, but stays quiet for clean hook output.
+# Skips if: not in a git repo, codegraph not installed, or init/index/sync fails.
 
 CODEGRAPH_BIN="${CODEGRAPH_BIN:-codegraph}"
 
@@ -17,10 +16,9 @@ if [ -z "$repo_root" ] || [ ! -d "$repo_root" ]; then
   exit 0
 fi
 
-cd "$repo_root"
-
-if [ ! -d ".codegraph" ]; then
-  exit 0
+if [ ! -d "$repo_root/.codegraph" ]; then
+  "$CODEGRAPH_BIN" init "$repo_root" >/dev/null 2>&1 || true
+  "$CODEGRAPH_BIN" index "$repo_root" >/dev/null 2>&1 || true
+else
+  "$CODEGRAPH_BIN" sync "$repo_root" >/dev/null 2>&1 || true
 fi
-
-"$CODEGRAPH_BIN" sync >/dev/null 2>&1 || true

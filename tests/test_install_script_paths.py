@@ -322,14 +322,15 @@ def test_install_script_updates_chinese_optional_copy():
     assert "Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。" in text
 
 
-def test_install_script_codegraph_keeps_first_init_manual():
+def test_install_script_codegraph_auto_registers_missing_index():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     hook_text = (ROOT_DIR / "hooks" / "claude-codegraph-auto-index.sh").read_text(encoding="utf-8")
     readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
 
-    assert "首次 codegraph init -i 需要手动执行" in text
+    assert "自动 init/index" in text
     assert "codegraph init -i" in readme_text
-    assert '"$CODEGRAPH_BIN" init -i' not in hook_text
+    assert '"$CODEGRAPH_BIN" init "$repo_root"' in hook_text
+    assert '"$CODEGRAPH_BIN" index "$repo_root"' in hook_text
     assert '"$CODEGRAPH_BIN" sync' in hook_text
 
 

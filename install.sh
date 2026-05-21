@@ -309,7 +309,7 @@ $(t "说明:" "Notes:")
   - $(t "旧参数 --install-mindkeeper-context / --mindkeeper-ref 仍兼容，但已 deprecated" "Legacy --install-mindkeeper-context / --mindkeeper-ref remain compatible but are deprecated")
   - $(t "--install-map 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；默认锁定到经过 MMS 验证的 Map release" "--install-map installs the project-structure Map and enables the Claude SessionStart auto-index hook; by default it pins the MMS-tested Map release")
   - $(t "--map-ref 可覆盖 Map 安装版本，例如 v0.3.1 / main" "--map-ref overrides the Map version, for example v0.3.1 / main")
-  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI/MCP，用于 symbol/call graph 代码索引；首次 codegraph init -i 需要用户或 LLM 手动执行，MMS session hook 只自动 sync 已初始化 repo" "--install-codegraph installs the CodeGraph CLI/MCP via npm for symbol/call-graph code indexing; first-time codegraph init -i stays manual/user-or-LLM driven, and MMS session hooks only auto-sync initialized repos")
+  - $(t "--install-codegraph 会通过 npm 安装 CodeGraph CLI/MCP，用于 symbol/call graph 代码索引；MMS session hook 会在 git repo 中自动 init/index，已有索引则 sync" "--install-codegraph installs the CodeGraph CLI/MCP via npm for symbol/call-graph code indexing; MMS session hooks auto init/index git repos and sync existing indexes")
   - $(t "--codegraph-package 可覆盖 npm 包规格，例如 @colbymchenry/codegraph@0.7.6" "--codegraph-package overrides the npm package spec, for example @colbymchenry/codegraph@0.7.6")
   - $(t "--install-read-once 会安装 read-once，并启用 Claude 的 Read 省 token hooks：同一 session 避免重复全文读文件，改动后优先提示 diff" "--install-read-once installs read-once and enables Claude Read token-saving hooks: avoid repeated full-file rereads in a session and prefer diffs after edits")
   - $(t "--install-token-saver 会安装 Codex/Claude 共用 token-saver skill 和本机 token-saver 命令，用于长日志/测试输出/diff 的 ref+snippet 收纳" "--install-token-saver installs the shared Codex/Claude token-saver skill plus the local token-saver command for long logs/test output/diff refs and snippets")
@@ -509,7 +509,7 @@ prompt_optional_install_choices() {
         elif [ "$INSTALL_LANG" = "en" ]; then
             echo "Optional code intelligence"
             echo "  CodeGraph installs a local CLI/MCP server for symbol search, callers/callees, and code context."
-            echo "  First-time codegraph init -i stays manual; MMS session hooks only auto-sync repos that already have .codegraph/."
+            echo "  MMS session hooks auto-register git repos with CodeGraph, then sync existing .codegraph/ indexes."
             echo "  It uses npm and may fall back to MMS-managed nvm Node.js 22 without changing your default Node."
             if confirm_from_tty "Install CodeGraph CLI? [y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
@@ -517,7 +517,7 @@ prompt_optional_install_choices() {
         else
             echo "可选代码索引"
             echo "  CodeGraph 会安装本机 CLI/MCP server，用于 symbol search、callers/callees 和代码上下文检索。"
-            echo "  首次 codegraph init -i 需要手动执行；MMS session hook 只会自动 sync 已有 .codegraph/ 的 repo。"
+            echo "  MMS session hook 会自动为 git repo 注册 CodeGraph；已有 .codegraph/ 时只做 sync。"
             echo "  它使用 npm；必要时会临时用 MMS-managed nvm Node.js 22，不会修改你的默认 Node。"
             if confirm_from_tty "是否安装 CodeGraph CLI？[y/N]: " "n"; then
                 INSTALL_CODEGRAPH=1
@@ -2977,7 +2977,7 @@ install_optional_codegraph() {
     echo ""
     echo "$(t "正在安装 CodeGraph..." "Installing CodeGraph...")"
     echo "⚠ $(t "这个可选包会通过 npm 安装 CodeGraph CLI；不写 ~/.config/mms，也不修改 Claude/Codex 全局配置。" "This optional pack installs the CodeGraph CLI via npm; it does not write ~/.config/mms or change global Claude/Codex config.")"
-    echo "  $(t "MMS 启动的 session 已带 CodeGraph sync hook；首次 codegraph init -i 需要手动执行，之后检测到 .codegraph/ 才会自动 sync。" "MMS-launched sessions already include the CodeGraph sync hook; first-time codegraph init -i stays manual, then existing .codegraph/ repos auto-sync.")"
+    echo "  $(t "MMS 启动的 session 已带 CodeGraph auto-register hook；未初始化的 git repo 会自动 init/index，已有 .codegraph/ 则 sync。" "MMS-launched sessions already include the CodeGraph auto-register hook; uninitialized git repos auto init/index, and existing .codegraph/ repos sync.")"
 
     npm_global_install_with_nvm_fallback "CodeGraph CLI" "$CODEGRAPH_PACKAGE_SPEC" || true
 
@@ -2993,15 +2993,15 @@ install_optional_codegraph() {
 
 print_codegraph_init_hint() {
     if [ "$INSTALL_LANG" = "en" ]; then
-        echo "  CodeGraph init for the current repo:"
-        echo "    codegraph init -i"
-        echo "  Prompt for an LLM to initialize all repos:"
+        echo "  CodeGraph session behavior:"
+        echo "    MMS sessions auto run codegraph init/index for an uninitialized git repo, and codegraph sync when .codegraph/ exists."
+        echo "  Prompt for an LLM to initialize all repos now:"
         echo "    Find every git repo under this workspace, run 'codegraph init -i' when .codegraph is missing and 'codegraph sync' when it exists, skip node_modules/vendor/build dirs, and report failures."
         echo "  Tip: keep .codegraph/ local and do not commit it unless your repo intentionally tracks indexes."
     else
-        echo "  当前 repo 手动初始化："
-        echo "    codegraph init -i"
-        echo "  让 LLM 一键初始化全部 repo 的指令："
+        echo "  CodeGraph session 行为："
+        echo "    MMS session 会在未初始化的 git repo 自动执行 codegraph init/index；已有 .codegraph/ 时执行 codegraph sync。"
+        echo "  让 LLM 立刻一键初始化全部 repo 的指令："
         echo "    找出当前工作区下所有 git repo；没有 .codegraph 就执行 'codegraph init -i'，已有 .codegraph 就执行 'codegraph sync'；跳过 node_modules/vendor/build 目录；最后汇总失败列表。"
         echo "  提醒：.codegraph/ 建议保持本地，不要提交，除非项目明确要追踪索引。"
     fi
@@ -3688,7 +3688,7 @@ fi
 
 if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
     echo "• $(t "附带安装 CodeGraph CLI" "Optional CodeGraph CLI"): on"
-    echo "  $(t "会通过 npm 安装 codegraph；首次 codegraph init -i 需要手动执行，MMS session hook 只会自动 sync 已初始化 repo。" "This installs codegraph via npm; first-time codegraph init -i stays manual, and MMS session hooks only auto-sync initialized repos.")"
+    echo "  $(t "会通过 npm 安装 codegraph；MMS session hook 会自动 init/index 未初始化的 git repo，已有索引则 sync。" "This installs codegraph via npm; MMS session hooks auto init/index uninitialized git repos and sync existing indexes.")"
     echo "  $(t "CodeGraph npm 包" "CodeGraph npm package"): $CODEGRAPH_PACKAGE_SPEC"
 fi
 
@@ -3911,7 +3911,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
 
     if [ "$INSTALL_CODEGRAPH" -eq 1 ]; then
-        echo "  $(t "CodeGraph CLI 可选安装已执行；首次 codegraph init -i 需要手动执行，之后 MMS session start hook 会自动 sync 已初始化 repo。" "CodeGraph CLI optional install ran; first-time codegraph init -i stays manual, then MMS session start hooks auto-sync initialized repos.")"
+        echo "  $(t "CodeGraph CLI 可选安装已执行；MMS session start hook 会自动 init/index 未初始化的 git repo，已有索引则 sync。" "CodeGraph CLI optional install ran; MMS session start hooks auto init/index uninitialized git repos and sync existing indexes.")"
         print_codegraph_init_hint
         echo ""
     fi

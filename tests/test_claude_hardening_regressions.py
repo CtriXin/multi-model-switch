@@ -1042,7 +1042,7 @@ def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
     assert "[map] Index up to date." in result.stderr
 
 
-def test_codegraph_hook_does_not_auto_init_missing_index(tmp_path):
+def test_codegraph_hook_auto_registers_missing_index(tmp_path):
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     log_path = tmp_path / "codegraph.log"
@@ -1083,8 +1083,10 @@ def test_codegraph_hook_does_not_auto_init_missing_index(tmp_path):
 
     assert result.stdout == ""
     assert result.stderr == ""
-    assert not (repo / ".codegraph").exists()
-    assert not log_path.exists()
+    assert log_path.read_text(encoding="utf-8").splitlines() == [
+        f"init {repo}",
+        f"index {repo}",
+    ]
 
 
 def test_codegraph_hook_syncs_existing_index(tmp_path):
@@ -1127,7 +1129,7 @@ def test_codegraph_hook_syncs_existing_index(tmp_path):
         check=True,
     )
 
-    assert log_path.read_text(encoding="utf-8").strip() == "sync"
+    assert log_path.read_text(encoding="utf-8").strip() == f"sync {repo}"
 
 
 def test_rtk_hook_is_silent_when_dependencies_are_missing(tmp_path):
