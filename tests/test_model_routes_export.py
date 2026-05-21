@@ -234,7 +234,6 @@ def test_latest_routes_freshness_tracks_provider_profiles(monkeypatch, tmp_path)
     _patch_export_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(mms_core, "CONFIG_PATH", str(tmp_path / "missing-config.toml"))
     monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(tmp_path / "missing-credentials.sh"))
-    monkeypatch.setattr(mms_core, "LEGACY_CREDENTIALS_PATH", str(tmp_path / "missing-legacy-credentials.sh"))
     monkeypatch.setattr(mms_core, "OVERRIDE_PATHS", [])
     monkeypatch.setattr(mms_router, "_BUILTIN_PROVIDER_PROFILE_PATH", str(tmp_path / "provider-profiles.json"))
     routes = {

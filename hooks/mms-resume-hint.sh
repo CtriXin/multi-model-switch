@@ -21,7 +21,7 @@ esac
 
 command_name="${MMS_RESUME_COMMAND_NAME:-mms}"
 case "$command_name" in
-  mms|ccs) ;;
+  mms) ;;
   *) command_name="mms" ;;
 esac
 

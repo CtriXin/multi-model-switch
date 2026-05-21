@@ -38,7 +38,6 @@ def _default_broker_repo() -> str:
 
 DEFAULT_BROKER_REPO = _default_broker_repo()
 PRIMARY_CREDENTIALS_PATH = os.path.expanduser("~/.config/mms/credentials.sh")
-LEGACY_CREDENTIALS_PATH = os.path.expanduser("~/.config/ccs/credentials.sh")
 BROKER_CACHE_DIR = os.path.expanduser("~/.config/mms/cache/broker")
 _BROKER_PARENT_ENV_PREFIX_BLOCKLIST = (
     "ANTHROPIC_",
@@ -100,7 +99,7 @@ def _resolve_profile_value(profile: dict[str, Any], direct_key: str, env_key: st
     if env_name:
         if env_name in os.environ:
             return str(os.environ.get(env_name, "")).strip(), True
-        for credentials_path in (PRIMARY_CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
+        for credentials_path in (PRIMARY_CREDENTIALS_PATH,):
             values = _load_env_file(credentials_path)
             if env_name in values:
                 return str(values.get(env_name, "")).strip(), True

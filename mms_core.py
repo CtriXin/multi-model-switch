@@ -104,7 +104,7 @@ from mms_fake_upstream import (
     tail_log as _fake_upstream_tail_log,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
-from mms_state_io import resolve_legacy_config_dir, resolve_mms_config_dir, resolve_real_user_home
+from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
@@ -124,11 +124,9 @@ if not _probe_debug_logger.handlers:
     _probe_debug_logger.addHandler(_dh)
 
 APP_NAME = "Multi-Model Switch"
-LEGACY_COMMAND = "ccs"
 PRIMARY_COMMAND = "mms"
 
 PRIMARY_CONFIG_DIR = resolve_mms_config_dir()
-LEGACY_CONFIG_DIR = resolve_legacy_config_dir()
 CONFIG_DIR = PRIMARY_CONFIG_DIR
 CONFIG_PATH = os.path.join(PRIMARY_CONFIG_DIR, "config.toml")
 CREDENTIALS_PATH = os.path.join(PRIMARY_CONFIG_DIR, "credentials.sh")
@@ -137,12 +135,7 @@ ACCOUNTS_DIR = os.path.join(PRIMARY_CONFIG_DIR, "accounts")
 USAGE_PATH = os.path.join(PRIMARY_CONFIG_DIR, "usage.json")
 VERSION_META_PATH = os.path.join(PRIMARY_CONFIG_DIR, "version.json")
 UPDATE_CHECK_PATH = os.path.join(PRIMARY_CONFIG_DIR, "update-check.json")
-LEGACY_CONFIG_PATH = os.path.join(LEGACY_CONFIG_DIR, "config.toml")
-LEGACY_CREDENTIALS_PATH = os.path.join(LEGACY_CONFIG_DIR, "credentials.sh")
-LEGACY_ENV_DIR = os.path.join(LEGACY_CONFIG_DIR, "env")
-LEGACY_USAGE_PATH = os.path.join(LEGACY_CONFIG_DIR, "usage.json")
 OVERRIDE_PATHS = [
-    os.path.join(LEGACY_CONFIG_DIR, "override.toml"),
     os.path.join(PRIMARY_CONFIG_DIR, "override.toml"),
 ]
 PREFERENCES_PATHS = [
@@ -260,9 +253,6 @@ def _merge_base_user_broker_profiles(cfg, config_path):
 DEFAULT_BASE_URL = "https://your-api.example.com"
 API_URL_ENV_NAME = "MMS_API_BASE_URL"
 API_KEY_ENV_NAME = "MMS_API_KEY"
-# Legacy fallback: 旧环境变量仍然生效
-_LEGACY_API_URL_ENV = "CCS_API_BASE_URL"
-_LEGACY_API_KEY_ENV = "CCS_API_KEY"
 DEFAULT_PROVIDER_ID = "default"
 DEFAULT_PROVIDER_PROTOCOLS = ["anthropic_messages", "openai_chat_completions"]
 DEFAULT_ACCOUNT_TIMEZONE = "America/Los_Angeles"
@@ -753,14 +743,11 @@ LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
-    invoked = os.path.basename(sys.argv[0] or "").strip().lower()
-    if invoked in {PRIMARY_COMMAND, LEGACY_COMMAND}:
-        return invoked
     return PRIMARY_COMMAND
 
 
 def display_title():
-    return "MMS" if current_command() == PRIMARY_COMMAND else "CCS"
+    return "MMS"
 
 
 def config_command_hint():
@@ -1370,10 +1357,8 @@ def _provider_env_name(provider_id, field):
 
 
 def _provider_env_value(provider_id, field):
-    """读取 provider 环境变量，MMS_PROVIDER_* 优先，fallback 到 CCS_PROVIDER_*。"""
-    sanitized = _sanitize_provider_id(provider_id)
-    return (os.environ.get(f"MMS_PROVIDER_{sanitized}_{field}", "").strip()
-            or os.environ.get(f"CCS_PROVIDER_{sanitized}_{field}", "").strip())
+    """读取 provider 环境变量。"""
+    return os.environ.get(_provider_env_name(provider_id, field), "").strip()
 
 
 def _normalize_provider(provider):
@@ -2043,12 +2028,6 @@ def get_account_definition(cfg, account_id=None, cli_name=None):
 
 # ── Config ──────────────────────────────────────────────
 
-def _first_existing_path(*paths):
-    for path in paths:
-        if os.path.exists(path):
-            return path
-    return paths[0] if paths else ""
-
 
 def _active_config_path():
     base_primary_dir = _base_user_primary_dir_from_gateway(CONFIG_PATH)
@@ -2056,7 +2035,7 @@ def _active_config_path():
         base_config_path = os.path.join(base_primary_dir, "config.toml")
         if os.path.exists(base_config_path):
             return base_config_path
-    return _first_existing_path(CONFIG_PATH, LEGACY_CONFIG_PATH)
+    return CONFIG_PATH
 
 
 def _active_credentials_path():
@@ -2065,7 +2044,7 @@ def _active_credentials_path():
         base_credentials_path = os.path.join(base_primary_dir, "credentials.sh")
         if os.path.exists(base_credentials_path):
             return base_credentials_path
-    return _first_existing_path(CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH)
+    return CREDENTIALS_PATH
 
 
 def _active_usage_path():
@@ -2074,7 +2053,7 @@ def _active_usage_path():
         base_usage_path = os.path.join(base_primary_dir, "usage.json")
         if os.path.exists(base_usage_path):
             return base_usage_path
-    return _first_existing_path(USAGE_PATH, LEGACY_USAGE_PATH)
+    return USAGE_PATH
 
 
 def _config_guard_root_dir(config_path=None):
@@ -3286,14 +3265,13 @@ def _backup_config_tree(label):
     os.makedirs(backup_root, exist_ok=True)
     backup_dir = os.path.join(backup_root, f"{label}-{_local_now_slug()}")
     os.makedirs(backup_dir, exist_ok=True)
-    for source in {PRIMARY_CONFIG_DIR, LEGACY_CONFIG_DIR}:
-        if os.path.exists(source):
-            shutil.copytree(
-                source,
-                os.path.join(backup_dir, os.path.basename(source)),
-                symlinks=True,
-                ignore_dangling_symlinks=True,
-            )
+    if os.path.exists(PRIMARY_CONFIG_DIR):
+        shutil.copytree(
+            PRIMARY_CONFIG_DIR,
+            os.path.join(backup_dir, os.path.basename(PRIMARY_CONFIG_DIR)),
+            symlinks=True,
+            ignore_dangling_symlinks=True,
+        )
     return backup_dir
 
 
@@ -3638,47 +3616,34 @@ def _launch_with_tracking(cli_name, model_info, runtime, once=False, extra_args=
     launch_cli(cli_name, model_info, runtime, once=once, extra_args=extra_args)
 
 
-def _legacy_provider_env_name(provider_id, field):
-    """旧版 CCS_PROVIDER_* 环境变量名，用于 credentials.sh fallback。"""
-    return f"CCS_PROVIDER_{_sanitize_provider_id(provider_id)}_{field}"
-
-
 def load_provider_credentials(provider_id=DEFAULT_PROVIDER_ID):
     base_key = _provider_env_name(provider_id, "BASE_URL")
     openai_base_key = _provider_env_name(provider_id, "OPENAI_BASE_URL")
     anthropic_base_key = _provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
     api_key_name = _provider_env_name(provider_id, "API_KEY")
     openai_api_key_name = _provider_env_name(provider_id, "OPENAI_API_KEY")
-    # Legacy CCS_PROVIDER_* fallback keys
-    legacy_base_key = _legacy_provider_env_name(provider_id, "BASE_URL")
-    legacy_openai_base_key = _legacy_provider_env_name(provider_id, "OPENAI_BASE_URL")
-    legacy_anthropic_base_key = _legacy_provider_env_name(provider_id, "ANTHROPIC_BASE_URL")
-    legacy_api_key_name = _legacy_provider_env_name(provider_id, "API_KEY")
-    legacy_openai_api_key_name = _legacy_provider_env_name(provider_id, "OPENAI_API_KEY")
-
-    base_url = os.environ.get(base_key, "").strip() or os.environ.get(legacy_base_key, "").strip()
-    openai_base_url = os.environ.get(openai_base_key, "").strip() or os.environ.get(legacy_openai_base_key, "").strip()
-    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip() or os.environ.get(legacy_anthropic_base_key, "").strip()
-    api_key = os.environ.get(api_key_name, "").strip() or os.environ.get(legacy_api_key_name, "").strip()
-    openai_api_key = os.environ.get(openai_api_key_name, "").strip() or os.environ.get(legacy_openai_api_key_name, "").strip()
+    base_url = os.environ.get(base_key, "").strip()
+    openai_base_url = os.environ.get(openai_base_key, "").strip()
+    anthropic_base_url = os.environ.get(anthropic_base_key, "").strip()
+    api_key = os.environ.get(api_key_name, "").strip()
+    openai_api_key = os.environ.get(openai_api_key_name, "").strip()
 
     if provider_id == DEFAULT_PROVIDER_ID:
-        base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip() or os.environ.get(_LEGACY_API_URL_ENV, "").strip()
-        api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip() or os.environ.get(_LEGACY_API_KEY_ENV, "").strip()
+        base_url = base_url or os.environ.get(API_URL_ENV_NAME, "").strip()
+        api_key = api_key or os.environ.get(API_KEY_ENV_NAME, "").strip()
 
-    for credentials_path in (CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH):
+    for credentials_path in (CREDENTIALS_PATH,):
         if not os.path.exists(credentials_path):
             continue
         file_values = _load_env_file(credentials_path)
-        # 先查 MMS_PROVIDER_* 再 fallback 到 CCS_PROVIDER_*
-        base_url = base_url or file_values.get(base_key, "").strip() or file_values.get(legacy_base_key, "").strip()
-        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip() or file_values.get(legacy_openai_base_key, "").strip()
-        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip() or file_values.get(legacy_anthropic_base_key, "").strip()
-        api_key = api_key or file_values.get(api_key_name, "").strip() or file_values.get(legacy_api_key_name, "").strip()
-        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip() or file_values.get(legacy_openai_api_key_name, "").strip()
+        base_url = base_url or file_values.get(base_key, "").strip()
+        openai_base_url = openai_base_url or file_values.get(openai_base_key, "").strip()
+        anthropic_base_url = anthropic_base_url or file_values.get(anthropic_base_key, "").strip()
+        api_key = api_key or file_values.get(api_key_name, "").strip()
+        openai_api_key = openai_api_key or file_values.get(openai_api_key_name, "").strip()
         if provider_id == DEFAULT_PROVIDER_ID:
-            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_URL_ENV, "").strip()
-            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip() or file_values.get(_LEGACY_API_KEY_ENV, "").strip()
+            base_url = base_url or file_values.get(API_URL_ENV_NAME, "").strip()
+            api_key = api_key or file_values.get(API_KEY_ENV_NAME, "").strip()
 
     config_path = _active_config_path()
     if provider_id == DEFAULT_PROVIDER_ID and (not base_url or not api_key) and os.path.exists(config_path):
@@ -10756,7 +10721,6 @@ def _target_account_home(old_home, new_id):
         return _default_account_home(new_id)
     known_roots = {
         os.path.realpath(ACCOUNTS_DIR),
-        os.path.realpath(os.path.join(LEGACY_CONFIG_DIR, "accounts")),
     }
     parent = os.path.realpath(os.path.dirname(expanded))
     if parent in known_roots:
@@ -10870,7 +10834,6 @@ def _handle_account_rename_config(cfg, args_rest):
 def _migrate_accounts_dirs(cfg):
     changed = False
     updated_accounts = []
-    legacy_accounts_dir = os.path.join(LEGACY_CONFIG_DIR, "accounts")
     for item in cfg.get("accounts", []):
         if not isinstance(item, dict):
             continue
@@ -10885,33 +10848,12 @@ def _migrate_accounts_dirs(cfg):
             changed = True
         updated_accounts.append(_normalize_account(account))
 
-    if os.path.isdir(legacy_accounts_dir):
-        for leftover in os.listdir(legacy_accounts_dir):
-            source = os.path.join(legacy_accounts_dir, leftover)
-            target = os.path.join(ACCOUNTS_DIR, leftover)
-            if os.path.isdir(source) and not os.path.exists(target):
-                os.makedirs(ACCOUNTS_DIR, exist_ok=True)
-                shutil.move(source, target)
-                changed = True
     return updated_accounts, changed
 
-
-def _copy_if_missing(source, target):
-    if not os.path.exists(source) or os.path.exists(target):
-        return False
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    shutil.copy2(source, target)
-    return True
 
 
 def _handle_config_migrate():
     backup_dir = _backup_config_tree("config-migrate")
-    copied = []
-    if _copy_if_missing(LEGACY_CREDENTIALS_PATH, CREDENTIALS_PATH):
-        copied.append(CREDENTIALS_PATH)
-    if _copy_if_missing(LEGACY_USAGE_PATH, USAGE_PATH):
-        copied.append(USAGE_PATH)
-
     cfg = load_config()
     if cfg is None:
         console.print("[yellow]未找到可迁移配置，当前无需执行 migrate[/yellow]")
@@ -10928,8 +10870,6 @@ def _handle_config_migrate():
     console.print(f"[dim]config: {CONFIG_PATH}[/dim]")
     console.print(f"[dim]credentials: {_active_credentials_path()}[/dim]")
     console.print(f"[dim]usage: {_active_usage_path()}[/dim]")
-    if copied:
-        console.print(f"[dim]复制的文件: {copied}[/dim]")
     console.print(f"[dim]备份目录: {backup_dir}[/dim]")
 
 

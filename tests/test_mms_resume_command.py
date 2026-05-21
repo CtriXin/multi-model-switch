@@ -335,7 +335,7 @@ def test_claude_session_end_hook_prints_mms_resume_hint():
         env={"MMS_RESUME_COMMAND_NAME": "ccs", "PATH": "/usr/bin:/bin"},
     )
 
-    assert result.stdout.strip() == f"[MMS] resume: ccs resume claude:{session_id}"
+    assert result.stdout.strip() == f"[MMS] resume: mms resume claude:{session_id}"
 
 
 def test_mms_session_hooks_include_claude_session_end_resume_hint():

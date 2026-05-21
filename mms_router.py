@@ -889,12 +889,11 @@ def _write_snapshot_if_missing(path, text):
 
 
 def _routes_dependency_paths():
-    from mms_core import CONFIG_PATH, CREDENTIALS_PATH, LEGACY_CREDENTIALS_PATH, OVERRIDE_PATHS
+    from mms_core import CONFIG_PATH, CREDENTIALS_PATH, OVERRIDE_PATHS
 
     return [
         CONFIG_PATH,
         CREDENTIALS_PATH,
-        LEGACY_CREDENTIALS_PATH,
         *OVERRIDE_PATHS,
         *_provider_profile_dependency_paths(),
     ]

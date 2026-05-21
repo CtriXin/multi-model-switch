@@ -84,7 +84,7 @@ def resolve_current_workdir(env=None, fallback=None):
 
 def resolve_mms_config_dir(env=None):
     env = env or os.environ
-    explicit = str(env.get("MMS_CONFIG_DIR") or env.get("CCS_CONFIG_DIR") or "").strip()
+    explicit = str(env.get("MMS_CONFIG_DIR") or "").strip()
     if explicit:
         return os.path.abspath(os.path.expanduser(explicit))
 
@@ -102,10 +102,6 @@ def resolve_mms_config_dir(env=None):
 
     return os.path.join(resolve_real_user_home(env), ".config", "mms")
 
-
-def resolve_legacy_config_dir(env=None):
-    env = env or os.environ
-    return os.path.join(resolve_real_user_home(env), ".config", "ccs")
 
 
 @contextmanager

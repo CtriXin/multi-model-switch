@@ -6286,8 +6286,7 @@ def _set_codex_resume_writeback_root(env, target_codex_dir):
 
 
 def _mms_resume_command_name():
-    invoked = os.path.basename(sys.argv[0] or "").strip().lower()
-    return invoked if invoked in {"mms", "ccs"} else "mms"
+    return "mms"
 
 
 def _print_mms_resume_hint(cli_name, session_id):
@@ -10617,8 +10616,6 @@ def _show_launch_info(cli, runtime, auth_mode):
     # ── 本地用量统计 ──
     try:
         usage_path = _real_user_path(".config", "mms", "usage.json")
-        if not os.path.exists(usage_path):
-            usage_path = _real_user_path(".config", "ccs", "usage.json")
         if os.path.exists(usage_path):
             with open(usage_path, "r", encoding="utf-8") as f:
                 stats = json.load(f)
