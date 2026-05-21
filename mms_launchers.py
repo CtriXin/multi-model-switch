@@ -1861,6 +1861,7 @@ _CLAUDE_MINDKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeep
 _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-session-end-hook.sh")
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
 _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
+_CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2398,6 +2399,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_SESSION_END_HOOK),
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
+        _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
@@ -2408,6 +2410,7 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-session-end-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2810,6 +2813,12 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         matcher="",
         timeout=20,
         status_message="Syncing CodeGraph",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "SessionEnd",
+        _CLAUDE_MMS_RESUME_HINT_HOOK,
+        matcher="",
     )
     return hooks_data
 
@@ -3293,6 +3302,7 @@ def _is_mms_managed_hook_command(command_text):
         "mindkeeper-session-end-hook.sh",
         "mindkeeper-token-monitor-hook.sh",
         "claude-codegraph-auto-index.sh",
+        "mms-resume-hint.sh",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
@@ -7906,6 +7916,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
     env["API_TIMEOUT_MS"] = "3000000"
+    env["MMS_RESUME_COMMAND_NAME"] = _mms_resume_command_name()
 
     # bridge 模式下跳过 model slot：Claude Code 用默认 claude-* 模型名通过校验，
     # bridge 在转发时替换成真实模型名（heavy_model / medium_model / light_model）。

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -92,6 +93,67 @@ def _load_matching_raw_session(cwd: str, payload: dict) -> dict | None:
     return best
 
 
+_CLAUDE_SESSION_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _session_id_from_project_jsonl(path: Path) -> str:
+    stem = str(path.stem or "").strip()
+    if _CLAUDE_SESSION_ID_RE.fullmatch(stem):
+        return stem
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for _ in range(5):
+                line = handle.readline()
+                if not line:
+                    break
+                try:
+                    payload = json.loads(line)
+                except Exception:
+                    continue
+                session_id = str(payload.get("sessionId") or payload.get("session_id") or "").strip()
+                if session_id and not session_id.startswith("pid-"):
+                    return session_id
+    except OSError:
+        return ""
+    return ""
+
+
+def _load_latest_project_resume_session(cwd: str, payload: dict) -> dict | None:
+    account_id = str(payload.get("account_id") or "").strip()
+    projects_root = claude_raw_entry_path("projects", cwd, account_id=account_id)
+    if not projects_root.is_dir():
+        return None
+
+    expected_started_at_ms = _payload_started_at_ms(payload)
+    candidates: list[tuple[int, str, Path]] = []
+    for path in projects_root.rglob("*.jsonl"):
+        if not path.is_file():
+            continue
+        session_id = _session_id_from_project_jsonl(path)
+        if not session_id:
+            continue
+        try:
+            mtime_ms = int(path.stat().st_mtime * 1000)
+        except OSError:
+            continue
+        if expected_started_at_ms is not None and mtime_ms < expected_started_at_ms - 10 * 60 * 1000:
+            continue
+        candidates.append((mtime_ms, session_id, path))
+
+    if not candidates:
+        return None
+    mtime_ms, session_id, source_path = sorted(candidates, reverse=True)[0]
+    return {
+        "sessionId": session_id,
+        "cwd": str(payload.get("cwd") or cwd),
+        "startedAt": mtime_ms,
+        "pid": payload.get("pid"),
+        "_source": str(source_path),
+    }
+
+
 def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
     session_id = str(payload.get("session_id") or "").strip()
     if session_id and session_id != "None" and not session_id.startswith("pid-"):
@@ -103,6 +165,8 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
         return payload, path
 
     session_data = _load_matching_raw_session(cwd, payload)
+    if not session_data:
+        session_data = _load_latest_project_resume_session(cwd, payload)
     if not session_data:
         return payload, path
 
@@ -124,6 +188,58 @@ def _reconcile_session_state(path: Path, payload: dict) -> tuple[dict, Path]:
         except OSError:
             pass
     return updated, target
+
+
+def _synthesize_finalized_session_from_project_jsonl(
+    *,
+    cwd: str,
+    pid: int,
+    account_id: str = "",
+    exit_code: int | None,
+    stale_cleanup: bool = False,
+) -> dict | None:
+    cwd = os.path.realpath(str(cwd or ""))
+    if not cwd:
+        return None
+    store = ensure_claude_project_store(cwd, account_id=account_id)
+    seed_payload = {
+        "cwd": cwd,
+        "project_path": cwd,
+        "account_id": account_id or "",
+        "pid": pid,
+    }
+    session_data = _load_latest_project_resume_session(cwd, seed_payload)
+    if not session_data:
+        return None
+    session_id = str(session_data.get("sessionId") or "").strip()
+    if not session_id:
+        return None
+    started_at_ms = session_data.get("startedAt")
+    started_at = _utc_now()
+    if isinstance(started_at_ms, (int, float)):
+        started_at = datetime.fromtimestamp(float(started_at_ms) / 1000, timezone.utc).isoformat()
+    payload = {
+        "session_id": session_id,
+        "project_key": store["project_key"],
+        "project_path": store["canonical_path"],
+        "account_id": account_id or "",
+        "started_at": started_at,
+        "started_at_ms": started_at_ms if isinstance(started_at_ms, (int, float)) else None,
+        "last_active_at": _utc_now(),
+        "cwd": cwd,
+        "pid": pid,
+        "session_pid": session_data.get("pid"),
+        "cli": "claude",
+        "runtime_kind": "",
+        "resume_model": "",
+        "slot_home": "",
+        "exit_code": exit_code,
+        "stale_cleanup": bool(stale_cleanup),
+        "recovered_from": str(session_data.get("_source") or "project-jsonl"),
+    }
+    target = _session_state_path(cwd, session_id, account_id=account_id)
+    _write_json(target, payload)
+    return payload
 
 
 def record_claude_session_start(
@@ -160,7 +276,13 @@ def finalize_claude_session(*, cwd: str, pid: int, account_id: str = "", exit_co
     slot_state = _slot_state_path(cwd, pid, account_id=account_id)
     payload = _read_json(slot_state)
     if payload is None:
-        return None
+        return _synthesize_finalized_session_from_project_jsonl(
+            cwd=cwd,
+            pid=pid,
+            account_id=account_id,
+            exit_code=exit_code,
+            stale_cleanup=stale_cleanup,
+        )
 
     payload["last_active_at"] = _utc_now()
     payload["exit_code"] = exit_code

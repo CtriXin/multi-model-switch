@@ -287,3 +287,65 @@ def test_finalize_claude_slot_prints_mms_resume_hint(monkeypatch, tmp_path):
 
     assert calls["pid"] == 12345
     assert any("mms resume claude:2ea6c1bc-8632-4d5c-94ba-672b4a744871" in item for item in console.items)
+
+
+def test_finalize_claude_session_recovers_missing_slot_state_from_project_jsonl(monkeypatch, tmp_path):
+    import mms_session_index
+    from mms_project_store import claude_raw_entry_path
+
+    real_home = tmp_path / "real-home"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+
+    session_id = "05b53311-036b-41e7-8b94-4f018aabbac8"
+    transcript = claude_raw_entry_path("projects", str(workspace), account_id="provider-a") / "-tmp-repo" / f"{session_id}.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(
+        json.dumps({"type": "last-prompt", "sessionId": session_id}) + "\n",
+        encoding="utf-8",
+    )
+
+    result = mms_session_index.finalize_claude_session(
+        cwd=str(workspace),
+        pid=29168,
+        account_id="provider-a",
+        exit_code=130,
+    )
+
+    assert result["session_id"] == session_id
+    assert result["exit_code"] == 130
+    assert result["recovered_from"].endswith(f"{session_id}.jsonl")
+    assert mms_session_index.get_indexed_session(session_id, cli_name="claude")["session_id"] == session_id
+
+
+def test_claude_session_end_hook_prints_mms_resume_hint():
+    import subprocess
+    import mms_launchers
+
+    session_id = "05b53311-036b-41e7-8b94-4f018aabbac8"
+    result = subprocess.run(
+        [mms_launchers._CLAUDE_MMS_RESUME_HINT_HOOK],
+        input=json.dumps({"session_id": session_id}),
+        text=True,
+        capture_output=True,
+        check=True,
+        env={"MMS_RESUME_COMMAND_NAME": "ccs", "PATH": "/usr/bin:/bin"},
+    )
+
+    assert result.stdout.strip() == f"[MMS] resume: ccs resume claude:{session_id}"
+
+
+def test_mms_session_hooks_include_claude_session_end_resume_hint():
+    import mms_launchers
+
+    hooks = mms_launchers._merge_mms_session_hooks({})
+    commands = [
+        hook.get("command")
+        for group in hooks.get("SessionEnd", [])
+        for hook in group.get("hooks", [])
+    ]
+
+    assert mms_launchers._CLAUDE_MMS_RESUME_HINT_HOOK in commands
