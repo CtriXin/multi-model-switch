@@ -4895,6 +4895,8 @@ def test_forward_as_responses_retries_on_generic_403_permission_denied(monkeypat
 def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypatch):
     import mms_bridge
 
+    monkeypatch.setenv("MMS_LANG", "zh")
+
     def fake_build_codex_payload(*_args, incremental_messages=None, **_kwargs):
         return {
             "model": "gpt-5.4",
@@ -5086,6 +5088,8 @@ def test_responses_proxy_handler_overrides_reasoning_effort_when_enabled(monkeyp
 
 def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeypatch):
     import mms_bridge
+
+    monkeypatch.setenv("MMS_LANG", "zh")
 
     class FakeResponse:
         status_code = 403

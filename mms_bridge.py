@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from mms_speed_stats import record_model_speed
 from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
+from mms_i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
 
 try:
     from mms_events import emit_event as _emit_event
@@ -985,12 +986,29 @@ def _extract_upstream_error_summary(body_text):
     return summary
 
 
-def _mms_auth_error_category(status_code):
+def _mms_bridge_language(value=""):
+    return _normalize_mms_language(value) or _get_mms_language()
+
+
+def _mms_auth_error_category(status_code, language=""):
+    language = _mms_bridge_language(language)
     if int(status_code or 0) == 401:
+        if language == "en":
+            return (
+                "provider_authentication",
+                "the selected MMS API-key provider/account rejected authentication",
+                "check the selected provider API key/account binding, or switch runtime in MMS",
+            )
         return (
             "provider_authentication",
             "当前选择的 MMS API-key provider/account 认证被上游拒绝",
             "检查当前 provider 的 API key/account 绑定，或在 MMS 中切换 runtime",
+        )
+    if language == "en":
+        return (
+            "provider_or_model_permission",
+            "the selected MMS provider/account reached upstream, but upstream denied this model/path",
+            "check provider model permission, relay policy, quota, or switch runtime in MMS",
         )
     return (
         "provider_or_model_permission",
@@ -1007,14 +1025,16 @@ def _mms_fail_closed_auth_error_payload(
     provider_id="",
     request_url="",
     route_count=1,
+    language="",
 ):
     """将 upstream 401/403 改写成可诊断、但不会误导用户去 login 的 fail-closed 错误。"""
+    language = _mms_bridge_language(language)
     status_code = int(status_code or 0)
     model_label = str(model_name or "").strip() or "current model"
     provider_label = str(provider_id or "").strip() or "selected-provider"
     request_path = _fallback_safe_url(request_url)
     upstream = _extract_upstream_error_summary(body_text)
-    category, meaning, next_step = _mms_auth_error_category(status_code)
+    category, meaning, next_step = _mms_auth_error_category(status_code, language)
     route_note = ""
     try:
         if int(route_count or 0) > 1:
@@ -1022,15 +1042,26 @@ def _mms_fail_closed_auth_error_payload(
     except Exception:
         route_note = ""
     upstream_hint = upstream.get("message") or upstream.get("body")
-    message = (
-        f"MMS fail-closed：上游 provider 返回 HTTP {status_code} "
-        f"（{category}）。model={model_label} provider={provider_label} path={request_path}."
-        f"{route_note} 含义：{meaning}。"
-        "MMS 仍停留在当前 configured runtime；没有使用 global OAuth 或 login fallback。"
-        f"下一步：{next_step}。"
-    )
-    if upstream_hint:
-        message += f" 上游原文：{upstream_hint}"
+    if language == "en":
+        message = (
+            f"MMS fail-closed: upstream_provider returned HTTP {status_code} "
+            f"({category}). model={model_label} provider={provider_label} path={request_path}."
+            f"{route_note} Meaning: {meaning}. "
+            "MMS stayed inside the current configured runtime; global OAuth or login fallback was not used. "
+            f"Next: {next_step}."
+        )
+        if upstream_hint:
+            message += f" Upstream said: {upstream_hint}"
+    else:
+        message = (
+            f"MMS fail-closed：上游 provider 返回 HTTP {status_code} "
+            f"（{category}）。model={model_label} provider={provider_label} path={request_path}."
+            f"{route_note} 含义：{meaning}。"
+            "MMS 仍停留在当前 configured runtime；没有使用 global OAuth 或 login fallback。"
+            f"下一步：{next_step}。"
+        )
+        if upstream_hint:
+            message += f" 上游原文：{upstream_hint}"
     return {
         "type": "error",
         "error": {

@@ -189,6 +189,8 @@ def test_responses_proxy_retries_native_fallback_on_403(monkeypatch):
 def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
     import mms_bridge
 
+    monkeypatch.setenv("MMS_LANG", "zh")
+
     class FakeResponse:
         status_code = 403
         headers = {"content-type": "application/json"}
@@ -250,8 +252,10 @@ def test_responses_proxy_converts_terminal_403_to_fail_closed(monkeypatch):
     assert payload["error"]["upstream"]["message"] == "Permission denied"
 
 
-def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail():
+def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail(monkeypatch):
     import mms_bridge
+
+    monkeypatch.setenv("MMS_LANG", "zh")
 
     payload = mms_bridge._mms_fail_closed_auth_error_payload(
         401,
@@ -282,6 +286,37 @@ def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail():
     assert payload["error"]["upstream"]["type"] == "invalid_api_key"
     assert payload["error"]["upstream"]["message"] == "bad key"
     assert payload["error"]["upstream"]["request_id"] == "req-auth"
+
+
+def test_fail_closed_auth_error_payload_uses_english_when_mms_lang_en(monkeypatch):
+    import mms_i18n
+    import mms_bridge
+
+    monkeypatch.delenv("MMS_LANG", raising=False)
+    mms_i18n.set_language("en")
+
+    try:
+        payload = mms_bridge._mms_fail_closed_auth_error_payload(
+            403,
+            '{"error":{"message":"Permission denied","request_id":"req-en"}}',
+            model_name="gpt-5.5",
+            provider_id="codex-relay",
+            request_url="https://relay.example.com/v1/responses",
+        )
+    finally:
+        mms_i18n.set_language("zh")
+
+    message = payload["error"]["message"]
+    assert "upstream_provider returned HTTP 403" in message
+    assert "Meaning: the selected MMS provider/account reached upstream" in message
+    assert "global OAuth or login fallback was not used" in message
+    assert "Upstream said: Permission denied" in message
+    assert "上游 provider 返回" not in message
+    assert payload["error"]["mms"]["category"] == "provider_or_model_permission"
+    assert payload["error"]["mms"]["next"] == (
+        "check provider model permission, relay policy, quota, or switch runtime in MMS"
+    )
+    assert payload["error"]["upstream"]["request_id"] == "req-en"
 
 
 def test_chatcompletions_fallback_uses_native_route_profile_and_proxy(monkeypatch):
