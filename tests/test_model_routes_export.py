@@ -698,6 +698,42 @@ def test_save_provider_credentials_triggers_routes_export(monkeypatch, tmp_path)
     ]
 
 
+def test_load_provider_credentials_reads_legacy_ccs_aliases_in_mms_credentials(monkeypatch, tmp_path):
+    import mms_core
+
+    credentials = tmp_path / "credentials.sh"
+    credentials.write_text(
+        "\n".join(
+            [
+                'export CCS_PROVIDER_USCRSOPENAI_BASE_URL="https://legacy.example/openai"',
+                'export CCS_PROVIDER_USCRSOPENAI_OPENAI_BASE_URL="https://legacy.example/openai/v1"',
+                'export CCS_PROVIDER_USCRSOPENAI_API_KEY="sk-legacy"',
+                'export CCS_PROVIDER_USCRSOPENAI_OPENAI_API_KEY="sk-legacy-openai"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials))
+    for key in (
+        "MMS_PROVIDER_USCRSOPENAI_BASE_URL",
+        "MMS_PROVIDER_USCRSOPENAI_OPENAI_BASE_URL",
+        "MMS_PROVIDER_USCRSOPENAI_API_KEY",
+        "MMS_PROVIDER_USCRSOPENAI_OPENAI_API_KEY",
+        "CCS_PROVIDER_USCRSOPENAI_BASE_URL",
+        "CCS_PROVIDER_USCRSOPENAI_OPENAI_BASE_URL",
+        "CCS_PROVIDER_USCRSOPENAI_API_KEY",
+        "CCS_PROVIDER_USCRSOPENAI_OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    loaded = mms_core.load_provider_credentials("uscrsopenai")
+
+    assert loaded["base_url"] == "https://legacy.example/openai"
+    assert loaded["openai_base_url"] == "https://legacy.example/openai/v1"
+    assert loaded["api_key"] == "sk-legacy"
+    assert loaded["openai_api_key"] == "sk-legacy-openai"
+
+
 def test_refresh_routes_export_for_hive_loads_current_config(monkeypatch):
     import mms_core
     import mms_router
