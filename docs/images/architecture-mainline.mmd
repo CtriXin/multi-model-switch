@@ -1,7 +1,7 @@
 flowchart LR
   subgraph Entry[Entry Surfaces]
     E1["Install & Packs\n`install.sh` bootstraps MMS itself and optional packs like RTK, MindKeeper context, Map, read-once, and ops-env-safe."]
-    E2["TUI & CLI\n`mms`, `mms claude`, `mms codex`, `mmc`, and related commands expose one local launcher surface."]
+    E2["TUI & CLI\n`mms`, `mms claude`, `mms codex`, and related commands expose one local launcher surface."]
     E3["Web / Runtime API\nWorkspace apps under `apps/web` and `apps/runtime-api` offer an additional operator and integration surface."]
   end
   subgraph Runtime[Core Runtime / Workflow]

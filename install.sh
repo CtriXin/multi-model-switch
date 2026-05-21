@@ -2024,9 +2024,7 @@ run_install_check() {
         echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
     fi
     if [ -L "$BIN_DIR/mmc" ]; then
-        echo "✓ $(t "已存在 mmc 命令链接" "mmc symlink present"): $BIN_DIR/mmc"
-    else
-        echo "• $(t "mmc 命令链接尚未创建" "mmc symlink not created yet"): $BIN_DIR/mmc"
+        echo "• $(t "检测到 retired mmc 命令链接；下次安装会移除 MMS-owned 链接" "Retired mmc command link detected; the next install removes MMS-owned links"): $BIN_DIR/mmc"
     fi
     if [ -L "$BIN_DIR/mmslogs" ]; then
         echo "✓ $(t "已存在 mmslogs 命令链接" "mmslogs symlink present"): $BIN_DIR/mmslogs"
@@ -3755,7 +3753,6 @@ if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
 fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
-[ -f "$SOURCE_DIR/mmc" ] && cp "$SOURCE_DIR"/mmc "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
@@ -3769,10 +3766,6 @@ copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scri
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
 done
-# 复制 MMC 私用 Claude OAuth launcher 依赖，避免 fresh install 后 `mmc` 缺文件。
-for f in "$SOURCE_DIR"/mmc*.py; do
-    [ -f "$f" ] && cp "$f" "$MMS_HOME/"
-done
 [ -f "$SOURCE_DIR/config.example.toml" ] && cp "$SOURCE_DIR/config.example.toml" "$MMS_HOME/"
 echo "✓ $(t "文件已复制到" "Files copied to") $MMS_HOME"
 write_version_metadata
@@ -3780,7 +3773,6 @@ repair_managed_claude_settings
 write_language_config
 
 chmod +x "$MMS_HOME/mms"
-[ -f "$MMS_HOME/mmc" ] && chmod +x "$MMS_HOME/mmc"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 [ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
@@ -3790,7 +3782,6 @@ chmod +x "$MMS_HOME/mms"
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
 rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
-[ -f "$MMS_HOME/mmc" ] && rewrite_shebang "$MMS_HOME/mmc" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
@@ -3830,12 +3821,22 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs 已下线，仅保留 mms/mmc 入口。
+# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmslogs 入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
-if [ -e "$MMS_HOME/mmc" ]; then
-    ln -sf "$MMS_HOME/mmc" "$BIN_DIR/mmc"
+# Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
+rm -f "$MMS_HOME/mmc"
+if [ -L "$BIN_DIR/mmc" ]; then
+    mmc_target="$(readlink "$BIN_DIR/mmc" 2>/dev/null || true)"
+    case "$mmc_target" in
+        "$MMS_HOME"/mmc|"$REAL_HOME"/.mms/mmc|"$REAL_HOME"/.config/mms/*/mmc)
+            rm -f "$BIN_DIR/mmc"
+            echo "• $(t "已移除 retired mmc 命令链接" "Removed retired mmc command link"): $BIN_DIR/mmc"
+            ;;
+        *)
+            echo "• $(t "检测到非 MMS-owned mmc 命令，保持不变" "Non-MMS-owned mmc command detected; left unchanged"): $BIN_DIR/mmc"
+            ;;
+    esac
 fi
-# Remove stale MMS-owned legacy ccs artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/ccs"
 if [ -L "$BIN_DIR/ccs" ]; then
     ccs_target="$(readlink "$BIN_DIR/ccs" 2>/dev/null || true)"
@@ -3884,7 +3885,6 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
     echo "    mms --export claude  $(t "导出环境变量" "export env vars")"
-    echo "    mmc              $(t "Claude OAuth 私用隔离入口" "private isolated Claude OAuth launcher")"
     echo ""
     echo "  $(t "简单上手示例:" "Quick examples:")"
     echo "    mms doctor                          $(t "先看 route / auth / protocol 通不通" "check route / auth / protocol first")"

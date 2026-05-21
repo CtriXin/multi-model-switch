@@ -190,6 +190,23 @@ PROVIDER_TEMPLATES = {
         "priority": 100,
         "note": "通用兼容网关，适合自建或聚合 API。",
     },
+    "openrouter": {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "protocols": ["openai_chat_completions"],
+        "supported_clis": ["claude", "codex", "opencode"],
+        "priority": 70,
+        "default_openai_base_url": "https://openrouter.ai/api/v1",
+        "models_endpoint": "/models",
+        "provider_profile": "openrouter",
+        "extension": "openrouter",
+        "capabilities": {
+            "text": True,
+            "image": "paid_only",
+            "video": "paid_only",
+        },
+        "note": "OpenRouter 可选扩展：文本模型默认启用；生图/视频仅在付费账号探测通过后展示。",
+    },
     "qwen": {
         "id": "qwen",
         "name": "Qwen",

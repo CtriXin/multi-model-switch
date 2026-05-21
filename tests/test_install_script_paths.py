@@ -196,7 +196,7 @@ def test_install_script_uses_npm_first_cli_installs():
 
 
 def test_repo_entrypoints_use_env_python():
-    for entrypoint in ("mms", "mmc", "mmslogs"):
+    for entrypoint in ("mms", "mmslogs"):
         first_line = (ROOT_DIR / entrypoint).read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env python3"
 
@@ -246,14 +246,16 @@ def test_install_script_copies_session_tool_scripts_directory():
     assert '[ -d "$MMS_HOME/scripts" ] && find "$MMS_HOME/scripts" -type f -exec chmod +x {} +' in text
 
 
-def test_install_script_copies_mmc_entrypoint_and_modules_before_linking():
+def test_install_script_retires_mmc_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert '[ -f "$SOURCE_DIR/mmc" ] && cp "$SOURCE_DIR"/mmc "$MMS_HOME/"' in text
-    assert 'for f in "$SOURCE_DIR"/mmc*.py; do' in text
-    assert '[ -f "$MMS_HOME/mmc" ] && chmod +x "$MMS_HOME/mmc"' in text
-    assert '[ -f "$MMS_HOME/mmc" ] && rewrite_shebang "$MMS_HOME/mmc" "$PYTHON_PATH"' in text
-    assert 'ln -sf "$MMS_HOME/mmc" "$BIN_DIR/mmc"' in text
+    assert '[ -f "$SOURCE_DIR/mmc" ] && cp "$SOURCE_DIR"/mmc "$MMS_HOME/"' not in text
+    assert 'for f in "$SOURCE_DIR"/mmc*.py; do' not in text
+    assert '[ -f "$MMS_HOME/mmc" ] && chmod +x "$MMS_HOME/mmc"' not in text
+    assert '[ -f "$MMS_HOME/mmc" ] && rewrite_shebang "$MMS_HOME/mmc" "$PYTHON_PATH"' not in text
+    assert 'ln -sf "$MMS_HOME/mmc" "$BIN_DIR/mmc"' not in text
+    assert 'rm -f "$MMS_HOME/mmc"' in text
+    assert '已移除 retired mmc 命令链接' in text
 
 
 def test_install_script_copies_mmslogs_entrypoint_before_linking():
@@ -293,7 +295,7 @@ def test_install_check_omits_retired_ccs_status(tmp_path):
     assert "ccs" not in output.lower()
 
 
-def test_install_check_reports_mmc_and_mmslogs_links(tmp_path):
+def test_install_check_reports_mmslogs_and_warns_retired_mmc_link(tmp_path):
     home = tmp_path / "home"
     mms_home = home / ".mms"
     bin_dir = home / ".local" / "bin"
@@ -307,7 +309,7 @@ def test_install_check_reports_mmc_and_mmslogs_links(tmp_path):
     output = _run_install_check(home=home)
 
     assert str(bin_dir / "mms") in output
-    assert str(bin_dir / "mmc") in output
+    assert "retired mmc" in output
     assert str(bin_dir / "mmslogs") in output
 
 

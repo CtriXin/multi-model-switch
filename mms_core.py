@@ -4067,7 +4067,7 @@ def _probe_account_status(account):
     if cli_name == "claude":
         return {
             "state": "delegated",
-            "summary": "Claude OAuth 已迁移到 mmc；MMS 不再探测或登录这个账号",
+            "summary": "Claude OAuth 独立入口已下线；MMS 不再探测或登录这个账号",
         }
     if cli_name == "gemini":
         home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
@@ -4129,7 +4129,7 @@ def _probe_account_status(account):
 def _run_account_login(account):
     cli_name = account.get("cli")
     if cli_name == "claude":
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 登录和恢复 session。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；请使用 provider/API route 启动 Claude。[/yellow]")
         return
     env = _account_env(account)
     os.makedirs(account.get("home_dir", ""), exist_ok=True)
@@ -4318,10 +4318,20 @@ def _provider_template_payload(template_key):
         payload["key_prefix"] = template["key_prefix"]
     if "fallback_models" in template:
         payload["fallback_models"] = list(template["fallback_models"])
+    if "models_endpoint" in template:
+        payload["models_endpoint"] = template["models_endpoint"]
+    if "provider_profile" in template:
+        payload["provider_profile"] = template["provider_profile"]
+    if "extension" in template:
+        payload["extension"] = template["extension"]
+    if "capabilities" in template:
+        payload["capabilities"] = dict(template["capabilities"])
     return payload
 
 
 def _select_provider_template(preset_id=None):
+    if preset_id == "openrouter":
+        return "openrouter"
     if preset_id and preset_id != "generic":
         console.print("[yellow]已统一收敛为“通用兼容网关”，将直接进入通用网关配置。[/yellow]")
     return "generic"
@@ -4587,7 +4597,7 @@ def _quick_connect_official(cfg, preset_cli=None):
         "2": ("agy", "Antigravity CLI"),
     }
     if preset_cli in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再新增 Claude 官方账号。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再新增 Claude 官方账号。[/yellow]")
         return cfg, False
     if preset_cli in MMS_MANAGED_OAUTH_CLIS:
         cli_name = preset_cli
@@ -10355,6 +10365,9 @@ def handle_config(cfg, args_rest):
     if key_path == "connect":
         run_connect_wizard(cfg)
         return
+    if key_path in {"extension.openrouter", "openrouter"}:
+        _handle_openrouter_extension_config(cfg, args_rest[1:])
+        return
     if key_path in {"adapter.registry", "source.registry", "source.top10"}:
         _display_adapter_registry()
         return
@@ -10556,20 +10569,223 @@ def _handle_provider_credentials_config(cfg, args_rest):
     )
 
 
+def _provider_looks_openrouter(provider):
+    if not isinstance(provider, dict):
+        return False
+    fields = [
+        provider.get("id"),
+        provider.get("name"),
+        provider.get("provider_profile"),
+        provider.get("profile"),
+        provider.get("extension"),
+        provider.get("base_url"),
+        provider.get("openai_base_url"),
+        provider.get("default_openai_base_url"),
+    ]
+    return any("openrouter" in str(item or "").lower() for item in fields)
+
+
+def _openrouter_provider_candidates(cfg):
+    providers = []
+    for item in cfg.get("providers", []):
+        if not _provider_looks_openrouter(item):
+            continue
+        try:
+            providers.append(resolve_provider_context(cfg, item.get("id")))
+        except Exception:
+            providers.append(item)
+    return providers
+
+
+def _parse_openrouter_extension_args(args_rest):
+    args = list(args_rest or [])
+    action = "status"
+    provider_id = ""
+    limit = 12
+    assume_paid = False
+    json_output = False
+    if args and not args[0].startswith("-"):
+        action = args.pop(0).strip().lower() or "status"
+    if args and not args[0].startswith("-"):
+        provider_id = args.pop(0).strip()
+    idx = 0
+    while idx < len(args):
+        token = args[idx]
+        if token in {"--limit", "-n"} and idx + 1 < len(args):
+            try:
+                limit = max(1, int(args[idx + 1]))
+            except ValueError:
+                limit = 12
+            idx += 2
+            continue
+        if token == "--assume-paid":
+            assume_paid = True
+        elif token == "--json":
+            json_output = True
+        idx += 1
+    if action in {"ls", "list"}:
+        action = "models"
+    if action in {"-h", "--help", "help"}:
+        action = "help"
+    return {
+        "action": action,
+        "provider_id": provider_id,
+        "limit": limit,
+        "assume_paid": assume_paid,
+        "json": json_output,
+    }
+
+
+def _display_openrouter_extension_help():
+    command = current_command()
+    console.print(f"[bold]{command} config extension.openrouter[/bold] — OpenRouter 可选扩展")
+    console.print(f"  {command} config extension.openrouter add")
+    console.print(f"  {command} config extension.openrouter status [provider_id] [--limit N] [--json]")
+    console.print(f"  {command} config extension.openrouter models [provider_id] [--limit N] [--json]")
+    console.print("[dim]status/models 默认不写真实 MMS 配置；add 会进入交互式 provider 接入。[/dim]")
+
+
+def _openrouter_extension_provider(cfg, provider_id=""):
+    providers = _provider_map(cfg)
+    if provider_id:
+        if provider_id not in providers:
+            return None, f"未找到 provider: {provider_id}"
+        provider = resolve_provider_context(cfg, provider_id)
+        if not _provider_looks_openrouter(provider):
+            return provider, f"provider '{provider_id}' 不是 OpenRouter 模板，但仍可用其 Key 做探测"
+        return provider, ""
+    candidates = _openrouter_provider_candidates(cfg)
+    if candidates:
+        return candidates[0], ""
+    return None, ""
+
+
+def _display_openrouter_model_rows(title, rows, *, limit):
+    _ensure_rich()
+    table = Table(title=title, show_lines=False)
+    table.add_column("模型", style="cyan")
+    table.add_column("原始来源", style="green")
+    table.add_column("免费", style="yellow", width=6)
+    table.add_column("输入", style="magenta")
+    table.add_column("输出", style="magenta")
+    table.add_column("Context", justify="right")
+    shown = list(rows or [])[: int(limit)]
+    for item in shown:
+        table.add_row(
+            str(item.get("id") or ""),
+            str(item.get("origin") or ""),
+            "yes" if item.get("is_free") else "no",
+            ",".join(item.get("input_modalities") or []),
+            ",".join(item.get("output_modalities") or []),
+            str(item.get("context_length") or ""),
+        )
+    console.print(table)
+    if len(rows or []) > len(shown):
+        console.print(f"[dim]仅展示前 {len(shown)} / {len(rows)} 个；可加 --limit 调整。[/dim]")
+
+
+def _display_openrouter_video_rows(rows, *, limit):
+    _ensure_rich()
+    table = Table(title="OpenRouter Video 模型", show_lines=False)
+    table.add_column("模型", style="cyan")
+    table.add_column("原始来源", style="green")
+    table.add_column("分辨率", style="yellow")
+    table.add_column("时长", style="magenta")
+    shown = list(rows or [])[: int(limit)]
+    for item in shown:
+        table.add_row(
+            str(item.get("id") or ""),
+            str(item.get("origin") or ""),
+            ",".join(str(value) for value in item.get("supported_resolutions") or []),
+            ",".join(str(value) for value in item.get("supported_durations") or []),
+        )
+    console.print(table)
+    if len(rows or []) > len(shown):
+        console.print(f"[dim]仅展示前 {len(shown)} / {len(rows)} 个；可加 --limit 调整。[/dim]")
+
+
+def _display_openrouter_extension_summary(summary, *, provider_label="", limit=12, show_models=False):
+    _ensure_rich()
+    account = summary.get("account") or {}
+    counts = summary.get("counts") or {}
+    requests = summary.get("requests") or {}
+    table = Table(title="OpenRouter Extension", show_lines=True)
+    table.add_column("项目", style="cyan")
+    table.add_column("值", style="green")
+    table.add_row("provider/key", provider_label or "env/public")
+    table.add_row("account tier", f"{account.get('tier')} ({account.get('reason')})")
+    table.add_row("model source", str(summary.get("model_source") or "-"))
+    table.add_row("visible text", str(counts.get("visible_text", 0)))
+    table.add_row("image/video", f"{'on' if summary.get('image_enabled') else 'off'} / {'on' if summary.get('video_enabled') else 'off'}")
+    table.add_row("requests", ", ".join(f"{key}:{value.get('status')}" for key, value in requests.items()))
+    console.print(table)
+    if summary.get("free_only"):
+        console.print("[yellow]当前按 free-only 策略展示：只列免费文本模型，隐藏 OpenRouter Image / Video。[/yellow]")
+    if not show_models:
+        return
+    _display_openrouter_model_rows("OpenRouter Text 模型", summary.get("text_models") or [], limit=limit)
+    if summary.get("image_enabled"):
+        _display_openrouter_model_rows("OpenRouter Image 模型", summary.get("image_models") or [], limit=limit)
+    if summary.get("video_enabled"):
+        _display_openrouter_video_rows(summary.get("video_models") or [], limit=limit)
+
+
+def _handle_openrouter_extension_config(cfg, args_rest):
+    parsed = _parse_openrouter_extension_args(args_rest)
+    action = parsed["action"]
+    if action == "help":
+        _display_openrouter_extension_help()
+        return
+    if action in {"add", "enable"}:
+        _quick_connect_gateway(cfg, preset_id="openrouter")
+        return
+
+    from mms_openrouter_extension import (
+        openrouter_api_key_from_env,
+        probe_openrouter_extension,
+    )
+
+    provider, warning = _openrouter_extension_provider(cfg, parsed["provider_id"])
+    if warning:
+        console.print(f"[yellow]{warning}[/yellow]")
+    api_key = ""
+    provider_label = ""
+    if provider:
+        provider_label = f"{provider.get('name') or provider.get('id')} ({provider.get('id')})"
+        api_key = str(provider.get("api_key") or "").strip()
+    if not api_key:
+        api_key = openrouter_api_key_from_env()
+        if api_key and not provider_label:
+            provider_label = "OPENROUTER_API_KEY"
+    summary = probe_openrouter_extension(
+        api_key,
+        assume_paid=bool(parsed["assume_paid"]),
+    )
+    if parsed["json"]:
+        console.print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    _display_openrouter_extension_summary(
+        summary,
+        provider_label=provider_label,
+        limit=int(parsed["limit"]),
+        show_models=action == "models",
+    )
+
+
 def _handle_account_default_config(cfg, args_rest):
     defaults = cfg.get("account", {}).get("defaults", {})
     if not args_rest:
         for cli_name in MMS_MANAGED_OAUTH_CLIS:
             value = defaults.get(cli_name, "(未设置)")
             console.print(f"[cyan]account.default.{cli_name}[/cyan] = {value}")
-        console.print("[dim]Claude OAuth 已迁移到 mmc，不再支持 account.default.claude。[/dim]")
+        console.print("[dim]Claude OAuth 独立入口已下线，不再支持 account.default.claude。[/dim]")
         return
     if len(args_rest) < 2:
         console.print(f"[red]用法: {current_command()} config account.default <cli> <account_id>[/red]")
         return
     cli_name, account_id = args_rest[0].strip(), args_rest[1].strip()
     if cli_name in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再支持设置 account.default.claude。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再支持设置 account.default.claude。[/yellow]")
         return
     if cli_name not in MMS_MANAGED_OAUTH_CLIS:
         console.print(f"[red]不支持的 CLI: {cli_name}[/red]")
@@ -10591,7 +10807,7 @@ def _handle_account_default_config(cfg, args_rest):
 def _handle_account_add_config(cfg, args_rest):
     requested_cli = args_rest[0].strip() if args_rest and args_rest[0].strip() else None
     if requested_cli in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 管理 Claude 官方登录。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再管理 Claude 官方登录。[/yellow]")
         return
     preset_cli = requested_cli if requested_cli in MMS_MANAGED_OAUTH_CLIS else None
     _quick_connect_official(cfg, preset_cli=preset_cli)
@@ -10607,7 +10823,7 @@ def _handle_account_edit_config(cfg, args_rest):
         console.print(f"[red]未找到账号档案: {account_id}[/red]")
         return
     if accounts[account_id].get("cli") in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；MMS 不再编辑 Claude 官方账号。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；MMS 不再编辑 Claude 官方账号。[/yellow]")
         return
     account = _prompt_account_metadata(existing=accounts[account_id], preset_id=account_id)
     updated_cfg = dict(cfg)
@@ -10665,7 +10881,7 @@ def _handle_account_login_config(cfg, args_rest):
         return
     account = resolve_account_context(cfg, account_id=args_rest[0].strip())
     if account and account.get("cli") in MMC_DELEGATED_OAUTH_CLIS:
-        console.print("[yellow]Claude OAuth 已迁移到 mmc；请改用 `mmc` 登录和恢复 Claude session。[/yellow]")
+        console.print("[yellow]Claude OAuth 独立入口已下线；请使用 provider/API route 启动 Claude。[/yellow]")
         return
     _run_account_login(account)
 
@@ -10947,7 +11163,7 @@ def _display_accounts(cfg):
         f"[dim]提示: 可用 {current_command()} config account.default <cli> <id> 设置默认账号，"
         f"{current_command()} config account.login <id> 进入官方登录。[/dim]"
     )
-    console.print("[dim]注: Claude OAuth 已迁移到 mmc，这里仅保留旧配置只读兼容。[/dim]")
+    console.print("[dim]注: Claude OAuth 独立入口已下线，这里仅保留旧配置只读兼容。[/dim]")
 
 
 def _display_config_help():
@@ -10978,6 +11194,7 @@ def _display_config_help():
     console.print(f"  {command} config provider.edit <id>")
     console.print(f"  {command} config provider.remove <id>")
     console.print(f"  {command} config provider.credentials [id]")
+    console.print(f"  {command} config extension.openrouter [add|status|models]")
     console.print("\n[bold]Account:[/bold]")
     console.print(f"  {command} config account.list")
     console.print(f"  {command} config account.add \\[codex|agy]")
@@ -10986,7 +11203,7 @@ def _display_config_help():
     console.print(f"  {command} config account.status [id]")
     console.print(f"  {command} config account.login <id>")
     console.print(f"  {command} config account.default <cli> <id>")
-    console.print("  [dim]Claude OAuth 已迁移到 mmc，不再从 MMS 新增/登录/设默认。[/dim]")
+    console.print("  [dim]Claude OAuth 独立入口已下线；MMS 不再新增/登录/设默认 Claude 官方账号。[/dim]")
     console.print("\n[bold]其他:[/bold]")
     console.print(f"  {command} config stats")
     console.print(f"  {command} config api.edit")

@@ -57,11 +57,11 @@ Default behavior:
 
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
-- links `mms`, `mmc`, and `mmslogs` into `~/.local/bin`
+- links `mms` and `mmslogs` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
 - discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- retires the legacy `ccs` shim; new installs expose `mms` / `mmc` / `mmslogs`, not `ccs`
+- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmslogs`, not `ccs` / `mmc`
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 

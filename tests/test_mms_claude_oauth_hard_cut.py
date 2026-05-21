@@ -54,7 +54,7 @@ def test_handle_account_add_config_rejects_claude(monkeypatch):
     mms_core._handle_account_add_config({}, ["claude"])
 
     assert called == []
-    assert any("Claude OAuth 已迁移到 mmc" in message for message in console.messages)
+    assert any("Claude OAuth 独立入口已下线" in message for message in console.messages)
 
 
 def test_handle_account_add_config_accepts_agy(monkeypatch):
@@ -92,4 +92,4 @@ def test_handle_account_login_config_rejects_legacy_claude_account(monkeypatch):
     mms_core._handle_account_login_config({}, ["claude-main"])
 
     assert called == []
-    assert any("请改用 `mmc` 登录和恢复 Claude session" in message for message in console.messages)
+    assert any("请使用 provider/API route 启动 Claude" in message for message in console.messages)

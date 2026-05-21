@@ -1,4 +1,7 @@
-# MMC Loopback Proxy Route v1
+# MMC Loopback Proxy Route v1 (Retired)
+
+> Retired: the public `mmc` entrypoint is no longer installed by MMS. This document is kept only as historical context for the old isolated Claude OAuth experiment. Do not use it as current setup guidance.
+
 
 ## 结论
 

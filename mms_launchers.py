@@ -7117,7 +7117,7 @@ def _build_mmc_delegate_env():
 def _mmc_launch_env_overrides(model_info, runtime, *, enable_claude_1m=True):
     if isinstance(model_info, dict):
         if model_info.get("lb_light") or model_info.get("lb_medium"):
-            console.print("[red]OAuth Claude 已切到 MMC 隔离模式，不再支持 load-balance / bridge 路线[/red]")
+            console.print("[red]OAuth Claude 独立入口已下线，不再支持 load-balance / bridge 路线[/red]")
             sys.exit(1)
         resolved_model = _resolve_model(model_info)
     else:
@@ -7160,7 +7160,7 @@ def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS
     model_name = str(model_name or "").strip() or "claude-sonnet-4-6"
     console.print("[red]已阻止 OAuth Claude 自动进入。[/red]")
     console.print(
-        "[yellow]OAuth Claude 现在是 manual-only 保护面：MMS / MMC / Hive / fallback / 子进程都不能自动启动它。[/yellow]"
+        "[yellow]OAuth Claude 现在是 manual-only 保护面：MMS / Hive / fallback / 子进程都不能自动启动它。[/yellow]"
     )
     console.print(f"[dim]入口: {caller} · runtime={runtime_label} · model={model_name}[/dim]")
     console.print("[dim]允许的唯一入口：你自己在 real/global shell 手动输入 `claude`，并先跑你的验证脚本。[/dim]")
@@ -7168,7 +7168,7 @@ def _exit_oauth_claude_manual_only(runtime=None, model_info=None, *, caller="MMS
 
 
 def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_claude_1m=True):
-    _exit_oauth_claude_manual_only(runtime, model_info, caller="MMS->MMC")
+    _exit_oauth_claude_manual_only(runtime, model_info, caller="MMS")
     mmc_entry = _mmc_entry_path()
     if not os.path.exists(mmc_entry):
         console.print(f"[red]未找到 MMC 入口: {mmc_entry}[/red]")
@@ -7186,7 +7186,7 @@ def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_clau
         enable_claude_1m=enable_claude_1m,
     )
     if _runtime_force_ipv4(runtime):
-        console.print("[red]OAuth Claude / MMC 路线已禁用 force_ipv4 注入；请改系统网络层，不再透传 NODE_OPTIONS[/red]")
+        console.print("[red]OAuth Claude 路线已禁用 force_ipv4 注入；请改系统网络层，不再透传 NODE_OPTIONS[/red]")
         sys.exit(1)
     claude_bin = _assert_safe_mmc_delegate_binary(
         _resolve_real_home_command_path("claude"),
@@ -7222,7 +7222,7 @@ def _launch_claude_oauth_via_mmc(model_info, runtime, once=False, *, enable_clau
 
     env = _build_mmc_delegate_env()
 
-    console.print("[dim]⏳ OAuth Claude 已委托给 MMC 隔离启动...[/dim]")
+    console.print("[dim]⏳ OAuth Claude 独立入口已下线；不应到达委托启动路径。[/dim]")
     _exec_or_run(cmd, env, once)
 
 
@@ -10802,7 +10802,7 @@ def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
         source_kind = "模型源"
 
     if cli == "claude" and auth_mode == "oauth":
-        # OAuth Claude 已委托给 MMC 管理 session/state；MMS 不再读取或判定其并发 state。
+        # OAuth Claude 已下线为 standalone 入口；MMS 不再读取或判定其并发 state。
         runtime.pop("_account_guard_report", None)
     if cli == "claude" and auth_mode in {"oauth", "api_key"} and runtime.get("bypass"):
         _enforce_claude_network_guard_or_exit(
