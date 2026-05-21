@@ -5931,7 +5931,7 @@ def _apply_provider_model_patch(provider, base_result):
     # 过滤 claude- 前缀国产别名和旧版 Claude 模型
     _DOMESTIC_KW = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
     _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
         "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
     }

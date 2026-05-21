@@ -316,6 +316,21 @@ def parse_model_ids(raw: bytes) -> set[str]:
     return ids
 
 
+def model_presence_alias_candidates(model_id: str) -> set[str]:
+    """Return acceptable /models ids for virtual route aliases.
+
+    Some gateways expose effort variants as request-time aliases like
+    `gemini-3-flash-agent(high)` while `/models` only lists the base model.
+    """
+    normalized = str(model_id or "").strip()
+    candidates = {normalized} if normalized else set()
+    if normalized.endswith(")") and "(" in normalized:
+        base = normalized.rsplit("(", 1)[0].strip()
+        if base:
+            candidates.add(base)
+    return candidates
+
+
 def route_source_checks(config_dir: Path, routes_payload: dict[str, Any], policy_payload: dict[str, Any]) -> list[CheckResult]:
     results: list[CheckResult] = []
     routes_text = json.dumps(routes_payload, ensure_ascii=False)
@@ -391,7 +406,7 @@ def model_presence_checks(
             continue
         checked += 1
         wire_model = str(route.get("model_id") or model).strip()
-        if wire_model not in models:
+        if not (model_presence_alias_candidates(wire_model) & models):
             missing.append(f"{model}@{provider_id}/{role} as {wire_model}")
     if missing:
         return [CheckResult("model_presence", "policy_models", "warning", "fail", "missing: " + ", ".join(missing[:12]))]

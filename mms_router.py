@@ -1174,7 +1174,7 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
     _DOMESTIC_KEYWORDS = ("glm", "kimi", "qwen", "minimax", "deepseek", "doubao", "seed", "bailian")
     # 只保留最新一代 Claude 模型，过滤旧版（3.x、4-1、4-20250514 等）
     _CLAUDE_KEEP = {
-        "claude-opus-4-6", "claude-sonnet-4-6",
+        "claude-opus-4-6", "claude-opus-4-6-thinking", "claude-sonnet-4-6",
         "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
     }
@@ -1183,13 +1183,22 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
     def _model_cli_compatible(model_name, supported_clis):
         if not supported_clis:
             return True  # no restriction
+        normalized_clis = {
+            str(item or "").strip().lower()
+            for item in supported_clis
+            if str(item or "").strip()
+        }
         lower = model_name.lower()
         if lower.startswith(("gpt-", "o1-", "o3-", "o4-")):
-            return "codex" in supported_clis
+            return "codex" in normalized_clis or "claude" in normalized_clis
         if lower.startswith("gemini-"):
-            return "gemini" in supported_clis
+            return (
+                "gemini" in normalized_clis
+                or "claude" in normalized_clis
+                or "codex" in normalized_clis
+            )
         if lower.startswith("claude-"):
-            return "claude" in supported_clis
+            return "claude" in normalized_clis or "codex" in normalized_clis
         return True
 
     _MAX_FALLBACKS = 3

@@ -503,6 +503,60 @@ def test_export_model_routes_keeps_gemini_models_for_gemini_provider(monkeypatch
     assert routes["gemini-3.1-pro-preview"]["fallbacks"] == []
 
 
+def test_export_model_routes_keeps_antigravity_bridge_models(monkeypatch, tmp_path):
+    import mms_router
+
+    _patch_export_dependencies(
+        monkeypatch,
+        contexts={
+            "us-cpa-local-antigravity": {
+                "id": "us-cpa-local-antigravity",
+                "provider_name": "US CPA Antigravity",
+                "anthropic_base_url": "http://127.0.0.1:18617/v1",
+                "openai_base_url": "http://127.0.0.1:18617/v1",
+                "api_key": "sk-antigravity",
+                "models": [
+                    "gemini-3-flash-agent(high)",
+                    "gemini-3.1-flash-lite",
+                    "gemini-3.1-pro-low",
+                    "claude-opus-4-6-thinking",
+                    "claude-sonnet-4-6",
+                ],
+            }
+        },
+    )
+    _patch_export_paths(monkeypatch, tmp_path)
+
+    cfg = {
+        "provider": {"default": "us-cpa-local-antigravity"},
+        "providers": [
+            {
+                "id": "us-cpa-local-antigravity",
+                "role": "fallback",
+                "priority": 210,
+                "enabled": True,
+                "protocols": ["anthropic_messages", "openai_chat_completions"],
+                "supported_clis": ["claude", "codex"],
+                "models": [
+                    "gemini-3-flash-agent(high)",
+                    "gemini-3.1-flash-lite",
+                    "gemini-3.1-pro-low",
+                    "claude-opus-4-6-thinking",
+                    "claude-sonnet-4-6",
+                ],
+            }
+        ],
+    }
+
+    routes = mms_router.export_model_routes(cfg, force=True)
+
+    assert routes["gemini-3-flash-agent(high)"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
+    assert routes["gemini-3.1-flash-lite"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
+    assert routes["gemini-3.1-pro-low"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
+    assert routes["claude-opus-4-6-thinking"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
+    assert routes["claude-sonnet-4-6"]["primary"]["provider_id"] == "us-cpa-local-antigravity"
+
+
 def test_export_model_routes_uses_startup_safe_probe_when_requested(monkeypatch, tmp_path):
     import mms_core
     import mms_router
