@@ -989,13 +989,13 @@ def _mms_auth_error_category(status_code):
     if int(status_code or 0) == 401:
         return (
             "provider_authentication",
-            "the selected MMS API-key provider/account rejected authentication",
-            "check the selected provider API key/account binding, or switch runtime in MMS",
+            "当前选择的 MMS API-key provider/account 认证被上游拒绝",
+            "检查当前 provider 的 API key/account 绑定，或在 MMS 中切换 runtime",
         )
     return (
         "provider_or_model_permission",
-        "the selected MMS provider/account reached upstream, but the upstream denied this model/path",
-        "check provider model permission, relay policy, quota, or switch runtime in MMS",
+        "请求已到达上游，但上游拒绝当前 model/path，通常是 model 权限、relay policy 或 quota 问题",
+        "检查 provider 的 model 权限、relay policy、quota，或在 MMS 中切换 runtime",
     )
 
 
@@ -1023,14 +1023,14 @@ def _mms_fail_closed_auth_error_payload(
         route_note = ""
     upstream_hint = upstream.get("message") or upstream.get("body")
     message = (
-        f"MMS fail-closed: upstream_provider returned HTTP {status_code} "
-        f"({category}). model={model_label} provider={provider_label} path={request_path}."
-        f"{route_note} Meaning: {meaning}. "
-        "MMS stayed inside the current configured runtime; global OAuth or login fallback was not used. "
-        f"Next: {next_step}."
+        f"MMS fail-closed：上游 provider 返回 HTTP {status_code} "
+        f"（{category}）。model={model_label} provider={provider_label} path={request_path}."
+        f"{route_note} 含义：{meaning}。"
+        "MMS 仍停留在当前 configured runtime；没有使用 global OAuth 或 login fallback。"
+        f"下一步：{next_step}。"
     )
     if upstream_hint:
-        message += f" Upstream said: {upstream_hint}"
+        message += f" 上游原文：{upstream_hint}"
     return {
         "type": "error",
         "error": {

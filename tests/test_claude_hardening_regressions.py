@@ -4957,9 +4957,9 @@ def test_forward_as_responses_fail_closes_final_403_without_login_hint(monkeypat
 
     assert captured["code"] == 502
     message = captured["payload"]["error"]["message"]
-    assert "upstream_provider returned HTTP 403" in message
+    assert "上游 provider 返回 HTTP 403" in message
     assert "provider_or_model_permission" in message
-    assert "global OAuth or login fallback was not used" in message
+    assert "没有使用 global OAuth 或 login fallback" in message
     assert "/login" not in message
     assert "HTTP 403" in message
     assert captured["payload"]["error"]["mms"]["source"] == "upstream_provider"
@@ -5136,9 +5136,9 @@ def test_gateway_bridge_post_fail_closes_upstream_403_without_login_hint(monkeyp
 
     assert captured["code"] == 502
     message = captured["payload"]["error"]["message"]
-    assert "upstream_provider returned HTTP 403" in message
+    assert "上游 provider 返回 HTTP 403" in message
     assert "provider_or_model_permission" in message
-    assert "global OAuth or login fallback was not used" in message
+    assert "没有使用 global OAuth 或 login fallback" in message
     assert "/login" not in message
     assert "HTTP 403" in message
     assert captured["payload"]["error"]["mms"]["source"] == "upstream_provider"

@@ -266,7 +266,7 @@ def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail():
     assert "provider_authentication" in message
     assert "provider=codex-relay" in message
     assert "routes_tried=2" in message
-    assert "global OAuth or login fallback was not used" in message
+    assert "没有使用 global OAuth 或 login fallback" in message
     assert payload["error"]["type"] == "mms_upstream_auth_error"
     assert payload["error"]["mms"] == {
         "source": "upstream_provider",
@@ -277,7 +277,7 @@ def test_fail_closed_auth_error_payload_keeps_diagnosis_and_upstream_detail():
         "request_path": "/v1/responses",
         "routes_tried": 2,
         "global_oauth_fallback": "disabled",
-        "next": "check the selected provider API key/account binding, or switch runtime in MMS",
+        "next": "检查当前 provider 的 API key/account 绑定，或在 MMS 中切换 runtime",
     }
     assert payload["error"]["upstream"]["type"] == "invalid_api_key"
     assert payload["error"]["upstream"]["message"] == "bad key"
