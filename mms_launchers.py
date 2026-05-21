@@ -2894,6 +2894,15 @@ def _resolve_native_fallback_routes(runtime, model_name):
         return []
 
 
+def _resolve_codex_responses_fallback_routes(runtime, model_name):
+    try:
+        from mms_native_fallback import resolve_codex_responses_fallback_routes
+
+        return resolve_codex_responses_fallback_routes(runtime, model_name)
+    except Exception:
+        return []
+
+
 def _is_installed_mms_layout(module_path=None):
     current_path = os.path.abspath(module_path or __file__)
     installed_root = os.path.abspath(_real_user_path(".mms"))
@@ -9331,6 +9340,10 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         from mms_tui import select_reasoning_effort_tui as _sel_effort
         reasoning_effort = _sel_effort(default=gpt_default_effort)
     console.print(f"[dim]thinking: {'on' if thinking_enabled else 'off'} · effort: {reasoning_effort}[/dim]")
+    native_fallback_routes = _resolve_codex_responses_fallback_routes(runtime, model)
+    if native_fallback_routes:
+        fallback_ids = ", ".join(route.get("provider_id", "") for route in native_fallback_routes)
+        console.print(f"[dim]Codex Responses fallback: {fallback_ids}[/dim]")
     with codex_responses_bridge(
         gateway_url,
         api_key,
@@ -9343,6 +9356,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         reasoning_effort=reasoning_effort,
         proxy_url=runtime.get("proxy"),
         no_proxy=runtime.get("no_proxy"),
+        native_fallback_routes=native_fallback_routes,
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"], model_info=model_info)

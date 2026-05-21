@@ -58,6 +58,12 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda runtime: None)
     monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4"]})
     monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url, model_info=None: {"PATH": ""})
+    monkeypatch.setattr(mms_launchers, "_resolve_codex_responses_fallback_routes", lambda runtime, model: [])
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_codex_responses_fallback_routes",
+        lambda runtime, model: [{"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}],
+    )
 
     def fake_select_reasoning_effort_tui(default="medium"):
         captured["default_effort"] = default
@@ -90,6 +96,9 @@ def test_launch_codex_passes_reasoning_effort_to_codex_config(monkeypatch):
     mms_launchers.launch_codex(model_info, runtime, once=True)
 
     assert captured["bridge_kwargs"]["reasoning_effort"] == "xhigh"
+    assert captured["bridge_kwargs"]["native_fallback_routes"] == [
+        {"provider_id": "codex-fallback", "gateway_url": "https://fallback.test/v1"}
+    ]
     assert captured["default_effort"] == "xhigh"
     assert '-c' in captured["cmd"]
     assert 'model_reasoning_effort="xhigh"' in captured["cmd"]
@@ -110,6 +119,7 @@ def test_launch_codex_uses_runtime_thinking_and_effort_without_prompt(monkeypatc
     monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", lambda runtime: None)
     monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4"]})
     monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url, model_info=None: {"PATH": ""})
+    monkeypatch.setattr(mms_launchers, "_resolve_codex_responses_fallback_routes", lambda runtime, model: [])
     monkeypatch.setattr(
         mms_tui,
         "select_reasoning_effort_tui",

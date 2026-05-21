@@ -3501,168 +3501,251 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
 
         gateway_url = getattr(self.server, "gateway_url")
         gateway_key = getattr(self.server, "gateway_key")
-        model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
-        provider_id = getattr(self.server, "provider_id", "")
-        provider_profile = getattr(self.server, "provider_profile", "")
-        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
-        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
-        profile_id = apply_profile_body_patches(
-            payload,
-            protocol="responses",
-            provider_id=provider_id,
-            profile_id=provider_profile,
-            base_url=gateway_url,
-            model_name=model_name,
-            thinking_enabled=reasoning_enabled,
-            reasoning_effort=reasoning_effort,
-        )
-        if not profile_id and reasoning_enabled:
-            reasoning_payload = payload.get("reasoning")
-            next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
-            next_reasoning["effort"] = reasoning_effort
-            payload["reasoning"] = next_reasoning
-        elif not profile_id:
-            payload.pop("reasoning", None)
-        target_url = _build_gateway_url(gateway_url, "/responses")
-        fwd_headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {gateway_key}",
-        }
-        apply_profile_auth_headers(
-            fwd_headers,
-            protocol="responses",
-            api_key=gateway_key,
-            provider_id=provider_id,
-            profile_id=provider_profile,
-            base_url=gateway_url,
-            model_name=model_name,
-        )
-        fwd_headers.update(_copy_passthrough_headers(self.headers))
-
+        requested_model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
         started_ms = _now_ms()
         first_byte_ms = None
         output_tokens = None
-
-        # 检查是否已知需要 chatcompletions fallback
-        if provider_id and _needs_chatcompletions_bridge(provider_id, model_name, gateway_url):
-            self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
-                                             started_ms)
-            return
+        base_forward_payload = copy.deepcopy(payload)
+        primary_route = _gateway_route_payload(
+            {},
+            gateway_url=gateway_url,
+            gateway_key=gateway_key,
+            server=self.server,
+        )
+        fallback_routes = [
+            _gateway_route_payload(route, gateway_url="", gateway_key="", server=self.server)
+            for route in getattr(self.server, "native_fallback_routes", []) or []
+            if isinstance(route, dict)
+            and (
+                not route.get("model")
+                or _normalize_model_name(route.get("model")) == _normalize_model_name(requested_model_name)
+            )
+        ]
+        forward_routes = [primary_route] + [route for route in fallback_routes if route.get("gateway_url") and route.get("gateway_key")]
 
         try:
-            with httpx.stream(
-                "POST",
-                target_url,
-                headers=fwd_headers,
-                json=payload,
-                timeout=300,
-                **_server_bridge_httpx_kwargs(self.server, target_url),
-            ) as response:
-                content_type = response.headers.get("content-type", "application/json")
-                is_stream = "text/event-stream" in content_type.lower()
+            for route_index, route in enumerate(forward_routes):
+                payload = copy.deepcopy(base_forward_payload)
+                route_gateway_url = route.get("gateway_url") or gateway_url
+                route_gateway_key = route.get("gateway_key") or gateway_key
+                provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
+                provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+                model_name = payload.get("model") or getattr(self.server, "model_name", "unknown")
+                reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+                reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+                profile_id = apply_profile_body_patches(
+                    payload,
+                    protocol="responses",
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=route_gateway_url,
+                    model_name=model_name,
+                    thinking_enabled=reasoning_enabled,
+                    reasoning_effort=reasoning_effort,
+                )
+                if not profile_id and reasoning_enabled:
+                    reasoning_payload = payload.get("reasoning")
+                    next_reasoning = dict(reasoning_payload) if isinstance(reasoning_payload, dict) else {}
+                    next_reasoning["effort"] = reasoning_effort
+                    payload["reasoning"] = next_reasoning
+                elif not profile_id:
+                    payload.pop("reasoning", None)
+                target_url = _build_gateway_url(route_gateway_url, "/responses")
+                fwd_headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {route_gateway_key}",
+                }
+                apply_profile_auth_headers(
+                    fwd_headers,
+                    protocol="responses",
+                    api_key=route_gateway_key,
+                    provider_id=provider_id,
+                    profile_id=provider_profile,
+                    base_url=route_gateway_url,
+                    model_name=model_name,
+                )
+                fwd_headers.update(_copy_passthrough_headers(self.headers))
+                is_last_route = route_index >= len(forward_routes) - 1
+                retry_statuses, _retry_tokens = _native_fallback_retry_sets(route)
 
-                def _forward_sse_line(raw_line):
-                    nonlocal output_tokens
-                    stripped = raw_line.strip()
-                    if stripped.startswith("data:"):
-                        data_str = stripped[5:].strip()
-                        if data_str and data_str != "[DONE]":
-                            try:
-                                event_payload = json.loads(data_str)
-                            except json.JSONDecodeError:
-                                event_payload = None
-                            extracted = _extract_output_tokens(event_payload)
-                            if extracted is not None:
-                                output_tokens = extracted
-                    self.wfile.write(raw_line.encode("utf-8") + b"\n")
-                    if raw_line == "":
-                        self.wfile.flush()
+                # 检查是否已知需要 chatcompletions fallback
+                if provider_id and _needs_chatcompletions_bridge(provider_id, model_name, route_gateway_url):
+                    self._do_chatcompletions_fallback(
+                        payload,
+                        model_name,
+                        route_gateway_url,
+                        route_gateway_key,
+                        started_ms,
+                        route=route,
+                    )
+                    return
 
-                # 检测上游是否真正支持 Responses API。仅在明确“不支持 Responses”时才 fallback；
-                # 普通 4xx 业务错误应原样透传，避免把可用 provider 误判为 chat completions-only。
-                cl_header = response.headers.get("content-length", "")
-                try:
-                    content_length = int(cl_header) if cl_header else None
-                except (TypeError, ValueError):
-                    content_length = None
-                if response.status_code >= 400:
-                    body_out = response.read()
-                    body_text = body_out.decode("utf-8", errors="replace")
-                    if _should_try_chatcompletions_fallback(response.status_code, body_text):
+                with httpx.stream(
+                    "POST",
+                    target_url,
+                    headers=fwd_headers,
+                    json=payload,
+                    timeout=300,
+                    **_route_httpx_kwargs(self.server, route, target_url),
+                ) as response:
+                    content_type = response.headers.get("content-type", "application/json")
+                    is_stream = "text/event-stream" in content_type.lower()
+
+                    def _forward_sse_line(raw_line):
+                        nonlocal output_tokens
+                        stripped = raw_line.strip()
+                        if stripped.startswith("data:"):
+                            data_str = stripped[5:].strip()
+                            if data_str and data_str != "[DONE]":
+                                try:
+                                    event_payload = json.loads(data_str)
+                                except json.JSONDecodeError:
+                                    event_payload = None
+                                extracted = _extract_output_tokens(event_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                        self.wfile.write(raw_line.encode("utf-8") + b"\n")
+                        if raw_line == "":
+                            self.wfile.flush()
+
+                    # 检测上游是否真正支持 Responses API。仅在明确“不支持 Responses”时才 fallback；
+                    # 普通 4xx 业务错误应原样透传，避免把可用 provider 误判为 chat completions-only。
+                    cl_header = response.headers.get("content-length", "")
+                    try:
+                        content_length = int(cl_header) if cl_header else None
+                    except (TypeError, ValueError):
+                        content_length = None
+                    if response.status_code >= 400:
+                        body_out = response.read()
+                        body_text = body_out.decode("utf-8", errors="replace")
+                        if response.status_code in retry_statuses and not is_last_route:
+                            next_route = forward_routes[route_index + 1]
+                            reason = f"http_{response.status_code}"
+                            _log_native_fallback(
+                                from_route=route,
+                                to_route=next_route,
+                                model_name=model_name,
+                                reason=reason,
+                                request_url=target_url,
+                            )
+                            _write_route_status(
+                                "fallback",
+                                model_name,
+                                reason,
+                                status_paths=getattr(self.server, "route_status_paths", None),
+                            )
+                            continue
+                        if _should_try_chatcompletions_fallback(response.status_code, body_text):
+                            response.close()
+                            if provider_id:
+                                _record_bridge_fallback(provider_id, model_name, route_gateway_url)
+                            self._do_chatcompletions_fallback(
+                                payload,
+                                model_name,
+                                route_gateway_url,
+                                route_gateway_key,
+                                _now_ms(),
+                                route=route,
+                            )
+                            return
+                        if response.status_code in (401, 403):
+                            self._json(
+                                502,
+                                _mms_fail_closed_auth_error_payload(
+                                    response.status_code,
+                                    body_text,
+                                    model_name=model_name,
+                                ),
+                            )
+                            return
+                        self.send_response(response.status_code)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(body_out)))
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                        return
+                    if content_length == 0:
                         response.close()
-                        if provider_id:
-                            _record_bridge_fallback(provider_id, model_name, gateway_url)
                         self._do_chatcompletions_fallback(
-                            payload, model_name, gateway_url, gateway_key, _now_ms()
+                            payload,
+                            model_name,
+                            route_gateway_url,
+                            route_gateway_key,
+                            _now_ms(),
+                            route=route,
                         )
                         return
-                    self.send_response(response.status_code)
-                    self.send_header("Content-Type", content_type)
-                    self.send_header("Content-Length", str(len(body_out)))
-                    self.end_headers()
-                    self.wfile.write(body_out)
-                    return
-                if content_length == 0:
-                    response.close()
-                    self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
-                                                     _now_ms())
-                    return
 
-                if is_stream:
-                    lines = response.iter_lines()
-                    first_line = next(lines, None)
-                    if first_line is None:
-                        response.close()
-                        self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key, _now_ms())
-                        return
-                    first_byte_ms = _now_ms()
-                    self.send_response(response.status_code)
-                    self.send_header("Content-Type", content_type)
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_header("Connection", "close")
-                    self.end_headers()
-                    _forward_sse_line(first_line)
-                    for raw_line in lines:
-                        _forward_sse_line(raw_line)
-                    self.close_connection = True
-                    if provider_id:
-                        _clear_bridge_fallback(provider_id, model_name, gateway_url)
-                else:
-                    body_out = response.read()
-                    if not body_out:
-                        response.close()
-                        self._do_chatcompletions_fallback(payload, model_name, gateway_url, gateway_key,
-                                                         _now_ms())
-                        return
-                    first_byte_ms = _now_ms()
-                    try:
-                        output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
-                    except Exception:
-                        output_tokens = None
-                    self.send_response(response.status_code)
-                    self.send_header("Content-Type", content_type)
-                    self.send_header("Content-Length", str(len(body_out)))
-                    self.end_headers()
-                    self.wfile.write(body_out)
-                    if provider_id:
-                        _clear_bridge_fallback(provider_id, model_name, gateway_url)
-                if response.status_code < 400:
-                    _record_bridge_speed(
-                        model_name,
-                        started_ms=started_ms,
-                        first_byte_ms=first_byte_ms,
-                        output_tokens=output_tokens,
-                        provider_scope=getattr(self.server, "speed_scope", None),
-                        server=self.server,
-                    )
+                    if is_stream:
+                        lines = response.iter_lines()
+                        first_line = next(lines, None)
+                        if first_line is None:
+                            response.close()
+                            self._do_chatcompletions_fallback(
+                                payload,
+                                model_name,
+                                route_gateway_url,
+                                route_gateway_key,
+                                _now_ms(),
+                                route=route,
+                            )
+                            return
+                        first_byte_ms = _now_ms()
+                        self.send_response(response.status_code)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        _forward_sse_line(first_line)
+                        for raw_line in lines:
+                            _forward_sse_line(raw_line)
+                        self.close_connection = True
+                        if provider_id:
+                            _clear_bridge_fallback(provider_id, model_name, route_gateway_url)
+                    else:
+                        body_out = response.read()
+                        if not body_out:
+                            response.close()
+                            self._do_chatcompletions_fallback(
+                                payload,
+                                model_name,
+                                route_gateway_url,
+                                route_gateway_key,
+                                _now_ms(),
+                                route=route,
+                            )
+                            return
+                        first_byte_ms = _now_ms()
+                        try:
+                            output_tokens = _extract_output_tokens(json.loads(body_out.decode("utf-8")))
+                        except Exception:
+                            output_tokens = None
+                        self.send_response(response.status_code)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(body_out)))
+                        self.end_headers()
+                        self.wfile.write(body_out)
+                        if provider_id:
+                            _clear_bridge_fallback(provider_id, model_name, route_gateway_url)
+                    if response.status_code < 400:
+                        _record_bridge_speed(
+                            model_name,
+                            started_ms=started_ms,
+                            first_byte_ms=first_byte_ms,
+                            output_tokens=output_tokens,
+                            provider_scope=getattr(self.server, "speed_scope", None),
+                            server=self.server,
+                        )
+                    return
         except Exception as exc:
             _bridge_error_logger.error("do_POST responses proxy error: %s", exc, exc_info=True)
             self._json(502, {"error": {"message": str(exc)}})
 
-    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms):
+    def _do_chatcompletions_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
         """Responses API 不可用时，内部翻译为 Chat Completions 请求并转发。"""
-        provider_id = getattr(self.server, "provider_id", "")
-        provider_profile = getattr(self.server, "provider_profile", "")
+        route = route if isinstance(route, dict) else {}
+        provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
+        provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
         reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
         reasoning_effort = getattr(self.server, "reasoning_effort", "high")
         chat_messages = _responses_input_to_messages(
@@ -3724,7 +3807,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         headers=fwd_headers,
                         json=chat_payload,
                         timeout=300,
-                        **_server_bridge_httpx_kwargs(self.server, target_url),
+                        **_route_httpx_kwargs(self.server, route, target_url),
                     ) as response:
                         if response.status_code == 429:
                             last_status = response.status_code
@@ -4053,6 +4136,7 @@ def codex_responses_bridge(
     reasoning_effort="medium",
     proxy_url="",
     no_proxy="",
+    native_fallback_routes=None,
 ):
     _ensure_httpx()
     if httpx is None:
@@ -4073,6 +4157,7 @@ def codex_responses_bridge(
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
+    server.native_fallback_routes = list(native_fallback_routes or [])
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

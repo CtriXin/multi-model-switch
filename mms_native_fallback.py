@@ -198,6 +198,27 @@ def _fallback_gateway_url(provider):
     return gateway_url
 
 
+def _fallback_openai_url(provider):
+    openai_url = _clean(provider.get("openai_base_url") or provider.get("default_openai_base_url"))
+    if openai_url:
+        return openai_url.rstrip("/")
+    openai_url = _clean(provider.get("base_url"))
+    if not openai_url:
+        return ""
+    gateway_url = openai_url.rstrip("/")
+    if not gateway_url.endswith("/v1"):
+        gateway_url += "/v1"
+    return gateway_url
+
+
+def _supports_cli(provider, cli_name):
+    supported = provider.get("supported_clis") if isinstance(provider, dict) else []
+    if isinstance(supported, str):
+        supported = [supported]
+    supported = {_clean(item).lower() for item in (supported or []) if _clean(item)}
+    return not supported or cli_name in supported
+
+
 def resolve_native_fallback_routes(runtime, model_name, *, cfg=None, max_routes=None):
     """Return explicit same-vendor native Anthropic routes for a selected runtime.
 
@@ -280,6 +301,95 @@ def resolve_native_fallback_routes(runtime, model_name, *, cfg=None, max_routes=
             "model": model_name,
             "protocol": "anthropic_messages",
             "fallback_reason": "same_vendor_native_direct",
+            "try_next_on": list(_DEFAULT_TRY_NEXT_ON),
+        }))
+
+    candidates.sort(key=lambda item: item[0])
+    return [route for _sort_key, route in candidates[:limit]]
+
+
+def resolve_codex_responses_fallback_routes(runtime, model_name, *, cfg=None, max_routes=None):
+    """Return configured Codex OpenAI-compatible fallback routes for Responses bridge.
+
+    This is an in-memory launch-time fallback list only. It does not probe or
+    write MMS config, and it stays within configured api_key runtimes.
+    """
+    runtime = runtime if isinstance(runtime, dict) else {}
+    model_name = _clean(model_name)
+    if not model_name or not _enabled_for_runtime(runtime):
+        return []
+    if runtime.get("auth_mode") not in {None, "", "api_key"}:
+        return []
+
+    current_profile_id, current_profile = _profile_for(runtime, model_name)
+    if not current_profile_id or not current_profile:
+        return []
+
+    cfg = cfg if isinstance(cfg, dict) else _load_runtime_config()
+    providers = cfg.get("providers") if isinstance(cfg, dict) else []
+    if not isinstance(providers, list):
+        return []
+
+    current_id = _clean(runtime.get("id") or runtime.get("provider_id"))
+    current_urls = {
+        _normalize_url(_clean(runtime.get("openai_base_url") or runtime.get("default_openai_base_url"))),
+        _normalize_url(_clean(runtime.get("base_url"))),
+    }
+    current_urls.discard("")
+    try:
+        limit = int(max_routes if max_routes is not None else runtime.get("native_fallback_max") or 2)
+    except Exception:
+        limit = 2
+    limit = max(0, limit)
+    if limit <= 0:
+        return []
+
+    candidates = []
+    for provider_def in providers:
+        if not isinstance(provider_def, dict) or not provider_def.get("enabled", True):
+            continue
+        provider_id = _clean(provider_def.get("id"))
+        if not provider_id or provider_id == current_id:
+            continue
+        provider = _provider_context(cfg, provider_def)
+        if not _supports_cli(provider, "codex"):
+            continue
+        if "openai_chat_completions" not in _protocols(provider):
+            continue
+        gateway_url = _fallback_openai_url(provider)
+        if not gateway_url or not provider.get("api_key"):
+            continue
+        provider_profile_id, _provider_profile = _profile_for(provider, model_name)
+        if provider_profile_id != current_profile_id:
+            continue
+        route_urls = {
+            _normalize_url(provider.get("openai_base_url") or provider.get("default_openai_base_url")),
+            _normalize_url(provider.get("base_url")),
+        }
+        route_urls.discard("")
+        if route_urls and route_urls == current_urls:
+            continue
+        if not _provider_has_model(provider, cfg, model_name):
+            continue
+        try:
+            from mms_core import _normalize_priority, _normalize_role, _runtime_priority_for_model, ROLE_WEIGHTS
+
+            role_weight = ROLE_WEIGHTS.get(_normalize_role(provider.get("role", "fallback")), 1)
+            priority = _runtime_priority_for_model(provider, model_name)
+            sort_key = (role_weight, -_normalize_priority(priority), provider_id)
+        except Exception:
+            sort_key = (1, 0, provider_id)
+        candidates.append((sort_key, {
+            "provider_id": provider_id,
+            "provider_profile": _clean(provider.get("profile") or provider.get("provider_profile") or provider_profile_id),
+            "gateway_url": gateway_url,
+            "gateway_key": str(provider.get("api_key") or ""),
+            "openai_url": gateway_url,
+            "proxy_url": _clean(provider.get("proxy")),
+            "no_proxy": _clean(provider.get("no_proxy")),
+            "model": model_name,
+            "protocol": "responses",
+            "fallback_reason": "codex_responses_fallback",
             "try_next_on": list(_DEFAULT_TRY_NEXT_ON),
         }))
 
