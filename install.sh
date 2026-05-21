@@ -3762,6 +3762,10 @@ cp "$SOURCE_DIR"/mms_installer.py "$MMS_HOME/"
 copy_hooks_dir_safely "$SOURCE_DIR/hooks" "$MMS_HOME/hooks"
 copy_dir_safely "$SOURCE_DIR/vendor" "$MMS_HOME/vendor" "vendor 目录" "vendor directory"
 copy_dir_safely "$SOURCE_DIR/scripts" "$MMS_HOME/scripts" "scripts 目录" "scripts directory"
+if [ -f "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" ]; then
+    mkdir -p "$MMS_HOME/docs"
+    cp "$SOURCE_DIR/docs/LLM_OPERATION_GUIDE.md" "$MMS_HOME/docs/"
+fi
 # 复制所有 mms_*.py 确保完整
 for f in "$SOURCE_DIR"/mms_*.py; do
     [ -f "$f" ] && cp "$f" "$MMS_HOME/"
@@ -3895,6 +3899,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
     echo "  $(t "内建 session assets：Caveman、TOON、token-saver 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供，按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS and are injected per session without global hooks/config writes.")"
+    echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
     echo ""
 
     if [ "$INSTALL_RTK" -eq 1 ]; then

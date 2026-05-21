@@ -274,6 +274,16 @@ def test_install_script_mentions_bundled_session_assets():
     assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
 
 
+def test_install_script_installs_llm_operation_guide():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    guide_text = (ROOT_DIR / "docs" / "LLM_OPERATION_GUIDE.md").read_text(encoding="utf-8")
+
+    assert 'docs/LLM_OPERATION_GUIDE.md' in text
+    assert "LLM editing guide" in text
+    assert "Human Gate" in guide_text
+    assert "~/.config/mms/**" in guide_text
+
+
 def test_install_script_retires_ccs_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
