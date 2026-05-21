@@ -3030,6 +3030,60 @@ def test_account_env_scrubs_claude_oauth_parent_env(monkeypatch, tmp_path):
     assert env["HOME"].startswith(str(account_home / "s"))
 
 
+def test_sync_claude_gateway_ui_state_persists_theme_without_auth(tmp_path):
+    import mms_launchers
+
+    session_home = tmp_path / "session"
+    gateway_home = tmp_path / "gateway"
+    (session_home / ".claude").mkdir(parents=True)
+    (session_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "hasCompletedOnboarding": True,
+                "lastOnboardingVersion": "2.0.0",
+                "numStartups": 3,
+                "claudeAiOauth": {"accessToken": "should-drop"},
+                "oauthAccount": {"emailAddress": "drop@example.com"},
+                "api_key": "sk-drop",
+                "tipsHistory": {"theme-command": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (session_home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "theme": "light",
+                "env": {"ANTHROPIC_AUTH_TOKEN": "drop"},
+                "hooks": {"PreToolUse": [{"matcher": "*"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (gateway_home / ".claude.json").parent.mkdir(parents=True)
+    (gateway_home / ".claude.json").write_text(
+        json.dumps({"numStartups": 9, "tipsHistory": {"terminal-setup": 1}}),
+        encoding="utf-8",
+    )
+
+    mms_launchers._sync_claude_session_state_to_account_home(
+        str(session_home),
+        str(gateway_home),
+        state_mode="ui",
+    )
+
+    synced_state = json.loads((gateway_home / ".claude.json").read_text(encoding="utf-8"))
+    assert synced_state["hasCompletedOnboarding"] is True
+    assert synced_state["lastOnboardingVersion"] == "2.0.0"
+    assert synced_state["numStartups"] == 9
+    assert synced_state["tipsHistory"] == {"terminal-setup": 1, "theme-command": 2}
+    assert "claudeAiOauth" not in synced_state
+    assert "oauthAccount" not in synced_state
+    assert "api_key" not in synced_state
+    synced_settings = json.loads((gateway_home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert synced_settings == {"theme": "light"}
+
+
 def test_account_env_seeds_current_project_trust_and_ui_state(monkeypatch, tmp_path):
     import mms_launchers
 

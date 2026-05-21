@@ -5,6 +5,7 @@ import copy
 import inspect
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -4757,6 +4758,46 @@ def _merge_claude_ui_state_seed(target_payload, seed_payload):
     return target_payload
 
 
+def _merge_claude_gateway_ui_state_payload(existing_payload, incoming_payload):
+    existing = _sanitize_claude_ui_state_seed_payload(existing_payload)
+    incoming = _sanitize_claude_ui_state_seed_payload(incoming_payload)
+    merged = copy.deepcopy(existing)
+
+    for key in _CLAUDE_OAUTH_UI_STATE_SEED_KEYS:
+        incoming_value = incoming.get(key)
+        existing_value = existing.get(key)
+        if key == "firstStartTime":
+            chosen = existing_value or incoming_value
+            if isinstance(chosen, (str, int, float, bool)):
+                merged[key] = copy.deepcopy(chosen)
+            continue
+        if key == "numStartups":
+            numeric_values = [
+                value for value in (existing_value, incoming_value)
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            ]
+            if numeric_values:
+                merged[key] = max(numeric_values)
+            continue
+        if key == "hasCompletedOnboarding":
+            if existing_value or incoming_value:
+                merged[key] = bool(existing_value or incoming_value)
+            continue
+        if isinstance(incoming_value, (str, int, float, bool)):
+            merged[key] = copy.deepcopy(incoming_value)
+
+    for key in _CLAUDE_OAUTH_STATE_SCALAR_DICT_ALLOWLIST:
+        merged_dict = _merge_scalar_dict_entries(
+            existing.get(key),
+            incoming.get(key),
+            prefer_max_numeric=(key == "tipsHistory"),
+        )
+        if merged_dict:
+            merged[key] = merged_dict
+
+    return _strip_claude_state_execution_surfaces(merged)
+
+
 def _strip_claude_state_execution_surfaces(payload):
     payload = dict(payload) if isinstance(payload, dict) else {}
     payload.pop("mcpServers", None)
@@ -5969,7 +6010,7 @@ def _overlay_codex_shared_resume(home_dir, session_home):
 
     bounded_resume_entries = _codex_bounded_resume_entries()
     for entry in os.listdir(account_codex_dir):
-        if entry in bounded_resume_entries:
+        if entry in bounded_resume_entries or _codex_entry_is_session_local(entry):
             continue
         src = os.path.join(account_codex_dir, entry)
         dst = os.path.join(session_codex_dir, entry)
@@ -6005,6 +6046,21 @@ _CODEX_RESUME_WRITEBACK_ROOT_ENV = "MMS_CODEX_RESUME_WRITEBACK_ROOT"
 _CODEX_RESUME_MAX_FILE_BYTES = 2_000_000
 _CODEX_RESUME_PROJECT_MAX_FILE_BYTES = 32_000_000
 _CODEX_COPY_INTO_SESSION_FILES = {"installation_id"}
+_CODEX_SESSION_LOCAL_ONLY_ENTRIES = {
+    ".codex-global-state.json",
+    ".tmp",
+    "models_cache.json",
+    "version.json",
+    "sqlite",
+    "tmp",
+    "app-server-control",
+    "app-server-daemon",
+}
+_CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
+    ".codex-global-state.json.",
+    ".codex-global-state.json.tmp-",
+    "app-server-",
+)
 
 
 def _materialize_codex_session_entry(entry, src, dst):
@@ -6015,6 +6071,19 @@ def _materialize_codex_session_entry(entry, src, dst):
         shutil.copy2(src, dst)
         return
     os.symlink(src, dst)
+
+
+def _codex_entry_is_session_local(entry):
+    name = str(entry or "").strip()
+    if not name:
+        return True
+    if name in _CODEX_SESSION_LOCAL_ONLY_ENTRIES:
+        return True
+    if any(name.startswith(prefix) for prefix in _CODEX_SESSION_LOCAL_ONLY_PREFIXES):
+        return True
+    if re.match(r"^(state|logs)_\d+\.sqlite(?:-(?:shm|wal))?$", name):
+        return True
+    return False
 
 
 def _bounded_env_int(name, default):
@@ -8364,7 +8433,7 @@ def _prepare_claude_session_tree(
     )
 
 
-def _sync_claude_session_state_to_account_home(session_home, account_home):
+def _sync_claude_session_state_to_account_home(session_home, account_home, *, state_mode="oauth"):
     import json as _json
 
     account_home = os.path.expanduser(str(account_home or "").strip())
@@ -8392,7 +8461,13 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
             if os.path.basename(dst) == "settings.json":
                 with open(src, "r", encoding="utf-8") as f:
                     loaded = _json.load(f)
-                cleaned = _sanitize_account_claude_settings_payload(loaded)
+                if str(state_mode or "").strip() == "ui":
+                    cleaned = _sanitize_claude_inherited_settings_payload(
+                        loaded,
+                        allow_execution_surfaces=False,
+                    )
+                else:
+                    cleaned = _sanitize_account_claude_settings_payload(loaded)
                 with locked_state_file(dst):
                     atomic_write_json(dst, cleaned, mode=0o600)
             elif os.path.basename(dst) == ".claude.json":
@@ -8400,7 +8475,10 @@ def _sync_claude_session_state_to_account_home(session_home, account_home):
                     incoming = _json.load(f)
                 with locked_state_file(dst):
                     existing = _load_json_dict_unlocked(dst)
-                    merged = _merge_oauth_claude_state_payload(existing, incoming)
+                    if str(state_mode or "").strip() == "ui":
+                        merged = _merge_claude_gateway_ui_state_payload(existing, incoming)
+                    else:
+                        merged = _merge_oauth_claude_state_payload(existing, incoming)
                     atomic_write_json(dst, merged, mode=0o600)
             else:
                 shutil.copy2(src, dst)
@@ -8418,9 +8496,14 @@ def _finalize_claude_slot(session_home, exit_code=None, stale_cleanup=False):
         return
     cwd = marker.get("cwd") or _safe_getcwd()
     account_id = str(marker.get("account_id") or "").strip()
+    runtime_kind = str(marker.get("runtime_kind") or "").strip()
     account_home = str(marker.get("account_home") or "").strip()
     if not stale_cleanup:
-        _sync_claude_session_state_to_account_home(session_home, account_home)
+        _sync_claude_session_state_to_account_home(
+            session_home,
+            account_home,
+            state_mode="oauth" if runtime_kind == "oauth" else "ui",
+        )
     session_payload = finalize_claude_session(
         cwd=cwd,
         pid=pid,
@@ -8493,6 +8576,8 @@ def _claude_gateway_env(
     current_project_state = _load_real_claude_project_state(current_project)
     resume_model = _claude_resume_model_name(display_model, selected_model, heavy_model)
     gw_existing = {}
+    persistent_gateway_json = os.path.join(gateway_base, ".claude.json")
+    persistent_gateway_claude_dir = os.path.join(gateway_base, ".claude")
 
     if os.path.exists(gw_json):
         try:
@@ -8510,6 +8595,10 @@ def _claude_gateway_env(
             pass
 
     data = _merge_claude_ui_state_seed(data, _sanitize_claude_ui_state_seed_payload(gw_existing))
+    data = _merge_claude_ui_state_seed(
+        data,
+        _sanitize_claude_ui_state_seed_payload(_load_json_dict_unlocked(persistent_gateway_json)),
+    )
     data = _merge_claude_ui_state_seed(data, _load_real_claude_ui_state_seed())
     data = _inject_managed_mcp_servers_into_claude_state(
         data,
@@ -8556,6 +8645,7 @@ def _claude_gateway_env(
             gateway_home,
             gw_claude_dir,
             account_id=str(runtime.get("id", "")),
+            account_home=gateway_base,
             runtime_kind=runtime_kind or str(runtime.get("auth_mode", "api_key")),
             resume_model=resume_model,
             skip_real_entries={"settings.json"},
@@ -8662,10 +8752,15 @@ def _claude_gateway_env(
         )
         required_settings_env.update(host_context_env)
         required_settings_env.update(session_packet_env)
+        session_base_settings = _merge_claude_settings(
+            _load_real_claude_settings(),
+            _load_claude_settings_from_dir(persistent_gateway_claude_dir),
+        )
         _write_claude_session_settings(
             gw_claude_dir,
             required_env=required_settings_env,
             default_env=default_settings_env,
+            base_settings=session_base_settings,
             enable_caveman=enable_caveman,
             enable_ecc=enable_ecc,
             enable_omc=enable_omc,
@@ -8987,6 +9082,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         try:
             with open(source_config, "r", encoding="utf-8") as f:
                 config_text = f.read()
+            config_text = _set_top_level_scalar(config_text, "forced_login_method", "api")
+            config_text = _set_top_level_scalar(config_text, "disable_response_storage", True)
             config_text = _set_top_level_scalar(config_text, "base_url", base_url)
             config_text = _set_project_base_url(config_text, _safe_getcwd(), base_url)
             config_text = _set_project_scalar(config_text, _safe_getcwd(), "trust_level", "trusted")
@@ -9018,6 +9115,8 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             shutil.copy2(source_config, gateway_config)
     else:
         with open(gateway_config, "w", encoding="utf-8") as f:
+            f.write('forced_login_method = "api"\n')
+            f.write('disable_response_storage = true\n')
             f.write(f'base_url = "{base_url}"\n')
             f.write('\n[model_providers.custom]\n')
             f.write('name = "custom"\n')
@@ -9055,7 +9154,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     if os.path.isdir(real_codex_dir):
         skip = {"auth.json", "config.toml", "hooks.json"} | _codex_bounded_resume_entries()
         for entry in os.listdir(real_codex_dir):
-            if entry in skip:
+            if entry in skip or _codex_entry_is_session_local(entry):
                 continue
             src = os.path.join(real_codex_dir, entry)
             dst = os.path.join(codex_dir, entry)

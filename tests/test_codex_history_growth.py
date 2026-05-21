@@ -227,6 +227,9 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     _write_lines(real_codex / "history.jsonl", "real-history", 5)
     (account_codex / "installation_id").parent.mkdir(parents=True, exist_ok=True)
     (account_codex / "installation_id").write_text("account-installation\n", encoding="utf-8")
+    (account_codex / "state_5.sqlite").write_text("account-state\n", encoding="utf-8")
+    (account_codex / "logs_2.sqlite").write_text("account-logs\n", encoding="utf-8")
+    (account_codex / "app-server-daemon").mkdir()
     for index in range(3):
         _write_file(
             account_codex / "sessions" / "2026" / "04" / f"account-session-{index}.jsonl",
@@ -261,6 +264,9 @@ def test_account_codex_env_materializes_bounded_resume_without_global_symlinks(m
     assert copied_sessions[0].name == "account-session-2.jsonl"
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "account-installation\n"
+    assert not (session_codex / "state_5.sqlite").exists()
+    assert not (session_codex / "logs_2.sqlite").exists()
+    assert not (session_codex / "app-server-daemon").exists()
     assert env["CODEX_HOME"] == str(session_codex)
     assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(account_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
@@ -285,6 +291,10 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
         )
     (real_codex / "memories").mkdir(parents=True)
     (real_codex / "installation_id").write_text("real-installation\n", encoding="utf-8")
+    (real_codex / "state_5.sqlite").write_text("real-state\n", encoding="utf-8")
+    (real_codex / "state_5.sqlite-wal").write_text("real-state-wal\n", encoding="utf-8")
+    (real_codex / "logs_2.sqlite").write_text("real-logs\n", encoding="utf-8")
+    (real_codex / "app-server-control").mkdir()
 
     monkeypatch.chdir(repo_dir)
     monkeypatch.setenv("MMS_CODEX_HISTORY_JSONL_MAX_LINES", "2")
@@ -318,6 +328,13 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert (session_codex / "memories").is_symlink()
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
+    assert not (session_codex / "state_5.sqlite").exists()
+    assert not (session_codex / "state_5.sqlite-wal").exists()
+    assert not (session_codex / "logs_2.sqlite").exists()
+    assert not (session_codex / "app-server-control").exists()
+    config_text = (session_codex / "config.toml").read_text(encoding="utf-8")
+    assert 'forced_login_method = "api"' in config_text
+    assert "disable_response_storage = true" in config_text
     assert env["CODEX_HOME"] == str(session_codex)
     assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(gateway_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
