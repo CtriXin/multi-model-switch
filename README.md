@@ -61,7 +61,7 @@ Default behavior:
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
 - discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- keeps the legacy `ccs` shim installable with `--install-legacy-ccs`, but no longer exposes it by default
+- retires the legacy `ccs` shim; new installs expose only the `mms` command
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 

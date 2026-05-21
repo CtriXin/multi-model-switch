@@ -75,7 +75,6 @@ INSTALL_ECC=0
 INSTALL_ECC_EXPLICIT=0
 INSTALL_OMC=0
 INSTALL_OMC_EXPLICIT=0
-INSTALL_LEGACY_CCS=0
 INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
@@ -290,7 +289,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]] [--install-legacy-ccs]
+  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -321,7 +320,6 @@ $(t "说明:" "Notes:")
   - $(t "Caveman、weber、web-access、agent-browser、TOON、token-saver 作为 MMS 内建 session assets 随安装一起提供" "Caveman, weber, web-access, agent-browser, TOON, and token-saver ship as bundled MMS session assets")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
-  - $(t "--install-legacy-ccs 可显式恢复旧 ccs 命令链接；默认只链接 mms" "--install-legacy-ccs explicitly restores the legacy ccs command link; by default only mms is linked")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
 EOF
 }
@@ -2036,11 +2034,6 @@ run_install_check() {
         echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
     fi
 
-    if [ -L "$BIN_DIR/ccs" ]; then
-        echo "✓ $(t "已存在 legacy ccs 命令链接" "legacy ccs symlink present"): $BIN_DIR/ccs"
-    else
-        echo "• $(t "legacy ccs 命令链接未启用（默认不再创建）" "legacy ccs symlink disabled (no longer created by default)"): $BIN_DIR/ccs"
-    fi
 
     if optional_brainkeeper_context_installed; then
         echo "✓ $(t "BrainKeeper context pack 已安装" "BrainKeeper context pack installed"): $REAL_HOME/.local/share/brainkeeper"
@@ -3597,9 +3590,6 @@ while [[ $# -gt 0 ]]; do
             INSTALL_OMC=1
             INSTALL_OMC_EXPLICIT=1
             ;;
-        --install-legacy-ccs)
-            INSTALL_LEGACY_CCS=1
-            ;;
         --install-cli)
             shift
             parse_install_cli_arg "${1:-}"
@@ -3764,7 +3754,6 @@ if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
     exit 1
 fi
 
-cp "$SOURCE_DIR"/ccs "$MMS_HOME/ccs"
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
@@ -3784,7 +3773,6 @@ write_version_metadata
 repair_managed_claude_settings
 write_language_config
 
-chmod +x "$MMS_HOME/ccs"
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 [ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
@@ -3793,7 +3781,6 @@ chmod +x "$MMS_HOME/mms"
 # ── 4. 修正入口的 Python 路径 ──
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
-rewrite_shebang "$MMS_HOME/ccs" "$PYTHON_PATH"
 rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
@@ -3833,22 +3820,26 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs 入口保留为显式 opt-in，避免 fresh install 继续暴露双入口。
+# 创建 primary symlink；legacy ccs 已下线，仅保留 mms 主入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
-if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then
-    ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"
+# Remove stale MMS-owned legacy ccs artifacts from previous installs without touching unrelated user commands.
+rm -f "$MMS_HOME/ccs"
+if [ -L "$BIN_DIR/ccs" ]; then
+    ccs_target="$(readlink "$BIN_DIR/ccs" 2>/dev/null || true)"
+    case "$ccs_target" in
+        "$MMS_HOME"/ccs|"$REAL_HOME"/.mms/ccs|"$REAL_HOME"/.config/mms/*/ccs)
+            rm -f "$BIN_DIR/ccs"
+            echo "• $(t "已移除 retired legacy ccs 命令链接" "Removed retired legacy ccs command link"): $BIN_DIR/ccs"
+            ;;
+        *)
+            echo "• $(t "检测到非 MMS-owned ccs 命令，保持不变" "Non-MMS-owned ccs command detected; left unchanged"): $BIN_DIR/ccs"
+            ;;
+    esac
 fi
 if [ -e "$MMS_HOME/mmslogs" ]; then
     ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 fi
 echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
-if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then
-    echo "✓ $(t "legacy ccs 命令已显式链接到" "Legacy ccs command explicitly linked to") $BIN_DIR/ccs"
-elif [ -L "$BIN_DIR/ccs" ]; then
-    echo "• $(t "保留已有 legacy ccs 命令链接，不在本轮重写" "Existing legacy ccs symlink left unchanged; not rewritten in this run"): $BIN_DIR/ccs"
-else
-    echo "• $(t "默认不再创建 legacy ccs 命令链接；如仍需要可加 --install-legacy-ccs" "Legacy ccs symlink is no longer created by default; pass --install-legacy-ccs if still needed")"
-fi
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then

@@ -196,7 +196,7 @@ def test_install_script_uses_npm_first_cli_installs():
 
 
 def test_repo_entrypoints_use_env_python():
-    for entrypoint in ("mms", "ccs", "mmc", "mmslogs"):
+    for entrypoint in ("mms", "mmc", "mmslogs"):
         first_line = (ROOT_DIR / entrypoint).read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env python3"
 
@@ -253,24 +253,25 @@ def test_install_script_mentions_bundled_session_assets():
     assert "Caveman, weber, web-access, agent-browser, TOON, and token-saver" in text
 
 
-def test_install_script_keeps_ccs_as_legacy_opt_in():
+def test_install_script_retires_ccs_entrypoint():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
-    assert "INSTALL_LEGACY_CCS=0" in text
-    assert "--install-legacy-ccs" in text
-    assert 'ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"' in text
-    assert 'if [ "$INSTALL_LEGACY_CCS" -eq 1 ]; then' in text
-    assert 'ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"' in text
-    assert "Legacy ccs symlink is no longer created by default" in text
+    assert not (ROOT_DIR / "ccs").exists()
+    assert "INSTALL_LEGACY_CCS" not in text
+    assert "--install-legacy-ccs" not in text
+    assert 'cp "$SOURCE_DIR"/ccs "$MMS_HOME/ccs"' not in text
+    assert 'ln -sf "$MMS_HOME/ccs" "$BIN_DIR/ccs"' not in text
+    assert 'rm -f "$MMS_HOME/ccs"' in text
+    assert "Removed retired legacy ccs command link" in text
 
 
-def test_install_check_reports_legacy_ccs_as_disabled_by_default(tmp_path):
+def test_install_check_omits_retired_ccs_status(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
 
     output = _run_install_check(home=home)
 
-    assert "legacy ccs 命令链接未启用（默认不再创建）" in output
+    assert "ccs" not in output.lower()
 
 
 def test_install_script_updates_chinese_optional_copy():

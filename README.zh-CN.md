@@ -61,7 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
 - 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
-- legacy `ccs` shim 仍可通过 `--install-legacy-ccs` 显式安装，但默认不再暴露
+- legacy `ccs` shim 已下线；新安装只暴露 `mms` 命令
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
 

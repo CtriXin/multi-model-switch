@@ -15,7 +15,6 @@ FILES=(
     "MMS Installer.command"
     "mms"
     "README.md"
-    "ccs"
     "mms_core.py"
     "mms_installer.py"
     "mms_launchers.py"
