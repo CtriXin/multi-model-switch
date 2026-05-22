@@ -16,6 +16,19 @@ project-local model registry.
 `model-routes.json` is the only file that should contain API keys. Do not copy
 it into public artifacts or docs.
 
+## Reference Evidence
+
+MMS keeps source/reference snapshots under `docs/reference/`. The current model
+capability calibration snapshot lives at:
+
+- `docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.md`
+- `docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json`
+
+These files are evidence inputs for registry import/refresh. They are not live
+runtime truth and should not be consumed directly by downstream projects.
+Runtime consumers should keep reading the approved Router / Lineup / Profile /
+Policy surfaces documented below.
+
 ## Responsibilities
 
 | Question | Answer |
