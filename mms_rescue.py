@@ -55,6 +55,49 @@ _SECRET_DETECTORS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
 )
 
+_BLOCKING_STATUS_CODES = {401, 403, 408, 409, 413, 425, 429, 500, 502, 503, 504}
+_CONTEXT_OVERFLOW_MARKERS = (
+    "context_length_exceeded",
+    "context length",
+    "context window",
+    "context overflow",
+    "maximum context",
+    "max context",
+    "token limit",
+    "too many tokens",
+)
+_RATE_LIMIT_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "quota",
+    "insufficient_quota",
+    "billing quota",
+)
+_MODEL_NOT_FOUND_MARKERS = (
+    "model not found",
+    "model_not_found",
+    "unknown model",
+    "does not exist",
+    "not found",
+)
+_UNSUPPORTED_MARKERS = (
+    "unsupported",
+    "unsupported_parameter",
+    "unsupported capability",
+    "unsupported parameter",
+    "unknown parameter",
+    "invalid parameter",
+    "not supported",
+)
+_TIMEOUT_MARKERS = (
+    "timeout",
+    "timed out",
+    "deadline exceeded",
+    "read timeout",
+    "connect timeout",
+)
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -80,6 +123,47 @@ def is_secret_safe(text: str) -> bool:
 def assert_secret_safe(text: str) -> None:
     if not is_secret_safe(text):
         raise ValueError("rescue artifact still contains secret-looking content after redaction")
+
+
+def _status_int(status_code: Any) -> int | None:
+    try:
+        return int(status_code)
+    except (TypeError, ValueError):
+        return None
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    lowered = str(text or "").lower()
+    return any(marker in lowered for marker in markers)
+
+
+def classify_blocking_failure(
+    *,
+    status_code: Any = None,
+    body_text: Any = "",
+    error_type: Any = "",
+    exception: Any = "",
+) -> str:
+    """Return a stable rescue reason for failures that should write L3 rescue."""
+    status = _status_int(status_code)
+    haystack = " ".join(str(item or "") for item in (body_text, error_type, exception)).lower()
+    if status == 429 or _contains_any(haystack, _RATE_LIMIT_MARKERS):
+        return "rate_limit_or_quota"
+    if status in {408, 504} or _contains_any(haystack, _TIMEOUT_MARKERS):
+        return "timeout"
+    if status == 413 or _contains_any(haystack, _CONTEXT_OVERFLOW_MARKERS):
+        return "context_overflow"
+    if (status == 404 and "model" in haystack) or _contains_any(haystack, _MODEL_NOT_FOUND_MARKERS):
+        return "model_not_found"
+    if _contains_any(haystack, _UNSUPPORTED_MARKERS):
+        return "unsupported_capability_or_parameter"
+    if status in {401, 403}:
+        return "provider_auth_or_permission"
+    if status in {500, 502, 503}:
+        return "provider_error"
+    if status in _BLOCKING_STATUS_CODES:
+        return f"http_{status}"
+    return ""
 
 
 def is_auth_bearing_path(path: str | os.PathLike[str]) -> bool:
@@ -144,6 +228,15 @@ def build_rescue_event(
             "selected": False,
             "reason": redact_text(event.get("fallback_reason") or "file-only rescue baseline"),
         },
+        "health": _redacted_mapping(dict(event.get("health") or {})),
+        "bridge": _redacted_mapping(dict(event.get("bridge") or {})),
+        "safety": {
+            "file_only_written_first": True,
+            "automatic_model_call": False,
+            "global_oauth_fallback": "disabled",
+            "auth_bearing_state_read": False,
+            "privacy_boundary_crossed": False,
+        },
         "next_action": redact_text(event.get("next_action") or "Open latest.md and resume with a compatible model."),
     }
     serialized = _json_dumps(payload)
@@ -177,6 +270,13 @@ def render_rescue_markdown(payload: Mapping[str, Any]) -> str:
         "```text",
         str(git.get("status_short") or "not captured"),
         "```",
+        "",
+        "## Rescue Safety",
+        "",
+        "- mode: `file-only`",
+        "- automatic_model_call: `False`",
+        "- global_oauth_fallback: `disabled`",
+        "- privacy_boundary_crossed: `False`",
         "",
         "## Next Action",
         "",
@@ -253,3 +353,72 @@ def write_file_only_rescue(
             handle.write(index_line + "\n")
 
     return payload
+
+
+def record_blocking_failure(
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+    config_root: str | os.PathLike[str] | None = None,
+    model: str = "",
+    provider_id: str = "",
+    status_code: Any = None,
+    body_text: Any = "",
+    error_type: Any = "",
+    error_summary: Any = "",
+    request_url: str = "",
+    request_path: str = "",
+    route_count: Any = None,
+    bridge_surface: str = "",
+    registry_revision: str = "",
+    raw_artifacts: Mapping[str, Any] | None = None,
+    git: Mapping[str, Any] | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any] | None:
+    """Thin bridge/launcher entry: write L3 file-only rescue for blocking failures."""
+    failure_kind = classify_blocking_failure(
+        status_code=status_code,
+        body_text=body_text,
+        error_type=error_type,
+    )
+    if not failure_kind:
+        return None
+
+    status = _status_int(status_code)
+    summary = error_summary or body_text or (f"HTTP {status}" if status is not None else failure_kind)
+    failed = {
+        "model": model or "unknown",
+        "provider_id": provider_id or "unknown",
+        "status_code": status,
+        "error_type": error_type or failure_kind,
+        "error_summary": summary,
+        "request_url": request_url,
+        "request_path": request_path,
+        "route_count": route_count,
+        "failure_kind": failure_kind,
+    }
+    event = {
+        "registry_revision": registry_revision,
+        "failed": failed,
+        "git": dict(git or {}),
+        "bridge": {
+            "surface": bridge_surface or "unknown",
+            "route_count": route_count,
+        },
+        "health": {
+            "status": "degraded",
+            "reason": failure_kind,
+            "ttl_seconds": 900,
+        },
+        "fallback_reason": "L3 file-only rescue hook; automatic continuation fallback not attempted",
+        "next_action": "Open .mms/rescue/latest.md and resume with an explicitly selected compatible runtime.",
+    }
+    artifacts = dict(raw_artifacts or {})
+    if body_text not in (None, "") and "upstream-response.txt" not in artifacts:
+        artifacts["upstream-response.txt"] = body_text
+    return write_file_only_rescue(
+        event,
+        repo_root=repo_root,
+        config_root=config_root,
+        raw_artifacts=artifacts,
+        created_at=created_at,
+    )

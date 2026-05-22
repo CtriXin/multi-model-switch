@@ -1,4 +1,6 @@
+import io
 import json
+import types
 from pathlib import Path
 
 
@@ -85,3 +87,132 @@ def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_
     monkeypatch.setenv("HOME", str(session_home))
 
     assert resolve_real_mms_config_dir() == real_home / ".config" / "mms"
+
+
+def test_rescue_config_root_prefers_real_home_env(tmp_path):
+    from mms_rescue import resolve_real_mms_config_dir
+
+    session_home = tmp_path / ".config" / "mms" / "codex-gateway" / "s" / "12345"
+    mms_real = tmp_path / "mms-real"
+    real = tmp_path / "real"
+    original = tmp_path / "original"
+
+    assert resolve_real_mms_config_dir({
+        "HOME": str(session_home),
+        "MMS_REAL_HOME": str(mms_real),
+        "REAL_HOME": str(real),
+        "ORIGINAL_HOME": str(original),
+    }) == mms_real / ".config" / "mms"
+    assert resolve_real_mms_config_dir({
+        "HOME": str(session_home),
+        "REAL_HOME": str(real),
+        "ORIGINAL_HOME": str(original),
+    }) == real / ".config" / "mms"
+    assert resolve_real_mms_config_dir({
+        "HOME": str(session_home),
+        "ORIGINAL_HOME": str(original),
+    }) == original / ".config" / "mms"
+
+
+def test_record_blocking_failure_redacts_secret_upstream_body(tmp_path):
+    from mms_rescue import record_blocking_failure
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    payload = record_blocking_failure(
+        repo_root=repo,
+        config_root=tmp_path / "mms-config",
+        model="gpt-5.5",
+        provider_id="relay",
+        status_code=429,
+        body_text='{"error":{"message":"quota","access_token":"secret-token-123","api_key":"sk-live-secret-1234567890"}}',
+        request_url="https://relay.example.com/v1/responses?api_key=sk-query-secret-1234567890",
+        created_at="2026-05-22T01:02:00+00:00",
+    )
+
+    assert payload is not None
+    latest_text = (repo / ".mms" / "rescue" / "latest.json").read_text(encoding="utf-8")
+    raw_text = Path(payload["artifacts"]["raw_written"][0]).read_text(encoding="utf-8")
+    assert "secret-token" not in latest_text
+    assert "sk-live-secret" not in latest_text
+    assert "sk-query-secret" not in latest_text
+    assert "secret-token" not in raw_text
+    assert "sk-live-secret" not in raw_text
+    assert payload["safety"]["global_oauth_fallback"] == "disabled"
+    assert payload["safety"]["automatic_model_call"] is False
+
+
+def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tmp_path):
+    import mms_bridge
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    repo.mkdir()
+
+    class FakeResponse:
+        status_code = 429
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return b'{"error":{"message":"quota hit","authorization":"Bearer sk-upstream-secret-1234567890"}}'
+
+    def fail_oauth(*_args, **_kwargs):
+        raise AssertionError("global OAuth fallback must not be used")
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=lambda *_args, **_kwargs: FakeResponse()))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    monkeypatch.setattr(mms_bridge, "_load_codex_auth", fail_oauth)
+
+    raw_body = json.dumps({"model": "gpt-5.5", "input": "hi"}).encode()
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.path = "/v1/responses"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="relay-key",
+        gateway_url="https://relay.example.com/v1",
+        model_name="gpt-5.5",
+        advertised_models=["gpt-5.5"],
+        speed_scope={},
+        route_status_paths=[],
+        provider_id="private-relay",
+        provider_profile="openai",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        proxy_url="",
+        no_proxy="",
+        native_fallback_routes=[],
+        rescue_enabled=True,
+        rescue_repo_root=str(repo),
+        rescue_config_root=str(config_root),
+    )
+    captured = {"headers": []}
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *args, **kwargs: captured["headers"].append(args)
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["status"] == 429
+    latest_json = repo / ".mms" / "rescue" / "latest.json"
+    assert latest_json.exists()
+    payload = json.loads(latest_json.read_text(encoding="utf-8"))
+    assert payload["rescue_level"] == "L3_file_only"
+    assert payload["failed"]["status_code"] == 429
+    assert payload["failed"]["failure_kind"] == "rate_limit_or_quota"
+    assert payload["fallback"]["selected"] is False
+    assert payload["safety"]["global_oauth_fallback"] == "disabled"
+    assert "sk-upstream-secret" not in latest_json.read_text(encoding="utf-8")
+    assert (config_root / "rescue" / "index.jsonl").exists()
