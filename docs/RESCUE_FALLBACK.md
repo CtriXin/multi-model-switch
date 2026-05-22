@@ -1,6 +1,6 @@
 # MMS Rescue Fallback
 
-Status: L3 file-only foundation with thin bridge hook and TUI rescue viewer.
+Status: L3 file-only foundation with thin bridge hook, TUI rescue viewer, and safe fallback handover generation.
 
 ## Current Scope
 
@@ -11,6 +11,7 @@ Status: L3 file-only foundation with thin bridge hook and TUI rescue viewer.
 - Keeps private/public boundary crossing disabled.
 - Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
 - When no packets exist, the TUI can create a safe demo rescue packet for local verification; it makes no upstream/model request.
+- For an existing packet, the TUI can generate `fallback-handover.md/json` for an explicitly selected fallback model; it still makes no model call.
 
 ## Artifacts
 
@@ -22,6 +23,10 @@ Repo-local:
 <repo>/.mms/rescue/<timestamp>/rescue.json
 <repo>/.mms/rescue/<timestamp>/rescue.md
 <repo>/.mms/rescue/<timestamp>/raw/*
+<repo>/.mms/rescue/<timestamp>/fallback-handover.json
+<repo>/.mms/rescue/<timestamp>/fallback-handover.md
+<repo>/.mms/rescue/latest-fallback-handover.json
+<repo>/.mms/rescue/latest-fallback-handover.md
 ```
 
 Global metadata index:
@@ -45,6 +50,6 @@ It must not write rescue metadata under an isolated session HOME such as `.confi
 ## Not Implemented Yet
 
 - No full continuation fallback.
-- No fallback model selection or model call.
+- No automatic fallback model call; fallback handover generation is file-only and explicit.
 - No automatic session resume; the TUI viewer is read-only recovery metadata + packet display.
 - No registry DB persistence beyond the file-only metadata/index shape.

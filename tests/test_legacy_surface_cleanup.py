@@ -39,6 +39,68 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     assert "fake_upstream" not in ids
 
 
+def test_about_release_version_prefers_installed_version(monkeypatch) -> None:
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_load_version_meta",
+        lambda: {
+            "installed_version": "v9.9.9",
+            "installed_ref": "release-ref",
+            "install_channel": "latest-tag",
+            "source": "install.sh",
+        },
+    )
+    monkeypatch.setattr(mms_core, "_git_output", lambda args: "git-value")
+
+    info = mms_core._release_version_info()
+
+    assert info["release"] == "v9.9.9"
+    assert info["install_channel"] == "latest-tag"
+    assert info["source"] == "install.sh"
+
+
+def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch) -> None:
+    import mms_core
+
+    monkeypatch.setattr(
+        mms_core,
+        "_load_usage_stats",
+        lambda: {
+            "last_by_cli": {
+                "codex": {"model": "recent-model", "last_used_at": "2026-05-22T10:00:00Z"},
+            },
+            "sources": {
+                "provider:codex:relay": {
+                    "models": {"older-model": 2, "failed-model": 9},
+                    "model_last_used_at": {
+                        "older-model": "2026-05-21T10:00:00Z",
+                        "failed-model": "2026-05-22T11:00:00Z",
+                    },
+                }
+            },
+        },
+    )
+    cfg = {
+        "providers": [
+            {
+                "enabled": True,
+                "extra_models": ["configured-model"],
+                "fallback_models": ["fallback-model"],
+            }
+        ]
+    }
+
+    candidates = mms_core._rescue_fallback_model_candidates(
+        cfg,
+        {"failed_model": "failed-model"},
+        limit=4,
+    )
+
+    assert candidates[:4] == ["recent-model", "older-model", "configured-model", "fallback-model"]
+
+
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
     import mms_chat
     import mms_discuss

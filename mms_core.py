@@ -749,6 +749,43 @@ def display_title():
     return "MMS"
 
 
+def _git_output(args):
+    try:
+        result = subprocess.run(
+            ["git", "-C", os.path.dirname(os.path.abspath(__file__)), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _release_version_info():
+    version_meta = _load_version_meta()
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    installed_ref = str(version_meta.get("installed_ref") or "").strip()
+    git_describe = _git_output(["describe", "--tags", "--always", "--dirty"])
+    git_branch = _git_output(["branch", "--show-current"])
+    git_commit = _git_output(["rev-parse", "--short", "HEAD"])
+    release = installed_version or git_describe or git_commit or "dev"
+    return {
+        "release": release,
+        "installed_version": installed_version,
+        "installed_ref": installed_ref,
+        "git_describe": git_describe,
+        "git_branch": git_branch,
+        "git_commit": git_commit,
+        "install_channel": str(version_meta.get("install_channel") or "").strip(),
+        "source": str(version_meta.get("source") or "").strip(),
+    }
+
+
 def config_command_hint():
     return f"{current_command()} config api.edit"
 
@@ -4692,6 +4729,65 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
     launches = sum(int(item.get("launches", 0)) for item in rows)
     last_used_at = rows[0].get("last_used_at", "") if rows else ""
     return launches, last_used_at
+
+
+def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
+    failed_model = str((rescue_event or {}).get("failed_model") or "").strip().lower()
+    rows = {}
+
+    def add(model, *, last_used_at="", source_rank=1000):
+        name = str(model or "").strip()
+        if not name or name.lower() == failed_model:
+            return
+        key = name.lower()
+        existing = rows.get(key)
+        candidate = {
+            "model": name,
+            "last_used_at": str(last_used_at or "").strip(),
+            "source_rank": int(source_rank),
+        }
+        if existing is None:
+            rows[key] = candidate
+            return
+        existing_key = (str(existing.get("last_used_at") or ""), -int(existing.get("source_rank") or 0))
+        candidate_key = (candidate["last_used_at"], -candidate["source_rank"])
+        if candidate_key > existing_key:
+            rows[key] = candidate
+
+    stats = _load_usage_stats()
+    for item in (stats.get("last_by_cli") or {}).values():
+        if not isinstance(item, dict):
+            continue
+        add(item.get("model"), last_used_at=item.get("last_used_at"), source_rank=0)
+    for source in (stats.get("sources") or {}).values():
+        if not isinstance(source, dict):
+            continue
+        model_last_used = source.get("model_last_used_at") if isinstance(source.get("model_last_used_at"), dict) else {}
+        for model_name in (source.get("models") or {}).keys():
+            add(model_name, last_used_at=model_last_used.get(model_name), source_rank=10)
+        add(source.get("last_model"), last_used_at=source.get("last_used_at"), source_rank=5)
+
+    rank = 100
+    for provider_def in (cfg or {}).get("providers", []) or []:
+        if not isinstance(provider_def, dict) or not provider_def.get("enabled", True):
+            continue
+        for field in ("extra_models", "fallback_models"):
+            for model_name in provider_def.get(field) or []:
+                add(model_name, source_rank=rank)
+                rank += 1
+
+    values = list(rows.values())
+    recent = sorted(
+        [item for item in values if item.get("last_used_at")],
+        key=lambda item: (str(item.get("last_used_at") or ""), -int(item.get("source_rank") or 0)),
+        reverse=True,
+    )
+    cold = sorted(
+        [item for item in values if not item.get("last_used_at")],
+        key=lambda item: (int(item.get("source_rank") or 0), str(item.get("model") or "").lower()),
+    )
+    ordered = recent + cold
+    return [item["model"] for item in ordered[: max(int(limit or 1), 1)]]
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):
@@ -9904,13 +10000,24 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "about":
+                version_info = _release_version_info()
                 console.print(f"[cyan]{display_title()}[/cyan]")
+                console.print(f"[green]Release: {version_info.get('release') or 'dev'}[/green]")
+                if version_info.get("git_branch") or version_info.get("git_commit"):
+                    console.print(
+                        f"[dim]Git: {version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}[/dim]"
+                    )
+                if version_info.get("install_channel") or version_info.get("source"):
+                    console.print(
+                        f"[dim]Install: {version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}[/dim]"
+                    )
                 console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
+                _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
             elif settings_action == "rescue":
                 from pathlib import Path
-                from mms_rescue import list_rescue_events, write_demo_rescue_packet
+                from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
                 if not rescue_events:
@@ -9949,11 +10056,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     ("原因", selected_rescue.get("failure_kind") or "-"),
                     ("Repo", selected_rescue.get("repo_path") or "-"),
                 ]
+                fallback_candidates = _rescue_fallback_model_candidates(current_cfg, selected_rescue, limit=5)
+                fallback_actions = [
+                    (f"handover::{model}", f"生成 fallback handover -> {model}")
+                    for model in fallback_candidates
+                ]
                 rescue_action = _safe_tui_call(
                     select_channel_action_tui,
                     "Rescue Packet",
                     info_lines,
-                    [
+                    fallback_actions + [
+                        ("manual_handover", "手动输入 fallback model"),
                         ("view_md", "查看 rescue.md"),
                         ("show_paths", "显示文件路径"),
                         ("back", "返回"),
@@ -9978,6 +10091,26 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     console.print(f"[cyan]rescue.md[/cyan] {selected_rescue.get('artifact_markdown') or '-'}")
                     console.print(f"[cyan]rescue.json[/cyan] {selected_rescue.get('artifact_json') or '-'}")
                     _pause_after_tui_report("按 Enter 返回设置")
+                elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
+                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("handover::") else ""
+                    if not fallback_model:
+                        _ensure_rich()
+                        fallback_model = Prompt.ask("fallback model", default="").strip()
+                    if fallback_model:
+                        try:
+                            handover = write_fallback_handover(
+                                selected_rescue,
+                                fallback_model=fallback_model,
+                            )
+                        except Exception as exc:
+                            console.print(f"[red]生成 fallback handover 失败: {exc}[/red]")
+                        else:
+                            artifacts = handover.get("artifacts", {})
+                            console.print(f"[green]✓ 已生成 fallback handover[/green]")
+                            console.print(f"[cyan]model[/cyan] {fallback_model}")
+                            console.print(f"[cyan]handover.md[/cyan] {artifacts.get('markdown') or '-'}")
+                            console.print(f"[dim]latest: {artifacts.get('latest_markdown') or '-'}[/dim]")
+                        _pause_after_tui_report("按 Enter 返回设置")
             continue
 
         # ── 上次使用 ──

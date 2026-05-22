@@ -13,6 +13,7 @@ from mms_state_io import atomic_write_text, locked_state_file, resolve_real_user
 
 RESCUE_SCHEMA = "mms.rescue_event.v1"
 GLOBAL_INDEX_SCHEMA = "mms.rescue_index.v1"
+FALLBACK_HANDOVER_SCHEMA = "mms.rescue_fallback_handover.v1"
 _RESCUE_LIST_LIMIT = 20
 
 _AUTH_BEARING_PATH_PARTS = {
@@ -304,6 +305,170 @@ def write_demo_rescue_packet(
         raw_artifacts={"demo-upstream-response.txt": "demo only; no upstream request was made"},
         created_at=created_at,
     )
+
+
+def _handover_context_policy(payload: Mapping[str, Any]) -> dict[str, Any]:
+    failed = payload.get("failed") if isinstance(payload.get("failed"), Mapping) else {}
+    failure_kind = str(failed.get("failure_kind") or failed.get("error_type") or "").strip()
+    status = _status_int(failed.get("status_code"))
+    if status == 413 or failure_kind == "context_overflow":
+        return {
+            "mode": "compact_first",
+            "reason": "The failed run looks context-bound; compact or summarize before using a smaller fallback model.",
+        }
+    return {
+        "mode": "handover_first",
+        "reason": "A fallback model can start from the generated handover packet without replaying the full transcript.",
+    }
+
+
+def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
+    failed = payload.get("failed") if isinstance(payload.get("failed"), Mapping) else {}
+    fallback = payload.get("fallback") if isinstance(payload.get("fallback"), Mapping) else {}
+    context_policy = payload.get("context_policy") if isinstance(payload.get("context_policy"), Mapping) else {}
+    source_artifacts = payload.get("source_artifacts") if isinstance(payload.get("source_artifacts"), Mapping) else {}
+    lines = [
+        "# MMS Rescue Fallback Handover",
+        "",
+        f"- schema: `{payload.get('schema')}`",
+        f"- created_at: `{payload.get('created_at')}`",
+        f"- source_event_id: `{payload.get('source_event_id') or 'unknown'}`",
+        f"- repo_path: `{payload.get('repo_path') or 'unknown'}`",
+        "",
+        "## Failed Route",
+        "",
+        f"- model: `{failed.get('model') or 'unknown'}`",
+        f"- provider_id: `{failed.get('provider_id') or 'unknown'}`",
+        f"- status_code: `{failed.get('status_code') or 'unknown'}`",
+        f"- failure_kind: `{failed.get('failure_kind') or failed.get('error_type') or 'unknown'}`",
+        f"- summary: {failed.get('error_summary') or 'unknown'}",
+        "",
+        "## Fallback Target",
+        "",
+        f"- model: `{fallback.get('model') or 'manual-select'}`",
+        f"- cli: `{fallback.get('cli') or 'select in MMS'}`",
+        f"- mode: `{fallback.get('mode') or 'manual_handover'}`",
+        "",
+        "## Context Policy",
+        "",
+        f"- mode: `{context_policy.get('mode') or 'handover_first'}`",
+        f"- reason: {context_policy.get('reason') or '-'}",
+        "",
+        "## Continue Prompt",
+        "",
+        "```text",
+        "Continue from this MMS rescue handover.",
+        f"Repo: {payload.get('repo_path') or 'unknown'}",
+        f"Previous failed model: {failed.get('model') or 'unknown'}",
+        f"Failure: {failed.get('failure_kind') or failed.get('error_type') or 'unknown'} / {failed.get('status_code') or 'unknown'}",
+        f"Fallback target: {fallback.get('model') or 'manual-select'}",
+        "",
+        "Read the rescue packet first, summarize the needed state, then finish only the smallest safe next step.",
+        "Do not replay unrelated transcript. If context_policy is compact_first, create a concise checkpoint before continuing.",
+        "```",
+        "",
+        "## Source Artifacts",
+        "",
+        f"- rescue.md: `{source_artifacts.get('markdown') or '-'}`",
+        f"- rescue.json: `{source_artifacts.get('json') or '-'}`",
+        "",
+        "## Safety",
+        "",
+        "- automatic_model_call: `False`",
+        "- auth_bearing_state_read: `False`",
+        "- privacy_boundary_crossed: `False`",
+        "",
+    ]
+    text = "\n".join(lines)
+    assert_secret_safe(text)
+    return text
+
+
+def write_fallback_handover(
+    rescue_event: Mapping[str, Any],
+    *,
+    fallback_model: str,
+    fallback_cli: str = "",
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Write a safe continuation packet for an explicit fallback model; no model call."""
+    model = str(fallback_model or "").strip()
+    if not model:
+        raise ValueError("fallback_model is required")
+
+    artifact_json = str(rescue_event.get("artifact_json") or "").strip()
+    source_payload = _read_json_object(artifact_json) if artifact_json else {}
+    if not source_payload:
+        source_payload = {
+            "event_id": rescue_event.get("event_id") or "",
+            "created_at": rescue_event.get("created_at") or "",
+            "repo_path": rescue_event.get("repo_path") or os.getcwd(),
+            "failed": {
+                "model": rescue_event.get("failed_model") or "",
+                "provider_id": rescue_event.get("failed_provider_id") or "",
+                "status_code": rescue_event.get("status_code"),
+                "failure_kind": rescue_event.get("failure_kind") or "",
+                "error_summary": rescue_event.get("error_summary") or "",
+            },
+            "artifacts": {
+                "json": rescue_event.get("artifact_json") or "",
+                "markdown": rescue_event.get("artifact_markdown") or "",
+            },
+        }
+
+    failed = _redacted_mapping(dict(source_payload.get("failed") or {}))
+    repo_path = str(source_payload.get("repo_path") or rescue_event.get("repo_path") or os.getcwd())
+    artifacts = source_payload.get("artifacts") if isinstance(source_payload.get("artifacts"), Mapping) else {}
+    created = created_at or utc_now_iso()
+    event_dir = Path(str(artifacts.get("dir") or "")).expanduser()
+    if not str(event_dir) or not event_dir.exists():
+        source_json_path = Path(artifact_json).expanduser() if artifact_json else None
+        event_dir = source_json_path.parent if source_json_path and source_json_path.exists() else Path(repo_path) / ".mms" / "rescue" / "fallback-handover"
+    event_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "schema": FALLBACK_HANDOVER_SCHEMA,
+        "created_at": created,
+        "source_event_id": source_payload.get("event_id") or rescue_event.get("event_id") or "",
+        "repo_path": repo_path,
+        "failed": failed,
+        "fallback": {
+            "selected": True,
+            "model": redact_text(model),
+            "cli": redact_text(fallback_cli or ""),
+            "mode": "manual_handover",
+            "automatic_model_call": False,
+        },
+        "context_policy": _handover_context_policy(source_payload),
+        "source_artifacts": {
+            "json": str(artifacts.get("json") or rescue_event.get("artifact_json") or ""),
+            "markdown": str(artifacts.get("markdown") or rescue_event.get("artifact_markdown") or ""),
+        },
+        "safety": {
+            "file_only_written_first": True,
+            "automatic_model_call": False,
+            "global_oauth_fallback": "disabled",
+            "auth_bearing_state_read": False,
+            "privacy_boundary_crossed": False,
+        },
+    }
+    handover_json = event_dir / "fallback-handover.json"
+    handover_md = event_dir / "fallback-handover.md"
+    repo_rescue = Path(repo_path) / ".mms" / "rescue"
+    payload["artifacts"] = {
+        "json": str(handover_json),
+        "markdown": str(handover_md),
+        "latest_json": str(repo_rescue / "latest-fallback-handover.json"),
+        "latest_markdown": str(repo_rescue / "latest-fallback-handover.md"),
+    }
+    json_text = _json_dumps(payload)
+    assert_secret_safe(json_text)
+    md_text = _fallback_handover_markdown(payload)
+    atomic_write_text(handover_json, json_text, mode=0o600)
+    atomic_write_text(handover_md, md_text, mode=0o600)
+    atomic_write_text(repo_rescue / "latest-fallback-handover.json", json_text, mode=0o600)
+    atomic_write_text(repo_rescue / "latest-fallback-handover.md", md_text, mode=0o600)
+    return payload
 
 
 def _event_id(created_at: str, repo_path: str, failed_model: str) -> str:

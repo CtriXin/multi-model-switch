@@ -137,6 +137,44 @@ def test_write_demo_rescue_packet_is_listable_and_marked_demo(tmp_path):
     assert "Demo rescue packet" in events[0]["error_summary"]
 
 
+def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
+    from mms_rescue import list_rescue_events, write_fallback_handover, write_file_only_rescue
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    repo.mkdir()
+    write_file_only_rescue(
+        {
+            "failed": {
+                "model": "failed-model",
+                "provider_id": "relay",
+                "status_code": 413,
+                "failure_kind": "context_overflow",
+                "error_summary": "context window exceeded",
+            },
+        },
+        repo_root=repo,
+        config_root=config_root,
+        created_at="2026-05-22T04:00:00+00:00",
+    )
+    event = list_rescue_events(repo_root=repo, config_root=config_root)[0]
+
+    handover = write_fallback_handover(
+        event,
+        fallback_model="fallback-model",
+        created_at="2026-05-22T04:01:00+00:00",
+    )
+
+    assert handover["schema"] == "mms.rescue_fallback_handover.v1"
+    assert handover["fallback"]["automatic_model_call"] is False
+    assert handover["context_policy"]["mode"] == "compact_first"
+    md_path = Path(handover["artifacts"]["markdown"])
+    latest_path = repo / ".mms" / "rescue" / "latest-fallback-handover.md"
+    assert md_path.exists()
+    assert latest_path.exists()
+    assert "fallback-model" in md_path.read_text(encoding="utf-8")
+
+
 def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_path):
     from mms_rescue import resolve_real_mms_config_dir
 
