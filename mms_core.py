@@ -9851,8 +9851,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         # ── 设置 ──
         elif action_type == "settings":
             from mms_tui import (
+                select_channel_action_tui,
                 select_fake_upstream_tui,
                 select_language_tui,
+                select_rescue_event_tui,
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
@@ -9918,6 +9920,58 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
+            elif settings_action == "rescue":
+                from pathlib import Path
+                from mms_rescue import list_rescue_events
+
+                rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
+                if not rescue_events:
+                    console.print("[yellow]没有找到 rescue packet[/yellow]")
+                    console.print("[dim]触发 429/context/provider blocking failure 后会写入 repo/.mms/rescue/latest.md[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                    continue
+                selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
+                if selected_rescue == "__interrupt__":
+                    return True
+                if not selected_rescue:
+                    continue
+                info_lines = [
+                    ("时间", selected_rescue.get("created_at") or "-"),
+                    ("模型", selected_rescue.get("failed_model") or "-"),
+                    ("Provider", selected_rescue.get("failed_provider_id") or "-"),
+                    ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
+                    ("原因", selected_rescue.get("failure_kind") or "-"),
+                    ("Repo", selected_rescue.get("repo_path") or "-"),
+                ]
+                rescue_action = _safe_tui_call(
+                    select_channel_action_tui,
+                    "Rescue Packet",
+                    info_lines,
+                    [
+                        ("view_md", "查看 rescue.md"),
+                        ("show_paths", "显示文件路径"),
+                        ("back", "返回"),
+                    ],
+                )
+                if rescue_action == "__interrupt__":
+                    return True
+                if rescue_action == "view_md":
+                    md_path = Path(str(selected_rescue.get("artifact_markdown") or ""))
+                    try:
+                        content = md_path.read_text(encoding="utf-8")
+                    except OSError as exc:
+                        console.print(f"[red]无法读取 rescue.md: {exc}[/red]")
+                    else:
+                        try:
+                            console.clear()
+                        except Exception:
+                            pass
+                        console.print(content)
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif rescue_action == "show_paths":
+                    console.print(f"[cyan]rescue.md[/cyan] {selected_rescue.get('artifact_markdown') or '-'}")
+                    console.print(f"[cyan]rescue.json[/cyan] {selected_rescue.get('artifact_json') or '-'}")
+                    _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "recommend":
                 current_cfg = _run_recommend_mgmt_tui(current_cfg)
                 _families_dirty = True

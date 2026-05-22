@@ -1,6 +1,6 @@
 # MMS Rescue Fallback
 
-Status: L3 file-only foundation with thin bridge hook.
+Status: L3 file-only foundation with thin bridge hook and TUI rescue viewer.
 
 ## Current Scope
 
@@ -9,6 +9,7 @@ Status: L3 file-only foundation with thin bridge hook.
 - Keeps automatic continuation fallback disabled.
 - Keeps global OAuth fallback disabled.
 - Keeps private/public boundary crossing disabled.
+- Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
 
 ## Artifacts
 
@@ -44,5 +45,5 @@ It must not write rescue metadata under an isolated session HOME such as `.confi
 
 - No full continuation fallback.
 - No fallback model selection or model call.
-- No TUI interrupted-session panel.
+- No automatic session resume; the TUI viewer is read-only recovery metadata + packet display.
 - No registry DB persistence beyond the file-only metadata/index shape.

@@ -13,6 +13,7 @@ from mms_state_io import atomic_write_text, locked_state_file, resolve_real_user
 
 RESCUE_SCHEMA = "mms.rescue_event.v1"
 GLOBAL_INDEX_SCHEMA = "mms.rescue_index.v1"
+_RESCUE_LIST_LIMIT = 20
 
 _AUTH_BEARING_PATH_PARTS = {
     ".claude.json",
@@ -182,6 +183,98 @@ def _safe_artifact_name(name: str) -> str:
 
 def _json_dumps(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _read_json_object(path: str | os.PathLike[str]) -> dict[str, Any]:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _rescue_event_from_payload(payload: Mapping[str, Any], index_item: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    failed = payload.get("failed") if isinstance(payload.get("failed"), Mapping) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), Mapping) else {}
+    item = dict(index_item or {})
+    artifact_json = str(item.get("artifact_json") or artifacts.get("json") or "").strip()
+    artifact_markdown = str(item.get("artifact_markdown") or artifacts.get("markdown") or "").strip()
+    return {
+        "schema": str(item.get("schema") or GLOBAL_INDEX_SCHEMA),
+        "event_id": str(payload.get("event_id") or item.get("event_id") or ""),
+        "created_at": str(payload.get("created_at") or item.get("created_at") or ""),
+        "repo_path": str(payload.get("repo_path") or item.get("repo_path") or ""),
+        "rescue_level": str(payload.get("rescue_level") or item.get("rescue_level") or ""),
+        "failed_model": str(failed.get("model") or item.get("failed_model") or ""),
+        "failed_provider_id": str(failed.get("provider_id") or item.get("failed_provider_id") or ""),
+        "status_code": failed.get("status_code"),
+        "failure_kind": str(failed.get("failure_kind") or failed.get("error_type") or ""),
+        "error_summary": redact_text(failed.get("error_summary") or ""),
+        "artifact_json": artifact_json,
+        "artifact_markdown": artifact_markdown,
+        "next_action": redact_text(payload.get("next_action") or ""),
+    }
+
+
+def list_rescue_events(
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+    config_root: str | os.PathLike[str] | None = None,
+    limit: int = _RESCUE_LIST_LIMIT,
+) -> list[dict[str, Any]]:
+    """Return recent rescue events from the global index plus current repo latest."""
+    cfg = Path(config_root).expanduser().resolve() if config_root else resolve_real_mms_config_dir()
+    index_path = cfg / "rescue" / "index.jsonl"
+    candidates: list[dict[str, Any]] = []
+    if index_path.exists():
+        try:
+            lines = index_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines[-max(int(limit or 1) * 3, 1):]:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(item, dict):
+                continue
+            payload = _read_json_object(str(item.get("artifact_json") or ""))
+            if payload:
+                candidates.append(_rescue_event_from_payload(payload, item))
+            else:
+                candidates.append({
+                    "schema": str(item.get("schema") or GLOBAL_INDEX_SCHEMA),
+                    "event_id": str(item.get("event_id") or ""),
+                    "created_at": str(item.get("created_at") or ""),
+                    "repo_path": str(item.get("repo_path") or ""),
+                    "rescue_level": str(item.get("rescue_level") or ""),
+                    "failed_model": str(item.get("failed_model") or ""),
+                    "failed_provider_id": str(item.get("failed_provider_id") or ""),
+                    "status_code": "",
+                    "failure_kind": "",
+                    "error_summary": "",
+                    "artifact_json": str(item.get("artifact_json") or ""),
+                    "artifact_markdown": str(item.get("artifact_markdown") or ""),
+                    "next_action": "",
+                })
+
+    repo = Path(repo_root or os.getcwd()).expanduser().resolve()
+    local_latest = repo / ".mms" / "rescue" / "latest.json"
+    if local_latest.exists():
+        payload = _read_json_object(local_latest)
+        if payload:
+            candidates.append(_rescue_event_from_payload(payload))
+
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in candidates:
+        key = str(item.get("event_id") or item.get("artifact_json") or item.get("artifact_markdown") or id(item))
+        deduped[key] = item
+    events = sorted(
+        deduped.values(),
+        key=lambda item: str(item.get("created_at") or ""),
+        reverse=True,
+    )
+    return events[: max(int(limit or _RESCUE_LIST_LIMIT), 1)]
 
 
 def _event_id(created_at: str, repo_path: str, failed_model: str) -> str:

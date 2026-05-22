@@ -76,6 +76,47 @@ def test_write_file_only_rescue_skips_auth_bearing_raw_files(tmp_path):
     assert Path(payload["artifacts"]["raw_written"][0]).name == "safe-log.txt"
 
 
+def test_list_rescue_events_loads_recent_enriched_payloads(tmp_path):
+    from mms_rescue import list_rescue_events, write_file_only_rescue
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    repo.mkdir()
+    write_file_only_rescue(
+        {
+            "failed": {
+                "model": "older-model",
+                "provider_id": "relay-a",
+                "status_code": 429,
+                "failure_kind": "rate_limit_or_quota",
+            },
+        },
+        repo_root=repo,
+        config_root=config_root,
+        created_at="2026-05-22T01:00:00+00:00",
+    )
+    write_file_only_rescue(
+        {
+            "failed": {
+                "model": "newer-model",
+                "provider_id": "relay-b",
+                "status_code": 413,
+                "failure_kind": "context_overflow",
+            },
+        },
+        repo_root=repo,
+        config_root=config_root,
+        created_at="2026-05-22T02:00:00+00:00",
+    )
+
+    events = list_rescue_events(repo_root=repo, config_root=config_root, limit=5)
+
+    assert [event["failed_model"] for event in events] == ["newer-model", "older-model"]
+    assert events[0]["failed_provider_id"] == "relay-b"
+    assert events[0]["status_code"] == 413
+    assert events[0]["artifact_markdown"].endswith("rescue.md")
+
+
 def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_path):
     from mms_rescue import resolve_real_mms_config_dir
 

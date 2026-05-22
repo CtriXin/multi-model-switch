@@ -2249,6 +2249,7 @@ def _settings_menu():
     return [
         {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
         {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
+        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("查看最近失败与 rescue packet", "View recent failures and rescue packets")},
         {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
         {"id": "fake_upstream", "label": _L("Fake Upstream", "Fake Upstream"), "desc": fake_desc},
@@ -2392,6 +2393,96 @@ def select_settings_tui():
                 idx = (idx + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER):
                 return items[idx]["id"]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
+def _rescue_event_title(event):
+    created = str(event.get("created_at") or "")[:19].replace("T", " ")
+    model = str(event.get("failed_model") or "unknown")
+    status = str(event.get("status_code") or event.get("failure_kind") or "")
+    return f"{created}  {model}  {status}".strip()
+
+
+def select_rescue_event_tui(events):
+    """选择最近的 Rescue packet。"""
+    events = list(events or [])
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+            total_w = min(92, max_w - 4)
+            visible_h = max(1, min(len(events), max_y - 10))
+            ph = visible_h + 7
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, _L("中断/救援", "Interrupted / Rescue"), curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            if not events:
+                _safe_addstr(stdscr, row, ll + 1, _L("没有找到 rescue packet", "No rescue packets found"), curses.A_DIM)
+                row += 1
+            else:
+                start = max(0, min(idx - visible_h + 1, len(events) - visible_h))
+                for offset, event in enumerate(events[start:start + visible_h]):
+                    i = start + offset
+                    y = row + offset
+                    is_sel = i == idx
+                    repo_name = os.path.basename(str(event.get("repo_path") or "")) or "-"
+                    provider = str(event.get("failed_provider_id") or "-")
+                    line = f"{_rescue_event_title(event)}  · {provider} · {repo_name}"
+                    if is_sel:
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, line, curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 6)
+                    else:
+                        _safe_addstr(stdscr, y, ll + 1, line, curses.color_pair(2), max_w=total_w - 6)
+                row += visible_h
+
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+            if events:
+                _safe_addstr(stdscr, row, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 6, _L("详情", "Details"), curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 15, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 19, _L("返回", "Back"), curses.A_DIM)
+            else:
+                _safe_addstr(stdscr, row, ll, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 4, _L("返回", "Back"), curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP and events:
+                idx = (idx - 1) % len(events)
+            elif key == curses.KEY_DOWN and events:
+                idx = (idx + 1) % len(events)
+            elif key in (10, 13, curses.KEY_ENTER) and events:
+                return events[idx]
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
