@@ -29,6 +29,75 @@ runtime truth and should not be consumed directly by downstream projects.
 Runtime consumers should keep reading the approved Router / Lineup / Profile /
 Policy surfaces documented below.
 
+## Latest-Approved Bundle
+
+Local Registry v2 introduces a single consumer-facing latest-approved bundle.
+New consumers should treat this manifest as the canonical entrypoint:
+
+```text
+~/.config/mms/generated/model-registry.latest-approved.json
+```
+
+The bundle pins every generated export to one approved revision set:
+
+```json
+{
+  "schema": "mms.model_registry.latest_approved.v1",
+  "bundle_revision": "bundle_20260522_001",
+  "model_registry_revision": "bundle_20260522_001",
+  "capability_revision": "cap_20260522_001",
+  "route_revision": "route_20260522_001",
+  "policy_revision": "policy_20260522_001",
+  "profile_revision": "profile_20260522_001",
+  "generated_at": "2026-05-22T00:00:00.000Z",
+  "files": {
+    "router": {
+      "canonical_path": "generated/model-routes.json",
+      "legacy_alias_path": "model-routes.json",
+      "sha256": "<hex>",
+      "sensitivity": "secret"
+    },
+    "lineup": {
+      "canonical_path": "generated/model-routes.lineup.json",
+      "legacy_alias_path": "model-routes.lineup.json",
+      "sha256": "<hex>",
+      "sensitivity": "non-secret"
+    },
+    "profile": {
+      "canonical_path": "generated/provider-profiles.generated.json",
+      "legacy_alias_path": "",
+      "sha256": "<hex>",
+      "sensitivity": "non-secret"
+    },
+    "policy": {
+      "canonical_path": "generated/model-policy.effective.json",
+      "legacy_alias_path": "model-policy.json",
+      "sha256": "<hex>",
+      "sensitivity": "non-secret"
+    }
+  }
+}
+```
+
+Bundle rules:
+
+- The manifest is the v2 canonical consumer contract; legacy root files remain
+  compatibility aliases/copies, not independent truth.
+- Generated v2 exports MUST carry the same `model_registry_revision` or
+  `bundle_revision` when their strict legacy shape allows it. If a legacy root
+  file must stay shape-compatible, the manifest hash is the revision tie.
+- Consumers must verify per-file hashes and must not combine route, lineup,
+  profile, or policy files from different bundles.
+- Publishing uses atomic temp-file + rename: write canonical payloads first,
+  refresh legacy aliases, then rename the manifest last.
+- `provider-profiles.generated.json` and `model-policy.effective.json` are
+  consumer-facing only when referenced by the manifest; human-maintained source
+  files stay separate.
+
+See `docs/REGISTRY_ARCHITECTURE.md` for the full source/candidate/approved/
+runtime/health layer contract, `privacy_boundary` gates, deletion/tombstone
+rules, and reference-snapshot ingestion boundaries.
+
 ## Responsibilities
 
 | Question | Answer |
@@ -176,6 +245,12 @@ surfaces can stay project-owned until explicitly migrated.
 | Moebius | Prefer Lineup/Policy for planning and audit; do not read API keys unless dispatching through Ant/Hive; gates must consume downstream `cache_transport_evidence.v1`. |
 | Agent Soul local | Router for text-model URL/key; Lineup for context/reference; Policy for visibility; Jimeng stays Agent Soul-owned. |
 | Agent Soul online | Sync server-private copies of Router/Lineup/Profile/Policy during deploy; never fold Jimeng keys into MMS files. |
+
+Consumers that adopt Local Registry v2 must resolve through the latest-approved
+bundle manifest or a future `mms registry resolve` API. They must not read the
+SQLite schema directly, and they should record `bundle_revision`,
+`capability_revision`, `route_revision`, `policy_revision`, and
+`profile_revision` in run artifacts.
 
 ## Runtime Transport And Cache Evidence
 
