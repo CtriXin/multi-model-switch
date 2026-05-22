@@ -10,6 +10,7 @@ Status: L3 file-only foundation with thin bridge hook and TUI rescue viewer.
 - Keeps global OAuth fallback disabled.
 - Keeps private/public boundary crossing disabled.
 - Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
+- When no packets exist, the TUI can create a safe demo rescue packet for local verification; it makes no upstream/model request.
 
 ## Artifacts
 

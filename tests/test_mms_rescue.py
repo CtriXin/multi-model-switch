@@ -117,6 +117,26 @@ def test_list_rescue_events_loads_recent_enriched_payloads(tmp_path):
     assert events[0]["artifact_markdown"].endswith("rescue.md")
 
 
+def test_write_demo_rescue_packet_is_listable_and_marked_demo(tmp_path):
+    from mms_rescue import list_rescue_events, write_demo_rescue_packet
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    repo.mkdir()
+
+    payload = write_demo_rescue_packet(
+        repo_root=repo,
+        config_root=config_root,
+        created_at="2026-05-22T03:00:00+00:00",
+    )
+    events = list_rescue_events(repo_root=repo, config_root=config_root, limit=5)
+
+    assert payload["failed"]["model"] == "demo-rescue-model"
+    assert events[0]["failed_model"] == "demo-rescue-model"
+    assert events[0]["failed_provider_id"] == "demo-provider"
+    assert "Demo rescue packet" in events[0]["error_summary"]
+
+
 def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_path):
     from mms_rescue import resolve_real_mms_config_dir
 

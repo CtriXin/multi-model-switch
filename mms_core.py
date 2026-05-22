@@ -9852,7 +9852,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         elif action_type == "settings":
             from mms_tui import (
                 select_channel_action_tui,
-                select_fake_upstream_tui,
                 select_language_tui,
                 select_rescue_event_tui,
                 select_settings_tui,
@@ -9896,17 +9895,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     current_cfg.setdefault("ui", {})["language"] = chosen_lang
                     save_config(current_cfg)
                     set_language(chosen_lang)
-            elif settings_action == "fake_upstream":
-                selected_fake = _safe_tui_call(select_fake_upstream_tui)
-                if selected_fake == "__interrupt__":
-                    return True
-                if selected_fake in {"on", "off"}:
-                    _set_fake_upstream_enabled(selected_fake == "on")
-                    status_payload = _fake_upstream_status_payload()
-                    console.print(
-                        f"[green]✓ Fake Upstream 已{'开启' if status_payload.get('enabled') else '关闭'}[/green]\n"
-                        f"[dim]log: {status_payload.get('log_path', '-')}[/dim]"
-                    )
             elif settings_action == "routes_export":
                 try:
                     from mms_router import MODEL_ROUTES_PATH, export_model_routes
@@ -9922,14 +9910,32 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 _run_account_mgmt_tui(current_cfg)
             elif settings_action == "rescue":
                 from pathlib import Path
-                from mms_rescue import list_rescue_events
+                from mms_rescue import list_rescue_events, write_demo_rescue_packet
 
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
                 if not rescue_events:
-                    console.print("[yellow]没有找到 rescue packet[/yellow]")
-                    console.print("[dim]触发 429/context/provider blocking failure 后会写入 repo/.mms/rescue/latest.md[/dim]")
-                    _pause_after_tui_report("按 Enter 返回设置")
-                    continue
+                    empty_action = _safe_tui_call(
+                        select_channel_action_tui,
+                        "Rescue Packet",
+                        [
+                            ("状态", "没有找到 rescue packet"),
+                            ("说明", "真实 429/context/provider failure 会自动写入 repo/.mms/rescue/latest.md"),
+                        ],
+                        [
+                            ("create_demo", "生成测试 rescue packet"),
+                            ("back", "返回"),
+                        ],
+                    )
+                    if empty_action == "__interrupt__":
+                        return True
+                    if empty_action == "create_demo":
+                        payload = write_demo_rescue_packet(repo_root=os.getcwd())
+                        console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
+                        console.print(f"[dim]rescue.md: {payload.get('artifacts', {}).get('markdown', '-')}[/dim]")
+                        _pause_after_tui_report("按 Enter 继续查看")
+                        rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
+                    else:
+                        continue
                 selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
                 if selected_rescue == "__interrupt__":
                     return True
@@ -9972,9 +9978,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     console.print(f"[cyan]rescue.md[/cyan] {selected_rescue.get('artifact_markdown') or '-'}")
                     console.print(f"[cyan]rescue.json[/cyan] {selected_rescue.get('artifact_json') or '-'}")
                     _pause_after_tui_report("按 Enter 返回设置")
-            elif settings_action == "recommend":
-                current_cfg = _run_recommend_mgmt_tui(current_cfg)
-                _families_dirty = True
             continue
 
         # ── 上次使用 ──

@@ -31,13 +31,12 @@ def test_tui_settings_action_descriptors_have_stable_labels() -> None:
 def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     import mms_tui
 
-    monkeypatch.setattr(mms_tui, "_fake_upstream_status_payload", lambda: {"enabled": False})
-
     items = mms_tui._settings_menu()
     ids = [item["id"] for item in items]
 
     assert "rescue" in ids
-    assert ids.index("rescue") < ids.index("recommend")
+    assert "recommend" not in ids
+    assert "fake_upstream" not in ids
 
 
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:

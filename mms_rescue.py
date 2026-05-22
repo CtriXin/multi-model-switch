@@ -277,6 +277,35 @@ def list_rescue_events(
     return events[: max(int(limit or _RESCUE_LIST_LIMIT), 1)]
 
 
+def write_demo_rescue_packet(
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+    config_root: str | os.PathLike[str] | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Create a safe local demo rescue packet for TUI/manual verification."""
+    return write_file_only_rescue(
+        {
+            "registry_revision": "demo",
+            "failed": {
+                "model": "demo-rescue-model",
+                "provider_id": "demo-provider",
+                "status_code": 429,
+                "error_type": "rate_limit_or_quota",
+                "failure_kind": "rate_limit_or_quota",
+                "error_summary": "Demo rescue packet; no upstream request was made.",
+            },
+            "git": {"status_short": "demo packet"},
+            "fallback_reason": "demo rescue packet; automatic continuation fallback not attempted",
+            "next_action": "This is a demo packet. Use it to verify the Rescue viewer, then ignore or delete repo/.mms/rescue demo artifacts.",
+        },
+        repo_root=repo_root,
+        config_root=config_root,
+        raw_artifacts={"demo-upstream-response.txt": "demo only; no upstream request was made"},
+        created_at=created_at,
+    )
+
+
 def _event_id(created_at: str, repo_path: str, failed_model: str) -> str:
     digest = hashlib.sha256(f"{created_at}\0{repo_path}\0{failed_model}".encode("utf-8")).hexdigest()
     return digest[:16]

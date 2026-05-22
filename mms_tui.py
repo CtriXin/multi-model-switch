@@ -2244,15 +2244,11 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
 def _settings_menu():
     current_lang = _get_language()
     language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")
-    fake_status = _fake_upstream_status_payload()
-    fake_desc = _L("当前：开启", "Current: On") if fake_status.get("enabled") else _L("当前：关闭", "Current: Off")
     return [
         {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
         {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
         {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("查看最近失败与 rescue packet", "View recent failures and rescue packets")},
-        {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
-        {"id": "fake_upstream", "label": _L("Fake Upstream", "Fake Upstream"), "desc": fake_desc},
         {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
         {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
     ]
