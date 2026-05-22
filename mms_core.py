@@ -10027,7 +10027,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import refresh_source_snapshots, registry_status
+                from mms_registry_cli import publish_approved_bundle, refresh_source_snapshots, registry_status, verify_approved_bundle
 
                 status = registry_status()
                 counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
@@ -10044,6 +10044,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     ],
                     [
                         ("refresh_sources", "Refresh Sources"),
+                        ("publish_approved", "Publish Approved Bundle"),
+                        ("verify_approved", "Verify Approved Bundle"),
                         ("doctor", "Registry Doctor / Status"),
                         ("back", "返回"),
                     ],
@@ -10062,6 +10064,30 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
                         console.print(f"[cyan]facts[/cyan] {summary.get('fact_count')}")
                         console.print("[dim]只写 source_truth/candidate evidence，不改变当前 runtime defaults。[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "publish_approved":
+                    try:
+                        summary = publish_approved_bundle()
+                    except Exception as exc:
+                        console.print(f"[red]Publish Approved Bundle 失败: {exc}[/red]")
+                    else:
+                        console.print("[green]✓ Publish Approved Bundle 完成[/green]")
+                        console.print(f"[cyan]manifest[/cyan] {summary.get('manifest_path')}")
+                        console.print(f"[cyan]bundle[/cyan] {summary.get('bundle_revision')}")
+                        console.print("[dim]发布 generated/latest-approved bundle；不改 root aliases，不改 runtime defaults。[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "verify_approved":
+                    try:
+                        summary = verify_approved_bundle()
+                    except Exception as exc:
+                        console.print(f"[red]Verify Approved Bundle 失败: {exc}[/red]")
+                    else:
+                        manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+                        files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
+                        console.print("[green]✓ Latest-approved bundle hash verified[/green]")
+                        console.print(f"[cyan]manifest[/cyan] {summary.get('manifest_path')}")
+                        console.print(f"[cyan]bundle[/cyan] {manifest.get('bundle_revision')}")
+                        console.print(f"[cyan]files[/cyan] {len(files)}")
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "doctor":
                     status = registry_status()

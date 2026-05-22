@@ -44,6 +44,12 @@ _SECRET_REFERENCE_KEYS = {
     "secret_hash",
     "key_fingerprint",
 }
+_NON_SECRET_SCHEMA_KEYS = {
+    "auth_headers",
+    "auth_header_names",
+    "required_auth_headers",
+    "header_aliases",
+}
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
@@ -56,6 +62,8 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 )
 _MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy")
+_OPTIONAL_MANIFEST_FILE_KEYS = ("capabilities",)
+APPROVED_CAPABILITIES_SCHEMA = "mms.model_capabilities.approved.v1"
 
 
 class RegistryValidationError(ValueError):
@@ -236,7 +244,7 @@ def add_revision_membership(
     with db:
         db.execute(
             """
-            INSERT INTO revision_membership(bundle_revision, member_revision, member_class, metadata_json)
+            INSERT OR IGNORE INTO revision_membership(bundle_revision, member_revision, member_class, metadata_json)
             VALUES (?, ?, ?, ?)
             """,
             (bundle_revision, member_revision, member_class, _json_text(metadata or {})),
@@ -273,6 +281,9 @@ def validate_non_secret_payload(payload: Any, *, context: str = "payload") -> No
                 key = str(raw_key)
                 normalized_key = key.lower().replace("-", "_")
                 child_path = f"{path}.{key}" if path else key
+                if normalized_key in _NON_SECRET_SCHEMA_KEYS:
+                    walk(item, child_path)
+                    continue
                 if normalized_key in _SECRET_REFERENCE_KEYS:
                     if looks_like_plaintext_secret(item):
                         raise RegistryValidationError(f"{child_path} contains a plaintext secret, not a reference")
@@ -603,6 +614,9 @@ def build_latest_approved_bundle_manifest(
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
     manifest_files = {name: _manifest_file_entry(name, files[name]) for name in _MANIFEST_FILE_KEYS}
+    for name in _OPTIONAL_MANIFEST_FILE_KEYS:
+        if name in files:
+            manifest_files[name] = _manifest_file_entry(name, files[name])
     manifest = {
         "schema": LATEST_APPROVED_SCHEMA,
         "bundle_revision": bundle_revision,
@@ -688,3 +702,401 @@ def export_latest_approved_bundle_manifest(
                 ),
             )
     return manifest
+
+
+def _write_bytes_atomic(path: str | os.PathLike[str], data: bytes, *, mode: int = 0o600) -> None:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f"{target.name}.",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, target)
+        os.chmod(target, mode)
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def copy_file_atomic(src: str | os.PathLike[str], dst: str | os.PathLike[str], *, mode: int = 0o600) -> None:
+    src_path = Path(src)
+    dst_path = Path(dst)
+    data = src_path.read_bytes()
+    _write_bytes_atomic(dst_path, data, mode=mode)
+
+
+def _json_loads_safe(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
+def build_approved_capabilities_payload(
+    db: sqlite3.Connection,
+    *,
+    capability_revision: str = "",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Build a non-secret approved capability export from registry facts."""
+    rows = db.execute(
+        """
+        SELECT
+            mi.model_key,
+            mi.canonical_model_id,
+            mi.alias,
+            mi.vendor,
+            mi.family,
+            mf.fact_key,
+            mf.fact_value_json,
+            mf.confidence,
+            mf.source_layer
+        FROM model_identity mi
+        LEFT JOIN model_fact mf ON mf.model_key = mi.model_key
+        ORDER BY lower(mi.model_key), lower(mf.fact_key), mf.source_snapshot_id, mf.fact_id
+        """
+    ).fetchall()
+    by_model: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        model_key = str(row["model_key"] or "").strip()
+        if not model_key:
+            continue
+        item = by_model.setdefault(
+            model_key,
+            {
+                "alias": str(row["alias"] or model_key),
+                "model": model_key,
+                "canonical_model_id": str(row["canonical_model_id"] or model_key),
+                "vendor": str(row["vendor"] or ""),
+                "family": str(row["family"] or ""),
+                "source_layers": {},
+                "confidence_by_fact": {},
+            },
+        )
+        fact_key = str(row["fact_key"] or "").strip()
+        if not fact_key:
+            continue
+        item[fact_key] = _json_loads_safe(row["fact_value_json"])
+        item["source_layers"][fact_key] = str(row["source_layer"] or "")
+        item["confidence_by_fact"][fact_key] = str(row["confidence"] or "")
+
+    payload = {
+        "schema": APPROVED_CAPABILITIES_SCHEMA,
+        "capability_revision": capability_revision,
+        "generated_at": generated_at or utc_now(),
+        "models": list(by_model.values()),
+    }
+    validate_non_secret_payload(payload, context="approved_capabilities")
+    return payload
+
+
+def _config_file(config_dir: Path, name: str) -> Path:
+    path = config_dir / name
+    if not path.exists():
+        raise RegistryValidationError(f"required config artifact is missing: {path}")
+    return path
+
+
+def _revision_slug(prefix: str, content_hash: str, *, generated_at: str) -> str:
+    stamp = re.sub(r"[^0-9]", "", generated_at)[:14] or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"{prefix}_{stamp}_{content_hash[:10]}"
+
+
+def _create_revision_for_publish(
+    db: sqlite3.Connection,
+    revision_id: str,
+    revision_class: str,
+    *,
+    revision_hash: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> None:
+    with db:
+        db.execute(
+            """
+            INSERT OR IGNORE INTO registry_revision(
+                revision_id,
+                revision_class,
+                status,
+                revision_hash,
+                bundle_revision,
+                privacy_boundary,
+                created_at,
+                metadata_json
+            )
+            VALUES (?, ?, 'candidate', ?, '', 'private', ?, ?)
+            """,
+            (revision_id, revision_class, revision_hash, utc_now(), _json_text(metadata or {})),
+        )
+
+
+def _approve_if_candidate(db: sqlite3.Connection, revision_id: str, *, actor: str) -> None:
+    row = db.execute("SELECT status FROM registry_revision WHERE revision_id = ?", (revision_id,)).fetchone()
+    if row is None:
+        raise RegistryValidationError(f"revision not found: {revision_id}")
+    if str(row["status"]) == "approved":
+        return
+    approve_revision(db, revision_id, actor=actor)
+
+
+def publish_latest_approved_bundle(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    generated_at: str | None = None,
+    actor: str = "agent",
+) -> dict[str, Any]:
+    """Publish a hash-verified latest-approved bundle from current local artifacts.
+
+    This writes generated/* and the manifest only. It does not alter live root
+    aliases such as model-routes.json, and it does not read/write credentials.
+    """
+    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    generated_dir = config_root / "generated"
+    generated = generated_at or utc_now()
+    db = open_registry(db_path or default_registry_db_path(config_root))
+    try:
+        source_files = {
+            "router": _config_file(config_root, "model-routes.json"),
+            "lineup": _config_file(config_root, "model-routes.lineup.json"),
+            "profile": _config_file(config_root, "provider-profiles.json"),
+            "policy": _config_file(config_root, "model-policy.json"),
+        }
+        output_files = {
+            "router": generated_dir / "model-routes.json",
+            "lineup": generated_dir / "model-routes.lineup.json",
+            "profile": generated_dir / "provider-profiles.generated.json",
+            "policy": generated_dir / "model-policy.effective.json",
+            "capabilities": generated_dir / "model-capabilities.approved.json",
+        }
+
+        for name, src in source_files.items():
+            copy_file_atomic(src, output_files[name], mode=0o600)
+
+        capability_revision_seed = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "source_snapshot_count": db.execute("SELECT count(*) FROM source_snapshot").fetchone()[0],
+                    "model_fact_count": db.execute("SELECT count(*) FROM model_fact").fetchone()[0],
+                    "generated_at": generated,
+                }
+            )
+        )
+        capability_revision = _revision_slug("cap", capability_revision_seed, generated_at=generated)
+        capabilities_payload = build_approved_capabilities_payload(
+            db,
+            capability_revision=capability_revision,
+            generated_at=generated,
+        )
+        write_json_atomic(output_files["capabilities"], capabilities_payload)
+
+        file_hashes = {name: sha256_hex(path.read_bytes()) for name, path in output_files.items()}
+        route_revision = _revision_slug("route", file_hashes["router"], generated_at=generated)
+        policy_revision = _revision_slug("policy", file_hashes["policy"], generated_at=generated)
+        profile_revision = _revision_slug("profile", file_hashes["profile"], generated_at=generated)
+        bundle_hash = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "capability_revision": capability_revision,
+                    "route_revision": route_revision,
+                    "policy_revision": policy_revision,
+                    "profile_revision": profile_revision,
+                    "file_hashes": file_hashes,
+                }
+            )
+        )
+        bundle_revision = _revision_slug("bundle", bundle_hash, generated_at=generated)
+
+        for revision_id, revision_class, revision_hash in (
+            (capability_revision, "capability", file_hashes["capabilities"]),
+            (route_revision, "route", file_hashes["router"]),
+            (policy_revision, "policy", file_hashes["policy"]),
+            (profile_revision, "profile", file_hashes["profile"]),
+            (bundle_revision, "bundle", bundle_hash),
+        ):
+            _create_revision_for_publish(
+                db,
+                revision_id,
+                revision_class,
+                revision_hash=revision_hash,
+                metadata={"publish_generated_at": generated},
+            )
+
+        for revision_id, revision_class in (
+            (capability_revision, "capability"),
+            (route_revision, "route"),
+            (policy_revision, "policy"),
+            (profile_revision, "profile"),
+        ):
+            add_revision_membership(
+                db,
+                bundle_revision,
+                revision_id,
+                revision_class,
+                metadata={"publish_generated_at": generated},
+            )
+
+        for revision_id in (capability_revision, route_revision, policy_revision, profile_revision, bundle_revision):
+            _approve_if_candidate(db, revision_id, actor=actor)
+
+        manifest_path = generated_dir / "model-registry.latest-approved.json"
+        manifest = export_latest_approved_bundle_manifest(
+            manifest_path,
+            bundle_revision=bundle_revision,
+            capability_revision=capability_revision,
+            route_revision=route_revision,
+            policy_revision=policy_revision,
+            profile_revision=profile_revision,
+            files={
+                "router": {
+                    "path": output_files["router"],
+                    "canonical_path": "generated/model-routes.json",
+                    "legacy_alias_path": "model-routes.json",
+                    "sensitivity": "secret",
+                    "legacy_alias_compat": True,
+                },
+                "lineup": {
+                    "path": output_files["lineup"],
+                    "canonical_path": "generated/model-routes.lineup.json",
+                    "legacy_alias_path": "model-routes.lineup.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "profile": {
+                    "path": output_files["profile"],
+                    "canonical_path": "generated/provider-profiles.generated.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+                "policy": {
+                    "path": output_files["policy"],
+                    "canonical_path": "generated/model-policy.effective.json",
+                    "legacy_alias_path": "model-policy.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "capabilities": {
+                    "path": output_files["capabilities"],
+                    "canonical_path": "generated/model-capabilities.approved.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+            },
+            generated_at=generated,
+            db=db,
+        )
+        with db:
+            db.execute(
+                """
+                INSERT INTO audit_log(event_type, actor, target_type, target_id, details_json)
+                VALUES ('bundle.published', ?, 'registry_revision', ?, ?)
+                """,
+                (
+                    actor,
+                    bundle_revision,
+                    _json_text(
+                        {
+                            "manifest_path": str(manifest_path),
+                            "files": manifest["files"],
+                        }
+                    ),
+                ),
+            )
+        return {
+            "manifest": manifest,
+            "manifest_path": str(manifest_path),
+            "generated_dir": str(generated_dir),
+            "bundle_revision": bundle_revision,
+            "capability_revision": capability_revision,
+            "route_revision": route_revision,
+            "policy_revision": policy_revision,
+            "profile_revision": profile_revision,
+            "files": {name: str(path) for name, path in output_files.items()},
+        }
+    finally:
+        db.close()
+
+
+def _manifest_base_dir(manifest_path: Path, config_dir: str | os.PathLike[str] | None = None) -> Path:
+    if config_dir is not None:
+        return Path(config_dir)
+    if manifest_path.parent.name == "generated":
+        return manifest_path.parent.parent
+    return manifest_path.parent
+
+
+def verify_latest_approved_bundle(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    manifest_path: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    path = Path(manifest_path) if manifest_path is not None else Path(config_dir or resolve_mms_config_dir()) / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != LATEST_APPROVED_SCHEMA:
+        raise RegistryValidationError(f"unexpected latest-approved schema: {manifest.get('schema')}")
+    base_dir = _manifest_base_dir(path, config_dir)
+    verified_files: dict[str, dict[str, Any]] = {}
+    for name, entry in (manifest.get("files") or {}).items():
+        canonical = str(entry.get("canonical_path") or "").strip()
+        if not canonical:
+            raise RegistryValidationError(f"manifest file entry missing canonical_path: {name}")
+        file_path = base_dir / canonical
+        if not file_path.exists():
+            raise RegistryValidationError(f"manifest file missing: {file_path}")
+        actual_hash = sha256_hex(file_path.read_bytes())
+        expected_hash = str(entry.get("sha256") or "")
+        if actual_hash != expected_hash:
+            raise RegistryValidationError(f"manifest hash mismatch for {name}: {file_path}")
+        verified_files[name] = {
+            "path": str(file_path),
+            "sha256": actual_hash,
+            "sensitivity": entry.get("sensitivity") or "",
+        }
+    return {
+        "manifest_path": str(path),
+        "base_dir": str(base_dir),
+        "manifest": manifest,
+        "verified_files": verified_files,
+        "verified": True,
+    }
+
+
+def load_latest_approved_bundle(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    manifest_path: str | os.PathLike[str] | None = None,
+    include_secret: bool = False,
+) -> dict[str, Any]:
+    verified = verify_latest_approved_bundle(config_dir=config_dir, manifest_path=manifest_path)
+    payloads: dict[str, Any] = {}
+    for name, info in verified["verified_files"].items():
+        if info.get("sensitivity") == "secret" and not include_secret:
+            continue
+        path = Path(info["path"])
+        try:
+            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payloads[name] = path.read_text(encoding="utf-8", errors="replace")
+    result = dict(verified)
+    result["payloads"] = payloads
+    return result
+
+
+def latest_approved_capability_facts_path(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    manifest_path: str | os.PathLike[str] | None = None,
+) -> str:
+    verified = verify_latest_approved_bundle(config_dir=config_dir, manifest_path=manifest_path)
+    files = verified.get("verified_files") or {}
+    target = files.get("capabilities") or files.get("lineup") or {}
+    return str(target.get("path") or "")

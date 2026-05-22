@@ -95,6 +95,13 @@ The latest-approved bundle manifest MUST contain:
       "sha256": "<hex>",
       "sensitivity": "non-secret",
       "legacy_alias_compat": true
+    },
+    "capabilities": {
+      "canonical_path": "generated/model-capabilities.approved.json",
+      "legacy_alias_path": "",
+      "sha256": "<hex>",
+      "sensitivity": "non-secret",
+      "legacy_alias_compat": false
     }
   }
 }
@@ -139,10 +146,34 @@ and keep using its previously verified bundle or fail closed.
 | Lineup | `generated/model-routes.lineup.json` | `model-routes.lineup.json` | Non-secret capability/display export. |
 | Provider profile | `generated/provider-profiles.generated.json` | none by default | Consumer-facing effective profile, not human source profile. |
 | Policy | `generated/model-policy.effective.json` | `model-policy.json` compatibility input/export as needed | Effective policy export must preserve human policy source semantics. |
+| Capabilities | `generated/model-capabilities.approved.json` | none | Source-backed approved capability facts for resolver use; optional but recommended. |
 | Manifest | `generated/model-registry.latest-approved.json` | none | Canonical latest-approved bundle entrypoint. |
 
 Legacy root files exist for compatibility. They are aliases/copies, not a second
 source of truth.
+
+## Current CLI Entrypoints
+
+The first live implementation exposes a conservative publish/verify loop:
+
+```text
+mms registry refresh-sources
+mms registry publish-approved
+mms registry verify
+mms registry resolve <model>
+```
+
+Rules:
+
+- `refresh-sources` imports local reference snapshots into SQLite
+  `source_snapshot`, `model_identity`, and `model_fact` tables only.
+- `publish-approved` writes `generated/*` and
+  `generated/model-registry.latest-approved.json`; it does not edit legacy root
+  aliases or runtime defaults.
+- `verify` checks manifest hashes before a consumer should trust the bundle.
+- `resolve <model>` reads the verified latest-approved capability facts and
+  falls back through the existing resolver stack when individual facts are
+  incomplete; a missing or hash-mismatched manifest fails closed.
 
 ## Privacy Boundary
 

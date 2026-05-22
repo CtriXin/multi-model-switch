@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import mms_registry
+from mms_capability_resolver import resolve_model_capabilities
 
 
 ROOT = Path(__file__).resolve().parent
@@ -82,6 +83,35 @@ def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
     }
 
 
+def publish_approved_bundle(
+    *,
+    config_dir: str | Path | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    return mms_registry.publish_latest_approved_bundle(config_dir=config_dir, db_path=db_path, actor="mms")
+
+
+def verify_approved_bundle(
+    *,
+    config_dir: str | Path | None = None,
+    manifest_path: str | Path | None = None,
+) -> dict[str, Any]:
+    return mms_registry.verify_latest_approved_bundle(config_dir=config_dir, manifest_path=manifest_path)
+
+
+def resolve_approved_model(
+    model_name: str,
+    *,
+    config_dir: str | Path | None = None,
+    manifest_path: str | Path | None = None,
+) -> dict[str, Any]:
+    facts_path = mms_registry.latest_approved_capability_facts_path(
+        config_dir=config_dir,
+        manifest_path=manifest_path,
+    )
+    return resolve_model_capabilities(model_name, approved_facts_path=facts_path)
+
+
 def _print_status(status: dict[str, Any]) -> None:
     counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
     latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
@@ -98,6 +128,45 @@ def _print_status(status: dict[str, Any]) -> None:
         print(f"latest_captured_at={latest.get('captured_at')}")
     else:
         print("latest_source_snapshot=none")
+
+
+def _print_publish(summary: dict[str, Any]) -> None:
+    print("MMS Registry Publish Approved Bundle")
+    print(f"manifest_path={summary.get('manifest_path')}")
+    print(f"bundle_revision={summary.get('bundle_revision')}")
+    print(f"capability_revision={summary.get('capability_revision')}")
+    print(f"route_revision={summary.get('route_revision')}")
+    print(f"policy_revision={summary.get('policy_revision')}")
+    print(f"profile_revision={summary.get('profile_revision')}")
+    files = summary.get("files") if isinstance(summary.get("files"), dict) else {}
+    for name in sorted(files):
+        print(f"file_{name}={files[name]}")
+
+
+def _print_verify(summary: dict[str, Any]) -> None:
+    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+    files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
+    print("MMS Registry Verify Approved Bundle")
+    print(f"verified={summary.get('verified')}")
+    print(f"manifest_path={summary.get('manifest_path')}")
+    print(f"bundle_revision={manifest.get('bundle_revision')}")
+    for name in sorted(files):
+        print(f"verified_file={name} path={files[name].get('path')} sha256={files[name].get('sha256')}")
+
+
+def _print_resolve(model_name: str, caps: dict[str, Any]) -> None:
+    print("MMS Registry Resolve")
+    print(f"model={model_name}")
+    for key in (
+        "context_window_tokens",
+        "max_output_tokens",
+        "supports_thinking",
+        "expected_protocol",
+    ):
+        print(f"{key}={caps.get(key)} source={caps.get('sources', {}).get(key)}")
+    thinking = caps.get("thinking_control") if isinstance(caps.get("thinking_control"), dict) else {}
+    print(f"thinking_control_type={thinking.get('control_type') or ''}")
+    print(f"thinking_control_path={thinking.get('path') or ''}")
 
 
 def _print_refresh(summary: dict[str, Any]) -> None:
@@ -136,6 +205,19 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         default=[],
         help="Reference JSON snapshot path; may be repeated. Defaults to docs/reference/model-capability-calibration/*.json",
     )
+    publish_parser = subparsers.add_parser(
+        "publish-approved",
+        help="Publish generated/latest-approved bundle from current local artifacts",
+    )
+    publish_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    publish_parser.add_argument("--refresh-sources", action="store_true", help="Refresh source snapshots before publishing")
+    verify_parser = subparsers.add_parser("verify", help="Verify latest-approved manifest hashes")
+    verify_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    verify_parser.add_argument("--manifest", default="", help="Override manifest path")
+    resolve_parser = subparsers.add_parser("resolve", help="Resolve one model through latest-approved capability facts")
+    resolve_parser.add_argument("model")
+    resolve_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    resolve_parser.add_argument("--manifest", default="", help="Override manifest path")
 
     args = parser.parse_args(argv)
     db_path = args.db or None
@@ -146,12 +228,30 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         summary = refresh_source_snapshots(db_path=db_path, paths=args.path or None)
         _print_refresh(summary)
         return 0
+    if args.subcommand == "publish-approved":
+        config_dir = args.config_dir or None
+        if args.refresh_sources:
+            refresh_source_snapshots(db_path=db_path)
+        summary = publish_approved_bundle(config_dir=config_dir, db_path=db_path)
+        _print_publish(summary)
+        return 0
+    if args.subcommand == "verify":
+        summary = verify_approved_bundle(config_dir=args.config_dir or None, manifest_path=args.manifest or None)
+        _print_verify(summary)
+        return 0
+    if args.subcommand == "resolve":
+        caps = resolve_approved_model(args.model, config_dir=args.config_dir or None, manifest_path=args.manifest or None)
+        _print_resolve(args.model, caps)
+        return 0
     return 2
 
 
 __all__ = [
     "DEFAULT_REFERENCE_DIR",
     "handle_registry_command",
+    "publish_approved_bundle",
     "refresh_source_snapshots",
     "registry_status",
+    "resolve_approved_model",
+    "verify_approved_bundle",
 ]
