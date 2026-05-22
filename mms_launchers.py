@@ -6220,6 +6220,10 @@ def _overlay_codex_shared_resume(home_dir, session_home):
     if os.path.islink(session_codex_dir):
         os.unlink(session_codex_dir)
     os.makedirs(session_codex_dir, exist_ok=True)
+    _overlay_codex_plugin_marketplace_cache(
+        session_codex_dir,
+        [account_codex_dir, real_codex_dir],
+    )
 
     bounded_resume_entries = _codex_bounded_resume_entries()
     for entry in os.listdir(account_codex_dir):
@@ -6259,6 +6263,11 @@ _CODEX_RESUME_WRITEBACK_ROOT_ENV = "MMS_CODEX_RESUME_WRITEBACK_ROOT"
 _CODEX_RESUME_MAX_FILE_BYTES = 2_000_000
 _CODEX_RESUME_PROJECT_MAX_FILE_BYTES = 32_000_000
 _CODEX_COPY_INTO_SESSION_FILES = {"installation_id"}
+_CODEX_PLUGIN_MARKETPLACE_CACHE_ENTRIES = (
+    "plugins",
+    "plugins.sha",
+    "bundled-marketplaces",
+)
 _CODEX_SESSION_LOCAL_ONLY_ENTRIES = {
     ".codex-global-state.json",
     ".tmp",
@@ -6284,6 +6293,28 @@ def _materialize_codex_session_entry(entry, src, dst):
         shutil.copy2(src, dst)
         return
     os.symlink(src, dst)
+
+
+def _overlay_codex_plugin_marketplace_cache(session_codex_dir, source_codex_dirs):
+    """Seed Codex marketplace cache without exposing the whole volatile .tmp tree."""
+    session_codex_dir = str(session_codex_dir or "").strip()
+    if not session_codex_dir:
+        return
+    source_codex_dirs = [str(item or "").strip() for item in (source_codex_dirs or [])]
+    tmp_dir = os.path.join(session_codex_dir, ".tmp")
+    for entry in _CODEX_PLUGIN_MARKETPLACE_CACHE_ENTRIES:
+        dst = os.path.join(tmp_dir, entry)
+        if os.path.exists(dst) or os.path.islink(dst):
+            continue
+        for source_codex_dir in source_codex_dirs:
+            if not source_codex_dir or os.path.realpath(source_codex_dir) == os.path.realpath(session_codex_dir):
+                continue
+            src = os.path.join(source_codex_dir, ".tmp", entry)
+            if not os.path.exists(src):
+                continue
+            os.makedirs(tmp_dir, exist_ok=True)
+            os.symlink(src, dst)
+            break
 
 
 def _codex_entry_is_session_local(entry):
@@ -9160,6 +9191,10 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     sibling_codex_roots = _codex_sibling_session_roots(
         sessions_dir,
         exclude_session_home=session_home,
+    )
+    _overlay_codex_plugin_marketplace_cache(
+        codex_dir,
+        [gateway_codex_dir, real_codex_dir],
     )
     trust_config_texts, trust_hook_payloads = _collect_codex_hook_trust_seed_sources(
         [real_codex_dir, gateway_codex_dir] + sibling_codex_roots

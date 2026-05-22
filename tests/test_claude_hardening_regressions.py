@@ -1652,6 +1652,54 @@ def test_codex_gateway_env_materializes_session_web_access_skill(monkeypatch, tm
     assert (session_codex / "skills" / "web-access" / "SKILL.md").read_text(encoding="utf-8") == "# web-access\n"
 
 
+def test_codex_gateway_env_seeds_plugin_marketplace_cache(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    curated_cache = real_codex / ".tmp" / "plugins"
+    bundled_cache = real_codex / ".tmp" / "bundled-marketplaces"
+    (curated_cache / ".agents" / "plugins").mkdir(parents=True)
+    (curated_cache / ".agents" / "plugins" / "marketplace.json").write_text(
+        '{"name":"openai-curated","plugins":[]}\n',
+        encoding="utf-8",
+    )
+    (curated_cache / "plugins" / "github" / ".codex-plugin").mkdir(parents=True)
+    (bundled_cache / "openai-bundled" / ".agents" / "plugins").mkdir(parents=True)
+    (real_codex / ".tmp" / "plugins.sha").write_text("abc123\n", encoding="utf-8")
+    (real_codex / ".tmp" / "diagrams").mkdir(parents=True)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    env = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime"},
+        "https://relay.example.com",
+    )
+
+    session_tmp = Path(env["CODEX_HOME"]) / ".tmp"
+    assert os.path.islink(session_tmp / "plugins")
+    assert (session_tmp / "plugins").resolve() == curated_cache.resolve()
+    assert os.path.islink(session_tmp / "plugins.sha")
+    assert (session_tmp / "plugins.sha").resolve() == (real_codex / ".tmp" / "plugins.sha").resolve()
+    assert os.path.islink(session_tmp / "bundled-marketplaces")
+    assert (session_tmp / "bundled-marketplaces").resolve() == bundled_cache.resolve()
+    assert not (session_tmp / "diagrams").exists()
+
+
 def test_codex_gateway_env_materializes_session_agent_browser_skill(monkeypatch, tmp_path):
     import mms_launchers
 
