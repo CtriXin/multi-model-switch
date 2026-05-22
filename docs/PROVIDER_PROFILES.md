@@ -17,6 +17,7 @@ Agents must not auto-write the real `~/.config/mms/**` files. User overlays are 
 - `api_formats`: protocol-specific base URL and request path metadata.
 - `auth_headers`: declarative auth header forms such as `authorization_bearer`, `x-api-key`, and `api-key`.
 - `body_patches`: protocol/purpose-specific request body patches, including `thinking_on`, `thinking_off`, and `classify`.
+- `parameter_aliases`: protocol-specific field renames that preserve caller intent while matching provider request schemas, for example MiMo OpenAI `max_tokens` -> `max_completion_tokens`.
 - `effort`: protocol-specific effort field path, allowed values, defaults, and mappings.
 - `context_windows`: model-prefix context metadata.
 - `model_aliases`: protocol-specific provider wire-model aliases, optionally gated by `provider_id_contains` or `base_url_contains`, for cases where the logical MMS model should stay stable but the upstream API needs a different model string.
@@ -32,7 +33,7 @@ The patch engine intentionally supports only data-driven field patches. It does 
 | --- | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` + `/responses` | N/A | `reasoning.effort` on Responses API |
 | Qwen / DashScope | `https://dashscope.aliyuncs.com/compatible-mode/v1` + `/chat/completions` | `https://dashscope.aliyuncs.com/apps/anthropic` + `/v1/messages` | `enable_thinking`; some local templates use `chat_template_kwargs.enable_thinking`; `thinking_budget` metadata is recorded |
-| Xiaomi MiMo | `https://api.xiaomimimo.com/v1` + `/chat/completions` | `https://api.xiaomimimo.com/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled; no GPT-style effort tier recorded |
+| Xiaomi MiMo | `https://api.xiaomimimo.com/v1` + `/chat/completions` | `https://api.xiaomimimo.com/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled; OpenAI format aliases output cap to `max_completion_tokens`; no GPT-style effort tier recorded |
 | MiniMax | `https://api.minimaxi.com/v1` + `/chat/completions` | `https://api.minimaxi.com/anthropic` + `/v1/messages` | OpenAI format can use `reasoning_split`; Anthropic format uses thinking blocks |
 | DeepSeek | `https://api.deepseek.com` + `/chat/completions` | `https://api.deepseek.com/anthropic` + `/v1/messages` | OpenAI `reasoning_effort` and Anthropic `output_config.effort`, currently `high`/`max` |
 | Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | Thinking toggle metadata only; preserve normal client headers |

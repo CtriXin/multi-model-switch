@@ -88,6 +88,7 @@ Provider profiles are MMS-owned declarative source data. They are used for:
 | `match` | Match provider/model/base URL to this profile. |
 | `auth_headers` | Select Authorization / `x-api-key` header behavior per protocol. |
 | `body_patches` | Apply vendor-specific request body patches. |
+| `parameter_aliases` | Rename caller intent fields per protocol without hardcoded consumer branches, for example MiMo OpenAI `max_tokens` to `max_completion_tokens`. |
 | `model_aliases` | Convert logical model id to provider wire model id. |
 | `context_windows` | Source context metadata for Lineup export. |
 | `references` | Source reference URLs for Lineup export. |

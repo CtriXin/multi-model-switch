@@ -250,6 +250,28 @@ def _delete_path(payload: dict[str, Any], path: str) -> None:
             break
 
 
+def _has_path(payload: dict[str, Any], path: str) -> bool:
+    parts = [part for part in str(path or "").split(".") if part]
+    if not parts:
+        return False
+    cursor: Any = payload
+    for part in parts:
+        if not isinstance(cursor, dict) or part not in cursor:
+            return False
+        cursor = cursor[part]
+    return True
+
+
+def _get_path(payload: dict[str, Any], path: str) -> Any:
+    parts = [part for part in str(path or "").split(".") if part]
+    cursor: Any = payload
+    for part in parts:
+        if not isinstance(cursor, dict):
+            return None
+        cursor = cursor.get(part)
+    return cursor
+
+
 class _DeleteSentinel:
     pass
 
@@ -263,6 +285,20 @@ def _apply_patch_map(payload: dict[str, Any], patch: dict[str, Any]) -> None:
             _delete_path(payload, path)
         else:
             _set_path(payload, path, value)
+
+
+def _apply_parameter_aliases(payload: dict[str, Any], profile: dict[str, Any], protocol: str) -> None:
+    aliases = profile.get("parameter_aliases") if isinstance(profile.get("parameter_aliases"), dict) else {}
+    protocol_aliases = aliases.get(protocol) if isinstance(aliases.get(protocol), dict) else {}
+    for source, target in protocol_aliases.items():
+        source_path = str(source or "").strip()
+        target_path = str(target or "").strip()
+        if not source_path or not target_path or not _has_path(payload, source_path):
+            continue
+        value = _get_path(payload, source_path)
+        if not _has_path(payload, target_path):
+            _set_path(payload, target_path, value)
+        _delete_path(payload, source_path)
 
 
 def _normalize_effort(value: Any, config: dict[str, Any]) -> str:
@@ -368,6 +404,7 @@ def apply_profile_body_patches(
             budget_value = _normalize_budget(reasoning_effort, budget_config)
             if budget_value is not None:
                 _set_path(payload, str(budget_config["path"]), budget_value)
+    _apply_parameter_aliases(payload, profile, protocol)
     return profile_id
 
 

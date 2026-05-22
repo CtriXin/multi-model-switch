@@ -8,7 +8,7 @@ def _profiles(monkeypatch, tmp_path):
 
 def test_mimo_anthropic_profile_uses_api_key_and_thinking_toggle(monkeypatch, tmp_path):
     profiles = _profiles(monkeypatch, tmp_path)
-    payload = {"model": "mimo-v2.5-pro", "messages": []}
+    payload = {"model": "mimo-v2.5-pro", "messages": [], "max_tokens": 4096}
 
     profile_id = profiles.apply_profile_body_patches(
         payload,
@@ -31,9 +31,30 @@ def test_mimo_anthropic_profile_uses_api_key_and_thinking_toggle(monkeypatch, tm
 
     assert profile_id == "mimo"
     assert payload["thinking"] == {"type": "enabled"}
+    assert payload["max_tokens"] == 4096
+    assert "max_completion_tokens" not in payload
     assert "output_config" not in payload
     assert headers["api-key"] == "sk-mimo"
     assert headers["Authorization"] == "Bearer sk-mimo"
+
+
+def test_mimo_openai_profile_uses_official_token_parameter(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    payload = {"model": "mimo-v2.5-pro", "messages": [], "max_tokens": 4096}
+
+    profile_id = profiles.apply_profile_body_patches(
+        payload,
+        protocol="openai_chat",
+        provider_id="mimo-direct",
+        base_url="https://api.xiaomimimo.com/v1",
+        model_name="mimo-v2.5-pro",
+        thinking_enabled=True,
+    )
+
+    assert profile_id == "mimo"
+    assert payload["thinking"] == {"type": "enabled"}
+    assert payload["max_completion_tokens"] == 4096
+    assert "max_tokens" not in payload
 
 
 def test_qwen_chat_template_profile_is_explicit_overlay_only(monkeypatch, tmp_path):

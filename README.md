@@ -205,6 +205,7 @@ Provider-specific behavior belongs in data, not in one-off launcher branches.
 - auth header expectations
 - Thinking / Effort request fields
 - provider-specific body patches
+- provider-specific parameter aliases
 - context window metadata
 - reference URLs for future verification
 
