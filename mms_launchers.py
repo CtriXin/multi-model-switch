@@ -3863,6 +3863,48 @@ def _codex_hook_trust_records_from_config(config_text):
     return records
 
 
+def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
+    import re
+
+    text = str(config_text or "")
+    replacements = {
+        str(key): str(value)
+        for key, value in (trusted_hashes_by_key or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    if not text or not replacements:
+        return text
+
+    header_pattern = re.compile(
+        r'^\[hooks\.state\."((?:\\.|[^"\\])*)"\]\s*$',
+        flags=re.MULTILINE,
+    )
+    matches = list(header_pattern.finditer(text))
+    for match in reversed(matches):
+        raw_key = _decode_toml_basic_key(match.group(1))
+        if raw_key not in replacements:
+            continue
+        next_header = re.search(r"^\[", text[match.end():], flags=re.MULTILINE)
+        block_end = match.end() + next_header.start() if next_header else len(text)
+        block = text[match.end():block_end]
+        new_hash = replacements[raw_key]
+
+        def _replace_hash(hash_match):
+            if hash_match.group(2) == new_hash:
+                return hash_match.group(0)
+            return f'{hash_match.group("prefix")}{_toml_quote(new_hash)}'
+
+        block = re.sub(
+            r'^(?P<prefix>\s*trusted_hash\s*=\s*)"([^"]+)"\s*$',
+            _replace_hash,
+            block,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        text = text[:match.end()] + block + text[block_end:]
+    return text
+
+
 def _collect_codex_hook_trust_seed_sources(codex_roots):
     config_texts = []
     hook_payloads = {}
@@ -3931,8 +3973,29 @@ def _append_codex_session_hook_trust_states(
         if seed_text:
             seed_texts.append(str(seed_text))
 
-    existing_keys = {record["key"] for record in _codex_hook_trust_records_from_config(text)}
+    existing_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(text)
+    }
     pending = {}
+    pending_updates = {}
+    pending_quality = {}
+
+    def _remember(target_key, trusted_hash, quality):
+        if not target_key or not trusted_hash:
+            return
+        if target_key in existing_hashes:
+            if existing_hashes[target_key] != trusted_hash:
+                previous_quality = pending_quality.get(target_key, -1)
+                if quality > previous_quality:
+                    pending_updates[target_key] = trusted_hash
+                    pending_quality[target_key] = quality
+            return
+        previous_quality = pending_quality.get(target_key, -1)
+        if target_key not in pending or quality > previous_quality:
+            pending[target_key] = trusted_hash
+            pending_quality[target_key] = quality
+
     for seed_text in seed_texts:
         for trust_record in _codex_hook_trust_records_from_config(seed_text):
             source_record = _source_index(trust_record["hooks_path"])["positions"].get(
@@ -3945,11 +4008,14 @@ def _append_codex_session_hook_trust_states(
             if not source_record:
                 continue
             candidates = []
+            match_quality = 1
             if source_record.get("fingerprint"):
                 candidates = target_index["by_fingerprint"].get(
                     (trust_record["event"], source_record["fingerprint"]),
                     [],
                 )
+                if candidates:
+                    match_quality = 2
             if not candidates:
                 candidates = target_index["by_command"].get(
                     (trust_record["event"], source_record["command"]),
@@ -3960,10 +4026,14 @@ def _append_codex_session_hook_trust_states(
                     f"{target_hooks_path}:{target_record['event']}:"
                     f"{target_record['group_index']}:{target_record['hook_index']}"
                 )
-                if target_key in existing_keys or target_key in pending:
+                # A same-path, same-position record in the existing target config
+                # is not evidence that its hash is still valid after hooks changed.
+                if trust_record["hooks_path"] == target_hooks_path and trust_record["key"] == target_key:
                     continue
-                pending[target_key] = trust_record["trusted_hash"]
+                _remember(target_key, trust_record["trusted_hash"], match_quality)
 
+    if pending_updates:
+        text = _replace_codex_hook_trust_hashes(text, pending_updates)
     if not pending:
         return text
     if text and not text.endswith("\n"):
@@ -6650,8 +6720,16 @@ def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
         trust_config_texts=[target_config_text, session_config_text],
         source_hook_payloads_by_path=source_payloads,
     )
-    before_keys = {record["key"] for record in _codex_hook_trust_records_from_config(target_config_text)}
-    after_keys = {record["key"] for record in _codex_hook_trust_records_from_config(rendered_config)}
+    before_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(target_config_text)
+    }
+    after_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(rendered_config)
+    }
+    before_keys = set(before_hashes)
+    after_keys = set(after_hashes)
     try:
         atomic_write_json(target_hooks_path, session_hooks, mode=0o600)
         atomic_write_text(target_config_path, rendered_config, mode=0o600)
@@ -6661,6 +6739,11 @@ def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
         "status": "synced",
         "trusted_entries": len(after_keys),
         "added_entries": max(0, len(after_keys - before_keys)),
+        "updated_entries": sum(
+            1
+            for key in before_keys & after_keys
+            if before_hashes.get(key) != after_hashes.get(key)
+        ),
     }
 
 

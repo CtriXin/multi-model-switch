@@ -1270,6 +1270,40 @@ def test_append_codex_session_hook_trust_states_reuses_mms_session_only_hook_tru
     assert "sha256:caveman-session-only" in rendered
 
 
+def test_append_codex_session_hook_trust_states_replaces_stale_target_hash(tmp_path):
+    import mms_launchers
+
+    session_hooks_path = str(tmp_path / "session" / ".codex" / "hooks.json")
+    target_hooks_path = str(tmp_path / "gateway" / ".codex" / "hooks.json")
+    hooks_payload = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "echo caveman"}]},
+            ]
+        }
+    }
+    target_config = (
+        f'[hooks.state."{target_hooks_path}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:stale"\n'
+    )
+    session_config = (
+        f'[hooks.state."{session_hooks_path}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:fresh"\n'
+    )
+
+    rendered = mms_launchers._append_codex_session_hook_trust_states(
+        target_config,
+        target_hooks_path=target_hooks_path,
+        target_hooks=hooks_payload,
+        trust_config_texts=[session_config],
+        source_hook_payloads_by_path={session_hooks_path: hooks_payload},
+    )
+
+    assert rendered.count(f'[hooks.state."{target_hooks_path}:session_start:0:0"]') == 1
+    assert 'trusted_hash = "sha256:fresh"' in rendered
+    assert "sha256:stale" not in rendered
+
+
 def test_sync_codex_hook_trust_back_persists_mms_local_cache(tmp_path):
     import mms_launchers
 
@@ -1297,6 +1331,43 @@ def test_sync_codex_hook_trust_back_persists_mms_local_cache(tmp_path):
     assert (target_codex / "hooks.json").exists()
     assert f'[hooks.state."{target_codex / "hooks.json"}:session_start:0:0"]' in target_config
     assert "sha256:caveman-session-only" in target_config
+
+
+def test_sync_codex_hook_trust_back_replaces_stale_mms_local_cache(tmp_path):
+    import mms_launchers
+
+    session_codex = tmp_path / "session" / ".codex"
+    target_codex = tmp_path / "gateway" / ".codex"
+    session_codex.mkdir(parents=True)
+    target_codex.mkdir(parents=True)
+    hooks_payload = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "echo caveman"}]},
+            ]
+        }
+    }
+    (session_codex / "hooks.json").write_text(json.dumps(hooks_payload), encoding="utf-8")
+    (target_codex / "hooks.json").write_text(json.dumps(hooks_payload), encoding="utf-8")
+    (session_codex / "config.toml").write_text(
+        f'[hooks.state."{session_codex / "hooks.json"}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:fresh-caveman"\n',
+        encoding="utf-8",
+    )
+    (target_codex / "config.toml").write_text(
+        f'[hooks.state."{target_codex / "hooks.json"}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:stale-caveman"\n',
+        encoding="utf-8",
+    )
+
+    result = mms_launchers._sync_codex_hook_trust_back(str(session_codex), str(target_codex))
+
+    target_config = (target_codex / "config.toml").read_text(encoding="utf-8")
+    assert result["status"] == "synced"
+    assert result["added_entries"] == 0
+    assert result["updated_entries"] == 1
+    assert 'trusted_hash = "sha256:fresh-caveman"' in target_config
+    assert "sha256:stale-caveman" not in target_config
 
 
 def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
