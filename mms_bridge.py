@@ -1094,6 +1094,76 @@ def _mms_fail_closed_auth_error_payload(
     }
 
 
+def _record_bridge_blocking_failure(
+    server,
+    *,
+    model_name,
+    provider_id="",
+    status_code=None,
+    body_text="",
+    request_url="",
+    route_count=1,
+    bridge_surface="bridge",
+):
+    """Best-effort L3 rescue hook; never calls another model or OAuth flow."""
+    if not bool(getattr(server, "rescue_enabled", False)):
+        return None
+    try:
+        from mms_rescue import record_blocking_failure, write_fallback_handover
+
+        payload = record_blocking_failure(
+            repo_root=getattr(server, "rescue_repo_root", None),
+            config_root=getattr(server, "rescue_config_root", None),
+            model=str(model_name or getattr(server, "model_name", "") or ""),
+            provider_id=str(provider_id or getattr(server, "provider_id", "") or ""),
+            status_code=status_code,
+            body_text=body_text,
+            request_url=request_url,
+            request_path=_fallback_safe_url(request_url),
+            route_count=route_count,
+            bridge_surface=bridge_surface,
+            raw_artifacts={"upstream-response.txt": body_text} if body_text not in (None, "") else None,
+        )
+        if payload:
+            _bridge_error_logger.warning(
+                "rescue file-only packet written: event_id=%s model=%s provider=%s status=%s",
+                payload.get("event_id"),
+                model_name,
+                provider_id or getattr(server, "provider_id", ""),
+                status_code,
+            )
+            fallback_model = str(getattr(server, "rescue_fallback_model", "") or "").strip()
+            if fallback_model:
+                handover = write_fallback_handover(
+                    payload,
+                    fallback_model=fallback_model,
+                    fallback_cli=str(getattr(server, "rescue_fallback_cli", "") or "").strip(),
+                    mode="auto_default_handover",
+                )
+                _bridge_error_logger.warning(
+                    "rescue fallback handover written: source_event_id=%s fallback_model=%s",
+                    handover.get("source_event_id"),
+                    fallback_model,
+                )
+        return payload
+    except Exception as exc:
+        _bridge_error_logger.warning("rescue file-only packet failed: %s", exc, exc_info=True)
+        return None
+
+
+def _configure_bridge_rescue(server):
+    disabled = str(os.environ.get("MMS_RESCUE_ENABLED", "1")).strip().lower() in {"0", "false", "no", "off"}
+    server.rescue_enabled = not disabled
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    server.rescue_repo_root = str(os.environ.get("MMS_PROJECT_ROOT") or os.environ.get("MMS_CWD") or cwd or "").strip() or None
+    server.rescue_config_root = str(os.environ.get("MMS_RESCUE_CONFIG_ROOT") or "").strip() or None
+    server.rescue_fallback_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
+    server.rescue_fallback_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+
+
 def _strip_cache_control(payload):
     """剥离不支持 Anthropic prompt cache 的模型 payload 中的 cache_control 字段。"""
     # 顶层 cache_control
@@ -2836,6 +2906,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 continue
                             if response.status_code in (401, 403):
                                 body = response.read().decode("utf-8", errors="replace")
+                                _record_bridge_blocking_failure(
+                                    self.server,
+                                    model_name=metrics_model,
+                                    provider_id=route_provider_id,
+                                    status_code=response.status_code,
+                                    body_text=body,
+                                    request_url=target_url,
+                                    route_count=len(forward_routes),
+                                    bridge_surface="gateway_messages_stream",
+                                )
                                 self._json(
                                     502,
                                     _mms_fail_closed_auth_error_payload(
@@ -2848,6 +2928,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                     ),
                                 )
                                 return
+                            if response.status_code >= 400:
+                                _record_bridge_blocking_failure(
+                                    self.server,
+                                    model_name=metrics_model,
+                                    provider_id=route_provider_id,
+                                    status_code=response.status_code,
+                                    body_text="",
+                                    request_url=target_url,
+                                    route_count=len(forward_routes),
+                                    bridge_surface="gateway_messages_stream",
+                                )
                             self.send_response(response.status_code)
                             self.send_header("Content-Type", response.headers.get("content-type", "text/event-stream"))
                             self.send_header("Cache-Control", "no-cache")
@@ -2916,6 +3007,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                         continue
                     if response.status_code in (401, 403):
                         body = body_out.decode("utf-8", errors="replace")
+                        _record_bridge_blocking_failure(
+                            self.server,
+                            model_name=metrics_model,
+                            provider_id=route_provider_id,
+                            status_code=response.status_code,
+                            body_text=body,
+                            request_url=target_url,
+                            route_count=len(forward_routes),
+                            bridge_surface="gateway_messages_post",
+                        )
                         self._json(
                             502,
                             _mms_fail_closed_auth_error_payload(
@@ -2928,6 +3029,17 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             ),
                         )
                         return
+                    if response.status_code >= 400:
+                        _record_bridge_blocking_failure(
+                            self.server,
+                            model_name=metrics_model,
+                            provider_id=route_provider_id,
+                            status_code=response.status_code,
+                            body_text=body_out.decode("utf-8", errors="replace"),
+                            request_url=target_url,
+                            route_count=len(forward_routes),
+                            bridge_surface="gateway_messages_post",
+                        )
                     if response.status_code == 200 and path_bare == "/v1/messages" and not is_last_route:
                         failure = _native_fallback_failure_for_body(body_out)
                         if failure in retry_tokens:
@@ -3151,6 +3263,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                             retried_without_previous_response_id = True
                             continue
                         if response.status_code in (401, 403):
+                            _record_bridge_blocking_failure(
+                                self.server,
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                status_code=response.status_code,
+                                body_text=body,
+                                request_url=target_url,
+                                route_count=1,
+                                bridge_surface="gpt_on_claude_responses",
+                            )
                             self._json(
                                 502,
                                 _mms_fail_closed_auth_error_payload(
@@ -3162,6 +3284,16 @@ class _GatewayBridgeHandler(BaseHTTPRequestHandler):
                                 ),
                             )
                             return
+                        _record_bridge_blocking_failure(
+                            self.server,
+                            model_name=model_name,
+                            provider_id=provider_id,
+                            status_code=response.status_code,
+                            body_text=body,
+                            request_url=target_url,
+                            route_count=1,
+                            bridge_surface="gpt_on_claude_responses",
+                        )
                         self._json(response.status_code, err)
                         return
 
@@ -3782,6 +3914,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             )
                             return
                         if response.status_code in (401, 403):
+                            _record_bridge_blocking_failure(
+                                self.server,
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                status_code=response.status_code,
+                                body_text=body_text,
+                                request_url=target_url,
+                                route_count=len(forward_routes),
+                                bridge_surface="codex_responses_proxy",
+                            )
                             self._json(
                                 502,
                                 _mms_fail_closed_auth_error_payload(
@@ -3794,6 +3936,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 ),
                             )
                             return
+                        _record_bridge_blocking_failure(
+                            self.server,
+                            model_name=model_name,
+                            provider_id=provider_id,
+                            status_code=response.status_code,
+                            body_text=body_text,
+                            request_url=target_url,
+                            route_count=len(forward_routes),
+                            bridge_surface="codex_responses_proxy",
+                        )
                         self.send_response(response.status_code)
                         self.send_header("Content-Type", content_type)
                         self.send_header("Content-Length", str(len(body_out)))
@@ -3960,6 +4112,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                 )
                                 time.sleep(delay)
                                 continue
+                            _record_bridge_blocking_failure(
+                                self.server,
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                status_code=response.status_code,
+                                body_text=last_body,
+                                request_url=target_url,
+                                bridge_surface="codex_chatcompletions_fallback",
+                            )
                             self._json_with_headers(
                                 429,
                                 {"error": {"message": last_body or "chat completions fallback rate limited"}},
@@ -4007,6 +4168,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         )
                         return
                     break
+            _record_bridge_blocking_failure(
+                self.server,
+                model_name=model_name,
+                provider_id=provider_id,
+                status_code=last_status,
+                body_text=last_body or "",
+                request_url=target_url if "target_url" in locals() else "",
+                bridge_surface="codex_chatcompletions_fallback",
+            )
             self._json(last_status, {"error": {"message": last_body or "chat completions fallback failed"}})
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
@@ -4155,6 +4325,15 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             ) as response:
                 if response.status_code >= 400:
                     body = response.read().decode("utf-8", errors="replace")
+                    _record_bridge_blocking_failure(
+                        self.server,
+                        model_name=model_name,
+                        provider_id=provider_id,
+                        status_code=response.status_code,
+                        body_text=body,
+                        request_url=target_url,
+                        bridge_surface="codex_responses_to_chat",
+                    )
                     self._json(response.status_code, {"error": {"message": body}})
                     return
 
@@ -4211,6 +4390,8 @@ def codex_chatcompletions_bridge(
     reasoning_effort="high",
     proxy_url="",
     no_proxy="",
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
@@ -4236,6 +4417,11 @@ def codex_chatcompletions_bridge(
     server.reasoning_effort = reasoning_effort
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
+    _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     server.session_input_tokens = 0
     server.session_output_tokens = 0
     server.session_request_count = 0
@@ -4273,6 +4459,8 @@ def codex_responses_bridge(
     proxy_url="",
     no_proxy="",
     native_fallback_routes=None,
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     _ensure_httpx()
     if httpx is None:
@@ -4294,6 +4482,11 @@ def codex_responses_bridge(
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
+    _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -4334,6 +4527,8 @@ def gateway_claude_bridge(
     no_proxy="",
     native_fallback_routes=None,
     vision_sidecar=None,
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -4374,6 +4569,11 @@ def gateway_claude_bridge(
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
     server.vision_sidecar = dict(vision_sidecar or {})
+    _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

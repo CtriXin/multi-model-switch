@@ -30,6 +30,9 @@ def test_record_usage_persists_runtime_hint(monkeypatch):
         "provider_id": "preferred-provider",
         "runtime_id": "preferred-provider",
     }
+    assert saved["sources"]["provider:claude:preferred-provider"]["model_last_used_at"] == {
+        "gpt-5.4": "2026-04-15T18:00:00Z"
+    }
 
 
 def test_resolve_last_used_runtime_prefers_saved_provider(monkeypatch):
@@ -86,6 +89,36 @@ def test_resolve_last_used_runtime_prefers_saved_provider(monkeypatch):
     assert runtime["id"] == "preferred-provider"
     assert models == ["gpt-5.4"]
     assert choice == "last used provider:preferred-provider"
+
+
+def test_record_usage_preserves_per_model_last_used_at(monkeypatch):
+    import mms_core
+
+    stats = {"sources": {}, "last_by_cli": {}}
+    timestamps = iter(["2026-04-15T18:00:00Z", "2026-04-16T18:00:00Z"])
+
+    def _fake_update_usage_stats(mutator):
+        mutator(stats)
+
+    monkeypatch.setattr(mms_core, "_update_usage_stats", _fake_update_usage_stats)
+    monkeypatch.setattr(mms_core, "_iso_now", lambda: next(timestamps))
+
+    runtime = {
+        "id": "preferred-provider",
+        "name": "Preferred Provider",
+        "runtime_kind": "provider",
+        "auth_mode": "api_key",
+    }
+
+    mms_core._record_usage(runtime, "codex", {"model": "model-used-first"})
+    mms_core._record_usage(runtime, "codex", {"model": "model-used-second"})
+
+    source = stats["sources"]["provider:codex:preferred-provider"]
+    assert source["last_model"] == "model-used-second"
+    assert source["model_last_used_at"] == {
+        "model-used-first": "2026-04-15T18:00:00Z",
+        "model-used-second": "2026-04-16T18:00:00Z",
+    }
 
 
 def test_get_scene_usage_backfills_runtime_hint_from_sources(monkeypatch):

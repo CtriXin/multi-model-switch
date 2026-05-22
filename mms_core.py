@@ -749,6 +749,43 @@ def display_title():
     return "MMS"
 
 
+def _git_output(args):
+    try:
+        result = subprocess.run(
+            ["git", "-C", os.path.dirname(os.path.abspath(__file__)), *args],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _release_version_info():
+    version_meta = _load_version_meta()
+    installed_version = str(version_meta.get("installed_version") or "").strip()
+    installed_ref = str(version_meta.get("installed_ref") or "").strip()
+    git_describe = _git_output(["describe", "--tags", "--always", "--dirty"])
+    git_branch = _git_output(["branch", "--show-current"])
+    git_commit = _git_output(["rev-parse", "--short", "HEAD"])
+    release = installed_version or git_describe or git_commit or "dev"
+    return {
+        "release": release,
+        "installed_version": installed_version,
+        "installed_ref": installed_ref,
+        "git_describe": git_describe,
+        "git_branch": git_branch,
+        "git_commit": git_commit,
+        "install_channel": str(version_meta.get("install_channel") or "").strip(),
+        "source": str(version_meta.get("source") or "").strip(),
+    }
+
+
 def config_command_hint():
     return f"{current_command()} config api.edit"
 
@@ -3317,6 +3354,7 @@ def _record_usage(runtime, cli_name, model_info):
         sources = stats.setdefault("sources", {})
         key = _runtime_usage_key(runtime, cli_name)
         model_name = _resolve_model_name(model_info)
+        now = _iso_now()
         entry = sources.setdefault(key, {
             "runtime_kind": runtime.get("runtime_kind", "provider"),
             "id": runtime.get("id", "default"),
@@ -3326,19 +3364,22 @@ def _record_usage(runtime, cli_name, model_info):
             "last_used_at": "",
             "last_model": "",
             "models": {},
+            "model_last_used_at": {},
         })
         entry["launches"] += 1
-        entry["last_used_at"] = _iso_now()
+        entry["last_used_at"] = now
         entry["last_model"] = model_name
         models = entry.setdefault("models", {})
         models[model_name] = int(models.get(model_name, 0)) + 1
+        model_last_used_at = entry.setdefault("model_last_used_at", {})
+        model_last_used_at[model_name] = now
         last_by_cli = stats.setdefault("last_by_cli", {})
         last_by_cli[cli_name] = {
             "cli": cli_name,
             "model": model_name,
             "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
             "runtime_hint": _runtime_hint_from_runtime(runtime),
-            "last_used_at": _iso_now(),
+            "last_used_at": now,
         }
 
     _update_usage_stats(_mutate)
@@ -4688,6 +4729,92 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
     launches = sum(int(item.get("launches", 0)) for item in rows)
     last_used_at = rows[0].get("last_used_at", "") if rows else ""
     return launches, last_used_at
+
+
+def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
+    failed_model = str((rescue_event or {}).get("failed_model") or "").strip().lower()
+    rows = {}
+
+    def add(model, *, last_used_at="", source_rank=1000):
+        name = str(model or "").strip()
+        if not name or name.lower() == failed_model:
+            return
+        key = name.lower()
+        existing = rows.get(key)
+        candidate = {
+            "model": name,
+            "last_used_at": str(last_used_at or "").strip(),
+            "source_rank": int(source_rank),
+        }
+        if existing is None:
+            rows[key] = candidate
+            return
+        existing_key = (str(existing.get("last_used_at") or ""), -int(existing.get("source_rank") or 0))
+        candidate_key = (candidate["last_used_at"], -candidate["source_rank"])
+        if candidate_key > existing_key:
+            rows[key] = candidate
+
+    stats = _load_usage_stats()
+    for item in (stats.get("last_by_cli") or {}).values():
+        if not isinstance(item, dict):
+            continue
+        add(item.get("model"), last_used_at=item.get("last_used_at"), source_rank=0)
+    for source in (stats.get("sources") or {}).values():
+        if not isinstance(source, dict):
+            continue
+        model_last_used = source.get("model_last_used_at") if isinstance(source.get("model_last_used_at"), dict) else {}
+        for model_name in (source.get("models") or {}).keys():
+            add(model_name, last_used_at=model_last_used.get(model_name), source_rank=10)
+        add(source.get("last_model"), last_used_at=source.get("last_used_at"), source_rank=5)
+
+    rank = 100
+    for provider_def in (cfg or {}).get("providers", []) or []:
+        if not isinstance(provider_def, dict) or not provider_def.get("enabled", True):
+            continue
+        for field in ("extra_models", "fallback_models"):
+            for model_name in provider_def.get(field) or []:
+                add(model_name, source_rank=rank)
+                rank += 1
+
+    values = list(rows.values())
+    recent = sorted(
+        [item for item in values if item.get("last_used_at")],
+        key=lambda item: (str(item.get("last_used_at") or ""), -int(item.get("source_rank") or 0)),
+        reverse=True,
+    )
+    cold = sorted(
+        [item for item in values if not item.get("last_used_at")],
+        key=lambda item: (int(item.get("source_rank") or 0), str(item.get("model") or "").lower()),
+    )
+    ordered = recent + cold
+    return [item["model"] for item in ordered[: max(int(limit or 1), 1)]]
+
+
+def _rescue_default_fallback(cfg):
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    return {
+        "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
+        "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
+    }
+
+
+def _set_rescue_default_fallback(cfg, *, model="", cli=""):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    rescue_cfg = cfg.setdefault("rescue", {})
+    model = str(model or "").strip()
+    cli = str(cli or "").strip()
+    for legacy_key in ("default_fallback_model", "default_fallback_cli"):
+        rescue_cfg.pop(legacy_key, None)
+    if model:
+        rescue_cfg["fallback_model"] = model
+        if cli:
+            rescue_cfg["fallback_cli"] = cli
+        else:
+            rescue_cfg.pop("fallback_cli", None)
+    else:
+        rescue_cfg.pop("fallback_model", None)
+        rescue_cfg.pop("fallback_cli", None)
+    return cfg
 
 
 def _display_runtime_usage(runtime_kind, runtime_id, title):
@@ -6906,16 +7033,31 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
                     pid,
                 )
 
-    # 注入 use_count（用于 TUI 排序）
+    # 注入当前 CLI 的使用信息（用于 TUI 排序）。
     use_counts = {}
     last_used_at_by_model = {}
     stats = _load_usage_stats()
     for src in stats.get("sources", {}).values():
+        if str(src.get("cli") or "").strip() != str(cli_name or "").strip():
+            continue
         used_at = str(src.get("last_used_at") or "").strip()
+        model_last_used_at = src.get("model_last_used_at")
+        if not isinstance(model_last_used_at, dict):
+            model_last_used_at = {}
         for mname, cnt in src.get("models", {}).items():
             use_counts[mname] = use_counts.get(mname, 0) + cnt
-            if used_at and used_at > last_used_at_by_model.get(mname, ""):
-                last_used_at_by_model[mname] = used_at
+            model_used_at = str(model_last_used_at.get(mname) or "").strip()
+            if model_used_at and model_used_at > last_used_at_by_model.get(mname, ""):
+                last_used_at_by_model[mname] = model_used_at
+        last_model = str(src.get("last_model") or "").strip()
+        # Legacy usage files only had source-level last_model/last_used_at.
+        if (
+            last_model
+            and used_at
+            and last_model not in model_last_used_at
+            and used_at > last_used_at_by_model.get(last_model, "")
+        ):
+            last_used_at_by_model[last_model] = used_at
 
     # 按 family 分组
     family_map = {}  # family_name -> [model_entry]
@@ -9389,6 +9531,33 @@ def _parse_usage_timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
+def _usage_recency_score(value, now=None, half_life_days=14):
+    parsed = _parse_usage_timestamp(value)
+    if parsed is None:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if half_life_days <= 0:
+        return 1.0
+    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
+    return 0.5 ** (age_days / float(half_life_days))
+
+
+def _sort_family_entries_for_tui(families, preferred_family="", now=None):
+    def _key(item):
+        family = str(item.get("family") or "") if isinstance(item, dict) else ""
+        last_at = str(item.get("last_used_at") or "").strip() if isinstance(item, dict) else ""
+        recency = _usage_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        preferred_rank = 0 if family == str(preferred_family or "").strip() else 1
+        return (-has_recent, -recency, preferred_rank, family.lower())
+
+    return sorted(list(families or []), key=_key)
+
+
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
     if str(family_name or "").strip() == str(preferred_family or "").strip():
         return False
@@ -9567,13 +9736,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         preferred_family=preferred_family,
                     ),
                 })
-            # 当前 CLI 的默认主族群置顶，其余再按使用量降序排列。
-            fam_list.sort(
-                key=lambda x: (
-                    0 if x.get("family") == preferred_family else 1,
-                    -x.get("use_count", 0),
-                    x.get("family", ""),
-                )
+            # 最近使用的 family 优先；没有 recency 时再保留当前 CLI 默认主族群兜底置顶。
+            fam_list = _sort_family_entries_for_tui(
+                fam_list,
+                preferred_family=preferred_family,
             )
             fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
@@ -9808,8 +9974,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         # ── 设置 ──
         elif action_type == "settings":
             from mms_tui import (
-                select_fake_upstream_tui,
+                select_channel_action_tui,
                 select_language_tui,
+                select_rescue_event_tui,
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
@@ -9851,17 +10018,6 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     current_cfg.setdefault("ui", {})["language"] = chosen_lang
                     save_config(current_cfg)
                     set_language(chosen_lang)
-            elif settings_action == "fake_upstream":
-                selected_fake = _safe_tui_call(select_fake_upstream_tui)
-                if selected_fake == "__interrupt__":
-                    return True
-                if selected_fake in {"on", "off"}:
-                    _set_fake_upstream_enabled(selected_fake == "on")
-                    status_payload = _fake_upstream_status_payload()
-                    console.print(
-                        f"[green]✓ Fake Upstream 已{'开启' if status_payload.get('enabled') else '关闭'}[/green]\n"
-                        f"[dim]log: {status_payload.get('log_path', '-')}[/dim]"
-                    )
             elif settings_action == "routes_export":
                 try:
                     from mms_router import MODEL_ROUTES_PATH, export_model_routes
@@ -9871,13 +10027,167 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "about":
+                version_info = _release_version_info()
                 console.print(f"[cyan]{display_title()}[/cyan]")
+                console.print(f"[green]Release: {version_info.get('release') or 'dev'}[/green]")
+                if version_info.get("git_branch") or version_info.get("git_commit"):
+                    console.print(
+                        f"[dim]Git: {version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}[/dim]"
+                    )
+                if version_info.get("install_channel") or version_info.get("source"):
+                    console.print(
+                        f"[dim]Install: {version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}[/dim]"
+                    )
                 console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
+                _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
-            elif settings_action == "recommend":
-                current_cfg = _run_recommend_mgmt_tui(current_cfg)
-                _families_dirty = True
+            elif settings_action == "rescue":
+                from pathlib import Path
+                from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
+
+                default_fallback = _rescue_default_fallback(current_cfg)
+                default_label = default_fallback.get("model") or "未设置"
+                generic_fallback_candidates = _rescue_fallback_model_candidates(current_cfg, {}, limit=5)
+                default_candidate_actions = [
+                    (f"default::{model}", f"设为默认 fallback -> {model}")
+                    for model in generic_fallback_candidates
+                ]
+                rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
+                if not rescue_events:
+                    empty_action = _safe_tui_call(
+                        select_channel_action_tui,
+                        "Rescue Packet",
+                        [
+                            ("状态", "没有找到 rescue packet"),
+                            ("说明", "真实 429/context/provider failure 会自动写入 repo/.mms/rescue/latest.md"),
+                            ("默认 fallback", default_label),
+                        ],
+                        default_candidate_actions + [
+                            ("manual_default", "手动设置默认 fallback"),
+                            ("clear_default", "清除默认 fallback"),
+                            ("create_demo", "生成测试 rescue packet"),
+                            ("back", "返回"),
+                        ],
+                    )
+                    if empty_action == "__interrupt__":
+                        return True
+                    if str(empty_action or "").startswith("default::") or empty_action == "manual_default":
+                        fallback_model = str(empty_action or "").split("::", 1)[1] if str(empty_action or "").startswith("default::") else ""
+                        if not fallback_model:
+                            _ensure_rich()
+                            fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                        if fallback_model:
+                            current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                            save_config(current_cfg, reason="tui:rescue_default_fallback")
+                            console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                            _pause_after_tui_report("按 Enter 返回设置")
+                        continue
+                    if empty_action == "clear_default":
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model="")
+                        save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
+                        console.print("[green]✓ 默认 fallback 已清除[/green]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                        continue
+                    if empty_action == "create_demo":
+                        payload = write_demo_rescue_packet(repo_root=os.getcwd())
+                        console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
+                        console.print(f"[dim]rescue.md: {payload.get('artifacts', {}).get('markdown', '-')}[/dim]")
+                        _pause_after_tui_report("按 Enter 继续查看")
+                        rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
+                    else:
+                        continue
+                selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
+                if selected_rescue == "__interrupt__":
+                    return True
+                if not selected_rescue:
+                    continue
+                info_lines = [
+                    ("时间", selected_rescue.get("created_at") or "-"),
+                    ("模型", selected_rescue.get("failed_model") or "-"),
+                    ("Provider", selected_rescue.get("failed_provider_id") or "-"),
+                    ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
+                    ("原因", selected_rescue.get("failure_kind") or "-"),
+                    ("Repo", selected_rescue.get("repo_path") or "-"),
+                    ("默认 fallback", default_label),
+                ]
+                fallback_candidates = _rescue_fallback_model_candidates(current_cfg, selected_rescue, limit=5)
+                fallback_actions = [
+                    (f"handover::{model}", f"生成 fallback handover -> {model}")
+                    for model in fallback_candidates
+                ]
+                default_actions = [
+                    (f"default::{model}", f"设为默认 fallback -> {model}")
+                    for model in fallback_candidates
+                ]
+                rescue_action = _safe_tui_call(
+                    select_channel_action_tui,
+                    "Rescue Packet",
+                    info_lines,
+                    fallback_actions + default_actions + [
+                        ("manual_handover", "手动输入 fallback model"),
+                        ("manual_default", "手动设置默认 fallback"),
+                        ("clear_default", "清除默认 fallback"),
+                        ("view_md", "查看 rescue.md"),
+                        ("show_paths", "显示文件路径"),
+                        ("back", "返回"),
+                    ],
+                )
+                if rescue_action == "__interrupt__":
+                    return True
+                if rescue_action == "view_md":
+                    md_path = Path(str(selected_rescue.get("artifact_markdown") or ""))
+                    try:
+                        content = md_path.read_text(encoding="utf-8")
+                    except OSError as exc:
+                        console.print(f"[red]无法读取 rescue.md: {exc}[/red]")
+                    else:
+                        try:
+                            console.clear()
+                        except Exception:
+                            pass
+                        console.print(content)
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif rescue_action == "show_paths":
+                    console.print(f"[cyan]rescue.md[/cyan] {selected_rescue.get('artifact_markdown') or '-'}")
+                    console.print(f"[cyan]rescue.json[/cyan] {selected_rescue.get('artifact_json') or '-'}")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
+                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("handover::") else ""
+                    if not fallback_model:
+                        _ensure_rich()
+                        fallback_model = Prompt.ask("fallback model", default="").strip()
+                    if fallback_model:
+                        try:
+                            handover = write_fallback_handover(
+                                selected_rescue,
+                                fallback_model=fallback_model,
+                            )
+                        except Exception as exc:
+                            console.print(f"[red]生成 fallback handover 失败: {exc}[/red]")
+                        else:
+                            artifacts = handover.get("artifacts", {})
+                            console.print(f"[green]✓ 已生成 fallback handover[/green]")
+                            console.print(f"[cyan]model[/cyan] {fallback_model}")
+                            console.print(f"[cyan]handover.md[/cyan] {artifacts.get('markdown') or '-'}")
+                            console.print(f"[dim]latest: {artifacts.get('latest_markdown') or '-'}[/dim]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
+                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
+                    if not fallback_model:
+                        _ensure_rich()
+                        fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                    if fallback_model:
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                        save_config(current_cfg, reason="tui:rescue_default_fallback")
+                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]真实 429/context/provider failure 会先写 rescue packet，再自动写 fallback handover；不会自动调用模型。[/dim]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                elif rescue_action == "clear_default":
+                    current_cfg = _set_rescue_default_fallback(current_cfg, model="")
+                    save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
+                    console.print("[green]✓ 默认 fallback 已清除[/green]")
+                    _pause_after_tui_report("按 Enter 返回设置")
             continue
 
         # ── 上次使用 ──
@@ -12722,12 +13032,13 @@ def main():
             f"  {current_command()} opencode --profile lite_pro  直接启动指定 OpenCode profile\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
-            f"  {current_command()} chat ...        legacy/maintenance-only chat 子命令\n"
-            f"  {current_command()} discuss ...     legacy/maintenance-only discuss 子命令\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
-            f"  {current_command()} usage ...       查看 usage 统计"
+            f"  {current_command()} usage ...       查看 usage 统计\n\n"
+            "Legacy / emergency-only 命令（保留兼容，不作为主入口）:\n"
+            f"  {current_command()} chat ...        legacy/maintenance-only；新会话请用 TUI launcher\n"
+            f"  {current_command()} discuss ...     legacy/maintenance-only；规划/执行请用 TUI 启动 CLI"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -7,6 +7,8 @@ import os
 import sys
 import time
 import unicodedata
+from datetime import datetime, timezone
+from math import pow
 from mms_fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_i18n import pick as _L, get_language as _get_language
 from mms_state_io import resolve_mms_config_dir
@@ -292,6 +294,71 @@ def _last_used_label(last_item):
     return str(last_item.get("model") or "?")
 
 
+def _parse_tui_usage_timestamp(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _tui_recency_score(value, now=None, half_life_days=14):
+    parsed = _parse_tui_usage_timestamp(value)
+    if parsed is None:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if half_life_days <= 0:
+        return 1.0
+    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
+    return pow(0.5, age_days / float(half_life_days))
+
+
+def _sort_cli_names_by_last_used(cli_names, last_used=None, now=None):
+    indexed = list(enumerate(cli_names or []))
+
+    def _key(item):
+        index, cli_name = item
+        usage = (last_used or {}).get(cli_name) if isinstance(last_used, dict) else {}
+        last_at = usage.get("last_used_at") if isinstance(usage, dict) else ""
+        recency = _tui_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        return (-has_recent, -recency, index)
+
+    return [cli_name for _index, cli_name in sorted(indexed, key=_key)]
+
+
+def _sort_model_entries_for_tui(models, family_name="", now=None):
+    def _model_name(item):
+        if isinstance(item, dict):
+            return str(item.get("model") or "")
+        return str(item or "")
+
+    def _key(item):
+        if isinstance(item, dict):
+            last_at = str(item.get("last_used_at") or "").strip()
+        else:
+            last_at = ""
+        recency = _tui_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        return (
+            -has_recent,
+            -recency,
+            _model_name(item).lower(),
+        )
+
+    return sorted(list(models or []), key=_key)
+
+
 def select_family_tui(
     families_by_cli,
     cli_names,
@@ -320,6 +387,7 @@ def select_family_tui(
         ("connect", cli_name, None) | ("provider_browse", cli_name, None) | None
     """
     families_detail = families_detail or {}
+    cli_names = _sort_cli_names_by_last_used(cli_names, last_used)
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -522,13 +590,7 @@ def select_family_tui(
             elif sel_fam_name and detail.get(sel_fam_name):
                 raw_models = detail[sel_fam_name]
                 if raw_models and isinstance(raw_models[0], dict):
-                    raw_models = sorted(
-                        raw_models,
-                        key=lambda item: (
-                            -int(item.get("use_count", 0) or 0),
-                            str(item.get("model", "")),
-                        ),
-                    )
+                    raw_models = _sort_model_entries_for_tui(raw_models, sel_fam_name)
                 # raw_models 可能是 str 列表或 dict 列表（含 model/provider_id 等）
                 model_names = []
                 for m in raw_models:
@@ -753,13 +815,7 @@ def select_submodel_tui(
     if not models:
         return None
 
-    sorted_models = sorted(
-        models,
-        key=lambda m: (
-            -int(m.get("use_count", 0) or 0),
-            str(m.get("model", "")),
-        ),
-    )
+    sorted_models = _sort_model_entries_for_tui(models, family_name)
     provider_options_cache = dict(provider_options or {})
     try:
         from mms_speed_stats import get_speed_entry as _get_speed_entry
@@ -2188,14 +2244,11 @@ def _select_lb_custom_tui(families_detail=None, provider_options_map=None):
 def _settings_menu():
     current_lang = _get_language()
     language_desc = _L("当前：英文", "Current: English") if current_lang == "en" else _L("当前：中文", "Current: Chinese")
-    fake_status = _fake_upstream_status_payload()
-    fake_desc = _L("当前：开启", "Current: On") if fake_status.get("enabled") else _L("当前：关闭", "Current: Off")
     return [
         {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
         {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
-        {"id": "recommend", "label": _L("推荐模型", "Recommended Models"), "desc": _L("编辑推荐模型列表", "Edit the recommended model list")},
+        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("查看最近失败与 rescue packet", "View recent failures and rescue packets")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
-        {"id": "fake_upstream", "label": _L("Fake Upstream", "Fake Upstream"), "desc": fake_desc},
         {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
         {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
     ]
@@ -2336,6 +2389,96 @@ def select_settings_tui():
                 idx = (idx + 1) % len(items)
             elif key in (10, 13, curses.KEY_ENTER):
                 return items[idx]["id"]
+            elif key in (27, ord('q'), ord('Q')):
+                return None
+
+    try:
+        return curses.wrapper(_inner)
+    except curses.error:
+        return None
+
+
+def _rescue_event_title(event):
+    created = str(event.get("created_at") or "")[:19].replace("T", " ")
+    model = str(event.get("failed_model") or "unknown")
+    status = str(event.get("status_code") or event.get("failure_kind") or "")
+    return f"{created}  {model}  {status}".strip()
+
+
+def select_rescue_event_tui(events):
+    """选择最近的 Rescue packet。"""
+    events = list(events or [])
+
+    def _inner(stdscr):
+        curses.curs_set(0)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_CYAN, -1)
+        curses.init_pair(2, curses.COLOR_WHITE, -1)
+        curses.init_pair(4, curses.COLOR_YELLOW, -1)
+        curses.init_pair(5, curses.COLOR_GREEN, -1)
+
+        idx = 0
+        while True:
+            stdscr.erase()
+            max_y, max_w = stdscr.getmaxyx()
+            ac = curses.color_pair(1)
+            total_w = min(92, max_w - 4)
+            visible_h = max(1, min(len(events), max_y - 10))
+            ph = visible_h + 7
+            px = (max_w - total_w) // 2
+            py = max(1, (max_y - ph) // 2)
+            ll = px + 2
+            rr = px + total_w - 2
+
+            row = py
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+            row += 1
+            _safe_addstr(stdscr, row, ll, _L("中断/救援", "Interrupted / Rescue"), curses.color_pair(1) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+
+            if not events:
+                _safe_addstr(stdscr, row, ll + 1, _L("没有找到 rescue packet", "No rescue packets found"), curses.A_DIM)
+                row += 1
+            else:
+                start = max(0, min(idx - visible_h + 1, len(events) - visible_h))
+                for offset, event in enumerate(events[start:start + visible_h]):
+                    i = start + offset
+                    y = row + offset
+                    is_sel = i == idx
+                    repo_name = os.path.basename(str(event.get("repo_path") or "")) or "-"
+                    provider = str(event.get("failed_provider_id") or "-")
+                    line = f"{_rescue_event_title(event)}  · {provider} · {repo_name}"
+                    if is_sel:
+                        _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, ll + 1, line, curses.color_pair(1) | curses.A_BOLD, max_w=total_w - 6)
+                    else:
+                        _safe_addstr(stdscr, y, ll + 1, line, curses.color_pair(2), max_w=total_w - 6)
+                row += visible_h
+
+            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            row += 1
+            if events:
+                _safe_addstr(stdscr, row, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 6, _L("详情", "Details"), curses.A_DIM)
+                _safe_addstr(stdscr, row, ll + 15, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 19, _L("返回", "Back"), curses.A_DIM)
+            else:
+                _safe_addstr(stdscr, row, ll, "Esc", curses.A_BOLD)
+                _safe_addstr(stdscr, row, ll + 4, _L("返回", "Back"), curses.A_DIM)
+            row += 1
+            _safe_addstr(stdscr, row, px, "-" * total_w, ac)
+
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key == curses.KEY_UP and events:
+                idx = (idx - 1) % len(events)
+            elif key == curses.KEY_DOWN and events:
+                idx = (idx + 1) % len(events)
+            elif key in (10, 13, curses.KEY_ENTER) and events:
+                return events[idx]
             elif key in (27, ord('q'), ord('Q')):
                 return None
 
