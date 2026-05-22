@@ -12,7 +12,7 @@ supported_clis = ["claude", "codex", "opencode"]
 enabled = true
 # proxy = "http://127.0.0.1:7890" # 可选：通道级强制 proxy；预探测和实际启动都走它
 # no_proxy = ""                   # 可选：传给 NO_PROXY
-# timezone = "America/Los_Angeles"   # 可选：默认就是这个；仅影响该次启动环境
+# timezone = "Asia/Singapore"        # 可选：默认就是这个；仅影响该次启动环境
 # force_ipv4 = true               # 可选：默认开启；MMS 预探测和子进程优先 IPv4
 # Claude 1M 策略：auto / enable / disable
 # claude_1m_mode = "auto"
@@ -87,5 +87,5 @@ remote_service_model = "claude-opus-4-6"
 #claude_1m_mode = "disable"  # auto / enable / disable
 #proxy = "http://127.0.0.1:7890" # 可选：账号级强制 proxy；不通则阻止启动
 #no_proxy = ""                   # 可选：传给 NO_PROXY
-#timezone = "America/Los_Angeles"   # 可选：默认就是这个；仅本次 Claude 进程生效，不改系统时区
+#timezone = "Asia/Singapore"        # 可选：默认就是这个；仅本次 Claude 进程生效，不改系统时区
 #force_ipv4 = true               # 可选：默认开启；MMS 会话优先 IPv4
