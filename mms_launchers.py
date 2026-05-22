@@ -408,6 +408,17 @@ def _lookup_context_window(model_name, provider_id=None):
     if model_clean is not None:
         return model_clean
 
+    try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        caps = resolve_model_capabilities(clean, provider_id=provider_id or "")
+        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+            approved_window = _coerce_context_window(caps.get("context_window_tokens"))
+            if approved_window is not None:
+                return approved_window
+    except Exception:
+        pass
+
     profiled = profile_context_window(clean, provider_id=provider_id or "")
     if profiled is not None:
         return profiled

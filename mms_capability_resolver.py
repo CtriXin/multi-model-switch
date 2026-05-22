@@ -2,8 +2,9 @@
 
 This module is intentionally runtime-adjacent, not runtime-owning. It does not
 query SQLite directly and it does not alter provider/model/account selection.
-Callers may pass an approved registry/export fact mapping when available; missing
-or corrupt inputs fall back to provider profiles and then conservative defaults.
+By default it reads the verified latest-approved capability export when
+available. Missing or corrupt approved inputs fall back to provider profiles and
+then conservative defaults.
 """
 
 from __future__ import annotations
@@ -87,6 +88,15 @@ def load_approved_facts(path: str | Path | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def load_default_approved_facts() -> dict[str, Any]:
+    """Read verified latest-approved capability facts, returning empty on fallback."""
+    try:
+        import mms_registry
+    except Exception:
+        return {}
+    return mms_registry.try_load_latest_approved_payload("capabilities")
+
+
 def resolve_model_capabilities(
     model_name: str,
     *,
@@ -125,6 +135,8 @@ def resolve_model_capabilities(
     _apply_source(result, profile_caps, "provider_profile")
 
     approved_payload = load_approved_facts(approved_facts_path)
+    if approved_facts_path is None and approved_facts is None:
+        approved_payload = load_default_approved_facts()
     if approved_facts:
         approved_payload = _deep_merge(approved_payload, dict(approved_facts))
     approved_caps = _approved_capabilities(model, approved_payload)

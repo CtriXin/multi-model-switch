@@ -1899,6 +1899,16 @@ def _model_context_window(model_name):
     if not clean:
         return None
     try:
+        from mms_capability_resolver import resolve_model_capabilities
+
+        caps = resolve_model_capabilities(clean)
+        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+            window = int(caps.get("context_window_tokens"))
+            if window > 0:
+                return window
+    except Exception:
+        pass
+    try:
         from mms_launchers import _MODEL_CONTEXT_WINDOWS
     except Exception:
         return None

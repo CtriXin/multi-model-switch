@@ -735,6 +735,41 @@ def copy_file_atomic(src: str | os.PathLike[str], dst: str | os.PathLike[str], *
     _write_bytes_atomic(dst_path, data, mode=mode)
 
 
+def _deep_merge(base: Any, override: Any) -> Any:
+    if isinstance(base, Mapping) and isinstance(override, Mapping):
+        merged = dict(base)
+        for key, value in override.items():
+            merged[key] = _deep_merge(merged.get(key), value)
+        return merged
+    if override is None:
+        return base
+    return override
+
+
+def _read_json_mapping(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _build_effective_provider_profiles_payload(config_root: Path) -> dict[str, Any]:
+    """Build the non-secret consumer-facing profile export from builtin + overlays."""
+    repo_root = Path(__file__).resolve().parent
+    payload: dict[str, Any] = _read_json_mapping(repo_root / "config" / "provider-profiles.json")
+    if not payload:
+        payload = {"schema_version": 1, "profiles": {}}
+    for basename in ("provider-profiles.json", "model-profiles.json"):
+        overlay = _read_json_mapping(config_root / basename)
+        if overlay:
+            payload = _deep_merge(payload, overlay)
+    if not isinstance(payload.get("profiles"), dict):
+        payload["profiles"] = {}
+    validate_non_secret_payload(payload, context="effective_provider_profiles")
+    return payload
+
+
 def _json_loads_safe(value: str) -> Any:
     try:
         return json.loads(value)
@@ -868,7 +903,6 @@ def publish_latest_approved_bundle(
         source_files = {
             "router": _config_file(config_root, "model-routes.json"),
             "lineup": _config_file(config_root, "model-routes.lineup.json"),
-            "profile": _config_file(config_root, "provider-profiles.json"),
             "policy": _config_file(config_root, "model-policy.json"),
         }
         output_files = {
@@ -881,6 +915,7 @@ def publish_latest_approved_bundle(
 
         for name, src in source_files.items():
             copy_file_atomic(src, output_files[name], mode=0o600)
+        write_json_atomic(output_files["profile"], _build_effective_provider_profiles_payload(config_root))
 
         capability_revision_seed = sha256_hex(
             _canonical_json_bytes(
@@ -1089,6 +1124,27 @@ def load_latest_approved_bundle(
     result = dict(verified)
     result["payloads"] = payloads
     return result
+
+
+def try_load_latest_approved_payload(
+    name: str,
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    manifest_path: str | os.PathLike[str] | None = None,
+    include_secret: bool = False,
+) -> dict[str, Any]:
+    """Return one verified latest-approved payload, or empty when unavailable."""
+    try:
+        bundle = load_latest_approved_bundle(
+            config_dir=config_dir,
+            manifest_path=manifest_path,
+            include_secret=include_secret,
+        )
+    except (OSError, json.JSONDecodeError, TypeError, RegistryValidationError):
+        return {}
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), Mapping) else {}
+    payload = payloads.get(str(name or ""))
+    return payload if isinstance(payload, dict) else {}
 
 
 def latest_approved_capability_facts_path(

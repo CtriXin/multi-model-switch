@@ -44,12 +44,27 @@ def _deep_merge(base: Any, override: Any) -> Any:
     return copy.deepcopy(override)
 
 
+def _load_latest_approved_profiles(config_dir: str) -> dict[str, Any]:
+    try:
+        import mms_registry
+    except Exception:
+        return {}
+    payload = mms_registry.try_load_latest_approved_payload("profile", config_dir=config_dir)
+    return payload if isinstance(payload, dict) else {}
+
+
 @lru_cache(maxsize=1)
 def load_provider_profiles() -> dict[str, Any]:
-    """Load built-in profiles plus optional read-only user overlays."""
+    """Load built-in profiles plus verified latest-approved or legacy overlays."""
     loaded = _read_json(_BUILTIN_PROFILE_PATH)
     profiles = loaded if loaded else {"schema_version": 1, "profiles": {}}
     config_dir = resolve_mms_config_dir()
+    approved_payload = _load_latest_approved_profiles(config_dir)
+    if approved_payload:
+        profiles = _deep_merge(profiles, approved_payload)
+        if not isinstance(profiles.get("profiles"), dict):
+            profiles["profiles"] = {}
+        return profiles
     for basename in _USER_PROFILE_BASENAMES:
         user_payload = _read_json(os.path.join(config_dir, basename))
         if user_payload:

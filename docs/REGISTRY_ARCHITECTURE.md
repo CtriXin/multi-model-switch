@@ -175,6 +175,27 @@ Rules:
   falls back through the existing resolver stack when individual facts are
   incomplete; a missing or hash-mismatched manifest fails closed.
 
+## Current Runtime Adoption
+
+MMS now uses the latest-approved bundle for the low-risk resolver surfaces:
+
+- `mms_provider_profiles.load_provider_profiles()` first verifies the manifest,
+  then reads `generated/provider-profiles.generated.json`.
+- `mms_capability_resolver.resolve_model_capabilities()` first verifies the
+  manifest, then reads `generated/model-capabilities.approved.json`.
+- `mms_launchers._lookup_context_window()` and the TUI capability summary only
+  accept approved context facts when the resolver marks the field source as
+  `approved_facts`.
+
+Fallback is intentionally conservative:
+
+- Missing manifest, invalid JSON, hash mismatch, or missing capability/profile
+  payload means MMS falls back to the legacy built-in/user profile files or
+  conservative capability defaults.
+- Candidate/source snapshots are never read by runtime resolver paths.
+- Router/root alias files and launcher/provider/account selection are unchanged
+  in this phase.
+
 ## Privacy Boundary
 
 Every route group and provider route must expose a `privacy_boundary`:
