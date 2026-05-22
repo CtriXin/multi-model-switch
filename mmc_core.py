@@ -45,6 +45,11 @@ from mmc_session_index import (
 from mms_state_io import atomic_write_json, locked_state_file
 from mms_runtime import prepend_binary_dir_to_path, resolve_cli_binary
 
+MMC_PUBLIC_MIGRATION_NOTICE = (
+    "mmc public command is retired; use `mms` TUI launcher for normal work. "
+    "mmc_core remains only for launcher-owned OAuth Claude adapter and emergency debug until dependency removal is proven safe."
+)
+
 _SAFE_PARENT_ENV_KEYS = (
     "TERM",
     "COLORTERM",
@@ -2649,7 +2654,11 @@ def main(argv: list[str] | None = None) -> None:
     if len(argv) == 1 and argv[0] in {"3", "ls"}:
         sys.exit(_handle_session_ls())
 
-    parser = argparse.ArgumentParser(prog="mmc", description="MMC - isolated OAuth Claude launcher")
+    parser = argparse.ArgumentParser(
+        prog="mmc",
+        description="MMC - isolated OAuth Claude launcher",
+        epilog=MMC_PUBLIC_MIGRATION_NOTICE,
+    )
     subparsers = parser.add_subparsers(dest="subcommand")
 
     run_parser = subparsers.add_parser("run", help="启动隔离的 OAuth Claude")

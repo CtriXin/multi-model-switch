@@ -24,6 +24,11 @@ from mms_core import (
 )
 from mms_toon import format_llm_data
 
+LEGACY_DISCUSS_MIGRATION_NOTICE = (
+    "mms discuss 是 legacy/maintenance-only 子命令；新规划/执行请使用 `mms` TUI 启动目标 CLI，"
+    "维护动作会迁移到 TUI Settings / Maintenance。"
+)
+
 PHASE1_SYSTEM_PROMPT = """你是一个严格压缩输出的技术分析助手。
 你会收到一个任务，请独立思考，并且只输出 JSON。
 禁止输出 markdown、禁止代码块、禁止额外解释。
@@ -79,7 +84,8 @@ PHASE3_SYSTEM_PROMPT = """你是一个严格的 reviewer 和 architect。
 def parse_discuss_args(argv):
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} discuss",
-        description=f"{display_title()} discuss — 多模型摘要发散与综合裁定",
+        description=f"{display_title()} discuss — legacy/maintenance-only 多模型摘要发散与综合裁定",
+        epilog=LEGACY_DISCUSS_MIGRATION_NOTICE,
     )
     parser.add_argument("--provider", help="临时使用指定模型源")
     parser.add_argument("--cross", action="store_true", help="启用环形交叉审查")
@@ -726,6 +732,7 @@ def _discuss_post_action(provider_ctx, selected_models, original_task, final_tex
 
 def discuss_main(cfg, argv):
     args = parse_discuss_args(argv)
+    console.print(f"[yellow]{LEGACY_DISCUSS_MIGRATION_NOTICE}[/yellow]")
     provider_ctx = ensure_provider_credentials(cfg, args.provider)
     models = fetch_models(provider_ctx)
     if not models:

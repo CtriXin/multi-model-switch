@@ -12722,12 +12722,13 @@ def main():
             f"  {current_command()} opencode --profile lite_pro  直接启动指定 OpenCode profile\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
-            f"  {current_command()} chat ...        legacy/maintenance-only chat 子命令\n"
-            f"  {current_command()} discuss ...     legacy/maintenance-only discuss 子命令\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
-            f"  {current_command()} usage ...       查看 usage 统计"
+            f"  {current_command()} usage ...       查看 usage 统计\n\n"
+            "Legacy / emergency-only 命令（保留兼容，不作为主入口）:\n"
+            f"  {current_command()} chat ...        legacy/maintenance-only；新会话请用 TUI launcher\n"
+            f"  {current_command()} discuss ...     legacy/maintenance-only；规划/执行请用 TUI 启动 CLI"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
