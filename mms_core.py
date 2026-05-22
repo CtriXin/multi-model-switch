@@ -560,9 +560,7 @@ def _model_info_looks_domestic(model_info):
 
 
 _MMS_HIDDEN_MODEL_FAMILIES = set()
-_MMS_HIDDEN_MODELS = {
-    "anthropic/claude-opus-4.7",
-}
+_MMS_HIDDEN_MODELS = set()
 
 
 def _mms_model_visible(model_name):

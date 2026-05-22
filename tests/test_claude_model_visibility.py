@@ -19,11 +19,12 @@ def test_filter_visible_models_keeps_claude_family():
     ]
 
 
-def test_default_mms_hides_openrouter_private_opus():
+def test_default_mms_keeps_openrouter_claude_visible():
     import mms_core
 
-    assert mms_core._mms_model_visible("anthropic/claude-opus-4.7") is False
+    assert mms_core._mms_model_visible("anthropic/claude-opus-4.7") is True
     assert mms_core._filter_visible_models(["anthropic/claude-opus-4.7", "claude-opus-4-6"]) == [
+        "anthropic/claude-opus-4.7",
         "claude-opus-4-6"
     ]
 
