@@ -41,11 +41,13 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - runtime discovery 跨 PATH、Homebrew、所有 NVM Node 版本，不改默认 Node
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
-- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
+- 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`xmem` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
 - silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
 - session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
+
+MMS 在检测到 `xmem` 时，会默认注入 `xmem` skill 和静默 session-start hook。hook 只负责注册/同步当前项目到 xmem generated index；真正的 durable summary 仍走 xmem skill workflow，并进入 Project Wiki / issue-tracking 的 append-only 队列。
 
 ## 安装 / 升级
 

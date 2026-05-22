@@ -1863,6 +1863,7 @@ _CLAUDE_MINDKEEPER_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper
 _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeeper-token-monitor-hook.sh")
 _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
 _CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
+_XMEM_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-start-hook.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2817,6 +2818,14 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
     )
     hooks_data = _append_command_hook(
         hooks_data,
+        "SessionStart",
+        _XMEM_SESSION_START_HOOK,
+        matcher="",
+        timeout=10,
+        status_message="Syncing xmem",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
         "SessionEnd",
         _CLAUDE_MMS_RESUME_HINT_HOOK,
         matcher="",
@@ -3184,6 +3193,55 @@ def _resolve_token_saver_root():
     return ""
 
 
+def _resolve_xmem_root():
+    candidates = []
+    explicit = str(os.environ.get("MMS_XMEM_ROOT") or "").strip()
+    if explicit:
+        candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("xmem")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "xmem"),
+        _real_user_path("auto-skills", "shared-skills", "xmem"),
+        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "skills", "xmem"),
+        _real_user_path(".codex", "skills", "xmem"),
+        _real_user_path(".agents", "skills", "xmem"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(os.path.join(candidate, "SKILL.md")):
+            return candidate
+    return ""
+
+
+def _xmem_cli_path():
+    candidates = []
+    for key in ("MMS_XMEM_BIN", "XMEM_BIN"):
+        explicit = str(os.environ.get(key) or "").strip()
+        if explicit:
+            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        _real_user_path(".local", "bin", "xmem"),
+        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "bin", "xmem"),
+    ])
+    found = shutil.which("xmem")
+    if found:
+        candidates.append(found)
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
+
+
 def _resolve_auto_github_contributor_root():
     candidates = []
     explicit = str(os.environ.get("MMS_AUTO_GITHUB_CONTRIBUTOR_ROOT") or "").strip()
@@ -3313,6 +3371,7 @@ def _is_mms_managed_hook_command(command_text):
         "mindkeeper-token-monitor-hook.sh",
         "claude-codegraph-auto-index.sh",
         "mms-resume-hint.sh",
+        "xmem-session-start-hook.sh",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
@@ -3512,6 +3571,9 @@ def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
         return {}
     disabled = _normalize_session_surface_disabled(disabled_session_surfaces)
     disabled_commands = disabled.get("hooks", set())
+    if "xmem" in disabled.get("skills", set()):
+        disabled_commands = set(disabled_commands)
+        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_START_HOOK))
     if not disabled_commands:
         return hooks_data
     return _filter_hook_commands(
@@ -3750,7 +3812,16 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
 def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
     hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
+    hooks_data = _append_shell_command_hook(
+        hooks_data,
+        "SessionStart",
+        _XMEM_SESSION_START_HOOK,
+        matcher="startup|resume",
+        timeout=10,
+        status_message="Syncing xmem",
+    )
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
+    hooks_data = _filter_missing_managed_hook_commands(hooks_data)
     if hooks_data:
         payload["hooks"] = hooks_data
     else:
@@ -4263,6 +4334,15 @@ def _overlay_toon_session_entries(parent_dir, session_home, *, disabled_session_
     _overlay_session_skill_dir(parent_dir, overlay_root, "toon", toon_root, disabled_session_surfaces=disabled_session_surfaces)
 
 
+def _overlay_xmem_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
+    xmem_root = _resolve_xmem_root()
+    if not xmem_root:
+        return
+    overlay_root = os.path.join(session_home, ".mms-xmem-overlay")
+    os.makedirs(overlay_root, exist_ok=True)
+    _overlay_session_skill_dir(parent_dir, overlay_root, "xmem", xmem_root, disabled_session_surfaces=disabled_session_surfaces)
+
+
 def _overlay_token_saver_session_entries(parent_dir, session_home, *, disabled_session_surfaces=None):
     token_saver_root = _resolve_token_saver_root()
     if not token_saver_root:
@@ -4419,6 +4499,7 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
     _overlay_agent_browser_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_xmem_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(plugin_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
 
@@ -4440,6 +4521,8 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
     _overlay_weber_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_opencode_xmem_plugin(config_dir, plugin_runtime)
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):
@@ -5942,6 +6025,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
             session_home,
             disabled_session_surfaces=disabled_session_surfaces,
         )
+        _overlay_xmem_session_entries(
+            session_claude_dir,
+            session_home,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
         _scrub_claude_oauth_env(env)
         env["HOME"] = session_home
         _set_session_home_hint(env, session_home)
@@ -6043,6 +6131,11 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 session_home,
                 disabled_session_surfaces=disabled_session_surfaces,
             )
+            _overlay_xmem_session_entries(
+                os.path.join(session_home, ".codex"),
+                session_home,
+                disabled_session_surfaces=disabled_session_surfaces,
+            )
             _overlay_auto_github_contributor_session_entries(
                 os.path.join(session_home, ".codex"),
                 session_home,
@@ -6077,6 +6170,7 @@ def _account_env(account, *, validate_proxy=True, model_info=None):
                 "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -7151,6 +7245,23 @@ def _install_session_command_wrappers(session_home, env):
             env["TOKEN_SAVER_BIN"] = token_saver_wrapper_path
             env["MMS_TOKEN_SAVER_BIN"] = token_saver_wrapper_path
             env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
+    xmem_script = _xmem_cli_path()
+    if xmem_script:
+        xmem_wrapper_path = os.path.join(wrapper_dir, "xmem")
+        xmem_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(xmem_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(xmem_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(xmem_wrapper)
+        os.chmod(xmem_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["XMEM_BIN"] = xmem_wrapper_path
+            env["MMS_XMEM_BIN"] = xmem_wrapper_path
 
     session_path = env.get("PATH") or current_path
     env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
@@ -8852,6 +8963,7 @@ def _claude_gateway_env(
                 "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
                 "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
                 "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+                "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
                 "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
             },
             extra_paths={
@@ -8898,6 +9010,7 @@ def _claude_gateway_env(
         _overlay_weber_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_toon_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_token_saver_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
+        _overlay_xmem_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
         _overlay_auto_github_contributor_session_entries(gw_claude_dir, gateway_home, disabled_session_surfaces=disabled_session_surfaces)
 
     with _timed_launch_step(_timings, "build env and wrappers"):
@@ -9283,6 +9396,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _overlay_agent_browser_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_toon_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_token_saver_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    _overlay_xmem_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
     _overlay_auto_github_contributor_session_entries(codex_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
 
     env = os.environ.copy()
@@ -9317,6 +9431,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+            "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
             "auto_github_contributor": bool(_resolve_auto_github_contributor_root()) and not _session_skill_disabled(disabled_session_surfaces, "auto-github-contributor"),
         },
         extra_paths={"host_context": host_context_env.get("MMS_HOST_CONTEXT_JSON", "")},
@@ -9918,6 +10033,18 @@ def _opencode_rtk_plugin_path(runtime=None):
     return plugin_path if os.path.isfile(plugin_path) else ""
 
 
+def _opencode_xmem_plugin_path(runtime=None):
+    disabled = _normalize_session_surface_disabled(
+        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
+    )
+    if "opencode-xmem" in disabled.get("hooks", set()) or _session_skill_disabled(disabled, "xmem"):
+        return ""
+    if not _resolve_xmem_root() and not _xmem_cli_path():
+        return ""
+    plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "opencode-xmem.ts")
+    return plugin_path if os.path.isfile(plugin_path) else ""
+
+
 def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     plugin_path = _opencode_rtk_plugin_path(runtime)
     if not plugin_path:
@@ -9936,8 +10063,30 @@ def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
     return True
 
 
+def _overlay_opencode_xmem_plugin(config_dir, runtime=None):
+    plugin_path = _opencode_xmem_plugin_path(runtime)
+    if not plugin_path:
+        return False
+    plugins_dir = os.path.join(config_dir, "plugins")
+    os.makedirs(plugins_dir, exist_ok=True)
+    target_path = os.path.join(plugins_dir, "mms-xmem.ts")
+    try:
+        if os.path.islink(target_path) or os.path.isfile(target_path):
+            os.unlink(target_path)
+        elif os.path.isdir(target_path):
+            shutil.rmtree(target_path)
+        os.symlink(plugin_path, target_path)
+    except OSError:
+        shutil.copy2(plugin_path, target_path)
+    return True
+
+
 def _opencode_rtk_plugin_enabled(runtime=None):
     return bool(_opencode_rtk_plugin_path(runtime))
+
+
+def _opencode_xmem_plugin_enabled(runtime=None):
+    return bool(_opencode_xmem_plugin_path(runtime))
 
 
 def _opencode_lite_agent_configs(model_ref):
@@ -10627,6 +10776,8 @@ def _opencode_gateway_env(runtime, model_info=None):
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
             "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
             "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
+            "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
+            "opencode_xmem": _opencode_xmem_plugin_enabled(runtime),
         },
     )
     return env
@@ -10792,6 +10943,7 @@ def get_export_env(cli, runtime):
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
     token_saver_script = _token_saver_script_path()
+    xmem_script = _xmem_cli_path()
     if cli in {"claude", "codex", "opencode"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
@@ -10802,7 +10954,10 @@ def get_export_env(cli, runtime):
             exports["TOKEN_SAVER_BIN"] = token_saver_script
             exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
             exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
-        first_script = toon_script or context_script or token_saver_script
+        if xmem_script:
+            exports["XMEM_BIN"] = xmem_script
+            exports["MMS_XMEM_BIN"] = xmem_script
+        first_script = toon_script or context_script or token_saver_script or xmem_script
         if first_script:
             exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
     return exports

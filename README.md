@@ -41,11 +41,13 @@ Key changes in this generation:
 - runtime discovery across PATH, Homebrew, and all NVM Node versions without changing default Node
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
-- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
+- bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
 - silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
+
+MMS also injects the `xmem` skill and a silent session-start xmem hook when available. The hook only registers/syncs the current project for the generated xmem index; durable summaries still go through the xmem skill workflow and append-only Project Wiki / issue-tracking queues.
 
 ## Install Or Upgrade
 
