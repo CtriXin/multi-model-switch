@@ -39,6 +39,11 @@ from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body
 
 MAX_SELECT = 5
 
+LEGACY_CHAT_MIGRATION_NOTICE = (
+    "mms chat 是 legacy/maintenance-only 子命令；新会话请优先使用 `mms` TUI launcher，"
+    "维护动作会迁移到 TUI Settings / Maintenance。"
+)
+
 # Shared mutable references for Ctrl+C recovery and cross-module view state
 _last_buffers: dict = {}
 _current_view_state: dict = {"mode": "columns", "focus": 0}
@@ -599,7 +604,8 @@ async def run_compare(provider_ctx, models, prompt, with_footer=False):
 def parse_chat_args(argv):
     parser = argparse.ArgumentParser(
         prog=f"{current_command()} chat",
-        description=f"{display_title()} chat — 多模型并发对比",
+        description=f"{display_title()} chat — legacy/maintenance-only 多模型并发对比",
+        epilog=LEGACY_CHAT_MIGRATION_NOTICE,
     )
     parser.add_argument("--provider", help="临时使用指定模型源")
     parser.add_argument("--resume", metavar="SESSION_REF", help="恢复已保存的 session（支持 id / 前缀 / 序号）")
@@ -643,6 +649,7 @@ def chat_main(cfg, argv):
         sys.exit(1)
 
     args = parse_chat_args(argv)
+    console.print(f"[yellow]{LEGACY_CHAT_MIGRATION_NOTICE}[/yellow]")
     session_cwd = os.getcwd()
 
     if args.list_sessions:
