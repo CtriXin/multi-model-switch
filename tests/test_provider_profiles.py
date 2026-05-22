@@ -249,3 +249,38 @@ def test_glm_capabilities_are_profile_driven(monkeypatch, tmp_path):
     assert caps["effort_supported"] is False
     assert profile_id == "glm"
     assert payload["thinking"] == {"type": "disabled"}
+
+
+def test_gemini_profile_keeps_3_level_and_25_numeric_budget(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+
+    gemini3_payload = {"model": "gemini-3.5-flash-low", "messages": []}
+    gemini3_profile = profiles.apply_profile_body_patches(
+        gemini3_payload,
+        protocol="anthropic_messages",
+        provider_id="gemini-direct",
+        base_url="https://generativelanguage.googleapis.com",
+        model_name="gemini-3.5-flash-low",
+        thinking_enabled=True,
+        reasoning_effort="low",
+    )
+
+    assert gemini3_profile == "gemini"
+    assert gemini3_payload["thinkingConfig"]["thinkingLevel"] == "low"
+    assert "thinkingBudget" not in gemini3_payload["thinkingConfig"]
+
+    gemini25_payload = {"model": "gemini-2.5-pro", "messages": []}
+    gemini25_profile = profiles.apply_profile_body_patches(
+        gemini25_payload,
+        protocol="anthropic_messages",
+        provider_id="gemini-direct",
+        base_url="https://generativelanguage.googleapis.com",
+        model_name="gemini-2.5-pro",
+        thinking_enabled=True,
+        reasoning_effort="low",
+    )
+
+    assert gemini25_profile == "gemini"
+    assert gemini25_payload["thinkingConfig"]["thinkingBudget"] == 2048
+    assert isinstance(gemini25_payload["thinkingConfig"]["thinkingBudget"], int)
+    assert "thinkingLevel" not in gemini25_payload["thinkingConfig"]
