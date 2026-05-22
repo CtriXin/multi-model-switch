@@ -7,6 +7,8 @@ import os
 import sys
 import time
 import unicodedata
+from datetime import datetime, timezone
+from math import pow
 from mms_fake_upstream import status_payload as _fake_upstream_status_payload
 from mms_i18n import pick as _L, get_language as _get_language
 from mms_state_io import resolve_mms_config_dir
@@ -292,6 +294,74 @@ def _last_used_label(last_item):
     return str(last_item.get("model") or "?")
 
 
+def _parse_tui_usage_timestamp(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _tui_recency_score(value, now=None, half_life_days=14):
+    parsed = _parse_tui_usage_timestamp(value)
+    if parsed is None:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if half_life_days <= 0:
+        return 1.0
+    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
+    return pow(0.5, age_days / float(half_life_days))
+
+
+def _sort_cli_names_by_last_used(cli_names, last_used=None, now=None):
+    indexed = list(enumerate(cli_names or []))
+
+    def _key(item):
+        index, cli_name = item
+        usage = (last_used or {}).get(cli_name) if isinstance(last_used, dict) else {}
+        last_at = usage.get("last_used_at") if isinstance(usage, dict) else ""
+        recency = _tui_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        return (-has_recent, -recency, index)
+
+    return [cli_name for _index, cli_name in sorted(indexed, key=_key)]
+
+
+def _sort_model_entries_for_tui(models, family_name="", now=None):
+    def _model_name(item):
+        if isinstance(item, dict):
+            return str(item.get("model") or "")
+        return str(item or "")
+
+    def _key(item):
+        if isinstance(item, dict):
+            last_at = str(item.get("last_used_at") or "").strip()
+            use_count = int(item.get("use_count", 0) or 0)
+        else:
+            last_at = ""
+            use_count = 0
+        recency = _tui_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        return (
+            -has_recent,
+            -recency,
+            -use_count,
+            _model_name(item).lower(),
+        )
+
+    return sorted(list(models or []), key=_key)
+
+
 def select_family_tui(
     families_by_cli,
     cli_names,
@@ -320,6 +390,7 @@ def select_family_tui(
         ("connect", cli_name, None) | ("provider_browse", cli_name, None) | None
     """
     families_detail = families_detail or {}
+    cli_names = _sort_cli_names_by_last_used(cli_names, last_used)
 
     def _inner(stdscr):
         curses.curs_set(0)
@@ -522,13 +593,7 @@ def select_family_tui(
             elif sel_fam_name and detail.get(sel_fam_name):
                 raw_models = detail[sel_fam_name]
                 if raw_models and isinstance(raw_models[0], dict):
-                    raw_models = sorted(
-                        raw_models,
-                        key=lambda item: (
-                            -int(item.get("use_count", 0) or 0),
-                            str(item.get("model", "")),
-                        ),
-                    )
+                    raw_models = _sort_model_entries_for_tui(raw_models, sel_fam_name)
                 # raw_models 可能是 str 列表或 dict 列表（含 model/provider_id 等）
                 model_names = []
                 for m in raw_models:
@@ -753,13 +818,7 @@ def select_submodel_tui(
     if not models:
         return None
 
-    sorted_models = sorted(
-        models,
-        key=lambda m: (
-            -int(m.get("use_count", 0) or 0),
-            str(m.get("model", "")),
-        ),
-    )
+    sorted_models = _sort_model_entries_for_tui(models, family_name)
     provider_options_cache = dict(provider_options or {})
     try:
         from mms_speed_stats import get_speed_entry as _get_speed_entry

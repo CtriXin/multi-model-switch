@@ -9389,6 +9389,34 @@ def _parse_usage_timestamp(value):
     return parsed.astimezone(timezone.utc)
 
 
+def _usage_recency_score(value, now=None, half_life_days=14):
+    parsed = _parse_usage_timestamp(value)
+    if parsed is None:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if half_life_days <= 0:
+        return 1.0
+    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
+    return 0.5 ** (age_days / float(half_life_days))
+
+
+def _sort_family_entries_for_tui(families, preferred_family="", now=None):
+    def _key(item):
+        family = str(item.get("family") or "") if isinstance(item, dict) else ""
+        last_at = str(item.get("last_used_at") or "").strip() if isinstance(item, dict) else ""
+        use_count = int(item.get("use_count", 0) or 0) if isinstance(item, dict) else 0
+        recency = _usage_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        preferred_rank = 0 if family == str(preferred_family or "").strip() else 1
+        return (-has_recent, -recency, preferred_rank, -use_count, family.lower())
+
+    return sorted(list(families or []), key=_key)
+
+
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
     if str(family_name or "").strip() == str(preferred_family or "").strip():
         return False
@@ -9567,13 +9595,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         preferred_family=preferred_family,
                     ),
                 })
-            # 当前 CLI 的默认主族群置顶，其余再按使用量降序排列。
-            fam_list.sort(
-                key=lambda x: (
-                    0 if x.get("family") == preferred_family else 1,
-                    -x.get("use_count", 0),
-                    x.get("family", ""),
-                )
+            # 最近使用的 family 优先；没有 recency 时再保留当前 CLI 默认主族群兜底置顶。
+            fam_list = _sort_family_entries_for_tui(
+                fam_list,
+                preferred_family=preferred_family,
             )
             fbc[cli_name] = fam_list
             fd[cli_name] = {f["family"]: f["models"] for f in raw}
