@@ -143,7 +143,7 @@ def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
     repo = tmp_path / "repo"
     config_root = tmp_path / "mms-config"
     repo.mkdir()
-    write_file_only_rescue(
+    source_payload = write_file_only_rescue(
         {
             "failed": {
                 "model": "failed-model",
@@ -173,6 +173,15 @@ def test_write_fallback_handover_is_file_only_and_context_aware(tmp_path):
     assert md_path.exists()
     assert latest_path.exists()
     assert "fallback-model" in md_path.read_text(encoding="utf-8")
+
+    auto_handover = write_fallback_handover(
+        source_payload,
+        fallback_model="auto-fallback-model",
+        mode="auto_default_handover",
+        created_at="2026-05-22T04:02:00+00:00",
+    )
+    assert auto_handover["failed"]["model"] == "failed-model"
+    assert auto_handover["fallback"]["mode"] == "auto_default_handover"
 
 
 def test_rescue_config_root_uses_real_home_not_gateway_session(monkeypatch, tmp_path):
@@ -296,6 +305,8 @@ def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tm
         rescue_enabled=True,
         rescue_repo_root=str(repo),
         rescue_config_root=str(config_root),
+        rescue_fallback_model="fallback-model",
+        rescue_fallback_cli="codex",
     )
     captured = {"headers": []}
     handler.send_response = lambda code: captured.setdefault("status", code)
@@ -315,3 +326,28 @@ def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tm
     assert payload["safety"]["global_oauth_fallback"] == "disabled"
     assert "sk-upstream-secret" not in latest_json.read_text(encoding="utf-8")
     assert (config_root / "rescue" / "index.jsonl").exists()
+    handover_json = repo / ".mms" / "rescue" / "latest-fallback-handover.json"
+    assert handover_json.exists()
+    handover = json.loads(handover_json.read_text(encoding="utf-8"))
+    assert handover["fallback"]["model"] == "fallback-model"
+    assert handover["fallback"]["cli"] == "codex"
+    assert handover["fallback"]["mode"] == "auto_default_handover"
+    assert handover["fallback"]["automatic_model_call"] is False
+
+
+def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_path):
+    import mms_bridge
+
+    monkeypatch.setenv("MMS_PROJECT_ROOT", str(tmp_path / "repo"))
+    monkeypatch.setenv("MMS_RESCUE_CONFIG_ROOT", str(tmp_path / "config"))
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_CLI", "codex")
+
+    server = types.SimpleNamespace()
+    mms_bridge._configure_bridge_rescue(server)
+
+    assert server.rescue_enabled is True
+    assert server.rescue_repo_root == str(tmp_path / "repo")
+    assert server.rescue_config_root == str(tmp_path / "config")
+    assert server.rescue_fallback_model == "fallback-model"
+    assert server.rescue_fallback_cli == "codex"

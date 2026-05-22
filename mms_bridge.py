@@ -1109,7 +1109,7 @@ def _record_bridge_blocking_failure(
     if not bool(getattr(server, "rescue_enabled", False)):
         return None
     try:
-        from mms_rescue import record_blocking_failure
+        from mms_rescue import record_blocking_failure, write_fallback_handover
 
         payload = record_blocking_failure(
             repo_root=getattr(server, "rescue_repo_root", None),
@@ -1132,6 +1132,19 @@ def _record_bridge_blocking_failure(
                 provider_id or getattr(server, "provider_id", ""),
                 status_code,
             )
+            fallback_model = str(getattr(server, "rescue_fallback_model", "") or "").strip()
+            if fallback_model:
+                handover = write_fallback_handover(
+                    payload,
+                    fallback_model=fallback_model,
+                    fallback_cli=str(getattr(server, "rescue_fallback_cli", "") or "").strip(),
+                    mode="auto_default_handover",
+                )
+                _bridge_error_logger.warning(
+                    "rescue fallback handover written: source_event_id=%s fallback_model=%s",
+                    handover.get("source_event_id"),
+                    fallback_model,
+                )
         return payload
     except Exception as exc:
         _bridge_error_logger.warning("rescue file-only packet failed: %s", exc, exc_info=True)
@@ -1141,8 +1154,14 @@ def _record_bridge_blocking_failure(
 def _configure_bridge_rescue(server):
     disabled = str(os.environ.get("MMS_RESCUE_ENABLED", "1")).strip().lower() in {"0", "false", "no", "off"}
     server.rescue_enabled = not disabled
-    server.rescue_repo_root = str(os.environ.get("MMS_PROJECT_ROOT") or os.environ.get("MMS_CWD") or "").strip() or None
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    server.rescue_repo_root = str(os.environ.get("MMS_PROJECT_ROOT") or os.environ.get("MMS_CWD") or cwd or "").strip() or None
     server.rescue_config_root = str(os.environ.get("MMS_RESCUE_CONFIG_ROOT") or "").strip() or None
+    server.rescue_fallback_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
+    server.rescue_fallback_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
 
 
 def _strip_cache_control(payload):
@@ -4371,6 +4390,8 @@ def codex_chatcompletions_bridge(
     reasoning_effort="high",
     proxy_url="",
     no_proxy="",
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
@@ -4397,6 +4418,10 @@ def codex_chatcompletions_bridge(
     server.proxy_url = str(proxy_url or "").strip()
     server.no_proxy = str(no_proxy or "").strip()
     _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     server.session_input_tokens = 0
     server.session_output_tokens = 0
     server.session_request_count = 0
@@ -4434,6 +4459,8 @@ def codex_responses_bridge(
     proxy_url="",
     no_proxy="",
     native_fallback_routes=None,
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     _ensure_httpx()
     if httpx is None:
@@ -4456,6 +4483,10 @@ def codex_responses_bridge(
     server.no_proxy = str(no_proxy or "").strip()
     server.native_fallback_routes = list(native_fallback_routes or [])
     _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -4496,6 +4527,8 @@ def gateway_claude_bridge(
     no_proxy="",
     native_fallback_routes=None,
     vision_sidecar=None,
+    rescue_fallback_model="",
+    rescue_fallback_cli="",
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -4537,6 +4570,10 @@ def gateway_claude_bridge(
     server.native_fallback_routes = list(native_fallback_routes or [])
     server.vision_sidecar = dict(vision_sidecar or {})
     _configure_bridge_rescue(server)
+    if rescue_fallback_model:
+        server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
+    if rescue_fallback_cli:
+        server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

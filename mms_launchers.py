@@ -26,6 +26,7 @@ from mms_core import (
     _runtime_force_ipv4,
     _runtime_httpx_request,
     detect_working_base_url,
+    load_config,
     preference_asset_root,
 )
 from mms_fake_upstream import (
@@ -804,8 +805,56 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     env["WEB_ACCESS_HOST_HOME"] = real_home
     env["HOST_HOME"] = real_home
     env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
+    _inject_rescue_launch_env(env)
     if include_xdg:
         env["XDG_CONFIG_HOME"] = _real_user_path(".config")
+    return env
+
+
+def _rescue_default_fallback_config():
+    env_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
+    env_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+    if env_model:
+        return {"model": env_model, "cli": env_cli}
+    try:
+        cfg = load_config() or {}
+    except Exception:
+        cfg = {}
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    model = str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip()
+    cli = str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip()
+    return {"model": model, "cli": cli}
+
+
+def _rescue_bridge_kwargs():
+    fallback = _rescue_default_fallback_config()
+    model = str(fallback.get("model") or "").strip()
+    if not model:
+        return {}
+    return {
+        "rescue_fallback_model": model,
+        "rescue_fallback_cli": str(fallback.get("cli") or "").strip(),
+    }
+
+
+def _inject_rescue_launch_env(env):
+    if not isinstance(env, dict):
+        return env
+    try:
+        project_root = os.path.realpath(_safe_getcwd())
+    except Exception:
+        project_root = os.path.realpath(os.getcwd())
+    if project_root:
+        env["MMS_PROJECT_ROOT"] = project_root
+        env["MMS_CWD"] = project_root
+    env.setdefault("MMS_RESCUE_CONFIG_ROOT", _real_user_path(".config", "mms"))
+    fallback = _rescue_default_fallback_config()
+    if fallback.get("model"):
+        env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
+        if fallback.get("cli"):
+            env["MMS_RESCUE_FALLBACK_CLI"] = str(fallback.get("cli") or "")
+        else:
+            env.pop("MMS_RESCUE_FALLBACK_CLI", None)
     return env
 
 
@@ -7946,6 +7995,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
             console.print(
                 f"[dim]vision sidecar: {_vision_sidecar.get('provider_id', '-')} / {_vision_sidecar.get('model', '-')}[/dim]"
             )
+        rescue_bridge_kwargs = _rescue_bridge_kwargs()
 
         if anthropic_url is not None:
             bridge_gw_url = anthropic_url.rstrip("/")
@@ -7975,7 +8025,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     reasoning_enabled=_thinking_enabled,
                                                     reasoning_effort=_reasoning_effort,
                                                     native_fallback_routes=native_fallback_routes,
-                                                    vision_sidecar=_vision_sidecar)
+                                                    vision_sidecar=_vision_sidecar,
+                                                    **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -8015,6 +8066,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -8073,7 +8125,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
                                                 reasoning_enabled=_thinking_enabled,
                                                 reasoning_effort=_reasoning_effort,
-                                                vision_sidecar=_vision_sidecar)
+                                                vision_sidecar=_vision_sidecar,
+                                                **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -8109,7 +8162,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                 no_proxy=runtime.get("no_proxy"),
                                                 strip_upstream_user_agent=strip_upstream_user_agent,
                                                 minimal_claude_header_passthrough=minimal_claude_header_passthrough,
-                                                vision_sidecar=_vision_sidecar)
+                                                vision_sidecar=_vision_sidecar,
+                                                **rescue_bridge_kwargs)
             bridge_cfg = cleanup_ctx.__enter__()
             env = _prepare_claude_env_with_status(
                 runtime,
@@ -8152,7 +8206,8 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                                                     no_proxy=runtime.get("no_proxy"),
                                                     strip_upstream_user_agent=strip_upstream_user_agent,
                                                     minimal_claude_header_passthrough=minimal_claude_header_passthrough,
-                                                    vision_sidecar=_vision_sidecar)
+                                                    vision_sidecar=_vision_sidecar,
+                                                    **rescue_bridge_kwargs)
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
                     runtime,
@@ -8207,6 +8262,7 @@ def launch_claude(model_info, runtime, once=False, extra_args=None):
                     reasoning_effort=_reasoning_effort,
                     native_fallback_routes=native_fallback_routes,
                     vision_sidecar=_vision_sidecar,
+                    **rescue_bridge_kwargs,
                 )
                 bridge_cfg = cleanup_ctx.__enter__()
                 env = _prepare_claude_env_with_status(
@@ -9514,6 +9570,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         console.print(f"[dim]{bridge_label} 通过本地 Chat Completions bridge 启动 Codex...[/dim]")
         bridge_thinking_enabled = _runtime_thinking_enabled(runtime)
         bridge_reasoning_effort = _runtime_reasoning_effort(runtime, default="high")
+        rescue_bridge_kwargs = _rescue_bridge_kwargs()
         with codex_chatcompletions_bridge(
             gateway_url,
             api_key,
@@ -9526,6 +9583,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
             reasoning_effort=bridge_reasoning_effort,
             proxy_url=runtime.get("proxy"),
             no_proxy=runtime.get("no_proxy"),
+            **rescue_bridge_kwargs,
         ) as bridge_cfg:
             bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
             env = _codex_gateway_env(runtime, bridge_cfg["base_url"], model_info=model_info)
@@ -9568,6 +9626,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
     if native_fallback_routes:
         fallback_ids = ", ".join(route.get("provider_id", "") for route in native_fallback_routes)
         console.print(f"[dim]Codex Responses fallback: {fallback_ids}[/dim]")
+    rescue_bridge_kwargs = _rescue_bridge_kwargs()
     with codex_responses_bridge(
         gateway_url,
         api_key,
@@ -9581,6 +9640,7 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         proxy_url=runtime.get("proxy"),
         no_proxy=runtime.get("no_proxy"),
         native_fallback_routes=native_fallback_routes,
+        **rescue_bridge_kwargs,
     ) as bridge_cfg:
         bridge_base_url = _codex_provider_base_url(bridge_cfg["base_url"])
         env = _codex_gateway_env(runtime, bridge_cfg["base_url"], model_info=model_info)

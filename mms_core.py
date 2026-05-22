@@ -4790,6 +4790,33 @@ def _rescue_fallback_model_candidates(cfg, rescue_event, *, limit=6):
     return [item["model"] for item in ordered[: max(int(limit or 1), 1)]]
 
 
+def _rescue_default_fallback(cfg):
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    return {
+        "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
+        "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
+    }
+
+
+def _set_rescue_default_fallback(cfg, *, model="", cli=""):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    rescue_cfg = cfg.setdefault("rescue", {})
+    model = str(model or "").strip()
+    cli = str(cli or "").strip()
+    for legacy_key in ("default_fallback_model", "default_fallback_cli"):
+        rescue_cfg.pop(legacy_key, None)
+    if model:
+        rescue_cfg["fallback_model"] = model
+        if cli:
+            rescue_cfg["fallback_cli"] = cli
+        else:
+            rescue_cfg.pop("fallback_cli", None)
+    else:
+        rescue_cfg.pop("fallback_model", None)
+        rescue_cfg.pop("fallback_cli", None)
+    return cfg
+
+
 def _display_runtime_usage(runtime_kind, runtime_id, title):
     if _use_tui():
         try:
@@ -10019,6 +10046,13 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 from pathlib import Path
                 from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
+                default_fallback = _rescue_default_fallback(current_cfg)
+                default_label = default_fallback.get("model") or "未设置"
+                generic_fallback_candidates = _rescue_fallback_model_candidates(current_cfg, {}, limit=5)
+                default_candidate_actions = [
+                    (f"default::{model}", f"设为默认 fallback -> {model}")
+                    for model in generic_fallback_candidates
+                ]
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
                 if not rescue_events:
                     empty_action = _safe_tui_call(
@@ -10027,14 +10061,34 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         [
                             ("状态", "没有找到 rescue packet"),
                             ("说明", "真实 429/context/provider failure 会自动写入 repo/.mms/rescue/latest.md"),
+                            ("默认 fallback", default_label),
                         ],
-                        [
+                        default_candidate_actions + [
+                            ("manual_default", "手动设置默认 fallback"),
+                            ("clear_default", "清除默认 fallback"),
                             ("create_demo", "生成测试 rescue packet"),
                             ("back", "返回"),
                         ],
                     )
                     if empty_action == "__interrupt__":
                         return True
+                    if str(empty_action or "").startswith("default::") or empty_action == "manual_default":
+                        fallback_model = str(empty_action or "").split("::", 1)[1] if str(empty_action or "").startswith("default::") else ""
+                        if not fallback_model:
+                            _ensure_rich()
+                            fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                        if fallback_model:
+                            current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                            save_config(current_cfg, reason="tui:rescue_default_fallback")
+                            console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                            _pause_after_tui_report("按 Enter 返回设置")
+                        continue
+                    if empty_action == "clear_default":
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model="")
+                        save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
+                        console.print("[green]✓ 默认 fallback 已清除[/green]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                        continue
                     if empty_action == "create_demo":
                         payload = write_demo_rescue_packet(repo_root=os.getcwd())
                         console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
@@ -10055,18 +10109,25 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
                     ("原因", selected_rescue.get("failure_kind") or "-"),
                     ("Repo", selected_rescue.get("repo_path") or "-"),
+                    ("默认 fallback", default_label),
                 ]
                 fallback_candidates = _rescue_fallback_model_candidates(current_cfg, selected_rescue, limit=5)
                 fallback_actions = [
                     (f"handover::{model}", f"生成 fallback handover -> {model}")
                     for model in fallback_candidates
                 ]
+                default_actions = [
+                    (f"default::{model}", f"设为默认 fallback -> {model}")
+                    for model in fallback_candidates
+                ]
                 rescue_action = _safe_tui_call(
                     select_channel_action_tui,
                     "Rescue Packet",
                     info_lines,
-                    fallback_actions + [
+                    fallback_actions + default_actions + [
                         ("manual_handover", "手动输入 fallback model"),
+                        ("manual_default", "手动设置默认 fallback"),
+                        ("clear_default", "清除默认 fallback"),
                         ("view_md", "查看 rescue.md"),
                         ("show_paths", "显示文件路径"),
                         ("back", "返回"),
@@ -10111,6 +10172,22 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                             console.print(f"[cyan]handover.md[/cyan] {artifacts.get('markdown') or '-'}")
                             console.print(f"[dim]latest: {artifacts.get('latest_markdown') or '-'}[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
+                elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
+                    fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
+                    if not fallback_model:
+                        _ensure_rich()
+                        fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                    if fallback_model:
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                        save_config(current_cfg, reason="tui:rescue_default_fallback")
+                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]真实 429/context/provider failure 会先写 rescue packet，再自动写 fallback handover；不会自动调用模型。[/dim]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                elif rescue_action == "clear_default":
+                    current_cfg = _set_rescue_default_fallback(current_cfg, model="")
+                    save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
+                    console.print("[green]✓ 默认 fallback 已清除[/green]")
+                    _pause_after_tui_report("按 Enter 返回设置")
             continue
 
         # ── 上次使用 ──

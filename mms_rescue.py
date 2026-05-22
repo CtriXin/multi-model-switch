@@ -389,6 +389,7 @@ def write_fallback_handover(
     *,
     fallback_model: str,
     fallback_cli: str = "",
+    mode: str = "manual_handover",
     created_at: str | None = None,
 ) -> dict[str, Any]:
     """Write a safe continuation packet for an explicit fallback model; no model call."""
@@ -396,8 +397,12 @@ def write_fallback_handover(
     if not model:
         raise ValueError("fallback_model is required")
 
-    artifact_json = str(rescue_event.get("artifact_json") or "").strip()
-    source_payload = _read_json_object(artifact_json) if artifact_json else {}
+    raw_artifacts = rescue_event.get("artifacts") if isinstance(rescue_event.get("artifacts"), Mapping) else {}
+    artifact_json = str(rescue_event.get("artifact_json") or raw_artifacts.get("json") or "").strip()
+    if str(rescue_event.get("schema") or "") == RESCUE_SCHEMA and isinstance(rescue_event.get("failed"), Mapping):
+        source_payload = dict(rescue_event)
+    else:
+        source_payload = _read_json_object(artifact_json) if artifact_json else {}
     if not source_payload:
         source_payload = {
             "event_id": rescue_event.get("event_id") or "",
@@ -436,7 +441,7 @@ def write_fallback_handover(
             "selected": True,
             "model": redact_text(model),
             "cli": redact_text(fallback_cli or ""),
-            "mode": "manual_handover",
+            "mode": redact_text(mode or "manual_handover"),
             "automatic_model_call": False,
         },
         "context_policy": _handover_context_policy(source_payload),

@@ -101,6 +101,19 @@ def test_rescue_fallback_candidates_use_recent_models_before_config(monkeypatch)
     assert candidates[:4] == ["recent-model", "older-model", "configured-model", "fallback-model"]
 
 
+def test_rescue_default_fallback_config_roundtrip() -> None:
+    import mms_core
+
+    cfg: dict = {}
+    mms_core._set_rescue_default_fallback(cfg, model="fallback-model")
+
+    assert mms_core._rescue_default_fallback(cfg) == {"model": "fallback-model", "cli": ""}
+
+    mms_core._set_rescue_default_fallback(cfg, model="")
+
+    assert mms_core._rescue_default_fallback(cfg) == {"model": "", "cli": ""}
+
+
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
     import mms_chat
     import mms_discuss
