@@ -10026,6 +10026,52 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     console.print(f"[green]✓ 已导出 {MODEL_ROUTES_PATH}[/green]")
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
+            elif settings_action == "registry":
+                from mms_registry_cli import refresh_source_snapshots, registry_status
+
+                status = registry_status()
+                counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+                latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
+                registry_action = _safe_tui_call(
+                    select_channel_action_tui,
+                    "Registry Truth",
+                    [
+                        ("DB", status.get("db_path") or "-"),
+                        ("source_snapshot", counts.get("source_snapshot", 0)),
+                        ("model_identity", counts.get("model_identity", 0)),
+                        ("model_fact", counts.get("model_fact", 0)),
+                        ("latest", latest.get("source_path") or "none"),
+                    ],
+                    [
+                        ("refresh_sources", "Refresh Sources"),
+                        ("doctor", "Registry Doctor / Status"),
+                        ("back", "返回"),
+                    ],
+                )
+                if registry_action == "__interrupt__":
+                    return True
+                if registry_action == "refresh_sources":
+                    try:
+                        summary = refresh_source_snapshots()
+                    except Exception as exc:
+                        console.print(f"[red]Refresh Sources 失败: {exc}[/red]")
+                    else:
+                        console.print("[green]✓ Refresh Sources 完成[/green]")
+                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
+                        console.print(f"[cyan]imported[/cyan] {summary.get('imported_count')}")
+                        console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
+                        console.print(f"[cyan]facts[/cyan] {summary.get('fact_count')}")
+                        console.print("[dim]只写 source_truth/candidate evidence，不改变当前 runtime defaults。[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "doctor":
+                    status = registry_status()
+                    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+                    console.print("[cyan]MMS Registry Status[/cyan]")
+                    console.print(f"[cyan]db[/cyan] {status.get('db_path')}")
+                    console.print(f"[cyan]user_version[/cyan] {status.get('user_version')}")
+                    for key in sorted(counts):
+                        console.print(f"[cyan]{key}[/cyan] {counts[key]}")
+                    _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
                 version_info = _release_version_info()
                 console.print(f"[cyan]{display_title()}[/cyan]")
@@ -12913,6 +12959,10 @@ def main():
         if command == "exposure":
             handle_exposure_command(argv[1:])
             return
+        if command == "registry":
+            from mms_registry_cli import handle_registry_command
+
+            raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
         if _is_session_prune_dry_run(argv):
             handle_session_command(argv[1:])
             return
@@ -12926,7 +12976,7 @@ def main():
     preloaded_command_cfg = None
     if not help_request and len(argv) >= 1:
         command = argv[0]
-        if command not in {"guard", "logs", "fake-upstream", "exposure", "opencode-smoke"}:
+        if command not in {"guard", "logs", "fake-upstream", "exposure", "registry", "opencode-smoke"}:
             preloaded_command_cfg = _load_command_config()
             _refresh_routes_export_for_hive(
                 preloaded_command_cfg,
@@ -13023,6 +13073,7 @@ def main():
             f"  {current_command()} session ...     查看托管 session\n"
             f"  {current_command()} resume <id>     通过 Codex/Claude session id 恢复托管 CLI\n"
             f"  {current_command()} routes ...      查看路由配置\n"
+            f"  {current_command()} registry ...    刷新/查看本地 model registry source truth\n"
             f"  {current_command()} broker ...      启动或查看 broker profiles\n"
             f"  {current_command()} doctor [full]   诊断 provider / model / Claude 兼容性（默认 lite）\n"
             f"  {current_command()} exposure ...    审计当前 runtime 对 CLI 暴露的 env/settings/home\n"

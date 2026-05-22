@@ -35,6 +35,7 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
     ids = [item["id"] for item in items]
 
     assert "rescue" in ids
+    assert "registry" in ids
     assert "recommend" not in ids
     assert "fake_upstream" not in ids
 
@@ -155,6 +156,7 @@ def test_mms_help_keeps_review_launch_outside_legacy_bucket(monkeypatch, capsys)
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
+    assert "registry ..." in out
     assert "review-launch" in out
     assert "Legacy / emergency-only" in out
     assert "chat ...        legacy/maintenance-only" in out
