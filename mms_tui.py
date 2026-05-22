@@ -346,16 +346,13 @@ def _sort_model_entries_for_tui(models, family_name="", now=None):
     def _key(item):
         if isinstance(item, dict):
             last_at = str(item.get("last_used_at") or "").strip()
-            use_count = int(item.get("use_count", 0) or 0)
         else:
             last_at = ""
-            use_count = 0
         recency = _tui_recency_score(last_at, now=now)
         has_recent = 1 if recency > 0 else 0
         return (
             -has_recent,
             -recency,
-            -use_count,
             _model_name(item).lower(),
         )
 

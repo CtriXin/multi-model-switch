@@ -9411,11 +9411,10 @@ def _sort_family_entries_for_tui(families, preferred_family="", now=None):
     def _key(item):
         family = str(item.get("family") or "") if isinstance(item, dict) else ""
         last_at = str(item.get("last_used_at") or "").strip() if isinstance(item, dict) else ""
-        use_count = int(item.get("use_count", 0) or 0) if isinstance(item, dict) else 0
         recency = _usage_recency_score(last_at, now=now)
         has_recent = 1 if recency > 0 else 0
         preferred_rank = 0 if family == str(preferred_family or "").strip() else 1
-        return (-has_recent, -recency, preferred_rank, -use_count, family.lower())
+        return (-has_recent, -recency, preferred_rank, family.lower())
 
     return sorted(list(families or []), key=_key)
 

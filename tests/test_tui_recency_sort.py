@@ -30,7 +30,7 @@ def test_cli_tabs_keep_original_order_when_no_recent_usage() -> None:
     ]
 
 
-def test_model_sort_uses_recency_before_historical_count() -> None:
+def test_model_sort_uses_last_used_only_before_name() -> None:
     models = [
         {"model": "gpt-5.4", "use_count": 900, "last_used_at": "2026-02-22T12:00:00Z"},
         {"model": "gpt-5.5", "use_count": 2, "last_used_at": "2026-05-22T06:00:00Z"},
@@ -42,7 +42,7 @@ def test_model_sort_uses_recency_before_historical_count() -> None:
     assert sorted_names == ["gpt-5.5", "gpt-5.4", "gpt-never-used"]
 
 
-def test_model_sort_falls_back_to_use_count_then_name_without_recency() -> None:
+def test_model_sort_falls_back_to_name_without_recency() -> None:
     models = [
         {"model": "qwen-b", "use_count": 1},
         {"model": "qwen-a", "use_count": 3},
@@ -51,10 +51,10 @@ def test_model_sort_falls_back_to_use_count_then_name_without_recency() -> None:
 
     sorted_names = [item["model"] for item in _sort_model_entries_for_tui(models, "Qwen", now=NOW)]
 
-    assert sorted_names == ["qwen-a", "qwen-c", "qwen-b"]
+    assert sorted_names == ["qwen-a", "qwen-b", "qwen-c"]
 
 
-def test_family_sort_uses_recency_before_default_family_and_count() -> None:
+def test_family_sort_uses_last_used_before_default_family() -> None:
     families = [
         {"family": "GPT", "use_count": 900, "last_used_at": "2026-02-22T12:00:00Z"},
         {"family": "Qwen", "use_count": 2, "last_used_at": "2026-05-22T06:00:00Z"},
@@ -92,9 +92,31 @@ def test_family_sort_keeps_cli_default_first_when_no_recency() -> None:
     assert sorted_names == ["GPT", "Claude", "Qwen"]
 
 
+def test_family_sort_ignores_use_count_when_no_recency_or_default() -> None:
+    families = [
+        {"family": "Qwen", "use_count": 10},
+        {"family": "Claude", "use_count": 20},
+        {"family": "DeepSeek", "use_count": 1},
+    ]
+
+    sorted_names = [
+        item["family"]
+        for item in _sort_family_entries_for_tui(
+            families,
+            preferred_family="",
+            now=NOW,
+        )
+    ]
+
+    assert sorted_names == ["Claude", "DeepSeek", "Qwen"]
+
+
 def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatch) -> None:
     import mms_core
 
+    recent_model = "gpt-recent-choice"
+    high_count_model = "gpt-high-count"
+    middle_count_model = "gpt-middle-count"
     provider = {
         "id": "openai-demo",
         "enabled": True,
@@ -102,7 +124,7 @@ def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatc
         "role": "auto",
         "supported_clis": ["claude", "codex"],
         "models_endpoint": "manual",
-        "fallback_models": ["gpt-5.3-codex", "gpt-5.4", "gpt-5.5"],
+        "fallback_models": [high_count_model, middle_count_model, recent_model],
     }
     monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
     monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
@@ -115,19 +137,19 @@ def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatc
             "sources": {
                 "provider:codex:openai-demo": {
                     "cli": "codex",
-                    "last_model": "gpt-5.5",
+                    "last_model": recent_model,
                     "last_used_at": "2026-05-22T11:55:00Z",
                     "models": {
-                        "gpt-5.3-codex": 10,
-                        "gpt-5.4": 20,
-                        "gpt-5.5": 2,
+                        high_count_model: 10,
+                        middle_count_model: 20,
+                        recent_model: 2,
                     },
                 },
                 "provider:claude:openai-demo": {
                     "cli": "claude",
-                    "last_model": "gpt-5.3-codex",
+                    "last_model": high_count_model,
                     "last_used_at": "2026-05-22T11:59:00Z",
-                    "models": {"gpt-5.3-codex": 99},
+                    "models": {high_count_model: 99},
                 },
             }
         },
@@ -138,7 +160,7 @@ def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatc
     by_name = {item["model"]: item for item in gpt_models}
     sorted_names = [item["model"] for item in _sort_model_entries_for_tui(gpt_models, "GPT", now=NOW)]
 
-    assert by_name["gpt-5.5"]["last_used_at"] == "2026-05-22T11:55:00Z"
-    assert by_name["gpt-5.3-codex"]["last_used_at"] == ""
-    assert by_name["gpt-5.3-codex"]["use_count"] == 10
-    assert sorted_names == ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex"]
+    assert by_name[recent_model]["last_used_at"] == "2026-05-22T11:55:00Z"
+    assert by_name[high_count_model]["last_used_at"] == ""
+    assert by_name[high_count_model]["use_count"] == 10
+    assert sorted_names == [recent_model, high_count_model, middle_count_model]
