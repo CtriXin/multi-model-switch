@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MMS-owned xmem bootstrap. Silent/fail-open: hook output must not disturb agents.
+# MMS-owned xmem close marker. Silent/fail-open: do not inject memory into context.
 
 resolve_xmem() {
   local real_home candidate
@@ -27,4 +27,4 @@ XMEM_BIN="$(resolve_xmem)"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 [ -n "${repo_root:-}" ] || exit 0
 
-"$XMEM_BIN" hook start --path "$repo_root" >/dev/null 2>&1 || true
+"$XMEM_BIN" hook finish --path "$repo_root" >/dev/null 2>&1 || true

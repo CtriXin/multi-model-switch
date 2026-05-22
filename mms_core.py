@@ -7774,6 +7774,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             return "CodeGraph 自动索引", _L("刷新项目 CodeGraph 索引", "Refresh project CodeGraph index")
         if "xmem-session-start-hook" in lower_target or basename == "xmem-session-start-hook.sh":
             return "xmem 自动同步", _L("注册/同步当前项目 truth index", "Register/sync the current project truth index")
+        if "xmem-session-end-hook" in lower_target or basename == "xmem-session-end-hook.sh":
+            return "xmem 收尾同步", _L("记录会话结束，不注入知识正文", "Record session close without injecting memory body")
         if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
@@ -8112,7 +8114,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 "hooks",
                 "always",
                 title="xmem OpenCode plugin",
-                summary=_L("会话启动时注册/同步当前项目", "Register/sync the current project on session start"),
+                summary=_L("会话启动/结束时轻量同步当前项目", "Lightly sync the current project on session start/end"),
                 details=[
                     (_L("类型", "Type"), "OpenCode plugin"),
                     (_L("路径", "Path"), xmem_plugin),

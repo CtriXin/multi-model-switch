@@ -47,7 +47,7 @@ Key changes in this generation:
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also injects the `xmem` skill and a silent session-start xmem hook when available. The hook only registers/syncs the current project for the generated xmem index; durable summaries still go through the xmem skill workflow and append-only Project Wiki / issue-tracking queues.
+MMS also injects the `xmem` skill plus silent session-start/session-end xmem hooks when available. These hooks only register/sync the current project and record a close marker for the generated xmem index; durable summaries still go through the xmem skill workflow and append-only Project Wiki / issue-tracking queues.
 
 ## Install Or Upgrade
 

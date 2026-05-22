@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,17 @@ def test_mms_claude_hooks_include_xmem_session_start():
     assert mms_launchers._XMEM_SESSION_START_HOOK in commands
 
 
+def test_mms_claude_hooks_include_xmem_session_end():
+    hooks = mms_launchers._merge_mms_session_hooks({})
+    commands = [
+        hook.get("command")
+        for group in hooks.get("Stop", [])
+        for hook in group.get("hooks", [])
+    ]
+
+    assert mms_launchers._XMEM_SESSION_END_HOOK in commands
+
+
 def test_codex_hooks_include_xmem_session_start():
     payload = mms_launchers._build_codex_session_hooks({})
     commands = [
@@ -73,6 +85,73 @@ def test_codex_hooks_include_xmem_session_start():
     ]
 
     assert mms_launchers._XMEM_SESSION_START_HOOK in commands
+
+
+def test_codex_hooks_include_xmem_session_end():
+    payload = mms_launchers._build_codex_session_hooks({})
+    commands = [
+        hook.get("command")
+        for group in payload.get("hooks", {}).get("Stop", [])
+        for hook in group.get("hooks", [])
+    ]
+
+    assert mms_launchers._XMEM_SESSION_END_HOOK in commands
+
+
+def test_disabling_xmem_skill_removes_xmem_hooks():
+    claude_hooks = mms_launchers._filter_hooks_by_disabled(
+        mms_launchers._merge_mms_session_hooks({}),
+        {"skills": ["xmem"]},
+    )
+    claude_commands = [
+        hook.get("command")
+        for groups in claude_hooks.values()
+        for group in groups
+        for hook in group.get("hooks", [])
+    ]
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in claude_commands
+    assert mms_launchers._XMEM_SESSION_END_HOOK not in claude_commands
+
+    codex_hooks = mms_launchers._build_codex_session_hooks({}, disabled_session_surfaces={"skills": ["xmem"]})
+    codex_commands = [
+        hook.get("command")
+        for groups in codex_hooks.get("hooks", {}).values()
+        for group in groups
+        for hook in group.get("hooks", [])
+    ]
+    assert mms_launchers._XMEM_SESSION_START_HOOK not in codex_commands
+    assert mms_launchers._XMEM_SESSION_END_HOOK not in codex_commands
+
+
+def test_xmem_session_end_hook_is_silent_and_finish_only(tmp_path):
+    fake_bin = tmp_path / "xmem"
+    log_path = tmp_path / "xmem.log"
+    fake_bin.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$XMEM_TEST_LOG\"\n"
+        "echo should-not-leak\n",
+        encoding="utf-8",
+    )
+    fake_bin.chmod(0o755)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    result = subprocess.run(
+        [mms_launchers._XMEM_SESSION_END_HOOK],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+        env={
+            "MMS_XMEM_BIN": str(fake_bin),
+            "XMEM_TEST_LOG": str(log_path),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert log_path.read_text(encoding="utf-8").strip() == f"hook finish --path {repo}"
 
 
 def test_session_wrappers_expose_xmem(monkeypatch, tmp_path):

@@ -30,6 +30,8 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     base_hook.write_text("#!/bin/sh\n", encoding="utf-8")
     xmem_hook = tmp_path / "xmem-session-start-hook.sh"
     xmem_hook.write_text("#!/bin/sh\n", encoding="utf-8")
+    xmem_end_hook = tmp_path / "xmem-session-end-hook.sh"
+    xmem_end_hook.write_text("#!/bin/sh\n", encoding="utf-8")
     caveman_hook = tmp_path / "caveman-activate.js"
     caveman_hook.write_text("// caveman\n", encoding="utf-8")
     ecc_hook = tmp_path / "ecc-stop.sh"
@@ -88,6 +90,14 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
                 "matcher": "",
                 "hooks": [
                     {"type": "command", "command": str(xmem_hook)},
+                ],
+            }
+        )
+        hooks.setdefault("Stop", []).append(
+            {
+                "matcher": "",
+                "hooks": [
+                    {"type": "command", "command": str(xmem_end_hook)},
                 ],
             }
         )
@@ -187,6 +197,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     assert next(iter(ecc_skill_titles)).startswith("ECC")
     assert "RTK Bash 改写" in hook_titles
     assert "xmem 自动同步" in hook_titles
+    assert "xmem 收尾同步" in hook_titles
     assert "Caveman 激活" in caveman_hook_titles
     assert "ecc-stop" in ecc_hook_titles or any(title.startswith("ECC") for title in ecc_hook_titles)
 

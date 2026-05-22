@@ -1864,6 +1864,7 @@ _CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mindkeep
 _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codegraph-auto-index.sh")
 _CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
 _XMEM_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-start-hook.sh")
+_XMEM_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-end-hook.sh")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2402,6 +2403,8 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MINDKEEPER_TOKEN_MONITOR_HOOK),
         _normalize_hook_command(_CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK),
         _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
+        _normalize_hook_command(_XMEM_SESSION_START_HOOK),
+        _normalize_hook_command(_XMEM_SESSION_END_HOOK),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
@@ -2413,6 +2416,8 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(os.path.join(local_hooks_dir, "mindkeeper-token-monitor-hook.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-codegraph-auto-index.sh")),
         _normalize_hook_command(os.path.join(local_hooks_dir, "mms-resume-hint.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-start-hook.sh")),
+        _normalize_hook_command(os.path.join(local_hooks_dir, "xmem-session-end-hook.sh")),
     }
     pruned_hooks = {}
     for event_name, groups in hooks.items():
@@ -2801,6 +2806,14 @@ def _merge_mms_session_hooks(existing_hooks, template_hooks=None):
         "Stop",
         _CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
         matcher="",
+    )
+    hooks_data = _append_command_hook(
+        hooks_data,
+        "Stop",
+        _XMEM_SESSION_END_HOOK,
+        matcher="",
+        timeout=10,
+        status_message="Closing xmem",
     )
     hooks_data = _append_command_hook(
         hooks_data,
@@ -3372,6 +3385,7 @@ def _is_mms_managed_hook_command(command_text):
         "claude-codegraph-auto-index.sh",
         "mms-resume-hint.sh",
         "xmem-session-start-hook.sh",
+        "xmem-session-end-hook.sh",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
@@ -3574,6 +3588,7 @@ def _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces=None):
     if "xmem" in disabled.get("skills", set()):
         disabled_commands = set(disabled_commands)
         disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_START_HOOK))
+        disabled_commands.add(_normalize_hook_command(_XMEM_SESSION_END_HOOK))
     if not disabled_commands:
         return hooks_data
     return _filter_hook_commands(
@@ -3819,6 +3834,14 @@ def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disable
         matcher="startup|resume",
         timeout=10,
         status_message="Syncing xmem",
+    )
+    hooks_data = _append_shell_command_hook(
+        hooks_data,
+        "Stop",
+        _XMEM_SESSION_END_HOOK,
+        matcher="",
+        timeout=10,
+        status_message="Closing xmem",
     )
     hooks_data = _filter_hooks_by_disabled(hooks_data, disabled_session_surfaces)
     hooks_data = _filter_missing_managed_hook_commands(hooks_data)

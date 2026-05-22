@@ -675,7 +675,10 @@ def test_build_claude_session_settings_rewrites_caveman_hooks_per_session(monkey
     assert "/tmp/keep-session-start.sh" in disabled_session_start
     assert mms_launchers._CLAUDE_BRAINKEEPER_SESSION_START_HOOK in disabled_session_start
     assert disabled_user_prompt == [mms_launchers._CLAUDE_BRAINKEEPER_TOKEN_MONITOR_HOOK]
-    assert disabled_stop == [mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK]
+    assert disabled_stop == [
+        mms_launchers._CLAUDE_BRAINKEEPER_SESSION_END_HOOK,
+        mms_launchers._XMEM_SESSION_END_HOOK,
+    ]
 
     enabled = mms_launchers._build_claude_session_settings(
         base_settings,
@@ -848,13 +851,13 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
         enable_caveman=False,
     )
     disabled_groups = disabled["hooks"]["SessionStart"]
-    assert disabled_groups == [
-        {
-            "hooks": [
-                {"type": "command", "command": "/tmp/notify.sh"},
-            ]
-        }
+    disabled_commands = [
+        item["command"]
+        for group in disabled_groups
+        for item in group["hooks"]
     ]
+    assert "/tmp/notify.sh" in disabled_commands
+    assert mms_launchers._XMEM_SESSION_START_HOOK in disabled_commands
     assert "PreToolUse" not in disabled["hooks"]
 
     enabled = mms_launchers._build_codex_session_hooks(
@@ -872,6 +875,7 @@ def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, 
     assert len(caveman_commands) == 1
     assert "CAVEMAN_HOOK_EVENT=SessionStart" in caveman_commands[0]
     assert f'node "{caveman_root / "hooks" / "caveman-activate.js"}"' in caveman_commands[0]
+    assert mms_launchers._XMEM_SESSION_START_HOOK in enabled_commands
     assert "PreToolUse" not in enabled["hooks"]
 
 
@@ -922,6 +926,7 @@ def test_build_codex_session_hooks_replaces_inherited_compact_caveman_with_sessi
             'CLAUDE_CONFIG_DIR="$HOME/.codex" '
             f'node "{caveman_root / "hooks" / "caveman-activate.js"}"'
         ),
+        mms_launchers._XMEM_SESSION_START_HOOK,
     ]
     assert compact_command not in session_commands
     assert stale_echo_command not in session_commands
