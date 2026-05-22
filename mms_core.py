@@ -3317,6 +3317,7 @@ def _record_usage(runtime, cli_name, model_info):
         sources = stats.setdefault("sources", {})
         key = _runtime_usage_key(runtime, cli_name)
         model_name = _resolve_model_name(model_info)
+        now = _iso_now()
         entry = sources.setdefault(key, {
             "runtime_kind": runtime.get("runtime_kind", "provider"),
             "id": runtime.get("id", "default"),
@@ -3326,19 +3327,22 @@ def _record_usage(runtime, cli_name, model_info):
             "last_used_at": "",
             "last_model": "",
             "models": {},
+            "model_last_used_at": {},
         })
         entry["launches"] += 1
-        entry["last_used_at"] = _iso_now()
+        entry["last_used_at"] = now
         entry["last_model"] = model_name
         models = entry.setdefault("models", {})
         models[model_name] = int(models.get(model_name, 0)) + 1
+        model_last_used_at = entry.setdefault("model_last_used_at", {})
+        model_last_used_at[model_name] = now
         last_by_cli = stats.setdefault("last_by_cli", {})
         last_by_cli[cli_name] = {
             "cli": cli_name,
             "model": model_name,
             "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
             "runtime_hint": _runtime_hint_from_runtime(runtime),
-            "last_used_at": _iso_now(),
+            "last_used_at": now,
         }
 
     _update_usage_stats(_mutate)
@@ -6914,10 +6918,22 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
         if str(src.get("cli") or "").strip() != str(cli_name or "").strip():
             continue
         used_at = str(src.get("last_used_at") or "").strip()
+        model_last_used_at = src.get("model_last_used_at")
+        if not isinstance(model_last_used_at, dict):
+            model_last_used_at = {}
         for mname, cnt in src.get("models", {}).items():
             use_counts[mname] = use_counts.get(mname, 0) + cnt
+            model_used_at = str(model_last_used_at.get(mname) or "").strip()
+            if model_used_at and model_used_at > last_used_at_by_model.get(mname, ""):
+                last_used_at_by_model[mname] = model_used_at
         last_model = str(src.get("last_model") or "").strip()
-        if last_model and used_at and used_at > last_used_at_by_model.get(last_model, ""):
+        # Legacy usage files only had source-level last_model/last_used_at.
+        if (
+            last_model
+            and used_at
+            and last_model not in model_last_used_at
+            and used_at > last_used_at_by_model.get(last_model, "")
+        ):
             last_used_at_by_model[last_model] = used_at
 
     # 按 family 分组

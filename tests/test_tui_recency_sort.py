@@ -139,6 +139,11 @@ def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatc
                     "cli": "codex",
                     "last_model": recent_model,
                     "last_used_at": "2026-05-22T11:55:00Z",
+                    "model_last_used_at": {
+                        recent_model: "2026-05-22T11:55:00Z",
+                        high_count_model: "2026-05-21T11:55:00Z",
+                        middle_count_model: "2026-05-08T11:55:00Z",
+                    },
                     "models": {
                         high_count_model: 10,
                         middle_count_model: 20,
@@ -161,6 +166,47 @@ def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatc
     sorted_names = [item["model"] for item in _sort_model_entries_for_tui(gpt_models, "GPT", now=NOW)]
 
     assert by_name[recent_model]["last_used_at"] == "2026-05-22T11:55:00Z"
-    assert by_name[high_count_model]["last_used_at"] == ""
+    assert by_name[high_count_model]["last_used_at"] == "2026-05-21T11:55:00Z"
     assert by_name[high_count_model]["use_count"] == 10
     assert sorted_names == [recent_model, high_count_model, middle_count_model]
+
+
+def test_build_model_families_backfills_legacy_source_last_model(monkeypatch) -> None:
+    import mms_core
+
+    current_model = "gpt-current-choice"
+    older_model = "gpt-older-choice"
+    provider = {
+        "id": "openai-demo",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["codex"],
+        "models_endpoint": "manual",
+        "fallback_models": [older_model, current_model],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
+    monkeypatch.setattr(mms_core, "_provider_supports_model_for_cli", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_provider_label", lambda _provider: "OpenAI Demo")
+    monkeypatch.setattr(
+        mms_core,
+        "_load_usage_stats",
+        lambda: {
+            "sources": {
+                "provider:codex:openai-demo": {
+                    "cli": "codex",
+                    "last_model": current_model,
+                    "last_used_at": "2026-05-22T11:55:00Z",
+                    "models": {older_model: 20, current_model: 2},
+                },
+            }
+        },
+    )
+
+    families = mms_core._build_model_families_for_cli({}, "codex", {}, [])
+    gpt_models = next(item["models"] for item in families if item["family"] == "GPT")
+    by_name = {item["model"]: item for item in gpt_models}
+
+    assert by_name[current_model]["last_used_at"] == "2026-05-22T11:55:00Z"
+    assert by_name[older_model]["last_used_at"] == ""
