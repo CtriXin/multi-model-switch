@@ -90,3 +90,55 @@ def test_family_sort_keeps_cli_default_first_when_no_recency() -> None:
     ]
 
     assert sorted_names == ["GPT", "Claude", "Qwen"]
+
+
+def test_build_model_families_uses_current_cli_last_model_for_recency(monkeypatch) -> None:
+    import mms_core
+
+    provider = {
+        "id": "openai-demo",
+        "enabled": True,
+        "api_key": "sk-demo",
+        "role": "auto",
+        "supported_clis": ["claude", "codex"],
+        "models_endpoint": "manual",
+        "fallback_models": ["gpt-5.3-codex", "gpt-5.4", "gpt-5.5"],
+    }
+    monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args, **_kwargs: [(provider, None)])
+    monkeypatch.setattr(mms_core, "_provider_has_configured_base_url", lambda _provider: True)
+    monkeypatch.setattr(mms_core, "_provider_supports_model_for_cli", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(mms_core, "_provider_label", lambda _provider: "OpenAI Demo")
+    monkeypatch.setattr(
+        mms_core,
+        "_load_usage_stats",
+        lambda: {
+            "sources": {
+                "provider:codex:openai-demo": {
+                    "cli": "codex",
+                    "last_model": "gpt-5.5",
+                    "last_used_at": "2026-05-22T11:55:00Z",
+                    "models": {
+                        "gpt-5.3-codex": 10,
+                        "gpt-5.4": 20,
+                        "gpt-5.5": 2,
+                    },
+                },
+                "provider:claude:openai-demo": {
+                    "cli": "claude",
+                    "last_model": "gpt-5.3-codex",
+                    "last_used_at": "2026-05-22T11:59:00Z",
+                    "models": {"gpt-5.3-codex": 99},
+                },
+            }
+        },
+    )
+
+    families = mms_core._build_model_families_for_cli({}, "codex", {}, [])
+    gpt_models = next(item["models"] for item in families if item["family"] == "GPT")
+    by_name = {item["model"]: item for item in gpt_models}
+    sorted_names = [item["model"] for item in _sort_model_entries_for_tui(gpt_models, "GPT", now=NOW)]
+
+    assert by_name["gpt-5.5"]["last_used_at"] == "2026-05-22T11:55:00Z"
+    assert by_name["gpt-5.3-codex"]["last_used_at"] == ""
+    assert by_name["gpt-5.3-codex"]["use_count"] == 10
+    assert sorted_names == ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex"]

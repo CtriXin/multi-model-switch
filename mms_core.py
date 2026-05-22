@@ -6906,16 +6906,19 @@ def _build_model_families_for_cli(cfg, cli_name, default_provider, default_model
                     pid,
                 )
 
-    # 注入 use_count（用于 TUI 排序）
+    # 注入当前 CLI 的使用信息（用于 TUI 排序）。
     use_counts = {}
     last_used_at_by_model = {}
     stats = _load_usage_stats()
     for src in stats.get("sources", {}).values():
+        if str(src.get("cli") or "").strip() != str(cli_name or "").strip():
+            continue
         used_at = str(src.get("last_used_at") or "").strip()
         for mname, cnt in src.get("models", {}).items():
             use_counts[mname] = use_counts.get(mname, 0) + cnt
-            if used_at and used_at > last_used_at_by_model.get(mname, ""):
-                last_used_at_by_model[mname] = used_at
+        last_model = str(src.get("last_model") or "").strip()
+        if last_model and used_at and used_at > last_used_at_by_model.get(last_model, ""):
+            last_used_at_by_model[last_model] = used_at
 
     # 按 family 分组
     family_map = {}  # family_name -> [model_entry]
