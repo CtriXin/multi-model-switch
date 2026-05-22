@@ -172,6 +172,7 @@ hooks = []                    # hook names or paths shown on confirm screen
 # weber = "~/my-skills/weber"
 # token_saver = "~/vendor/token-saver"
 # toon = "~/vendor/toon"
+# xmem = "~/auto-skills/shared-skills/xmem"
 # caveman = "~/vendor/caveman"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
@@ -2974,6 +2975,7 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "web_access": "web_access",
     "web-access": "web_access",
     "weber": "weber",
+    "xmem": "xmem",
 }
 
 
@@ -7605,6 +7607,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _merge_claude_settings,
             _merge_mms_session_hooks,
             _opencode_rtk_plugin_path,
+            _opencode_xmem_plugin_path,
             _resolve_agent_browser_root,
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
@@ -7614,6 +7617,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _resolve_toon_root,
             _resolve_weber_root,
             _resolve_web_access_root,
+            _resolve_xmem_root,
             _sanitize_claude_inherited_settings_payload,
             _session_managed_mcp_servers,
             _strip_agent_im_hooks,
@@ -7768,6 +7772,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             return _L("Map 自动索引", "Map auto-index"), _L("刷新项目结构索引", "Refresh project structure index")
         if "codegraph-auto-index" in lower_target or basename == "claude-codegraph-auto-index.sh":
             return "CodeGraph 自动索引", _L("刷新项目 CodeGraph 索引", "Refresh project CodeGraph index")
+        if "xmem-session-start-hook" in lower_target or basename == "xmem-session-start-hook.sh":
+            return "xmem 自动同步", _L("注册/同步当前项目 truth index", "Register/sync the current project truth index")
         if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
@@ -8100,6 +8106,19 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 ],
                 disable_key="opencode-rtk",
             )
+        xmem_plugin = _opencode_xmem_plugin_path(runtime)
+        if xmem_plugin:
+            _append(
+                "hooks",
+                "always",
+                title="xmem OpenCode plugin",
+                summary=_L("会话启动时注册/同步当前项目", "Register/sync the current project on session start"),
+                details=[
+                    (_L("类型", "Type"), "OpenCode plugin"),
+                    (_L("路径", "Path"), xmem_plugin),
+                ],
+                disable_key="opencode-xmem",
+            )
     elif cli == "agy":
         agy_mcp = _session_managed_mcp_servers(
             {},
@@ -8172,6 +8191,13 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _append_skill_entries(
                 "always",
                 [{"name": "token-saver", "path": _skill_path(token_saver_root)}],
+                _L("会话技能", "Session skill"),
+            )
+        if _resolve_xmem_root():
+            xmem_root = _resolve_xmem_root()
+            _append_skill_entries(
+                "always",
+                [{"name": "xmem", "path": _skill_path(xmem_root)}],
                 _L("会话技能", "Session skill"),
             )
         if _resolve_auto_github_contributor_root():
@@ -11245,7 +11271,7 @@ def _display_preferences_help():
     console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
-    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, caveman, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")

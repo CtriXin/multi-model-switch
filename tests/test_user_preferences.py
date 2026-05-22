@@ -7,6 +7,9 @@ def test_load_user_preferences_sanitizes_allowlist(monkeypatch, tmp_path):
     skill_root = tmp_path / "web-access"
     skill_root.mkdir()
     (skill_root / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    xmem_root = tmp_path / "xmem"
+    xmem_root.mkdir()
+    (xmem_root / "SKILL.md").write_text("# xmem\n", encoding="utf-8")
     pref_path = tmp_path / "preferences.toml"
     pref_path.write_text(
         f"""
@@ -27,6 +30,7 @@ hooks = ["/tmp/drop.sh"]
 
 [assets.roots]
 web_access = "{skill_root}"
+xmem = "{xmem_root}"
 credentials = "/tmp/should-not-load"
 
 [provider]
@@ -53,7 +57,7 @@ base_url = "https://should-not-load.example"
         "skills": ["web-access"],
         "hooks": ["/tmp/drop.sh"],
     }
-    assert prefs["assets"]["roots"] == {"web_access": str(skill_root)}
+    assert prefs["assets"]["roots"] == {"web_access": str(skill_root), "xmem": str(xmem_root)}
     assert "provider" not in prefs
     assert "api_key" not in prefs["launch"]["defaults"]
     assert "credentials" not in prefs["assets"]["roots"]

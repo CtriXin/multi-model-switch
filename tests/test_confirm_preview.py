@@ -28,11 +28,14 @@ def test_build_confirm_preview_catalog_disables_execution_surfaces_for_claude_oa
 def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tmp_path):
     base_hook = tmp_path / "rtk-rewrite.sh"
     base_hook.write_text("#!/bin/sh\n", encoding="utf-8")
+    xmem_hook = tmp_path / "xmem-session-start-hook.sh"
+    xmem_hook.write_text("#!/bin/sh\n", encoding="utf-8")
     caveman_hook = tmp_path / "caveman-activate.js"
     caveman_hook.write_text("// caveman\n", encoding="utf-8")
     ecc_hook = tmp_path / "ecc-stop.sh"
     ecc_hook.write_text("#!/bin/sh\n", encoding="utf-8")
 
+    xmem_root = _write_skill(tmp_path / "xmem-root", "xmem")
     caveman_root = tmp_path / "caveman"
     ecc_root = tmp_path / "ecc"
     _write_skill(caveman_root, "caveman")
@@ -78,11 +81,19 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     )
     monkeypatch.setattr(mms_launchers, "_merge_claude_settings", lambda base, template: dict(base))
     monkeypatch.setattr(mms_launchers, "_strip_agent_im_hooks", lambda hooks: hooks)
-    monkeypatch.setattr(
-        mms_launchers,
-        "_merge_mms_session_hooks",
-        lambda existing, template: existing or template or {},
-    )
+    def _merge_mms_session_hooks(existing, template):
+        hooks = dict(existing or template or {})
+        hooks.setdefault("SessionStart", []).append(
+            {
+                "matcher": "",
+                "hooks": [
+                    {"type": "command", "command": str(xmem_hook)},
+                ],
+            }
+        )
+        return hooks
+
+    monkeypatch.setattr(mms_launchers, "_merge_mms_session_hooks", _merge_mms_session_hooks)
     monkeypatch.setattr(
         mms_launchers,
         "_filter_claude_session_hooks",
@@ -146,6 +157,7 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "/tmp/toon")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "/tmp/token-saver")
+    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: str(xmem_root))
     monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "/tmp/auto-github-contributor")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
     monkeypatch.setattr(mms_launchers, "_resolve_ecc_root", lambda: str(ecc_root))
@@ -169,11 +181,12 @@ def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tm
     ecc_hook_titles = {item["title"] for item in preview["hooks"]["ecc"]}
 
     assert "brainkeeper" in mcp_titles
-    assert skill_titles >= {"web-access", "toon", "token-saver", "auto-github-contributor"}
+    assert skill_titles >= {"web-access", "toon", "token-saver", "xmem", "auto-github-contributor"}
     assert caveman_skill_titles >= {"caveman", "caveman-review"}
     assert len(preview["skills"]["ecc"]) == 1
     assert next(iter(ecc_skill_titles)).startswith("ECC")
     assert "RTK Bash 改写" in hook_titles
+    assert "xmem 自动同步" in hook_titles
     assert "Caveman 激活" in caveman_hook_titles
     assert "ecc-stop" in ecc_hook_titles or any(title.startswith("ECC") for title in ecc_hook_titles)
 
@@ -235,6 +248,7 @@ def test_build_confirm_preview_catalog_collects_omc_bundle(monkeypatch, tmp_path
     monkeypatch.setattr(mms_launchers, "_resolve_agent_browser_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_ecc_root", lambda: "")
@@ -261,12 +275,15 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
     weber = _write_skill(tmp_path / "weber-root", "weber")
     toon = _write_skill(tmp_path / "toon-root", "toon")
     token_saver = _write_skill(tmp_path / "token-root", "token-saver")
+    xmem = _write_skill(tmp_path / "xmem-root", "xmem")
 
     monkeypatch.setattr(mms_launchers, "_opencode_rtk_plugin_path", lambda _runtime=None: "/tmp/opencode-rtk.ts")
+    monkeypatch.setattr(mms_launchers, "_opencode_xmem_plugin_path", lambda _runtime=None: "/tmp/opencode-xmem.ts")
     monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: str(web_access))
     monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: str(weber))
     monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: str(toon))
     monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: str(token_saver))
+    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: str(xmem))
     monkeypatch.setattr(mms_launchers, "_resolve_auto_github_contributor_root", lambda: "")
     monkeypatch.setattr(mms_launchers, "_resolve_caveman_root", lambda: str(caveman_root))
 
@@ -281,6 +298,8 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
         "weber",
         "toon",
         "token-saver",
+        "xmem",
     }
     assert {item["title"] for item in preview["skills"]["caveman"]} == {"caveman"}
     assert any(item["title"] == "RTK OpenCode plugin" for item in preview["hooks"]["always"])
+    assert any(item["title"] == "xmem OpenCode plugin" for item in preview["hooks"]["always"])

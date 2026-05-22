@@ -220,7 +220,7 @@ Use `~/.config/mms/preferences.toml` for install-safe daily launch preferences:
 - `thinking_mode` / `reasoning_effort`
 - `bypass`, `caveman_mode`, `agent_pack`
 - disabled session `skills` / `mcp` / `hooks`
-- custom bundled asset roots such as `web_access`, `token_saver`, `ecc`, `omc`
+- custom bundled asset roots such as `web_access`, `token_saver`, `xmem`, `ecc`, `omc`
 
 LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. This file is still real MMS config: agents may inspect and propose edits, but must not auto-write `~/.config/mms/**` without human confirmation.
 
