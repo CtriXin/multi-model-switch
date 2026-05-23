@@ -327,6 +327,7 @@ def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
     fallback = payload.get("fallback") if isinstance(payload.get("fallback"), Mapping) else {}
     context_policy = payload.get("context_policy") if isinstance(payload.get("context_policy"), Mapping) else {}
     source_artifacts = payload.get("source_artifacts") if isinstance(payload.get("source_artifacts"), Mapping) else {}
+    automatic_model_call = bool((payload.get("fallback") or {}).get("automatic_model_call"))
     lines = [
         "# MMS Rescue Fallback Handover",
         "",
@@ -348,6 +349,7 @@ def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
         f"- model: `{fallback.get('model') or 'manual-select'}`",
         f"- cli: `{fallback.get('cli') or 'select in MMS'}`",
         f"- mode: `{fallback.get('mode') or 'manual_handover'}`",
+        f"- automatic_model_call: `{automatic_model_call}`",
         "",
         "## Context Policy",
         "",
@@ -374,7 +376,7 @@ def _fallback_handover_markdown(payload: Mapping[str, Any]) -> str:
         "",
         "## Safety",
         "",
-        "- automatic_model_call: `False`",
+        f"- automatic_model_call: `{automatic_model_call}`",
         "- auth_bearing_state_read: `False`",
         "- privacy_boundary_crossed: `False`",
         "",
@@ -390,9 +392,10 @@ def write_fallback_handover(
     fallback_model: str,
     fallback_cli: str = "",
     mode: str = "manual_handover",
+    automatic_model_call: bool = False,
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    """Write a safe continuation packet for an explicit fallback model; no model call."""
+    """Write a safe continuation packet for an explicit fallback model."""
     model = str(fallback_model or "").strip()
     if not model:
         raise ValueError("fallback_model is required")
@@ -442,7 +445,7 @@ def write_fallback_handover(
             "model": redact_text(model),
             "cli": redact_text(fallback_cli or ""),
             "mode": redact_text(mode or "manual_handover"),
-            "automatic_model_call": False,
+            "automatic_model_call": bool(automatic_model_call),
         },
         "context_policy": _handover_context_policy(source_payload),
         "source_artifacts": {
@@ -451,7 +454,7 @@ def write_fallback_handover(
         },
         "safety": {
             "file_only_written_first": True,
-            "automatic_model_call": False,
+            "automatic_model_call": bool(automatic_model_call),
             "global_oauth_fallback": "disabled",
             "auth_bearing_state_read": False,
             "privacy_boundary_crossed": False,
@@ -506,6 +509,7 @@ def build_rescue_event(
     failed = _redacted_mapping(dict(event.get("failed") or {}))
     failed_model = str(failed.get("model") or event.get("model") or "unknown")
     event_id = str(event.get("event_id") or _event_id(created, repo_path, failed_model))
+    automatic_model_call = bool(event.get("automatic_model_call"))
     payload = {
         "schema": RESCUE_SCHEMA,
         "event_id": event_id,
@@ -524,7 +528,7 @@ def build_rescue_event(
         "bridge": _redacted_mapping(dict(event.get("bridge") or {})),
         "safety": {
             "file_only_written_first": True,
-            "automatic_model_call": False,
+            "automatic_model_call": automatic_model_call,
             "global_oauth_fallback": "disabled",
             "auth_bearing_state_read": False,
             "privacy_boundary_crossed": False,
@@ -565,8 +569,8 @@ def render_rescue_markdown(payload: Mapping[str, Any]) -> str:
         "",
         "## Rescue Safety",
         "",
-        "- mode: `file-only`",
-        "- automatic_model_call: `False`",
+        f"- mode: `{'file-first-hot-fallback' if payload.get('safety', {}).get('automatic_model_call') else 'file-only'}`",
+        f"- automatic_model_call: `{bool(payload.get('safety', {}).get('automatic_model_call'))}`",
         "- global_oauth_fallback: `disabled`",
         "- privacy_boundary_crossed: `False`",
         "",
@@ -664,6 +668,7 @@ def record_blocking_failure(
     registry_revision: str = "",
     raw_artifacts: Mapping[str, Any] | None = None,
     git: Mapping[str, Any] | None = None,
+    automatic_model_call: bool = False,
     created_at: str | None = None,
 ) -> dict[str, Any] | None:
     """Thin bridge/launcher entry: write L3 file-only rescue for blocking failures."""
@@ -690,6 +695,7 @@ def record_blocking_failure(
     }
     event = {
         "registry_revision": registry_revision,
+        "automatic_model_call": bool(automatic_model_call),
         "failed": failed,
         "git": dict(git or {}),
         "bridge": {
@@ -701,8 +707,16 @@ def record_blocking_failure(
             "reason": failure_kind,
             "ttl_seconds": 900,
         },
-        "fallback_reason": "L3 file-only rescue hook; automatic continuation fallback not attempted",
-        "next_action": "Open .mms/rescue/latest.md and resume with an explicitly selected compatible runtime.",
+        "fallback_reason": (
+            "L3 file-only rescue hook written before configured hot fallback model call"
+            if automatic_model_call
+            else "L3 file-only rescue hook; automatic continuation fallback not attempted"
+        ),
+        "next_action": (
+            "Configured hot fallback is being attempted; inspect latest-fallback-handover if it cannot finish."
+            if automatic_model_call
+            else "Open .mms/rescue/latest.md and resume with an explicitly selected compatible runtime."
+        ),
     }
     artifacts = dict(raw_artifacts or {})
     if body_text not in (None, "") and "upstream-response.txt" not in artifacts:

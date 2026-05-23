@@ -335,6 +335,114 @@ def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tm
     assert handover["fallback"]["automatic_model_call"] is False
 
 
+def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, tmp_path):
+    import mms_bridge
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    (config_root / "generated").mkdir(parents=True)
+    repo.mkdir()
+    (config_root / "generated" / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {
+                            "provider_id": "newapi-deepseek",
+                            "openai_base_url": "https://deepseek.example/v1",
+                            "api_key": "sk-deepseek-test",
+                            "model_id": "deepseek-v4-flash",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeResponse:
+        status_code = 503
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return b'{"error":{"message":"auth_unavailable: no auth available"}}'
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=lambda *_args, **_kwargs: FakeResponse()))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps({"model": "gpt-5.5", "input": "hi"}).encode()
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.path = "/v1/responses"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="relay-key",
+        gateway_url="https://relay.example/v1",
+        model_name="gpt-5.5",
+        advertised_models=["gpt-5.5"],
+        speed_scope={},
+        route_status_paths=[],
+        provider_id="codex-relay",
+        provider_profile="openai",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        proxy_url="",
+        no_proxy="",
+        native_fallback_routes=[],
+        rescue_enabled=True,
+        rescue_repo_root=str(repo),
+        rescue_config_root=str(config_root),
+        rescue_fallback_model="deepseek-v4-flash",
+        rescue_fallback_cli="codex",
+    )
+    captured = {}
+
+    def fake_chat_fallback(payload, model_name, gateway_url, gateway_key, _started_ms, route=None):
+        captured.update({
+            "payload": payload,
+            "model_name": model_name,
+            "gateway_url": gateway_url,
+            "gateway_key": gateway_key,
+            "route": route,
+        })
+
+    handler._do_chatcompletions_fallback = fake_chat_fallback
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["model_name"] == "deepseek-v4-flash"
+    assert captured["gateway_url"] == "https://deepseek.example/v1"
+    assert captured["gateway_key"] == "sk-deepseek-test"
+    assert captured["route"]["provider_id"] == "newapi-deepseek"
+    latest_json = repo / ".mms" / "rescue" / "latest.json"
+    assert latest_json.exists()
+    latest = json.loads(latest_json.read_text(encoding="utf-8"))
+    assert latest["safety"]["automatic_model_call"] is True
+    assert latest["safety"]["global_oauth_fallback"] == "disabled"
+    handover = json.loads((repo / ".mms" / "rescue" / "latest-fallback-handover.json").read_text(encoding="utf-8"))
+    assert handover["fallback"]["model"] == "deepseek-v4-flash"
+    assert handover["fallback"]["mode"] == "hot_fallback_attempt"
+    assert handover["fallback"]["automatic_model_call"] is True
+    assert handover["safety"]["global_oauth_fallback"] == "disabled"
+
+
 def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_path):
     import mms_bridge
 

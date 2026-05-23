@@ -1,17 +1,19 @@
 # MMS Rescue Fallback
 
-Status: L3 file-only foundation with thin bridge hook, TUI rescue viewer, and safe fallback handover generation.
+Status: L3 file-first rescue with thin bridge hook, TUI rescue viewer, safe fallback handover generation, and optional current-session hot fallback for Codex Responses bridge failures.
 
 ## Current Scope
 
-- Writes deterministic rescue artifacts before any future continuation model call.
+- Writes deterministic rescue artifacts before any continuation model call.
 - Hooks terminal bridge failures for blocking classes: 429/quota, 403/401 permission/auth, context overflow, model not found, timeout, 5xx, and unsupported capability/parameter.
-- Keeps automatic continuation fallback disabled.
+- Codex Responses bridge can hot-fallback inside the current request to the configured `MMS_RESCUE_FALLBACK_MODEL` when a blocking upstream failure remains after native route retry and protocol fallback checks.
+- Hot fallback resolves the selected model through `generated/model-routes.json` / `model-routes.json`; it does not hardcode a vendor/model route.
+- `MMS_RESCUE_HOT_FALLBACK=0` disables the automatic model call while keeping file-only rescue artifacts.
 - Keeps global OAuth fallback disabled.
 - Keeps private/public boundary crossing disabled.
 - Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
 - When no packets exist, the TUI can create a safe demo rescue packet for local verification; it makes no upstream/model request.
-- For an existing packet, the TUI can generate `fallback-handover.md/json` for an explicitly selected fallback model; it still makes no model call.
+- For an existing packet, the TUI can generate `fallback-handover.md/json` for an explicitly selected fallback model; the TUI viewer itself still makes no model call.
 
 ## Artifacts
 
@@ -47,9 +49,9 @@ MMS_REAL_HOME -> REAL_HOME -> ORIGINAL_HOME -> stripped MMS gateway session HOME
 
 It must not write rescue metadata under an isolated session HOME such as `.config/mms/codex-gateway/s/*`.
 
-## Not Implemented Yet
+## Current Limits
 
-- No full continuation fallback.
-- No automatic fallback model call; fallback handover generation is file-only and explicit.
+- Hot fallback is currently scoped to the Codex Responses proxy path.
+- Context-heavy failures still rely on the rescue packet/context policy; MMS does not auto-compact before choosing a smaller fallback model.
 - No automatic session resume; the TUI viewer is read-only recovery metadata + packet display.
 - No registry DB persistence beyond the file-only metadata/index shape.

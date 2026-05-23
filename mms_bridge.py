@@ -1104,6 +1104,8 @@ def _record_bridge_blocking_failure(
     request_url="",
     route_count=1,
     bridge_surface="bridge",
+    fallback_mode="auto_default_handover",
+    automatic_model_call=False,
 ):
     """Best-effort L3 rescue hook; never calls another model or OAuth flow."""
     if not bool(getattr(server, "rescue_enabled", False)):
@@ -1122,6 +1124,7 @@ def _record_bridge_blocking_failure(
             request_path=_fallback_safe_url(request_url),
             route_count=route_count,
             bridge_surface=bridge_surface,
+            automatic_model_call=bool(automatic_model_call),
             raw_artifacts={"upstream-response.txt": body_text} if body_text not in (None, "") else None,
         )
         if payload:
@@ -1138,7 +1141,8 @@ def _record_bridge_blocking_failure(
                     payload,
                     fallback_model=fallback_model,
                     fallback_cli=str(getattr(server, "rescue_fallback_cli", "") or "").strip(),
-                    mode="auto_default_handover",
+                    mode=fallback_mode,
+                    automatic_model_call=bool(automatic_model_call),
                 )
                 _bridge_error_logger.warning(
                     "rescue fallback handover written: source_event_id=%s fallback_model=%s",
@@ -1149,6 +1153,83 @@ def _record_bridge_blocking_failure(
     except Exception as exc:
         _bridge_error_logger.warning("rescue file-only packet failed: %s", exc, exc_info=True)
         return None
+
+
+def _rescue_hot_fallback_enabled(server):
+    raw = str(os.environ.get("MMS_RESCUE_HOT_FALLBACK", "") or "").strip().lower()
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    return bool(getattr(server, "rescue_enabled", False)) and bool(str(getattr(server, "rescue_fallback_model", "") or "").strip())
+
+
+def _rescue_route_from_export(route, fallback_model):
+    route = route if isinstance(route, dict) else {}
+    openai_url = str(route.get("openai_base_url") or route.get("gateway_url") or route.get("base_url") or "").strip().rstrip("/")
+    api_key = str(route.get("api_key") or route.get("gateway_key") or "").strip()
+    if not openai_url or not api_key:
+        return None
+    model_id = str(route.get("model_id") or route.get("model") or fallback_model or "").strip()
+    if not model_id:
+        return None
+    return {
+        "provider_id": str(route.get("provider_id") or "rescue-fallback").strip(),
+        "provider_profile": str(route.get("provider_profile") or route.get("profile") or "").strip(),
+        "gateway_url": openai_url,
+        "gateway_key": api_key,
+        "openai_url": openai_url,
+        "model": model_id,
+        "protocol": "openai_chat_completions",
+        "fallback_reason": "rescue_hot_fallback",
+        "try_next_on": list(_NATIVE_FALLBACK_RETRY_STATUSES),
+    }
+
+
+def _load_rescue_hot_fallback_routes(server, fallback_model):
+    explicit_routes = getattr(server, "rescue_hot_fallback_routes", None)
+    if isinstance(explicit_routes, list) and explicit_routes:
+        routes = []
+        for item in explicit_routes:
+            normalized = _rescue_route_from_export(item, fallback_model)
+            if normalized:
+                routes.append(normalized)
+        return routes
+
+    config_root = str(getattr(server, "rescue_config_root", "") or "").strip()
+    if not config_root:
+        try:
+            config_root = resolve_mms_config_dir()
+        except Exception:
+            config_root = os.path.expanduser("~/.config/mms")
+    candidates = [
+        os.path.join(config_root, "generated", "model-routes.json"),
+        os.path.join(config_root, "model-routes.json"),
+    ]
+    seen = set()
+    routes = []
+    for path in candidates:
+        try:
+            payload = json.loads(open(path, "r", encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        model_routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
+        entry = model_routes.get(fallback_model)
+        if not isinstance(entry, dict):
+            continue
+        leaves = [entry.get("primary")]
+        if isinstance(entry.get("fallbacks"), list):
+            leaves.extend(entry.get("fallbacks") or [])
+        for leaf in leaves:
+            normalized = _rescue_route_from_export(leaf, fallback_model)
+            if not normalized:
+                continue
+            key = (normalized.get("provider_id"), normalized.get("gateway_url"), normalized.get("model"))
+            if key in seen:
+                continue
+            seen.add(key)
+            routes.append(normalized)
+        if routes:
+            return routes
+    return routes
 
 
 def _configure_bridge_rescue(server):
@@ -3709,6 +3790,59 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _try_rescue_hot_fallback(
+        self,
+        payload,
+        *,
+        failed_model,
+        failed_provider_id,
+        status_code,
+        body_text,
+        request_url,
+        route_count=1,
+    ):
+        if not _rescue_hot_fallback_enabled(self.server):
+            return False
+        fallback_model = str(getattr(self.server, "rescue_fallback_model", "") or "").strip()
+        if not fallback_model or _normalize_model_name(fallback_model) == _normalize_model_name(failed_model):
+            return False
+        routes = _load_rescue_hot_fallback_routes(self.server, fallback_model)
+        if not routes:
+            return False
+        route = routes[0]
+        rescue_payload = _record_bridge_blocking_failure(
+            self.server,
+            model_name=failed_model,
+            provider_id=failed_provider_id,
+            status_code=status_code,
+            body_text=body_text,
+            request_url=request_url,
+            route_count=route_count,
+            bridge_surface="codex_responses_proxy",
+            fallback_mode="hot_fallback_attempt",
+            automatic_model_call=True,
+        )
+        if not rescue_payload:
+            return False
+        _bridge_error_logger.warning(
+            "rescue hot fallback attempting: failed_model=%s status=%s fallback_model=%s provider=%s",
+            failed_model,
+            status_code,
+            fallback_model,
+            route.get("provider_id"),
+        )
+        fallback_payload = copy.deepcopy(payload)
+        fallback_payload["model"] = route.get("model") or fallback_model
+        self._do_chatcompletions_fallback(
+            fallback_payload,
+            route.get("model") or fallback_model,
+            route.get("gateway_url") or route.get("openai_url") or "",
+            route.get("gateway_key") or "",
+            _now_ms(),
+            route=route,
+        )
+        return True
+
     def _authorized(self):
         expected = getattr(self.server, "bridge_token")
         gateway_key = getattr(self.server, "gateway_key", "")
@@ -3914,6 +4048,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                             )
                             return
                         if response.status_code in (401, 403):
+                            if self._try_rescue_hot_fallback(
+                                payload,
+                                failed_model=model_name,
+                                failed_provider_id=provider_id,
+                                status_code=response.status_code,
+                                body_text=body_text,
+                                request_url=target_url,
+                                route_count=len(forward_routes),
+                            ):
+                                return
                             _record_bridge_blocking_failure(
                                 self.server,
                                 model_name=model_name,
@@ -3935,6 +4079,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                                     route_count=len(forward_routes),
                                 ),
                             )
+                            return
+                        if self._try_rescue_hot_fallback(
+                            payload,
+                            failed_model=model_name,
+                            failed_provider_id=provider_id,
+                            status_code=response.status_code,
+                            body_text=body_text,
+                            request_url=target_url,
+                            route_count=len(forward_routes),
+                        ):
                             return
                         _record_bridge_blocking_failure(
                             self.server,
