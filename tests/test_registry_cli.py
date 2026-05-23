@@ -108,6 +108,56 @@ def test_registry_command_check_staleness_and_if_due(capsys, tmp_path: Path) -> 
     assert "skipped_count=1" in out
 
 
+def test_fetch_openrouter_catalog_from_file_records_provider_catalog_source(capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+    catalog_path = tmp_path / "openrouter-models.json"
+    catalog_path.write_text(
+        """
+        {
+          "data": [
+            {
+              "id": "openai/gpt-5.5",
+              "context_length": 1050000,
+              "pricing": {
+                "prompt": "0.000005",
+                "completion": "0.00003"
+              },
+              "supported_parameters": ["reasoning", "tools", "max_tokens"]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.fetch_openrouter_catalog(
+        db_path=db_path,
+        from_file=catalog_path,
+    )
+    command_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "fetch-openrouter-catalog",
+            "--from-file",
+            str(catalog_path),
+        ],
+        command_name="mms registry",
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+    out = capsys.readouterr().out
+
+    assert summary["source_kind"] == mms_registry.OPENROUTER_MODELS_SOURCE_KIND
+    assert summary["transport"] == "file"
+    assert summary["model_count"] == 1
+    assert command_rc == 0
+    assert "source_kind=openrouter_models_api" in out
+    assert "model_count=1" in out
+    assert status["counts"]["source_snapshot"] == 1
+    assert status["counts"]["source_check"] == 1
+    assert status["counts"]["model_fact"] == 0
+
+
 def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "model-registry.sqlite"
 

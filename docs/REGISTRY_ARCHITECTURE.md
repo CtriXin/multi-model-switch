@@ -160,6 +160,7 @@ The first live implementation exposes a conservative publish/verify loop:
 mms registry refresh-sources
 mms registry refresh-sources --if-due
 mms registry check-staleness
+mms registry fetch-openrouter-catalog
 mms registry publish-approved
 mms registry verify
 mms registry resolve <model>
@@ -176,6 +177,10 @@ Rules:
 - `refresh-sources --if-due` updates only sources whose `source_check` state is
   missing, content-changed, or stale. This is the safe hook for a future
   scheduled job because it avoids full network/startup refresh behavior.
+- `fetch-openrouter-catalog` explicitly fetches or imports OpenRouter
+  `/api/v1/models` into `source_snapshot` as `provider_catalog` evidence; it
+  does not promote prices/context/supported-parameter changes into runtime
+  defaults by itself.
 - `publish-approved` writes `generated/*` and
   `generated/model-registry.latest-approved.json`; it does not edit legacy root
   aliases or runtime defaults.

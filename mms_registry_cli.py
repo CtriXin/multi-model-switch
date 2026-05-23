@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.request import Request, urlopen
 
 import mms_registry
 from mms_capability_resolver import resolve_model_capabilities
@@ -13,6 +15,7 @@ from mms_capability_resolver import resolve_model_capabilities
 ROOT = Path(__file__).resolve().parent
 DEFAULT_REFERENCE_DIR = ROOT / "docs" / "reference" / "model-capability-calibration"
 DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
+OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 
 def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list[Path]:
@@ -137,6 +140,54 @@ def refresh_source_snapshots(
         "fact_count": sum(int(item.get("fact_count", 0) or 0) for item in imported),
         "freshness": freshness or source_freshness(db_path=db_path, paths=_reference_snapshot_paths(paths), max_age_hours=max_age_hours),
     }
+
+
+def fetch_openrouter_catalog(
+    *,
+    db_path: str | Path | None = None,
+    url: str = OPENROUTER_MODELS_API_URL,
+    from_file: str | Path | None = None,
+    timeout: float = 20.0,
+) -> dict[str, Any]:
+    """Fetch or import OpenRouter model catalog as provider_catalog evidence."""
+    source_url = str(url or OPENROUTER_MODELS_API_URL)
+    if from_file:
+        file_path = Path(from_file).expanduser()
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        source_path = str(file_path)
+        transport = "file"
+    else:
+        request = Request(
+            source_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "MMS-Registry/1.0 (+https://github.com/CtriXin/multi-model-switch)",
+            },
+        )
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        source_path = source_url
+        transport = "network"
+    if not isinstance(payload, dict):
+        raise mms_registry.RegistryValidationError("OpenRouter catalog payload must be a JSON object")
+    db = mms_registry.open_registry(db_path)
+    try:
+        summary = mms_registry.import_raw_source_payload(
+            db,
+            payload,
+            source_kind=mms_registry.OPENROUTER_MODELS_SOURCE_KIND,
+            source_path=source_path,
+        )
+    finally:
+        db.close()
+    summary.update(
+        {
+            "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
+            "transport": transport,
+            "url": source_url,
+        }
+    )
+    return summary
 
 
 def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
@@ -303,6 +354,17 @@ def _print_refresh(summary: dict[str, Any]) -> None:
         )
 
 
+def _print_fetch_catalog(summary: dict[str, Any]) -> None:
+    print("MMS Registry Fetch OpenRouter Catalog")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"transport={summary.get('transport')}")
+    print(f"source_kind={summary.get('source_kind')}")
+    print(f"source_path={summary.get('source_path')}")
+    print(f"snapshot_id={summary.get('snapshot_id')}")
+    print(f"model_count={summary.get('model_count')}")
+    print(f"content_hash={summary.get('content_hash')}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -325,6 +387,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     )
     refresh_parser.add_argument("--if-due", action="store_true", help="Only import sources that are missing, changed, or stale")
     refresh_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold for --if-due")
+    fetch_openrouter_parser = subparsers.add_parser(
+        "fetch-openrouter-catalog",
+        help="Fetch OpenRouter /api/v1/models into source_snapshot evidence",
+    )
+    fetch_openrouter_parser.add_argument("--url", default=OPENROUTER_MODELS_API_URL, help="OpenRouter models API URL")
+    fetch_openrouter_parser.add_argument("--from-file", default="", help="Import catalog JSON from a local file instead of network")
+    fetch_openrouter_parser.add_argument("--timeout", type=float, default=20.0, help="Network timeout in seconds")
     staleness_parser = subparsers.add_parser("check-staleness", help="Check source reference staleness without importing")
     staleness_parser.add_argument("--path", action="append", default=[], help="Reference JSON snapshot path; may be repeated")
     staleness_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold")
@@ -364,6 +433,15 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         )
         _print_freshness(summary)
         return 0
+    if args.subcommand == "fetch-openrouter-catalog":
+        summary = fetch_openrouter_catalog(
+            db_path=db_path,
+            url=args.url or OPENROUTER_MODELS_API_URL,
+            from_file=args.from_file or None,
+            timeout=float(args.timeout or 20.0),
+        )
+        _print_fetch_catalog(summary)
+        return 0
     if args.subcommand == "publish-approved":
         config_dir = args.config_dir or None
         if args.refresh_sources:
@@ -385,6 +463,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
 __all__ = [
     "DEFAULT_REFERENCE_DIR",
     "handle_registry_command",
+    "fetch_openrouter_catalog",
     "publish_approved_bundle",
     "refresh_source_snapshots",
     "registry_status",

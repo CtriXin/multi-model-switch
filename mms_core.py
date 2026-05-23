@@ -10039,7 +10039,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import publish_approved_bundle, refresh_source_snapshots, registry_status, source_freshness, verify_approved_bundle
+                from mms_registry_cli import fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, source_freshness, verify_approved_bundle
 
                 status = registry_status()
                 counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
@@ -10060,6 +10060,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         ("check_staleness", "Check Source Staleness"),
                         ("refresh_due_sources", "Refresh Due Sources"),
                         ("refresh_sources", "Refresh Sources"),
+                        ("fetch_openrouter", "Fetch OpenRouter Catalog"),
                         ("publish_approved", "Publish Approved Bundle"),
                         ("verify_approved", "Verify Approved Bundle"),
                         ("doctor", "Registry Doctor / Status"),
@@ -10097,6 +10098,18 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
                         console.print(f"[cyan]facts[/cyan] {summary.get('fact_count')}")
                         console.print("[dim]只写 source_truth/candidate evidence，不改变当前 runtime defaults。[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "fetch_openrouter":
+                    try:
+                        summary = fetch_openrouter_catalog()
+                    except Exception as exc:
+                        console.print(f"[red]Fetch OpenRouter Catalog 失败: {exc}[/red]")
+                    else:
+                        console.print("[green]✓ Fetch OpenRouter Catalog 完成[/green]")
+                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
+                        console.print(f"[cyan]snapshot[/cyan] {summary.get('snapshot_id')}")
+                        console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
+                        console.print("[dim]只写 provider_catalog source_snapshot，不改变当前 runtime defaults。[/dim]")
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "publish_approved":
                     try:

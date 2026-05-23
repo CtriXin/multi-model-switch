@@ -21,6 +21,7 @@ from mms_state_io import resolve_mms_config_dir
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 CALIBRATION_SOURCE_KIND = "model_capability_calibration"
+OPENROUTER_MODELS_SOURCE_KIND = "openrouter_models_api"
 
 _SECRET_FIELD_PARTS = (
     "api_key",
@@ -86,6 +87,14 @@ def sha256_hex(data: bytes | str) -> str:
     if isinstance(data, str):
         data = data.encode("utf-8")
     return hashlib.sha256(data).hexdigest()
+
+
+def _source_model_count(payload: Mapping[str, Any]) -> int:
+    for key in ("models", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return 0
 
 
 def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None) -> Path:
@@ -601,6 +610,99 @@ def import_source_snapshot(
         "content_hash": content_hash,
         "model_count": len(model_rows),
         "fact_count": fact_count,
+    }
+
+
+def import_raw_source_payload(
+    db: sqlite3.Connection,
+    payload: Mapping[str, Any],
+    *,
+    source_kind: str,
+    source_path: str,
+    captured_at: str | None = None,
+) -> dict[str, Any]:
+    """Store non-secret raw source evidence without promoting runtime facts."""
+    if not source_kind:
+        raise RegistryValidationError("source_kind is required")
+    if not source_path:
+        raise RegistryValidationError("source_path is required")
+    validate_non_secret_payload(payload, context=f"source_payload:{source_kind}")
+    captured = captured_at or utc_now()
+    payload_text = _json_text(payload)
+    content_hash = sha256_hex(payload_text)
+    model_count = _source_model_count(payload)
+
+    with db:
+        db.execute(
+            """
+            INSERT OR IGNORE INTO source_snapshot(
+                source_kind,
+                source_path,
+                captured_at,
+                content_hash,
+                schema,
+                model_count,
+                payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source_kind,
+                source_path,
+                captured,
+                content_hash,
+                str(payload.get("schema") or ""),
+                model_count,
+                payload_text,
+            ),
+        )
+        snapshot = db.execute(
+            """
+            SELECT snapshot_id
+            FROM source_snapshot
+            WHERE source_kind = ? AND source_path = ? AND content_hash = ?
+            """,
+            (source_kind, source_path, content_hash),
+        ).fetchone()
+        if snapshot is None:
+            raise RegistryValidationError("source_snapshot insert failed")
+        snapshot_id = int(snapshot["snapshot_id"])
+        db.execute(
+            """
+            INSERT INTO source_check(
+                source_kind,
+                source_path,
+                checked_at,
+                content_hash,
+                snapshot_id,
+                status,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, 'ok', ?)
+            ON CONFLICT(source_kind, source_path) DO UPDATE SET
+                checked_at = excluded.checked_at,
+                content_hash = excluded.content_hash,
+                snapshot_id = excluded.snapshot_id,
+                status = excluded.status,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                source_kind,
+                source_path,
+                captured,
+                content_hash,
+                snapshot_id,
+                _json_text({"model_count": model_count}),
+            ),
+        )
+    return {
+        "snapshot_id": snapshot_id,
+        "source_kind": source_kind,
+        "source_path": source_path,
+        "captured_at": captured,
+        "content_hash": content_hash,
+        "model_count": model_count,
+        "fact_count": 0,
     }
 
 

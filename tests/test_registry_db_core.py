@@ -153,6 +153,36 @@ def test_source_calibration_json_imports_as_source_snapshot(tmp_path: Path) -> N
         db.close()
 
 
+def test_raw_provider_catalog_imports_as_source_snapshot_only(tmp_path: Path) -> None:
+    db = _open_temp_registry(tmp_path)
+    try:
+        payload = {
+            "data": [
+                {
+                    "id": "openai/gpt-5.5",
+                    "context_length": 1050000,
+                    "pricing": {"prompt": "0.000005", "completion": "0.00003"},
+                }
+            ]
+        }
+        summary = mms_registry.import_raw_source_payload(
+            db,
+            payload,
+            source_kind=mms_registry.OPENROUTER_MODELS_SOURCE_KIND,
+            source_path="https://openrouter.ai/api/v1/models",
+            captured_at="2026-05-23T00:00:00.000Z",
+        )
+
+        assert summary["source_kind"] == mms_registry.OPENROUTER_MODELS_SOURCE_KIND
+        assert summary["model_count"] == 1
+        assert summary["fact_count"] == 0
+        assert db.execute("SELECT count(*) FROM source_snapshot").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM source_check").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM model_fact").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_approved_revision_and_routes_are_immutable(tmp_path: Path) -> None:
     db = _open_temp_registry(tmp_path)
     try:
