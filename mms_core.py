@@ -10144,7 +10144,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     handle_guard_command(["status"], bootstrap_cfg=current_cfg)
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif guard_action == "accept":
-                    handle_guard_command(["accept"], bootstrap_cfg=current_cfg)
+                    if _confirm_guard_accept_from_tui(current_cfg):
+                        handle_guard_command(["accept"], bootstrap_cfg=current_cfg)
+                    else:
+                        console.print("[yellow]已取消接受当前快照。[/yellow]")
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
@@ -12746,6 +12749,24 @@ def handle_guard_command(argv, bootstrap_cfg=None):
             console.print(f"  - {item}")
         if len(diff_lines) > 20:
             console.print(f"[dim]... 还有 {len(diff_lines) - 20} 项[/dim]")
+
+
+def _confirm_guard_accept_from_tui(cfg):
+    config_path = _config_write_target_path()
+    current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
+    latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
+    accepted_path = _config_snapshot_path("startup", "accepted.json", config_path=config_path)
+    accepted_payload = _load_json_snapshot(accepted_path) or {}
+    accepted_snapshot = accepted_payload.get("snapshot") if isinstance(accepted_payload, dict) else None
+    diff_lines = _snapshot_diff_lines(accepted_snapshot, current_snapshot) if accepted_snapshot else []
+    if not diff_lines:
+        console.print("[green]当前快照没有 drift，不需要 accept。[/green]")
+        return False
+    return _confirm_startup_snapshot_drift(
+        diff_lines,
+        accepted_path=accepted_path,
+        latest_path=latest_path,
+    )
 
 
 def handle_fake_upstream_command(argv):

@@ -211,6 +211,50 @@ def test_startup_snapshot_guard_skips_block_when_not_enforced(monkeypatch, tmp_p
     assert pending.exists()
 
 
+def test_tui_guard_accept_requires_drift_confirmation(monkeypatch, tmp_path):
+    import mms_core
+
+    target = tmp_path / "config.toml"
+    target.write_text('reload = "--ok"\n', encoding="utf-8")
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(target))
+    monkeypatch.setattr(mms_core, "_iso_now", lambda: "2026-04-12T08:03:45Z")
+    monkeypatch.setattr(mms_core, "_snapshot_period_bucket", lambda _name: "bucket-2c")
+
+    cfg = {
+        "provider": {"default": "default"},
+        "account": {"defaults": {"claude": "claude-a"}},
+        "providers": [],
+        "accounts": [
+            {
+                "id": "claude-a",
+                "cli": "claude",
+                "home_dir": str(tmp_path / "accounts" / "claude-a"),
+                "proxy": "http://127.0.0.1:7890",
+                "timezone": "America/Los_Angeles",
+                "force_ipv4": True,
+            }
+        ],
+    }
+    mms_core._ensure_startup_snapshot_guard(cfg)
+
+    calls = []
+
+    def fake_confirm(diff_lines, **kwargs):
+        calls.append((diff_lines, kwargs))
+        return True
+
+    monkeypatch.setattr(mms_core, "_confirm_startup_snapshot_drift", fake_confirm)
+    drifted_cfg = {
+        **cfg,
+        "accounts": [{**cfg["accounts"][0], "timezone": "Asia/Singapore"}],
+    }
+
+    assert mms_core._confirm_guard_accept_from_tui(drifted_cfg) is True
+    assert calls
+    assert any("account claude-a timezone" in item for item in calls[0][0])
+    assert calls[0][1]["accepted_path"].endswith("accepted.json")
+
+
 def test_startup_snapshot_guard_ignores_config_file_and_audit_churn(monkeypatch, tmp_path):
     import mms_core
 
