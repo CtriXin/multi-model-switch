@@ -378,6 +378,8 @@ def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, 
 
     monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=lambda *_args, **_kwargs: FakeResponse()))
     monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    emitted_events = []
+    monkeypatch.setattr(mms_bridge, "_emit_event", lambda *args, **kwargs: emitted_events.append((args, kwargs)))
 
     raw_body = json.dumps({"model": "gpt-5.5", "input": "hi"}).encode()
     handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
@@ -441,6 +443,9 @@ def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, 
     assert handover["fallback"]["mode"] == "hot_fallback_attempt"
     assert handover["fallback"]["automatic_model_call"] is True
     assert handover["safety"]["global_oauth_fallback"] == "disabled"
+    assert emitted_events
+    assert emitted_events[0][0] == ("fallback", "deepseek-v4-flash")
+    assert "rescue_hot_fallback" in emitted_events[0][1]["note"]
 
 
 def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, tmp_path):

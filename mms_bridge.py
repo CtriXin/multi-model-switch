@@ -3863,6 +3863,14 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         )
         if not rescue_payload:
             return False
+        try:
+            _emit_event(
+                "fallback",
+                fallback_model,
+                note=f"rescue_hot_fallback from={failed_model} status={status_code} provider={route.get('provider_id') or '-'}",
+            )
+        except Exception:
+            pass
         _bridge_error_logger.warning(
             "rescue hot fallback attempting: failed_model=%s status=%s fallback_model=%s provider=%s",
             failed_model,

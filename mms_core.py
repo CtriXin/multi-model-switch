@@ -4872,7 +4872,35 @@ def _set_rescue_default_fallback(cfg, *, model="", cli=""):
     return cfg
 
 
-def _rescue_landing_tui_payload(default_label, rescue_events):
+def _latest_rescue_hot_fallback_event():
+    try:
+        from mms_events import get_recent_events
+
+        events = get_recent_events(limit=40)
+    except Exception:
+        return None
+    for event in reversed(events or []):
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") != "fallback":
+            continue
+        if "rescue_hot_fallback" not in str(event.get("note") or ""):
+            continue
+        return event
+    return None
+
+
+def _format_rescue_hot_fallback_event(event):
+    if not isinstance(event, dict) or not event:
+        return "-"
+    at = str(event.get("at") or "")[:19].replace("T", " ")
+    model = str(event.get("model") or "").strip()
+    note = str(event.get("note") or "").strip()
+    parts = [item for item in (at, model, note) if item]
+    return " · ".join(parts) if parts else "-"
+
+
+def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None):
     """Build the first Rescue settings page before drilling into packet history."""
     events = list(rescue_events or [])
     latest = events[0] if events else {}
@@ -4894,6 +4922,7 @@ def _rescue_landing_tui_payload(default_label, rescue_events):
         ("生效范围", "MMS 全局默认；bridge 失败时读取"),
         ("触发时机", "429 / 503 / context / provider failure"),
         ("最近失败", f"{packet_summary} · {latest_line}" if latest else packet_summary),
+        ("最近 fallback 尝试", _format_rescue_hot_fallback_event(latest_fallback_event)),
         ("安全边界", "只走 routed provider；不使用 global OAuth"),
     ]
     actions = [
@@ -10328,6 +10357,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 landing_info, landing_actions = _rescue_landing_tui_payload(
                     default_label,
                     rescue_events,
+                    _latest_rescue_hot_fallback_event(),
                 )
                 landing_action = _safe_tui_call(
                     select_channel_action_tui,

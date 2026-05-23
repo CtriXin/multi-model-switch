@@ -191,6 +191,7 @@ def test_rescue_landing_prioritizes_fallback_settings_without_packets() -> None:
     assert info["全局默认"] == "deepseek-v4-flash"
     assert info["生效范围"] == "MMS 全局默认；bridge 失败时读取"
     assert info["最近失败"] == "没有 packet"
+    assert info["最近 fallback 尝试"] == "-"
     assert action_ids[:3] == ["choose_route_default", "manual_default", "clear_default"]
     assert "view_packets" not in action_ids
 
@@ -216,6 +217,26 @@ def test_rescue_landing_shows_packets_as_secondary_action() -> None:
     assert "gpt-5.5" in info["最近失败"]
     assert action_ids.index("choose_route_default") < action_ids.index("view_packets")
     assert action_ids.index("manual_default") < action_ids.index("view_packets")
+
+
+def test_rescue_landing_shows_latest_hot_fallback_event() -> None:
+    import mms_core
+
+    info_lines, _actions = mms_core._rescue_landing_tui_payload(
+        "deepseek-v4-flash",
+        [],
+        {
+            "type": "fallback",
+            "model": "deepseek-v4-flash",
+            "at": "2026-05-24T01:02:03+08:00",
+            "note": "rescue_hot_fallback from=gpt-5.5 status=503 provider=newapi-deepseek",
+        },
+    )
+    info = dict(info_lines)
+
+    assert "2026-05-24 01:02:03" in info["最近 fallback 尝试"]
+    assert "deepseek-v4-flash" in info["最近 fallback 尝试"]
+    assert "rescue_hot_fallback" in info["最近 fallback 尝试"]
 
 
 def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
