@@ -2248,6 +2248,7 @@ def _settings_menu():
         {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
         {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
         {"id": "registry", "label": _L("模型真源", "Registry Truth"), "desc": _L("刷新 source truth / 查看 registry 状态", "Refresh source truth / inspect registry status")},
+        {"id": "guard", "label": _L("启动快照", "Snapshot Guard"), "desc": _L("查看/接受 config drift", "Inspect / accept config drift")},
         {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("查看最近失败与 rescue packet", "View recent failures and rescue packets")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
         {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},

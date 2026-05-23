@@ -36,6 +36,7 @@ def test_live_settings_menu_exposes_rescue_entry(monkeypatch) -> None:
 
     assert "rescue" in ids
     assert "registry" in ids
+    assert "guard" in ids
     assert "recommend" not in ids
     assert "fake_upstream" not in ids
 

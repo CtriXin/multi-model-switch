@@ -2696,7 +2696,9 @@ def _ensure_startup_snapshot_guard(cfg, *, enforce=True):
 
     console.print(
         f"[red]启动已阻止：检测到配置/关键文件漂移，请先确认快照。[/red]\n"
-        f"[dim]漂移详情: {pending_path}[/dim]"
+        f"[dim]漂移详情: {pending_path}[/dim]\n"
+        f"[dim]查看: {current_command()} guard status[/dim]\n"
+        f"[dim]接受: {current_command()} guard accept[/dim]"
     )
     sys.exit(CONFIG_GUARD_EXIT_CODE)
 
@@ -10122,6 +10124,28 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     )
                 console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
                 _pause_after_tui_report("按 Enter 返回设置")
+            elif settings_action == "guard":
+                guard_action = _safe_tui_call(
+                    select_channel_action_tui,
+                    "Snapshot Guard",
+                    [
+                        ("用途", "检查/接受 MMS config drift"),
+                        ("CLI", f"{current_command()} guard status / accept"),
+                    ],
+                    [
+                        ("status", "Status"),
+                        ("accept", "Accept Current Snapshot"),
+                        ("back", "返回"),
+                    ],
+                )
+                if guard_action == "__interrupt__":
+                    return True
+                if guard_action == "status":
+                    handle_guard_command(["status"], bootstrap_cfg=current_cfg)
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif guard_action == "accept":
+                    handle_guard_command(["accept"], bootstrap_cfg=current_cfg)
+                    _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
             elif settings_action == "rescue":

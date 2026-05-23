@@ -112,7 +112,7 @@ def test_startup_snapshot_guard_bootstraps_snapshots(monkeypatch, tmp_path):
     assert weekly.exists()
 
 
-def test_startup_snapshot_guard_blocks_on_proxy_drift(monkeypatch, tmp_path):
+def test_startup_snapshot_guard_blocks_on_proxy_drift(monkeypatch, tmp_path, capsys):
     import mms_core
 
     target = tmp_path / "config.toml"
@@ -160,6 +160,10 @@ def test_startup_snapshot_guard_blocks_on_proxy_drift(monkeypatch, tmp_path):
     assert pending.exists()
     payload = json.loads(pending.read_text(encoding="utf-8"))
     assert any("account claude-a proxy" in item for item in payload["diffs"])
+
+    out = capsys.readouterr().out
+    assert "guard status" in out
+    assert "guard accept" in out
 
 
 def test_startup_snapshot_guard_skips_block_when_not_enforced(monkeypatch, tmp_path):
