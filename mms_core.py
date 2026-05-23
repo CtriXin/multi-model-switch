@@ -10112,18 +10112,18 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
                 version_info = _release_version_info()
-                console.print(f"[cyan]{display_title()}[/cyan]")
-                console.print(f"[green]Release: {version_info.get('release') or 'dev'}[/green]")
-                if version_info.get("git_branch") or version_info.get("git_commit"):
-                    console.print(
-                        f"[dim]Git: {version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}[/dim]"
-                    )
-                if version_info.get("install_channel") or version_info.get("source"):
-                    console.print(
-                        f"[dim]Install: {version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}[/dim]"
-                    )
-                console.print(f"[dim]Config: {CONFIG_PATH}[/dim]")
-                _pause_after_tui_report("按 Enter 返回设置")
+                about_lines = [
+                    ("Release", version_info.get("release") or "dev"),
+                    ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
+                    ("Install", f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
+                    ("Config", CONFIG_PATH),
+                ]
+                _safe_tui_call(
+                    select_channel_action_tui,
+                    display_title(),
+                    about_lines,
+                    [("back", "返回")],
+                )
             elif settings_action == "guard":
                 guard_action = _safe_tui_call(
                     select_channel_action_tui,

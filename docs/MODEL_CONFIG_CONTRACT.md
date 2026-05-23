@@ -223,6 +223,11 @@ but route export must not overwrite human policy entries. A project can use
 must treat every other Router model as hidden for that project. `hidden_models`
 and `disabled_models` are explicit deny overlays.
 
+Validation treats stale `hidden_models` / `disabled_models` entries as benign:
+they can intentionally suppress retired aliases if those aliases return later.
+Unknown `allowed_models` and `favorite_models` still warn because they imply a
+model the current Router/Lineup cannot actually provide.
+
 Current official execution surface for MMS consumers (`mms`, `hive`, `pilot`,
 `ant`, `moebius`/`mobius`) is maintained in `model-policy.json`:
 

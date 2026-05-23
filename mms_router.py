@@ -1066,6 +1066,8 @@ def validate_model_config_bundle(routes_payload=None, lineup_payload=None, polic
                 continue
             for model_name in values:
                 if isinstance(model_name, str) and model_name not in routes and model_name not in lineup_routes:
+                    if field in {"hidden_models", "disabled_models"}:
+                        continue
                     issues.append({
                         "level": "warning",
                         "code": "policy_project_unknown_model",

@@ -440,6 +440,45 @@ def test_validate_model_config_bundle_errors_on_bad_lineup_and_fallback():
     assert "lineup_extra_model" in error_codes
 
 
+def test_validate_model_config_bundle_allows_stale_hidden_policy_entries():
+    import mms_router
+
+    routes = {
+        "version": 1,
+        "routes": {
+            "demo": {
+                "primary": {
+                    "provider_id": "demo",
+                    "openai_base_url": "https://demo.example/v1",
+                    "api_key": "sk-demo",
+                },
+                "fallbacks": [],
+            }
+        },
+    }
+    lineup = {
+        "version": 1,
+        "source_routes_hash": mms_router._content_hash({"version": 1, "routes": routes["routes"]}),
+        "routes": {"demo": {"primary": {"provider_id": "demo"}, "fallbacks": []}},
+    }
+    policy = {
+        "models": {},
+        "projects": {
+            "mms": {
+                "hidden_models": ["retired-hidden"],
+                "disabled_models": ["retired-disabled"],
+                "allowed_models": ["missing-allowed"],
+                "favorite_models": ["missing-favorite"],
+            }
+        },
+    }
+
+    issues = mms_router.validate_model_config_bundle(routes, lineup, policy)
+    warnings = [item for item in issues if item.get("level") == "warning"]
+
+    assert {item["model"] for item in warnings} == {"missing-allowed", "missing-favorite"}
+
+
 def test_export_model_routes_creates_new_snapshot_when_key_changes(monkeypatch, tmp_path):
     import mms_router
 
