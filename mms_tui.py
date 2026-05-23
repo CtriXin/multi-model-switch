@@ -2247,9 +2247,9 @@ def _settings_menu():
     return [
         {"id": "provider_mgmt", "label": _L("Provider 管理", "Provider Management"), "desc": _L("查看/调整 role 与 priority", "Inspect and adjust role / priority")},
         {"id": "account_mgmt", "label": _L("账号管理", "Account Management"), "desc": _L("查看 OAuth 账号状态", "Inspect OAuth account status")},
-        {"id": "registry", "label": _L("模型真源", "Registry Truth"), "desc": _L("模型 DB / official source 刷新，不是 Rescue fallback 设置", "Model DB / official source refresh, not Rescue fallback settings")},
+        {"id": "registry", "label": _L("模型真源", "Registry Truth"), "desc": _L("模型 DB / source truth", "Model DB / source truth")},
         {"id": "guard", "label": _L("启动快照", "Snapshot Guard"), "desc": _L("查看/接受 config drift", "Inspect / accept config drift")},
-        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("设置 current-session fallback / 查看最近失败", "Set current-session fallback / view recent failures")},
+        {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("设置 fallback / 最近失败", "Set fallback / recent failures")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
         {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
         {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
@@ -2367,11 +2367,11 @@ def select_settings_tui():
                 is_sel = (i == idx)
                 if is_sel:
                     _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.color_pair(1) | curses.A_DIM)
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(1) | curses.A_BOLD, max_w=16)
+                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.color_pair(1) | curses.A_DIM, max_w=max(1, rr - (ll + 18)))
                 else:
-                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2))
-                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.A_DIM)
+                    _safe_addstr(stdscr, y, ll + 1, item["label"], curses.color_pair(2), max_w=16)
+                    _safe_addstr(stdscr, y, ll + 18, item["desc"], curses.A_DIM, max_w=max(1, rr - (ll + 18)))
 
             bot_y = row + len(items)
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)

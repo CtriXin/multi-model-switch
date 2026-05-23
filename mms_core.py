@@ -4872,7 +4872,7 @@ def _set_rescue_default_fallback(cfg, *, model="", cli=""):
     return cfg
 
 
-def _rescue_landing_tui_payload(default_label, rescue_events, default_candidate_actions=None):
+def _rescue_landing_tui_payload(default_label, rescue_events):
     """Build the first Rescue settings page before drilling into packet history."""
     events = list(rescue_events or [])
     latest = events[0] if events else {}
@@ -4888,18 +4888,19 @@ def _rescue_landing_tui_payload(default_label, rescue_events, default_candidate_
         )
     else:
         latest_line = "-"
+    packet_summary = f"{len(events)} 个 packet" if events else "没有 packet"
     info_lines = [
-        ("状态", f"{len(events)} 个 rescue packet" if events else "没有找到 rescue packet"),
-        ("最近失败", latest_line),
-        ("默认 fallback", str(default_label or "未设置")),
-        ("Hot fallback", "按 model-routes.json 在当前 bridge 内尝试；不使用 global OAuth"),
+        ("全局默认", str(default_label or "未设置")),
+        ("生效范围", "MMS 全局默认；bridge 失败时读取"),
+        ("触发时机", "429 / 503 / context / provider failure"),
+        ("最近失败", f"{packet_summary} · {latest_line}" if latest else packet_summary),
+        ("安全边界", "只走 routed provider；不使用 global OAuth"),
     ]
     actions = [
-        ("choose_route_default", "从 routed models 选择 current-session fallback"),
-        ("manual_default", "手动设置 current-session fallback"),
+        ("choose_route_default", "设置全局默认 fallback（routed models）"),
+        ("manual_default", "手动输入 fallback model"),
+        ("clear_default", "清除全局默认 fallback"),
     ]
-    actions.extend(list(default_candidate_actions or []))
-    actions.append(("clear_default", "清除 current-session fallback"))
     if events:
         actions.append(("view_packets", "查看最近失败 / rescue packet"))
     actions.extend(
@@ -10313,17 +10314,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
                 default_fallback = _rescue_default_fallback(current_cfg)
                 default_label = default_fallback.get("model") or "未设置"
-                generic_fallback_candidates = _rescue_fallback_model_candidates(current_cfg, {}, limit=8)
                 route_fallback_candidates = _rescue_route_fallback_model_candidates(limit=120)
-                default_candidate_actions = [
-                    (f"default::{model}", f"设为 current-session fallback -> {model}")
-                    for model in generic_fallback_candidates
-                ]
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
                 landing_info, landing_actions = _rescue_landing_tui_payload(
                     default_label,
                     rescue_events,
-                    default_candidate_actions,
                 )
                 landing_action = _safe_tui_call(
                     select_channel_action_tui,
@@ -10339,12 +10334,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     fallback_model = str(landing_action or "").split("::", 1)[1] if str(landing_action or "").startswith("default::") else ""
                     if not fallback_model:
                         _ensure_rich()
-                        fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                        fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]后续 bridge failure 会按 model-routes.json 尝试这个 routed fallback；不使用 global OAuth。[/dim]")
+                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]保存到 [rescue].fallback_model；bridge failure 时按 model-routes.json 尝试，不使用 global OAuth。[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "choose_route_default":
@@ -10353,19 +10348,19 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     fallback_model = _safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
-                        title="选择 current-session fallback model",
+                        title="选择全局默认 fallback model",
                     )
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]后续同一类 bridge failure 会先写 rescue packet，再尝试这个 routed model。[/dim]")
+                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]保存到 [rescue].fallback_model；bridge failure 时按 model-routes.json 尝试。[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")
                     save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    console.print("[green]✓ 默认 fallback 已清除[/green]")
+                    console.print("[green]✓ 全局默认 fallback 已清除[/green]")
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "create_demo":
@@ -10392,7 +10387,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     ("状态", selected_rescue.get("status_code") or selected_rescue.get("failure_kind") or "-"),
                     ("原因", selected_rescue.get("failure_kind") or "-"),
                     ("Repo", selected_rescue.get("repo_path") or "-"),
-                    ("默认 fallback", default_label),
+                    ("全局默认", default_label),
                 ]
                 fallback_candidates = _rescue_fallback_model_candidates(current_cfg, selected_rescue, limit=8)
                 route_fallback_candidates = _rescue_route_fallback_model_candidates(
@@ -10404,7 +10399,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     for model in fallback_candidates
                 ]
                 default_actions = [
-                    (f"default::{model}", f"设为 current-session fallback -> {model}")
+                    (f"default::{model}", f"设为全局默认 fallback -> {model}")
                     for model in fallback_candidates
                 ]
                 rescue_action = _safe_tui_call(
@@ -10413,10 +10408,10 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     info_lines,
                     fallback_actions + default_actions + [
                         ("choose_route_handover", "从 routed models 选择 handover"),
-                        ("choose_route_default", "从 routed models 选择 current-session fallback"),
+                        ("choose_route_default", "设置全局默认 fallback（routed models）"),
                         ("manual_handover", "手动输入 fallback model"),
-                        ("manual_default", "手动设置默认 fallback"),
-                        ("clear_default", "清除默认 fallback"),
+                        ("manual_default", "手动输入全局默认 fallback"),
+                        ("clear_default", "清除全局默认 fallback"),
                         ("view_md", "查看 rescue.md"),
                         ("show_paths", "显示文件路径"),
                         ("back", "返回"),
@@ -10487,12 +10482,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
                     if not fallback_model:
                         _ensure_rich()
-                        fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                        fallback_model = Prompt.ask("全局默认 fallback model", default=default_fallback.get("model") or "").strip()
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]真实 429/context/provider failure 会先写 rescue packet，再按 model-routes.json 尝试 current-session fallback；不使用 global OAuth。[/dim]")
+                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]保存到 [rescue].fallback_model；真实 failure 会先写 rescue packet，再按 model-routes.json 尝试。[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
@@ -10500,18 +10495,18 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     fallback_model = _safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
-                        title="选择 current-session fallback model",
+                        title="选择全局默认 fallback model",
                     )
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
                         console.print("[dim]后续 bridge failure 会尝试该 routed model；不使用 global OAuth。[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")
                     save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    console.print("[green]✓ 默认 fallback 已清除[/green]")
+                    console.print("[green]✓ 全局默认 fallback 已清除[/green]")
                     _pause_after_tui_report("按 Enter 返回设置")
             continue
 
