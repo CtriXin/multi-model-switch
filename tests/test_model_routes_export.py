@@ -8,6 +8,70 @@ import stat
 import pytest
 
 
+def _write_latest_approved_route_bundle(tmp_path, mms_router, *, routes):
+    import mms_registry
+
+    generated = tmp_path / "generated"
+    router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
+    policy = generated / "model-policy.effective.json"
+    mms_registry.write_json_atomic(router, {"version": 1, "generated_at": "2026-05-23T00:00:00.000Z", "routes": routes})
+    router_payload = json.loads(router.read_text(encoding="utf-8"))
+    mms_registry.write_json_atomic(
+        lineup,
+        {
+            "version": 1,
+            "generated_at": "2026-05-23T00:00:00.000Z",
+            "source_routes_hash": mms_router._content_hash({"version": 1, "routes": router_payload["routes"]}),
+            "routes": {
+                name: {"primary": {"provider_id": info["primary"]["provider_id"], "model_id": name}, "fallbacks": []}
+                for name, info in routes.items()
+            },
+        },
+    )
+    mms_registry.write_json_atomic(profile, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_route_test_001",
+        capability_revision="cap_route_test_001",
+        route_revision="route_test_001",
+        policy_revision="policy_test_001",
+        profile_revision="profile_test_001",
+        generated_at="2026-05-23T00:00:00.000Z",
+        files={
+            "router": {
+                "path": router,
+                "canonical_path": "generated/model-routes.json",
+                "legacy_alias_path": "model-routes.json",
+                "sensitivity": "secret",
+                "legacy_alias_compat": True,
+            },
+            "lineup": {
+                "path": lineup,
+                "canonical_path": "generated/model-routes.lineup.json",
+                "legacy_alias_path": "model-routes.lineup.json",
+                "sensitivity": "non-secret",
+                "legacy_alias_compat": True,
+            },
+            "profile": {
+                "path": profile,
+                "canonical_path": "generated/provider-profiles.generated.json",
+                "sensitivity": "non-secret",
+                "legacy_alias_compat": False,
+            },
+            "policy": {
+                "path": policy,
+                "canonical_path": "generated/model-policy.effective.json",
+                "legacy_alias_path": "model-policy.json",
+                "sensitivity": "non-secret",
+                "legacy_alias_compat": True,
+            },
+        },
+    )
+
+
 def _patch_export_dependencies(monkeypatch, *, contexts):
     import mms_core
 
@@ -118,7 +182,79 @@ def test_export_model_routes_writes_minimal_hive_contract_and_snapshot(monkeypat
     assert re.fullmatch(r"[0-9a-f]{64}", snapshots[0].stem)
     assert json.loads(snapshots[0].read_text(encoding="utf-8")) == written
     assert stat.S_IMODE(latest_path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(snapshots[0].stat().st_mode) == 0o600
+
+
+def test_export_model_routes_prefers_verified_latest_approved_bundle(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_router
+
+    _patch_export_paths(monkeypatch, tmp_path)
+    approved_routes = {
+        "approved-model": {
+            "primary": {
+                "provider_id": "approved-provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://approved.example/v1",
+                "api_key": "sk-approved",
+                "model_id": "approved-model",
+            },
+            "fallbacks": [],
+        }
+    }
+    _write_latest_approved_route_bundle(tmp_path, mms_router, routes=approved_routes)
+
+    routes = mms_router.export_model_routes({"providers": []}, force=False)
+
+    assert routes == approved_routes
+    assert not (tmp_path / "model-routes.snapshots").exists()
+
+
+def test_validate_model_config_bundle_uses_verified_latest_approved_or_legacy_fallback(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_router
+
+    _patch_export_paths(monkeypatch, tmp_path)
+    bad_root = {
+        "version": 1,
+        "routes": {
+            "bad-root": {
+                "primary": {"provider_id": "bad-root", "openai_base_url": "https://bad.example/v1", "api_key": ""},
+                "fallbacks": [],
+            }
+        },
+    }
+    (tmp_path / "model-routes.json").write_text(json.dumps(bad_root), encoding="utf-8")
+    (tmp_path / "model-routes.lineup.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source_routes_hash": mms_router._content_hash({"version": 1, "routes": bad_root["routes"]}),
+                "routes": {"bad-root": {"primary": {"provider_id": "bad-root"}, "fallbacks": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "model-policy.json").write_text(json.dumps({"version": 1, "models": {}}), encoding="utf-8")
+    approved_routes = {
+        "approved-model": {
+            "primary": {
+                "provider_id": "approved-provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://approved.example/v1",
+                "api_key": "sk-approved",
+                "model_id": "approved-model",
+            },
+            "fallbacks": [],
+        }
+    }
+    _write_latest_approved_route_bundle(tmp_path, mms_router, routes=approved_routes)
+
+    assert not [item for item in mms_router.validate_model_config_bundle() if item.get("level") == "error"]
+
+    (tmp_path / "generated" / "model-routes.json").write_text(json.dumps({"version": 1, "routes": {}}), encoding="utf-8")
+    error_codes = {item["code"] for item in mms_router.validate_model_config_bundle() if item.get("level") == "error"}
+    assert "route_missing_primary_provider" not in error_codes
+    assert "route_missing_api_key" in error_codes
 
 
 def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):

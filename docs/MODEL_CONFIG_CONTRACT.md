@@ -97,9 +97,12 @@ Bundle rules:
   capability facts are loaded from the verified manifest first, then legacy
   files/conservative defaults are used only when the manifest is missing,
   invalid, or hash-mismatched. Candidate/source snapshots are not runtime input.
-- Router/root alias files are not automatically replaced in this phase; route
-  selection and provider/account priority stay on the existing path until the
-  router integration lane explicitly adopts the verified bundle.
+- Router read-side adoption is also conservative:
+  `mms_router.export_model_routes(force=False)` and
+  `validate_model_config_bundle()` read verified generated router/lineup/policy
+  first; explicit `force=True` still regenerates legacy root aliases from
+  current config. Provider/account priority and bridge routing stay on the
+  existing path.
 
 See `docs/REGISTRY_ARCHITECTURE.md` for the full source/candidate/approved/
 runtime/health layer contract, `privacy_boundary` gates, deletion/tombstone

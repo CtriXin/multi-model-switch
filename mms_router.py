@@ -942,6 +942,43 @@ def _read_json_file_or_empty(path):
     return payload if isinstance(payload, dict) else {}
 
 
+def _latest_approved_model_config_bundle():
+    try:
+        import mms_registry
+
+        bundle = mms_registry.load_latest_approved_bundle(include_secret=True)
+    except Exception:
+        return {}
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
+    routes_payload = payloads.get("router")
+    lineup_payload = payloads.get("lineup")
+    policy_payload = payloads.get("policy")
+    if not isinstance(routes_payload, dict) or not isinstance(lineup_payload, dict):
+        return {}
+    if not isinstance(policy_payload, dict):
+        policy_payload = {}
+    return {
+        "routes_payload": routes_payload,
+        "lineup_payload": lineup_payload,
+        "policy_payload": policy_payload,
+        "manifest_path": bundle.get("manifest_path") or "",
+        "verified_files": bundle.get("verified_files") or {},
+    }
+
+
+def _current_model_config_payloads():
+    approved = _latest_approved_model_config_bundle()
+    if approved:
+        return approved
+    return {
+        "routes_payload": _read_json_file_or_empty(MODEL_ROUTES_PATH),
+        "lineup_payload": _read_json_file_or_empty(MODEL_ROUTES_LINEUP_PATH),
+        "policy_payload": _read_json_file_or_empty(MODEL_POLICY_PATH),
+        "manifest_path": "",
+        "verified_files": {},
+    }
+
+
 def _ensure_model_policy_file(generated_at):
     if os.path.exists(MODEL_POLICY_PATH):
         return _read_json_file_or_empty(MODEL_POLICY_PATH)
@@ -966,9 +1003,15 @@ def _append_model_config_audit(event):
 
 
 def validate_model_config_bundle(routes_payload=None, lineup_payload=None, policy_payload=None):
-    routes_payload = routes_payload or _read_json_file_or_empty(MODEL_ROUTES_PATH)
-    lineup_payload = lineup_payload or _read_json_file_or_empty(MODEL_ROUTES_LINEUP_PATH)
-    policy_payload = policy_payload or _read_json_file_or_empty(MODEL_POLICY_PATH)
+    if routes_payload is None and lineup_payload is None and policy_payload is None:
+        current = _current_model_config_payloads()
+        routes_payload = current["routes_payload"]
+        lineup_payload = current["lineup_payload"]
+        policy_payload = current["policy_payload"]
+    else:
+        routes_payload = routes_payload or _read_json_file_or_empty(MODEL_ROUTES_PATH)
+        lineup_payload = lineup_payload or _read_json_file_or_empty(MODEL_ROUTES_LINEUP_PATH)
+        policy_payload = policy_payload or _read_json_file_or_empty(MODEL_POLICY_PATH)
     issues = []
 
     routes = routes_payload.get("routes") if isinstance(routes_payload.get("routes"), dict) else {}
@@ -1097,6 +1140,19 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
         if cfg is None:
             return {}
         cfg = apply_local_overrides(cfg)
+
+    # Verified latest-approved bundle is the stable read-side truth. Explicit
+    # force=True still regenerates legacy root aliases from current config.
+    if not force:
+        approved = _latest_approved_model_config_bundle()
+        if approved:
+            issues = validate_model_config_bundle(
+                approved["routes_payload"],
+                approved["lineup_payload"],
+                approved["policy_payload"],
+            )
+            if not any(issue.get("level") == "error" for issue in issues):
+                return (approved["routes_payload"].get("routes") or {})
 
     # latest 新于 config / override / credentials 时，直接读固定 latest 文件。
     if not force and _latest_routes_is_fresh():

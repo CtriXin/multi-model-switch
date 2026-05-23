@@ -186,6 +186,10 @@ MMS now uses the latest-approved bundle for the low-risk resolver surfaces:
 - `mms_launchers._lookup_context_window()` and the TUI capability summary only
   accept approved context facts when the resolver marks the field source as
   `approved_facts`.
+- `mms_router.export_model_routes(force=False)` and
+  `mms_router.validate_model_config_bundle()` read the verified generated
+  router/lineup/policy payloads first; explicit `force=True` still regenerates
+  legacy root aliases from current config.
 
 Fallback is intentionally conservative:
 
@@ -193,8 +197,8 @@ Fallback is intentionally conservative:
   payload means MMS falls back to the legacy built-in/user profile files or
   conservative capability defaults.
 - Candidate/source snapshots are never read by runtime resolver paths.
-- Router/root alias files and launcher/provider/account selection are unchanged
-  in this phase.
+- Launcher/provider/account selection and bridge routing are unchanged in this
+  phase.
 
 ## Privacy Boundary
 
