@@ -977,13 +977,41 @@ def _about_status_snapshot(force_update=False):
     }
 
 
+def _short_update_status_label(status):
+    status = str(status or "").strip()
+    if not status:
+        return ""
+    if status.startswith(_L("有新版", "update available")):
+        return _L("有新版", "update available")
+    if status.startswith(_L("高于 latest", "newer than latest")):
+        return _L("高于 latest", "newer than latest")
+    return status
+
+
 def _format_cli_about_line(cli_status):
-    current = str(cli_status.get("label") or cli_status.get("version") or "").strip()
-    latest = str(cli_status.get("latest") or "").strip()
-    status = str(cli_status.get("status") or "").strip()
-    suffix = f" / latest {latest}" if latest else ""
+    current = str(cli_status.get("version") or cli_status.get("label") or "").strip()
+    status = _short_update_status_label(cli_status.get("status"))
     status_suffix = f" · {status}" if status else ""
-    return f"{current}{suffix}{status_suffix}".strip() or "-"
+    return f"{current}{status_suffix}".strip() or "-"
+
+
+def _format_about_latest_value(status):
+    latest = str((status or {}).get("latest") or "").strip()
+    return latest or _L("未检查", "not checked")
+
+
+def _about_check_error_summary(error_text):
+    raw = str(error_text or "").strip()
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if "ssl" in lower or "handshake" in lower:
+        return _L("MMS latest 检查失败：SSL handshake，可稍后重试", "MMS latest check failed: SSL handshake; retry later")
+    if "timed out" in lower or "timeout" in lower:
+        return _L("MMS latest 检查超时，可稍后重试", "MMS latest check timed out; retry later")
+    if len(raw) > 72:
+        raw = raw[:69].rstrip() + "..."
+    return raw
 
 
 def _mms_upgrade_shell_command(*, include_clis=False):
@@ -994,6 +1022,14 @@ def _mms_upgrade_shell_command(*, include_clis=False):
     return f"curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- {quoted_args}"
 
 
+def _cli_upgrade_shell_command(cli_name):
+    cli = str(cli_name or "").strip().lower()
+    package = CLI_VERSION_PACKAGES.get(cli)
+    if not package:
+        return ""
+    return "npm install -g " + shlex.quote(f"{package}@latest")
+
+
 def _print_about_version_summary(about_snapshot):
     title, info_lines, _actions = _about_tui_payload(about_snapshot)
     console.print(f"[cyan]{title}[/cyan]")
@@ -1001,13 +1037,21 @@ def _print_about_version_summary(about_snapshot):
         console.print(f"[cyan]{label}[/cyan] {value}")
 
 
-def _run_about_upgrade(*, include_clis=False):
+def _run_about_upgrade(*, target="mms", include_clis=False):
     _ensure_rich()
-    command = _mms_upgrade_shell_command(include_clis=include_clis)
-    if include_clis:
-        label = _L("MMS + Codex/Claude CLI", "MMS + Codex/Claude CLI")
+    target = str(target or "mms").strip().lower()
+    if target in {"codex", "claude"}:
+        command = _cli_upgrade_shell_command(target)
+        label = "Codex CLI" if target == "codex" else "Claude CLI"
     else:
-        label = "MMS"
+        command = _mms_upgrade_shell_command(include_clis=include_clis)
+        if include_clis:
+            label = _L("MMS + Codex/Claude CLI", "MMS + Codex/Claude CLI")
+        else:
+            label = "MMS"
+    if not command:
+        console.print(f"[red]{_L('没有可执行的升级命令。', 'No upgrade command available.')}[/red]")
+        return False
     console.print(f"[yellow]{_L(f'即将升级 {label}', f'About to upgrade {label}')}[/yellow]")
     console.print(f"[dim]{command}[/dim]")
     if not Confirm.ask(_L("确认执行升级？", "Run upgrade now?"), default=False):
@@ -5226,18 +5270,22 @@ def _about_tui_payload(about_snapshot):
         ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
         (_L("MMS 最新", "MMS latest"), mms_status.get("latest") or _L("未检查", "not checked")),
         ("Codex", _format_cli_about_line(codex_status)),
+        (_L("Codex 最新", "Codex latest"), _format_about_latest_value(codex_status)),
         ("Claude", _format_cli_about_line(claude_status)),
+        (_L("Claude 最新", "Claude latest"), _format_about_latest_value(claude_status)),
         ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
         (_L("安装", "Install"), f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
         ("Config", CONFIG_PATH),
     ]
     if mms_status.get("last_error"):
-        info_lines.append((_L("检查错误", "Check error"), mms_status.get("last_error")))
+        info_lines.append((_L("检查错误", "Check error"), _about_check_error_summary(mms_status.get("last_error"))))
     actions = [("refresh_versions", _L("刷新版本检查", "Refresh Version Check"))]
     if mms_status.get("outdated"):
-        actions.append(("upgrade_mms", _L("一键升级 MMS", "Upgrade MMS")))
-    if any((clis.get(name) or {}).get("outdated") for name in ("codex", "claude")):
-        actions.append(("upgrade_mms_clis", _L("升级 MMS + Codex/Claude CLI", "Upgrade MMS + Codex/Claude CLI")))
+        actions.append(("upgrade_mms", _L("升级 MMS", "Upgrade MMS")))
+    if codex_status.get("outdated"):
+        actions.append(("upgrade_codex_cli", _L("升级 Codex CLI", "Upgrade Codex CLI")))
+    if claude_status.get("outdated"):
+        actions.append(("upgrade_claude_cli", _L("升级 Claude CLI", "Upgrade Claude CLI")))
     actions.append(("back", _L("返回", "Back")))
     return _L("关于 / About", "About"), info_lines, actions
 
@@ -10606,16 +10654,16 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         break
                     if about_action == "refresh_versions":
                         console.print("[cyan]正在刷新 MMS / Codex / Claude 版本检查...[/cyan]")
-                        refreshed = _about_status_snapshot(force_update=True)
-                        _print_about_version_summary(refreshed)
-                        _pause_after_tui_report("按 Enter 返回关于")
+                        _about_status_snapshot(force_update=True)
                         continue
-                    if about_action in {"upgrade_mms", "upgrade_mms_clis"}:
-                        include_clis = about_action == "upgrade_mms_clis"
-                        if _run_about_upgrade(include_clis=include_clis):
-                            _pause_after_tui_report("按 Enter 返回关于")
-                        else:
-                            _pause_after_tui_report("按 Enter 返回关于")
+                    if about_action in {"upgrade_mms", "upgrade_codex_cli", "upgrade_claude_cli"}:
+                        upgrade_target = {
+                            "upgrade_mms": "mms",
+                            "upgrade_codex_cli": "codex",
+                            "upgrade_claude_cli": "claude",
+                        }[about_action]
+                        _run_about_upgrade(target=upgrade_target)
+                        _pause_after_tui_report("按 Enter 返回关于")
                         continue
             elif settings_action == "guard":
                 guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()

@@ -168,3 +168,10 @@ def test_update_notice_supports_legacy_install_metadata_without_source(monkeypat
 
     assert notice is not None
     assert notice["gap_count"] == 3
+
+
+def test_about_cli_upgrade_commands_are_individual():
+    import mms_core
+
+    assert mms_core._cli_upgrade_shell_command("codex") == "npm install -g @openai/codex@latest"
+    assert mms_core._cli_upgrade_shell_command("claude") == "npm install -g @anthropic-ai/claude-code@latest"

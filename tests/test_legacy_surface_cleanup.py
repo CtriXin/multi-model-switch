@@ -285,7 +285,17 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     guard_title, guard_info, guard_actions = mms_core._snapshot_guard_tui_payload()
 
     assert about_title == "关于 / About"
-    assert [label for label, _value in about_info] == ["MMS", "MMS 最新", "Codex", "Claude", "Git", "安装", "Config"]
+    assert [label for label, _value in about_info] == [
+        "MMS",
+        "MMS 最新",
+        "Codex",
+        "Codex 最新",
+        "Claude",
+        "Claude 最新",
+        "Git",
+        "安装",
+        "Config",
+    ]
     assert about_actions == [("refresh_versions", "刷新版本检查"), ("back", "返回")]
     assert guard_title == "启动快照 / Snapshot Guard"
     assert guard_info[0][0] == "用途"
@@ -308,8 +318,10 @@ def test_about_tui_payload_surfaces_upgrade_actions_for_outdated_versions() -> N
         }
     )
 
-    assert ("upgrade_mms", "一键升级 MMS") in actions
-    assert ("upgrade_mms_clis", "升级 MMS + Codex/Claude CLI") in actions
+    assert ("upgrade_mms", "升级 MMS") in actions
+    assert ("upgrade_codex_cli", "升级 Codex CLI") in actions
+    assert ("upgrade_claude_cli", "升级 Claude CLI") not in actions
+    assert ("upgrade_mms_clis", "升级 MMS + Codex/Claude CLI") not in actions
 
 
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:

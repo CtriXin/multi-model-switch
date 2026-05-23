@@ -3140,7 +3140,7 @@ def select_channel_action_tui(title, info_lines, actions):
                 _safe_addstr(stdscr, y, value_x, value_text, curses.color_pair(2), max_w=max(8, rr - value_x))
             row += detail_h
             if hidden_details:
-                _safe_addstr(stdscr, row, ll, f"+ {hidden_details} more", curses.A_DIM)
+                _safe_addstr(stdscr, row, ll, _L(f"+ {hidden_details} 项更多", f"+ {hidden_details} more"), curses.A_DIM)
                 row += 1
 
             _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
