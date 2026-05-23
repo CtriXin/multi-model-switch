@@ -20,8 +20,92 @@ def test_refresh_sources_imports_reference_snapshot_to_db(tmp_path: Path) -> Non
     assert summary["model_count"] >= 39
     assert summary["fact_count"] >= summary["model_count"]
     assert status["counts"]["source_snapshot"] == 1
+    assert status["counts"]["source_check"] == 1
+    assert status["source_freshness"]["due_count"] == 0
     assert status["counts"]["model_identity"] >= 30
     assert status["counts"]["model_fact"] == summary["fact_count"]
+
+
+def test_source_freshness_and_if_due_refresh_use_check_timestamp(tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+    old_captured = "2026-05-01T00:00:00.000Z"
+
+    db = mms_registry.open_registry(db_path)
+    try:
+        mms_registry.import_source_snapshot(db, REFERENCE_JSON, captured_at=old_captured)
+    finally:
+        db.close()
+
+    stale = mms_registry_cli.source_freshness(
+        db_path=db_path,
+        paths=[REFERENCE_JSON],
+        max_age_hours=1,
+    )
+    refreshed = mms_registry_cli.refresh_source_snapshots(
+        db_path=db_path,
+        paths=[REFERENCE_JSON],
+        if_due=True,
+        max_age_hours=1,
+    )
+    fresh = mms_registry_cli.source_freshness(
+        db_path=db_path,
+        paths=[REFERENCE_JSON],
+        max_age_hours=1,
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+
+    assert stale["due_count"] == 1
+    assert stale["sources"][0]["reason"] == "max_age_exceeded"
+    assert refreshed["imported_count"] == 1
+    assert refreshed["skipped_count"] == 0
+    assert fresh["due_count"] == 0
+    assert status["counts"]["source_snapshot"] == 1
+    assert status["counts"]["source_check"] == 1
+
+
+def test_registry_command_check_staleness_and_if_due(capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+
+    check_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "check-staleness",
+            "--path",
+            str(REFERENCE_JSON),
+        ],
+        command_name="mms registry",
+    )
+    refresh_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "refresh-sources",
+            "--if-due",
+            "--path",
+            str(REFERENCE_JSON),
+        ],
+        command_name="mms registry",
+    )
+    second_refresh_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "refresh-sources",
+            "--if-due",
+            "--path",
+            str(REFERENCE_JSON),
+        ],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+
+    assert check_rc == 0
+    assert refresh_rc == 0
+    assert second_refresh_rc == 0
+    assert "due_count=1" in out
+    assert "imported_count=1" in out
+    assert "skipped_count=1" in out
 
 
 def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> None:

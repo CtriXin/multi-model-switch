@@ -92,7 +92,7 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
     try:
         assert db_path.exists()
         assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
         tables = {
             row["name"]
@@ -101,6 +101,7 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
         assert {
             "schema_migrations",
             "source_snapshot",
+            "source_check",
             "registry_revision",
             "revision_membership",
             "route_group",
@@ -111,7 +112,11 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
             "audit_log",
             "tombstone_event",
         }.issubset(tables)
-        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 1
+        migration_versions = {
+            row["version"]
+            for row in db.execute("SELECT version FROM schema_migrations")
+        }
+        assert {1, 2}.issubset(migration_versions)
     finally:
         db.close()
 
@@ -132,6 +137,13 @@ def test_source_calibration_json_imports_as_source_snapshot(tmp_path: Path) -> N
         assert snapshot["content_hash"] == expected_hash
         assert snapshot["schema"] == "mobius.mms_model_capability_calibration.v1"
         assert snapshot["model_count"] == summary["model_count"] >= 39
+        source_check = db.execute(
+            "SELECT * FROM source_check WHERE source_kind = ? AND source_path = ?",
+            (mms_registry.CALIBRATION_SOURCE_KIND, str(REFERENCE_JSON)),
+        ).fetchone()
+        assert source_check["checked_at"] == "2026-05-22T00:00:00.000Z"
+        assert source_check["content_hash"] == expected_hash
+        assert source_check["snapshot_id"] == summary["snapshot_id"]
 
         identity_count = db.execute("SELECT count(*) FROM model_identity").fetchone()[0]
         fact_count = db.execute("SELECT count(*) FROM model_fact").fetchone()[0]

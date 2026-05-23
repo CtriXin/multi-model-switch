@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PRIVACY_BOUNDARIES = ("private", "team", "public")
 REVISION_CLASSES = ("bundle", "capability", "route", "policy", "profile")
 REVISION_STATUSES = ("candidate", "approved", "tombstoned")
@@ -26,6 +26,18 @@ CREATE TABLE IF NOT EXISTS source_snapshot (
     model_count INTEGER NOT NULL DEFAULT 0 CHECK (model_count >= 0),
     payload_json TEXT NOT NULL,
     UNIQUE (source_kind, source_path, content_hash)
+);
+
+CREATE TABLE IF NOT EXISTS source_check (
+    source_kind TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    checked_at TEXT NOT NULL,
+    content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+    snapshot_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'ok',
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (source_kind, source_path),
+    FOREIGN KEY (snapshot_id) REFERENCES source_snapshot(snapshot_id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS registry_revision (
@@ -142,6 +154,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_source_snapshot_hash ON source_snapshot(content_hash);
+CREATE INDEX IF NOT EXISTS idx_source_check_checked_at ON source_check(checked_at);
 CREATE INDEX IF NOT EXISTS idx_registry_revision_status ON registry_revision(status, revision_class);
 CREATE INDEX IF NOT EXISTS idx_revision_membership_bundle ON revision_membership(bundle_revision);
 CREATE INDEX IF NOT EXISTS idx_route_group_revision ON route_group(route_revision_id);
@@ -308,6 +321,10 @@ def migrate(db: sqlite3.Connection) -> None:
         db.executescript(SCHEMA_V1_SQL)
         db.execute(
             "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
-            (SCHEMA_VERSION, "registry_core_v1"),
+            (1, "registry_core_v1"),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
+            (2, "source_check_v2"),
         )
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

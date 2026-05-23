@@ -489,6 +489,34 @@ def import_source_snapshot(
         if snapshot is None:
             raise RegistryValidationError("source_snapshot insert failed")
         snapshot_id = int(snapshot["snapshot_id"])
+        db.execute(
+            """
+            INSERT INTO source_check(
+                source_kind,
+                source_path,
+                checked_at,
+                content_hash,
+                snapshot_id,
+                status,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, 'ok', ?)
+            ON CONFLICT(source_kind, source_path) DO UPDATE SET
+                checked_at = excluded.checked_at,
+                content_hash = excluded.content_hash,
+                snapshot_id = excluded.snapshot_id,
+                status = excluded.status,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                source_kind,
+                str(path),
+                captured,
+                content_hash,
+                snapshot_id,
+                _json_text({"schema": str(payload.get("schema") or ""), "model_count": len(model_rows)}),
+            ),
+        )
         fact_count = 0
         for model in model_rows:
             if not isinstance(model, Mapping):

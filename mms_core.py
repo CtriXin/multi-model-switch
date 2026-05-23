@@ -10039,11 +10039,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import publish_approved_bundle, refresh_source_snapshots, registry_status, verify_approved_bundle
+                from mms_registry_cli import publish_approved_bundle, refresh_source_snapshots, registry_status, source_freshness, verify_approved_bundle
 
                 status = registry_status()
                 counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
                 latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
+                freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
                 registry_action = _safe_tui_call(
                     select_channel_action_tui,
                     "Registry Truth",
@@ -10052,9 +10053,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         ("source_snapshot", counts.get("source_snapshot", 0)),
                         ("model_identity", counts.get("model_identity", 0)),
                         ("model_fact", counts.get("model_fact", 0)),
+                        ("source_due", freshness.get("due_count", 0)),
                         ("latest", latest.get("source_path") or "none"),
                     ],
                     [
+                        ("check_staleness", "Check Source Staleness"),
+                        ("refresh_due_sources", "Refresh Due Sources"),
                         ("refresh_sources", "Refresh Sources"),
                         ("publish_approved", "Publish Approved Bundle"),
                         ("verify_approved", "Verify Approved Bundle"),
@@ -10064,15 +10068,32 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 )
                 if registry_action == "__interrupt__":
                     return True
-                if registry_action == "refresh_sources":
+                if registry_action == "check_staleness":
                     try:
-                        summary = refresh_source_snapshots()
+                        summary = source_freshness()
+                    except Exception as exc:
+                        console.print(f"[red]Check Source Staleness 失败: {exc}[/red]")
+                    else:
+                        console.print("[cyan]MMS Registry Source Staleness[/cyan]")
+                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
+                        console.print(f"[cyan]due[/cyan] {summary.get('due_count')} / {summary.get('source_count')}")
+                        for item in summary.get("sources") or []:
+                            console.print(
+                                f"[cyan]{item.get('reason')}[/cyan] "
+                                f"due={item.get('due')} checked_at={item.get('checked_at') or '-'} "
+                                f"{item.get('source_path')}"
+                            )
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action in {"refresh_sources", "refresh_due_sources"}:
+                    try:
+                        summary = refresh_source_snapshots(if_due=(registry_action == "refresh_due_sources"))
                     except Exception as exc:
                         console.print(f"[red]Refresh Sources 失败: {exc}[/red]")
                     else:
                         console.print("[green]✓ Refresh Sources 完成[/green]")
                         console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
                         console.print(f"[cyan]imported[/cyan] {summary.get('imported_count')}")
+                        console.print(f"[cyan]skipped[/cyan] {summary.get('skipped_count', 0)}")
                         console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
                         console.print(f"[cyan]facts[/cyan] {summary.get('fact_count')}")
                         console.print("[dim]只写 source_truth/candidate evidence，不改变当前 runtime defaults。[/dim]")

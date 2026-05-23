@@ -158,6 +158,8 @@ The first live implementation exposes a conservative publish/verify loop:
 
 ```text
 mms registry refresh-sources
+mms registry refresh-sources --if-due
+mms registry check-staleness
 mms registry publish-approved
 mms registry verify
 mms registry resolve <model>
@@ -166,7 +168,14 @@ mms registry resolve <model>
 Rules:
 
 - `refresh-sources` imports local reference snapshots into SQLite
-  `source_snapshot`, `model_identity`, and `model_fact` tables only.
+  `source_snapshot`, `source_check`, `model_identity`, and `model_fact` tables
+  only.
+- `check-staleness` is read/metadata-only for source freshness: it reports
+  missing, changed, and max-age-exceeded source references without promoting
+  runtime truth.
+- `refresh-sources --if-due` updates only sources whose `source_check` state is
+  missing, content-changed, or stale. This is the safe hook for a future
+  scheduled job because it avoids full network/startup refresh behavior.
 - `publish-approved` writes `generated/*` and
   `generated/model-registry.latest-approved.json`; it does not edit legacy root
   aliases or runtime defaults.

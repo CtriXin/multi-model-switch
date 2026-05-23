@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -11,6 +12,7 @@ from mms_capability_resolver import resolve_model_capabilities
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_REFERENCE_DIR = ROOT / "docs" / "reference" / "model-capability-calibration"
+DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
 
 
 def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list[Path]:
@@ -21,13 +23,103 @@ def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list
     return [path for path in candidates if path.exists() and path.is_file()]
 
 
+def _parse_utc(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def source_freshness(
+    *,
+    db_path: str | Path | None = None,
+    paths: Iterable[str | Path] | None = None,
+    max_age_hours: int = DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Report local source-reference staleness without importing new facts."""
+    snapshot_paths = _reference_snapshot_paths(paths)
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    max_age_seconds = max(0, int(max_age_hours or 0)) * 3600
+    db = mms_registry.open_registry(db_path)
+    sources: list[dict[str, Any]] = []
+    try:
+        for path in snapshot_paths:
+            raw = path.read_bytes()
+            content_hash = mms_registry.sha256_hex(raw)
+            row = db.execute(
+                """
+                SELECT checked_at, content_hash, snapshot_id, status
+                FROM source_check
+                WHERE source_kind = ? AND source_path = ?
+                """,
+                (mms_registry.CALIBRATION_SOURCE_KIND, str(path)),
+            ).fetchone()
+            checked_at = str(row["checked_at"]) if row is not None else ""
+            checked_dt = _parse_utc(checked_at)
+            age_seconds = int((current - checked_dt).total_seconds()) if checked_dt is not None else None
+            missing = row is None
+            changed = row is not None and str(row["content_hash"]) != content_hash
+            stale = age_seconds is None or age_seconds >= max_age_seconds
+            due = bool(missing or changed or stale)
+            if missing:
+                reason = "never_checked"
+            elif changed:
+                reason = "source_content_changed"
+            elif stale:
+                reason = "max_age_exceeded"
+            else:
+                reason = "fresh"
+            sources.append(
+                {
+                    "source_kind": mms_registry.CALIBRATION_SOURCE_KIND,
+                    "source_path": str(path),
+                    "checked_at": checked_at,
+                    "age_seconds": age_seconds,
+                    "max_age_hours": int(max_age_hours or 0),
+                    "content_hash": content_hash,
+                    "last_checked_hash": str(row["content_hash"]) if row is not None else "",
+                    "snapshot_id": int(row["snapshot_id"]) if row is not None and row["snapshot_id"] is not None else None,
+                    "status": str(row["status"]) if row is not None else "missing",
+                    "due": due,
+                    "reason": reason,
+                }
+            )
+    finally:
+        db.close()
+    due_sources = [source for source in sources if source.get("due")]
+    return {
+        "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
+        "max_age_hours": int(max_age_hours or 0),
+        "source_count": len(sources),
+        "due_count": len(due_sources),
+        "fresh_count": len(sources) - len(due_sources),
+        "sources": sources,
+    }
+
+
 def refresh_source_snapshots(
     *,
     db_path: str | Path | None = None,
     paths: Iterable[str | Path] | None = None,
+    if_due: bool = False,
+    max_age_hours: int = DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS,
 ) -> dict[str, Any]:
     """Import local source snapshots into the registry DB without promotion."""
     snapshot_paths = _reference_snapshot_paths(paths)
+    freshness = None
+    if if_due:
+        freshness = source_freshness(db_path=db_path, paths=snapshot_paths, max_age_hours=max_age_hours)
+        due_paths = {str(item.get("source_path")) for item in freshness.get("sources", []) if item.get("due")}
+        snapshot_paths = [path for path in snapshot_paths if str(path) in due_paths]
     db = mms_registry.open_registry(db_path)
     imported: list[dict[str, Any]] = []
     try:
@@ -40,8 +132,10 @@ def refresh_source_snapshots(
         "source_paths": [str(path) for path in snapshot_paths],
         "imported": imported,
         "imported_count": len(imported),
+        "skipped_count": len(_reference_snapshot_paths(paths)) - len(snapshot_paths) if if_due else 0,
         "model_count": sum(int(item.get("model_count", 0) or 0) for item in imported),
         "fact_count": sum(int(item.get("fact_count", 0) or 0) for item in imported),
+        "freshness": freshness or source_freshness(db_path=db_path, paths=_reference_snapshot_paths(paths), max_age_hours=max_age_hours),
     }
 
 
@@ -53,6 +147,7 @@ def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
         counts = {}
         for table in (
             "source_snapshot",
+            "source_check",
             "model_identity",
             "model_fact",
             "registry_revision",
@@ -73,6 +168,7 @@ def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
         journal_mode = str(db.execute("PRAGMA journal_mode").fetchone()[0])
     finally:
         db.close()
+    freshness = source_freshness(db_path=path)
     return {
         "db_path": str(path),
         "existed_before": exists_before,
@@ -80,6 +176,7 @@ def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
         "journal_mode": journal_mode,
         "counts": counts,
         "latest_source_snapshot": latest_snapshot,
+        "source_freshness": freshness,
     }
 
 
@@ -115,12 +212,15 @@ def resolve_approved_model(
 def _print_status(status: dict[str, Any]) -> None:
     counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
     latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
+    freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
     print("MMS Registry")
     print(f"db_path={status.get('db_path')}")
     print(f"user_version={status.get('user_version')}")
     print(f"journal_mode={status.get('journal_mode')}")
     for key in sorted(counts):
         print(f"{key}={counts[key]}")
+    print(f"source_due_count={freshness.get('due_count', 0)}")
+    print(f"source_fresh_count={freshness.get('fresh_count', 0)}")
     if latest:
         print(f"latest_source_kind={latest.get('source_kind')}")
         print(f"latest_source_path={latest.get('source_path')}")
@@ -128,6 +228,23 @@ def _print_status(status: dict[str, Any]) -> None:
         print(f"latest_captured_at={latest.get('captured_at')}")
     else:
         print("latest_source_snapshot=none")
+
+
+def _print_freshness(summary: dict[str, Any]) -> None:
+    print("MMS Registry Source Staleness")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"max_age_hours={summary.get('max_age_hours')}")
+    print(f"source_count={summary.get('source_count')}")
+    print(f"due_count={summary.get('due_count')}")
+    print(f"fresh_count={summary.get('fresh_count')}")
+    for item in summary.get("sources") or []:
+        print(
+            "source="
+            f"due={item.get('due')} "
+            f"reason={item.get('reason')} "
+            f"checked_at={item.get('checked_at') or '-'} "
+            f"path={item.get('source_path')}"
+        )
 
 
 def _print_publish(summary: dict[str, Any]) -> None:
@@ -173,6 +290,7 @@ def _print_refresh(summary: dict[str, Any]) -> None:
     print("MMS Registry Refresh Sources")
     print(f"db_path={summary.get('db_path')}")
     print(f"imported_count={summary.get('imported_count')}")
+    print(f"skipped_count={summary.get('skipped_count', 0)}")
     print(f"model_count={summary.get('model_count')}")
     print(f"fact_count={summary.get('fact_count')}")
     for item in summary.get("imported") or []:
@@ -205,6 +323,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         default=[],
         help="Reference JSON snapshot path; may be repeated. Defaults to docs/reference/model-capability-calibration/*.json",
     )
+    refresh_parser.add_argument("--if-due", action="store_true", help="Only import sources that are missing, changed, or stale")
+    refresh_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold for --if-due")
+    staleness_parser = subparsers.add_parser("check-staleness", help="Check source reference staleness without importing")
+    staleness_parser.add_argument("--path", action="append", default=[], help="Reference JSON snapshot path; may be repeated")
+    staleness_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold")
     publish_parser = subparsers.add_parser(
         "publish-approved",
         help="Publish generated/latest-approved bundle from current local artifacts",
@@ -225,8 +348,21 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         _print_status(registry_status(db_path=db_path))
         return 0
     if args.subcommand == "refresh-sources":
-        summary = refresh_source_snapshots(db_path=db_path, paths=args.path or None)
+        summary = refresh_source_snapshots(
+            db_path=db_path,
+            paths=args.path or None,
+            if_due=bool(args.if_due),
+            max_age_hours=int(args.max_age_hours or DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS),
+        )
         _print_refresh(summary)
+        return 0
+    if args.subcommand == "check-staleness":
+        summary = source_freshness(
+            db_path=db_path,
+            paths=args.path or None,
+            max_age_hours=int(args.max_age_hours or DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS),
+        )
+        _print_freshness(summary)
         return 0
     if args.subcommand == "publish-approved":
         config_dir = args.config_dir or None
@@ -253,5 +389,6 @@ __all__ = [
     "refresh_source_snapshots",
     "registry_status",
     "resolve_approved_model",
+    "source_freshness",
     "verify_approved_bundle",
 ]
