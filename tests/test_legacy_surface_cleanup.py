@@ -178,6 +178,47 @@ def test_rescue_default_fallback_config_roundtrip() -> None:
     assert mms_core._rescue_default_fallback(cfg) == {"model": "", "cli": ""}
 
 
+def test_rescue_landing_prioritizes_fallback_settings_without_packets() -> None:
+    import mms_core
+
+    info_lines, actions = mms_core._rescue_landing_tui_payload(
+        "deepseek-v4-flash",
+        [],
+        [("default::recent-model", "设为 current-session fallback -> recent-model")],
+    )
+    action_ids = [action_id for action_id, _label in actions]
+    info = dict(info_lines)
+
+    assert info["状态"] == "没有找到 rescue packet"
+    assert info["默认 fallback"] == "deepseek-v4-flash"
+    assert action_ids[:3] == ["choose_route_default", "manual_default", "default::recent-model"]
+    assert "view_packets" not in action_ids
+    assert "clear_default" in action_ids
+
+
+def test_rescue_landing_shows_packets_as_secondary_action() -> None:
+    import mms_core
+
+    info_lines, actions = mms_core._rescue_landing_tui_payload(
+        "未设置",
+        [
+            {
+                "created_at": "2026-05-23T09:10:11+08:00",
+                "failed_model": "gpt-5.5",
+                "status_code": 429,
+            }
+        ],
+    )
+    action_ids = [action_id for action_id, _label in actions]
+    info = dict(info_lines)
+
+    assert info["状态"] == "1 个 rescue packet"
+    assert "2026-05-23 09:10:11" in info["最近失败"]
+    assert "gpt-5.5" in info["最近失败"]
+    assert action_ids.index("choose_route_default") < action_ids.index("view_packets")
+    assert action_ids.index("manual_default") < action_ids.index("view_packets")
+
+
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
     import mms_chat
     import mms_discuss

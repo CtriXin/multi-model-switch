@@ -4872,6 +4872,45 @@ def _set_rescue_default_fallback(cfg, *, model="", cli=""):
     return cfg
 
 
+def _rescue_landing_tui_payload(default_label, rescue_events, default_candidate_actions=None):
+    """Build the first Rescue settings page before drilling into packet history."""
+    events = list(rescue_events or [])
+    latest = events[0] if events else {}
+    if latest:
+        latest_line = " ".join(
+            item
+            for item in (
+                str(latest.get("created_at") or "")[:19].replace("T", " "),
+                str(latest.get("failed_model") or ""),
+                str(latest.get("status_code") or latest.get("failure_kind") or ""),
+            )
+            if item
+        )
+    else:
+        latest_line = "-"
+    info_lines = [
+        ("状态", f"{len(events)} 个 rescue packet" if events else "没有找到 rescue packet"),
+        ("最近失败", latest_line),
+        ("默认 fallback", str(default_label or "未设置")),
+        ("Hot fallback", "按 model-routes.json 在当前 bridge 内尝试；不使用 global OAuth"),
+    ]
+    actions = [
+        ("choose_route_default", "从 routed models 选择 current-session fallback"),
+        ("manual_default", "手动设置 current-session fallback"),
+    ]
+    actions.extend(list(default_candidate_actions or []))
+    actions.append(("clear_default", "清除 current-session fallback"))
+    if events:
+        actions.append(("view_packets", "查看最近失败 / rescue packet"))
+    actions.extend(
+        [
+            ("create_demo", "生成测试 rescue packet"),
+            ("back", "返回"),
+        ]
+    )
+    return info_lines, actions
+
+
 def _display_runtime_usage(runtime_kind, runtime_id, title):
     if _use_tui():
         try:
@@ -10281,66 +10320,66 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     for model in generic_fallback_candidates
                 ]
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
-                if not rescue_events:
-                    empty_action = _safe_tui_call(
-                        select_channel_action_tui,
-                        "Rescue Packet",
-                        [
-                            ("状态", "没有找到 rescue packet"),
-                            ("说明", "真实 429/context/provider failure 会先写 rescue packet，再尝试 current-session fallback"),
-                            ("默认 fallback", default_label),
-                            ("Hot fallback", "设置 fallback 后按 model-routes.json 在当前 bridge 内尝试；不使用 global OAuth"),
-                        ],
-                        default_candidate_actions + [
-                            ("choose_route_default", "从 routed models 选择 current-session fallback"),
-                            ("manual_default", "手动设置默认 fallback"),
-                            ("clear_default", "清除默认 fallback"),
-                            ("create_demo", "生成测试 rescue packet"),
-                            ("back", "返回"),
-                        ],
-                    )
-                    if empty_action == "__interrupt__":
-                        return True
-                    if str(empty_action or "").startswith("default::") or empty_action == "manual_default":
-                        fallback_model = str(empty_action or "").split("::", 1)[1] if str(empty_action or "").startswith("default::") else ""
-                        if not fallback_model:
-                            _ensure_rich()
-                            fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
-                        if fallback_model:
-                            current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                            save_config(current_cfg, reason="tui:rescue_default_fallback")
-                            console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
-                            _pause_after_tui_report("按 Enter 返回设置")
-                        continue
-                    if empty_action == "choose_route_default":
-                        from mms_tui import select_model_tui
-
-                        fallback_model = _safe_tui_call(
-                            select_model_tui,
-                            route_fallback_candidates,
-                            title="选择 current-session fallback model",
-                        )
-                        if fallback_model:
-                            current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
-                            save_config(current_cfg, reason="tui:rescue_default_fallback")
-                            console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
-                            console.print("[dim]后续同一类 bridge failure 会先写 rescue packet，再尝试这个 routed model。[/dim]")
-                            _pause_after_tui_report("按 Enter 返回设置")
-                        continue
-                    if empty_action == "clear_default":
-                        current_cfg = _set_rescue_default_fallback(current_cfg, model="")
-                        save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                        console.print("[green]✓ 默认 fallback 已清除[/green]")
+                landing_info, landing_actions = _rescue_landing_tui_payload(
+                    default_label,
+                    rescue_events,
+                    default_candidate_actions,
+                )
+                landing_action = _safe_tui_call(
+                    select_channel_action_tui,
+                    "Rescue / Current-session Fallback",
+                    landing_info,
+                    landing_actions,
+                )
+                if landing_action == "__interrupt__":
+                    return True
+                if landing_action in {None, "back"}:
+                    continue
+                if str(landing_action or "").startswith("default::") or landing_action == "manual_default":
+                    fallback_model = str(landing_action or "").split("::", 1)[1] if str(landing_action or "").startswith("default::") else ""
+                    if not fallback_model:
+                        _ensure_rich()
+                        fallback_model = Prompt.ask("默认 fallback model", default=default_fallback.get("model") or "").strip()
+                    if fallback_model:
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                        save_config(current_cfg, reason="tui:rescue_default_fallback")
+                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]后续 bridge failure 会按 model-routes.json 尝试这个 routed fallback；不使用 global OAuth。[/dim]")
                         _pause_after_tui_report("按 Enter 返回设置")
-                        continue
-                    if empty_action == "create_demo":
-                        payload = write_demo_rescue_packet(repo_root=os.getcwd())
-                        console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
-                        console.print(f"[dim]rescue.md: {payload.get('artifacts', {}).get('markdown', '-')}[/dim]")
-                        _pause_after_tui_report("按 Enter 继续查看")
-                        rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
-                    else:
-                        continue
+                    continue
+                if landing_action == "choose_route_default":
+                    from mms_tui import select_model_tui
+
+                    fallback_model = _safe_tui_call(
+                        select_model_tui,
+                        route_fallback_candidates,
+                        title="选择 current-session fallback model",
+                    )
+                    if fallback_model:
+                        current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
+                        save_config(current_cfg, reason="tui:rescue_default_fallback")
+                        console.print(f"[green]✓ 默认 fallback 已设置为 {fallback_model}[/green]")
+                        console.print("[dim]后续同一类 bridge failure 会先写 rescue packet，再尝试这个 routed model。[/dim]")
+                        _pause_after_tui_report("按 Enter 返回设置")
+                    continue
+                if landing_action == "clear_default":
+                    current_cfg = _set_rescue_default_fallback(current_cfg, model="")
+                    save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
+                    console.print("[green]✓ 默认 fallback 已清除[/green]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                    continue
+                if landing_action == "create_demo":
+                    payload = write_demo_rescue_packet(repo_root=os.getcwd())
+                    console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
+                    console.print(f"[dim]rescue.md: {payload.get('artifacts', {}).get('markdown', '-')}[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                    continue
+                if landing_action != "view_packets":
+                    continue
+                if not rescue_events:
+                    console.print("[yellow]没有可查看的 rescue packet。[/yellow]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                    continue
                 selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
                 if selected_rescue == "__interrupt__":
                     return True
