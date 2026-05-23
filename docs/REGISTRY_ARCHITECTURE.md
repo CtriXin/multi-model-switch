@@ -160,6 +160,7 @@ The first live implementation exposes a conservative publish/verify loop:
 mms registry refresh-sources
 mms registry refresh-sources --if-due
 mms registry check-staleness
+mms registry scheduled-refresh
 mms registry fetch-openrouter-catalog
 mms registry diff-openrouter-catalog
 mms registry publish-approved
@@ -178,6 +179,16 @@ Rules:
 - `refresh-sources --if-due` updates only sources whose `source_check` state is
   missing, content-changed, or stale. This is the safe hook for a future
   scheduled job because it avoids full network/startup refresh behavior.
+- `scheduled-refresh` is the safe wrapper for cron/launchd/manual runs. It
+  runs local reference refresh only when due, optionally refreshes OpenRouter
+  provider-catalog evidence when due, and writes only `source_snapshot`,
+  `source_check`, and `candidate_change` evidence. It must not be wired into
+  MMS startup.
+- `scheduled-refresh --no-network` never fetches remote catalogs; it may still
+  import a local `--openrouter-from-file` payload for reproducible testing or
+  offline evidence capture.
+- `scheduled-refresh --dry-run` reports due state without importing source or
+  candidate rows beyond opening/migrating the selected SQLite DB.
 - `fetch-openrouter-catalog` explicitly fetches or imports OpenRouter
   `/api/v1/models` into `source_snapshot` as `provider_catalog` evidence; it
   does not promote prices/context/supported-parameter changes into runtime

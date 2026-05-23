@@ -15,6 +15,7 @@ from mms_capability_resolver import resolve_model_capabilities
 ROOT = Path(__file__).resolve().parent
 DEFAULT_REFERENCE_DIR = ROOT / "docs" / "reference" / "model-capability-calibration"
 DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
+DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS = 24 * 7
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 
@@ -107,6 +108,83 @@ def source_freshness(
         "fresh_count": len(sources) - len(due_sources),
         "sources": sources,
     }
+
+
+def _openrouter_file_content_hash(path: str | Path) -> str:
+    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return mms_registry.sha256_hex(canonical)
+
+
+def _row_age_status(
+    row,
+    *,
+    max_age_hours: int,
+    now: datetime | None = None,
+    expected_content_hash: str | None = None,
+) -> dict[str, Any]:
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    checked_at = str(row["checked_at"]) if row is not None else ""
+    checked_dt = _parse_utc(checked_at)
+    age_seconds = int((current - checked_dt).total_seconds()) if checked_dt is not None else None
+    stale = age_seconds is None or age_seconds >= max(0, int(max_age_hours or 0)) * 3600
+    changed = row is not None and bool(expected_content_hash) and str(row["content_hash"]) != expected_content_hash
+    if row is None:
+        reason = "never_checked"
+    elif changed:
+        reason = "source_content_changed"
+    elif stale:
+        reason = "max_age_exceeded"
+    else:
+        reason = "fresh"
+    return {
+        "checked_at": checked_at,
+        "age_seconds": age_seconds,
+        "max_age_hours": int(max_age_hours or 0),
+        "due": bool(row is None or changed or stale),
+        "reason": reason,
+    }
+
+
+def openrouter_catalog_freshness(
+    *,
+    db_path: str | Path | None = None,
+    max_age_hours: int = DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS,
+    now: datetime | None = None,
+    source_path: str | Path | None = None,
+    expected_content_hash: str | None = None,
+) -> dict[str, Any]:
+    catalog_source_path = str(Path(source_path).expanduser() if source_path else OPENROUTER_MODELS_API_URL)
+    db = mms_registry.open_registry(db_path)
+    try:
+        row = db.execute(
+            """
+            SELECT checked_at, content_hash, snapshot_id, status
+            FROM source_check
+            WHERE source_kind = ? AND source_path = ?
+            """,
+            (mms_registry.OPENROUTER_MODELS_SOURCE_KIND, catalog_source_path),
+        ).fetchone()
+    finally:
+        db.close()
+    status = _row_age_status(
+        row,
+        max_age_hours=max_age_hours,
+        now=now,
+        expected_content_hash=expected_content_hash,
+    )
+    status.update(
+        {
+            "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
+            "source_kind": mms_registry.OPENROUTER_MODELS_SOURCE_KIND,
+            "source_path": catalog_source_path,
+            "content_hash": str(row["content_hash"]) if row is not None else "",
+            "expected_content_hash": expected_content_hash or "",
+            "snapshot_id": int(row["snapshot_id"]) if row is not None and row["snapshot_id"] is not None else None,
+            "status": str(row["status"]) if row is not None else "missing",
+        }
+    )
+    return status
 
 
 def refresh_source_snapshots(
@@ -344,6 +422,77 @@ def diff_openrouter_catalog(
     }
 
 
+def scheduled_refresh(
+    *,
+    db_path: str | Path | None = None,
+    max_age_hours: int = DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS,
+    openrouter_max_age_hours: int = DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS,
+    include_openrouter: bool = True,
+    no_network: bool = False,
+    openrouter_from_file: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Safe entrypoint for cron/launchd/manual scheduled refresh runs."""
+    source_status = source_freshness(db_path=db_path, max_age_hours=max_age_hours)
+    openrouter_source_path = str(Path(openrouter_from_file).expanduser()) if openrouter_from_file else OPENROUTER_MODELS_API_URL
+    openrouter_expected_hash = _openrouter_file_content_hash(openrouter_from_file) if openrouter_from_file else None
+    openrouter_status = openrouter_catalog_freshness(
+        db_path=db_path,
+        max_age_hours=openrouter_max_age_hours,
+        source_path=openrouter_source_path,
+        expected_content_hash=openrouter_expected_hash,
+    )
+    result: dict[str, Any] = {
+        "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
+        "dry_run": bool(dry_run),
+        "source_due_count": source_status.get("due_count", 0),
+        "source_status": source_status,
+        "openrouter_due": bool(openrouter_status.get("due")),
+        "openrouter_status": openrouter_status,
+        "source_refresh": {"skipped": True},
+        "openrouter_fetch": {"skipped": True},
+        "openrouter_diff": {"skipped": True},
+    }
+    if dry_run:
+        return result
+    if int(source_status.get("due_count", 0) or 0) > 0:
+        result["source_refresh"] = refresh_source_snapshots(
+            db_path=db_path,
+            if_due=True,
+            max_age_hours=max_age_hours,
+        )
+    else:
+        result["source_refresh"] = {"skipped": True, "reason": "not_due"}
+    if not include_openrouter:
+        result["openrouter_fetch"] = {"skipped": True, "reason": "no_openrouter"}
+        result["openrouter_diff"] = {"skipped": True, "reason": "no_openrouter"}
+        return result
+    if include_openrouter and bool(openrouter_status.get("due")):
+        if no_network and not openrouter_from_file:
+            result["openrouter_fetch"] = {"skipped": True, "reason": "no_network"}
+        else:
+            try:
+                result["openrouter_fetch"] = fetch_openrouter_catalog(
+                    db_path=db_path,
+                    from_file=openrouter_from_file,
+                )
+            except Exception as exc:  # Network scheduled jobs should record failure, not alter runtime truth.
+                result["openrouter_fetch"] = {
+                    "skipped": True,
+                    "status": "error",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }
+                return result
+            try:
+                result["openrouter_diff"] = diff_openrouter_catalog(db_path=db_path, limit=20)
+            except mms_registry.RegistryValidationError as exc:
+                result["openrouter_diff"] = {"skipped": True, "reason": str(exc)}
+    else:
+        result["openrouter_fetch"] = {"skipped": True, "reason": "not_due"}
+        result["openrouter_diff"] = {"skipped": True, "reason": "not_due"}
+    return result
+
+
 def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(db_path) if db_path else mms_registry.default_registry_db_path()
     exists_before = path.exists()
@@ -540,6 +689,27 @@ def _print_openrouter_diff(summary: dict[str, Any]) -> None:
         )
 
 
+def _print_scheduled_refresh(summary: dict[str, Any]) -> None:
+    print("MMS Registry Scheduled Refresh")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"dry_run={summary.get('dry_run')}")
+    print(f"source_due_count={summary.get('source_due_count')}")
+    print(f"openrouter_due={summary.get('openrouter_due')}")
+    source_refresh = summary.get("source_refresh") if isinstance(summary.get("source_refresh"), dict) else {}
+    openrouter_fetch = summary.get("openrouter_fetch") if isinstance(summary.get("openrouter_fetch"), dict) else {}
+    openrouter_diff = summary.get("openrouter_diff") if isinstance(summary.get("openrouter_diff"), dict) else {}
+    openrouter_status = summary.get("openrouter_status") if isinstance(summary.get("openrouter_status"), dict) else {}
+    print(f"source_imported={source_refresh.get('imported_count', 0)}")
+    print(f"source_skipped={source_refresh.get('skipped_count', 0) if 'skipped_count' in source_refresh else source_refresh.get('skipped')}")
+    print(f"source_skip_reason={source_refresh.get('reason', '')}")
+    print(f"openrouter_source_path={openrouter_status.get('source_path', '')}")
+    print(f"openrouter_fetched={not bool(openrouter_fetch.get('skipped', False))}")
+    print(f"openrouter_fetch_reason={openrouter_fetch.get('reason', '')}")
+    print(f"openrouter_model_count={openrouter_fetch.get('model_count', 0)}")
+    print(f"candidate_changes={openrouter_diff.get('stored_count', 0)}")
+    print(f"candidate_skip_reason={openrouter_diff.get('reason', '')}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -575,6 +745,16 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     )
     openrouter_diff_parser.add_argument("--no-store", action="store_true", help="Do not write candidate_change rows")
     openrouter_diff_parser.add_argument("--limit", type=int, default=50, help="Max candidate changes to print")
+    scheduled_parser = subparsers.add_parser(
+        "scheduled-refresh",
+        help="Run safe if-due registry refresh for cron/launchd/manual scheduling",
+    )
+    scheduled_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS)
+    scheduled_parser.add_argument("--openrouter-max-age-hours", type=int, default=DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS)
+    scheduled_parser.add_argument("--no-openrouter", action="store_true", help="Skip OpenRouter catalog refresh")
+    scheduled_parser.add_argument("--no-network", action="store_true", help="Do not perform network fetches")
+    scheduled_parser.add_argument("--openrouter-from-file", default="", help="Import OpenRouter catalog JSON from a file")
+    scheduled_parser.add_argument("--dry-run", action="store_true", help="Only report due state")
     staleness_parser = subparsers.add_parser("check-staleness", help="Check source reference staleness without importing")
     staleness_parser.add_argument("--path", action="append", default=[], help="Reference JSON snapshot path; may be repeated")
     staleness_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold")
@@ -631,6 +811,18 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         )
         _print_openrouter_diff(summary)
         return 0
+    if args.subcommand == "scheduled-refresh":
+        summary = scheduled_refresh(
+            db_path=db_path,
+            max_age_hours=int(args.max_age_hours or DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS),
+            openrouter_max_age_hours=int(args.openrouter_max_age_hours or DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS),
+            include_openrouter=not bool(args.no_openrouter),
+            no_network=bool(args.no_network),
+            openrouter_from_file=args.openrouter_from_file or None,
+            dry_run=bool(args.dry_run),
+        )
+        _print_scheduled_refresh(summary)
+        return 0
     if args.subcommand == "publish-approved":
         config_dir = args.config_dir or None
         if args.refresh_sources:
@@ -654,6 +846,7 @@ __all__ = [
     "handle_registry_command",
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
+    "scheduled_refresh",
     "publish_approved_bundle",
     "refresh_source_snapshots",
     "registry_status",

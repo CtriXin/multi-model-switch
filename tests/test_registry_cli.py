@@ -208,6 +208,103 @@ def test_diff_openrouter_catalog_records_candidate_changes(capsys, tmp_path: Pat
     assert status["counts"]["candidate_change"] == summary["change_count"]
 
 
+def test_scheduled_refresh_dry_run_writes_no_source_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+
+    summary = mms_registry_cli.scheduled_refresh(
+        db_path=db_path,
+        dry_run=True,
+        no_network=True,
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+
+    assert summary["dry_run"] is True
+    assert summary["source_due_count"] >= 1
+    assert summary["openrouter_due"] is True
+    assert summary["source_refresh"]["skipped"] is True
+    assert summary["openrouter_fetch"]["skipped"] is True
+    assert status["counts"]["source_snapshot"] == 0
+    assert status["counts"]["source_check"] == 0
+    assert status["counts"]["candidate_change"] == 0
+
+
+def test_scheduled_refresh_no_network_imports_local_sources_only(capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+
+    summary = mms_registry_cli.scheduled_refresh(
+        db_path=db_path,
+        no_network=True,
+    )
+    command_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "scheduled-refresh",
+            "--no-network",
+        ],
+        command_name="mms registry",
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+    out = capsys.readouterr().out
+
+    assert summary["source_refresh"]["imported_count"] >= 1
+    assert summary["openrouter_fetch"]["skipped"] is True
+    assert summary["openrouter_fetch"]["reason"] == "no_network"
+    assert command_rc == 0
+    assert "MMS Registry Scheduled Refresh" in out
+    assert "openrouter_fetched=False" in out
+    assert status["counts"]["source_snapshot"] >= 1
+    assert status["counts"]["source_check"] >= 1
+    assert status["counts"]["candidate_change"] == 0
+
+
+def test_scheduled_refresh_from_file_imports_openrouter_and_candidates(tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+    catalog_path = tmp_path / "openrouter-models.json"
+    catalog_path.write_text(
+        """
+        {
+          "data": [
+            {
+              "id": "deepseek/deepseek-v4-flash",
+              "context_length": 999999,
+              "top_provider": {
+                "max_completion_tokens": 12345
+              },
+              "pricing": {
+                "prompt": "0.000001",
+                "completion": "0.000002"
+              },
+              "supported_parameters": ["max_tokens"]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.scheduled_refresh(
+        db_path=db_path,
+        no_network=True,
+        openrouter_from_file=catalog_path,
+    )
+    second = mms_registry_cli.scheduled_refresh(
+        db_path=db_path,
+        no_network=True,
+        openrouter_from_file=catalog_path,
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+
+    assert summary["source_refresh"]["imported_count"] >= 1
+    assert summary["openrouter_fetch"]["transport"] == "file"
+    assert summary["openrouter_fetch"]["model_count"] == 1
+    assert summary["openrouter_diff"]["stored_count"] >= 1
+    assert second["source_refresh"]["reason"] == "not_due"
+    assert second["openrouter_fetch"]["reason"] == "not_due"
+    assert status["counts"]["source_snapshot"] >= 2
+    assert status["counts"]["candidate_change"] >= 1
+
+
 def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "model-registry.sqlite"
 
