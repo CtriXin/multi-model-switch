@@ -63,7 +63,7 @@ def resolve_current_workdir(env=None, fallback=None):
     except OSError:
         pass
 
-    for key in ("MMS_WORKSPACE", "MMS_PROJECT_ROOT", "MMS_CWD", "MMS_HOST_CWD", "PWD", "OLDPWD"):
+    for key in ("MMS_WORKSPACE", "PWD", "MMS_PROJECT_ROOT", "MMS_CWD", "MMS_HOST_CWD", "OLDPWD"):
         candidate = _path_from_env_value(env.get(key))
         if candidate:
             return candidate

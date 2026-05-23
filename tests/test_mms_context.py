@@ -493,6 +493,29 @@ def test_resolve_current_workdir_does_not_fallback_to_real_home(monkeypatch, tmp
     assert resolved != str(real_home)
 
 
+def test_resolve_current_workdir_prefers_pwd_over_stale_mms_cwd(monkeypatch, tmp_path):
+    import mms_state_io
+
+    repo_dir = tmp_path / "repo"
+    stale_dir = tmp_path / "stale"
+    repo_dir.mkdir()
+    stale_dir.mkdir()
+
+    def _raise_deleted_cwd():
+        raise FileNotFoundError(2, "No such file or directory")
+
+    monkeypatch.setattr(mms_state_io.os, "getcwd", _raise_deleted_cwd)
+
+    resolved = mms_state_io.resolve_current_workdir(
+        {
+            "PWD": str(repo_dir),
+            "MMS_CWD": str(stale_dir),
+        }
+    )
+
+    assert resolved == str(repo_dir)
+
+
 def test_resolve_current_workdir_uses_session_home_as_last_safe_fallback(monkeypatch, tmp_path):
     import mms_state_io
 

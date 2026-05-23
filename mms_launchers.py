@@ -264,6 +264,11 @@ _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
     "mimo-v2.5-pro": 1_000_000,
 }
+_ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
+    # The base wire model can support 1M in some surfaces, but Claude Code must
+    # opt in with the selector suffix before MMS advertises that large window.
+    "mimo-v2.5-pro": 262_144,
+}
 
 
 
@@ -398,6 +403,10 @@ def _lookup_context_window(model_name, provider_id=None):
         suffixed_window = _ONE_M_SUFFIX_CONTEXT_WINDOWS.get(lower)
         if suffixed_window is not None:
             return suffixed_window
+    else:
+        safe_base_window = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get(lower)
+        if safe_base_window is not None:
+            return safe_base_window
 
     if provider_key:
         provider_clean = _provider_override_lookup(clean, lower)

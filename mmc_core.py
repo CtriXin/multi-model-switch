@@ -1014,6 +1014,8 @@ def _run_setup_interactive(*, save: bool = True) -> dict:
     env_lc_all = str(os.environ.get("LC_ALL") or "").strip()
     env_lc_ctype = str(os.environ.get("LC_CTYPE") or "").strip()
     env_lc_messages = str(os.environ.get("LC_MESSAGES") or "").strip()
+    if env_lang in {"C", "C.UTF-8", "POSIX"}:
+        env_lang = ""
     defaults = {
         "route_id": existing.get("route_id") or "",
         "routes_file": existing.get("routes_file") or "",
