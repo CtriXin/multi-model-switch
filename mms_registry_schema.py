@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PRIVACY_BOUNDARIES = ("private", "team", "public")
 REVISION_CLASSES = ("bundle", "capability", "route", "policy", "profile")
 REVISION_STATUSES = ("candidate", "approved", "tombstoned")
@@ -38,6 +38,24 @@ CREATE TABLE IF NOT EXISTS source_check (
     metadata_json TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (source_kind, source_path),
     FOREIGN KEY (snapshot_id) REFERENCES source_snapshot(snapshot_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_change (
+    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_snapshot_id INTEGER NOT NULL,
+    baseline_snapshot_id INTEGER NOT NULL,
+    change_kind TEXT NOT NULL,
+    model_key TEXT NOT NULL DEFAULT '',
+    provider_model_id TEXT NOT NULL DEFAULT '',
+    field_key TEXT NOT NULL,
+    old_value_json TEXT NOT NULL,
+    new_value_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate', 'acknowledged', 'approved', 'dismissed', 'superseded')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (source_snapshot_id) REFERENCES source_snapshot(snapshot_id) ON DELETE RESTRICT,
+    FOREIGN KEY (baseline_snapshot_id) REFERENCES source_snapshot(snapshot_id) ON DELETE RESTRICT,
+    UNIQUE (source_snapshot_id, baseline_snapshot_id, model_key, provider_model_id, field_key)
 );
 
 CREATE TABLE IF NOT EXISTS registry_revision (
@@ -155,6 +173,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_source_snapshot_hash ON source_snapshot(content_hash);
 CREATE INDEX IF NOT EXISTS idx_source_check_checked_at ON source_check(checked_at);
+CREATE INDEX IF NOT EXISTS idx_candidate_change_status ON candidate_change(status, change_kind);
+CREATE INDEX IF NOT EXISTS idx_candidate_change_source ON candidate_change(source_snapshot_id, baseline_snapshot_id);
 CREATE INDEX IF NOT EXISTS idx_registry_revision_status ON registry_revision(status, revision_class);
 CREATE INDEX IF NOT EXISTS idx_revision_membership_bundle ON revision_membership(bundle_revision);
 CREATE INDEX IF NOT EXISTS idx_route_group_revision ON route_group(route_revision_id);
@@ -326,5 +346,9 @@ def migrate(db: sqlite3.Connection) -> None:
         db.execute(
             "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
             (2, "source_check_v2"),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, name) VALUES (?, ?)",
+            (3, "candidate_change_v3"),
         )
         db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

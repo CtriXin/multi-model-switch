@@ -706,6 +706,77 @@ def import_raw_source_payload(
     }
 
 
+def record_candidate_changes(
+    db: sqlite3.Connection,
+    changes: list[Mapping[str, Any]],
+    *,
+    source_snapshot_id: int,
+    baseline_snapshot_id: int,
+) -> dict[str, Any]:
+    """Persist provider/official source diffs as candidate evidence only."""
+    source_id = int(source_snapshot_id)
+    baseline_id = int(baseline_snapshot_id)
+    with db:
+        db.execute(
+            """
+            UPDATE candidate_change
+            SET status = 'superseded'
+            WHERE source_snapshot_id = ? AND baseline_snapshot_id = ? AND status = 'candidate'
+            """,
+            (source_id, baseline_id),
+        )
+        recorded = 0
+        for change in changes:
+            field_key = str(change.get("field_key") or "").strip()
+            if not field_key:
+                continue
+            old_value = change.get("old_value")
+            new_value = change.get("new_value")
+            validate_non_secret_payload(old_value, context=f"candidate_change.old.{field_key}")
+            validate_non_secret_payload(new_value, context=f"candidate_change.new.{field_key}")
+            db.execute(
+                """
+                INSERT INTO candidate_change(
+                    source_snapshot_id,
+                    baseline_snapshot_id,
+                    change_kind,
+                    model_key,
+                    provider_model_id,
+                    field_key,
+                    old_value_json,
+                    new_value_json,
+                    status,
+                    metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?)
+                ON CONFLICT(source_snapshot_id, baseline_snapshot_id, model_key, provider_model_id, field_key)
+                DO UPDATE SET
+                    change_kind = excluded.change_kind,
+                    old_value_json = excluded.old_value_json,
+                    new_value_json = excluded.new_value_json,
+                    status = 'candidate',
+                    metadata_json = excluded.metadata_json
+                """,
+                (
+                    source_id,
+                    baseline_id,
+                    str(change.get("change_kind") or "provider_catalog_changed"),
+                    str(change.get("model_key") or ""),
+                    str(change.get("provider_model_id") or ""),
+                    field_key,
+                    _json_text(old_value),
+                    _json_text(new_value),
+                    _json_text(change.get("metadata") or {}),
+                ),
+            )
+            recorded += 1
+    return {
+        "source_snapshot_id": source_id,
+        "baseline_snapshot_id": baseline_id,
+        "recorded_count": recorded,
+    }
+
+
 def _read_file_hash(path: Path, *, sensitivity: str) -> str:
     raw = path.read_bytes()
     if sensitivity != "secret":

@@ -10039,7 +10039,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, source_freshness, verify_approved_bundle
+                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, source_freshness, verify_approved_bundle
 
                 status = registry_status()
                 counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
@@ -10061,6 +10061,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         ("refresh_due_sources", "Refresh Due Sources"),
                         ("refresh_sources", "Refresh Sources"),
                         ("fetch_openrouter", "Fetch OpenRouter Catalog"),
+                        ("diff_openrouter", "OpenRouter Candidate Diff"),
                         ("publish_approved", "Publish Approved Bundle"),
                         ("verify_approved", "Verify Approved Bundle"),
                         ("doctor", "Registry Doctor / Status"),
@@ -10110,6 +10111,23 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         console.print(f"[cyan]snapshot[/cyan] {summary.get('snapshot_id')}")
                         console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
                         console.print("[dim]只写 provider_catalog source_snapshot，不改变当前 runtime defaults。[/dim]")
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "diff_openrouter":
+                    try:
+                        summary = diff_openrouter_catalog(limit=12)
+                    except Exception as exc:
+                        console.print(f"[red]OpenRouter Candidate Diff 失败: {exc}[/red]")
+                    else:
+                        console.print("[cyan]OpenRouter Candidate Diff[/cyan]")
+                        console.print(f"[cyan]changes[/cyan] {summary.get('change_count')} stored={summary.get('stored_count')}")
+                        console.print(f"[cyan]missing[/cyan] {summary.get('missing_reference_count')}")
+                        console.print(f"[cyan]untracked[/cyan] {summary.get('untracked_catalog_count')}")
+                        for item in summary.get("changes") or []:
+                            console.print(
+                                f"[cyan]{item.get('field_key')}[/cyan] "
+                                f"{item.get('model_key')} -> {item.get('provider_model_id')}"
+                            )
+                        console.print("[dim]只写 candidate_change evidence，不改变当前 runtime defaults。[/dim]")
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "publish_approved":
                     try:

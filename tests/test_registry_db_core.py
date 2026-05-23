@@ -92,7 +92,7 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
     try:
         assert db_path.exists()
         assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
 
         tables = {
             row["name"]
@@ -102,6 +102,7 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
             "schema_migrations",
             "source_snapshot",
             "source_check",
+            "candidate_change",
             "registry_revision",
             "revision_membership",
             "route_group",
@@ -116,7 +117,7 @@ def test_fresh_db_migration_creates_schema_and_wal_enabled(tmp_path: Path) -> No
             row["version"]
             for row in db.execute("SELECT version FROM schema_migrations")
         }
-        assert {1, 2}.issubset(migration_versions)
+        assert {1, 2, 3}.issubset(migration_versions)
     finally:
         db.close()
 

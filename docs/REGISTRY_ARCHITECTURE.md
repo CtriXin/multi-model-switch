@@ -161,6 +161,7 @@ mms registry refresh-sources
 mms registry refresh-sources --if-due
 mms registry check-staleness
 mms registry fetch-openrouter-catalog
+mms registry diff-openrouter-catalog
 mms registry publish-approved
 mms registry verify
 mms registry resolve <model>
@@ -181,6 +182,10 @@ Rules:
   `/api/v1/models` into `source_snapshot` as `provider_catalog` evidence; it
   does not promote prices/context/supported-parameter changes into runtime
   defaults by itself.
+- `diff-openrouter-catalog` compares the latest OpenRouter source snapshot with
+  the latest calibration snapshot's OpenRouter references and writes
+  `candidate_change` rows. These rows are review evidence only until a later
+  promotion action approves them.
 - `publish-approved` writes `generated/*` and
   `generated/model-registry.latest-approved.json`; it does not edit legacy root
   aliases or runtime defaults.

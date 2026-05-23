@@ -190,6 +190,160 @@ def fetch_openrouter_catalog(
     return summary
 
 
+def _latest_source_payload(db, source_kind: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    row = db.execute(
+        """
+        SELECT snapshot_id, source_kind, source_path, captured_at, content_hash, model_count, payload_json
+        FROM source_snapshot
+        WHERE source_kind = ?
+        ORDER BY snapshot_id DESC
+        LIMIT 1
+        """,
+        (source_kind,),
+    ).fetchone()
+    if row is None:
+        raise mms_registry.RegistryValidationError(f"missing source snapshot: {source_kind}")
+    payload = json.loads(str(row["payload_json"] or "{}"))
+    if not isinstance(payload, dict):
+        raise mms_registry.RegistryValidationError(f"source snapshot payload must be object: {source_kind}")
+    return dict(row), payload
+
+
+def _openrouter_items(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    data = payload.get("data") if isinstance(payload.get("data"), list) else []
+    items = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        if model_id:
+            items[model_id] = item
+    return items
+
+
+def _calibration_openrouter_refs(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for model in payload.get("models") or []:
+        if not isinstance(model, dict):
+            continue
+        alias = str(model.get("alias") or model.get("canonical_model_id") or "").strip()
+        for ref in model.get("provider_catalog_references") or []:
+            if not isinstance(ref, dict):
+                continue
+            if str(ref.get("source") or "").lower() != "openrouter":
+                continue
+            provider_model_id = str(ref.get("model_id") or model.get("openrouter_model_id") or "").strip()
+            if not provider_model_id:
+                continue
+            top_provider = ref.get("top_provider") if isinstance(ref.get("top_provider"), dict) else {}
+            refs.append(
+                {
+                    "model_key": alias,
+                    "provider_model_id": provider_model_id,
+                    "context_length": ref.get("context_length"),
+                    "max_completion_tokens": top_provider.get("max_completion_tokens"),
+                    "pricing": ref.get("pricing_raw_usd_per_unit") or model.get("provider_pricing_raw_usd_per_unit") or {},
+                    "supported_parameters": sorted(ref.get("supported_parameters") or model.get("provider_supported_parameters") or []),
+                }
+            )
+    return refs
+
+
+def _candidate_value(item: dict[str, Any], field_key: str) -> Any:
+    if field_key == "context_length":
+        return item.get("context_length")
+    if field_key == "max_completion_tokens":
+        top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
+        return top_provider.get("max_completion_tokens")
+    if field_key == "pricing":
+        return item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+    if field_key == "supported_parameters":
+        return sorted(item.get("supported_parameters") or [])
+    return None
+
+
+def _canonical_equal(left: Any, right: Any) -> bool:
+    return json.dumps(left, ensure_ascii=False, sort_keys=True, separators=(",", ":")) == json.dumps(
+        right,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def diff_openrouter_catalog(
+    *,
+    db_path: str | Path | None = None,
+    store: bool = True,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """Compare latest OpenRouter catalog source with calibration OpenRouter refs."""
+    db = mms_registry.open_registry(db_path)
+    try:
+        openrouter_snapshot, openrouter_payload = _latest_source_payload(db, mms_registry.OPENROUTER_MODELS_SOURCE_KIND)
+        baseline_snapshot, baseline_payload = _latest_source_payload(db, mms_registry.CALIBRATION_SOURCE_KIND)
+        catalog = _openrouter_items(openrouter_payload)
+        refs = _calibration_openrouter_refs(baseline_payload)
+        changes: list[dict[str, Any]] = []
+        missing = 0
+        for ref in refs:
+            item = catalog.get(ref["provider_model_id"])
+            if item is None:
+                missing += 1
+                changes.append(
+                    {
+                        "change_kind": "provider_catalog_missing",
+                        "model_key": ref["model_key"],
+                        "provider_model_id": ref["provider_model_id"],
+                        "field_key": "presence",
+                        "old_value": "present_in_baseline",
+                        "new_value": "missing_in_catalog",
+                        "metadata": {},
+                    }
+                )
+                continue
+            for field_key in ("context_length", "max_completion_tokens", "pricing", "supported_parameters"):
+                old_value = ref.get(field_key)
+                new_value = _candidate_value(item, field_key)
+                if _canonical_equal(old_value, new_value):
+                    continue
+                changes.append(
+                    {
+                        "change_kind": "provider_catalog_changed",
+                        "model_key": ref["model_key"],
+                        "provider_model_id": ref["provider_model_id"],
+                        "field_key": field_key,
+                        "old_value": old_value,
+                        "new_value": new_value,
+                        "metadata": {"source": "openrouter"},
+                    }
+                )
+        referenced_ids = {ref["provider_model_id"] for ref in refs}
+        untracked_count = len(set(catalog) - referenced_ids)
+        record = {"recorded_count": 0}
+        if store:
+            record = mms_registry.record_candidate_changes(
+                db,
+                changes,
+                source_snapshot_id=int(openrouter_snapshot["snapshot_id"]),
+                baseline_snapshot_id=int(baseline_snapshot["snapshot_id"]),
+            )
+        stored_count = int(record.get("recorded_count", 0) or 0)
+    finally:
+        db.close()
+    return {
+        "db_path": str(Path(db_path) if db_path else mms_registry.default_registry_db_path()),
+        "source_snapshot_id": int(openrouter_snapshot["snapshot_id"]),
+        "baseline_snapshot_id": int(baseline_snapshot["snapshot_id"]),
+        "matched_reference_count": len(refs),
+        "missing_reference_count": missing,
+        "untracked_catalog_count": untracked_count,
+        "change_count": len(changes),
+        "stored_count": stored_count,
+        "changes": changes[: max(0, int(limit or 0))],
+    }
+
+
 def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
     path = Path(db_path) if db_path else mms_registry.default_registry_db_path()
     exists_before = path.exists()
@@ -199,6 +353,7 @@ def registry_status(*, db_path: str | Path | None = None) -> dict[str, Any]:
         for table in (
             "source_snapshot",
             "source_check",
+            "candidate_change",
             "model_identity",
             "model_fact",
             "registry_revision",
@@ -365,6 +520,26 @@ def _print_fetch_catalog(summary: dict[str, Any]) -> None:
     print(f"content_hash={summary.get('content_hash')}")
 
 
+def _print_openrouter_diff(summary: dict[str, Any]) -> None:
+    print("MMS Registry OpenRouter Candidate Diff")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"source_snapshot_id={summary.get('source_snapshot_id')}")
+    print(f"baseline_snapshot_id={summary.get('baseline_snapshot_id')}")
+    print(f"matched_reference_count={summary.get('matched_reference_count')}")
+    print(f"missing_reference_count={summary.get('missing_reference_count')}")
+    print(f"untracked_catalog_count={summary.get('untracked_catalog_count')}")
+    print(f"change_count={summary.get('change_count')}")
+    print(f"stored_count={summary.get('stored_count')}")
+    for item in summary.get("changes") or []:
+        print(
+            "candidate_change="
+            f"{item.get('model_key')} "
+            f"{item.get('provider_model_id')} "
+            f"{item.get('field_key')} "
+            f"{item.get('change_kind')}"
+        )
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -394,6 +569,12 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     fetch_openrouter_parser.add_argument("--url", default=OPENROUTER_MODELS_API_URL, help="OpenRouter models API URL")
     fetch_openrouter_parser.add_argument("--from-file", default="", help="Import catalog JSON from a local file instead of network")
     fetch_openrouter_parser.add_argument("--timeout", type=float, default=20.0, help="Network timeout in seconds")
+    openrouter_diff_parser = subparsers.add_parser(
+        "diff-openrouter-catalog",
+        help="Compare latest OpenRouter catalog snapshot with calibration references",
+    )
+    openrouter_diff_parser.add_argument("--no-store", action="store_true", help="Do not write candidate_change rows")
+    openrouter_diff_parser.add_argument("--limit", type=int, default=50, help="Max candidate changes to print")
     staleness_parser = subparsers.add_parser("check-staleness", help="Check source reference staleness without importing")
     staleness_parser.add_argument("--path", action="append", default=[], help="Reference JSON snapshot path; may be repeated")
     staleness_parser.add_argument("--max-age-hours", type=int, default=DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS, help="Staleness threshold")
@@ -442,6 +623,14 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         )
         _print_fetch_catalog(summary)
         return 0
+    if args.subcommand == "diff-openrouter-catalog":
+        summary = diff_openrouter_catalog(
+            db_path=db_path,
+            store=not bool(args.no_store),
+            limit=int(args.limit or 50),
+        )
+        _print_openrouter_diff(summary)
+        return 0
     if args.subcommand == "publish-approved":
         config_dir = args.config_dir or None
         if args.refresh_sources:
@@ -464,6 +653,7 @@ __all__ = [
     "DEFAULT_REFERENCE_DIR",
     "handle_registry_command",
     "fetch_openrouter_catalog",
+    "diff_openrouter_catalog",
     "publish_approved_bundle",
     "refresh_source_snapshots",
     "registry_status",

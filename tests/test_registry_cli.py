@@ -158,6 +158,56 @@ def test_fetch_openrouter_catalog_from_file_records_provider_catalog_source(caps
     assert status["counts"]["model_fact"] == 0
 
 
+def test_diff_openrouter_catalog_records_candidate_changes(capsys, tmp_path: Path) -> None:
+    db_path = tmp_path / "model-registry.sqlite"
+    catalog_path = tmp_path / "openrouter-models.json"
+    catalog_path.write_text(
+        """
+        {
+          "data": [
+            {
+              "id": "deepseek/deepseek-v4-flash",
+              "context_length": 999999,
+              "top_provider": {
+                "max_completion_tokens": 12345
+              },
+              "pricing": {
+                "prompt": "0.000001",
+                "completion": "0.000002"
+              },
+              "supported_parameters": ["max_tokens"]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+    mms_registry_cli.fetch_openrouter_catalog(db_path=db_path, from_file=catalog_path)
+    summary = mms_registry_cli.diff_openrouter_catalog(db_path=db_path, limit=5)
+    command_rc = mms_registry_cli.handle_registry_command(
+        [
+            "--db",
+            str(db_path),
+            "diff-openrouter-catalog",
+            "--limit",
+            "3",
+        ],
+        command_name="mms registry",
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+    out = capsys.readouterr().out
+
+    assert summary["change_count"] >= 1
+    assert summary["stored_count"] == summary["change_count"]
+    assert any(item["provider_model_id"] == "deepseek/deepseek-v4-flash" for item in summary["changes"])
+    assert command_rc == 0
+    assert "MMS Registry OpenRouter Candidate Diff" in out
+    assert "stored_count=" in out
+    assert status["counts"]["candidate_change"] == summary["change_count"]
+
+
 def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> None:
     db_path = tmp_path / "model-registry.sqlite"
 
