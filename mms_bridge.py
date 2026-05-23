@@ -12,6 +12,11 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+try:
+    import tomllib
+except ImportError:  # pragma: no cover
+    import tomli as tomllib
+
 from mms_speed_stats import record_model_speed
 from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
@@ -1159,7 +1164,43 @@ def _rescue_hot_fallback_enabled(server):
     raw = str(os.environ.get("MMS_RESCUE_HOT_FALLBACK", "") or "").strip().lower()
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return False
-    return bool(getattr(server, "rescue_enabled", False)) and bool(str(getattr(server, "rescue_fallback_model", "") or "").strip())
+    fallback = _current_rescue_fallback(server)
+    return bool(getattr(server, "rescue_enabled", False)) and bool(fallback.get("model"))
+
+
+def _rescue_config_root(server):
+    config_root = str(getattr(server, "rescue_config_root", "") or "").strip()
+    if config_root:
+        return config_root
+    try:
+        return resolve_mms_config_dir()
+    except Exception:
+        return os.path.expanduser("~/.config/mms")
+
+
+def _read_rescue_fallback_config(config_root):
+    path = os.path.join(str(config_root or "").strip(), "config.toml")
+    try:
+        with open(path, "rb") as handle:
+            cfg = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError, TypeError):
+        return {"model": "", "cli": ""}
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg.get("rescue"), dict) else {}
+    return {
+        "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
+        "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
+    }
+
+
+def _current_rescue_fallback(server):
+    """Resolve the latest explicit fallback choice without using global OAuth."""
+    config_fallback = _read_rescue_fallback_config(_rescue_config_root(server))
+    if config_fallback.get("model"):
+        return config_fallback
+    return {
+        "model": str(getattr(server, "rescue_fallback_model", "") or os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip(),
+        "cli": str(getattr(server, "rescue_fallback_cli", "") or os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip(),
+    }
 
 
 def _rescue_route_from_export(route, fallback_model):
@@ -1194,12 +1235,7 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
                 routes.append(normalized)
         return routes
 
-    config_root = str(getattr(server, "rescue_config_root", "") or "").strip()
-    if not config_root:
-        try:
-            config_root = resolve_mms_config_dir()
-        except Exception:
-            config_root = os.path.expanduser("~/.config/mms")
+    config_root = _rescue_config_root(server)
     candidates = [
         os.path.join(config_root, "generated", "model-routes.json"),
         os.path.join(config_root, "model-routes.json"),
@@ -3803,9 +3839,12 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
     ):
         if not _rescue_hot_fallback_enabled(self.server):
             return False
-        fallback_model = str(getattr(self.server, "rescue_fallback_model", "") or "").strip()
+        fallback = _current_rescue_fallback(self.server)
+        fallback_model = str(fallback.get("model") or "").strip()
         if not fallback_model or _normalize_model_name(fallback_model) == _normalize_model_name(failed_model):
             return False
+        self.server.rescue_fallback_model = fallback_model
+        self.server.rescue_fallback_cli = str(fallback.get("cli") or getattr(self.server, "rescue_fallback_cli", "") or "").strip()
         routes = _load_rescue_hot_fallback_routes(self.server, fallback_model)
         if not routes:
             return False
