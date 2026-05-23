@@ -3080,7 +3080,7 @@ def select_manage_target_tui(targets):
 
 
 def select_channel_action_tui(title, info_lines, actions):
-    """通道详情+操作选择 — H6 风格。
+    """通道详情+操作选择 — H6 split-card style。
 
     Args:
         title: str — 页面标题
@@ -3108,11 +3108,16 @@ def select_channel_action_tui(title, info_lines, actions):
             max_y, max_w = stdscr.getmaxyx()
             ac = curses.color_pair(1)
 
-            total_w = min(60, max_w - 4)
-            ph = len(info_lines) + len(actions) + 6
+            total_w = min(88, max_w - 4)
+            left_w = max(28, min(42, total_w // 2))
+            right_w = max(24, total_w - left_w - 1)
+            content_h = max(len(info_lines) + 2, len(actions) + 2, 4)
+            ph = content_h + 6
             px = (max_w - total_w) // 2
             py = max(1, (max_y - ph) // 2)
             ll = px + 2
+            split_x = px + left_w
+            rl = split_x + 2
             rr = px + total_w - 2
 
             row = py
@@ -3121,36 +3126,45 @@ def select_channel_action_tui(title, info_lines, actions):
             _safe_addstr(stdscr, row, ll, title, curses.color_pair(1) | curses.A_BOLD)
             _safe_addstr(stdscr, row, rr - 5, "Esc <-", curses.A_DIM)
             row += 1
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            _safe_addstr(stdscr, row, px, "-" * left_w + "+" + "-" * (total_w - left_w - 1), curses.A_DIM)
             row += 1
 
-            # 信息区
-            for label, value in info_lines:
-                _safe_addstr(stdscr, row, ll + 1, label, curses.color_pair(4) | curses.A_DIM)
-                _safe_addstr(stdscr, row, ll + 12, str(value), curses.color_pair(2), max_w=total_w - 16)
-                row += 1
-
-            # 分隔
-            _safe_addstr(stdscr, row, px, "-" * total_w, curses.A_DIM)
+            _safe_addstr(stdscr, row, ll, _L("信息", "Info"), curses.color_pair(4) | curses.A_BOLD)
+            _safe_addstr(stdscr, row, rl, _L("操作", "Actions"), curses.color_pair(4) | curses.A_BOLD)
             row += 1
+            content_y = row
 
-            # 操作列表
-            for i, (aid, alabel) in enumerate(actions):
-                y = row + i
-                is_sel = (i == idx)
-                if is_sel:
-                    _safe_addstr(stdscr, y, ll - 1, "|", ac | curses.A_BOLD)
-                    _safe_addstr(stdscr, y, ll + 1, alabel, curses.color_pair(1) | curses.A_BOLD)
-                else:
-                    _safe_addstr(stdscr, y, ll + 1, alabel, curses.color_pair(2))
+            for offset in range(content_h):
+                y = content_y + offset
+                _safe_addstr(stdscr, y, split_x, "|", curses.A_DIM)
+                if offset < len(info_lines):
+                    label, value = info_lines[offset]
+                    label_text = str(label or "-")
+                    value_text = str(value or "-")
+                    _safe_addstr(stdscr, y, ll, label_text, curses.color_pair(4) | curses.A_DIM, max_w=10)
+                    _safe_addstr(stdscr, y, ll + 11, value_text, curses.color_pair(2), max_w=max(8, left_w - 15))
+                if offset < len(actions):
+                    _aid, alabel = actions[offset]
+                    alabel = str(alabel or "-")
+                    is_sel = (offset == idx)
+                    if is_sel:
+                        _safe_addstr(stdscr, y, rl - 1, "|", ac | curses.A_BOLD)
+                        _safe_addstr(stdscr, y, rl + 1, alabel, curses.color_pair(1) | curses.A_BOLD, max_w=right_w - 5)
+                    else:
+                        _safe_addstr(stdscr, y, rl + 1, alabel, curses.color_pair(2), max_w=right_w - 5)
+                elif offset == 0 and not actions:
+                    _safe_addstr(stdscr, y, rl + 1, _L("没有可执行操作", "No actions"), curses.A_DIM, max_w=right_w - 5)
 
-            bot_y = row + len(actions)
-            _safe_addstr(stdscr, bot_y, px, "-" * total_w, curses.A_DIM)
+            bot_y = content_y + content_h
+            _safe_addstr(stdscr, bot_y, px, "-" * left_w + "+" + "-" * (total_w - left_w - 1), curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, ll, "Enter", curses.color_pair(1) | curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 6, "执行", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 6, _L("执行", "Run"), curses.A_DIM)
             _safe_addstr(stdscr, bot_y, ll + 13, "Esc", curses.A_BOLD)
-            _safe_addstr(stdscr, bot_y, ll + 17, "返回", curses.A_DIM)
+            _safe_addstr(stdscr, bot_y, ll + 17, _L("返回", "Back"), curses.A_DIM)
+            if len(actions) > 1:
+                _safe_addstr(stdscr, bot_y, rl, "Up/Dn", curses.color_pair(4) | curses.A_BOLD)
+                _safe_addstr(stdscr, bot_y, rl + 6, _L("选择", "Select"), curses.A_DIM)
             bot_y += 1
             _safe_addstr(stdscr, bot_y, px, "-" * total_w, ac)
 
