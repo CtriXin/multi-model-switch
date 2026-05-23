@@ -268,21 +268,48 @@ def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     mms_i18n.set_language("zh")
     about_title, about_info, about_actions = mms_core._about_tui_payload(
         {
-            "release": "v9.9.9",
-            "git_branch": "main",
-            "git_commit": "abc123",
-            "install_channel": "latest-tag",
-            "source": "install.sh",
+            "version_info": {
+                "release": "v9.9.9",
+                "git_branch": "main",
+                "git_commit": "abc123",
+                "install_channel": "latest-tag",
+                "source": "install.sh",
+            },
+            "mms": {"current": "v9.9.9", "latest": "v9.9.9", "status": "最新"},
+            "clis": {
+                "codex": {"label": "codex-cli 0.133.0", "latest": "0.133.0", "status": "最新"},
+                "claude": {"label": "2.1.148 (Claude Code)", "latest": "2.1.148", "status": "最新"},
+            },
         }
     )
     guard_title, guard_info, guard_actions = mms_core._snapshot_guard_tui_payload()
 
     assert about_title == "关于 / About"
-    assert [label for label, _value in about_info] == ["版本", "Git", "安装", "Config"]
-    assert about_actions == [("back", "返回")]
+    assert [label for label, _value in about_info] == ["MMS", "MMS 最新", "Codex", "Claude", "Git", "安装", "Config"]
+    assert about_actions == [("refresh_versions", "刷新版本检查"), ("back", "返回")]
     assert guard_title == "启动快照 / Snapshot Guard"
     assert guard_info[0][0] == "用途"
     assert [label for _action_id, label in guard_actions] == ["查看当前 Snapshot 状态", "接受当前 Snapshot", "返回"]
+
+
+def test_about_tui_payload_surfaces_upgrade_actions_for_outdated_versions() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    _title, _info, actions = mms_core._about_tui_payload(
+        {
+            "version_info": {"release": "v3.0.0"},
+            "mms": {"current": "v3.0.0", "latest": "v3.0.2", "status": "有新版 v3.0.2", "outdated": True},
+            "clis": {
+                "codex": {"label": "codex-cli 0.132.0", "latest": "0.133.0", "status": "有新版 0.133.0", "outdated": True},
+                "claude": {"label": "2.1.148 (Claude Code)", "latest": "2.1.148", "status": "最新", "outdated": False},
+            },
+        }
+    )
+
+    assert ("upgrade_mms", "一键升级 MMS") in actions
+    assert ("upgrade_mms_clis", "升级 MMS + Codex/Claude CLI") in actions
 
 
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:

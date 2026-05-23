@@ -272,6 +272,11 @@ UPDATE_PROMPT_INTERVAL_SEC = 24 * 60 * 60
 UPDATE_NOTICE_VERSION_GAP = 3
 UPDATE_NOTICE_SOURCES = frozenset({"install.sh"})
 UPDATE_CHECK_TAG_LIMIT = 100
+CLI_VERSION_CHECK_INTERVAL_SEC = 24 * 60 * 60
+CLI_VERSION_PACKAGES = {
+    "codex": "@openai/codex",
+    "claude": "@anthropic-ai/claude-code",
+}
 
 _UPDATE_CHECK_LOCK = threading.Lock()
 _UPDATE_CHECK_RUNNING = False
@@ -378,6 +383,90 @@ def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
 def _fetch_latest_semver_tag():
     semver_tags = _fetch_latest_semver_tags()
     return semver_tags[0] if semver_tags else ""
+
+
+def _extract_semver_text(value):
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?", str(value or ""))
+    return match.group(0) if match else ""
+
+
+def _parse_semver_text(value):
+    version = _extract_semver_text(value)
+    if not version:
+        return None
+    core = re.split(r"[-+]", version, maxsplit=1)[0]
+    parts = core.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def _compare_semver_text(current, latest):
+    current_semver = _parse_semver_text(current)
+    latest_semver = _parse_semver_text(latest)
+    if current_semver is None or latest_semver is None:
+        return None
+    if current_semver < latest_semver:
+        return -1
+    if current_semver > latest_semver:
+        return 1
+    return 0
+
+
+def _detect_cli_version(command_name):
+    command = str(command_name or "").strip()
+    if not command:
+        return {"installed": False, "label": _L("未安装", "not installed"), "version": "", "path": ""}
+    path = shutil.which(command)
+    if not path:
+        return {"installed": False, "label": _L("未安装", "not installed"), "version": "", "path": ""}
+    try:
+        result = subprocess.run(
+            [path, "--version"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=3,
+            check=False,
+        )
+    except Exception as exc:
+        return {
+            "installed": True,
+            "label": _L(f"读取失败: {exc}", f"version failed: {exc}"),
+            "version": "",
+            "path": path,
+        }
+    raw = str(result.stdout or "").strip().splitlines()
+    label = raw[0].strip() if raw else (path if result.returncode == 0 else _L("读取失败", "version failed"))
+    return {
+        "installed": True,
+        "label": label,
+        "version": _extract_semver_text(label),
+        "path": path,
+    }
+
+
+def _fetch_npm_package_latest_version(package_name):
+    package = str(package_name or "").strip()
+    if not package:
+        return ""
+    npm_bin = shutil.which("npm")
+    if not npm_bin:
+        return ""
+    try:
+        result = subprocess.run(
+            [npm_bin, "view", package, "version", "--silent"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=6,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return _extract_semver_text(str(result.stdout or "").strip())
 
 
 def _installed_update_semver(version_meta):
@@ -784,6 +873,160 @@ def _release_version_info():
         "install_channel": str(version_meta.get("install_channel") or "").strip(),
         "source": str(version_meta.get("source") or "").strip(),
     }
+
+
+def _refresh_update_cache_for_about(force_update=False):
+    cache = _load_update_check_cache()
+    if not force_update:
+        return cache
+    try:
+        semver_tags = _fetch_latest_semver_tags()
+    except Exception as exc:
+        cache["last_error"] = str(exc)
+        cache["checked_at"] = time.time()
+        _save_update_check_cache(cache)
+        return cache
+    cache["checked_at"] = time.time()
+    cache["last_error"] = ""
+    if semver_tags:
+        cache["latest_tag"] = semver_tags[0]
+        cache["semver_tags"] = semver_tags
+    _save_update_check_cache(cache)
+    return cache
+
+
+def _cli_version_status(force_update=False):
+    cache = _load_update_check_cache()
+    cached_latest = cache.get("cli_latest_versions") if isinstance(cache.get("cli_latest_versions"), dict) else {}
+    # Do not block About on npm/network checks unless the user explicitly refreshes.
+    should_fetch_latest = bool(force_update)
+    latest_versions = dict(cached_latest)
+    if should_fetch_latest:
+        latest_versions = {}
+        for cli_name, package_name in CLI_VERSION_PACKAGES.items():
+            latest_versions[cli_name] = _fetch_npm_package_latest_version(package_name)
+        cache["cli_latest_versions"] = latest_versions
+        cache["cli_latest_checked_at"] = time.time()
+        _save_update_check_cache(cache)
+
+    status = {}
+    for cli_name in ("codex", "claude"):
+        current = _detect_cli_version(cli_name)
+        latest = str(latest_versions.get(cli_name) or "").strip()
+        comparison = _compare_semver_text(current.get("version"), latest)
+        if not current.get("installed"):
+            label = _L("未安装", "not installed")
+            outdated = False
+        elif comparison == -1:
+            label = _L(f"有新版 {latest}", f"update available {latest}")
+            outdated = True
+        elif comparison == 0:
+            label = _L("最新", "latest")
+            outdated = False
+        elif latest:
+            label = _L(f"高于 latest {latest}", f"newer than latest {latest}")
+            outdated = False
+        else:
+            label = _L("未检查 latest", "latest not checked")
+            outdated = False
+        status[cli_name] = {
+            **current,
+            "latest": latest,
+            "status": label,
+            "outdated": outdated,
+            "package": CLI_VERSION_PACKAGES.get(cli_name, ""),
+        }
+    return status
+
+
+def _mms_update_status(version_info, cache):
+    current = str(version_info.get("installed_version") or version_info.get("release") or "").strip()
+    latest = str(cache.get("latest_tag") or "").strip()
+    current_semver = _parse_semver_tag(current)
+    latest_semver = _parse_semver_tag(latest)
+    if current_semver is None:
+        status = _L("开发版/无法判断", "dev/unknown")
+        outdated = False
+    elif latest_semver is None:
+        status = _L("未检查 latest", "latest not checked")
+        outdated = False
+    elif current_semver < latest_semver:
+        status = _L(f"有新版 {latest}", f"update available {latest}")
+        outdated = True
+    else:
+        status = _L("最新", "latest")
+        outdated = False
+    return {
+        "current": current or "dev",
+        "latest": latest,
+        "status": status,
+        "outdated": outdated,
+        "last_error": str(cache.get("last_error") or "").strip(),
+    }
+
+
+def _about_status_snapshot(force_update=False):
+    version_info = _release_version_info()
+    cache = _refresh_update_cache_for_about(force_update=force_update)
+    cli_status = _cli_version_status(force_update=force_update)
+    return {
+        "version_info": version_info,
+        "mms": _mms_update_status(version_info, cache),
+        "clis": cli_status,
+        "checked_at": cache.get("checked_at"),
+    }
+
+
+def _format_cli_about_line(cli_status):
+    current = str(cli_status.get("label") or cli_status.get("version") or "").strip()
+    latest = str(cli_status.get("latest") or "").strip()
+    status = str(cli_status.get("status") or "").strip()
+    suffix = f" / latest {latest}" if latest else ""
+    status_suffix = f" · {status}" if status else ""
+    return f"{current}{suffix}{status_suffix}".strip() or "-"
+
+
+def _mms_upgrade_shell_command(*, include_clis=False):
+    args = ["--latest-tag", "--lang", normalize_language(_load_version_meta().get("preferred_language", "")) or "zh"]
+    if include_clis:
+        args.extend(["--install-cli", "claude,codex"])
+    quoted_args = " ".join(shlex.quote(arg) for arg in args)
+    return f"curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s -- {quoted_args}"
+
+
+def _print_about_version_summary(about_snapshot):
+    title, info_lines, _actions = _about_tui_payload(about_snapshot)
+    console.print(f"[cyan]{title}[/cyan]")
+    for label, value in info_lines:
+        console.print(f"[cyan]{label}[/cyan] {value}")
+
+
+def _run_about_upgrade(*, include_clis=False):
+    _ensure_rich()
+    command = _mms_upgrade_shell_command(include_clis=include_clis)
+    if include_clis:
+        label = _L("MMS + Codex/Claude CLI", "MMS + Codex/Claude CLI")
+    else:
+        label = "MMS"
+    console.print(f"[yellow]{_L(f'即将升级 {label}', f'About to upgrade {label}')}[/yellow]")
+    console.print(f"[dim]{command}[/dim]")
+    if not Confirm.ask(_L("确认执行升级？", "Run upgrade now?"), default=False):
+        console.print(f"[yellow]{_L('已取消升级。', 'Upgrade cancelled.')}[/yellow]")
+        return False
+    result = subprocess.run(
+        ["bash", "-lc", command],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.stdout:
+        console.print(result.stdout)
+    if result.returncode == 0:
+        console.print(f"[green]✓ {_L('升级命令完成。重新打开终端或重新启动 mms 后生效。', 'Upgrade command completed. Restart the terminal or MMS to apply.')}[/green]")
+        return True
+    console.print(f"[red]{_L('升级命令失败', 'Upgrade command failed')} (exit {result.returncode})[/red]")
+    return False
 
 
 def config_command_hint():
@@ -4971,16 +5214,31 @@ def _registry_truth_tui_payload(status):
     return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
 
 
-def _about_tui_payload(version_info):
+def _about_tui_payload(about_snapshot):
     """Build localized About status/actions for the Settings detail page."""
-    version_info = version_info if isinstance(version_info, dict) else {}
+    about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
+    version_info = about_snapshot.get("version_info") if isinstance(about_snapshot.get("version_info"), dict) else {}
+    mms_status = about_snapshot.get("mms") if isinstance(about_snapshot.get("mms"), dict) else {}
+    clis = about_snapshot.get("clis") if isinstance(about_snapshot.get("clis"), dict) else {}
+    codex_status = clis.get("codex") if isinstance(clis.get("codex"), dict) else {}
+    claude_status = clis.get("claude") if isinstance(clis.get("claude"), dict) else {}
     info_lines = [
-        (_L("版本", "Release"), version_info.get("release") or "dev"),
+        ("MMS", f"{mms_status.get('current') or version_info.get('release') or 'dev'} · {mms_status.get('status') or '-'}"),
+        (_L("MMS 最新", "MMS latest"), mms_status.get("latest") or _L("未检查", "not checked")),
+        ("Codex", _format_cli_about_line(codex_status)),
+        ("Claude", _format_cli_about_line(claude_status)),
         ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
         (_L("安装", "Install"), f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
         ("Config", CONFIG_PATH),
     ]
-    actions = [("back", _L("返回", "Back"))]
+    if mms_status.get("last_error"):
+        info_lines.append((_L("检查错误", "Check error"), mms_status.get("last_error")))
+    actions = [("refresh_versions", _L("刷新版本检查", "Refresh Version Check"))]
+    if mms_status.get("outdated"):
+        actions.append(("upgrade_mms", _L("一键升级 MMS", "Upgrade MMS")))
+    if any((clis.get(name) or {}).get("outdated") for name in ("codex", "claude")):
+        actions.append(("upgrade_mms_clis", _L("升级 MMS + Codex/Claude CLI", "Upgrade MMS + Codex/Claude CLI")))
+    actions.append(("back", _L("返回", "Back")))
     return _L("关于 / About", "About"), info_lines, actions
 
 
@@ -10333,14 +10591,32 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         console.print(f"[cyan]{key}[/cyan] {counts[key]}")
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
-                version_info = _release_version_info()
-                about_title, about_lines, about_actions = _about_tui_payload(version_info)
-                _safe_tui_call(
-                    select_channel_action_tui,
-                    about_title,
-                    about_lines,
-                    about_actions,
-                )
+                while True:
+                    about_snapshot = _about_status_snapshot(force_update=False)
+                    about_title, about_lines, about_actions = _about_tui_payload(about_snapshot)
+                    about_action = _safe_tui_call(
+                        select_channel_action_tui,
+                        about_title,
+                        about_lines,
+                        about_actions,
+                    )
+                    if about_action == "__interrupt__":
+                        return True
+                    if about_action in {None, "back"}:
+                        break
+                    if about_action == "refresh_versions":
+                        console.print("[cyan]正在刷新 MMS / Codex / Claude 版本检查...[/cyan]")
+                        refreshed = _about_status_snapshot(force_update=True)
+                        _print_about_version_summary(refreshed)
+                        _pause_after_tui_report("按 Enter 返回关于")
+                        continue
+                    if about_action in {"upgrade_mms", "upgrade_mms_clis"}:
+                        include_clis = about_action == "upgrade_mms_clis"
+                        if _run_about_upgrade(include_clis=include_clis):
+                            _pause_after_tui_report("按 Enter 返回关于")
+                        else:
+                            _pause_after_tui_report("按 Enter 返回关于")
+                        continue
             elif settings_action == "guard":
                 guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()
                 guard_action = _safe_tui_call(
