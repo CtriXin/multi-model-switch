@@ -4912,6 +4912,36 @@ def _rescue_landing_tui_payload(default_label, rescue_events):
     return info_lines, actions
 
 
+def _registry_truth_tui_payload(status):
+    """Build localized Registry Truth status/actions for the Settings detail page."""
+    status = status if isinstance(status, dict) else {}
+    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+    latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
+    freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
+    info_lines = [
+        ("DB", status.get("db_path") or "-"),
+        (_L("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
+        (_L("模型身份", "model identities"), counts.get("model_identity", 0)),
+        (_L("模型事实", "model facts"), counts.get("model_fact", 0)),
+        (_L("待刷新来源", "sources due"), freshness.get("due_count", 0)),
+        (_L("最新来源", "latest source"), latest.get("source_path") or "none"),
+    ]
+    actions = [
+        ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
+        ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
+        ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
+        ("scheduled_no_network", _L("定时刷新 No Network", "Scheduled Refresh No Network")),
+        ("refresh_sources", _L("刷新全部 Sources", "Refresh Sources")),
+        ("fetch_openrouter", _L("拉取 OpenRouter Catalog", "Fetch OpenRouter Catalog")),
+        ("diff_openrouter", _L("对比 OpenRouter Candidate", "OpenRouter Candidate Diff")),
+        ("publish_approved", _L("发布 Approved Bundle", "Publish Approved Bundle")),
+        ("verify_approved", _L("验证 Approved Bundle", "Verify Approved Bundle")),
+        ("doctor", _L("Registry Doctor / 状态", "Registry Doctor / Status")),
+        ("back", _L("返回", "Back")),
+    ]
+    return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
+
+
 def _display_runtime_usage(runtime_kind, runtime_id, title):
     if _use_tui():
         try:
@@ -10125,33 +10155,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 
                 status = registry_status()
-                counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
-                latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
-                freshness = status.get("source_freshness") if isinstance(status.get("source_freshness"), dict) else {}
+                registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
                 registry_action = _safe_tui_call(
                     select_channel_action_tui,
-                    "Registry Truth",
-                    [
-                        ("DB", status.get("db_path") or "-"),
-                        ("source_snapshot", counts.get("source_snapshot", 0)),
-                        ("model_identity", counts.get("model_identity", 0)),
-                        ("model_fact", counts.get("model_fact", 0)),
-                        ("source_due", freshness.get("due_count", 0)),
-                        ("latest", latest.get("source_path") or "none"),
-                    ],
-                    [
-                        ("check_staleness", "Check Source Staleness"),
-                        ("refresh_due_sources", "Refresh Due Sources"),
-                        ("scheduled_dry_run", "Scheduled Refresh Dry Run"),
-                        ("scheduled_no_network", "Scheduled Refresh No Network"),
-                        ("refresh_sources", "Refresh Sources"),
-                        ("fetch_openrouter", "Fetch OpenRouter Catalog"),
-                        ("diff_openrouter", "OpenRouter Candidate Diff"),
-                        ("publish_approved", "Publish Approved Bundle"),
-                        ("verify_approved", "Verify Approved Bundle"),
-                        ("doctor", "Registry Doctor / Status"),
-                        ("back", "返回"),
-                    ],
+                    registry_title,
+                    registry_info,
+                    registry_actions,
                 )
                 if registry_action == "__interrupt__":
                     return True

@@ -218,6 +218,28 @@ def test_rescue_landing_shows_packets_as_secondary_action() -> None:
     assert action_ids.index("manual_default") < action_ids.index("view_packets")
 
 
+def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, info_lines, actions = mms_core._registry_truth_tui_payload(
+        {
+            "db_path": "/tmp/model-registry.sqlite",
+            "counts": {"source_snapshot": 2, "model_identity": 39, "model_fact": 338},
+            "source_freshness": {"due_count": 1},
+            "latest_source_snapshot": {"source_path": "https://openrouter.ai/api/v1/models"},
+        }
+    )
+    info_labels = [label for label, _value in info_lines]
+    action_labels = [label for _action_id, label in actions]
+
+    assert title == "模型真源 / Registry Truth"
+    assert info_labels[:6] == ["DB", "来源快照", "模型身份", "模型事实", "待刷新来源", "最新来源"]
+    assert action_labels[:4] == ["检查 Source Staleness", "刷新到期 Sources", "定时刷新 Dry Run", "定时刷新 No Network"]
+    assert "Registry Doctor / 状态" in action_labels
+
+
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
     import mms_chat
     import mms_discuss
