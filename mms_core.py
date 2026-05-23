@@ -4971,6 +4971,33 @@ def _registry_truth_tui_payload(status):
     return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
 
 
+def _about_tui_payload(version_info):
+    """Build localized About status/actions for the Settings detail page."""
+    version_info = version_info if isinstance(version_info, dict) else {}
+    info_lines = [
+        (_L("版本", "Release"), version_info.get("release") or "dev"),
+        ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
+        (_L("安装", "Install"), f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
+        ("Config", CONFIG_PATH),
+    ]
+    actions = [("back", _L("返回", "Back"))]
+    return _L("关于 / About", "About"), info_lines, actions
+
+
+def _snapshot_guard_tui_payload():
+    """Build localized Snapshot Guard status/actions for the Settings detail page."""
+    info_lines = [
+        (_L("用途", "Purpose"), _L("检查/接受 MMS config drift", "Inspect / accept MMS config drift")),
+        ("CLI", f"{current_command()} guard status / accept"),
+    ]
+    actions = [
+        ("status", _L("查看当前 Snapshot 状态", "Status")),
+        ("accept", _L("接受当前 Snapshot", "Accept Current Snapshot")),
+        ("back", _L("返回", "Back")),
+    ]
+    return _L("启动快照 / Snapshot Guard", "Snapshot Guard"), info_lines, actions
+
+
 def _display_runtime_usage(runtime_kind, runtime_id, title):
     if _use_tui():
         try:
@@ -10307,31 +10334,20 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
                 version_info = _release_version_info()
-                about_lines = [
-                    ("Release", version_info.get("release") or "dev"),
-                    ("Git", f"{version_info.get('git_branch') or '-'} @ {version_info.get('git_commit') or '-'}"),
-                    ("Install", f"{version_info.get('install_channel') or '-'} / {version_info.get('source') or '-'}"),
-                    ("Config", CONFIG_PATH),
-                ]
+                about_title, about_lines, about_actions = _about_tui_payload(version_info)
                 _safe_tui_call(
                     select_channel_action_tui,
-                    display_title(),
+                    about_title,
                     about_lines,
-                    [("back", "返回")],
+                    about_actions,
                 )
             elif settings_action == "guard":
+                guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()
                 guard_action = _safe_tui_call(
                     select_channel_action_tui,
-                    "Snapshot Guard",
-                    [
-                        ("用途", "检查/接受 MMS config drift"),
-                        ("CLI", f"{current_command()} guard status / accept"),
-                    ],
-                    [
-                        ("status", "Status"),
-                        ("accept", "Accept Current Snapshot"),
-                        ("back", "返回"),
-                    ],
+                    guard_title,
+                    guard_info,
+                    guard_actions,
                 )
                 if guard_action == "__interrupt__":
                     return True

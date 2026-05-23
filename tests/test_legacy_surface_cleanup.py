@@ -261,6 +261,30 @@ def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     assert "Registry Doctor / 状态" in action_labels
 
 
+def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    about_title, about_info, about_actions = mms_core._about_tui_payload(
+        {
+            "release": "v9.9.9",
+            "git_branch": "main",
+            "git_commit": "abc123",
+            "install_channel": "latest-tag",
+            "source": "install.sh",
+        }
+    )
+    guard_title, guard_info, guard_actions = mms_core._snapshot_guard_tui_payload()
+
+    assert about_title == "关于 / About"
+    assert [label for label, _value in about_info] == ["版本", "Git", "安装", "Config"]
+    assert about_actions == [("back", "返回")]
+    assert guard_title == "启动快照 / Snapshot Guard"
+    assert guard_info[0][0] == "用途"
+    assert [label for _action_id, label in guard_actions] == ["查看当前 Snapshot 状态", "接受当前 Snapshot", "返回"]
+
+
 def test_legacy_chat_and_discuss_help_expose_migration_notice(capsys) -> None:
     import mms_chat
     import mms_discuss
