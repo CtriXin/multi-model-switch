@@ -3830,8 +3830,8 @@ def _caveman_codex_hook_payload(caveman_root):
     except Exception:
         pass
     context = (
-        "CAVEMAN MODE ACTIVE (full). Drop articles/filler/pleasantries/hedging. "
-        "Fragments OK. Code/commits/security: write normal. Off: stop caveman/normal mode."
+        "CAVEMAN MODE ACTIVE (lite). No filler/hedging. Keep full sentences. "
+        "Code/commits/security: write normal. Off: stop caveman/normal mode."
     )
     payload = json.dumps(
         {

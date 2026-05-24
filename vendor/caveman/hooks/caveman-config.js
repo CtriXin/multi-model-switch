@@ -7,7 +7,7 @@
 //      - $XDG_CONFIG_HOME/caveman/config.json (any platform, if set)
 //      - ~/.config/caveman/config.json (macOS / Linux fallback)
 //      - %APPDATA%\caveman\config.json (Windows fallback)
-//   3. 'full'
+//   3. 'lite'
 
 const fs = require('fs');
 const path = require('path');
@@ -55,7 +55,7 @@ function getDefaultMode() {
   }
 
   // 3. Default
-  return 'full';
+  return 'lite';
 }
 
 // Symlink-safe flag file write.

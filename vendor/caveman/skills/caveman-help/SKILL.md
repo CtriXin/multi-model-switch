@@ -14,8 +14,8 @@ Display this reference card when invoked. One-shot — do NOT change mode, write
 
 | Mode | Trigger | What change |
 |------|---------|-------------|
-| **Lite** | `/caveman lite` | Drop filler. Keep sentence structure. |
-| **Full** | `/caveman` | Drop articles, filler, pleasantries, hedging. Fragments OK. Default. |
+| **Lite** | `/caveman` | Drop filler. Keep sentence structure. Default. |
+| **Full** | `/caveman full` | Drop articles, filler, pleasantries, hedging. Fragments OK. |
 | **Ultra** | `/caveman ultra` | Extreme compression. Bare fragments. Tables over prose. |
 | **Wenyan-Lite** | `/caveman wenyan-lite` | Classical Chinese style, light compression. |
 | **Wenyan-Full** | `/caveman wenyan` | Full 文言文. Maximum classical terseness. |
@@ -38,7 +38,7 @@ Say "stop caveman" or "normal mode". Resume anytime with `/caveman`.
 
 ## Configure Default Mode
 
-Default mode = `full`. Change it:
+Default mode = `lite`. Change it:
 
 **Environment variable** (highest priority):
 ```bash
@@ -52,7 +52,7 @@ export CAVEMAN_DEFAULT_MODE=ultra
 
 Set `"off"` to disable auto-activation on session start. User can still activate manually with `/caveman`.
 
-Resolution: env var > config file > `full`.
+Resolution: env var > config file > `lite`.
 
 ## More
 

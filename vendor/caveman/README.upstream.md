@@ -310,8 +310,8 @@ Stop with: "stop caveman" or "normal mode"
 
 | Level | Trigger | What it do |
 |-------|---------|------------|
-| **Lite** | `/caveman lite` | Drop filler, keep grammar. Professional but no fluff |
-| **Full** | `/caveman full` | Default caveman. Drop articles, fragments, full grunt |
+| **Lite** | `/caveman` | Default caveman. Drop filler, keep grammar. Professional but no fluff |
+| **Full** | `/caveman full` | Drop articles, fragments, full grunt |
 | **Ultra** | `/caveman ultra` | Maximum compression. Telegraphic. Abbreviate everything |
 
 ### 文言文 (Wenyan) Mode

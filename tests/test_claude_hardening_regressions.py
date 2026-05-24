@@ -1159,6 +1159,32 @@ def test_caveman_codex_activate_outputs_valid_session_start_json(tmp_path):
     assert "STATUSLINE SETUP NEEDED" not in context
 
 
+def test_caveman_codex_activate_defaults_to_lite_without_override(tmp_path):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is required for caveman hook smoke")
+    script_path = Path(__file__).resolve().parents[1] / "vendor" / "caveman" / "hooks" / "caveman-activate.js"
+    env = {
+        **os.environ,
+        "CLAUDE_CONFIG_DIR": str(tmp_path / ".codex"),
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg-config"),
+        "CAVEMAN_HOOK_COMPACT": "1",
+        "CAVEMAN_HOOK_EVENT": "SessionStart",
+    }
+    env.pop("CAVEMAN_DEFAULT_MODE", None)
+    result = subprocess.run(
+        [node, str(script_path)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert context.startswith("CAVEMAN MODE ACTIVE (lite).")
+
+
 def test_map_auto_index_hook_keeps_codex_stdout_empty(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

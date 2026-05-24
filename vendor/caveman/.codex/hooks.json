@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "printf '%s' \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"CAVEMAN MODE ACTIVE (full). Drop articles/filler/pleasantries/hedging. Fragments OK. Code/commits/security: write normal. Off: stop caveman/normal mode.\\\"}}\"",
+            "command": "printf '%s' \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"CAVEMAN MODE ACTIVE (lite). No filler/hedging. Keep full sentences. Code/commits/security: write normal. Off: stop caveman/normal mode.\\\"}}\"",
             "timeout": 5,
             "statusMessage": "Loading caveman mode"
           }
