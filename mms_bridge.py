@@ -295,7 +295,7 @@ def _record_bridge_fallback(provider_id, model_name, gateway_url=None):
                 _save_bridge_mode_cache_unlocked(cache)
 
 
-_NATIVE_FALLBACK_RETRY_STATUSES = {401, 403, 408, 409, 425, 429, 500, 502, 503, 504}
+_NATIVE_FALLBACK_RETRY_STATUSES = {401, 403, 408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 _NATIVE_FALLBACK_RETRY_TOKENS = {"connect_error", "timeout", "invalid_json", "invalid_text"}
 
 
@@ -1223,24 +1223,48 @@ def _current_rescue_fallback(server):
 
 def _rescue_route_from_export(route, fallback_model):
     route = route if isinstance(route, dict) else {}
-    openai_url = str(route.get("openai_base_url") or route.get("gateway_url") or route.get("base_url") or "").strip().rstrip("/")
-    api_key = str(route.get("api_key") or route.get("gateway_key") or "").strip()
-    if not openai_url or not api_key:
-        return None
     model_id = str(route.get("model_id") or route.get("model") or fallback_model or "").strip()
     if not model_id:
+        return None
+    anthropic_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
+    openai_url = str(route.get("openai_base_url") or route.get("gateway_url") or route.get("base_url") or "").strip().rstrip("/")
+    protocol = _rescue_route_protocol(route, model_id, anthropic_url=anthropic_url, openai_url=openai_url)
+    selected_url = anthropic_url if protocol == "anthropic_messages" else openai_url
+    api_key = str(route.get("api_key") or route.get("gateway_key") or "").strip()
+    if not selected_url or not api_key:
         return None
     return {
         "provider_id": str(route.get("provider_id") or "rescue-fallback").strip(),
         "provider_profile": str(route.get("provider_profile") or route.get("profile") or "").strip(),
-        "gateway_url": openai_url,
+        "gateway_url": selected_url,
         "gateway_key": api_key,
         "openai_url": openai_url,
+        "anthropic_url": anthropic_url,
         "model": model_id,
-        "protocol": "openai_chat_completions",
+        "protocol": protocol,
         "fallback_reason": "rescue_hot_fallback",
         "try_next_on": list(_NATIVE_FALLBACK_RETRY_STATUSES),
     }
+
+
+def _rescue_route_protocol(route, model_id, *, anthropic_url="", openai_url=""):
+    explicit = str(route.get("protocol") or route.get("preferred_protocol") or "").strip()
+    if explicit in {"anthropic_messages", "openai_chat_completions"}:
+        return explicit
+    protocols = route.get("protocols")
+    if isinstance(protocols, (list, tuple)):
+        normalized = {str(item).strip() for item in protocols}
+        if "anthropic_messages" in normalized and anthropic_url and not _is_openai_model(model_id):
+            return "anthropic_messages"
+        if "openai_chat_completions" in normalized and openai_url:
+            return "openai_chat_completions"
+    if anthropic_url and _is_domestic_model(model_id):
+        return "anthropic_messages"
+    if openai_url:
+        return "openai_chat_completions"
+    if anthropic_url:
+        return "anthropic_messages"
+    return "openai_chat_completions"
 
 
 def _load_rescue_hot_fallback_routes(server, fallback_model):
@@ -3591,6 +3615,89 @@ def _responses_tools_to_chat(tools):
     return converted
 
 
+def _chat_messages_to_anthropic_payload(chat_messages, model_name, *, stream=True, max_tokens=None):
+    system_parts = []
+    messages = []
+    for message in chat_messages or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user")
+        content = message.get("content")
+        if role == "system":
+            if content:
+                system_parts.append(str(content))
+            continue
+        if role == "tool":
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": str(message.get("tool_call_id") or ""),
+                    "content": str(content or ""),
+                }],
+            })
+            continue
+        blocks = []
+        if content:
+            blocks.append({"type": "text", "text": str(content)})
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+            arguments = function.get("arguments") or "{}"
+            try:
+                parsed_arguments = json.loads(arguments)
+            except (TypeError, json.JSONDecodeError):
+                parsed_arguments = {}
+            blocks.append({
+                "type": "tool_use",
+                "id": str(tool_call.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"),
+                "name": str(function.get("name") or ""),
+                "input": parsed_arguments,
+            })
+        if not blocks:
+            blocks.append({"type": "text", "text": ""})
+        messages.append({"role": "assistant" if role == "assistant" else "user", "content": blocks})
+    payload = {
+        "model": model_name,
+        "messages": messages or [{"role": "user", "content": [{"type": "text", "text": ""}]}],
+        "stream": bool(stream),
+        "max_tokens": int(max_tokens) if isinstance(max_tokens, (int, float)) and max_tokens > 0 else 1024,
+    }
+    if system_parts:
+        payload["system"] = "\n\n".join(system_parts)
+    return payload
+
+
+def _responses_tools_to_anthropic(tools):
+    converted = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("type") != "function":
+            continue
+        converted.append({
+            "name": str(tool.get("name") or ""),
+            "description": str(tool.get("description") or ""),
+            "input_schema": tool.get("parameters") or {"type": "object", "properties": {}},
+        })
+    return converted
+
+
+def _responses_payload_to_anthropic_messages_payload(payload, model_name):
+    chat_messages = _responses_input_to_messages(payload.get("instructions", ""), payload.get("input", []))
+    anthropic_payload = _chat_messages_to_anthropic_payload(
+        chat_messages,
+        model_name,
+        stream=True,
+        max_tokens=_responses_max_output_tokens(payload),
+    )
+    tools = _responses_tools_to_anthropic(payload.get("tools"))
+    if tools:
+        anthropic_payload["tools"] = tools
+    return anthropic_payload
+
+
 class _ChatCompletionsToResponsesTranslator:
     """Translate Chat Completions streaming chunks to Responses API SSE events.
     Matches the real OpenAI Responses API format that Codex expects."""
@@ -3816,6 +3923,195 @@ class _ChatCompletionsToResponsesTranslator:
         return events
 
 
+class _AnthropicMessagesToResponsesTranslator:
+    """Translate Anthropic Messages SSE chunks to Responses API SSE events."""
+
+    def __init__(self, model_name):
+        self.model_name = model_name
+        self.response_id = f"resp_{uuid.uuid4().hex[:24]}"
+        self.message_item_id = f"msg_{uuid.uuid4().hex[:24]}"
+        self.started = False
+        self.text_part_added = False
+        self.text_content = ""
+        self.block_to_tool = {}
+        self.tool_arguments = {}
+        self._seq = 0
+
+    def _seq_num(self):
+        self._seq += 1
+        return self._seq
+
+    def _response_obj(self, status="in_progress", output=None):
+        return {
+            "id": self.response_id,
+            "object": "response",
+            "status": status,
+            "model": self.model_name,
+            "output": output or [],
+            "usage": None if status != "completed" else {
+                "input_tokens": 0,
+                "output_tokens": max(1, len(self.text_content) // 4),
+                "total_tokens": max(1, len(self.text_content) // 4),
+            },
+        }
+
+    def _ensure_started(self):
+        if self.started:
+            return []
+        self.started = True
+        return [
+            ("response.created", {
+                "type": "response.created",
+                "response": self._response_obj("in_progress"),
+            }),
+            ("response.in_progress", {
+                "type": "response.in_progress",
+                "response": self._response_obj("in_progress"),
+            }),
+            ("response.output_item.added", {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "type": "message",
+                    "id": self.message_item_id,
+                    "role": "assistant",
+                    "status": "in_progress",
+                    "content": [],
+                },
+                "sequence_number": self._seq_num(),
+            }),
+        ]
+
+    def _ensure_text_part(self):
+        if self.text_part_added:
+            return []
+        self.text_part_added = True
+        return [("response.content_part.added", {
+            "type": "response.content_part.added",
+            "item_id": self.message_item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "annotations": [], "text": ""},
+            "sequence_number": self._seq_num(),
+        })]
+
+    def process(self, event_type, payload):
+        outgoing = []
+        if event_type in {"message_start", "content_block_start", "content_block_delta", "message_delta", "message_stop"}:
+            outgoing.extend(self._ensure_started())
+        if event_type == "content_block_start":
+            index = int(payload.get("index") or 0)
+            block = payload.get("content_block") if isinstance(payload.get("content_block"), dict) else {}
+            if block.get("type") == "text":
+                outgoing.extend(self._ensure_text_part())
+            elif block.get("type") == "tool_use":
+                item_id = f"fc_{uuid.uuid4().hex[:24]}"
+                self.block_to_tool[index] = {
+                    "item_id": item_id,
+                    "call_id": str(block.get("id") or item_id),
+                    "name": str(block.get("name") or ""),
+                }
+                self.tool_arguments[index] = ""
+                outgoing.append(("response.output_item.added", {
+                    "type": "response.output_item.added",
+                    "output_index": index + 1,
+                    "item": {
+                        "type": "function_call",
+                        "id": item_id,
+                        "call_id": self.block_to_tool[index]["call_id"],
+                        "name": self.block_to_tool[index]["name"],
+                        "arguments": "",
+                        "status": "in_progress",
+                    },
+                    "sequence_number": self._seq_num(),
+                }))
+        elif event_type == "content_block_delta":
+            index = int(payload.get("index") or 0)
+            delta = payload.get("delta") if isinstance(payload.get("delta"), dict) else {}
+            if delta.get("type") == "text_delta":
+                text = str(delta.get("text") or "")
+                outgoing.extend(self._ensure_text_part())
+                self.text_content += text
+                outgoing.append(("response.output_text.delta", {
+                    "type": "response.output_text.delta",
+                    "item_id": self.message_item_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "delta": text,
+                    "sequence_number": self._seq_num(),
+                }))
+            elif delta.get("type") == "input_json_delta" and index in self.block_to_tool:
+                partial = str(delta.get("partial_json") or "")
+                self.tool_arguments[index] = self.tool_arguments.get(index, "") + partial
+                outgoing.append(("response.function_call_arguments.delta", {
+                    "type": "response.function_call_arguments.delta",
+                    "item_id": self.block_to_tool[index]["item_id"],
+                    "output_index": index + 1,
+                    "delta": partial,
+                    "sequence_number": self._seq_num(),
+                }))
+        elif event_type == "content_block_stop":
+            index = int(payload.get("index") or 0)
+            if index in self.block_to_tool:
+                tool = self.block_to_tool[index]
+                arguments = self.tool_arguments.get(index, "")
+                outgoing.append(("response.function_call_arguments.done", {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": tool["item_id"],
+                    "output_index": index + 1,
+                    "arguments": arguments,
+                    "sequence_number": self._seq_num(),
+                }))
+                outgoing.append(("response.output_item.done", {
+                    "type": "response.output_item.done",
+                    "output_index": index + 1,
+                    "item": {
+                        "type": "function_call",
+                        "id": tool["item_id"],
+                        "call_id": tool["call_id"],
+                        "name": tool["name"],
+                        "arguments": arguments,
+                        "status": "completed",
+                    },
+                    "sequence_number": self._seq_num(),
+                }))
+        elif event_type == "message_stop":
+            output = [{
+                "type": "message",
+                "id": self.message_item_id,
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "annotations": [], "text": self.text_content}],
+            }]
+            outgoing.append(("response.output_text.done", {
+                "type": "response.output_text.done",
+                "item_id": self.message_item_id,
+                "output_index": 0,
+                "content_index": 0,
+                "text": self.text_content,
+                "sequence_number": self._seq_num(),
+            }))
+            outgoing.append(("response.content_part.done", {
+                "type": "response.content_part.done",
+                "item_id": self.message_item_id,
+                "output_index": 0,
+                "content_index": 0,
+                "part": {"type": "output_text", "annotations": [], "text": self.text_content},
+                "sequence_number": self._seq_num(),
+            }))
+            outgoing.append(("response.output_item.done", {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": output[0],
+                "sequence_number": self._seq_num(),
+            }))
+            outgoing.append(("response.completed", {
+                "type": "response.completed",
+                "response": self._response_obj("completed", output),
+            }))
+        return outgoing
+
+
 class _ResponsesProxyHandler(BaseHTTPRequestHandler):
     """Local proxy for Codex direct Responses traffic with patched /v1/models."""
 
@@ -3899,14 +4195,24 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         )
         fallback_payload = copy.deepcopy(payload)
         fallback_payload["model"] = route.get("model") or fallback_model
-        self._do_chatcompletions_fallback(
-            fallback_payload,
-            route.get("model") or fallback_model,
-            route.get("gateway_url") or route.get("openai_url") or "",
-            route.get("gateway_key") or "",
-            _now_ms(),
-            route=route,
-        )
+        if route.get("protocol") == "anthropic_messages":
+            self._do_anthropic_messages_fallback(
+                fallback_payload,
+                route.get("model") or fallback_model,
+                route.get("gateway_url") or route.get("anthropic_url") or "",
+                route.get("gateway_key") or "",
+                _now_ms(),
+                route=route,
+            )
+        else:
+            self._do_chatcompletions_fallback(
+                fallback_payload,
+                route.get("model") or fallback_model,
+                route.get("gateway_url") or route.get("openai_url") or "",
+                route.get("gateway_key") or "",
+                _now_ms(),
+                route=route,
+            )
         return True
 
     def _authorized(self):
@@ -4401,6 +4707,153 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             _bridge_error_logger.error("fallback chatcompletions error: %s", exc, exc_info=True)
             # fallback 也失败，返回 502
+            self._json(502, {"error": {"message": str(exc)}})
+
+    def _do_anthropic_messages_fallback(self, payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        """Codex Responses hot fallback through Anthropic Messages transport."""
+        route = route if isinstance(route, dict) else {}
+        provider_id = route.get("provider_id") or getattr(self.server, "provider_id", "")
+        provider_profile = route.get("provider_profile") or getattr(self.server, "provider_profile", "")
+        reasoning_enabled = bool(getattr(self.server, "reasoning_enabled", True))
+        reasoning_effort = getattr(self.server, "reasoning_effort", "high")
+        anthropic_payload = _responses_payload_to_anthropic_messages_payload(payload, model_name)
+        profile_id = apply_profile_body_patches(
+            anthropic_payload,
+            protocol="anthropic_messages",
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+            thinking_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        if _domestic_model_requires_reasoning_content_roundtrip(model_name):
+            _preserve_domestic_reasoning_roundtrip(anthropic_payload, model_name)
+        if not profile_id and _is_domestic_model(model_name):
+            _apply_domestic_reasoning_controls(
+                anthropic_payload,
+                model_name,
+                thinking_enabled=reasoning_enabled,
+                reasoning_effort=reasoning_effort,
+            )
+        if not _normalize_model_name(model_name).startswith("claude-") and not _model_supports_anthropic_cache_control(model_name):
+            _strip_cache_control(anthropic_payload)
+
+        fwd_headers = {
+            "Content-Type": "application/json",
+            "x-api-key": gateway_key,
+            "anthropic-version": "2023-06-01",
+        }
+        apply_profile_auth_headers(
+            fwd_headers,
+            protocol="anthropic_messages",
+            api_key=gateway_key,
+            provider_id=provider_id,
+            profile_id=provider_profile,
+            base_url=gateway_url,
+            model_name=model_name,
+        )
+        claude_passthrough, claude_passthrough_prefixes = _claude_passthrough_rules(self.server, model_name)
+        fwd_headers.update(
+            _copy_passthrough_headers(
+                self.headers,
+                names=claude_passthrough,
+                prefixes=claude_passthrough_prefixes,
+            )
+        )
+
+        translator = _AnthropicMessagesToResponsesTranslator(model_name)
+        first_byte_ms = None
+        output_tokens = None
+        try:
+            last_body = None
+            last_status = 404
+            for target_url in _build_gateway_candidate_urls(gateway_url, "/messages"):
+                _bridge_error_logger.info(
+                    "FALLBACK to anthropic messages: model=%s url=%s", model_name, target_url
+                )
+                retry_remaining = 1
+                while True:
+                    with httpx.stream(
+                        "POST",
+                        target_url,
+                        headers=fwd_headers,
+                        json=anthropic_payload,
+                        timeout=300,
+                        **_route_httpx_kwargs(self.server, route, target_url),
+                    ) as response:
+                        if response.status_code == 429:
+                            last_status = response.status_code
+                            last_body = response.read().decode("utf-8", errors="replace")
+                            retry_after = response.headers.get("Retry-After")
+                            delay = _retry_after_delay_seconds(retry_after)
+                            if retry_remaining > 0 and delay > 0:
+                                retry_remaining -= 1
+                                _bridge_error_logger.warning(
+                                    "anthropic messages fallback rate limited: model=%s url=%s retry_after=%s",
+                                    model_name,
+                                    target_url,
+                                    retry_after,
+                                )
+                                time.sleep(delay)
+                                continue
+                            _record_bridge_blocking_failure(
+                                self.server,
+                                model_name=model_name,
+                                provider_id=provider_id,
+                                status_code=response.status_code,
+                                body_text=last_body,
+                                request_url=target_url,
+                                bridge_surface="codex_anthropic_messages_fallback",
+                            )
+                            self._json_with_headers(
+                                429,
+                                {"error": {"message": last_body or "anthropic messages fallback rate limited"}},
+                                extra_headers={"Retry-After": retry_after} if retry_after else None,
+                            )
+                            return
+                        if response.status_code >= 400:
+                            last_status = response.status_code
+                            last_body = response.read().decode("utf-8", errors="replace")
+                            break
+
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+
+                        for event_type, event_payload in _iter_sse_lines(response):
+                            if first_byte_ms is None:
+                                first_byte_ms = _now_ms()
+                            for event_name, response_payload in translator.process(event_type, event_payload):
+                                extracted = _extract_output_tokens(response_payload)
+                                if extracted is not None:
+                                    output_tokens = extracted
+                                self._sse(event_name, response_payload)
+                        self.close_connection = True
+                        _record_bridge_speed(
+                            model_name,
+                            started_ms=started_ms,
+                            first_byte_ms=first_byte_ms,
+                            output_tokens=output_tokens,
+                            provider_scope=getattr(self.server, "speed_scope", None),
+                            server=self.server,
+                        )
+                        return
+                    break
+            _record_bridge_blocking_failure(
+                self.server,
+                model_name=model_name,
+                provider_id=provider_id,
+                status_code=last_status,
+                body_text=last_body or "",
+                request_url=target_url if "target_url" in locals() else "",
+                bridge_surface="codex_anthropic_messages_fallback",
+            )
+            self._json(last_status, {"error": {"message": last_body or "anthropic messages fallback failed"}})
+        except Exception as exc:
+            _bridge_error_logger.error("fallback anthropic messages error: %s", exc, exc_info=True)
             self._json(502, {"error": {"message": str(exc)}})
 
 

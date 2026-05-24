@@ -41,6 +41,7 @@ def test_resolve_native_fallback_routes_finds_same_vendor_direct():
     assert routes[0]["gateway_url"] == "https://api.deepseek.com/anthropic/v1"
     assert routes[0]["gateway_key"] == "native-key"
     assert 403 in routes[0]["try_next_on"]
+    assert 524 in routes[0]["try_next_on"]
     assert "invalid_text" in routes[0]["try_next_on"]
 
 
@@ -90,6 +91,7 @@ def test_resolve_codex_responses_fallback_routes_finds_codex_provider(monkeypatc
     assert routes[0]["gateway_key"] == "native-key"
     assert routes[0]["protocol"] == "responses"
     assert 403 in routes[0]["try_next_on"]
+    assert 524 in routes[0]["try_next_on"]
 
 
 def test_responses_proxy_retries_native_fallback_on_403(monkeypatch):
@@ -183,6 +185,96 @@ def test_responses_proxy_retries_native_fallback_on_403(monkeypatch):
     ]
     assert calls[1][2]["headers"]["Authorization"] == "Bearer native-key"
     assert calls[1][2]["proxy"] == "http://proxy.example:8080"
+    assert b"response.created" in handler.wfile.getvalue()
+
+
+def test_responses_proxy_retries_native_fallback_on_cloudflare_524(monkeypatch):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, body=b"", headers=None, lines=None):
+            self.status_code = status_code
+            self._body = body
+            self.headers = headers or {"content-type": "text/html"}
+            self._lines = lines or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self._body
+
+        def iter_lines(self):
+            return iter(self._lines)
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        if len(calls) == 1:
+            return FakeResponse(524, b"<title>524: A timeout occurred</title>")
+        return FakeResponse(
+            200,
+            headers={"content-type": "text/event-stream"},
+            lines=[
+                'event: response.created',
+                'data: {"type":"response.created","response":{"id":"resp_1"}}',
+                "",
+            ],
+        )
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    monkeypatch.setattr(mms_bridge, "_write_route_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_bridge, "_record_bridge_speed", lambda *args, **kwargs: None)
+
+    raw_body = json.dumps({"model": "gpt-5.5", "input": "hi", "stream": True}).encode()
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.path = "/v1/responses"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="relay-key",
+        gateway_url="https://openai.example.com/openai",
+        model_name="gpt-5.5",
+        advertised_models=["gpt-5.5"],
+        speed_scope={},
+        route_status_paths=[],
+        provider_id="uscrsopenai",
+        provider_profile="openai",
+        reasoning_enabled=True,
+        reasoning_effort="xhigh",
+        proxy_url="",
+        no_proxy="",
+        native_fallback_routes=[{
+            "provider_id": "us-cpa-local-codex",
+            "provider_profile": "openai",
+            "gateway_url": "https://codex.example.com/v1",
+            "gateway_key": "native-key",
+            "model": "gpt-5.5",
+            "protocol": "responses",
+        }],
+    )
+    captured = {"statuses": []}
+    handler.send_response = lambda code: captured["statuses"].append(code)
+    handler.send_header = lambda *args, **kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["statuses"] == [200]
+    assert [item[1] for item in calls] == [
+        "https://openai.example.com/openai/responses",
+        "https://codex.example.com/v1/responses",
+    ]
     assert b"response.created" in handler.wfile.getvalue()
 
 

@@ -449,6 +449,188 @@ def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, 
     assert "rescue_hot_fallback" in emitted_events[0][1]["note"]
 
 
+def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(monkeypatch, tmp_path):
+    import mms_bridge
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    (config_root / "generated").mkdir(parents=True)
+    repo.mkdir()
+    (config_root / "generated" / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {
+                            "provider_id": "newapi-deepseek",
+                            "anthropic_base_url": "https://deepseek.example",
+                            "openai_base_url": "https://deepseek.example",
+                            "api_key": "sk-deepseek-test",
+                            "model_id": "deepseek-v4-flash",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeResponse:
+        status_code = 524
+        headers = {"content-type": "text/html"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return b"upstream timeout"
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=lambda *_args, **_kwargs: FakeResponse()))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+
+    raw_body = json.dumps({"model": "gpt-5.5", "input": "hi"}).encode()
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.path = "/v1/responses"
+    handler.headers = {
+        "content-length": str(len(raw_body)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(raw_body)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="relay-key",
+        gateway_url="https://relay.example/v1",
+        model_name="gpt-5.5",
+        advertised_models=["gpt-5.5"],
+        speed_scope={},
+        route_status_paths=[],
+        provider_id="codex-relay",
+        provider_profile="openai",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        proxy_url="",
+        no_proxy="",
+        native_fallback_routes=[],
+        rescue_enabled=True,
+        rescue_repo_root=str(repo),
+        rescue_config_root=str(config_root),
+        rescue_fallback_model="deepseek-v4-flash",
+        rescue_fallback_cli="codex",
+        rescue_hot_fallback_enabled=True,
+    )
+    captured = {}
+
+    def fake_anthropic_fallback(payload, model_name, gateway_url, gateway_key, _started_ms, route=None):
+        captured.update({
+            "payload": payload,
+            "model_name": model_name,
+            "gateway_url": gateway_url,
+            "gateway_key": gateway_key,
+            "route": route,
+        })
+
+    handler._do_anthropic_messages_fallback = fake_anthropic_fallback
+    handler._do_chatcompletions_fallback = lambda *_args, **_kwargs: captured.setdefault("chat_called", True)
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert captured["model_name"] == "deepseek-v4-flash"
+    assert captured["gateway_url"] == "https://deepseek.example"
+    assert captured["gateway_key"] == "sk-deepseek-test"
+    assert captured["route"]["provider_id"] == "newapi-deepseek"
+    assert captured["route"]["protocol"] == "anthropic_messages"
+    assert captured.get("chat_called") is None
+
+
+def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tmp_path):
+    import mms_bridge
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def iter_lines():
+            return iter([
+                b"event: message_start",
+                b'data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"deepseek-v4-flash"}}',
+                b"",
+                b"event: content_block_start",
+                b'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+                b"",
+                b"event: content_block_delta",
+                b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}',
+                b"",
+                b"event: content_block_stop",
+                b'data: {"type":"content_block_stop","index":0}',
+                b"",
+                b"event: message_stop",
+                b'data: {"type":"message_stop"}',
+                b"",
+            ])
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    handler = mms_bridge._ResponsesProxyHandler.__new__(mms_bridge._ResponsesProxyHandler)
+    handler.headers = {"authorization": "Bearer bridge-token"}
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        speed_scope={},
+        provider_id="codex-relay",
+        provider_profile="openai",
+        reasoning_enabled=True,
+        reasoning_effort="high",
+        proxy_url="",
+        no_proxy="",
+        route_status_paths=[],
+        rescue_enabled=True,
+        rescue_repo_root=str(tmp_path / "repo"),
+        rescue_config_root=str(tmp_path / "config"),
+    )
+    captured = {"headers": []}
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *args, **_kwargs: captured["headers"].append(args)
+    handler.end_headers = lambda: None
+
+    handler._do_anthropic_messages_fallback(
+        {"model": "deepseek-v4-flash", "instructions": "sys", "input": "hi", "max_output_tokens": 16},
+        "deepseek-v4-flash",
+        "https://deepseek.example",
+        "sk-test",
+        0,
+        route={"provider_id": "newapi-deepseek", "protocol": "anthropic_messages"},
+    )
+
+    assert captured["status"] == 200
+    assert calls[0][0] == "POST"
+    assert calls[0][1] == "https://deepseek.example/v1/messages"
+    assert calls[0][2]["headers"]["x-api-key"] == "sk-test"
+    assert calls[0][2]["json"]["model"] == "deepseek-v4-flash"
+    assert b"response.output_text.delta" in handler.wfile.getvalue()
+    assert b"ok" in handler.wfile.getvalue()
+
+
 def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, tmp_path):
     import mms_bridge
 
