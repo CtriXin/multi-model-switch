@@ -375,6 +375,68 @@ def test_launch_opencode_passes_model_ref_and_session_env(monkeypatch):
     assert captured["health_base_url"] == "http://129.146.32.12:3000/openai/v1"
 
 
+def test_launch_opencode_backend_agent_uses_headless_server(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_opencode_gateway_env",
+        lambda runtime, model_info=None: {"PATH": "/tmp/bin", "HOME": "/tmp/opencode-session"},
+    )
+
+    def fake_exec(cmd, env, once, **_kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["once"] = once
+
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+
+    mms_launchers.launch_opencode(
+        {"model": "deepseek-chat"},
+        _runtime(openai_base_url="http://129.146.32.12:3000/openai", opencode_entrypoint="serve"),
+        once=True,
+    )
+
+    assert captured["cmd"] == ["opencode", "serve", "--pure"]
+    assert captured["env"]["MMS_OPENCODE_ENTRYPOINT"] == "serve"
+    assert captured["env"]["MMS_OPENCODE_LAUNCH_MODEL"] == "mms/deepseek-chat"
+    assert captured["env"]["MMS_OPENCODE_LAUNCH_AGENT"] == "mobius-builder"
+    assert captured["once"] is True
+
+
+def test_launch_opencode_acp_uses_session_local_config_without_model_flag(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_opencode_gateway_env",
+        lambda runtime, model_info=None: {"PATH": "/tmp/bin", "HOME": "/tmp/opencode-session"},
+    )
+
+    def fake_exec(cmd, env, once, **_kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = env
+
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+
+    mms_launchers.launch_opencode(
+        {"model": "deepseek-chat"},
+        _runtime(openai_base_url="http://129.146.32.12:3000/openai", opencode_entrypoint="acp"),
+        once=False,
+    )
+
+    assert captured["cmd"] == ["opencode", "acp", "--pure"]
+    assert captured["env"]["MMS_OPENCODE_ENTRYPOINT"] == "acp"
+    assert "-m" not in captured["cmd"]
+    assert "--agent" not in captured["cmd"]
+
+
 def test_launch_opencode_heavy_omo_uses_global_opencode_config(monkeypatch):
     import mms_launchers
 
@@ -652,6 +714,12 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-builder-pro"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-builder-stable"]["mode"] == "primary"
     assert payload["agent"]["mobius-builder-stable"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-builder-pro"]["permission"]["task"]["mobius-spec-writer"] == "allow"
+    assert payload["agent"]["mobius-builder-pro"]["permission"]["task"]["mobius-spec-compliance-reviewer"] == "allow"
+    spec_route = next(route for route in runtime["opencode_routes"] if route["id"] == "spec_writer")
+    assert spec_route["protocol"] == "openai_responses"
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
@@ -735,12 +803,18 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert runtime["opencode_roster"] == "lite_pro_orchestrated"
     builder = payload["agent"]["mobius-builder-pro"]
     assert builder["permission"]["edit"] == "deny"
+    assert builder["permission"]["task"]["mobius-spec-writer"] == "allow"
+    assert builder["permission"]["task"]["mobius-spec-compliance-reviewer"] == "allow"
     assert builder["permission"]["task"]["mobius-executor-deepseek"] == "allow"
     assert builder["permission"]["task"]["mobius-explore-qwen"] == "allow"
     assert builder["permission"]["task"]["mobius-executor-qwen"] == "allow"
     assert "Do not edit files directly" in builder["prompt"]
+    assert "OpenSpec/SpecBridge-style contract" in builder["prompt"]
     assert payload["agent"]["mobius-builder-stable"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-executor-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert "do not reinterpret the architecture" in payload["agent"]["mobius-executor-deepseek"]["prompt"]
     assert payload["agent"]["mobius-executor-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-executor-qwen"]["model"].endswith("/qwen3.6-plus")
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
@@ -795,6 +869,8 @@ def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavail
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/gpt-5.4")
     assert all(
@@ -1071,7 +1147,7 @@ def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
     provider = _runtime(id="default-provider", name="Default Provider")
     captured = {}
 
-    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "opencode", "--profile", "lite-pro"])
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "opencode", "--profile", "lite-pro", "--backend-agent"])
     monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
     monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
     monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
@@ -1119,6 +1195,7 @@ def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.5", "profile": "lite_pro"}
     assert captured["runtime"]["opencode_profile"] == "lite_pro"
+    assert captured["runtime"]["opencode_entrypoint"] == "serve"
 
 
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
@@ -1404,10 +1481,10 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
 
     assert lite_pro["label"] == "5.5 Pro"
     assert orchestrated["label"] == "5.5 Multi-Agent"
-    assert "health: 1/13 healthy" in lite_pro["summary"]
+    assert "health: 1/15 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
-    assert "10 untested" in lite_pro["summary"]
-    assert "health: 1/18 healthy" in orchestrated["summary"]
+    assert "12 untested" in lite_pro["summary"]
+    assert "health: 1/20 healthy" in orchestrated["summary"]
     assert "1 degraded" in orchestrated["summary"]
-    assert "16 untested" in orchestrated["summary"]
+    assert "18 untested" in orchestrated["summary"]

@@ -9285,6 +9285,9 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
         if profile_label:
             profile_line = f"[bold]Profile:[/bold] {profile_label}\n"
+        entrypoint = _normalize_opencode_entrypoint(runtime.get("opencode_entrypoint")) or "tui"
+        if entrypoint != "tui":
+            profile_line += f"[bold]Entry:[/bold]   {entrypoint}\n"
     panel_text = (
         f"[bold]CLI:[/bold]    {cli}\n"
         f"[bold]模型:[/bold]   {model_display}\n"
@@ -9305,12 +9308,12 @@ _OPENCODE_PROFILE_OPTIONS = [
     {
         "id": "lite_pro",
         "label": "5.5 Pro",
-        "summary": "5.5 主写；国产 explore/review/fix fallback；session-local。",
+        "summary": "5.5 主写；OpenSpec contract + 国产 explore/review/fix fallback；session-local。",
     },
     {
         "id": "lite_pro_orchestrated",
         "label": "5.5 Multi-Agent",
-        "summary": "5.5 总控；多层 executor：DeepSeek→GLM→Qwen→5.4。",
+        "summary": "5.5 总控；OpenSpec contract；executor：DeepSeek→GLM→Qwen→5.4。",
     },
     {
         "id": "heavy_omo",
@@ -9347,6 +9350,36 @@ def _normalize_opencode_profile_id(value):
     return aliases.get(normalized, "")
 
 
+def _normalize_opencode_entrypoint(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "tui": "tui",
+        "interactive": "tui",
+        "ui": "tui",
+        "backend": "serve",
+        "backend_agent": "serve",
+        "headless": "serve",
+        "server": "serve",
+        "serve": "serve",
+        "acp": "acp",
+        "editor": "acp",
+        "agent_client_protocol": "acp",
+    }
+    return aliases.get(normalized, "")
+
+
+def _apply_opencode_entrypoint(runtime, entrypoint):
+    runtime = dict(runtime or {})
+    normalized = _normalize_opencode_entrypoint(entrypoint)
+    if not normalized:
+        return runtime
+    runtime["opencode_entrypoint"] = normalized
+    return runtime
+
+
 _OPENCODE_DEFAULT_MODEL_PREFERENCES = (
     "gpt-5.4",
     "gpt-5.5",
@@ -9365,6 +9398,16 @@ _OPENCODE_LITE_PRO_SPECS = (
         "key": "builder_fallback",
         "agent": "mobius-builder-stable",
         "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
+    },
+    {
+        "key": "spec_writer",
+        "agent": "mobius-spec-writer",
+        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
+    },
+    {
+        "key": "spec_compliance",
+        "agent": "mobius-spec-compliance-reviewer",
+        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
     },
     {
         "key": "explore_primary",
@@ -9595,8 +9638,8 @@ def _select_opencode_profile(use_tui=False):
             return select_channel_action_tui(
                 "OpenCode Profile",
                 [
-                    ("5.5 Pro", "fallback roster"),
-                    ("5.5 Multi-Agent", "orchestrated executor chain"),
+                    ("5.5 Pro", "OpenSpec contract + fallback roster"),
+                    ("5.5 Multi-Agent", "OpenSpec contract + executor chain"),
                     ("OMO", "global config"),
                     ("Raw", "pure fallback"),
                 ],
@@ -9645,6 +9688,9 @@ def _apply_opencode_profile(runtime, profile_id):
         runtime["opencode_agent"] = "mobius-builder-pro"
         runtime["opencode_default_agent"] = "mobius-builder-pro"
         runtime["opencode_roster"] = profile_id
+        runtime["opencode_contract_workflow"] = "openspec"
+        runtime["opencode_backend_agent_capable"] = True
+        runtime["opencode_acp_capable"] = True
         runtime["opencode_launch_preflight"] = False
         runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
         runtime["opencode_launch_fallback_agents"] = {
@@ -14113,6 +14159,8 @@ def main():
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
             f"  {current_command()} opencode --profile lite_pro  直接启动指定 OpenCode profile\n"
+            f"  {current_command()} opencode --profile lite_pro --backend-agent  启动 OpenCode headless backend server\n"
+            f"  {current_command()} opencode --profile lite_pro --opencode-entrypoint acp  启动 OpenCode ACP server\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
@@ -14141,6 +14189,13 @@ def main():
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
     parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode profile，例如 lite_pro / orchestrated / omo / raw")
+    parser.add_argument(
+        "--opencode-entrypoint",
+        choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
+        help="OpenCode 专用入口：tui 默认交互；backend/serve=headless server；acp=Agent Client Protocol server",
+    )
+    parser.add_argument("--backend-agent", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint backend")
+    parser.add_argument("--acp", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint acp")
     parser.add_argument("--lang", choices=["zh", "en"], help="临时指定 UI 语言")
     parser.add_argument("--trace", action="store_true",
                         help="启动前打印选择链路追踪信息（输出到 stderr）")
@@ -14182,6 +14237,25 @@ def main():
         parser.error(f"--profile 仅支持 OpenCode profile：lite, {valid_profiles}")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
+    requested_opencode_entrypoints = []
+    if args.opencode_entrypoint:
+        requested_opencode_entrypoints.append(args.opencode_entrypoint)
+    if args.backend_agent:
+        requested_opencode_entrypoints.append("backend")
+    if args.acp:
+        requested_opencode_entrypoints.append("acp")
+    normalized_entrypoints = {
+        _normalize_opencode_entrypoint(item)
+        for item in requested_opencode_entrypoints
+        if _normalize_opencode_entrypoint(item)
+    }
+    if len(normalized_entrypoints) > 1:
+        parser.error("OpenCode entrypoint 只能选择一个：tui / backend / acp")
+    requested_opencode_entrypoint = next(iter(normalized_entrypoints), "")
+    if requested_opencode_entrypoints and not requested_opencode_entrypoint:
+        parser.error("--opencode-entrypoint 仅支持 tui / backend / serve / headless / acp")
+    if requested_opencode_entrypoint and args.account:
+        parser.error("OpenCode entrypoint 参数不支持同时使用 --account")
 
     # --install
     if args.install:
@@ -14271,6 +14345,8 @@ def main():
         if runtime is None:
             console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
             return
+        if cli == "opencode":
+            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
         _launch_with_tracking(cli, model_info, runtime, once=once)
         return
 
@@ -14280,11 +14356,11 @@ def main():
 
     # Direct target
     target = once_target or args.target
-    if requested_opencode_profile:
+    if requested_opencode_profile or requested_opencode_entrypoint:
         if target is None:
             target = "opencode"
         elif target != "opencode":
-            parser.error("--profile 仅支持 target=opencode，例如：mms opencode --profile lite_pro")
+            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile lite_pro --backend-agent")
 
     if target:
         # Is it a scene number?
@@ -14321,6 +14397,7 @@ def main():
                     runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
                     if runtime is None:
                         return
+                    runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
                 action = confirm_launch(cli, model_info, once, runtime=runtime)
                 if action == "q":
                     return
@@ -14347,6 +14424,7 @@ def main():
             if runtime is None:
                 console.print(f"[red]opencode profile {requested_opencode_profile} 当前没有可用运行来源[/red]")
                 return
+            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
             _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice="opencode profile")
             if not check_cli_installed(cli):
                 from mms_installer import check_and_offer_install
@@ -14392,6 +14470,7 @@ def main():
                 runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
                 if runtime is None:
                     return
+                runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
@@ -14431,6 +14510,7 @@ def main():
                 runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
                 if runtime is None:
                     return
+                runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
             action = confirm_launch(cli, model_info, once, runtime=runtime)
             if action == "q":
                 return
@@ -14477,6 +14557,7 @@ def main():
             runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
             if runtime is None:
                 return
+            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
@@ -14528,6 +14609,7 @@ def main():
             runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
             if runtime is None:
                 return
+            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
         action = confirm_launch(cli, model_info, once, runtime=runtime)
         if action == "q":
             return
@@ -14565,6 +14647,7 @@ def main():
         runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
         if runtime is None:
             return
+        runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
     action = confirm_launch(cli, model_info, once, runtime=runtime)
     if action == "q":
         return

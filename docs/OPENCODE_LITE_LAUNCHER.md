@@ -6,6 +6,8 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 
 - `5.5 Pro` is the default high-confidence custom-agent lane.
 - `5.5 Multi-Agent` keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
+- Both Lite Pro profiles now include an OpenSpec/SpecBridge contract lane: `mobius-spec-writer` creates the minimal task contract, and `mobius-spec-compliance-reviewer` checks the actual diff and validation output against that contract item by item.
+- MMS can launch the same generated OpenCode config through the interactive TUI, a headless backend server (`opencode serve`), or ACP (`opencode acp`). Backend/ACP are entrypoints over the same session-local config; they do not replace MMS routing, trace, or evidence policy.
 - `OMO` keeps using the existing global OpenCode + OMO setup.
 - `Raw` is a pure fallback with no OMO and no custom agents.
 - `lite` remains supported by profile ID for compatibility, but is hidden from the selector.
@@ -23,12 +25,22 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 
 | Profile | Launch shape | Config source | Use case |
 | --- | --- | --- | --- |
-| `lite_pro` / `5.5 Pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary and named fallback agents |
-| `lite_pro_orchestrated` / `5.5 Multi-Agent` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with executor chain for implementation |
+| `lite_pro` / `5.5 Pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary, OpenSpec contract checks, and named fallback agents |
+| `lite_pro_orchestrated` / `5.5 Multi-Agent` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with OpenSpec contract and executor chain |
 | `heavy_omo` / `OMO` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
 | `raw` / `Raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
 
 Direct launch is also supported, for example `mms opencode --profile lite_pro` or `mmd opencode --profile lite_pro`.
+
+Alternative entrypoints are explicit and opt-in:
+
+```bash
+mms opencode --profile lite_pro --backend-agent
+mms opencode --profile lite_pro_orchestrated --opencode-entrypoint backend
+mms opencode --profile lite_pro --opencode-entrypoint acp
+```
+
+`--backend-agent` starts `opencode serve --pure` with the MMS-generated session-local config for SDK/WebUI/headless clients. `--opencode-entrypoint acp` starts `opencode acp --pure` for ACP-compatible editors. Neither path writes global OpenCode config.
 
 ## Lite Pro Roster
 
@@ -36,6 +48,8 @@ Direct launch is also supported, for example `mms opencode --profile lite_pro` o
 | --- | --- | --- | --- | --- |
 | `mobius-builder-pro` | primary | `gpt-5.5` | main worker | ask |
 | `mobius-builder-stable` | primary | `gpt-5.4` | launch/builder fallback | ask |
+| `mobius-spec-writer` | subagent | `gpt-5.5` via Responses | OpenSpec/SpecBridge contract writer | ask |
+| `mobius-spec-compliance-reviewer` | subagent | `gpt-5.5` via Responses | contract-vs-diff acceptance reviewer | deny |
 | `mobius-explore-glm` | subagent | `glm-5-turbo` via Anthropic | primary explorer | deny |
 | `mobius-explore-kimi` | subagent | `kimi-for-coding` via Anthropic | fallback explorer | deny |
 | `mobius-vision-mimo` | subagent | `mimo-v2.5` via direct MiMo OpenAI-compatible | primary image helper | deny |
@@ -55,12 +69,13 @@ GLM/Kimi/DeepSeek routes are cache-sensitive in the current config, so Lite Pro 
 `lite_pro_orchestrated` uses the same launch shape and route guardrails as Lite Pro, but changes the work split:
 
 - `mobius-builder-pro` / `gpt-5.5` is coordinator only: `edit=deny`, plans, delegates, inspects diffs, and accepts/rejects executor output.
+- The coordinator must create or reuse a concise OpenSpec/SpecBridge-style contract for non-trivial work before executor dispatch, then run spec-compliance review before the general release gate.
 - Primary executor chain: `mobius-executor-deepseek` → `mobius-executor-glm` → `mobius-executor-qwen` → `mobius-executor-gpt54`.
 - `mobius-explore-qwen` is available as an extra read-only Qwen explorer for broad repo/API context.
 - `mobius-vision-mimo`, `mobius-vision-kimi`, and `mobius-vision-qwen` are read-only image helpers. They are only generated when a matching image-capable route exists, so non-vision models do not falsely advertise image support.
 - Review is separated from executors: `mobius-reviewer-gpt55` is the release gate, and `mobius-reviewer-gpt54` is only a reviewer-route outage fallback. The coordinator prompt tells OpenCode not to let executor/fixer agents self-approve their own output.
 - `mobius-reviewer-mimo` is supplemental only: use it for CN/vision/counterexample critique when direct MiMo exists, then keep GPT as the final release gate.
-- Executor agents have edit/test permissions and must return changed files, validation commands, results, risks, and blockers.
+- Executor agents have edit/test permissions and must return changed files, validation commands, results, risks, and blockers. They must treat the contract packet as authoritative and return a blocker instead of reinterpreting unclear acceptance criteria.
 - If acceptance fails, the coordinator sends a bounded failure packet to the next executor instead of editing directly.
 
 Fallback is deterministic, not random. There are two layers:
@@ -97,11 +112,12 @@ When `--live` is used, the smoke also appends one route health row per tested ag
 
 MMS reads `.ai/opencode-health/latest.json` as repo-local health input only. `blocked` routes are not eligible for automatic fallback, fresh `unhealthy` routes are temporarily filtered, then route preference is deterministic: `live_healthy`, `degraded`, `untested`, stale `unhealthy`, `blocked`. Lite Pro route selection applies that health input inside each role: same model on another healthy channel first, then the role's peer model, then the existing stable GPT fallback path.
 
-The OpenCode profile menu appends compact health hints to Lite Pro profiles, such as `health: 9/9 healthy` for `lite_pro` or `health: 14/14 healthy` for `lite_pro_orchestrated`.
+The OpenCode profile menu appends compact health hints to Lite Pro profiles, such as `health: 15/15 healthy` for `lite_pro` or `health: 20/20 healthy` for `lite_pro_orchestrated`.
 
 ## Guardrails
 
 - Do not put agent roles in `model-routes.json`.
+- Do not treat OpenSpec/SpecBridge as a replacement orchestrator. It is a contract artifact that constrains executors and reviewers; MMS still owns launch/session routing and Moebius still owns closure when used.
 - Do not store API keys in OpenCode agent config; use session env vars such as `MMS_OPENCODE_API_KEY_*`.
 - Keep destructive shell, deploy, push, and external directory access behind `ask` or `deny`.
 - Keep `heavy_omo` global-config based until a separate audited OMO overlay is implemented.

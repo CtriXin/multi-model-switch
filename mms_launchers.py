@@ -10042,6 +10042,16 @@ def _opencode_runtime_bool(runtime, key, default=False):
     return bool(default)
 
 
+def _opencode_entrypoint(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    raw = str(runtime.get("opencode_entrypoint") or "tui").strip().lower().replace("-", "_")
+    if raw in {"backend", "backend_agent", "headless", "server", "serve"}:
+        return "serve"
+    if raw in {"acp", "editor", "agent_client_protocol"}:
+        return "acp"
+    return "tui"
+
+
 def _opencode_launch_preflight_enabled(runtime):
     default = _opencode_runtime_bool(runtime, "opencode_launch_preflight", False)
     return _opencode_env_bool("MMS_OPENCODE_LAUNCH_PREFLIGHT", default)
@@ -10557,6 +10567,8 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     direct_builder_task_permission = {
         "*": "deny",
         "mobius-builder-stable": "ask",
+        "mobius-spec-writer": "ask",
+        "mobius-spec-compliance-reviewer": "ask",
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
         "mobius-vision-mimo": "ask",
@@ -10571,6 +10583,8 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
     }
     orchestrator_task_permission = {
         "*": "deny",
+        "mobius-spec-writer": "allow",
+        "mobius-spec-compliance-reviewer": "allow",
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
         "mobius-explore-qwen": "ask",
@@ -10606,6 +10620,15 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "websearch": "ask",
         "external_directory": "ask",
     }
+    spec_writer_permission = {
+        **common_read_permissions,
+        "edit": "ask",
+        "bash": safe_read_bash,
+        "task": "deny",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "external_directory": "ask",
+    }
     builder_permission = {
         **common_read_permissions,
         "edit": "deny" if orchestrated else "ask",
@@ -10616,41 +10639,49 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "external_directory": "ask",
     }
     builder_prompt = (
-        "You are the orchestrator only. Do not edit files directly. First gather "
-        "context with mobius-explore-glm, mobius-explore-kimi, or mobius-explore-qwen "
-        "as needed. If the task includes images and the active model is not image-capable, "
-        "delegate visual inspection to mobius-vision-mimo, mobius-vision-kimi, or "
-        "mobius-vision-qwen before implementation. Then delegate implementation to "
-        "mobius-executor-deepseek with a "
-        "bounded task, target files, acceptance criteria, and validation commands. "
-        "Inspect the returned diff and validation evidence. If acceptance fails or "
-        "confidence is low, send the failure packet to mobius-executor-glm; if still "
-        "failing, use mobius-executor-qwen; use mobius-executor-gpt54 only as the "
-        "final stable executor. Use mobius-reviewer-gpt55 as the release gate; use "
+        "You are the orchestrator only. Do not edit files directly. For non-trivial, "
+        "architecture, product, or multi-agent work, first call mobius-spec-writer to "
+        "produce or update an OpenSpec/SpecBridge-style contract: intent, non-goals, "
+        "task slices, acceptance criteria, validation commands, and reviewer checklist. "
+        "Treat that contract as authoritative; do not let executors reinterpret the "
+        "architecture. Gather context with mobius-explore-glm, mobius-explore-kimi, or "
+        "mobius-explore-qwen as needed. If images are present, delegate visual inspection "
+        "to mobius-vision-mimo, mobius-vision-kimi, or mobius-vision-qwen before "
+        "implementation. Then delegate implementation to mobius-executor-deepseek with a "
+        "bounded packet containing target files, exact acceptance criteria, validation "
+        "commands, and blockers. Inspect the actual git diff and validation evidence, not "
+        "only executor summaries. If acceptance fails or confidence is low, send a failure "
+        "packet to mobius-executor-glm; if still failing, use mobius-executor-qwen; use "
+        "mobius-executor-gpt54 only as the final stable executor. Before release-gate "
+        "review, call mobius-spec-compliance-reviewer to check implementation against "
+        "the contract item by item. Use mobius-reviewer-gpt55 as the release gate; use "
         "mobius-reviewer-gpt54 only for reviewer-route outage. Do not let an "
         "executor/fixer self-approve its own work. When direct MiMo is available, use "
-        "mobius-reviewer-mimo for an additional CN/vision critique, not as the final gate. "
+        "mobius-reviewer-mimo for additional CN/vision critique, not as the final gate. "
         "Record which executor/reviewer was used."
     ) if orchestrated else (
-        "Primary path: explore with mobius-explore-glm; when images are present and the "
-        "active model is not image-capable, ask mobius-vision-mimo, mobius-vision-kimi, "
-        "or mobius-vision-qwen for a structured visual read; review with "
-        "mobius-reviewer-gpt55, "
-        "fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns low "
-        "confidence, misses evidence, or validation still fails, call the paired fallback "
-        "agent. When direct MiMo is available, ask mobius-reviewer-mimo for an additional "
-        "CN/vision critique, but keep GPT as the final release gate. Use "
-        "mobius-reviewer-gpt54 only for reviewer-route outage. Use "
-        "mobius-builder-stable only when the primary model/channel is suspect or the final "
-        "result remains unstable. Record which fallback was used."
+        "Primary path: for non-trivial or architecture-sensitive work, ask "
+        "mobius-spec-writer for an OpenSpec/SpecBridge-style contract before editing; "
+        "then implement against that contract. Explore with mobius-explore-glm; when "
+        "images are present and the active model is not image-capable, ask "
+        "mobius-vision-mimo, mobius-vision-kimi, or mobius-vision-qwen for a structured "
+        "visual read. Before claiming done, ask mobius-spec-compliance-reviewer to check "
+        "the implementation against the contract, then review with mobius-reviewer-gpt55 "
+        "and fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns "
+        "low confidence, misses evidence, or validation still fails, call the paired "
+        "fallback agent. When direct MiMo is available, ask mobius-reviewer-mimo for an "
+        "additional CN/vision critique, but keep GPT as the final release gate. Use "
+        "mobius-reviewer-gpt54 only for reviewer-route outage. Use mobius-builder-stable "
+        "only when the primary model/channel is suspect or the final result remains "
+        "unstable. Record which contract, fallback, and validation were used."
     )
     stable_prompt = (
         "Fallback orchestrator. Do not edit files directly. Take over only after primary "
         "orchestration fails or is low confidence. Delegate implementation to the executor "
-        "chain, inspect validation evidence, and keep scope small."
+        "chain, inspect contract compliance and validation evidence, and keep scope small."
     ) if orchestrated else (
         "Fallback builder. Take over only after primary path fails or is low confidence. "
-        "Keep scope small, preserve existing edits, validate, and report exact changed files."
+        "Keep scope small, preserve existing edits, validate against the contract, and report exact changed files."
     )
     stable_permission = builder_permission if orchestrated else fix_permission
 
@@ -10672,6 +10703,37 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "temperature": 0.2,
             "permission": stable_permission,
             "prompt": stable_prompt,
+        },
+        "mobius-spec-writer": {
+            "description": "OpenSpec/SpecBridge contract writer for non-trivial work",
+            "mode": "subagent",
+            "model": _agent_model("mobius-spec-writer"),
+            "variant": "high",
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": spec_writer_permission,
+            "prompt": (
+                "Create or update the minimal OpenSpec/SpecBridge-style contract for "
+                "this task. Prefer existing openspec/ or .ai/plan conventions; do not "
+                "invent a global framework. Capture intent, non-goals, task slices, "
+                "acceptance criteria, validation commands, changed-file boundaries, and "
+                "blockers. Keep it short enough for executors to follow exactly."
+            ),
+        },
+        "mobius-spec-compliance-reviewer": {
+            "description": "Read-only reviewer that checks implementation against the spec contract",
+            "mode": "subagent",
+            "model": _agent_model("mobius-spec-compliance-reviewer", _agent_model("mobius-reviewer-gpt55")),
+            "variant": "high",
+            "temperature": 0.1,
+            "steps": 10,
+            "permission": read_only_permission,
+            "prompt": (
+                "Review only spec compliance. Compare the OpenSpec/SpecBridge contract, "
+                "acceptance criteria, git diff, and validation output item by item. Return "
+                "PASS/FAIL/UNKNOWN for each criterion, then list blockers and evidence gaps. "
+                "Do not perform general style review and do not edit files."
+            ),
         },
         "mobius-explore-glm": {
             "description": "Lite Pro primary read-only explorer",
@@ -10710,7 +10772,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "permission": read_only_permission,
             "prompt": (
                 "Review as the release gate. Lead with bugs, regressions, missing tests, "
-                "and evidence gaps. Do not self-approve executor/fixer output. No edits."
+                "and evidence gaps. Confirm spec-compliance review ran when a contract exists. Do not self-approve executor/fixer output. No edits."
             ),
         },
         "mobius-reviewer-gpt54": {
@@ -10800,10 +10862,11 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         }
     if orchestrated:
         executor_prompt = (
-            "Implement only the assigned scope. Edit files directly if needed, but do "
-            "not broaden design or start unrelated refactors. Run listed validation "
-            "commands when available. Return changed files, commands, results, risks, "
-            "and any blocker."
+            "Implement only the assigned scope from the contract packet. Edit files "
+            "directly if needed, but do not reinterpret the architecture, broaden design, "
+            "or start unrelated refactors. If acceptance criteria are unclear, return a "
+            "blocker instead of guessing. Run listed validation commands when available. "
+            "Return changed files, commands, results, risks, and any blocker."
         )
         agents.update({
             "mobius-executor-deepseek": {
@@ -11115,12 +11178,17 @@ def _opencode_global_omo_env(runtime):
 
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
-    profile = str((runtime or {}).get("opencode_profile") or "lite").strip().lower() or "lite"
-    if profile in {"heavy", "heavy_omo", "omo"} or (runtime or {}).get("opencode_use_global_config"):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    profile = str(runtime.get("opencode_profile") or "lite").strip().lower() or "lite"
+    entrypoint = _opencode_entrypoint(runtime)
+    if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
         env = _opencode_global_omo_env(runtime)
+        env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
         cmd = ["opencode"]
-        agent = str((runtime or {}).get("opencode_agent") or "").strip()
-        if agent:
+        if entrypoint in {"serve", "acp"}:
+            cmd.append(entrypoint)
+        agent = str(runtime.get("opencode_agent") or "").strip()
+        if agent and entrypoint == "tui":
             cmd += ["--agent", agent]
         _exec_or_run(cmd, env, once)
         return
@@ -11156,13 +11224,17 @@ def launch_opencode(model_info, runtime, once=False):
                 "opencode_launch_route": launch_model_ref,
             },
         )
+    env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
     cmd = ["opencode"]
+    if entrypoint in {"serve", "acp"}:
+        cmd.append(entrypoint)
     if runtime.get("opencode_pure", True) is not False:
         cmd.append("--pure")
     agent = str(launch_agent or runtime.get("opencode_agent", OPENCODE_LITE_DEFAULT_AGENT) or "").strip()
-    if agent:
+    if agent and entrypoint == "tui":
         cmd += ["--agent", agent]
-    cmd += ["-m", launch_model_ref]
+    if entrypoint == "tui":
+        cmd += ["-m", launch_model_ref]
     _exec_or_run(cmd, env, once)
 
 
