@@ -1000,7 +1000,7 @@ def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep-session-start.sh" in disabled_commands
-    assert not any("nsr-" in command or "looop" in command for command in disabled_commands)
+    assert not any(Path(command).name.startswith("nsr-") or "looop" in command for command in disabled_commands)
 
     enabled = mms_launchers._build_claude_session_settings(base_settings, enable_nsr=True)
     enabled_hooks = enabled["hooks"]
@@ -1046,7 +1046,7 @@ def test_build_codex_session_hooks_respects_session_nsr_toggle():
         for item in group.get("hooks", [])
     ]
     assert "/tmp/keep.sh" in disabled_commands
-    assert not any("nsr-" in command or "bugloop" in command for command in disabled_commands)
+    assert not any(Path(command).name.startswith("nsr-") or "bugloop" in command for command in disabled_commands)
 
     enabled = mms_launchers._build_codex_session_hooks(base_hooks, enable_nsr=True)
     enabled_hooks = enabled["hooks"]

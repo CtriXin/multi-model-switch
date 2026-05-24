@@ -38,7 +38,7 @@ config.toml -> override.toml -> preferences.toml allowlist -> confirm screen cha
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
-nsr_mode = "disable"          # enable | disable
+nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
 
@@ -78,7 +78,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
-| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `disable` |
+| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `enable` |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
@@ -170,6 +170,6 @@ Common roots:
 ~/.mms/agent-packs/oh-my-claudecode
 ```
 
-Passive assets are available naturally in MMS-launched sessions. Active hooks such as `NSR`, `ECC`, and `OMC` remain opt-in per launch or via allowlisted preferences, so install-time bundling does not silently change long-running agent behavior.
+Passive assets are available naturally in MMS-launched sessions. NSR is also enabled by default for MMS-managed Claude/Codex sessions, but remains session-local and can be disabled per launch or via `nsr_mode = "disable"`. Heavier agent packs such as `ECC` and `OMC` remain opt-in.
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.

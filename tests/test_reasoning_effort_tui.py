@@ -27,7 +27,7 @@ def test_confirm_tui_thinking_and_effort_defaults():
     assert confirm_tui.__kwdefaults__["reasoning_effort_default"] == "high"
     assert confirm_tui.__kwdefaults__["ecc_enabled_default"] is False
     assert confirm_tui.__kwdefaults__["agent_pack_default"] == "none"
-    assert confirm_tui.__kwdefaults__["nsr_enabled_default"] is False
+    assert confirm_tui.__kwdefaults__["nsr_enabled_default"] is True
 
 
 def test_confirm_profile_capabilities_read_mimo_thinking(monkeypatch, tmp_path):

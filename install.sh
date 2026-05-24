@@ -28,7 +28,7 @@ RESOLVED_INSTALL_REF=""
 INSTALL_CHANNEL="latest-tag"
 LATEST_TAG_CACHE=""
 LATEST_RELEASE_TAG_CACHE=""
-DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.2.0}"
+DEFAULT_INSTALL_FALLBACK_TAG="${MMS_INSTALL_FALLBACK_TAG:-v3.2.1}"
 BRAINKEEPER_DEFAULT_REF="${BRAINKEEPER_DEFAULT_REF:-${MINDKEEPER_DEFAULT_REF:-v2.4.1}}"
 BRAINKEEPER_INSTALL_REF="${BRAINKEEPER_INSTALL_REF:-${MINDKEEPER_INSTALL_REF:-}}"
 # Legacy env names remain accepted by installer aliases and downstream scripts.
@@ -259,7 +259,7 @@ print_bundled_session_asset_status() {
             web-access) label="web-access"; path="$MMS_HOME/vendor/web-access"; mode="$(t "默认可用" "available by default")" ;;
             weber) label="weber"; path="$MMS_HOME/vendor/weber"; mode="$(t "默认可用" "available by default")" ;;
             agent-browser) label="agent-browser"; path="$MMS_HOME/vendor/agent-browser"; mode="$(t "Codex/Antigravity 默认可用" "available by default for Codex/Antigravity")" ;;
-            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-builtin-hook.py"; mode="$(t "内建但默认关闭；只在本 session 开启 hook" "built in but default off; hooks only when enabled for this session")" ;;
+            nsr) label="NSR"; path="$MMS_HOME/hooks/nsr-builtin-hook.py"; mode="$(t "默认开启；仍只在 MMS session 注入 hook" "enabled by default; hooks remain MMS-session-local")" ;;
         esac
         if bundled_session_asset_present "$asset"; then
             echo "✓ $label: $path ($mode)"
@@ -376,7 +376,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建但默认关闭" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in but default off")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -736,13 +736,13 @@ prompt_optional_install_choices() {
         echo "Bundled session mode"
         echo "  Caveman, TOON, token-saver, xmem, and the Web automation bundle ship inside MMS as pinned session assets."
         echo "  Web automation bundle = weber router + web-access logged-in Chrome + agent-browser headless CLI."
-        echo "  NSR is built in too, but stays default-off until enabled for the current session."
+        echo "  NSR is built in too and is enabled by default for MMS-managed Claude/Codex sessions."
         echo "  MMS-launched Claude/Codex can expose them per session without touching your global hooks or config."
     else
         echo "内建 session 模式"
         echo "  Caveman、TOON、token-saver、xmem 和 Web automation bundle 会随 MMS 一起作为内建 session 资产提供。"
         echo "  Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。"
-        echo "  NSR 也已内建，但默认关闭，只在当前 session 开启时注入 hook。"
+        echo "  NSR 也已内建，并对 MMS-managed Claude/Codex session 默认开启。"
         echo "  通过 MMS 启动的 Claude/Codex 可按 session 暴露这些能力，不会改你的全局 hooks 或配置。"
     fi
 
@@ -3780,7 +3780,7 @@ if [ "$INSTALL_OMC" -eq 1 ]; then
 fi
 
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
-echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）；NSR 内建但默认关闭；全部按 session 注入，不改全局 hooks/config。" "Install includes Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless); NSR is built in but default off; all are injected per session without changing global hooks/config.")"
+echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Install includes Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless); NSR is built in and enabled by default; all are injected per session without changing global hooks/config.")"
 
     if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
@@ -3955,7 +3955,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
-    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供；NSR 内建但默认关闭；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS; NSR is built in but default off; all are injected per session without global hooks/config writes.")"
+    echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS; NSR is built in and enabled by default; all are injected per session without global hooks/config writes.")"
     echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
     echo ""
 

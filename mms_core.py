@@ -149,7 +149,7 @@ PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
-nsr_mode = "disable"          # enable | disable
+nsr_mode = "enable"           # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
 
@@ -11435,7 +11435,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             has_caveman=has_caveman,
             caveman_enabled_default=str(runtime_runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
             has_nsr=has_nsr,
-            nsr_enabled_default=str(runtime_runtime.get("nsr_mode", "disable")).strip().lower() == "enable",
+            nsr_enabled_default=str(runtime_runtime.get("nsr_mode", "enable")).strip().lower() == "enable",
             has_ecc=has_ecc,
             ecc_enabled_default=False,
             has_omc=has_omc,

@@ -2984,19 +2984,19 @@ def _nsr_available_for_cli(cli_name):
     return os.path.isfile(wrapper) and bool(_resolve_nsr_root() or os.path.isfile(_NSR_BUILTIN_HOOK))
 
 
-def _normalize_nsr_mode(value, default="disable"):
+def _normalize_nsr_mode(value, default="enable"):
     raw = str(value or "").strip().lower()
     if raw in {"", "inherit", "default", "auto"}:
-        return default if default in {"enable", "disable"} else "disable"
+        return default if default in {"enable", "disable"} else "enable"
     if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
         return "enable"
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return "disable"
-    return default if default in {"enable", "disable"} else "disable"
+    return default if default in {"enable", "disable"} else "enable"
 
 
 def _runtime_nsr_enabled(runtime):
-    return _normalize_nsr_mode((runtime or {}).get("nsr_mode", "disable")) == "enable"
+    return _normalize_nsr_mode((runtime or {}).get("nsr_mode", "enable")) == "enable"
 
 
 def _normalize_caveman_mode(value, default="disable"):

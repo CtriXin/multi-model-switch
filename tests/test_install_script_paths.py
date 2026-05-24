@@ -272,7 +272,7 @@ def test_install_script_mentions_bundled_session_assets():
 
     assert "Bundled session assets" in text
     assert "xmem" in text
-    assert "NSR is built in but default off" in text
+    assert "NSR is built in and enabled by default" in text
     assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
 
 

@@ -3276,7 +3276,7 @@ def confirm_tui(
     has_caveman=False,
     caveman_enabled_default=False,
     has_nsr=False,
-    nsr_enabled_default=False,
+    nsr_enabled_default=True,
     has_ecc=False,
     ecc_enabled_default=False,
     has_omc=False,
