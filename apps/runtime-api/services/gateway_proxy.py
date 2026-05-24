@@ -249,6 +249,7 @@ def _build_upstream_headers(provider: GatewayProvider, key: GatewayUpstreamKey) 
     headers = {
         "Authorization": f"Bearer {key.apiKey}",
         "Content-Type": "application/json",
+        "User-Agent": "MMS/1.0",
     }
     if provider.apiType == "openrouter":
         if provider.httpReferer:

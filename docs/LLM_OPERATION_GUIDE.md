@@ -128,6 +128,19 @@ Cache-sensitive dual-protocol rule:
 - If a route supports `anthropic_messages`, keep Claude-style traffic on Anthropic `/v1/messages` by default.
 - Treat OpenAI `/v1/chat/completions` as an audited fallback with a visible fallback reason, not a silent default.
 
+Provider edge compatibility note:
+
+- MMS-owned HTTP probes, diagnostics, and relays must send a stable `User-Agent`
+  such as `MMS/1.0` unless they are intentionally preserving a real client
+  user-agent (`claude-cli`, `codex_cli_rs`, `opencode`, etc.).
+- Do not interpret Cloudflare `HTTP 403` with body `error code: 1010` as an
+  upstream provider/model failure until the same request is retried with a
+  non-default Python user-agent and checked against server logs.
+- This matters for NewAPI relay channels: Python's default `urllib` user-agent
+  can be challenged before the request reaches NewAPI, while the same
+  `/v1/messages?beta=true` call succeeds through `claude-cli`, `node`, or
+  `MMS/1.0`.
+
 ## Error Message Changes
 
 MMS errors should help the user identify the failing layer:

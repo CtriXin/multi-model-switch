@@ -38,6 +38,7 @@ from mms_core import (
     load_config,
     resolve_provider_context,
 )
+from mms_provider_profiles import ensure_default_user_agent
 
 _patch_fake_httpx(httpx)
 from mms_launchers import _anthropic_base_url, _claude_gateway_env, _openai_base_url
@@ -182,7 +183,7 @@ def _fetch_openai_model_catalog(provider: dict[str, Any]) -> list[dict[str, Any]
     if probe.get("models") is None:
         return []
     url = probe.get("working_url") or _openai_base_url(provider)
-    headers = {"Authorization": f"Bearer {provider.get('openai_api_key') or provider.get('api_key', '')}"}
+    headers = ensure_default_user_agent({"Authorization": f"Bearer {provider.get('openai_api_key') or provider.get('api_key', '')}"})
     try:
         resp = httpx.get(f"{url}/models", headers=headers, timeout=HTTP_TIMEOUT)
         resp.raise_for_status()
@@ -352,7 +353,7 @@ def _check_anthropic_probe(provider: dict[str, Any], probe_model: str) -> CheckR
 
 def _openai_chat_check(provider: dict[str, Any], model: str) -> CheckResult:
     url = _openai_base_url(provider)
-    headers = {"Authorization": f"Bearer {provider.get('openai_api_key') or provider.get('api_key', '')}"}
+    headers = ensure_default_user_agent({"Authorization": f"Bearer {provider.get('openai_api_key') or provider.get('api_key', '')}"})
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": PROMPT}],
@@ -377,6 +378,7 @@ def _anthropic_chat_check(provider: dict[str, Any], model: str, base_url: str | 
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
+    ensure_default_user_agent(headers)
     payload = {
         "model": model,
         "max_tokens": 1,
@@ -409,6 +411,7 @@ def _resolve_anthropic_route(provider: dict[str, Any], probe_model: str, timeout
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
+    ensure_default_user_agent(headers)
     url = detect_working_base_url(configured.rstrip("/"), "/v1/messages", headers, body=body, timeout=timeout)
     if url:
         return url, "probed"
@@ -448,6 +451,7 @@ def _claude_protocol_check(provider: dict[str, Any], model: str, route: ClaudeRo
                 "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json",
             }
+            ensure_default_user_agent(headers)
             payload = {
                 "model": "claude-sonnet-4-6",
                 "max_tokens": 1,

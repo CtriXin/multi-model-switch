@@ -20,6 +20,7 @@ _USER_PROFILE_BASENAMES = (
     "provider-profiles.json",
     "model-profiles.json",
 )
+DEFAULT_HTTP_USER_AGENT = "MMS/1.0"
 
 
 def _read_json(path: str) -> dict[str, Any]:
@@ -80,6 +81,24 @@ def _clean(value: Any) -> str:
 
 def _lower(value: Any) -> str:
     return _clean(value).lower()
+
+
+def default_http_user_agent() -> str:
+    """Stable default for MMS-owned HTTP probes/relays.
+
+    Some relay front doors challenge Python's default urllib/httpx user agents
+    before the request reaches the provider. Keep this explicit and overridable.
+    """
+    return _clean(os.environ.get("MMS_HTTP_USER_AGENT")) or DEFAULT_HTTP_USER_AGENT
+
+
+def ensure_default_user_agent(headers: dict[str, str]) -> dict[str, str]:
+    """Set a safe MMS User-Agent unless the caller/client already supplied one."""
+    if not isinstance(headers, dict):
+        return headers
+    if not any(_lower(key) == "user-agent" for key in headers):
+        headers["User-Agent"] = default_http_user_agent()
+    return headers
 
 
 def _normalize_model(model_name: Any) -> str:
@@ -437,6 +456,7 @@ def apply_profile_auth_headers(
     """Apply profile-defined auth headers in place. Return profile id."""
     if not isinstance(headers, dict):
         return ""
+    ensure_default_user_agent(headers)
     profile_id, profile = resolve_provider_profile(
         runtime=runtime,
         provider_id=provider_id,

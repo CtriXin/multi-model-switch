@@ -29,6 +29,8 @@ try:
 except ImportError:
     _httpx = None
 
+from mms_provider_profiles import ensure_default_user_agent
+
 Table = Text = None
 
 
@@ -89,7 +91,7 @@ async def _fetch_models_live(key: str, base_url: str, models_path: str) -> list[
     try:
         async with _httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             r = await c.get(base_url + models_path,
-                            headers={"Authorization": f"Bearer {key}"})
+                            headers=ensure_default_user_agent({"Authorization": f"Bearer {key}"}))
             if r.status_code == 200:
                 data = r.json().get("data", [])
                 return [m.get("id", "") for m in data if m.get("id")]
@@ -272,8 +274,10 @@ async def _anthropic_usage(token: str, account: dict | None = None) -> dict | No
         async with _httpx.AsyncClient(transport=transport, timeout=10) as c:
             r = await c.get(
                 "https://api.anthropic.com/api/oauth/usage",
-                headers={"Authorization": f"Bearer {token}",
-                         "anthropic-beta": "oauth-2025-04-20"},
+                headers=ensure_default_user_agent({
+                    "Authorization": f"Bearer {token}",
+                    "anthropic-beta": "oauth-2025-04-20",
+                }),
             )
             if r.status_code == 200:
                 return r.json()
@@ -520,7 +524,7 @@ async def _check_provider_endpoint(
     """Returns (status_label, detail)."""
     if not _httpx:
         return "N/A", "缺少 httpx"
-    h = {"Authorization": f"Bearer {key}"}
+    h = ensure_default_user_agent({"Authorization": f"Bearer {key}"})
     try:
         async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
             if check_type == "balance":

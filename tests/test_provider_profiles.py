@@ -36,6 +36,23 @@ def test_mimo_anthropic_profile_uses_api_key_and_thinking_toggle(monkeypatch, tm
     assert "output_config" not in payload
     assert headers["api-key"] == "sk-mimo"
     assert headers["Authorization"] == "Bearer sk-mimo"
+    assert headers["User-Agent"] == profiles.DEFAULT_HTTP_USER_AGENT
+
+
+def test_auth_headers_preserve_existing_user_agent(monkeypatch, tmp_path):
+    profiles = _profiles(monkeypatch, tmp_path)
+    headers = {"User-Agent": "claude-cli/2.1.148"}
+
+    profiles.apply_profile_auth_headers(
+        headers,
+        protocol="anthropic_messages",
+        api_key="sk-test",
+        provider_id="newapi-personal-tokyo",
+        base_url="https://newapi.example/v1",
+        model_name="kimi-k2.6",
+    )
+
+    assert headers["User-Agent"] == "claude-cli/2.1.148"
 
 
 def test_mimo_openai_profile_uses_official_token_parameter(monkeypatch, tmp_path):

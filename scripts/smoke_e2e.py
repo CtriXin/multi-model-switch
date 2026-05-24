@@ -37,6 +37,7 @@ from mms_core import (
 )
 from mms_fake_upstream import patch_httpx_module as _patch_fake_httpx
 from mms_launchers import _is_gpt_model, _openai_base_url, _resolve_anthropic_base_url
+from mms_provider_profiles import ensure_default_user_agent
 
 _patch_fake_httpx(httpx)
 
@@ -83,6 +84,7 @@ def _anthropic_request(base_url: str, api_key: str, model: str) -> tuple[bool, i
         "x-api-key": api_key,
         "Authorization": f"Bearer {api_key}",
     }
+    ensure_default_user_agent(headers)
     payload = {
         "model": model,
         "max_tokens": 16,

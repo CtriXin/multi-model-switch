@@ -1407,11 +1407,20 @@ def _runtime_httpx_request(method, url, *, runtime=None, follow_redirects=False,
     _ensure_httpx()
     if httpx is None:
         raise RuntimeError("missing httpx")
+    request_kwargs = dict(kwargs)
+    try:
+        from mms_provider_profiles import ensure_default_user_agent
+        headers = request_kwargs.get("headers") or {}
+        if not isinstance(headers, dict):
+            headers = dict(headers)
+        request_kwargs["headers"] = ensure_default_user_agent(headers)
+    except Exception:
+        request_kwargs = kwargs
     if _fake_upstream_enabled() and not _fake_upstream_is_local_url(url):
-        return _fake_httpx_response(httpx, method, url, **kwargs)
+        return _fake_httpx_response(httpx, method, url, **request_kwargs)
     transport = httpx.HTTPTransport(**_runtime_httpx_kwargs(runtime, target_url=url))
     with httpx.Client(transport=transport, follow_redirects=follow_redirects) as client:
-        return client.request(method, url, **kwargs)
+        return client.request(method, url, **request_kwargs)
 
 
 _SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}

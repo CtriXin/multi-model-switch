@@ -10,6 +10,8 @@ import json
 import os
 import urllib.error
 import urllib.request
+
+from mms_provider_profiles import ensure_default_user_agent
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -249,7 +251,7 @@ def openrouter_headers(api_key: str = "") -> dict[str, str]:
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    return headers
+    return ensure_default_user_agent(headers)
 
 
 def openrouter_get_json(

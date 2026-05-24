@@ -992,6 +992,8 @@ def test_runtime_httpx_request_prefers_ipv4(monkeypatch):
     assert calls["transport_kwargs"]["proxy"] == "http://127.0.0.1:7890"
     assert calls["transport_kwargs"]["trust_env"] is False
     assert calls["transport_kwargs"]["local_address"] == "0.0.0.0"
+    assert calls["request_kwargs"]["headers"]["Authorization"] == "Bearer sk-test"
+    assert calls["request_kwargs"]["headers"]["User-Agent"] == "MMS/1.0"
 
 
 def test_runtime_httpx_request_disables_ambient_env_for_official_anthropic(monkeypatch):
@@ -1036,6 +1038,7 @@ def test_runtime_httpx_request_disables_ambient_env_for_official_anthropic(monke
     assert response.status_code == 200
     assert calls["transport_kwargs"]["trust_env"] is False
     assert "proxy" not in calls["transport_kwargs"]
+    assert calls["request_kwargs"]["headers"]["User-Agent"] == "MMS/1.0"
 
 
 def test_runtime_httpx_request_keeps_existing_env_behavior_for_non_anthropic_direct_runtime(monkeypatch):
