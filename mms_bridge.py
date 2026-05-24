@@ -1140,12 +1140,13 @@ def _record_bridge_blocking_failure(
                 provider_id or getattr(server, "provider_id", ""),
                 status_code,
             )
-            fallback_model = str(getattr(server, "rescue_fallback_model", "") or "").strip()
+            fallback = _current_rescue_fallback(server)
+            fallback_model = str(fallback.get("model") or "").strip()
             if fallback_model:
                 handover = write_fallback_handover(
                     payload,
                     fallback_model=fallback_model,
-                    fallback_cli=str(getattr(server, "rescue_fallback_cli", "") or "").strip(),
+                    fallback_cli=str(fallback.get("cli") or getattr(server, "rescue_fallback_cli", "") or "").strip(),
                     mode=fallback_mode,
                     automatic_model_call=bool(automatic_model_call),
                 )
@@ -1160,12 +1161,26 @@ def _record_bridge_blocking_failure(
         return None
 
 
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
 def _rescue_hot_fallback_enabled(server):
     raw = str(os.environ.get("MMS_RESCUE_HOT_FALLBACK", "") or "").strip().lower()
+    fallback = _current_rescue_fallback(server)
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return bool(getattr(server, "rescue_enabled", False)) and bool(fallback.get("model"))
     if raw in {"0", "false", "no", "off", "disable", "disabled"}:
         return False
-    fallback = _current_rescue_fallback(server)
-    return bool(getattr(server, "rescue_enabled", False)) and bool(fallback.get("model"))
+    return (
+        bool(getattr(server, "rescue_enabled", False))
+        and bool(fallback.get("model"))
+        and bool(fallback.get("hot_fallback_enabled"))
+    )
 
 
 def _rescue_config_root(server):
@@ -1186,9 +1201,11 @@ def _read_rescue_fallback_config(config_root):
     except (OSError, tomllib.TOMLDecodeError, TypeError):
         return {"model": "", "cli": ""}
     rescue_cfg = cfg.get("rescue") if isinstance(cfg.get("rescue"), dict) else {}
+    hot_value = rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback", False))
     return {
         "model": str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip(),
         "cli": str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip(),
+        "hot_fallback_enabled": _truthy(hot_value),
     }
 
 
@@ -1200,6 +1217,7 @@ def _current_rescue_fallback(server):
     return {
         "model": str(getattr(server, "rescue_fallback_model", "") or os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip(),
         "cli": str(getattr(server, "rescue_fallback_cli", "") or os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip(),
+        "hot_fallback_enabled": bool(getattr(server, "rescue_hot_fallback_enabled", False)),
     }
 
 
@@ -1279,6 +1297,7 @@ def _configure_bridge_rescue(server):
     server.rescue_config_root = str(os.environ.get("MMS_RESCUE_CONFIG_ROOT") or "").strip() or None
     server.rescue_fallback_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
     server.rescue_fallback_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+    server.rescue_hot_fallback_enabled = _truthy(os.environ.get("MMS_RESCUE_HOT_FALLBACK"))
 
 
 def _strip_cache_control(payload):
@@ -4593,6 +4612,7 @@ def codex_chatcompletions_bridge(
     no_proxy="",
     rescue_fallback_model="",
     rescue_fallback_cli="",
+    rescue_hot_fallback_enabled=None,
 ):
     """Local bridge for Codex: translates /v1/responses → /v1/chat/completions.
 
@@ -4623,6 +4643,8 @@ def codex_chatcompletions_bridge(
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
     if rescue_fallback_cli:
         server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
+    if rescue_hot_fallback_enabled is not None:
+        server.rescue_hot_fallback_enabled = bool(rescue_hot_fallback_enabled)
     server.session_input_tokens = 0
     server.session_output_tokens = 0
     server.session_request_count = 0
@@ -4662,6 +4684,7 @@ def codex_responses_bridge(
     native_fallback_routes=None,
     rescue_fallback_model="",
     rescue_fallback_cli="",
+    rescue_hot_fallback_enabled=None,
 ):
     _ensure_httpx()
     if httpx is None:
@@ -4688,6 +4711,8 @@ def codex_responses_bridge(
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
     if rescue_fallback_cli:
         server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
+    if rescue_hot_fallback_enabled is not None:
+        server.rescue_hot_fallback_enabled = bool(rescue_hot_fallback_enabled)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -4730,6 +4755,7 @@ def gateway_claude_bridge(
     vision_sidecar=None,
     rescue_fallback_model="",
     rescue_fallback_cli="",
+    rescue_hot_fallback_enabled=None,
 ):
     """Local proxy for gateway mode: translates /v1/responses → /v1/messages,
     then forwards to the real gateway so gateways that only support Messages API work correctly.
@@ -4775,6 +4801,8 @@ def gateway_claude_bridge(
         server.rescue_fallback_model = str(rescue_fallback_model or "").strip()
     if rescue_fallback_cli:
         server.rescue_fallback_cli = str(rescue_fallback_cli or "").strip()
+    if rescue_hot_fallback_enabled is not None:
+        server.rescue_hot_fallback_enabled = bool(rescue_hot_fallback_enabled)
     server._sticky_floor = None
     server._sticky_remaining = 0
     server._last_level = "heavy"  # 默认 tier

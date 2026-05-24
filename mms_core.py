@@ -5140,6 +5140,11 @@ def _rescue_default_fallback(cfg):
     }
 
 
+def _rescue_hot_fallback_enabled_cfg(cfg):
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    return bool(_pref_bool(rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback"))))
+
+
 def _set_rescue_default_fallback(cfg, *, model="", cli=""):
     cfg = cfg if isinstance(cfg, dict) else {}
     rescue_cfg = cfg.setdefault("rescue", {})
@@ -5156,7 +5161,22 @@ def _set_rescue_default_fallback(cfg, *, model="", cli=""):
     else:
         rescue_cfg.pop("fallback_model", None)
         rescue_cfg.pop("fallback_cli", None)
+        rescue_cfg.pop("hot_fallback_enabled", None)
+        rescue_cfg.pop("enable_hot_fallback", None)
     return cfg
+
+
+def _set_rescue_hot_fallback_enabled(cfg, enabled=False):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    rescue_cfg = cfg.setdefault("rescue", {})
+    has_model = bool(str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip())
+    if not has_model:
+        rescue_cfg.pop("hot_fallback_enabled", None)
+        rescue_cfg.pop("enable_hot_fallback", None)
+        return cfg, False
+    rescue_cfg.pop("enable_hot_fallback", None)
+    rescue_cfg["hot_fallback_enabled"] = bool(enabled)
+    return cfg, bool(enabled)
 
 
 def _latest_rescue_hot_fallback_event():
@@ -5187,7 +5207,7 @@ def _format_rescue_hot_fallback_event(event):
     return " · ".join(parts) if parts else "-"
 
 
-def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None):
+def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_event=None, hot_fallback_enabled=False):
     """Build the first Rescue settings page before drilling into packet history."""
     events = list(rescue_events or [])
     latest = events[0] if events else {}
@@ -5204,8 +5224,10 @@ def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_ev
     else:
         latest_line = "-"
     packet_summary = f"{len(events)} 个 packet" if events else "没有 packet"
+    has_default = bool(str(default_label or "").strip() and str(default_label or "").strip() != "未设置")
     info_lines = [
         ("全局默认", str(default_label or "未设置")),
+        ("Hot fallback", "开启" if hot_fallback_enabled and has_default else "关闭"),
         ("生效范围", "MMS 全局默认；bridge 失败时读取"),
         ("触发时机", "429 / 503 / context / provider failure"),
         ("最近失败", f"{packet_summary} · {latest_line}" if latest else packet_summary),
@@ -5217,6 +5239,13 @@ def _rescue_landing_tui_payload(default_label, rescue_events, latest_fallback_ev
         ("manual_default", "手动输入 fallback model"),
         ("clear_default", "清除全局默认 fallback"),
     ]
+    if has_default:
+        actions.append(
+            (
+                "disable_hot_fallback" if hot_fallback_enabled else "enable_hot_fallback",
+                "关闭 hot fallback（只记录 handoff）" if hot_fallback_enabled else "开启 hot fallback（当前会话热切）",
+            )
+        )
     if events:
         actions.append(("view_packets", "查看最近失败 / rescue packet"))
     actions.extend(
@@ -5285,7 +5314,7 @@ def _print_settings_error_report(title, exc):
     )
 
 
-def _rescue_default_fallback_report_payload(model, *, cleared=False):
+def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False):
     if cleared:
         return (
             _L("全局 fallback 已清除", "Global fallback cleared"),
@@ -5299,11 +5328,37 @@ def _rescue_default_fallback_report_payload(model, *, cleared=False):
         _L("全局 fallback 已设置", "Global fallback set"),
         [
             ("Model", model or "-"),
+            ("Hot fallback", _L("开启", "on") if hot_fallback_enabled else _L("关闭", "off")),
             (_L("保存位置", "saved at"), "[rescue].fallback_model"),
             (_L("生效方式", "applies"), "bridge failure -> model-routes.json"),
             (_L("安全边界", "safety"), "no global OAuth"),
         ],
-        _L("真实 failure 会先写 rescue packet，再尝试该 routed model。", "Real failures write a rescue packet before trying this routed model."),
+        (
+            _L("真实 failure 会先写 rescue packet，再尝试该 routed model。", "Real failures write a rescue packet before trying this routed model.")
+            if hot_fallback_enabled
+            else _L("默认只记录 rescue / fallback handoff；开启 hot fallback 后才会自动模型调用。", "By default MMS records rescue / fallback handoff only; automatic model calls require hot fallback to be enabled.")
+        ),
+    )
+
+
+def _rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True):
+    if enabled and not has_default:
+        return (
+            _L("无法开启 hot fallback", "Cannot enable hot fallback"),
+            [
+                (_L("原因", "reason"), _L("请先设置全局 fallback model", "Set a global fallback model first")),
+                (_L("安全边界", "safety"), "no global OAuth"),
+            ],
+            "",
+        )
+    return (
+        _L("hot fallback 已开启", "hot fallback enabled") if enabled else _L("hot fallback 已关闭", "hot fallback disabled"),
+        [
+            ("Hot fallback", _L("开启", "on") if enabled else _L("关闭", "off")),
+            (_L("前置条件", "requires"), "[rescue].fallback_model"),
+            (_L("默认行为", "default"), _L("关闭时只记录 rescue / handoff", "off means rescue / handoff only")),
+        ],
+        _L("开关保存到 [rescue].hot_fallback_enabled。", "Switch is saved to [rescue].hot_fallback_enabled."),
     )
 
 
@@ -10860,12 +10915,14 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
 
                 default_fallback = _rescue_default_fallback(current_cfg)
                 default_label = default_fallback.get("model") or "未设置"
+                hot_fallback_enabled = _rescue_hot_fallback_enabled_cfg(current_cfg)
                 route_fallback_candidates = _rescue_route_fallback_model_candidates(limit=120)
                 rescue_events = list_rescue_events(repo_root=os.getcwd(), limit=20)
                 landing_info, landing_actions = _rescue_landing_tui_payload(
                     default_label,
                     rescue_events,
                     _latest_rescue_hot_fallback_event(),
+                    hot_fallback_enabled,
                 )
                 landing_action = _safe_tui_call(
                     select_channel_action_tui,
@@ -10885,7 +10942,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
+                        _print_settings_result_report(
+                            *_rescue_default_fallback_report_payload(
+                                fallback_model,
+                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
+                            )
+                        )
                         _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "choose_route_default":
@@ -10899,8 +10961,26 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
+                        _print_settings_result_report(
+                            *_rescue_default_fallback_report_payload(
+                                fallback_model,
+                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
+                            )
+                        )
                         _pause_after_tui_report("按 Enter 返回设置")
+                    continue
+                if landing_action in {"enable_hot_fallback", "disable_hot_fallback"}:
+                    enable_hot = landing_action == "enable_hot_fallback"
+                    current_cfg, applied = _set_rescue_hot_fallback_enabled(current_cfg, enabled=enable_hot)
+                    if applied != enable_hot:
+                        _print_settings_result_report(
+                            *_rescue_hot_fallback_toggle_report_payload(False, has_default=False),
+                            ok=False,
+                        )
+                    else:
+                        save_config(current_cfg, reason="tui:rescue_hot_fallback")
+                        _print_settings_result_report(*_rescue_hot_fallback_toggle_report_payload(enable_hot))
+                    _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")
@@ -11026,7 +11106,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
+                        _print_settings_result_report(
+                            *_rescue_default_fallback_report_payload(
+                                fallback_model,
+                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
+                            )
+                        )
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
@@ -11039,7 +11124,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
+                        _print_settings_result_report(
+                            *_rescue_default_fallback_report_payload(
+                                fallback_model,
+                                hot_fallback_enabled=_rescue_hot_fallback_enabled_cfg(current_cfg),
+                            )
+                        )
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")

@@ -6,12 +6,14 @@ Status: L3 file-first rescue with thin bridge hook, TUI rescue viewer, safe fall
 
 - Writes deterministic rescue artifacts before any continuation model call.
 - Hooks terminal bridge failures for blocking classes: 429/quota, 403/401 permission/auth, context overflow, model not found, timeout, 5xx, and unsupported capability/parameter.
-- Codex Responses bridge can hot-fallback inside the current request to the configured `MMS_RESCUE_FALLBACK_MODEL` when a blocking upstream failure remains after native route retry and protocol fallback checks.
+- Global fallback defaults to file-first behavior: bridge failures write the rescue packet and `fallback-handover.md/json`, but do not call the fallback model automatically.
+- Codex Responses bridge can hot-fallback inside the current request only when `[rescue].hot_fallback_enabled = true` or `MMS_RESCUE_HOT_FALLBACK=1` is explicitly set.
 - Hot fallback resolves the selected model through `generated/model-routes.json` / `model-routes.json`; it does not hardcode a vendor/model route.
-- `MMS_RESCUE_HOT_FALLBACK=0` disables the automatic model call while keeping file-only rescue artifacts.
+- `MMS_RESCUE_HOT_FALLBACK=0` disables the automatic model call while keeping file-only rescue artifacts and fallback handoff generation.
 - Keeps global OAuth fallback disabled.
 - Keeps private/public boundary crossing disabled.
 - Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
+- The same TUI page shows `Hot fallback` status and offers an explicit toggle after a global fallback model exists.
 - When no packets exist, the TUI can create a safe demo rescue packet for local verification; it makes no upstream/model request.
 - For an existing packet, the TUI can generate `fallback-handover.md/json` for an explicitly selected fallback model; the TUI viewer itself still makes no model call.
 

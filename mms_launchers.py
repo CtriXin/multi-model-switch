@@ -831,11 +831,20 @@ def _inject_real_home_hints(env, *, include_xdg=False):
     return env
 
 
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
 def _rescue_default_fallback_config():
     env_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
     env_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+    env_hot = os.environ.get("MMS_RESCUE_HOT_FALLBACK")
     if env_model:
-        return {"model": env_model, "cli": env_cli}
+        return {"model": env_model, "cli": env_cli, "hot_fallback_enabled": _truthy(env_hot)}
     try:
         cfg = load_config() or {}
     except Exception:
@@ -843,7 +852,8 @@ def _rescue_default_fallback_config():
     rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
     model = str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip()
     cli = str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip()
-    return {"model": model, "cli": cli}
+    hot = rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback", False))
+    return {"model": model, "cli": cli, "hot_fallback_enabled": _truthy(hot)}
 
 
 def _rescue_bridge_kwargs():
@@ -854,6 +864,7 @@ def _rescue_bridge_kwargs():
     return {
         "rescue_fallback_model": model,
         "rescue_fallback_cli": str(fallback.get("cli") or "").strip(),
+        "rescue_hot_fallback_enabled": bool(fallback.get("hot_fallback_enabled")),
     }
 
 
@@ -875,6 +886,7 @@ def _inject_rescue_launch_env(env):
             env["MMS_RESCUE_FALLBACK_CLI"] = str(fallback.get("cli") or "")
         else:
             env.pop("MMS_RESCUE_FALLBACK_CLI", None)
+        env["MMS_RESCUE_HOT_FALLBACK"] = "1" if fallback.get("hot_fallback_enabled") else "0"
     return env
 
 

@@ -172,10 +172,22 @@ def test_rescue_default_fallback_config_roundtrip() -> None:
     mms_core._set_rescue_default_fallback(cfg, model="fallback-model")
 
     assert mms_core._rescue_default_fallback(cfg) == {"model": "fallback-model", "cli": ""}
+    assert mms_core._rescue_hot_fallback_enabled_cfg(cfg) is False
+
+    cfg, applied = mms_core._set_rescue_hot_fallback_enabled(cfg, enabled=True)
+
+    assert applied is True
+    assert mms_core._rescue_hot_fallback_enabled_cfg(cfg) is True
+    assert "enable_hot_fallback" not in cfg["rescue"]
+
+    legacy_cfg = {"rescue": {"fallback_model": "fallback-model", "enable_hot_fallback": True}}
+    assert mms_core._rescue_hot_fallback_enabled_cfg(legacy_cfg) is True
 
     mms_core._set_rescue_default_fallback(cfg, model="")
 
     assert mms_core._rescue_default_fallback(cfg) == {"model": "", "cli": ""}
+    assert mms_core._rescue_hot_fallback_enabled_cfg(cfg) is False
+    assert "enable_hot_fallback" not in cfg["rescue"]
 
 
 def test_rescue_landing_prioritizes_fallback_settings_without_packets() -> None:
@@ -189,11 +201,21 @@ def test_rescue_landing_prioritizes_fallback_settings_without_packets() -> None:
     info = dict(info_lines)
 
     assert info["全局默认"] == "deepseek-v4-flash"
+    assert info["Hot fallback"] == "关闭"
     assert info["生效范围"] == "MMS 全局默认；bridge 失败时读取"
     assert info["最近失败"] == "没有 packet"
     assert info["最近 fallback 尝试"] == "-"
     assert action_ids[:3] == ["choose_route_default", "manual_default", "clear_default"]
+    assert "enable_hot_fallback" in action_ids
     assert "view_packets" not in action_ids
+
+    enabled_info, enabled_actions = mms_core._rescue_landing_tui_payload(
+        "deepseek-v4-flash",
+        [],
+        hot_fallback_enabled=True,
+    )
+    assert dict(enabled_info)["Hot fallback"] == "开启"
+    assert "disable_hot_fallback" in [action_id for action_id, _label in enabled_actions]
 
 
 def test_rescue_landing_shows_packets_as_secondary_action() -> None:
@@ -245,6 +267,10 @@ def test_rescue_result_payloads_are_compact_and_safe() -> None:
 
     mms_i18n.set_language("zh")
     title, rows, note = mms_core._rescue_default_fallback_report_payload("deepseek-v4-flash")
+    hot_title, hot_rows, hot_note = mms_core._rescue_default_fallback_report_payload(
+        "deepseek-v4-flash",
+        hot_fallback_enabled=True,
+    )
     demo_title, demo_rows, _demo_note = mms_core._rescue_demo_packet_report_payload(
         {"artifacts": {"markdown": "/tmp/rescue.md", "json": "/tmp/rescue.json"}}
     )
@@ -255,7 +281,11 @@ def test_rescue_result_payloads_are_compact_and_safe() -> None:
 
     assert title == "全局 fallback 已设置"
     assert ("Model", "deepseek-v4-flash") in rows
-    assert "routed model" in note
+    assert ("Hot fallback", "关闭") in rows
+    assert "只记录 rescue / fallback handoff" in note
+    assert hot_title == "全局 fallback 已设置"
+    assert ("Hot fallback", "开启") in hot_rows
+    assert "routed model" in hot_note
     assert demo_title == "测试 rescue packet 已生成"
     assert ("rescue.md", "/tmp/rescue.md") in demo_rows
     assert handover_title == "fallback handover 已生成"

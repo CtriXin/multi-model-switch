@@ -410,6 +410,7 @@ def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, 
         rescue_config_root=str(config_root),
         rescue_fallback_model="deepseek-v4-flash",
         rescue_fallback_cli="codex",
+        rescue_hot_fallback_enabled=True,
     )
     captured = {}
 
@@ -460,6 +461,7 @@ def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, t
         [rescue]
         fallback_model = "deepseek-v4-flash"
         fallback_cli = "codex"
+        hot_fallback_enabled = true
         """,
         encoding="utf-8",
     )
@@ -531,6 +533,7 @@ def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, t
         rescue_config_root=str(config_root),
         rescue_fallback_model="",
         rescue_fallback_cli="",
+        rescue_hot_fallback_enabled=False,
     )
     captured = {}
 
@@ -560,6 +563,53 @@ def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, t
     assert handover["safety"]["global_oauth_fallback"] == "disabled"
 
 
+def test_rescue_global_fallback_without_hot_switch_records_handover_only(tmp_path):
+    import mms_bridge
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    repo.mkdir()
+    config_root.mkdir()
+    (config_root / "config.toml").write_text(
+        """
+        [rescue]
+        fallback_model = "deepseek-v4-flash"
+        fallback_cli = "codex"
+        """,
+        encoding="utf-8",
+    )
+    server = types.SimpleNamespace(
+        rescue_enabled=True,
+        rescue_repo_root=str(repo),
+        rescue_config_root=str(config_root),
+        model_name="gpt-5.5",
+        provider_id="codex-relay",
+        rescue_fallback_model="",
+        rescue_fallback_cli="",
+        rescue_hot_fallback_enabled=False,
+    )
+
+    assert mms_bridge._rescue_hot_fallback_enabled(server) is False
+
+    payload = mms_bridge._record_bridge_blocking_failure(
+        server,
+        model_name="gpt-5.5",
+        provider_id="codex-relay",
+        status_code=429,
+        body_text='{"error":"rate limit"}',
+        request_url="https://relay.example/v1/responses",
+        bridge_surface="codex_responses_proxy",
+    )
+
+    assert payload is not None
+    latest = json.loads((repo / ".mms" / "rescue" / "latest.json").read_text(encoding="utf-8"))
+    assert latest["safety"]["automatic_model_call"] is False
+    handover = json.loads((repo / ".mms" / "rescue" / "latest-fallback-handover.json").read_text(encoding="utf-8"))
+    assert handover["fallback"]["model"] == "deepseek-v4-flash"
+    assert handover["fallback"]["automatic_model_call"] is False
+    assert handover["fallback"]["mode"] == "auto_default_handover"
+
+
 def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_path):
     import mms_bridge
 
@@ -567,6 +617,7 @@ def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_pat
     monkeypatch.setenv("MMS_RESCUE_CONFIG_ROOT", str(tmp_path / "config"))
     monkeypatch.setenv("MMS_RESCUE_FALLBACK_MODEL", "fallback-model")
     monkeypatch.setenv("MMS_RESCUE_FALLBACK_CLI", "codex")
+    monkeypatch.setenv("MMS_RESCUE_HOT_FALLBACK", "1")
 
     server = types.SimpleNamespace()
     mms_bridge._configure_bridge_rescue(server)
@@ -576,3 +627,4 @@ def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_pat
     assert server.rescue_config_root == str(tmp_path / "config")
     assert server.rescue_fallback_model == "fallback-model"
     assert server.rescue_fallback_cli == "codex"
+    assert server.rescue_hot_fallback_enabled is True
