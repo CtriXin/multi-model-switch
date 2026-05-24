@@ -157,7 +157,7 @@
 
 `~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。
 
-- 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
+- 日常偏好优先建议写 `preferences.toml`，例如 `thinking_mode`、`reasoning_effort`、`bypass`、`caveman_mode`、`nsr_mode`、`agent_pack`、`session_surfaces.disabled`、`assets.roots`
 - LLM / agent 需要先看 `docs/MMS_USER_PREFERENCES.md`，或让用户执行 `mms config preferences.help`
 - agents 可以读取、解释、生成 TOML snippet / manual diff，但不能自动写入真实 `~/.config/mms/**`
 - `preferences.toml` 会忽略 credentials、provider routes、account identity、proxy、OAuth、real HOME/XDG、Claude config 等非 allowlist 字段

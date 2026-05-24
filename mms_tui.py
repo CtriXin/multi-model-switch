@@ -3275,6 +3275,8 @@ def confirm_tui(
     *,
     has_caveman=False,
     caveman_enabled_default=False,
+    has_nsr=False,
+    nsr_enabled_default=False,
     has_ecc=False,
     ecc_enabled_default=False,
     has_omc=False,
@@ -3286,11 +3288,12 @@ def confirm_tui(
 ):
     """确认启动 TUI。
 
-    返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces)。
+    返回 (action, bypass, claude_1m_enabled, caveman_enabled, agent_pack, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled)。
     action: "" = 启动, "b" = 返回, "q" = 取消
     bypass: bool, codex/claude/opencode/agy 有效；OpenCode 会启用 permission allow / run bypass
     claude_1m_enabled: bool，仅 Claude Opus/Sonnet 有效，True 时本次启动开启 1M
     caveman_enabled: bool，仅 claude/codex/opencode/agy 且 Caveman 可用时有效，True 时本次会话开启 Caveman
+    nsr_enabled: bool，仅 claude/codex 且 NSR hook 可用时有效，True 时本次会话开启 NSR hooks
     agent_pack: "none" / "ecc" / "omc"，仅 Claude 国产模型能力包有效；三选一互斥
     thinking_enabled: bool，仅 GPT / 已验证 domestic thinking 路径有效
     reasoning_effort: str，仅 GPT / 支持 effort 的路径有效
@@ -3344,6 +3347,7 @@ def confirm_tui(
             "Launch": _L("启动", "Launch"),
             "Bypass": _L("绕过审批", "Bypass"),
             "Caveman": "Caveman",
+            "NSR": "NSR",
             "Thinking": _L("思考", "Thinking"),
             "Effort": _L("强度", "Effort"),
             "Agent Pack": _L("能力包", "Agent Pack"),
@@ -3403,7 +3407,7 @@ def confirm_tui(
         }
         return mapping.get(str(panel_key or ""), _L("当前面板没有可展示内容。", "Nothing to show on this panel."))
 
-    def _collect_preview_items(panel_key, *, caveman_enabled=False, agent_pack="none"):
+    def _collect_preview_items(panel_key, *, caveman_enabled=False, nsr_enabled=False, agent_pack="none"):
         panel_key = str(panel_key or "").strip()
         if not isinstance(preview_catalog, dict):
             return []
@@ -3435,6 +3439,27 @@ def confirm_tui(
                     items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
         if caveman_enabled:
             for item in sections.get("caveman") or []:
+                if not isinstance(item, dict):
+                    if not isinstance(item, (list, tuple)) or len(item) < 2:
+                        continue
+                    item = {"title": str(item[0]), "summary": str(item[1]), "details": []}
+                title = str(item.get("title") or "").strip()
+                summary = str(item.get("summary") or "").strip()
+                details = []
+                for detail in item.get("details") or []:
+                    if not isinstance(detail, (list, tuple)) or len(detail) < 2:
+                        continue
+                    label = str(detail[0] or "").strip()
+                    value = str(detail[1] or "").strip()
+                    if label and value:
+                        details.append((label, value))
+                signature = (title, summary, tuple(details))
+                disable_key = str(item.get("disable_key") or title).strip()
+                if title and signature not in seen:
+                    seen.add(signature)
+                    items.append({"title": title, "summary": summary, "details": details, "disable_key": disable_key})
+        if nsr_enabled:
+            for item in sections.get("nsr") or []:
                 if not isinstance(item, dict):
                     if not isinstance(item, (list, tuple)) or len(item) < 2:
                         continue
@@ -3601,6 +3626,7 @@ def confirm_tui(
         bypass_mode = initial_bypass_mode
         claude_1m_mode = False
         caveman_mode = bool(has_caveman and caveman_enabled_default)
+        nsr_mode = bool(has_nsr and nsr_enabled_default)
         agent_pack = default_pack
         thinking_mode = bool(has_thinking and initial_thinking_enabled)
         effort_mode = effort_default
@@ -3650,6 +3676,9 @@ def confirm_tui(
             if has_caveman:
                 caveman_text = _L("开启", "On") if caveman_mode else _L("关闭", "Off")
                 info_lines.append((_confirm_label("Caveman"), f"[C] {caveman_text}", "caveman"))
+            if has_nsr:
+                nsr_text = _L("开启", "On") if nsr_mode else _L("关闭", "Off")
+                info_lines.append((_confirm_label("NSR"), f"[N] {nsr_text}", "nsr"))
             if has_thinking:
                 thinking_text = _L("开启", "On") if thinking_mode else _L("关闭", "Off")
                 info_lines.append((_confirm_label("Thinking"), f"[T] {thinking_text}", "thinking"))
@@ -3671,6 +3700,7 @@ def confirm_tui(
                     preview_items = _collect_preview_items(
                         panel_key,
                         caveman_enabled=caveman_mode,
+                        nsr_enabled=nsr_mode,
                         agent_pack=agent_pack,
                     )
                     panels.append(
@@ -3705,6 +3735,8 @@ def confirm_tui(
                 footer_actions.append([("M", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 1M", "Toggle 1M"), curses.color_pair(1) | curses.A_DIM)])
             if has_caveman:
                 footer_actions.append([("C", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 Caveman", "Toggle Caveman"), curses.color_pair(1) | curses.A_DIM)])
+            if has_nsr:
+                footer_actions.append([("N", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切 NSR", "Toggle NSR"), curses.color_pair(1) | curses.A_DIM)])
             if has_thinking:
                 footer_actions.append([("T", curses.color_pair(1) | curses.A_BOLD), (" ", 0), (_L("切思考", "Toggle Thinking"), curses.color_pair(1) | curses.A_DIM)])
             if has_effort:
@@ -3844,6 +3876,8 @@ def confirm_tui(
                         val_attr = curses.color_pair(3) | curses.A_BOLD if bypass_mode else curses.color_pair(5)
                     elif style == "caveman":
                         val_attr = curses.color_pair(5) | curses.A_BOLD if caveman_mode else curses.color_pair(4)
+                    elif style == "nsr":
+                        val_attr = curses.color_pair(5) | curses.A_BOLD if nsr_mode else curses.color_pair(4)
                     elif style == "thinking":
                         val_attr = curses.color_pair(1) | curses.A_BOLD if thinking_mode else curses.color_pair(4)
                     elif style == "effort":
@@ -3870,11 +3904,11 @@ def confirm_tui(
             stdscr.refresh()
             key = stdscr.getch()
             if key in (10, 13, curses.KEY_ENTER):
-                return ("", bypass_mode, claude_1m_mode, caveman_mode, agent_pack, thinking_mode, effort_mode, _disabled_payload())
+                return ("", bypass_mode, claude_1m_mode, caveman_mode, agent_pack, thinking_mode, effort_mode, _disabled_payload(), nsr_mode)
             elif key in (ord('b'), ord('B')):
-                return ("b", False, False, False, "none", True, effort_default, {})
+                return ("b", False, False, False, "none", True, effort_default, {}, False)
             elif key in (ord('q'), ord('Q'), 27):
-                return ("q", False, False, False, "none", True, effort_default, {})
+                return ("q", False, False, False, "none", True, effort_default, {}, False)
             elif key == 9 and has_bypass:
                 bypass_mode = not bypass_mode
             elif key in (curses.KEY_LEFT, ord('h'), ord('H')) and len(panels) > 1:
@@ -3909,6 +3943,8 @@ def confirm_tui(
                 claude_1m_mode = not claude_1m_mode
             elif key in (ord('c'), ord('C')) and has_caveman:
                 caveman_mode = not caveman_mode
+            elif key in (ord('n'), ord('N')) and has_nsr:
+                nsr_mode = not nsr_mode
             elif key in (ord('t'), ord('T')) and has_thinking:
                 thinking_mode = not thinking_mode
             elif key in (ord('e'), ord('E')) and has_effort:
@@ -3921,7 +3957,7 @@ def confirm_tui(
     try:
         return curses.wrapper(_inner)
     except curses.error:
-        return ("q", False, False, False, "none", True, effort_default, {})
+        return ("q", False, False, False, "none", True, effort_default, {}, False)
 
 
 # ── Reasoning effort 选择 TUI ────────────────────────────────────

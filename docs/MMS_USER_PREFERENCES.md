@@ -38,6 +38,7 @@ config.toml -> override.toml -> preferences.toml allowlist -> confirm screen cha
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
+nsr_mode = "disable"          # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
 
@@ -62,6 +63,7 @@ token_saver = "~/vendor/token-saver"
 toon = "~/vendor/toon"
 xmem = "~/auto-skills/shared-skills/xmem"
 caveman = "~/vendor/caveman"
+nsr = "~/vendor/non-stop-run"
 ecc = "~/.mms/agent-packs/everything-claude-code"
 omc = "~/.mms/agent-packs/oh-my-claudecode"
 ```
@@ -75,6 +77,7 @@ omc = "~/.mms/agent-packs/oh-my-claudecode"
 | `thinking_mode` | `enable` / `disable` | Default Thinking toggle for supported `Claude` / `Codex` routes |
 | `reasoning_effort` | `low` / `medium` / `high` / `xhigh` | Default effort when the selected model profile supports it |
 | `caveman_mode` | `enable` / `disable` | Default session-local Caveman overlay |
+| `nsr_mode` | `enable` / `disable` | Default session-local NSR hook injection for Claude/Codex; default is `disable` |
 | `agent_pack` | `none` / `ecc` / `omc` | Default Claude agent pack toggle |
 | `bypass` | `true` / `false` | Default launch approval bypass toggle |
 | `disabled_session_surfaces` | table with `skills` / `mcp` / `hooks` arrays | Per-launch disabled surface overlay |
@@ -96,7 +99,7 @@ hooks = []
 `[assets.roots]` accepts:
 
 ```text
-web_access, weber, agent_browser, token_saver, toon, xmem, caveman, ecc, omc, auto_github_contributor
+web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor
 ```
 
 Env vars like `MMS_WEB_ACCESS_ROOT` and `MMS_ECC_ROOT` still take priority over `preferences.toml`.
@@ -143,7 +146,7 @@ When a user asks "MMS 该改哪个配置":
 
 1. Run or cite `mms config preferences.help`.
 2. Read this document.
-3. Prefer `preferences.toml` for daily preferences like `thinking_mode`, `reasoning_effort`, `bypass`, `agent_pack`, and disabled session surfaces.
+3. Prefer `preferences.toml` for daily preferences like `thinking_mode`, `reasoning_effort`, `bypass`, `nsr_mode`, `agent_pack`, and disabled session surfaces.
 4. Do not write real `~/.config/mms/**` automatically. Propose a TOML snippet or diff and ask the human to apply/confirm.
 5. If the requested change touches credentials, accounts, provider routes, proxy, OAuth, real `HOME`, or Claude config, treat it as a human-gate change and do not auto-apply.
 

@@ -218,9 +218,9 @@ User overlays can live in the MMS config directory as read-only profile inputs. 
 Use `~/.config/mms/preferences.toml` for install-safe daily launch preferences:
 
 - `thinking_mode` / `reasoning_effort`
-- `bypass`, `caveman_mode`, `agent_pack`
+- `bypass`, `caveman_mode`, `nsr_mode`, `agent_pack`
 - disabled session `skills` / `mcp` / `hooks`
-- custom bundled asset roots such as `web_access`, `token_saver`, `xmem`, `ecc`, `omc`
+- custom bundled asset roots such as `web_access`, `token_saver`, `xmem`, `nsr`, `ecc`, `omc`
 
 LLMs can discover the safe schema with `mms config preferences.help` or `mms config preferences.example`. This file is still real MMS config: agents may inspect and propose edits, but must not auto-write `~/.config/mms/**` without human confirmation.
 
@@ -233,11 +233,12 @@ MMS can expose capabilities per session without writing global hooks/config.
 | `token-saver` / `TOON` | bundled | compact long outputs and structured handoffs |
 | Web automation bundle | bundled | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
 | `Caveman` | bundled | compact communication mode |
+| `NSR` | built-in, default off | session-local continuation hooks for active NSR goals; no global hooks/config writes |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. OpenCode now receives session-local Caveman / token-saver / TOON / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. NSR stays disabled until selected on the launch confirmation screen or `nsr_mode = "enable"` is set in `preferences.toml`; it injects hooks only into the current Claude/Codex session. OpenCode now receives session-local Caveman / token-saver / TOON / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
 
 ## Optional Installer Packs
 

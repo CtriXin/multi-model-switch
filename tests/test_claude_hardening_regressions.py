@@ -971,6 +971,138 @@ def test_build_codex_session_hooks_strips_inherited_looop_hooks():
     assert not any("looop" in command or "bugloop" in command for command in commands)
 
 
+def test_build_claude_session_settings_respects_session_nsr_toggle(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_mms_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_load_global_claude_settings_template", lambda: {})
+    monkeypatch.setattr(mms_launchers, "_default_session_mcp_servers", lambda: {})
+
+    base_settings = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/keep-session-start.sh"},
+                        {"type": "command", "command": "/tmp/nsr-claude-hook.sh"},
+                        {"type": "command", "command": "/Users/me/.codex/skills/looop/hooks/session-start.sh"},
+                    ]
+                }
+            ]
+        }
+    }
+
+    disabled = mms_launchers._build_claude_session_settings(base_settings, enable_nsr=False)
+    disabled_commands = [
+        item["command"]
+        for groups in disabled.get("hooks", {}).values()
+        for group in groups
+        for item in group.get("hooks", [])
+    ]
+    assert "/tmp/keep-session-start.sh" in disabled_commands
+    assert not any("nsr-" in command or "looop" in command for command in disabled_commands)
+
+    enabled = mms_launchers._build_claude_session_settings(base_settings, enable_nsr=True)
+    enabled_hooks = enabled["hooks"]
+    enabled_commands = [
+        item["command"]
+        for groups in enabled_hooks.values()
+        for group in groups
+        for item in group.get("hooks", [])
+    ]
+    assert "/tmp/keep-session-start.sh" in enabled_commands
+    assert enabled_commands.count(mms_launchers._NSR_CLAUDE_HOOK) >= 2
+    assert mms_launchers._NSR_CLAUDE_HOOK in [
+        item["command"]
+        for group in enabled_hooks["Stop"]
+        for item in group["hooks"]
+    ]
+    assert not any("/tmp/nsr-claude-hook.sh" == command or "looop" in command for command in enabled_commands)
+
+
+def test_build_codex_session_hooks_respects_session_nsr_toggle():
+    import mms_launchers
+
+    base_hooks = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup|resume",
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/keep.sh"},
+                        {"type": "command", "command": "/tmp/nsr-codex-hook.sh"},
+                        {"type": "command", "command": "/tmp/bugloop-nightly-fix.sh"},
+                    ],
+                }
+            ]
+        }
+    }
+
+    disabled = mms_launchers._build_codex_session_hooks(base_hooks, enable_nsr=False)
+    disabled_commands = [
+        item["command"]
+        for groups in disabled.get("hooks", {}).values()
+        for group in groups
+        for item in group.get("hooks", [])
+    ]
+    assert "/tmp/keep.sh" in disabled_commands
+    assert not any("nsr-" in command or "bugloop" in command for command in disabled_commands)
+
+    enabled = mms_launchers._build_codex_session_hooks(base_hooks, enable_nsr=True)
+    enabled_hooks = enabled["hooks"]
+    enabled_commands = [
+        item["command"]
+        for groups in enabled_hooks.values()
+        for group in groups
+        for item in group.get("hooks", [])
+    ]
+    assert "/tmp/keep.sh" in enabled_commands
+    assert enabled_commands.count(mms_launchers._NSR_CODEX_HOOK) >= 2
+    assert mms_launchers._NSR_CODEX_HOOK in [
+        item["command"]
+        for group in enabled_hooks["Stop"]
+        for item in group["hooks"]
+    ]
+    assert not any("/tmp/nsr-codex-hook.sh" == command or "bugloop" in command for command in enabled_commands)
+
+
+def test_builtin_nsr_hook_injects_active_context(monkeypatch, tmp_path):
+    state_home = tmp_path / "nsr"
+    session_dir = state_home / "sessions" / "session-a"
+    session_dir.mkdir(parents=True)
+    (session_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "runtime": {"mode": "active"},
+                "goal": {"objective": "Finish release"},
+                "loop": {"status": "running", "current_slice": "Add NSR", "next_action": "Run tests"},
+                "quality": {"validation_summary": "pending"},
+                "trace": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["MMS_NSR_STATE_HOME"] = str(state_home)
+    result = subprocess.run(
+        ["python3", "hooks/nsr-builtin-hook.py", "claude"],
+        input=json.dumps({"hook_event_name": "SessionStart", "session_id": "session-a"}),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["continue"] is True
+    assert "Finish release" in payload["hookSpecificOutput"]["additionalContext"]
+    assert "Run tests" in payload["hookSpecificOutput"]["additionalContext"]
+    assert (session_dir / "events.jsonl").read_text(encoding="utf-8").strip()
+
+
 def test_build_codex_session_hooks_respects_session_disabled_hook_commands():
     import mms_launchers
 

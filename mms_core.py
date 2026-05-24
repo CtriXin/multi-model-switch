@@ -149,6 +149,7 @@ PREFERENCES_EXAMPLE_TOML = """# ~/.config/mms/preferences.toml
 thinking_mode = "enable"      # enable | disable
 reasoning_effort = "high"     # low | medium | high | xhigh
 caveman_mode = "enable"       # enable | disable
+nsr_mode = "disable"          # enable | disable
 agent_pack = "none"           # none | ecc | omc
 bypass = true                 # true | false
 
@@ -174,6 +175,7 @@ hooks = []                    # hook names or paths shown on confirm screen
 # toon = "~/vendor/toon"
 # xmem = "~/auto-skills/shared-skills/xmem"
 # caveman = "~/vendor/caveman"
+# nsr = "~/vendor/non-stop-run"
 # ecc = "~/.mms/agent-packs/everything-claude-code"
 # omc = "~/.mms/agent-packs/oh-my-claudecode"
 """
@@ -3277,6 +3279,9 @@ def _sanitize_launch_preferences(payload):
     caveman_mode = _pref_enable_disable(payload.get("caveman_mode"))
     if caveman_mode:
         result["caveman_mode"] = caveman_mode
+    nsr_mode = _pref_enable_disable(payload.get("nsr_mode"))
+    if nsr_mode:
+        result["nsr_mode"] = nsr_mode
     bypass = _pref_bool(payload.get("bypass"))
     if bypass is not None:
         result["bypass"] = bypass
@@ -3303,6 +3308,7 @@ _PREFERENCE_ASSET_ROOT_KEYS = {
     "auto_github_contributor": "auto_github_contributor",
     "auto-github-contributor": "auto_github_contributor",
     "caveman": "caveman",
+    "nsr": "nsr",
     "ecc": "ecc",
     "omc": "omc",
     "token_saver": "token_saver",
@@ -8531,14 +8537,14 @@ def _confirm_context_lines(cli, runtime):
     return lines[:12]
 
 
-def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=False, has_omc=False):
+def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=False, has_ecc=False, has_omc=False):
     runtime = runtime if isinstance(runtime, dict) else {}
     allow_execution_surfaces = not (cli == "claude" and runtime.get("auth_mode") == "oauth")
     preview = {
         "allow_execution_surfaces": allow_execution_surfaces,
-        "mcp": {"always": [], "caveman": [], "ecc": [], "omc": []},
-        "skills": {"always": [], "caveman": [], "ecc": [], "omc": []},
-        "hooks": {"always": [], "caveman": [], "ecc": [], "omc": []},
+        "mcp": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
+        "skills": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
+        "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
     }
 
     if cli not in {"claude", "codex", "opencode", "agy"}:
@@ -8548,6 +8554,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         from mms_launchers import (
             _build_codex_session_hooks,
             _configure_claude_caveman_hooks,
+            _configure_claude_nsr_hooks,
             _configure_claude_ecc_hooks,
             _configure_claude_omc_hooks,
             _agent_pack_mcp_servers,
@@ -8565,6 +8572,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             _resolve_auto_github_contributor_root,
             _resolve_caveman_root,
             _resolve_ecc_root,
+            _resolve_nsr_root,
             _resolve_omc_root,
             _resolve_token_saver_root,
             _resolve_toon_root,
@@ -8729,6 +8737,8 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             return "xmem 自动同步", _L("注册/同步当前项目 truth index", "Register/sync the current project truth index")
         if "xmem-session-end-hook" in lower_target or basename == "xmem-session-end-hook.sh":
             return "xmem 收尾同步", _L("记录会话结束，不注入知识正文", "Record session close without injecting memory body")
+        if "nsr-claude-hook" in lower_target or "nsr-codex-hook" in lower_target or "nsr-builtin-hook" in lower_target:
+            return "NSR 持续运行", _L("按 active NSR goal 注入继续执行提示", "Inject active NSR goal continuation hints")
         if "claude-feishu-webfetch-guard" in lower_target or basename == "claude-feishu-webfetch-guard.sh":
             return _L("飞书 WebFetch 防护", "Feishu WebFetch guard"), _L("拦截高风险飞书抓取", "Guard risky Feishu fetches")
         if "rtk-rewrite" in lower_target or basename == "rtk-rewrite.sh":
@@ -8994,11 +9004,17 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
             ),
             allow_execution_surfaces=allow_execution_surfaces,
         )
+        base_hooks = _configure_claude_nsr_hooks(base_hooks, enable_nsr=False)
         _append_hooks("always", base_hooks)
         if has_caveman and allow_execution_surfaces:
             _append_hooks(
                 "caveman",
                 _configure_claude_caveman_hooks({}, enable_caveman=True),
+            )
+        if has_nsr and allow_execution_surfaces:
+            _append_hooks(
+                "nsr",
+                _configure_claude_nsr_hooks({}, enable_nsr=True),
             )
         if has_ecc and allow_execution_surfaces:
             _append_hooks(
@@ -9047,6 +9063,9 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
         if has_caveman:
             caveman_hooks = _build_codex_session_hooks({}, enable_caveman=True)
             _append_hooks("caveman", (caveman_hooks or {}).get("hooks"))
+        if has_nsr:
+            nsr_hooks = _build_codex_session_hooks({}, enable_nsr=True)
+            _append_hooks("nsr", (nsr_hooks or {}).get("hooks"))
     elif cli == "opencode":
         rtk_plugin = _opencode_rtk_plugin_path(runtime)
         if rtk_plugin:
@@ -9182,6 +9201,14 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_ecc=F
                 collapse_threshold=12,
                 bundle_note=_L("这些是可用技能目录，不代表本次会全部执行。", "These are available skills, not all executed on launch."),
                 bundle_disable_key="caveman",
+            )
+
+        nsr_root = _resolve_nsr_root() if has_nsr else ""
+        if nsr_root:
+            _append_skill_entries(
+                "nsr",
+                [{"name": "nsr", "path": _skill_path(nsr_root)}],
+                _L("NSR 运行时", "NSR runtime"),
             )
 
         ecc_root = _resolve_ecc_root() if has_ecc else ""
@@ -10498,6 +10525,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
     from mms_launchers import (
         _caveman_available_for_cli,
         _ecc_available_for_claude,
+        _nsr_available_for_cli,
         _omc_available_for_claude,
         launch_cli,
         get_export_env,
@@ -11374,6 +11402,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                 }
         context_lines = _confirm_context_lines(cli, runtime_runtime)
         has_caveman = _caveman_available_for_cli(cli)
+        has_nsr = _nsr_available_for_cli(cli)
         has_ecc = (
             cli == "claude"
             and _ecc_available_for_claude()
@@ -11392,6 +11421,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             cli,
             runtime_runtime,
             has_caveman=has_caveman,
+            has_nsr=has_nsr,
             has_ecc=has_ecc,
             has_omc=has_omc,
         )
@@ -11404,6 +11434,8 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             context_lines=context_lines,
             has_caveman=has_caveman,
             caveman_enabled_default=str(runtime_runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
+            has_nsr=has_nsr,
+            nsr_enabled_default=str(runtime_runtime.get("nsr_mode", "disable")).strip().lower() == "enable",
             has_ecc=has_ecc,
             ecc_enabled_default=False,
             has_omc=has_omc,
@@ -11417,6 +11449,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return True
         disabled_session_surfaces = {}
         agent_pack = "none"
+        nsr_enabled = False
         confirm_returned_surfaces = False
 
         def _confirm_agent_pack(value):
@@ -11426,7 +11459,11 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             return "ecc" if bool(value) else "none"
 
         if isinstance(result, tuple):
-            if len(result) >= 8:
+            if len(result) >= 9:
+                action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled = result[:9]
+                agent_pack = _confirm_agent_pack(pack_value)
+                confirm_returned_surfaces = True
+            elif len(result) >= 8:
                 action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
                 agent_pack = _confirm_agent_pack(pack_value)
                 confirm_returned_surfaces = True
@@ -11456,6 +11493,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
         else:
             action, bypass, claude_1m_enabled, caveman_enabled, thinking_enabled, reasoning_effort = result, False, False, False, True, default_reasoning_effort
             disabled_session_surfaces = {}
+            nsr_enabled = False
         if action == "q":
             return True
         if action == "b":
@@ -11476,6 +11514,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
         if cli in {"claude", "codex", "opencode", "agy"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
+            runtime_runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
             if confirm_returned_surfaces:
                 runtime_runtime["disabled_session_surfaces"] = (
                     disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
@@ -12580,10 +12619,10 @@ def _display_preferences_help():
     console.print(f"  {command} config preferences.doc")
     console.print(f"  {command} config human-gate")
     console.print("\n[bold]Allowed keys:[/bold]")
-    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, agent_pack, bypass")
+    console.print("  launch.defaults: thinking_mode, reasoning_effort, caveman_mode, nsr_mode, agent_pack, bypass")
     console.print("  launch.cli.<claude|codex|opencode|agy>: same launch keys")
     console.print("  session_surfaces.disabled: skills, mcp, hooks")
-    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, ecc, omc, auto_github_contributor")
+    console.print("  assets.roots: web_access, weber, agent_browser, token_saver, toon, xmem, caveman, nsr, ecc, omc, auto_github_contributor")
     console.print("\n[bold]Denied / ignored:[/bold]")
     console.print("  api_key, base_url, proxy, account identity, provider routes, OAuth tokens, credentials, Claude config, real HOME/XDG/auth state")
     console.print("\n[bold]Overlay order:[/bold]")

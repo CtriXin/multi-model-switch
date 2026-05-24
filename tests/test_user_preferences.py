@@ -17,6 +17,7 @@ def test_load_user_preferences_sanitizes_allowlist(monkeypatch, tmp_path):
 thinking_mode = "disable"
 reasoning_effort = "xhigh"
 caveman_mode = "enable"
+nsr_mode = "enable"
 bypass = false
 api_key = "sk-should-be-ignored"
 
@@ -46,6 +47,7 @@ base_url = "https://should-not-load.example"
         "thinking_mode": "disable",
         "reasoning_effort": "xhigh",
         "caveman_mode": "enable",
+        "nsr_mode": "enable",
         "bypass": False,
     }
     assert prefs["launch"]["cli"]["codex"]["reasoning_effort"] == "low"
@@ -133,7 +135,7 @@ def test_launch_with_tracking_applies_preferences_safety_net(monkeypatch):
 
     captured = {}
     prefs = {
-        "launch": {"defaults": {}, "cli": {"agy": {"bypass": False, "caveman_mode": "disable"}}},
+        "launch": {"defaults": {}, "cli": {"agy": {"bypass": False, "caveman_mode": "disable", "nsr_mode": "enable"}}},
         "session_surfaces": {"disabled": {"skills": ["agent-browser"]}},
         "assets": {"roots": {}},
     }
@@ -160,6 +162,7 @@ def test_launch_with_tracking_applies_preferences_safety_net(monkeypatch):
     assert captured["once"] is True
     assert captured["runtime"]["bypass"] is False
     assert captured["runtime"]["caveman_mode"] == "disable"
+    assert captured["runtime"]["nsr_mode"] == "enable"
     assert captured["runtime"]["disabled_session_surfaces"] == {"skills": ["agent-browser"]}
 
 

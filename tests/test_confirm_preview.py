@@ -16,6 +16,7 @@ def test_build_confirm_preview_catalog_disables_execution_surfaces_for_claude_oa
         "claude",
         {"auth_mode": "oauth"},
         has_caveman=True,
+        has_nsr=True,
         has_ecc=True,
     )
 
@@ -23,6 +24,18 @@ def test_build_confirm_preview_catalog_disables_execution_surfaces_for_claude_oa
     assert preview["mcp"]["always"] == []
     assert preview["skills"]["always"] == []
     assert preview["hooks"]["always"] == []
+    assert preview["hooks"]["nsr"] == []
+
+
+def test_build_confirm_preview_catalog_collects_nsr_hooks_for_codex():
+    preview = mms_core._build_confirm_preview_catalog(
+        "codex",
+        {"auth_mode": "api_key"},
+        has_nsr=True,
+    )
+
+    nsr_titles = {item["title"] for item in preview["hooks"]["nsr"]}
+    assert "NSR 持续运行" in nsr_titles
 
 
 def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tmp_path):

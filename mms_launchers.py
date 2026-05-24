@@ -1946,6 +1946,9 @@ _CLAUDE_CODEGRAPH_AUTO_INDEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-codeg
 _CLAUDE_MMS_RESUME_HINT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "mms-resume-hint.sh")
 _XMEM_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-start-hook.sh")
 _XMEM_SESSION_END_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "xmem-session-end-hook.sh")
+_NSR_CLAUDE_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-claude-hook.sh")
+_NSR_CODEX_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-codex-hook.sh")
+_NSR_BUILTIN_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "nsr-builtin-hook.py")
 
 _CLAUDE_STATUSLINE_CONFIG = {
     "command": f"/bin/bash {_LOCAL_STATUSLINE_SCRIPT}",
@@ -2486,6 +2489,10 @@ def _prune_session_only_snapshot_entries(snapshot_data):
         _normalize_hook_command(_CLAUDE_MMS_RESUME_HINT_HOOK),
         _normalize_hook_command(_XMEM_SESSION_START_HOOK),
         _normalize_hook_command(_XMEM_SESSION_END_HOOK),
+        _normalize_hook_command(_NSR_CLAUDE_HOOK),
+        _normalize_hook_command(_NSR_CODEX_HOOK),
+        _normalize_hook_command(f"python3 {_NSR_BUILTIN_HOOK}"),
+        _normalize_hook_command(_NSR_BUILTIN_HOOK),
         _normalize_hook_command(os.path.join(local_hooks_dir, "claude-feishu-webfetch-guard.sh")),
         _normalize_hook_command(f"bash {os.path.join(local_hooks_dir, 'hive-compact-hook.sh')}"),
         _normalize_hook_command(os.path.join(local_hooks_dir, "hive-compact-hook.sh")),
@@ -2936,6 +2943,60 @@ def _filter_claude_session_hooks(hooks_data, *, allow_execution_surfaces=True):
 
 def _caveman_available_for_cli(cli_name):
     return str(cli_name or "").strip() in {"claude", "codex", "opencode", "agy"} and bool(_resolve_caveman_root())
+
+
+def _resolve_nsr_root():
+    candidates = []
+    for key in ("MMS_NSR_ROOT", "NSR_ROOT"):
+        explicit = str(os.environ.get(key) or "").strip()
+        if explicit:
+            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    pref = _asset_root_preference("nsr")
+    if pref:
+        candidates.append(os.path.abspath(os.path.expanduser(pref)))
+    nsr_home = str(os.environ.get("NSR_HOME") or "").strip()
+    if nsr_home:
+        candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
+    candidates.extend([
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
+        _real_user_path("auto-skills", "Non-Stop-Run"),
+        _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
+    ])
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if (
+            os.path.isfile(os.path.join(candidate, "scripts", "codex_hook.py"))
+            and os.path.isfile(os.path.join(candidate, "scripts", "claude_hook.py"))
+        ):
+            return candidate
+    return ""
+
+
+def _nsr_available_for_cli(cli_name):
+    cli_name = str(cli_name or "").strip()
+    if cli_name not in {"claude", "codex"}:
+        return False
+    wrapper = _NSR_CLAUDE_HOOK if cli_name == "claude" else _NSR_CODEX_HOOK
+    return os.path.isfile(wrapper) and bool(_resolve_nsr_root() or os.path.isfile(_NSR_BUILTIN_HOOK))
+
+
+def _normalize_nsr_mode(value, default="disable"):
+    raw = str(value or "").strip().lower()
+    if raw in {"", "inherit", "default", "auto"}:
+        return default if default in {"enable", "disable"} else "disable"
+    if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return "enable"
+    if raw in {"0", "false", "no", "off", "disable", "disabled"}:
+        return "disable"
+    return default if default in {"enable", "disable"} else "disable"
+
+
+def _runtime_nsr_enabled(runtime):
+    return _normalize_nsr_mode((runtime or {}).get("nsr_mode", "disable")) == "enable"
 
 
 def _normalize_caveman_mode(value, default="disable"):
@@ -3467,6 +3528,9 @@ def _is_mms_managed_hook_command(command_text):
         "mms-resume-hint.sh",
         "xmem-session-start-hook.sh",
         "xmem-session-end-hook.sh",
+        "nsr-claude-hook.sh",
+        "nsr-codex-hook.sh",
+        "nsr-builtin-hook.py",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
@@ -3475,7 +3539,7 @@ def _is_mms_managed_hook_command(command_text):
     return any(marker in command_text for marker in markers)
 
 
-def _is_looop_hook_command(command_text):
+def _is_legacy_loop_hook_command(command_text):
     command_text = str(command_text or "").strip().lower()
     if not command_text:
         return False
@@ -3486,6 +3550,39 @@ def _is_looop_hook_command(command_text):
         "nightly-debug",
     )
     return any(marker in command_text for marker in markers)
+
+
+def _is_nsr_hook_command(command_text):
+    command_text = str(command_text or "").strip().lower()
+    if not command_text:
+        return False
+    if any(
+        marker in command_text
+        for marker in (
+            "nsr-claude-hook.sh",
+            "nsr-codex-hook.sh",
+            "nsr-builtin-hook.py",
+            "non-stop-run",
+            "looop.deprecated",
+            "mms_nsr",
+        )
+    ):
+        return True
+    if (
+        ("codex_hook.py" in command_text or "claude_hook.py" in command_text)
+        and ("nsr" in command_text or "non-stop" in command_text or "looop" in command_text)
+    ):
+        return True
+    return False
+
+
+def _is_loop_family_hook_command(command_text):
+    return _is_legacy_loop_hook_command(command_text) or _is_nsr_hook_command(command_text)
+
+
+def _is_looop_hook_command(command_text):
+    # Backward-compatible alias for older tests/callers.
+    return _is_legacy_loop_hook_command(command_text)
 
 
 def _hook_command_targets_exist(command_text):
@@ -3776,7 +3873,7 @@ def _codex_caveman_session_hook(caveman_root):
 
 
 def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
-    hooks_data = _filter_hook_commands(hooks_data, _is_looop_hook_command)
+    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
     hooks_data = _filter_hook_commands(hooks_data, _is_codex_rtk_hook_command)
     if not enable_caveman:
         return _filter_hook_commands(hooks_data, _is_caveman_hook_command)
@@ -3831,6 +3928,56 @@ def _configure_codex_caveman_hooks(hooks_data, *, enable_caveman=False):
             status_message=replacement.get("statusMessage"),
         )
     return configured
+
+
+def _configure_claude_nsr_hooks(hooks_data, *, enable_nsr=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
+    if not enable_nsr or not _nsr_available_for_cli("claude"):
+        return hooks_data
+    for event_name, matcher in (
+        ("SessionStart", "startup|resume|clear|compact"),
+        ("UserPromptSubmit", ""),
+        ("PermissionRequest", "*"),
+        ("PreToolUse", "*"),
+        ("PostToolUse", "*"),
+        ("PreCompact", ""),
+        ("PostCompact", ""),
+        ("Stop", ""),
+    ):
+        hooks_data = _append_shell_command_hook(
+            hooks_data,
+            event_name,
+            _NSR_CLAUDE_HOOK,
+            matcher=matcher,
+            timeout=10,
+            status_message="Loading NSR",
+        )
+    return hooks_data
+
+
+def _configure_codex_nsr_hooks(hooks_data, *, enable_nsr=False):
+    hooks_data = _filter_hook_commands(hooks_data, _is_loop_family_hook_command)
+    if not enable_nsr or not _nsr_available_for_cli("codex"):
+        return hooks_data
+    for event_name, matcher in (
+        ("SessionStart", "startup|resume"),
+        ("UserPromptSubmit", ""),
+        ("PermissionRequest", "*"),
+        ("PreToolUse", "*"),
+        ("PostToolUse", "*"),
+        ("PreCompact", ""),
+        ("PostCompact", ""),
+        ("Stop", ""),
+    ):
+        hooks_data = _append_shell_command_hook(
+            hooks_data,
+            event_name,
+            _NSR_CODEX_HOOK,
+            matcher=matcher,
+            timeout=10,
+            status_message="Loading NSR",
+        )
+    return hooks_data
 
 
 def _configure_claude_caveman_hooks(hooks_data, *, enable_caveman=False):
@@ -3905,9 +4052,10 @@ def _configure_claude_omc_hooks(hooks_data, *, enable_omc=False):
     return _merge_claude_hooks(hooks_data, omc_hooks)
 
 
-def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, disabled_session_surfaces=None):
+def _build_codex_session_hooks(base_hooks=None, *, enable_caveman=False, enable_nsr=False, disabled_session_surfaces=None):
     payload = dict(base_hooks) if isinstance(base_hooks, dict) else {}
     hooks_data = _configure_codex_caveman_hooks(payload.get("hooks"), enable_caveman=enable_caveman)
+    hooks_data = _configure_codex_nsr_hooks(hooks_data, enable_nsr=enable_nsr)
     hooks_data = _append_shell_command_hook(
         hooks_data,
         "SessionStart",
@@ -5664,6 +5812,7 @@ def _build_claude_session_settings(
     default_env=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
     disabled_session_surfaces=None,
@@ -5703,6 +5852,10 @@ def _build_claude_session_settings(
     hooks = _configure_claude_caveman_hooks(
         hooks,
         enable_caveman=bool(enable_caveman and allow_execution_surfaces),
+    )
+    hooks = _configure_claude_nsr_hooks(
+        hooks,
+        enable_nsr=bool(enable_nsr and allow_execution_surfaces),
     )
     hooks = _configure_claude_ecc_hooks(
         hooks,
@@ -5794,6 +5947,7 @@ def _write_claude_session_settings(
     base_settings=None,
     allow_execution_surfaces=True,
     enable_caveman=False,
+    enable_nsr=False,
     enable_ecc=False,
     enable_omc=False,
     disabled_session_surfaces=None,
@@ -5810,6 +5964,7 @@ def _write_claude_session_settings(
         default_env=default_env,
         allow_execution_surfaces=allow_execution_surfaces,
         enable_caveman=enable_caveman,
+        enable_nsr=enable_nsr,
         enable_ecc=enable_ecc,
         enable_omc=enable_omc,
         disabled_session_surfaces=disabled_session_surfaces,
@@ -9025,6 +9180,7 @@ def _claude_gateway_env(
     provider_id = runtime.get("id", "")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    enable_nsr = _runtime_nsr_enabled(runtime)
     enable_ecc = agent_pack == "ecc"
     enable_omc = agent_pack == "omc"
     sensitive_provider = _runtime_is_sensitive_claude_provider(runtime)
@@ -9098,6 +9254,7 @@ def _claude_gateway_env(
             session_home=gateway_home,
             features={
                 "caveman": enable_caveman,
+                "nsr": enable_nsr,
                 "ecc": enable_ecc,
                 "omc": enable_omc,
                 "agent_pack": agent_pack,
@@ -9125,6 +9282,7 @@ def _claude_gateway_env(
             default_env=default_settings_env,
             base_settings=session_base_settings,
             enable_caveman=enable_caveman,
+            enable_nsr=enable_nsr,
             enable_ecc=enable_ecc,
             enable_omc=enable_omc,
             disabled_session_surfaces=disabled_session_surfaces,
@@ -9273,6 +9431,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     with open(auth_path, "w") as f:
         _json.dump({"auth_mode": "apikey", "OPENAI_API_KEY": openai_key}, f)
     enable_caveman = _runtime_caveman_enabled(runtime)
+    enable_nsr = _runtime_nsr_enabled(runtime)
     real_codex_dir = _real_user_path(".codex")
     real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
     gateway_codex_dir = os.path.join(gateway_base, ".codex")
@@ -9292,7 +9451,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     base_hooks = {}
     session_hooks = None
     hooks_path = os.path.join(codex_dir, "hooks.json")
-    if enable_caveman or os.path.exists(real_hooks_path):
+    if enable_caveman or enable_nsr or os.path.exists(real_hooks_path):
         try:
             with open(real_hooks_path, "r", encoding="utf-8") as f:
                 base_hooks = _json.load(f)
@@ -9303,6 +9462,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_hooks = _build_codex_session_hooks(
             base_hooks,
             enable_caveman=enable_caveman,
+            enable_nsr=enable_nsr,
             disabled_session_surfaces=disabled_session_surfaces,
         )
 
@@ -9572,6 +9732,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         session_home=session_home,
         features={
             "caveman": enable_caveman,
+            "nsr": enable_nsr,
             "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
             "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
             "agent_browser": bool(_resolve_agent_browser_root()) and not _session_skill_disabled(disabled_session_surfaces, "agent-browser"),
