@@ -47,7 +47,7 @@ Key changes in this generation:
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also injects the `xmem` skill plus silent session-start/session-end xmem hooks when available. These hooks only register/sync the current project and record a close marker for the generated xmem index; durable summaries still go through the xmem skill workflow and append-only Project Wiki / issue-tracking queues.
+MMS also bundles and injects the `xmem` skill plus silent session-start/session-end xmem hooks. These hooks only register/sync the current project and record a close marker for the generated xmem index; if the `xmem` CLI is absent they fail open. Durable summaries still go through the xmem skill workflow and append-only Project Wiki / issue-tracking queues.
 
 ## Install Or Upgrade
 
@@ -230,15 +230,16 @@ MMS can expose capabilities per session without writing global hooks/config.
 
 | Pack | Install state | Purpose |
 | --- | --- | --- |
-| `token-saver` / `TOON` | bundled | compact long outputs and structured handoffs |
-| Web automation bundle | bundled | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
-| `Caveman` | bundled | compact communication mode |
-| `NSR` | built-in, default off | session-local continuation hooks for active NSR goals; no global hooks/config writes |
+| `token-saver` / `TOON` | bundled in `~/.mms/vendor` | compact long outputs and structured handoffs |
+| `xmem` | bundled in `~/.mms/vendor` | cross-project memory / truth-index skill; session hooks are silent and fail-open |
+| Web automation bundle | bundled in `~/.mms/vendor` | `weber` routes the task, `web-access` connects logged-in Chrome, and `agent-browser` handles lightweight headless flows |
+| `Caveman` | bundled in `~/.mms/vendor` | compact communication mode; only active when enabled by preference or launch confirmation |
+| `NSR` | built-in hooks, default off | session-local continuation hooks for active NSR goals; no global hooks/config writes |
 | `ECC` | optional MMS-managed pack | Claude engineering workflow / rules / quality hooks |
 | `OMC` | optional MMS-managed pack | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | detected when installed | planning and contribution surfaces |
 
-These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. NSR stays disabled until selected on the launch confirmation screen or `nsr_mode = "enable"` is set in `preferences.toml`; it injects hooks only into the current Claude/Codex session. OpenCode now receives session-local Caveman / token-saver / TOON / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
+These surfaces are previewed before launch and can be disabled per session when supported by the confirmation UI. Passive skills (`token-saver`, `TOON`, `xmem`, `web-access`, `weber`, `agent-browser`) are available naturally in MMS-launched sessions; active behavior (`Caveman`, `NSR`, `ECC`, `OMC`) still requires the launch toggle or `preferences.toml`. NSR stays disabled until selected on the launch confirmation screen or `nsr_mode = "enable"` is set in `preferences.toml`; it injects hooks only into the current Claude/Codex session. OpenCode now receives session-local Caveman / token-saver / TOON / xmem / web-access / weber skills, and RTK is added through the session-local plugin directory when `rtk` exists. ECC and OMC stay disabled until selected from the Claude launch confirmation screen.
 
 ## Optional Installer Packs
 

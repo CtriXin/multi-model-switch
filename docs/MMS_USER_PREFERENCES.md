@@ -59,9 +59,10 @@ hooks = []
 [assets.roots]
 web_access = "~/my-skills/web-access"
 weber = "~/my-skills/weber"
+agent_browser = "~/my-skills/agent-browser"
 token_saver = "~/vendor/token-saver"
 toon = "~/vendor/toon"
-xmem = "~/auto-skills/shared-skills/xmem"
+xmem = "~/vendor/xmem"
 caveman = "~/vendor/caveman"
 nsr = "~/vendor/non-stop-run"
 ecc = "~/.mms/agent-packs/everything-claude-code"
@@ -160,10 +161,15 @@ Common roots:
 ~/.mms/vendor/caveman
 ~/.mms/vendor/web-access
 ~/.mms/vendor/weber
+~/.mms/vendor/agent-browser
 ~/.mms/vendor/token-saver
 ~/.mms/vendor/toon
+~/.mms/vendor/xmem
+~/.mms/hooks/nsr-builtin-hook.py
 ~/.mms/agent-packs/everything-claude-code
 ~/.mms/agent-packs/oh-my-claudecode
 ```
+
+Passive assets are available naturally in MMS-launched sessions. Active hooks such as `NSR`, `ECC`, and `OMC` remain opt-in per launch or via allowlisted preferences, so install-time bundling does not silently change long-running agent behavior.
 
 This keeps global Claude/Codex/OpenCode/Antigravity config clean while still giving each MMS session the selected skills, hooks, and MCP surfaces.

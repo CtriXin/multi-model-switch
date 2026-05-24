@@ -271,7 +271,48 @@ def test_install_script_mentions_bundled_session_assets():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
     assert "Bundled session assets" in text
+    assert "xmem" in text
+    assert "NSR is built in but default off" in text
     assert "Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless)" in text
+
+
+def test_install_check_reports_all_bundled_session_assets(tmp_path):
+    home = tmp_path / "home"
+    mms_home = home / ".mms"
+    vendor = mms_home / "vendor"
+    hooks = mms_home / "hooks"
+    for path in (
+        vendor / "caveman" / "skills" / "caveman",
+        vendor / "caveman" / "hooks",
+        vendor / "token-saver",
+        vendor / "toon",
+        vendor / "xmem",
+        vendor / "web-access",
+        vendor / "weber",
+        vendor / "agent-browser",
+        hooks,
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    for path in (
+        vendor / "caveman" / "skills" / "caveman" / "SKILL.md",
+        vendor / "token-saver" / "SKILL.md",
+        vendor / "toon" / "SKILL.md",
+        vendor / "xmem" / "SKILL.md",
+        vendor / "web-access" / "SKILL.md",
+        vendor / "weber" / "SKILL.md",
+        vendor / "agent-browser" / "SKILL.md",
+    ):
+        path.write_text("# asset\n", encoding="utf-8")
+    (vendor / "caveman" / "hooks" / "caveman-activate.js").write_text("// activate\n", encoding="utf-8")
+    (vendor / "caveman" / "hooks" / "caveman-mode-tracker.js").write_text("// tracker\n", encoding="utf-8")
+    for name in ("nsr-builtin-hook.py", "nsr-claude-hook.sh", "nsr-codex-hook.sh"):
+        (hooks / name).write_text("#!/bin/sh\n", encoding="utf-8")
+
+    output = _run_install_check(home=home)
+
+    assert ("Bundled session assets" in output) or ("内建 session assets" in output)
+    for label in ("Caveman", "token-saver", "TOON", "xmem", "web-access", "weber", "agent-browser", "NSR"):
+        assert f"✓ {label}:" in output
 
 
 def test_install_script_installs_llm_operation_guide():
@@ -332,6 +373,8 @@ def test_install_script_updates_chinese_optional_copy():
     assert "--brainkeeper-ref" in text
     assert "--mindkeeper-ref" in text
     assert "Web automation bundle = weber 路由器 + web-access 登录态 Chrome + agent-browser headless CLI。" in text
+    assert "Caveman、TOON、token-saver、xmem" in text
+    assert "NSR 也已内建" in text
 
 
 def test_install_script_codegraph_auto_registers_missing_index():

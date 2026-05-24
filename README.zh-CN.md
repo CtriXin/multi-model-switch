@@ -47,7 +47,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
 - ECC/OMC Claude agent pack 变成 MMS-managed 可选安装包，启动确认页互斥选择
 
-MMS 在检测到 `xmem` 时，会默认注入 `xmem` skill 和静默 session-start hook。hook 只负责注册/同步当前项目到 xmem generated index；真正的 durable summary 仍走 xmem skill workflow，并进入 Project Wiki / issue-tracking 的 append-only 队列。
+MMS 会内建并默认注入 `xmem` skill 和静默 session-start/session-end hook。hook 只负责注册/同步当前项目到 xmem generated index；如果本机没有 `xmem` CLI 就 fail-open 静默跳过。真正的 durable summary 仍走 xmem skill workflow，并进入 Project Wiki / issue-tracking 的 append-only 队列。
 
 ## 安装 / 升级
 
@@ -228,14 +228,16 @@ MMS 可以按 session 暴露能力，不需要写全局 hooks/config：
 
 | Pack | 安装状态 | 用途 |
 | --- | --- | --- |
-| `token-saver` / `TOON` | 内建 | 压缩长输出和结构化 handoff |
-| Web automation bundle | 内建 | `weber` 负责路由，`web-access` 连接登录态 Chrome，`agent-browser` 负责轻量 headless |
-| `Caveman` | 内建 | 低 token 沟通模式 |
+| `token-saver` / `TOON` | `~/.mms/vendor` 内建 | 压缩长输出和结构化 handoff |
+| `xmem` | `~/.mms/vendor` 内建 | 跨项目 memory / truth-index skill；session hooks 静默且 fail-open |
+| Web automation bundle | `~/.mms/vendor` 内建 | `weber` 负责路由，`web-access` 连接登录态 Chrome，`agent-browser` 负责轻量 headless |
+| `Caveman` | `~/.mms/vendor` 内建 | 低 token 沟通模式；只有偏好或启动确认页启用后才 active |
+| `NSR` | 内建 hooks，默认关闭 | active goal continuation hooks；不写全局 hooks/config |
 | `ECC` | MMS-managed 可选包 | Claude engineering workflow / rules / quality hooks |
 | `OMC` | MMS-managed 可选包 | Claude orchestration runtime / team / verify loop |
 | `Pilot` / `auto-github-contributor` | 已安装时检测 | 规划和开源贡献入口 |
 
-启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。OpenCode 现在会拿到 session-local Caveman / token-saver / TOON / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。ECC 和 OMC 默认关闭，只有在 Claude 启动确认页选择后才注入。
+启动确认页会展示这些 surface；支持时也可以按当前 session 关闭某个 MCP / skill / hook。Passive skills（`token-saver`、`TOON`、`xmem`、`web-access`、`weber`、`agent-browser`）在 MMS-launched session 中自然可用；会改变行为的 active 能力（`Caveman`、`NSR`、`ECC`、`OMC`）仍需要启动 toggle 或 `preferences.toml`。OpenCode 现在会拿到 session-local Caveman / token-saver / TOON / xmem / web-access / weber skills；如果本机有 `rtk`，也会通过 session-local plugin 目录注入静默 RTK plugin。ECC 和 OMC 默认关闭，只有在 Claude 启动确认页选择后才注入。
 
 ## 可选安装包
 

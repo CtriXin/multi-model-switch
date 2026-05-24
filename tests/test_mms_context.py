@@ -363,6 +363,24 @@ def test_resolve_weber_root_prefers_bundled_vendor(monkeypatch, tmp_path):
     assert Path(mms_launchers._resolve_weber_root()) == bundled_root
 
 
+def test_resolve_xmem_root_prefers_bundled_vendor(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    install_root = tmp_path / "mms-install"
+    bundled_root = install_root / "vendor" / "xmem"
+    shared_root = home / "auto-skills" / "shared-skills" / "xmem"
+    bundled_root.mkdir(parents=True)
+    shared_root.mkdir(parents=True)
+    (bundled_root / "SKILL.md").write_text("# bundled xmem\n", encoding="utf-8")
+    (shared_root / "SKILL.md").write_text("# shared xmem\n", encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(home))
+    monkeypatch.delenv("MMS_XMEM_ROOT", raising=False)
+    mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
+    monkeypatch.setattr(mms_launchers, "__file__", str(install_root / "mms_launchers.py"))
+
+    assert Path(mms_launchers._resolve_xmem_root()) == bundled_root
+
+
 def test_install_session_command_wrappers_exposes_context_bin(monkeypatch, tmp_path):
     mms_launchers = _import_mms_launchers(monkeypatch, tmp_path)
 
