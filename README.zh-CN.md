@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v3.2.4`
+当前 tagged version：`v3.2.5`
 
 这一代的重点：
 
@@ -44,6 +44,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - 隔离 session 内置 real-home wrappers，修复 Keychain/Chrome/global CLI 的 HOME/XDG 兼容
 - installer 自动创建 Python virtualenv；系统 Python 缺失或过旧时，用 MMS-managed Python 兜底
 - 内建 lightweight session assets：`Caveman`、`token-saver`、`TOON`、`xmem` 和 Web automation bundle（`weber` 路由器 + `web-access` 登录态 Chrome + `agent-browser` headless）；Claude/Codex/OpenCode/Antigravity 都保持 session-local 注入
+- Caveman 默认改为 `lite`，保留完整句子但去掉 filler；需要更强压缩时仍可用 `/caveman full`
 - silent hook policy：Caveman / Map / RTK 避免 noisy hook stdout；Claude/Codex hook 只输出合法 compact JSON
 - session MCP hardening：继承 Claude MCP 时解析 real HOME 中的 CLI 绝对路径，找不到就不注入；Codex Caveman 尽量保留已信任 hook 顺序
 - 可选 BrainKeeper context pack 会安装 MCP、Claude 命令/hooks、`bk` / `brainkeeper` 命令，且没有 Xcode/git 时走 archive fallback
@@ -92,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.4/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.5/install.sh | bash -s --
 ```
 
 安装后自检：

@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v3.2.4`
+Current tagged version: `v3.2.5`
 
 Key changes in this generation:
 
@@ -44,6 +44,7 @@ Key changes in this generation:
 - real-home compatibility wrappers for Keychain/Chrome/global CLIs inside isolated sessions
 - installer-managed Python virtualenv plus MMS-managed Python fallback when system Python is missing or too old
 - bundled lightweight session assets for `Caveman`, `token-saver`, `TOON`, `xmem`, and the Web automation bundle (`weber` router + `web-access` logged-in Chrome + `agent-browser` headless); Claude/Codex/OpenCode/Antigravity injection stays session-local
+- Caveman now defaults to `lite`, keeping full sentences while still removing filler; `/caveman full` remains available for stronger compression
 - silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
@@ -92,7 +93,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.4/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.5/install.sh | bash -s --
 ```
 
 Verify the install:
