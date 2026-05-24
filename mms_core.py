@@ -5294,7 +5294,54 @@ def _compact_tui_report_value(value, max_len=96):
     return text[: max(1, max_len - 1)].rstrip() + "…"
 
 
+_SETTINGS_RESULT_RENDERED_TUI = False
+
+
+def _settings_result_tui_available():
+    if str(os.environ.get("MMS_DISABLE_SETTINGS_RESULT_TUI") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        return bool(sys.stdin.isatty() and sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+def _settings_result_tui_payload(title, rows, note="", *, ok=True):
+    prefix = "✓ " if ok else "✗ "
+    info_lines = [(_L("状态", "Status"), _L("成功", "OK") if ok else _L("失败", "Failed"))]
+    info_lines.extend(
+        (str(label or "-"), _compact_tui_report_value(value, max_len=120))
+        for label, value in list(rows or [])
+    )
+    if note:
+        info_lines.append((_L("说明", "Note"), _compact_tui_report_value(note, max_len=160)))
+    return (
+        f"{prefix}{title}",
+        info_lines,
+        [("back", _L("返回", "Back"))],
+    )
+
+
+def _select_settings_result_tui(title, rows, note="", *, ok=True):
+    from mms_tui import select_channel_action_tui
+
+    tui_title, info_lines, actions = _settings_result_tui_payload(title, rows, note, ok=ok)
+    return select_channel_action_tui(tui_title, info_lines, actions)
+
+
 def _print_settings_result_report(title, rows, note="", *, ok=True):
+    global _SETTINGS_RESULT_RENDERED_TUI
+    if _settings_result_tui_available():
+        try:
+            _select_settings_result_tui(title, rows, note, ok=ok)
+        except (KeyboardInterrupt, EOFError):
+            pass
+        except Exception:
+            _SETTINGS_RESULT_RENDERED_TUI = False
+        else:
+            _SETTINGS_RESULT_RENDERED_TUI = True
+            return
+
     _ensure_rich()
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "
@@ -5795,6 +5842,11 @@ def _display_provider_model_table(provider, probe):
 
 
 def _pause_after_tui_report(prompt_text="按 Enter 返回"):
+    global _SETTINGS_RESULT_RENDERED_TUI
+    if _SETTINGS_RESULT_RENDERED_TUI:
+        _SETTINGS_RESULT_RENDERED_TUI = False
+        return
+
     _ensure_rich()
     try:
         console.print(f"[dim]{prompt_text}[/dim]")

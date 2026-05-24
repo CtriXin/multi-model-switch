@@ -293,6 +293,60 @@ def test_rescue_result_payloads_are_compact_and_safe() -> None:
     assert "不切换当前 session" in handover_note
 
 
+def test_settings_result_report_uses_tui_when_available(monkeypatch) -> None:
+    import builtins
+    import mms_core
+
+    calls = []
+    printed = []
+    mms_core._SETTINGS_RESULT_RENDERED_TUI = False
+
+    monkeypatch.setattr(mms_core, "_settings_result_tui_available", lambda: True)
+    monkeypatch.setattr(
+        mms_core,
+        "_select_settings_result_tui",
+        lambda title, rows, note="", ok=True: calls.append((title, list(rows), note, ok)) or "back",
+    )
+    monkeypatch.setattr(mms_core.console, "print", lambda *args, **kwargs: printed.append((args, kwargs)))
+    monkeypatch.setattr(builtins, "input", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("pause should be skipped after TUI result")))
+
+    mms_core._print_settings_result_report(
+        "hot fallback 已开启",
+        [("Hot fallback", "开启")],
+        "开关保存到 [rescue].hot_fallback_enabled。",
+    )
+    mms_core._pause_after_tui_report("按 Enter 返回设置")
+
+    assert calls == [
+        (
+            "hot fallback 已开启",
+            [("Hot fallback", "开启")],
+            "开关保存到 [rescue].hot_fallback_enabled。",
+            True,
+        )
+    ]
+    assert printed == []
+    assert mms_core._SETTINGS_RESULT_RENDERED_TUI is False
+
+
+def test_settings_result_tui_payload_matches_settings_card_contract() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, info_lines, actions = mms_core._settings_result_tui_payload(
+        "hot fallback 已开启",
+        [("Hot fallback", "开启"), ("前置条件", "[rescue].fallback_model")],
+        "关闭时只记录 rescue / handoff",
+    )
+
+    assert title == "✓ hot fallback 已开启"
+    assert ("状态", "成功") in info_lines
+    assert ("Hot fallback", "开启") in info_lines
+    assert ("说明", "关闭时只记录 rescue / handoff") in info_lines
+    assert actions == [("back", "返回")]
+
+
 def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     import mms_core
     import mms_i18n
