@@ -1,19 +1,19 @@
 # Legacy Surface Cleanup / TUI-Only Migration
 
-Status: safe first phase. No legacy modules are physically deleted in this
-phase.
+Status: TUI-only migration phase. Legacy modules are not physically deleted,
+but direct `mms chat` / `mms discuss` entrypoints are disabled by default.
 
 ## Goal
 
 MMS is launcher/TUI-first. Legacy user surfaces stay available only for
-compatibility, emergency recovery, or dependency-preserving maintenance until
-tests prove they can be removed.
+dependency-preserving maintenance or explicit one-off compatibility opt-in
+until tests prove they can be physically removed.
 
 This phase adds:
 
 - dependency audit for `mms_chat.py`, `mms_discuss.py`, `mmc_*`,
   `mms_action_bar.py`, and `mms_usage.py`;
-- stable migration/deprecation messages for `mms chat`, `mms discuss`, and
+- default tombstone/migration messages for `mms chat`, `mms discuss`, and
   `mmc_core` help;
 - backend-only TUI Settings/Maintenance action descriptors in
   `mms_tui_settings_actions.py`;
@@ -36,8 +36,8 @@ rg -n "\\bmms_usage\\b|usage_main|usage \\.{3}|--refresh" .
 
 | Surface | Entrypoint | Current use | First-phase action | TUI replacement | Risk | Test coverage |
 |---|---|---|---|---|---|---|
-| Chat | `mms chat`, `mms_chat.py::chat_main` | Invoked by `mms_core.py`; also exports `stream_model`, `select_models_tui`, `strip_markdown`, `run_compare`, and shared view state used by `mms_discuss.py` and `mms_action_bar.py`. | Keep importable; mark help/runtime notice as `legacy/maintenance-only`; do not expand features. | Default `mms` TUI launcher for new CLI sessions; future `Legacy Tools / Emergency Debug` panel for compatibility access. | High if deleted: `mms_discuss.py` and `mms_action_bar.py` still import helpers directly. | `tests/test_legacy_surface_cleanup.py` checks notices and legacy imports. |
-| Discuss | `mms discuss`, `mms_discuss.py::discuss_main` | Invoked by `mms_core.py`; `mms_action_bar.py` imports `REFINE_SYSTEM_PROMPT`, `phase3_synthesize`, and can route a chat continuation into `discuss_main`. | Keep importable; mark help/runtime notice as `legacy/maintenance-only`; do not expand features. | Default `mms` TUI launcher for CLI startup; broad planning/execution belongs to external orchestrators, not MMS core. | High if deleted: action bar convergence/discuss paths still import symbols. | `tests/test_legacy_surface_cleanup.py` checks notice and importability. |
+| Chat | `mms chat`, `mms_chat.py::chat_main` | Module still exports `stream_model`, `select_models_tui`, `strip_markdown`, `run_compare`, and shared view state used by `mms_discuss.py` and `mms_action_bar.py`. | Direct command is disabled by default and shows a TUI migration tombstone; module remains importable. Temporary opt-in: `MMS_ENABLE_LEGACY_CHAT_DISCUSS=1`. | Default `mms` TUI launcher for new CLI sessions; future `Legacy Tools / Emergency Debug` panel for compatibility access if still needed. | High if physically deleted: `mms_discuss.py` and `mms_action_bar.py` still import helpers directly. | `tests/test_legacy_surface_cleanup.py` checks tombstone, notices, and legacy imports. |
+| Discuss | `mms discuss`, `mms_discuss.py::discuss_main` | `mms_action_bar.py` imports `REFINE_SYSTEM_PROMPT`, `phase3_synthesize`, and can route a legacy chat continuation into `discuss_main`. | Direct command is disabled by default and shows a TUI migration tombstone; module remains importable. Temporary opt-in: `MMS_ENABLE_LEGACY_CHAT_DISCUSS=1`. | Default `mms` TUI launcher for CLI startup; broad planning/execution belongs to external orchestrators, not MMS core. | High if physically deleted: action bar convergence/discuss paths still import symbols. | `tests/test_legacy_surface_cleanup.py` checks tombstone, notices, and importability. |
 | Action bar | `mms_action_bar.py` | Not a standalone public command; post-chat/post-discuss curses event loop and continuation helpers. | Keep as dependency; no user-surface hide in this phase. | Future TUI maintenance descriptors may replace only operational actions, not chat UI internals. | Medium/high: tightly coupled to chat/discuss session flows. | Legacy import test keeps module loadable. |
 | Usage | `mms usage`, `mms_usage.py::usage_main` | CLI stats and optional `--refresh` provider model refresh; imported only by `mms_core.py` and tests. | Keep command; do not deprecate in this phase. Document migration target for refresh/usage display. | `Refresh Sources` and `Usage / Last Used / Health overlay view` descriptors. | Medium: `--refresh` can touch provider cache and needs a real implementation plan before moving. | Existing `tests/test_command_smoke.py`; settings action descriptor tests. |
 | MMC internal adapter | `mmc_core.py`, `mmc_project_store.py`, `mmc_proxy_guard.py`, `mmc_proxy_routes.py`, `mmc_session_index.py` | Public `mmc` shim is already retired by install docs, but `mms_launchers.py` still has launcher-owned MMC delegate code and tests cover isolation/proxy/session helpers. | Keep all modules; add help migration notice only; no physical deletion. | Normal users enter through `mms` TUI launcher. Emergency/debug access remains available until dependency removal is proven safe. | Very high: OAuth Claude isolation, local proxy guard, session home cleanup, and human guard semantics are safety-critical. | Existing MMC tests plus `tests/test_legacy_surface_cleanup.py` help/import checks. |

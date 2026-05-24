@@ -431,9 +431,25 @@ def test_mms_help_keeps_review_launch_outside_legacy_bucket(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "registry ..." in out
     assert "review-launch" in out
-    assert "Legacy / emergency-only" in out
-    assert "chat ...        legacy/maintenance-only" in out
-    assert "discuss ...     legacy/maintenance-only" in out
+    assert "Legacy / emergency-only 模块（默认入口已下线）" in out
+    assert "chat/discuss    默认拒绝直接启动" in out
+    assert "MMS_ENABLE_LEGACY_CHAT_DISCUSS=1" in out
+
+
+def test_mms_chat_discuss_direct_commands_are_disabled_by_default(monkeypatch, capsys) -> None:
+    import mms_core
+
+    monkeypatch.delenv("MMS_ENABLE_LEGACY_CHAT_DISCUSS", raising=False)
+    monkeypatch.setattr(sys, "argv", ["mms", "chat"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"user": {}, "recommend": {}})
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: pytest.fail("snapshot should not run"))
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: pytest.fail("routes export should not run"))
+
+    mms_core.main()
+
+    out = capsys.readouterr().out
+    assert "`mms chat` 已从默认入口下线" in out
+    assert "MMS_ENABLE_LEGACY_CHAT_DISCUSS=1" in out
 
 
 def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:

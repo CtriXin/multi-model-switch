@@ -13765,6 +13765,24 @@ def _is_session_prune_dry_run(argv):
     return "--apply" not in argv
 
 
+def _legacy_chat_discuss_enabled():
+    value = str(os.environ.get("MMS_ENABLE_LEGACY_CHAT_DISCUSS") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _handle_disabled_legacy_chat_discuss(command):
+    command = str(command or "").strip()
+    if command not in {"chat", "discuss"}:
+        return False
+    if _legacy_chat_discuss_enabled():
+        return False
+    _ensure_rich()
+    console.print(f"[yellow]`{current_command()} {command}` 已从默认入口下线。[/yellow]")
+    console.print("[cyan]新会话请直接运行 `mms` / `mmd`，通过 TUI 选择 CLI、模型、fallback 与设置。[/cyan]")
+    console.print("[dim]兼容模块暂时保留给内部依赖；如确需一次性旧入口，可设置 MMS_ENABLE_LEGACY_CHAT_DISCUSS=1。[/dim]")
+    return True
+
+
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
     help_request = _is_help_request(argv)
@@ -13796,6 +13814,9 @@ def main():
         if _is_session_prune_dry_run(argv):
             handle_session_command(argv[1:])
             return
+
+    if len(argv) >= 1 and _handle_disabled_legacy_chat_discuss(argv[0]):
+        return
 
     if not help_request:
         _ensure_startup_snapshot_guard(
@@ -13917,9 +13938,9 @@ def main():
             f"  {current_command()} env <preset>    输出预设对应的 export 环境变量\n"
             f"  {current_command()} activate <preset>  输出可 eval 的 export 语句\n"
             f"  {current_command()} usage ...       查看 usage 统计\n\n"
-            "Legacy / emergency-only 命令（保留兼容，不作为主入口）:\n"
-            f"  {current_command()} chat ...        legacy/maintenance-only；新会话请用 TUI launcher\n"
-            f"  {current_command()} discuss ...     legacy/maintenance-only；规划/执行请用 TUI 启动 CLI"
+            "Legacy / emergency-only 模块（默认入口已下线）:\n"
+            f"  {current_command()} chat/discuss    默认拒绝直接启动；新会话请用 TUI launcher\n"
+            "  MMS_ENABLE_LEGACY_CHAT_DISCUSS=1 可临时打开旧入口"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
