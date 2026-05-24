@@ -34,7 +34,7 @@ Key changes in this generation:
 - Claude resume persistence through `.claude/projects`
 - Claude-on-MMS vision sidecar: text-only domestic models fail closed or delegate screenshots/images to a configured Kimi/MiMo/Qwen-compatible sidecar instead of stalling
 - Codex resume write-back across isolated MMS-managed launches
-- OpenCode profiles: `5.5 Pro`, `5.5 Multi-Agent`, `OMO`, and `Raw` with repo-local health feedback
+- OpenCode modes: default `OpenSpec Multi`, `Backend Multi`, `ACP Multi`, `Pro Solo`, `OMO Global`, and `Raw Pure` with repo-local health feedback
 - OpenCode Lite Pro contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
 - OpenCode backend entrypoints: the same MMS-generated session-local config can start interactive TUI, headless `opencode serve`, or ACP `opencode acp`
 - OpenCode Lite Pro mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
@@ -124,9 +124,9 @@ Direct CLI launch:
 mms claude
 mms codex
 mms opencode
-mms opencode --profile lite_pro
-mms opencode --profile lite_pro --backend-agent
-mms opencode --profile lite_pro_orchestrated --opencode-entrypoint acp
+mms opencode --profile lite_pro_orchestrated
+mms opencode --profile lite_pro_orchestrated_backend
+mms opencode --profile lite_pro_orchestrated_acp
 mms --provider <provider-id> codex
 mms --provider <provider-id> opencode
 mms --account <account-id> claude

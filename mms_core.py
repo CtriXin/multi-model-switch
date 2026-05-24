@@ -9304,27 +9304,51 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     return choice
 
 
-_OPENCODE_PROFILE_OPTIONS = [
+_OPENCODE_DEFAULT_PROFILE_ID = "lite_pro_orchestrated"
+
+_OPENCODE_BASE_PROFILE_OPTIONS = [
+    {
+        "id": _OPENCODE_DEFAULT_PROFILE_ID,
+        "label": "OpenSpec Multi",
+        "badge": "默认",
+        "summary": "默认推荐：5.5 总控；OpenSpec contract；executor 小包执行；spec-compliance review。",
+    },
     {
         "id": "lite_pro",
-        "label": "5.5 Pro",
+        "label": "Pro Solo",
         "summary": "5.5 主写；OpenSpec contract + 国产 explore/review/fix fallback；session-local。",
     },
     {
-        "id": "lite_pro_orchestrated",
-        "label": "5.5 Multi-Agent",
-        "summary": "5.5 总控；OpenSpec contract；executor：DeepSeek→GLM→Qwen→5.4。",
-    },
-    {
         "id": "heavy_omo",
-        "label": "OMO",
+        "label": "OMO Global",
         "summary": "读取 global OpenCode + OMO；MMS 不写全局配置。",
     },
     {
         "id": "raw",
-        "label": "Raw",
+        "label": "Raw Pure",
         "summary": "纯 OpenCode；session-local；无 OMO/agents。",
     },
+]
+
+_OPENCODE_PROFILE_OPTIONS = [
+    _OPENCODE_BASE_PROFILE_OPTIONS[0],
+    {
+        "id": "lite_pro_orchestrated_backend",
+        "profile_id": "lite_pro_orchestrated",
+        "entrypoint": "serve",
+        "label": "Backend Multi",
+        "badge": "后台",
+        "summary": "OpenSpec Multi-Agent + opencode serve；给 SDK/WebUI/headless client 连接。",
+    },
+    {
+        "id": "lite_pro_orchestrated_acp",
+        "profile_id": "lite_pro_orchestrated",
+        "entrypoint": "acp",
+        "label": "ACP Multi",
+        "badge": "编辑器",
+        "summary": "OpenSpec Multi-Agent + opencode acp；给 ACP-compatible editor/client 连接。",
+    },
+    *_OPENCODE_BASE_PROFILE_OPTIONS[1:],
 ]
 
 def _normalize_opencode_profile_id(value):
@@ -9334,11 +9358,14 @@ def _normalize_opencode_profile_id(value):
     normalized = raw.lower().replace("-", "_").replace(" ", "_")
     aliases = {
         "pro": "lite_pro",
+        "pro_solo": "lite_pro",
         "litepro": "lite_pro",
         "lite_pro": "lite_pro",
         "5_5_pro": "lite_pro",
         "orchestrated": "lite_pro_orchestrated",
         "multi_agent": "lite_pro_orchestrated",
+        "5_5_multi_agent": "lite_pro_orchestrated",
+        "openspec_multi": "lite_pro_orchestrated",
         "lite_multi_agent": "lite_pro_orchestrated",
         "lite_pro_orchestrated": "lite_pro_orchestrated",
         "omo": "heavy_omo",
@@ -9348,6 +9375,40 @@ def _normalize_opencode_profile_id(value):
         "lite": "lite",
     }
     return aliases.get(normalized, "")
+
+
+def _opencode_profile_selection(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return "", ""
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    for option in _OPENCODE_PROFILE_OPTIONS:
+        option_id = str(option.get("id") or "").strip()
+        if normalized != option_id.lower().replace("-", "_").replace(" ", "_"):
+            continue
+        profile_id = _normalize_opencode_profile_id(option.get("profile_id") or option_id)
+        entrypoint = _normalize_opencode_entrypoint(option.get("entrypoint") or "")
+        return profile_id, entrypoint
+    aliases = {
+        "backend_multi": ("lite_pro_orchestrated", "serve"),
+        "multi_backend": ("lite_pro_orchestrated", "serve"),
+        "multi_agent_backend": ("lite_pro_orchestrated", "serve"),
+        "openspec_multi_backend": ("lite_pro_orchestrated", "serve"),
+        "lite_pro_orchestrated_backend": ("lite_pro_orchestrated", "serve"),
+        "acp_multi": ("lite_pro_orchestrated", "acp"),
+        "multi_acp": ("lite_pro_orchestrated", "acp"),
+        "multi_agent_acp": ("lite_pro_orchestrated", "acp"),
+        "openspec_multi_acp": ("lite_pro_orchestrated", "acp"),
+        "lite_pro_orchestrated_acp": ("lite_pro_orchestrated", "acp"),
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    return _normalize_opencode_profile_id(value), ""
+
+
+def _opencode_profile_selection_ids():
+    ids = ["lite"] + [str(option.get("id") or "").strip() for option in _OPENCODE_PROFILE_OPTIONS]
+    return [item for item in ids if item]
 
 
 def _normalize_opencode_entrypoint(value):
@@ -9561,9 +9622,10 @@ def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"
 def _opencode_profile_menu_options():
     options = []
     for option in _OPENCODE_PROFILE_OPTIONS:
+        profile_id = _normalize_opencode_profile_id(option.get("profile_id") or option["id"])
         summary = option["summary"]
-        if option["id"] in {"lite_pro", "lite_pro_orchestrated"}:
-            lite_pro_health = _opencode_lite_pro_health_summary_text(profile_id=option["id"])
+        if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+            lite_pro_health = _opencode_lite_pro_health_summary_text(profile_id=profile_id)
         else:
             lite_pro_health = ""
         if lite_pro_health:
@@ -9572,6 +9634,7 @@ def _opencode_profile_menu_options():
             "id": option["id"],
             "label": option["label"],
             "summary": summary,
+            "badge": option.get("badge", ""),
         })
     return options
 
@@ -9632,43 +9695,41 @@ def _official_account_menu_options(cfg, cli_name):
 
 
 def _select_opencode_profile(use_tui=False):
+    options = _opencode_profile_menu_options()
     if use_tui:
         try:
             from mms_tui import select_channel_action_tui
             return select_channel_action_tui(
-                "OpenCode Profile",
-                [
-                    ("5.5 Pro", "OpenSpec contract + fallback roster"),
-                    ("5.5 Multi-Agent", "OpenSpec contract + executor chain"),
-                    ("OMO", "global config"),
-                    ("Raw", "pure fallback"),
-                ],
-                [(option["id"], option["label"]) for option in _OPENCODE_PROFILE_OPTIONS],
+                "OpenCode Mode",
+                [(option["label"], option["summary"]) for option in options[:4]],
+                [(option["id"], option["label"]) for option in options],
             )
         except Exception:
             return None
 
     _ensure_rich()
-    table = Table(title="OpenCode Profile")
+    table = Table(title="OpenCode Mode")
     table.add_column("#", style="cyan", width=4)
-    table.add_column("Profile", style="green")
+    table.add_column("Mode", style="green")
     table.add_column("说明", style="dim")
-    for idx, option in enumerate(_OPENCODE_PROFILE_OPTIONS, 1):
-        table.add_row(str(idx), option["label"], option["summary"])
+    for idx, option in enumerate(options, 1):
+        label = f"{option.get('badge')} {option['label']}".strip()
+        table.add_row(str(idx), label, option["summary"])
     console.print(table)
     while True:
         try:
-            choice = IntPrompt.ask("选择 OpenCode profile")
-            if 1 <= choice <= len(_OPENCODE_PROFILE_OPTIONS):
-                return _OPENCODE_PROFILE_OPTIONS[choice - 1]["id"]
-            console.print(f"[red]请输入 1-{len(_OPENCODE_PROFILE_OPTIONS)}[/red]")
+            choice = IntPrompt.ask("选择 OpenCode mode")
+            if 1 <= choice <= len(options):
+                return options[choice - 1]["id"]
+            console.print(f"[red]请输入 1-{len(options)}[/red]")
         except KeyboardInterrupt:
             return None
 
 
 def _apply_opencode_profile(runtime, profile_id):
     runtime = dict(runtime or {})
-    profile_id = _normalize_opencode_profile_id(profile_id) or "lite"
+    profile_id, selection_entrypoint = _opencode_profile_selection(profile_id)
+    profile_id = profile_id or "lite"
     runtime["opencode_profile"] = profile_id
     runtime["opencode_profile_label"] = _opencode_profile_label(profile_id)
     if profile_id == "heavy_omo":
@@ -9702,6 +9763,8 @@ def _apply_opencode_profile(runtime, profile_id):
         runtime["opencode_pure"] = True
         runtime["opencode_lite_agents"] = True
         runtime["opencode_agent"] = "mobius-builder"
+    if selection_entrypoint:
+        runtime = _apply_opencode_entrypoint(runtime, selection_entrypoint)
     return runtime
 
 
@@ -10080,7 +10143,7 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
 
     runtime = dict(builder_route)
     runtime["id"] = str(builder_route.get("provider_id") or "opencode-lite-pro")
-    runtime["name"] = "OpenCode Lite Pro"
+    runtime["name"] = f"OpenCode {_opencode_profile_label(profile_id)}"
     runtime["auth_mode"] = "api_key"
     runtime["runtime_kind"] = "provider"
     runtime["model"] = builder_route["model"]
@@ -10098,7 +10161,8 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
 
 def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, profile_id):
     """Resolve fixed OpenCode profile runtime without asking for a model/channel."""
-    profile_id = _normalize_opencode_profile_id(profile_id) or "lite"
+    profile_id, selection_entrypoint = _opencode_profile_selection(profile_id)
+    profile_id = profile_id or "lite"
     if profile_id == "heavy_omo":
         runtime = {
             "id": "global-opencode-omo",
@@ -10106,9 +10170,13 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
             "runtime_kind": "opencode_profile",
             "auth_mode": "global_config",
         }
-        return {"model": "global-omo"}, _apply_opencode_profile(runtime, profile_id)
+        runtime = _apply_opencode_profile(runtime, profile_id)
+        return {"model": "global-omo"}, _apply_opencode_entrypoint(runtime, selection_entrypoint)
     if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
-        return _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=profile_id)
+        model_info, runtime = _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=profile_id)
+        if runtime is None:
+            return model_info, runtime
+        return model_info, _apply_opencode_entrypoint(runtime, selection_entrypoint)
 
     candidates = []
     for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
@@ -10168,7 +10236,8 @@ def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, pro
     _family_rank, _model_rank, _role, _priority, _pname, model_name, _pid, _seq, provider, family = candidates[0]
     runtime = _runtime_with_priority(provider, model_name=model_name, family_name=family)
     runtime["model"] = model_name
-    return {"model": model_name}, _apply_opencode_profile(runtime, profile_id)
+    runtime = _apply_opencode_profile(runtime, profile_id)
+    return {"model": model_name}, _apply_opencode_entrypoint(runtime, selection_entrypoint)
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
@@ -14158,9 +14227,9 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
-            f"  {current_command()} opencode --profile lite_pro  直接启动指定 OpenCode profile\n"
-            f"  {current_command()} opencode --profile lite_pro --backend-agent  启动 OpenCode headless backend server\n"
-            f"  {current_command()} opencode --profile lite_pro --opencode-entrypoint acp  启动 OpenCode ACP server\n"
+            f"  {current_command()} opencode --profile lite_pro_orchestrated  直接启动默认 OpenSpec Multi mode\n"
+            f"  {current_command()} opencode --profile lite_pro_orchestrated_backend  启动 OpenSpec Multi backend server\n"
+            f"  {current_command()} opencode --profile lite_pro_orchestrated_acp  启动 OpenSpec Multi ACP server\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
@@ -14188,7 +14257,7 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode profile，例如 lite_pro / orchestrated / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 lite_pro_orchestrated / lite_pro_orchestrated_backend / lite_pro_orchestrated_acp / lite_pro / omo / raw")
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
@@ -14231,13 +14300,15 @@ def main():
     if args.account and args.provider:
         console.print("[red]--account 和 --provider 不能同时使用[/red]")
         sys.exit(1)
-    requested_opencode_profile = _normalize_opencode_profile_id(args.opencode_profile)
+    requested_opencode_profile, requested_profile_entrypoint = _opencode_profile_selection(args.opencode_profile)
     if args.opencode_profile and not requested_opencode_profile:
-        valid_profiles = ", ".join(option["id"] for option in _OPENCODE_PROFILE_OPTIONS)
-        parser.error(f"--profile 仅支持 OpenCode profile：lite, {valid_profiles}")
+        valid_profiles = ", ".join(_opencode_profile_selection_ids())
+        parser.error(f"--profile 仅支持 OpenCode mode：{valid_profiles}")
     if requested_opencode_profile and args.account:
         parser.error("--profile 是 OpenCode 专用参数，不支持同时使用 --account")
     requested_opencode_entrypoints = []
+    if requested_profile_entrypoint:
+        requested_opencode_entrypoints.append(requested_profile_entrypoint)
     if args.opencode_entrypoint:
         requested_opencode_entrypoints.append(args.opencode_entrypoint)
     if args.backend_agent:
@@ -14360,7 +14431,7 @@ def main():
         if target is None:
             target = "opencode"
         elif target != "opencode":
-            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile lite_pro --backend-agent")
+            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile lite_pro_orchestrated_backend")
 
     if target:
         # Is it a scene number?

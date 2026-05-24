@@ -611,8 +611,8 @@ def main() -> int:
     parser.add_argument(
         "--profile",
         default="lite_pro",
-        choices=["lite_pro", "lite_pro_orchestrated", "lite", "raw"],
-        help="OpenCode profile to smoke",
+        choices=mms_core._opencode_profile_selection_ids(),
+        help="OpenCode mode/profile to smoke",
     )
     parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
@@ -639,11 +639,13 @@ def main() -> int:
 
     try:
         model_info, runtime = _resolve_profile(args.profile)
+        runtime_profile = str(runtime.get("opencode_profile") or args.profile)
         result["model_info"] = model_info
         result["runtime"] = {
             "id": runtime.get("id"),
             "name": runtime.get("name"),
-            "profile": runtime.get("opencode_profile"),
+            "profile": runtime_profile,
+            "entrypoint": runtime.get("opencode_entrypoint") or "tui",
             "agent": runtime.get("opencode_agent"),
         }
         result["routes"] = [
@@ -720,7 +722,7 @@ def main() -> int:
     if args.health_summary:
         result["health_summary"] = _health_summary_for_routes(
             repo_root,
-            args.profile,
+            str((result.get("runtime") or {}).get("profile") or args.profile),
             [route for route in result.get("routes", []) if isinstance(route, dict)],
         )
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

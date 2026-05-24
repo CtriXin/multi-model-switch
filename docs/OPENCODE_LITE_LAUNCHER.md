@@ -1,17 +1,17 @@
-# OpenCode Launcher Profiles
+# OpenCode Launcher Modes
 
-MMS launches OpenCode through fixed profiles. It does not ask the user to tune agents on every start.
+MMS launches OpenCode through fixed modes. It does not ask the user to tune agents on every start.
 
 ## Decision
 
-- `5.5 Pro` is the default high-confidence custom-agent lane.
-- `5.5 Multi-Agent` keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
-- Both Lite Pro profiles now include an OpenSpec/SpecBridge contract lane: `mobius-spec-writer` creates the minimal task contract, and `mobius-spec-compliance-reviewer` checks the actual diff and validation output against that contract item by item.
+- `OpenSpec Multi` (`lite_pro_orchestrated`) is the default/recommended OpenCode mode. It keeps GPT-5.5 as coordinator only and delegates implementation to domestic executor agents before a GPT-5.4 final fallback.
+- `Pro Solo` (`lite_pro`) is the high-confidence custom-agent lane for cases where one GPT-5.5-led lane is preferable to executor fanout.
+- Both Lite Pro-derived modes now include an OpenSpec/SpecBridge contract lane: `mobius-spec-writer` creates the minimal task contract, and `mobius-spec-compliance-reviewer` checks the actual diff and validation output against that contract item by item.
 - MMS can launch the same generated OpenCode config through the interactive TUI, a headless backend server (`opencode serve`), or ACP (`opencode acp`). Backend/ACP are entrypoints over the same session-local config; they do not replace MMS routing, trace, or evidence policy.
 - `OMO` keeps using the existing global OpenCode + OMO setup.
 - `Raw` is a pure fallback with no OMO and no custom agents.
 - `lite` remains supported by profile ID for compatibility, but is hidden from the selector.
-- In the OpenCode tab, MMS shows this profile selector first; session-local profiles do not ask the user to choose a channel/model before profile selection.
+- In the OpenCode tab, MMS shows this mode selector first; session-local modes do not ask the user to choose a channel/model before mode selection.
 - Lite Pro auto-resolves a deterministic multi-model roster and writes it only into session-local OpenCode config.
 - Lite Pro uses mixed OpenCode providers: GPT routes prefer `@ai-sdk/openai` + Responses API for cache-friendly transport; GPT chat completions are only a degraded fallback; direct MiMo uses the official `@ai-sdk/openai-compatible` `/v1` path; the other non-GPT routes with `anthropic_messages` support use `@ai-sdk/anthropic` and `/v1/messages`.
 - Lite Pro fail-closes protocol selection: GPT routes reject Anthropic transport, and non-GPT routes require `anthropic_messages`; if a protocol-safe non-GPT route is unavailable, that role uses the stable GPT fallback instead of silently using chat completions.
@@ -19,28 +19,30 @@ MMS launches OpenCode through fixed profiles. It does not ask the user to tune a
 - Lite Pro includes optional vision helper agents. If the active coding/review model cannot read images, the coordinator can ask MiMo/Kimi/Qwen vision helpers to inspect screenshots first, then pass structured observations back to the main workflow.
 - Lite Pro launch does not make a live model request by default. Set `MMS_OPENCODE_LAUNCH_PREFLIGHT=1` to run a tiny OpenCode preflight against the primary builder route; if `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session. See `docs/OPENCODE_PREFLIGHT_OPT_IN_DECISION_2026-05-18.md` for the root-cause and fix record.
 - MMS does not delete or rewrite global OMO config.
-- MMS does not write `~/.config/opencode/opencode.json`, `~/.config/opencode/oh-my-openagent.jsonc`, or `~/.config/mms/config.toml` for this profile selection.
+- MMS does not write `~/.config/opencode/opencode.json`, `~/.config/opencode/oh-my-openagent.jsonc`, or `~/.config/mms/config.toml` for this mode selection.
 
-## Profiles
+## Modes
 
-| Profile | Launch shape | Config source | Use case |
+| Mode | Launch shape | Config source | Use case |
 | --- | --- | --- | --- |
-| `lite_pro` / `5.5 Pro` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Daily coding with 5.5 primary, OpenSpec contract checks, and named fallback agents |
-| `lite_pro_orchestrated` / `5.5 Multi-Agent` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | 5.5 coordinator with OpenSpec contract and executor chain |
-| `heavy_omo` / `OMO` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
-| `raw` / `Raw` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
+| `lite_pro_orchestrated` / `OpenSpec Multi` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Default/recommended: 5.5 coordinator with OpenSpec contract, executor chain, and spec-compliance review |
+| `lite_pro_orchestrated_backend` / `Backend Multi` | `opencode serve --pure` | Same session-local config as `OpenSpec Multi` | Headless backend server for SDK/WebUI/automation clients |
+| `lite_pro_orchestrated_acp` / `ACP Multi` | `opencode acp --pure` | Same session-local config as `OpenSpec Multi` | ACP-compatible editor/client integration |
+| `lite_pro` / `Pro Solo` | `opencode --pure --agent mobius-builder-pro -m mms-builder_primary/<model>` | MMS-generated session-local multi-provider `opencode.json` | Single GPT-5.5-led lane with OpenSpec contract checks and named fallback agents |
+| `heavy_omo` / `OMO Global` | `opencode` | Existing global OpenCode + OMO config | Global OMO/fanout lane |
+| `raw` / `Raw Pure` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
 
-Direct launch is also supported, for example `mms opencode --profile lite_pro` or `mmd opencode --profile lite_pro`.
+Direct launch is also supported, for example `mms opencode --profile lite_pro_orchestrated` or `mmd opencode --profile lite_pro_orchestrated`.
 
 Alternative entrypoints are explicit and opt-in:
 
 ```bash
-mms opencode --profile lite_pro --backend-agent
-mms opencode --profile lite_pro_orchestrated --opencode-entrypoint backend
-mms opencode --profile lite_pro --opencode-entrypoint acp
+mms opencode --profile lite_pro_orchestrated_backend
+mms opencode --profile lite_pro_orchestrated_acp
+mms opencode --profile lite_pro_orchestrated --backend-agent
 ```
 
-`--backend-agent` starts `opencode serve --pure` with the MMS-generated session-local config for SDK/WebUI/headless clients. `--opencode-entrypoint acp` starts `opencode acp --pure` for ACP-compatible editors. Neither path writes global OpenCode config.
+`Backend Multi` and `--backend-agent` start `opencode serve --pure` with the MMS-generated session-local config for SDK/WebUI/headless clients. `ACP Multi` and `--opencode-entrypoint acp` start `opencode acp --pure` for ACP-compatible editors. Neither path writes global OpenCode config.
 
 ## Lite Pro Roster
 
@@ -112,7 +114,7 @@ When `--live` is used, the smoke also appends one route health row per tested ag
 
 MMS reads `.ai/opencode-health/latest.json` as repo-local health input only. `blocked` routes are not eligible for automatic fallback, fresh `unhealthy` routes are temporarily filtered, then route preference is deterministic: `live_healthy`, `degraded`, `untested`, stale `unhealthy`, `blocked`. Lite Pro route selection applies that health input inside each role: same model on another healthy channel first, then the role's peer model, then the existing stable GPT fallback path.
 
-The OpenCode profile menu appends compact health hints to Lite Pro profiles, such as `health: 15/15 healthy` for `lite_pro` or `health: 20/20 healthy` for `lite_pro_orchestrated`.
+The OpenCode mode menu appends compact health hints to Lite Pro modes, such as `health: 15/15 healthy` for `lite_pro` or `health: 20/20 healthy` for `lite_pro_orchestrated`. `Backend Multi` and `ACP Multi` reuse the same `lite_pro_orchestrated` health summary.
 
 ## Guardrails
 
