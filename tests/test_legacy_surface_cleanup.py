@@ -239,6 +239,30 @@ def test_rescue_landing_shows_latest_hot_fallback_event() -> None:
     assert "rescue_hot_fallback" in info["最近 fallback 尝试"]
 
 
+def test_rescue_result_payloads_are_compact_and_safe() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, rows, note = mms_core._rescue_default_fallback_report_payload("deepseek-v4-flash")
+    demo_title, demo_rows, _demo_note = mms_core._rescue_demo_packet_report_payload(
+        {"artifacts": {"markdown": "/tmp/rescue.md", "json": "/tmp/rescue.json"}}
+    )
+    handover_title, handover_rows, handover_note = mms_core._rescue_handover_report_payload(
+        {"artifacts": {"markdown": "/tmp/handover.md", "latest_markdown": "/tmp/latest.md"}},
+        "deepseek-v4-flash",
+    )
+
+    assert title == "全局 fallback 已设置"
+    assert ("Model", "deepseek-v4-flash") in rows
+    assert "routed model" in note
+    assert demo_title == "测试 rescue packet 已生成"
+    assert ("rescue.md", "/tmp/rescue.md") in demo_rows
+    assert handover_title == "fallback handover 已生成"
+    assert ("Model", "deepseek-v4-flash") in handover_rows
+    assert "不切换当前 session" in handover_note
+
+
 def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     import mms_core
     import mms_i18n

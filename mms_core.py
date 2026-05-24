@@ -5285,6 +5285,67 @@ def _print_settings_error_report(title, exc):
     )
 
 
+def _rescue_default_fallback_report_payload(model, *, cleared=False):
+    if cleared:
+        return (
+            _L("全局 fallback 已清除", "Global fallback cleared"),
+            [
+                (_L("保存位置", "saved at"), "[rescue].fallback_model"),
+                (_L("安全边界", "safety"), "routed providers only; no global OAuth"),
+            ],
+            "",
+        )
+    return (
+        _L("全局 fallback 已设置", "Global fallback set"),
+        [
+            ("Model", model or "-"),
+            (_L("保存位置", "saved at"), "[rescue].fallback_model"),
+            (_L("生效方式", "applies"), "bridge failure -> model-routes.json"),
+            (_L("安全边界", "safety"), "no global OAuth"),
+        ],
+        _L("真实 failure 会先写 rescue packet，再尝试该 routed model。", "Real failures write a rescue packet before trying this routed model."),
+    )
+
+
+def _rescue_demo_packet_report_payload(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    return (
+        _L("测试 rescue packet 已生成", "Demo rescue packet created"),
+        [
+            ("rescue.md", artifacts.get("markdown") or "-"),
+            ("rescue.json", artifacts.get("json") or "-"),
+        ],
+        "",
+    )
+
+
+def _rescue_paths_report_payload(selected_rescue):
+    selected_rescue = selected_rescue if isinstance(selected_rescue, dict) else {}
+    return (
+        _L("Rescue 文件路径", "Rescue file paths"),
+        [
+            ("rescue.md", selected_rescue.get("artifact_markdown") or "-"),
+            ("rescue.json", selected_rescue.get("artifact_json") or "-"),
+        ],
+        "",
+    )
+
+
+def _rescue_handover_report_payload(handover, fallback_model):
+    handover = handover if isinstance(handover, dict) else {}
+    artifacts = handover.get("artifacts") if isinstance(handover.get("artifacts"), dict) else {}
+    return (
+        _L("fallback handover 已生成", "fallback handover created"),
+        [
+            ("Model", fallback_model or "-"),
+            ("handover.md", artifacts.get("markdown") or "-"),
+            ("latest", artifacts.get("latest_markdown") or "-"),
+        ],
+        _L("handover 只写本地 rescue artifact；不切换当前 session。", "handover writes local rescue artifacts only; it does not switch the current session."),
+    )
+
+
 def _registry_source_staleness_report_payload(summary):
     summary = summary if isinstance(summary, dict) else {}
     rows = [
@@ -10824,8 +10885,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]保存到 [rescue].fallback_model；bridge failure 时按 model-routes.json 尝试，不使用 global OAuth。[/dim]")
+                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "choose_route_default":
@@ -10839,26 +10899,28 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]保存到 [rescue].fallback_model；bridge failure 时按 model-routes.json 尝试。[/dim]")
+                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")
                     save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    console.print("[green]✓ 全局默认 fallback 已清除[/green]")
+                    _print_settings_result_report(*_rescue_default_fallback_report_payload("", cleared=True))
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action == "create_demo":
                     payload = write_demo_rescue_packet(repo_root=os.getcwd())
-                    console.print(f"[green]✓ 已生成测试 rescue packet[/green]")
-                    console.print(f"[dim]rescue.md: {payload.get('artifacts', {}).get('markdown', '-')}[/dim]")
+                    _print_settings_result_report(*_rescue_demo_packet_report_payload(payload))
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 if landing_action != "view_packets":
                     continue
                 if not rescue_events:
-                    console.print("[yellow]没有可查看的 rescue packet。[/yellow]")
+                    _print_settings_result_report(
+                        _L("没有 rescue packet", "No rescue packet"),
+                        [(_L("状态", "Status"), _L("当前没有可查看记录", "No records available"))],
+                        ok=False,
+                    )
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
                 selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
@@ -10910,7 +10972,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     try:
                         content = md_path.read_text(encoding="utf-8")
                     except OSError as exc:
-                        console.print(f"[red]无法读取 rescue.md: {exc}[/red]")
+                        _print_settings_error_report(_L("无法读取 rescue.md", "Cannot read rescue.md"), exc)
                     else:
                         try:
                             console.clear()
@@ -10919,8 +10981,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                         console.print(content)
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "show_paths":
-                    console.print(f"[cyan]rescue.md[/cyan] {selected_rescue.get('artifact_markdown') or '-'}")
-                    console.print(f"[cyan]rescue.json[/cyan] {selected_rescue.get('artifact_json') or '-'}")
+                    _print_settings_result_report(*_rescue_paths_report_payload(selected_rescue))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif str(rescue_action or "").startswith("handover::") or rescue_action == "manual_handover":
                     fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("handover::") else ""
@@ -10934,13 +10995,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                                 fallback_model=fallback_model,
                             )
                         except Exception as exc:
-                            console.print(f"[red]生成 fallback handover 失败: {exc}[/red]")
+                            _print_settings_error_report(_L("生成 fallback handover 失败", "Create fallback handover failed"), exc)
                         else:
-                            artifacts = handover.get("artifacts", {})
-                            console.print(f"[green]✓ 已生成 fallback handover[/green]")
-                            console.print(f"[cyan]model[/cyan] {fallback_model}")
-                            console.print(f"[cyan]handover.md[/cyan] {artifacts.get('markdown') or '-'}")
-                            console.print(f"[dim]latest: {artifacts.get('latest_markdown') or '-'}[/dim]")
+                            _print_settings_result_report(*_rescue_handover_report_payload(handover, fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
@@ -10957,12 +11014,9 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                                 fallback_model=fallback_model,
                             )
                         except Exception as exc:
-                            console.print(f"[red]生成 fallback handover 失败: {exc}[/red]")
+                            _print_settings_error_report(_L("生成 fallback handover 失败", "Create fallback handover failed"), exc)
                         else:
-                            artifacts = handover.get("artifacts", {})
-                            console.print(f"[green]✓ 已生成 fallback handover[/green]")
-                            console.print(f"[cyan]model[/cyan] {fallback_model}")
-                            console.print(f"[cyan]handover.md[/cyan] {artifacts.get('markdown') or '-'}")
+                            _print_settings_result_report(*_rescue_handover_report_payload(handover, fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif str(rescue_action or "").startswith("default::") or rescue_action == "manual_default":
                     fallback_model = str(rescue_action or "").split("::", 1)[1] if str(rescue_action or "").startswith("default::") else ""
@@ -10972,8 +11026,7 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]保存到 [rescue].fallback_model；真实 failure 会先写 rescue packet，再按 model-routes.json 尝试。[/dim]")
+                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
@@ -10986,13 +11039,12 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     if fallback_model:
                         current_cfg = _set_rescue_default_fallback(current_cfg, model=fallback_model)
                         save_config(current_cfg, reason="tui:rescue_default_fallback")
-                        console.print(f"[green]✓ 全局默认 fallback 已设置为 {fallback_model}[/green]")
-                        console.print("[dim]后续 bridge failure 会尝试该 routed model；不使用 global OAuth。[/dim]")
+                        _print_settings_result_report(*_rescue_default_fallback_report_payload(fallback_model))
                         _pause_after_tui_report("按 Enter 返回设置")
                 elif rescue_action == "clear_default":
                     current_cfg = _set_rescue_default_fallback(current_cfg, model="")
                     save_config(current_cfg, reason="tui:clear_rescue_default_fallback")
-                    console.print("[green]✓ 全局默认 fallback 已清除[/green]")
+                    _print_settings_result_report(*_rescue_default_fallback_report_payload("", cleared=True))
                     _pause_after_tui_report("按 Enter 返回设置")
             continue
 
