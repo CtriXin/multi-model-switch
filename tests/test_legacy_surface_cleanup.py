@@ -261,6 +261,46 @@ def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     assert "Registry Doctor / 状态" in action_labels
 
 
+def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, rows, note = mms_core._registry_scheduled_refresh_report_payload(
+        {
+            "db_path": "/tmp/model-registry.sqlite",
+            "dry_run": True,
+            "source_due_count": 2,
+            "source_refresh": {"imported_count": 0},
+            "openrouter_due": False,
+            "openrouter_fetch": {"reason": "not fetched in no-network mode"},
+        }
+    )
+    diff_title, diff_rows, diff_note = mms_core._registry_openrouter_diff_report_payload(
+        {
+            "change_count": 2,
+            "stored_count": 2,
+            "missing_reference_count": 1,
+            "untracked_catalog_count": 3,
+            "changes": [
+                {
+                    "field_key": "context_window",
+                    "model_key": "gpt-5.5",
+                    "provider_model_id": "openai/gpt-5.5",
+                }
+            ],
+        }
+    )
+
+    assert title == "定时刷新结果"
+    assert ("到期 Source", 2) in rows
+    assert "不接入 startup" in note
+    assert diff_title == "OpenRouter Candidate Diff"
+    assert ("缺少 reference", 1) in diff_rows
+    assert "不改变当前 runtime defaults" in diff_note
+    assert mms_core._compact_tui_report_value("x" * 120, max_len=20) == "x" * 19 + "…"
+
+
 def test_about_and_snapshot_guard_tui_payloads_use_chinese_labels() -> None:
     import mms_core
     import mms_i18n

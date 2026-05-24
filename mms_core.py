@@ -5258,6 +5258,162 @@ def _registry_truth_tui_payload(status):
     return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
 
 
+def _compact_tui_report_value(value, max_len=96):
+    text = str(value if value is not None else "-").replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text or "-"
+    return text[: max(1, max_len - 1)].rstrip() + "…"
+
+
+def _print_settings_result_report(title, rows, note="", *, ok=True):
+    _ensure_rich()
+    color = "green" if ok else "red"
+    prefix = "✓ " if ok else "✗ "
+    console.print(f"[{color}]{prefix}{title}[/{color}]")
+    for label, value in rows:
+        console.print(f"[cyan]{label}[/cyan] {_compact_tui_report_value(value)}")
+    if note:
+        console.print(f"[dim]{note}[/dim]")
+
+
+def _print_settings_error_report(title, exc):
+    _print_settings_result_report(
+        title,
+        [(_L("错误", "Error"), exc)],
+        _L("操作未完成；没有改变 runtime defaults。", "Operation did not complete; runtime defaults unchanged."),
+        ok=False,
+    )
+
+
+def _registry_source_staleness_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    rows = [
+        ("DB", summary.get("db_path") or "-"),
+        (_L("到期 Source", "sources due"), f"{summary.get('due_count')} / {summary.get('source_count')}"),
+    ]
+    for idx, item in enumerate((summary.get("sources") or [])[:5], start=1):
+        due = _L("到期", "due") if item.get("due") else _L("未到期", "not due")
+        rows.append(
+            (
+                f"Source {idx}",
+                f"{due} · {item.get('reason') or '-'} · {item.get('checked_at') or '-'} · {item.get('source_path') or '-'}",
+            )
+        )
+    hidden = max(0, len(summary.get("sources") or []) - 5)
+    if hidden:
+        rows.append((_L("更多 Source", "more sources"), hidden))
+    return _L("模型真源 Source Staleness", "Registry Source Staleness"), rows, ""
+
+
+def _registry_refresh_sources_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        _L("刷新 Sources 完成", "Refresh Sources Complete"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            (_L("导入", "imported"), summary.get("imported_count")),
+            (_L("跳过", "skipped"), summary.get("skipped_count", 0)),
+            (_L("模型", "models"), summary.get("model_count")),
+            (_L("事实", "facts"), summary.get("fact_count")),
+        ],
+        _L("只写 source truth / candidate evidence；不改变当前 runtime defaults。", "Writes source truth / candidate evidence only; runtime defaults unchanged."),
+    )
+
+
+def _registry_scheduled_refresh_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    source_refresh = summary.get("source_refresh") if isinstance(summary.get("source_refresh"), dict) else {}
+    openrouter_fetch = summary.get("openrouter_fetch") if isinstance(summary.get("openrouter_fetch"), dict) else {}
+    return (
+        _L("定时刷新结果", "Scheduled Refresh Result"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            ("Dry Run", summary.get("dry_run")),
+            (_L("到期 Source", "source due"), summary.get("source_due_count")),
+            (_L("导入 Source", "source imported"), source_refresh.get("imported_count", 0)),
+            (_L("OpenRouter 到期", "OpenRouter due"), summary.get("openrouter_due")),
+            ("OpenRouter", openrouter_fetch.get("reason") or _L("No Network 模式未拉取", "not fetched in no-network mode")),
+        ],
+        _L("安全 schedule wrapper：不接入 startup，不发布 latest-approved。", "Safe schedule wrapper: no startup hook and no latest-approved publish."),
+    )
+
+
+def _registry_openrouter_fetch_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        _L("OpenRouter Catalog 拉取完成", "OpenRouter Catalog Fetch Complete"),
+        [
+            ("DB", summary.get("db_path") or "-"),
+            ("Snapshot", summary.get("snapshot_id") or "-"),
+            (_L("模型", "models"), summary.get("model_count")),
+        ],
+        _L("只写 provider_catalog source snapshot；不改变当前 runtime defaults。", "Writes provider_catalog source snapshot only; runtime defaults unchanged."),
+    )
+
+
+def _registry_openrouter_diff_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    rows = [
+        (_L("变化", "changes"), f"{summary.get('change_count')} stored={summary.get('stored_count')}"),
+        (_L("缺少 reference", "missing reference"), summary.get("missing_reference_count")),
+        (_L("未追踪 catalog", "untracked catalog"), summary.get("untracked_catalog_count")),
+    ]
+    for idx, item in enumerate((summary.get("changes") or [])[:5], start=1):
+        rows.append(
+            (
+                f"Change {idx}",
+                f"{item.get('field_key') or '-'} · {item.get('model_key') or '-'} -> {item.get('provider_model_id') or '-'}",
+            )
+        )
+    hidden = max(0, len(summary.get("changes") or []) - 5)
+    if hidden:
+        rows.append((_L("更多变化", "more changes"), hidden))
+    return (
+        _L("OpenRouter Candidate Diff", "OpenRouter Candidate Diff"),
+        rows,
+        _L("只写 candidate_change evidence；不改变当前 runtime defaults。", "Writes candidate_change evidence only; runtime defaults unchanged."),
+    )
+
+
+def _registry_publish_approved_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    return (
+        _L("发布 Approved Bundle 完成", "Publish Approved Bundle Complete"),
+        [
+            ("Manifest", summary.get("manifest_path") or "-"),
+            ("Bundle", summary.get("bundle_revision") or "-"),
+        ],
+        _L("发布 generated/latest-approved bundle；不改 root aliases，不改 runtime defaults。", "Publishes generated/latest-approved bundle; root aliases and runtime defaults unchanged."),
+    )
+
+
+def _registry_verify_approved_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
+    files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
+    return (
+        _L("Latest-approved hash 验证完成", "Latest-approved hash verified"),
+        [
+            ("Manifest", summary.get("manifest_path") or "-"),
+            ("Bundle", manifest.get("bundle_revision") or "-"),
+            (_L("文件", "files"), len(files)),
+        ],
+        "",
+    )
+
+
+def _registry_doctor_report_payload(status):
+    status = status if isinstance(status, dict) else {}
+    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+    rows = [
+        ("DB", status.get("db_path") or "-"),
+        ("user_version", status.get("user_version") or "-"),
+    ]
+    for key in sorted(counts):
+        rows.append((key, counts[key]))
+    return _L("Registry Doctor / 状态", "Registry Doctor / Status"), rows, ""
+
+
 def _about_tui_payload(about_snapshot):
     """Build localized About status/actions for the Settings detail page."""
     about_snapshot = about_snapshot if isinstance(about_snapshot, dict) else {}
@@ -10530,31 +10686,17 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                     try:
                         summary = source_freshness()
                     except Exception as exc:
-                        console.print(f"[red]Check Source Staleness 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("检查 Source Staleness 失败", "Check Source Staleness failed"), exc)
                     else:
-                        console.print("[cyan]MMS Registry Source Staleness[/cyan]")
-                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
-                        console.print(f"[cyan]due[/cyan] {summary.get('due_count')} / {summary.get('source_count')}")
-                        for item in summary.get("sources") or []:
-                            console.print(
-                                f"[cyan]{item.get('reason')}[/cyan] "
-                                f"due={item.get('due')} checked_at={item.get('checked_at') or '-'} "
-                                f"{item.get('source_path')}"
-                            )
+                        _print_settings_result_report(*_registry_source_staleness_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action in {"refresh_sources", "refresh_due_sources"}:
                     try:
                         summary = refresh_source_snapshots(if_due=(registry_action == "refresh_due_sources"))
                     except Exception as exc:
-                        console.print(f"[red]Refresh Sources 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("刷新 Sources 失败", "Refresh Sources failed"), exc)
                     else:
-                        console.print("[green]✓ Refresh Sources 完成[/green]")
-                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
-                        console.print(f"[cyan]imported[/cyan] {summary.get('imported_count')}")
-                        console.print(f"[cyan]skipped[/cyan] {summary.get('skipped_count', 0)}")
-                        console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
-                        console.print(f"[cyan]facts[/cyan] {summary.get('fact_count')}")
-                        console.print("[dim]只写 source_truth/candidate evidence，不改变当前 runtime defaults。[/dim]")
+                        _print_settings_result_report(*_registry_refresh_sources_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action in {"scheduled_dry_run", "scheduled_no_network"}:
                     try:
@@ -10563,80 +10705,45 @@ def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_
                             no_network=True,
                         )
                     except Exception as exc:
-                        console.print(f"[red]Scheduled Refresh 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("定时刷新失败", "Scheduled Refresh failed"), exc)
                     else:
-                        source_refresh = summary.get("source_refresh") if isinstance(summary.get("source_refresh"), dict) else {}
-                        openrouter_fetch = summary.get("openrouter_fetch") if isinstance(summary.get("openrouter_fetch"), dict) else {}
-                        console.print("[cyan]MMS Registry Scheduled Refresh[/cyan]")
-                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
-                        console.print(f"[cyan]dry_run[/cyan] {summary.get('dry_run')}")
-                        console.print(f"[cyan]source_due[/cyan] {summary.get('source_due_count')}")
-                        console.print(f"[cyan]source_imported[/cyan] {source_refresh.get('imported_count', 0)}")
-                        console.print(f"[cyan]openrouter_due[/cyan] {summary.get('openrouter_due')}")
-                        console.print(f"[cyan]openrouter[/cyan] {openrouter_fetch.get('reason') or 'not fetched in no-network mode'}")
-                        console.print("[dim]安全 schedule wrapper：不联网、不接入 startup、不发布 latest-approved。[/dim]")
+                        _print_settings_result_report(*_registry_scheduled_refresh_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "fetch_openrouter":
                     try:
                         summary = fetch_openrouter_catalog()
                     except Exception as exc:
-                        console.print(f"[red]Fetch OpenRouter Catalog 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("拉取 OpenRouter Catalog 失败", "Fetch OpenRouter Catalog failed"), exc)
                     else:
-                        console.print("[green]✓ Fetch OpenRouter Catalog 完成[/green]")
-                        console.print(f"[cyan]db[/cyan] {summary.get('db_path')}")
-                        console.print(f"[cyan]snapshot[/cyan] {summary.get('snapshot_id')}")
-                        console.print(f"[cyan]models[/cyan] {summary.get('model_count')}")
-                        console.print("[dim]只写 provider_catalog source_snapshot，不改变当前 runtime defaults。[/dim]")
+                        _print_settings_result_report(*_registry_openrouter_fetch_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "diff_openrouter":
                     try:
                         summary = diff_openrouter_catalog(limit=12)
                     except Exception as exc:
-                        console.print(f"[red]OpenRouter Candidate Diff 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("OpenRouter Candidate Diff 失败", "OpenRouter Candidate Diff failed"), exc)
                     else:
-                        console.print("[cyan]OpenRouter Candidate Diff[/cyan]")
-                        console.print(f"[cyan]changes[/cyan] {summary.get('change_count')} stored={summary.get('stored_count')}")
-                        console.print(f"[cyan]missing[/cyan] {summary.get('missing_reference_count')}")
-                        console.print(f"[cyan]untracked[/cyan] {summary.get('untracked_catalog_count')}")
-                        for item in summary.get("changes") or []:
-                            console.print(
-                                f"[cyan]{item.get('field_key')}[/cyan] "
-                                f"{item.get('model_key')} -> {item.get('provider_model_id')}"
-                            )
-                        console.print("[dim]只写 candidate_change evidence，不改变当前 runtime defaults。[/dim]")
+                        _print_settings_result_report(*_registry_openrouter_diff_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "publish_approved":
                     try:
                         summary = publish_approved_bundle()
                     except Exception as exc:
-                        console.print(f"[red]Publish Approved Bundle 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("发布 Approved Bundle 失败", "Publish Approved Bundle failed"), exc)
                     else:
-                        console.print("[green]✓ Publish Approved Bundle 完成[/green]")
-                        console.print(f"[cyan]manifest[/cyan] {summary.get('manifest_path')}")
-                        console.print(f"[cyan]bundle[/cyan] {summary.get('bundle_revision')}")
-                        console.print("[dim]发布 generated/latest-approved bundle；不改 root aliases，不改 runtime defaults。[/dim]")
+                        _print_settings_result_report(*_registry_publish_approved_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "verify_approved":
                     try:
                         summary = verify_approved_bundle()
                     except Exception as exc:
-                        console.print(f"[red]Verify Approved Bundle 失败: {exc}[/red]")
+                        _print_settings_error_report(_L("验证 Approved Bundle 失败", "Verify Approved Bundle failed"), exc)
                     else:
-                        manifest = summary.get("manifest") if isinstance(summary.get("manifest"), dict) else {}
-                        files = summary.get("verified_files") if isinstance(summary.get("verified_files"), dict) else {}
-                        console.print("[green]✓ Latest-approved bundle hash verified[/green]")
-                        console.print(f"[cyan]manifest[/cyan] {summary.get('manifest_path')}")
-                        console.print(f"[cyan]bundle[/cyan] {manifest.get('bundle_revision')}")
-                        console.print(f"[cyan]files[/cyan] {len(files)}")
+                        _print_settings_result_report(*_registry_verify_approved_report_payload(summary))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "doctor":
                     status = registry_status()
-                    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
-                    console.print("[cyan]MMS Registry Status[/cyan]")
-                    console.print(f"[cyan]db[/cyan] {status.get('db_path')}")
-                    console.print(f"[cyan]user_version[/cyan] {status.get('user_version')}")
-                    for key in sorted(counts):
-                        console.print(f"[cyan]{key}[/cyan] {counts[key]}")
+                    _print_settings_result_report(*_registry_doctor_report_payload(status))
                     _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
                 while True:
