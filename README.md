@@ -261,6 +261,8 @@ bash install.sh --install-xmem
 bash install.sh --install-ops-env-safe
 ```
 
+Add `--dry-run` to preview the install plan without writing files, for example `bash install.sh --install-xmem --dry-run`.
+
 `--install-brainkeeper-context` installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude `/distill` / `/cz` / `/cr`, token hooks, and `~/.local/bin/bk` plus `~/.local/bin/brainkeeper`. The installed runtime lives at `~/.local/share/brainkeeper`; when a sibling BrainKeeper repo exists, the installer reuses its `install.sh`, but the active install still syncs into that directory. If Node/npm is missing, the installer prepares an nvm Node 22 runtime for this install without changing the user's default Node. If Xcode/git is unavailable, it falls back to a GitHub archive download.
 
 `--install-map` installs the project-structure Map and enables the Claude SessionStart auto-index hook. It helps Claude orient in a repo faster by refreshing a lightweight directory/file map. This is a global Claude hook; use `--map-ref` to pin the version.

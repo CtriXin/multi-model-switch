@@ -424,6 +424,8 @@ def test_install_script_has_optional_xmem_pack():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
     readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
 
+    assert "--dry-run" in text
+    assert "print_dry_run_plan" in text
     assert "--install-xmem" in text
     assert "--xmem-ref" in text
     assert "INSTALL_XMEM" in text
@@ -433,8 +435,32 @@ def test_install_script_has_optional_xmem_pack():
     assert "run_xmem_setup_onboarding" in text
     assert "~/.codex/skills/xmem" in text
     assert "~/.claude/skills/xmem" in text
+    assert 'XMEM_HOME="$REAL_HOME/.xmem"' in text
+    assert 'XMEM_HOST_HOME="$REAL_HOME"' in text
     assert '"$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync' in text
     assert "bash install.sh --install-xmem" in readme_text
+
+
+def test_install_script_dry_run_does_not_write_home(tmp_path):
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env.update(_version_env_overrides())
+
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--install-xmem", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "DRY RUN: no files will be written" in completed.stdout
+    assert "would install xmem CLI/skill" in completed.stdout
+    assert "xmem setup --root" in completed.stdout
+    assert not (tmp_path / ".mms").exists()
+    assert not (tmp_path / ".xmem").exists()
+    assert not (tmp_path / ".local" / "share" / "xmem").exists()
 
 
 def test_install_script_has_optional_claude_agent_packs():

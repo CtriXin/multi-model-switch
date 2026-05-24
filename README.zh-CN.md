@@ -259,6 +259,8 @@ bash install.sh --install-xmem
 bash install.sh --install-ops-env-safe
 ```
 
+想先看会做什么但不写文件，可以加 `--dry-run`，例如 `bash install.sh --install-xmem --dry-run`。
+
 `--install-brainkeeper-context` 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude `/distill` / `/cz` / `/cr`、token hooks，以及 `~/.local/bin/bk` 和 `~/.local/bin/brainkeeper`。安装目录是 `~/.local/share/brainkeeper`；如果相邻存在 BrainKeeper 仓库，安装器会复用其 `install.sh`，但真正运行的安装仍同步到这个目录。如果缺 Node/npm，会用 nvm 准备本次安装用的 Node 22，不改用户默认 Node；如果没有 Xcode/git，会 fallback 到 GitHub archive 下载。
 
 `--install-map` 会安装项目结构地图 Map，并启用 Claude 的 SessionStart auto-index hook；它让 Claude 在进入 repo 时更快理解目录和文件结构。这是全局 Claude hook，可用 `--map-ref` 固定版本。

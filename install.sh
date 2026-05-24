@@ -84,6 +84,7 @@ INSTALL_CLI_LIST=""
 INSTALL_CLI_EXPLICIT=0
 CHECK_ONLY=0
 PRINT_ONLY_VERSION=0
+DRY_RUN=0
 
 REAL_HOME_CANDIDATE="${REAL_HOME:-${MMS_REAL_HOME:-${ORIGINAL_HOME:-}}}"
 REAL_HOME="${REAL_HOME_CANDIDATE:-$HOME}"
@@ -361,7 +362,7 @@ download_url_to_file() {
 usage() {
     cat <<EOF
 $(t "用法:" "Usage:")
-  bash install.sh [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
+  bash install.sh [--dry-run] [--write-shell-rc] [--run-setup] [--ensure-node22] [--launch-after-install] [--lang zh|en] [--install-brainkeeper-context] [--brainkeeper-ref <tag-or-branch>] [--install-map] [--map-ref <tag-or-branch>] [--install-codegraph] [--codegraph-package <npm-spec>] [--install-read-once] [--install-token-saver] [--install-toon] [--install-xmem] [--xmem-ref <tag-or-branch>] [--install-ops-env-safe] [--install-ecc] [--ecc-ref <tag-or-branch>] [--install-omc] [--omc-ref <tag-or-branch>] [--install-agent-packs] [--install-cli name[,name2]]
   bash install.sh --ref <tag-or-branch>
   bash install.sh --main
   bash install.sh --latest-tag
@@ -374,6 +375,7 @@ $(t "说明:" "Notes:")
   - $(t "--ref 可指定版本号或分支，例如 v1.2.0 / main" "--ref can pin a specific version or branch, for example v1.2.0 / main")
   - $(t "--version 仅显示当前脚本将安装的版本，不执行安装" "--version prints the version/ref this script would install without installing")
   - $(t "--check 仅检查当前环境与已安装状态，不执行安装" "--check inspects the current environment and installed state without installing")
+  - $(t "--dry-run 只显示本次会写入/安装/初始化什么，不创建 venv、不复制文件、不运行 setup" "--dry-run only prints what would be written/installed/initialized; it does not create a venv, copy files, or run setup")
   - $(t "--lang 可设置默认 UI 语言（zh / en）" "--lang sets the default UI language (zh / en)")
   - $(t "--install-rtk 会额外安装 jq + rtk，并把 Claude 的 RTK rewrite hook 配好" "--install-rtk installs jq + rtk and enables the Claude RTK rewrite hook")
   - $(t "--install-brainkeeper-context 会全量安装/更新 BrainKeeper context pack：BrainKeeper MCP、Claude 的 /distill /cz /cr、token hooks、bk/brainkeeper 命令；默认锁定到经过 MMS 验证的 BrainKeeper tag" "--install-brainkeeper-context installs/updates the full BrainKeeper context pack: BrainKeeper MCP, Claude /distill /cz /cr commands, token hooks, and bk/brainkeeper commands; by default it pins the MMS-tested BrainKeeper tag")
@@ -3688,12 +3690,52 @@ run_xmem_setup_onboarding() {
     fi
 
     echo "→ $(t "正在执行 xmem 轻量 setup" "Running lightweight xmem setup")"
-    if "$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync; then
+    if XMEM_HOME="$REAL_HOME/.xmem" XMEM_HOST_HOME="$REAL_HOME" MMS_HOST_HOME="$REAL_HOME" HOST_HOME="$REAL_HOME" \
+        "$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync; then
         echo "✓ $(t "xmem setup 已完成" "xmem setup completed")"
         return 0
     fi
     echo "⚠ $(t "xmem setup 未完成，可稍后手动运行 xmem setup" "xmem setup did not complete; you can run xmem setup later")"
     return 1
+}
+
+print_dry_run_plan() {
+    echo ""
+    echo "===================================="
+    echo "  $(t "DRY RUN：不会写入任何文件" "DRY RUN: no files will be written")"
+    echo "===================================="
+    echo "• $(t "MMS 安装目录" "MMS install dir"): $MMS_HOME"
+    echo "• $(t "命令目录" "command dir"): $BIN_DIR"
+    echo "• $(t "虚拟环境" "virtualenv"): $VENV_DIR"
+    echo "• $(t "配置目录" "config dir"): $REAL_HOME/.config/mms"
+    echo "• $(t "会复制 session assets" "would copy session assets"): Caveman / TOON / token-saver / xmem / Web automation bundle"
+
+    if [ -n "$INSTALL_CLI_LIST" ]; then
+        echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
+    fi
+    [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
+    [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
+    [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
+    [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
+    [ "$INSTALL_READ_ONCE" -eq 1 ] && echo "• $(t "会安装 read-once Claude hook" "would install read-once Claude hook")"
+    [ "$INSTALL_TOKEN_SAVER" -eq 1 ] && echo "• $(t "会安装 Token Saver skill/命令" "would install Token Saver skill/commands")"
+    [ "$INSTALL_TOON" -eq 1 ] && echo "• $(t "会安装 TOON skill/命令" "would install TOON skill/command")"
+
+    if [ "$INSTALL_XMEM" -eq 1 ]; then
+        echo "• $(t "会安装 xmem CLI/skill" "would install xmem CLI/skill"): $XMEM_REPO_URL#$XMEM_INSTALL_REF"
+        echo "  $(t "源码落点" "source target"): $XMEM_INSTALL_DIR"
+        echo "  $(t "命令落点" "command target"): $BIN_DIR/xmem"
+        echo "  $(t "skill 落点" "skill targets"): ~/.codex/skills/xmem, ~/.claude/skills/xmem, ~/.agents/skills/xmem"
+        echo "  $(t "setup 预期命令" "setup command"): xmem setup --root \"$REAL_HOME\" --scan-depth 2 --register-only --yes --no-sync"
+        echo "  $(t "setup 效果" "setup effect"): $(t "创建 ~/.xmem，注册浅层 git roots，不写 repo-local .xmem" "create ~/.xmem, register shallow git roots, do not write repo-local .xmem")"
+    fi
+
+    [ "$INSTALL_OPS_ENV_SAFE" -eq 1 ] && echo "• $(t "会安装 ops-env-safe path hints" "would install ops-env-safe path hints")"
+    [ "$INSTALL_ECC" -eq 1 ] && echo "• $(t "会安装 ECC agent pack" "would install ECC agent pack"): ${ECC_INSTALL_REF:-default}"
+    [ "$INSTALL_OMC" -eq 1 ] && echo "• $(t "会安装 OMC agent pack" "would install OMC agent pack"): ${OMC_INSTALL_REF:-default}"
+
+    echo ""
+    echo "✓ $(t "dry-run 完成：未创建 venv，未复制文件，未下载/安装可选包，未运行 xmem setup。" "dry-run complete: no venv created, no files copied, no optional packs downloaded/installed, and xmem setup was not run.")"
 }
 
 install_optional_xmem() {
@@ -3979,6 +4021,9 @@ while [[ $# -gt 0 ]]; do
         --check)
             CHECK_ONLY=1
             ;;
+        --dry-run)
+            DRY_RUN=1
+            ;;
         --lang)
             shift
             if [[ -z "${1:-}" ]] || [[ "$1" != "zh" && "$1" != "en" ]]; then
@@ -4090,8 +4135,13 @@ fi
 echo "• $(t "内建 session assets" "Bundled session assets"): on"
 echo "  $(t "安装后会自带 Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Install includes Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless); NSR is built in and enabled by default; all are injected per session without changing global hooks/config.")"
 
-    if [ "$ENSURE_NODE22" -eq 1 ]; then
+if [ "$ENSURE_NODE22" -eq 1 ]; then
         echo "⚠ $(t "将优先复用现有 Node.js 22；若不存在则回退到 nvm 安装，但不会切默认 Node 或写 shell rc。" "This prefers an existing Node.js 22 and only falls back to nvm when needed; it will not switch default Node or write shell rc.")"
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    print_dry_run_plan
+    exit 0
 fi
 
 # ── 1. 检查 Python3 ──
