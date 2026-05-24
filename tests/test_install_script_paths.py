@@ -420,6 +420,23 @@ def test_install_script_has_optional_token_saver_pack():
     assert 'write_mms_script_wrapper "mms-toon"' in text
 
 
+def test_install_script_has_optional_xmem_pack():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    readme_text = (ROOT_DIR / "README.zh-CN.md").read_text(encoding="utf-8")
+
+    assert "--install-xmem" in text
+    assert "--xmem-ref" in text
+    assert "INSTALL_XMEM" in text
+    assert "XMEM_REPO_URL" in text
+    assert "optional_xmem_installed" in text
+    assert "install_optional_xmem" in text
+    assert "run_xmem_setup_onboarding" in text
+    assert "~/.codex/skills/xmem" in text
+    assert "~/.claude/skills/xmem" in text
+    assert '"$xmem_cmd" setup --root "$REAL_HOME" --scan-depth 2 --register-only --yes --no-sync' in text
+    assert "bash install.sh --install-xmem" in readme_text
+
+
 def test_install_script_has_optional_claude_agent_packs():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 

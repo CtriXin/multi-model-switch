@@ -255,6 +255,7 @@ bash install.sh --install-codegraph
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-toon
+bash install.sh --install-xmem
 bash install.sh --install-ops-env-safe
 ```
 
@@ -269,6 +270,8 @@ bash install.sh --install-ops-env-safe
 `--install-token-saver` 会安装 Codex/Claude 共用 token-saver skill 和本机命令，用于长日志、测试输出、大范围 `rg`、`git diff/show` 和 noisy diagnostics 的 ref+snippet 收纳。agent 会自动用底层命令；用户只需要说 `/token-saver` 或“省点 context”。
 
 `--install-toon` 会安装 Codex/Claude 共用 TOON skill 和本机 `mms-toon` 命令，用于结构化 JSON/status/handoff 压缩，方便 MMS 之外的 export-only session 使用；MMS 启动的 session 仍默认内建 TOON。不要把 TOON 用在 prose、代码、原始日志、secret 或 CLI/API 要求精确的 JSON 上。
+
+`--install-xmem` 会安装通用版 xmem CLI，并把 Codex/Claude 共用 xmem skill 装给 MMS 之外的 export-only session；随后执行轻量 `xmem setup`：创建 `~/.xmem`，注册 HOME 下浅层 git roots，但不写 repo-local `.xmem` 文件。可用 `--xmem-ref` 固定 tag 或 branch。MMS 启动的 session 仍默认内建 xmem session asset。
 
 `--install-ops-env-safe` 是高级可选项：写入 Codex skill、Claude `/ops-env-safe` 和 `~/.config/mms/ops-env-safe.toml`，让 export-only 或特殊隔离 session 能查宿主路径。普通 MMS session 已自动带真实 HOME 路径提示和 session host context，通常不用安装它。它不设置真实 `HOME`/`XDG_*`，也不导出 auth secret。
 

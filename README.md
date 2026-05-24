@@ -257,6 +257,7 @@ bash install.sh --install-codegraph
 bash install.sh --install-read-once
 bash install.sh --install-token-saver
 bash install.sh --install-toon
+bash install.sh --install-xmem
 bash install.sh --install-ops-env-safe
 ```
 
@@ -271,6 +272,8 @@ bash install.sh --install-ops-env-safe
 `--install-token-saver` installs the shared Codex/Claude token-saver skill plus local commands for long logs, test output, broad `rg`, `git diff/show`, and noisy diagnostics as refs plus snippets. Agents use the low-level commands automatically; users can just say `/token-saver` or ask to save context.
 
 `--install-toon` installs the shared Codex/Claude TOON skill plus the local `mms-toon` command for structured JSON/status/handoff compression in export-only sessions outside MMS. MMS-launched sessions still bundle TOON by default. Do not use TOON for prose, code, raw logs, secrets, or exact CLI/API JSON.
+
+`--install-xmem` installs the generic xmem CLI plus the shared Codex/Claude xmem skill for export-only sessions outside MMS, then runs a lightweight `xmem setup`: it creates `~/.xmem` and registers shallow git roots under HOME without writing repo-local `.xmem` files. Use `--xmem-ref` to pin a tag or branch. MMS-launched sessions still bundle the xmem session asset by default.
 
 `--install-ops-env-safe` is an advanced-only path hint pack: it writes a Codex skill, Claude `/ops-env-safe`, and `~/.config/mms/ops-env-safe.toml` so export-only or special isolated sessions can inspect known host paths. Normal MMS sessions already receive real-HOME path hints and session host context, so most users do not need it. It does not set real `HOME`/`XDG_*` and does not export auth secrets.
 
