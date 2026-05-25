@@ -1,6 +1,6 @@
 ---
 name: xmem
-description: Use when the user asks for xmem, cross-project memory, project truth index, prior similar work, preserving feature invariants, or compact agent context; first verify that an `xmem` CLI or source registry is available.
+description: Use when the user asks for xmem, cross-project memory, project truth index, prior similar work, domain/service/deploy/COS/copy-domain routing, preserving feature invariants, historical bug patterns, or compact agent context; first verify that an `xmem` CLI or source registry is available.
 ---
 
 # xmem
@@ -26,6 +26,12 @@ If `xmem` is not installed or `xmem status` says no registry/sources are availab
 - optionally suggest installing/configuring xmem if the user asked for memory features.
 
 MMS session hooks are silent and fail-open for this reason.
+
+## When To Call xmem
+
+Call `xmem resume` or `xmem preflight` early for cross-project, domain/service, deploy, COS, copy-domain/template-clone, historical bug, or "where did we do this before" tasks. Do this even when the user did not explicitly say xmem; fail open if the CLI is unavailable.
+
+For new copied domains that lookup/rf cannot resolve yet, query xmem with the task id/template/old sibling domain before asking the user for service identity. For COS/coscli credential-looking failures in isolated sessions, query xmem before manual config archaeology.
 
 ## Resume Rule
 
