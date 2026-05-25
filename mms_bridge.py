@@ -1221,6 +1221,47 @@ def _current_rescue_fallback(server):
     }
 
 
+def _truthy_route_flag(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enabled"}
+
+
+def _route_declares_cache_sensitive_transport(route):
+    route = route if isinstance(route, dict) else {}
+    protocol_hints = route.get("protocol_hints")
+    hint_sensitive = False
+    if isinstance(protocol_hints, dict):
+        hint_sensitive = _truthy_route_flag(protocol_hints.get("cache_sensitive_transport"))
+    return (
+        _truthy_route_flag(route.get("cache_sensitive_transport"))
+        or _truthy_route_flag(route.get("cache_sensitive"))
+        or hint_sensitive
+    )
+
+
+def _route_declares_anthropic_messages(route):
+    route = route if isinstance(route, dict) else {}
+    protocols = route.get("protocols")
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    if isinstance(protocols, (list, tuple)):
+        return "anthropic_messages" in {str(item).strip() for item in protocols}
+    protocol_hints = route.get("protocol_hints")
+    if isinstance(protocol_hints, dict):
+        hint_protocols = protocol_hints.get("protocols")
+        if isinstance(hint_protocols, str):
+            hint_protocols = [hint_protocols]
+        if isinstance(hint_protocols, (list, tuple)):
+            return "anthropic_messages" in {str(item).strip() for item in hint_protocols}
+    return False
+
+
+def _route_should_use_messages_transport(route):
+    """Return True when chat/completions is unsafe for a fallback route."""
+    return _route_declares_cache_sensitive_transport(route) or _route_declares_anthropic_messages(route)
+
+
 def _rescue_route_from_export(route, fallback_model):
     route = route if isinstance(route, dict) else {}
     model_id = str(route.get("model_id") or route.get("model") or fallback_model or "").strip()
@@ -1228,6 +1269,10 @@ def _rescue_route_from_export(route, fallback_model):
         return None
     anthropic_url = str(route.get("anthropic_base_url") or "").strip().rstrip("/")
     openai_url = str(route.get("openai_base_url") or route.get("gateway_url") or route.get("base_url") or "").strip().rstrip("/")
+    if not anthropic_url and openai_url and _route_should_use_messages_transport(route):
+        # Shared-root gateways often expose /v1/messages under the same base used
+        # for OpenAI-compatible calls; cache-sensitive fallbacks must not hit chat.
+        anthropic_url = openai_url
     protocol = _rescue_route_protocol(route, model_id, anthropic_url=anthropic_url, openai_url=openai_url)
     selected_url = anthropic_url if protocol == "anthropic_messages" else openai_url
     api_key = str(route.get("api_key") or route.get("gateway_key") or "").strip()
@@ -1248,13 +1293,17 @@ def _rescue_route_from_export(route, fallback_model):
 
 
 def _rescue_route_protocol(route, model_id, *, anthropic_url="", openai_url=""):
+    if _route_declares_cache_sensitive_transport(route) and (anthropic_url or openai_url):
+        return "anthropic_messages"
     explicit = str(route.get("protocol") or route.get("preferred_protocol") or "").strip()
     if explicit in {"anthropic_messages", "openai_chat_completions"}:
         return explicit
     protocols = route.get("protocols")
+    if isinstance(protocols, str):
+        protocols = [protocols]
     if isinstance(protocols, (list, tuple)):
         normalized = {str(item).strip() for item in protocols}
-        if "anthropic_messages" in normalized and anthropic_url and not _is_openai_model(model_id):
+        if "anthropic_messages" in normalized and (anthropic_url or openai_url) and not _is_openai_model(model_id):
             return "anthropic_messages"
         if "openai_chat_completions" in normalized and openai_url:
             return "openai_chat_completions"
@@ -1464,6 +1513,15 @@ def _should_try_chatcompletions_fallback(status_code, body_text):
         "not found",
     )
     return any(marker in lower for marker in unsupported_markers)
+
+
+def _chatcompletions_error_requests_messages(body_text):
+    lower = str(body_text or "").lower()
+    return (
+        "prompt-cache sensitive" in lower
+        and "/v1/messages" in lower
+        and ("/v1/chat/completions" in lower or "chat/completions" in lower)
+    )
 
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -4694,6 +4752,23 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                         )
                         return
                     break
+            if _chatcompletions_error_requests_messages(last_body) and gateway_url and gateway_key:
+                messages_route = dict(route)
+                messages_route["protocol"] = "anthropic_messages"
+                messages_route["fallback_reason"] = "cache_sensitive_messages_retry"
+                _bridge_error_logger.warning(
+                    "chatcompletions fallback rejected for cache-sensitive transport; retrying messages: model=%s",
+                    model_name,
+                )
+                self._do_anthropic_messages_fallback(
+                    payload,
+                    model_name,
+                    gateway_url,
+                    gateway_key,
+                    started_ms,
+                    route=messages_route,
+                )
+                return
             _record_bridge_blocking_failure(
                 self.server,
                 model_name=model_name,
