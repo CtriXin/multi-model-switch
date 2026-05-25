@@ -48,9 +48,10 @@ Key changes in this generation:
 - silent hook policy: Caveman / Map / RTK avoid noisy hook stdout; Claude/Codex hooks emit valid compact JSON only
 - session MCP hardening resolves inherited Claude MCP commands to real-HOME absolute CLIs or drops missing ones; Codex Caveman preserves trusted hook order where possible
 - optional BrainKeeper context pack installs MCP, Claude commands/hooks, and `bk` / `brainkeeper` wrappers without requiring Xcode/git
+- optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. These hooks only register/sync the current project when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself.
+MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. These hooks only register/sync the current project when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
 
 ## Install Or Upgrade
 
