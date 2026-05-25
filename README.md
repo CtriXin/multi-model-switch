@@ -51,7 +51,7 @@ Key changes in this generation:
 - optional xmem installer pack: `--install-xmem` installs the generic xmem CLI/skill, `--xmem-ref` can pin the source ref, and `--dry-run` previews the install/setup plan without writing files
 - optional MMS-managed ECC/OMC Claude agent-pack installer flow
 
-MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. These hooks only register/sync the current project when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
+MMS also bundles the generic `xmem` skill plus silent session-start/session-end hooks. Newer sessions add a silent `xmem gateway` prompt probe in dry-run telemetry mode so MMS can learn when compact memory would have helped without changing agent context yet. These hooks only register/sync/probe when an `xmem` CLI is configured; if the CLI is absent they fail open. Durable summaries stay in the user's configured xmem sources, not in MMS itself. Public xmem onboarding stays low-touch: the optional installer creates `~/.xmem`, registers shallow HOME git roots, and does not write repo-local `.xmem` files until a user or agent runs `xmem setup` inside a project.
 
 ## Install Or Upgrade
 

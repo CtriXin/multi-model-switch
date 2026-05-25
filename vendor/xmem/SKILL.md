@@ -25,7 +25,18 @@ If `xmem` is not installed or `xmem status` says no registry/sources are availab
 - continue with normal repo inspection;
 - optionally suggest installing/configuring xmem if the user asked for memory features.
 
-MMS session hooks are silent and fail-open for this reason.
+MMS session hooks are silent and fail-open for this reason. Newer MMS sessions may also run `xmem gateway` in dry-run telemetry mode on user prompts; it must not block or speak when xmem is absent.
+
+## Gateway Rule
+
+Prefer the entry-layer gateway when it is available:
+
+```bash
+xmem gateway "user request" --cwd "$PWD" --format toon
+xmem gateway --fields issue=demo domain=example.com task="query" --format toon --budget 700
+```
+
+`xmem gateway` decides `inject` vs `skip`. Use the compact `packet` only when `decision: inject`; if it returns `skip`, continue normal work and do not mention xmem. Gateway is fail-open, redacts common secret syntaxes, and searches only for domain/service/deploy/COS/copy-domain/history/bugfix-shaped tasks or structured target fields.
 
 ## When To Call xmem
 
@@ -57,6 +68,7 @@ xmem help
 xmem status
 xmem doctor
 xmem sync
+xmem gateway "query" --cwd "$PWD" --format toon
 xmem preflight "query"
 xmem resume "query"
 xmem resume --fields issue=demo domain=example.com task="query"
@@ -72,20 +84,22 @@ xmem gain
 
 ## Workflow
 
-1. Run `xmem status` or `xmem doctor` when state is unclear.
-2. Run `xmem resume "<issue|domain|service|task>"` when taking over an existing task or fresh session before reading long handoffs.
-3. Run `xmem preflight "<task>"` before development or bugfix edits when xmem is available.
-4. Run `xmem context "<task>"` before broad repo traversal or project selection.
-5. If source freshness is stale, run `xmem sync` before relying on the packet.
-6. Treat verified cards as evidence; treat inferred/partial/stale/unknown/disputed cards as hints.
-7. For edits that hit a feature with invariant cards, run `xmem check` before final response.
-8. If a matched card is true but irrelevant, use `xmem suppress`; if it is wrong, use `xmem fix`.
+1. Launchers/hooks should run `xmem gateway "<user request>" --cwd "$PWD"` before normal skill routing when available.
+2. Run `xmem status` or `xmem doctor` when state is unclear.
+3. Run `xmem resume "<issue|domain|service|task>"` when taking over an existing task or fresh session before reading long handoffs.
+4. Run `xmem preflight "<task>"` before development or bugfix edits when xmem is available.
+5. Run `xmem context "<task>"` before broad repo traversal or project selection.
+6. If source freshness is stale, run `xmem sync` before relying on the packet.
+7. Treat verified cards as evidence; treat inferred/partial/stale/unknown/disputed cards as hints.
+8. For edits that hit a feature with invariant cards, run `xmem check` before final response.
+9. If a matched card is true but irrelevant, use `xmem suppress`; if it is wrong, use `xmem fix`.
 
 ## Agent Hooks
 
 When available, MMS may run lightweight xmem session hooks:
 
 - `start`: register/sync the current project path;
+- `gateway`: dry-run prompt probe by default, logging whether compact memory would be useful;
 - `finish`: record a close marker without injecting memory text;
 - task-specific events such as `fix`, `release`, or `deploy` if the user has configured them.
 

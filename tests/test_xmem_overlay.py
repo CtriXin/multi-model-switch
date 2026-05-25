@@ -76,6 +76,17 @@ def test_mms_claude_hooks_include_xmem_session_end():
     assert mms_launchers._XMEM_SESSION_END_HOOK in commands
 
 
+def test_mms_claude_hooks_include_xmem_gateway_probe():
+    hooks = mms_launchers._merge_mms_session_hooks({})
+    commands = [
+        hook.get("command")
+        for group in hooks.get("UserPromptSubmit", [])
+        for hook in group.get("hooks", [])
+    ]
+
+    assert mms_launchers._XMEM_GATEWAY_HOOK in commands
+
+
 def test_codex_hooks_include_xmem_session_start():
     payload = mms_launchers._build_codex_session_hooks({})
     commands = [
@@ -98,6 +109,17 @@ def test_codex_hooks_include_xmem_session_end():
     assert mms_launchers._XMEM_SESSION_END_HOOK in commands
 
 
+def test_codex_hooks_include_xmem_gateway_probe():
+    payload = mms_launchers._build_codex_session_hooks({})
+    commands = [
+        hook.get("command")
+        for group in payload.get("hooks", {}).get("UserPromptSubmit", [])
+        for hook in group.get("hooks", [])
+    ]
+
+    assert mms_launchers._XMEM_GATEWAY_HOOK in commands
+
+
 def test_disabling_xmem_skill_removes_xmem_hooks():
     claude_hooks = mms_launchers._filter_hooks_by_disabled(
         mms_launchers._merge_mms_session_hooks({}),
@@ -111,6 +133,7 @@ def test_disabling_xmem_skill_removes_xmem_hooks():
     ]
     assert mms_launchers._XMEM_SESSION_START_HOOK not in claude_commands
     assert mms_launchers._XMEM_SESSION_END_HOOK not in claude_commands
+    assert mms_launchers._XMEM_GATEWAY_HOOK not in claude_commands
 
     codex_hooks = mms_launchers._build_codex_session_hooks({}, disabled_session_surfaces={"skills": ["xmem"]})
     codex_commands = [
@@ -121,6 +144,7 @@ def test_disabling_xmem_skill_removes_xmem_hooks():
     ]
     assert mms_launchers._XMEM_SESSION_START_HOOK not in codex_commands
     assert mms_launchers._XMEM_SESSION_END_HOOK not in codex_commands
+    assert mms_launchers._XMEM_GATEWAY_HOOK not in codex_commands
 
 
 def test_xmem_session_end_hook_is_silent_and_finish_only(tmp_path):
@@ -152,6 +176,43 @@ def test_xmem_session_end_hook_is_silent_and_finish_only(tmp_path):
     assert result.stdout == ""
     assert result.stderr == ""
     assert log_path.read_text(encoding="utf-8").strip() == f"hook finish --path {repo}"
+
+
+def test_xmem_gateway_hook_is_silent_and_logs_dry_run(tmp_path):
+    fake_bin = tmp_path / "xmem"
+    log_path = tmp_path / "xmem.args"
+    xmem_home = tmp_path / "xmem-home"
+    fake_bin.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$XMEM_TEST_LOG\"\n"
+        "printf '%s\\n' '{\"schema\":\"xmem.gateway.v1\",\"decision\":\"inject\"}'\n",
+        encoding="utf-8",
+    )
+    fake_bin.chmod(0o755)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    result = subprocess.run(
+        [mms_launchers._XMEM_GATEWAY_HOOK],
+        cwd=repo,
+        input='{"prompt":"deploy example.com"}',
+        text=True,
+        capture_output=True,
+        check=True,
+        env={
+            "MMS_XMEM_BIN": str(fake_bin),
+            "XMEM_TEST_LOG": str(log_path),
+            "XMEM_HOME": str(xmem_home),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+
+    assert result.stdout == ""
+    assert result.stderr == ""
+    args = log_path.read_text(encoding="utf-8")
+    assert "gateway deploy example.com" in args
+    assert "--dry-run" in args
+    assert (xmem_home / "gateway-hook.jsonl").read_text(encoding="utf-8").strip() == '{"schema":"xmem.gateway.v1","decision":"inject"}'
 
 
 def test_session_wrappers_expose_xmem(monkeypatch, tmp_path):
