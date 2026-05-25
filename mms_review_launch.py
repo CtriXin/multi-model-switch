@@ -961,6 +961,139 @@ def _empty_cache_usage() -> dict[str, int]:
     }
 
 
+class ModelCallResult(str):
+    """String-compatible model result with normalized token/cache usage."""
+
+    usage: dict[str, int]
+
+    def __new__(cls, text: str, usage: dict[str, Any] | None = None) -> "ModelCallResult":
+        obj = str.__new__(cls, str(text or ""))
+        obj.usage = _normalize_cache_usage(usage)
+        return obj
+
+
+def _int_usage_value(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, float):
+        return max(0, int(value))
+    if isinstance(value, str):
+        try:
+            return max(0, int(float(value.strip())))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _first_usage_value(usage: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        value = _int_usage_value(usage.get(key))
+        if value:
+            return value
+    return 0
+
+
+def _nested_usage_value(usage: dict[str, Any], object_key: str, *keys: str) -> int:
+    nested = usage.get(object_key)
+    if not isinstance(nested, dict):
+        return 0
+    return _first_usage_value(nested, *keys)
+
+
+def _normalize_cache_usage(raw_usage: dict[str, Any] | None) -> dict[str, int]:
+    if not isinstance(raw_usage, dict):
+        return _empty_cache_usage()
+    prompt_details_cached = _nested_usage_value(raw_usage, "prompt_tokens_details", "cached_tokens")
+    input_details_cached = _nested_usage_value(raw_usage, "input_tokens_details", "cached_tokens")
+    cache_read = _first_usage_value(
+        raw_usage,
+        "cache_read_input_tokens",
+        "cache_read_tokens",
+        "cached_input_tokens",
+        "cached_tokens",
+    ) or prompt_details_cached or input_details_cached
+    cache_creation = _first_usage_value(
+        raw_usage,
+        "cache_creation_input_tokens",
+        "cache_creation_tokens",
+        "cache_write_input_tokens",
+        "cache_write_tokens",
+    )
+    cached_tokens = _first_usage_value(raw_usage, "cached_tokens") or cache_read
+    return {
+        "input_tokens": _first_usage_value(raw_usage, "input_tokens", "prompt_tokens"),
+        "output_tokens": _first_usage_value(raw_usage, "output_tokens", "completion_tokens"),
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_creation,
+        "cached_tokens": cached_tokens,
+    }
+
+
+def _merge_cache_usage(base: dict[str, int], update: dict[str, int]) -> dict[str, int]:
+    merged = dict(base or _empty_cache_usage())
+    for key in _empty_cache_usage():
+        value = _int_usage_value((update or {}).get(key))
+        if value or not _int_usage_value(merged.get(key)):
+            merged[key] = value
+    if not merged.get("cached_tokens") and merged.get("cache_read_input_tokens"):
+        merged["cached_tokens"] = merged["cache_read_input_tokens"]
+    return merged
+
+
+def _response_usage(data: Any) -> dict[str, int]:
+    if not isinstance(data, dict):
+        return _empty_cache_usage()
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        usage = data
+    return _normalize_cache_usage(usage)
+
+
+def _stream_payloads(text: str) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        data_text = line[len("data:") :].strip()
+        if not data_text or data_text == "[DONE]":
+            continue
+        try:
+            data = json.loads(data_text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            payloads.append(data)
+    return payloads
+
+
+def _extract_openai_stream_usage(text: str) -> dict[str, int]:
+    usage = _empty_cache_usage()
+    for data in _stream_payloads(text):
+        usage = _merge_cache_usage(usage, _response_usage(data))
+    return usage
+
+
+def _extract_anthropic_stream_usage(text: str) -> dict[str, int]:
+    usage = _empty_cache_usage()
+    for data in _stream_payloads(text):
+        message = data.get("message") if isinstance(data.get("message"), dict) else {}
+        for raw_usage in (message.get("usage"), data.get("usage")):
+            if isinstance(raw_usage, dict):
+                usage = _merge_cache_usage(usage, _normalize_cache_usage(raw_usage))
+    return usage
+
+
+def _model_call_result_parts(result: Any) -> tuple[str, dict[str, int]]:
+    if isinstance(result, ModelCallResult):
+        return str(result), dict(result.usage)
+    if isinstance(result, tuple) and len(result) >= 2:
+        return str(result[0] or ""), _normalize_cache_usage(result[1] if isinstance(result[1], dict) else None)
+    return str(result or ""), _empty_cache_usage()
+
+
 def _fallback_reason_for_attempts(attempts: list[dict[str, Any]]) -> str:
     previous_failures = [item for item in attempts[:-1] if item.get("ok") is False and not item.get("skipped")]
     if not previous_failures:
@@ -992,7 +1125,7 @@ def _transport_evidence_for_selection(
         "provider_profile": _default_provider_profile(provider, protocol),
         "fallback_used": bool(fallback_reason),
         "fallback_reason": fallback_reason,
-        "usage": _empty_cache_usage(),
+        "usage": _normalize_cache_usage(selected_attempt.get("usage") if isinstance(selected_attempt, dict) else None),
     }
 
 
@@ -1141,7 +1274,7 @@ async def _call_first_working_model(
             attempts.append(attempt)
             continue
         try:
-            content = await _call_model(
+            result = await _call_model(
                 provider=provider,
                 protocol=protocol,
                 model_name=model_name,
@@ -1149,12 +1282,14 @@ async def _call_first_working_model(
                 max_tokens=max_tokens,
                 read_timeout_seconds=read_timeout_seconds,
             )
+            content, usage = _model_call_result_parts(result)
         except Exception as exc:
             attempt["ok"] = False
             attempt["error"] = _compact_error(exc)
             attempts.append(attempt)
             continue
         attempt["ok"] = True
+        attempt["usage"] = usage
         attempts.append(attempt)
         return content, candidate, attempts
     raise ReviewLaunchDispatchError("all model dispatch candidates failed: " + _format_attempt_errors(attempts), attempts)
@@ -1167,7 +1302,7 @@ async def _call_model_openai_chat(
     prompt: str,
     max_tokens: int,
     read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
-) -> str:
+) -> ModelCallResult:
     try:
         import httpx
     except ImportError as exc:  # pragma: no cover - exercised only without dependency
@@ -1227,7 +1362,7 @@ async def _call_model_openai_chat(
             if response.status_code < 400:
                 content = _extract_openai_stream_text(response.text)
                 if content:
-                    return content
+                    return ModelCallResult(content, _extract_openai_stream_usage(response.text))
     if response.status_code >= 400:
         raise RuntimeError(f"model dispatch failed HTTP {response.status_code}: {response.text[:1000]}")
     data = response.json()
@@ -1238,7 +1373,7 @@ async def _call_model_openai_chat(
     content = _extract_response_text((message or {}).get("content"))
     if not content:
         raise RuntimeError("model response content is empty")
-    return content
+    return ModelCallResult(content, _response_usage(data))
 
 
 def _with_query_param_once(url: str, key: str, value: str) -> str:
@@ -1280,7 +1415,7 @@ async def _call_model_anthropic_messages(
     prompt: str,
     max_tokens: int,
     read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
-) -> str:
+) -> ModelCallResult:
     try:
         import httpx
     except ImportError as exc:  # pragma: no cover - exercised only without dependency
@@ -1339,7 +1474,7 @@ async def _call_model_anthropic_messages(
     if payload.get("stream"):
         content = _extract_anthropic_stream_text(response.text)
         if content:
-            return content
+            return ModelCallResult(content, _extract_anthropic_stream_usage(response.text))
     data = response.json()
     blocks = data.get("content") if isinstance(data, dict) else None
     if isinstance(blocks, str):
@@ -1352,7 +1487,7 @@ async def _call_model_anthropic_messages(
         content = _extract_response_text((message or {}).get("content"))
     if not content:
         raise RuntimeError("model response content is empty")
-    return content
+    return ModelCallResult(content, _response_usage(data))
 
 
 async def _call_model(
@@ -1363,7 +1498,7 @@ async def _call_model(
     prompt: str,
     max_tokens: int,
     read_timeout_seconds: int = DEFAULT_READ_TIMEOUT_SECONDS,
-) -> str:
+) -> ModelCallResult:
     if protocol == ANTHROPIC_MESSAGES_PROTOCOL:
         return await _call_model_anthropic_messages(
             provider=provider,

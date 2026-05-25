@@ -523,6 +523,46 @@ def test_review_launch_gpt_dual_provider_never_calls_messages_endpoint(tmp_path,
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
 
 
+def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkeypatch, capsys):
+    import mms_review_launch
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, ModelCallResult, handle_review_launch_command
+
+    env = _write_review_launch_fixture(tmp_path, reviewer_id="glm-5.1")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    provider = {"id": "newapi-personal-tokyo", "protocols": [ANTHROPIC_MESSAGES_PROTOCOL]}
+    monkeypatch.setattr(
+        mms_review_launch,
+        "_resolve_review_launch_candidates",
+        lambda _model, _env: (
+            [{"provider": provider, "protocol": ANTHROPIC_MESSAGES_PROTOCOL, "model_name": "glm-5.1"}],
+            "",
+        ),
+    )
+
+    usage = {
+        "input_tokens": 123,
+        "output_tokens": 45,
+        "cache_read_input_tokens": 67,
+        "cache_creation_input_tokens": 8,
+        "cached_tokens": 67,
+    }
+
+    async def fake_call_model(*, provider, protocol, model_name, prompt, max_tokens, read_timeout_seconds=180):
+        return ModelCallResult("Verdict: PASS\n\nNo blockers found.\n", usage)
+
+    monkeypatch.setattr(mms_review_launch, "_call_model", fake_call_model)
+
+    assert handle_review_launch_command([], command_name="mms") == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["transport_evidence"][0]["usage"] == usage
+    assert payload["dispatch_attempts"][0]["usage"] == usage
+    assert payload["cache_transport_evidence"] == payload["transport_evidence"]
+    assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()
+
+
 def test_review_launch_explicit_provider_reports_protocol_specific_base_url(monkeypatch):
     import mms_core
     from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_provider_for_model
@@ -792,7 +832,15 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
         text = ""
 
         def json(self):
-            return {"content": [{"type": "text", "text": "Reviewer: mimo-v2-flash\n\nVerdict: PASS"}]}
+            return {
+                "content": [{"type": "text", "text": "Reviewer: mimo-v2-flash\n\nVerdict: PASS"}],
+                "usage": {
+                    "input_tokens": 101,
+                    "output_tokens": 11,
+                    "cache_read_input_tokens": 31,
+                    "cache_creation_input_tokens": 7,
+                },
+            }
 
     class FakeAsyncClient:
         async def __aenter__(self):
@@ -824,6 +872,11 @@ def test_review_launch_anthropic_call_uses_messages_endpoint(monkeypatch):
     )
 
     assert text.startswith("Reviewer: mimo-v2-flash")
+    assert text.usage["input_tokens"] == 101
+    assert text.usage["output_tokens"] == 11
+    assert text.usage["cache_read_input_tokens"] == 31
+    assert text.usage["cache_creation_input_tokens"] == 7
+    assert text.usage["cached_tokens"] == 31
     assert captured["url"] == "https://token-plan-cn.xiaomimimo.com/anthropic/v1/messages"
     assert captured["headers"]["x-api-key"] == "key"
     assert captured["headers"]["anthropic-version"] == "2023-06-01"
@@ -994,9 +1047,11 @@ def test_review_launch_anthropic_high_latency_models_use_streaming(monkeypatch, 
     class FakeResponse:
         status_code = 200
         text = (
+            'data: {"type":"message_start","message":{"usage":{"input_tokens":211,"cache_read_input_tokens":144,"cache_creation_input_tokens":13}}}\n'
             'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hidden"}}\n'
             'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Verdict: "}}\n'
             'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"PASS"}}\n'
+            'data: {"type":"message_delta","usage":{"output_tokens":23}}\n'
             'data: {"type":"message_stop"}\n'
         )
 
@@ -1034,6 +1089,11 @@ def test_review_launch_anthropic_high_latency_models_use_streaming(monkeypatch, 
     assert captured["url"] == "http://161.33.197.51:4001/v1/messages?beta=true"
     assert captured["json"]["stream"] is True
     assert text == "Verdict: PASS"
+    assert text.usage["input_tokens"] == 211
+    assert text.usage["output_tokens"] == 23
+    assert text.usage["cache_read_input_tokens"] == 144
+    assert text.usage["cache_creation_input_tokens"] == 13
+    assert text.usage["cached_tokens"] == 144
 
 
 def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback(monkeypatch):
@@ -1069,6 +1129,7 @@ def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback
                 200,
                 'data: {"choices":[{"delta":{"content":"Verdict: "}}]}\n'
                 'data: {"choices":[{"delta":{"content":"PASS"}}]}\n'
+                'data: {"choices":[],"usage":{"prompt_tokens":88,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":55}}}\n'
                 "data: [DONE]\n",
             )
 
@@ -1091,6 +1152,10 @@ def test_review_launch_openai_call_does_not_double_append_v1_and_stream_fallback
     assert captured_urls == ["http://127.0.0.1:18317/v1/chat/completions"] * 2
     assert captured_stream_values == [False, True]
     assert text == "Verdict: PASS"
+    assert text.usage["input_tokens"] == 88
+    assert text.usage["output_tokens"] == 9
+    assert text.usage["cache_read_input_tokens"] == 55
+    assert text.usage["cached_tokens"] == 55
 
 
 def test_review_launch_rejects_output_path_escape_before_writing(tmp_path, monkeypatch, capsys):
