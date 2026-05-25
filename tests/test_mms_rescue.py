@@ -731,6 +731,98 @@ def test_chatcompletions_fallback_retries_messages_when_gateway_requests_message
     assert "status" not in captured
 
 
+def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messages(monkeypatch):
+    import mms_bridge
+
+    class FakeResponse:
+        status_code = 400
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return json.dumps({
+                "error": {
+                    "message": "channel #5 model glm-5.1 is prompt-cache sensitive; use /v1/messages instead of /v1/chat/completions"
+                }
+            }).encode()
+
+    stream_calls = []
+
+    def fake_stream(*args, **kwargs):
+        stream_calls.append((args, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    blocking = []
+    monkeypatch.setattr(
+        mms_bridge,
+        "_record_bridge_blocking_failure",
+        lambda *args, **kwargs: blocking.append((args, kwargs)),
+    )
+
+    request = json.dumps({
+        "model": "glm-5.1",
+        "instructions": "",
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+    }).encode()
+    handler = mms_bridge._ResponsesToChatHandler.__new__(mms_bridge._ResponsesToChatHandler)
+    handler.path = "/v1/responses"
+    handler.headers = {
+        "content-length": str(len(request)),
+        "authorization": "Bearer bridge-token",
+    }
+    handler.rfile = io.BytesIO(request)
+    handler.wfile = io.BytesIO()
+    handler.server = types.SimpleNamespace(
+        bridge_token="bridge-token",
+        gateway_key="sk-newapi-test",
+        gateway_url="https://newapi.example/v1",
+        model_name="glm-5.1",
+        provider_id="newapi-personal-tokyo",
+        provider_profile="",
+        proxy_url="",
+        no_proxy="",
+        speed_scope=None,
+        route_status_paths=[],
+        reasoning_enabled=True,
+        reasoning_effort="high",
+    )
+    captured = {}
+
+    def fake_anthropic_fallback(payload, model_name, gateway_url, gateway_key, started_ms, route=None):
+        captured.update({
+            "payload": payload,
+            "model_name": model_name,
+            "gateway_url": gateway_url,
+            "gateway_key": gateway_key,
+            "started_ms": started_ms,
+            "route": route,
+        })
+
+    handler._do_anthropic_messages_fallback = fake_anthropic_fallback
+    handler.send_response = lambda code: captured.setdefault("status", code)
+    handler.send_header = lambda *_args, **_kwargs: None
+    handler.end_headers = lambda: None
+
+    handler.do_POST()
+
+    assert stream_calls[0][0][1] == "https://newapi.example/v1/chat/completions"
+    assert captured["model_name"] == "glm-5.1"
+    assert captured["gateway_url"] == "https://newapi.example/v1"
+    assert captured["gateway_key"] == "sk-newapi-test"
+    assert captured["route"]["provider_id"] == "newapi-personal-tokyo"
+    assert captured["route"]["protocol"] == "anthropic_messages"
+    assert captured["route"]["fallback_reason"] == "cache_sensitive_messages_retry"
+    assert not blocking
+    assert "status" not in captured
+
+
 def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tmp_path):
     import mms_bridge
 

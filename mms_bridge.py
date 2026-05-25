@@ -4932,7 +4932,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
             self._json(502, {"error": {"message": str(exc)}})
 
 
-class _ResponsesToChatHandler(BaseHTTPRequestHandler):
+class _ResponsesToChatHandler(_ResponsesProxyHandler):
     """Local bridge: accepts Codex's /v1/responses requests,
     translates to /v1/chat/completions, forwards to gateway."""
 
@@ -5073,6 +5073,26 @@ class _ResponsesToChatHandler(BaseHTTPRequestHandler):
             ) as response:
                 if response.status_code >= 400:
                     body = response.read().decode("utf-8", errors="replace")
+                    if _chatcompletions_error_requests_messages(body) and gateway_url and gateway_key:
+                        messages_route = {
+                            "provider_id": provider_id,
+                            "provider_profile": provider_profile,
+                            "protocol": "anthropic_messages",
+                            "fallback_reason": "cache_sensitive_messages_retry",
+                        }
+                        _bridge_error_logger.warning(
+                            "primary chat bridge rejected for cache-sensitive transport; retrying messages: model=%s",
+                            model_name,
+                        )
+                        self._do_anthropic_messages_fallback(
+                            payload,
+                            model_name,
+                            gateway_url,
+                            gateway_key,
+                            started_ms,
+                            route=messages_route,
+                        )
+                        return
                     _record_bridge_blocking_failure(
                         self.server,
                         model_name=model_name,
