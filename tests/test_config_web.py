@@ -200,7 +200,66 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert plan["model_policy"]["models"]["qwen3.6-plus"]["capabilities"]["vision"] is True
     assert "Demo Gateway" in plan["diffs"]["config_toml"]
     assert "credentials.sh: update provider demo" in plan["diffs"]["credentials"]
+    assert plan["review_summary"]["schema"] == "mms.setup_web.review_summary.v1"
+    assert any(item["kind"] == "provider_url" for item in plan["review_summary"]["items"])
+    assert any(item["kind"] == "credentials" for item in plan["review_summary"]["items"])
+    assert any(risk["id"] == "credential_update" for risk in plan["review_summary"]["risks"])
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_review_summary_flags_http_and_hidden_cleanup(tmp_path):
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "default_openai_base_url": "",
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "fallback_models": ["keep-hidden"],
+                "hidden_models": ["keep-hidden", "retired-model"],
+            }
+        ],
+    }
+    payload = {
+        "draft": {
+            "provider_default": "demo",
+            "providers": [
+                {
+                    "original_id": "demo",
+                    "id": "demo",
+                    "name": "Demo",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["opencode"],
+                    "openai_base_url": "http://demo.example/v1",
+                    "fallback_models": ["keep-hidden"],
+                    "hidden_models": ["keep-hidden"],
+                    "models": [{"id": "keep-hidden", "visible": False, "capabilities": {"text": True}}],
+                },
+                {
+                    "id": "new-http",
+                    "name": "New HTTP",
+                    "enabled": True,
+                    "protocols": ["openai_chat_completions"],
+                    "supported_clis": ["opencode"],
+                    "openai_base_url": "http://new.example/v1",
+                    "models": [],
+                }
+            ],
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    review = plan["review_summary"]
+
+    assert review["counts"]["hidden_removed"] == 1
+    assert any(item["kind"] == "provider_added" and item["provider_id"] == "new-http" for item in review["items"])
+    assert any(item["kind"] == "hidden_removed" and "retired-model" in item["detail"] for item in review["items"])
+    assert any(risk["id"] == "http_base_url" and risk["provider_id"] == "demo" for risk in review["risks"])
+    assert any(risk["id"] == "http_base_url" and risk["provider_id"] == "new-http" for risk in review["risks"])
 
 
 def test_config_web_save_requires_explicit_confirmation(tmp_path):

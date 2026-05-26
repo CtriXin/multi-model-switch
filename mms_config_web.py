@@ -811,6 +811,190 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
     return policy
 
 
+def _provider_urls(provider: dict[str, Any] | None) -> dict[str, str]:
+    provider = provider if isinstance(provider, dict) else {}
+    return {
+        "openai": _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url")),
+        "anthropic": _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url")),
+    }
+
+
+def _provider_by_id(cfg: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    return {
+        _safe_text(provider.get("id")): provider
+        for provider in providers
+        if isinstance(provider, dict) and _safe_text(provider.get("id"))
+    }
+
+
+def _provider_default_id(cfg: dict[str, Any]) -> str:
+    provider_cfg = cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}
+    return _safe_text(provider_cfg.get("default"))
+
+
+def _mapping_digest(payload: Any) -> str:
+    return json.dumps(_sanitize_for_output(payload if isinstance(payload, dict) else {}), ensure_ascii=False, sort_keys=True)
+
+
+def _build_review_summary(
+    current_cfg: dict[str, Any],
+    next_cfg: dict[str, Any],
+    policy_before: dict[str, Any],
+    policy_after: dict[str, Any],
+    credential_updates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build a human-readable save review; raw diff remains the audit detail."""
+    items: list[dict[str, Any]] = []
+    risks: list[dict[str, Any]] = []
+    before_providers = _provider_by_id(current_cfg)
+    after_providers = _provider_by_id(next_cfg)
+    before_ids = set(before_providers)
+    after_ids = set(after_providers)
+
+    def add_item(kind: str, title: str, detail: str, *, provider_id: str = "", level: str = "info", meta: dict[str, Any] | None = None) -> None:
+        items.append({
+            "kind": kind,
+            "level": level,
+            "title": title,
+            "detail": detail,
+            "provider_id": provider_id,
+            "meta": meta or {},
+        })
+
+    def add_risk(risk_id: str, title: str, detail: str, *, level: str = "warn", provider_id: str = "") -> None:
+        risks.append({
+            "id": risk_id,
+            "level": level,
+            "title": title,
+            "detail": detail,
+            "provider_id": provider_id,
+        })
+
+    for provider_id in sorted(after_ids - before_ids):
+        add_item("provider_added", "新增通道", f"`{provider_id}` 将被加入配置。", provider_id=provider_id)
+    for provider_id in sorted(before_ids - after_ids):
+        add_item("provider_removed", "删除通道", f"`{provider_id}` 将从配置里移除。", provider_id=provider_id, level="danger")
+        add_risk("provider_removed", "删除通道", f"`{provider_id}` 删除后新 session 不会再使用该通道。", level="danger", provider_id=provider_id)
+
+    before_default = _provider_default_id(current_cfg)
+    after_default = _provider_default_id(next_cfg)
+    if before_default != after_default:
+        add_item("default_provider", "默认通道变化", f"`{before_default or '-'}` -> `{after_default or '-'}`", level="warn")
+        add_risk("default_provider_changed", "默认通道变化", "默认 provider 改变会影响后续新 session 的默认路由。", provider_id=after_default)
+
+    hidden_removed_total = 0
+    hidden_added_total = 0
+    for provider_id in sorted(after_ids):
+        before = before_providers.get(provider_id, {})
+        after = after_providers[provider_id]
+        before_urls = _provider_urls(before)
+        after_urls = _provider_urls(after)
+        if provider_id in before_ids:
+            for field, label in (("openai", "OpenAI base URL"), ("anthropic", "Anthropic base URL")):
+                if before_urls[field] == after_urls[field]:
+                    continue
+                add_item(
+                    "provider_url",
+                    f"通道 URL 变化：{provider_id}",
+                    f"{label}: `{before_urls[field] or '-'}` -> `{after_urls[field] or '-'}`",
+                    provider_id=provider_id,
+                    level="warn",
+                    meta={"field": field, "before": before_urls[field], "after": after_urls[field]},
+                )
+        elif after_urls["openai"] or after_urls["anthropic"]:
+            url_parts = []
+            if after_urls["openai"]:
+                url_parts.append(f"OpenAI: `{after_urls['openai']}`")
+            if after_urls["anthropic"]:
+                url_parts.append(f"Anthropic: `{after_urls['anthropic']}`")
+            add_item("provider_url", f"通道 URL：{provider_id}", "；".join(url_parts), provider_id=provider_id)
+        for field, label in (("openai", "OpenAI base URL"), ("anthropic", "Anthropic base URL")):
+            url = after_urls[field]
+            if url.lower().startswith("http://"):
+                add_risk("http_base_url", "HTTP URL", f"`{provider_id}` 的 {label} 使用 `http://`，请确认这是内网/代理预期。", provider_id=provider_id)
+        if after.get("enabled", True) is not False and not after_urls["openai"] and not after_urls["anthropic"]:
+            add_risk("empty_provider_url", "启用通道缺少 URL", f"`{provider_id}` 已启用但没有 OpenAI/Anthropic URL。", provider_id=provider_id)
+        before_hidden = set(_normalize_model_list(before.get("hidden_models")))
+        after_hidden = set(_normalize_model_list(after.get("hidden_models")))
+        removed = sorted(before_hidden - after_hidden, key=str.lower)
+        added = sorted(after_hidden - before_hidden, key=str.lower)
+        hidden_removed_total += len(removed)
+        hidden_added_total += len(added)
+        if removed:
+            preview = ", ".join(removed[:8])
+            suffix = f" 等 {len(removed)} 个" if len(removed) > 8 else ""
+            add_item("hidden_removed", f"清理 hidden_models：{provider_id}", f"将移除 `{preview}`{suffix}", provider_id=provider_id, meta={"models": removed})
+        if added:
+            preview = ", ".join(added[:8])
+            suffix = f" 等 {len(added)} 个" if len(added) > 8 else ""
+            add_item("hidden_added", f"新增隐藏模型：{provider_id}", f"将隐藏 `{preview}`{suffix}", provider_id=provider_id, meta={"models": added})
+        before_extra = set(_normalize_model_list(before.get("extra_models")))
+        after_extra = set(_normalize_model_list(after.get("extra_models")))
+        if before_extra != after_extra:
+            add_item(
+                "extra_models",
+                f"手动模型变化：{provider_id}",
+                f"新增 {len(after_extra - before_extra)} 个，移除 {len(before_extra - after_extra)} 个。",
+                provider_id=provider_id,
+            )
+
+    rescue_before = current_cfg.get("rescue") if isinstance(current_cfg.get("rescue"), dict) else {}
+    rescue_after = next_cfg.get("rescue") if isinstance(next_cfg.get("rescue"), dict) else {}
+    if _mapping_digest(rescue_before) != _mapping_digest(rescue_after):
+        add_item("rescue", "Rescue fallback 变化", f"`{_safe_text(rescue_before.get('fallback_model')) or '-'}` -> `{_safe_text(rescue_after.get('fallback_model')) or '-'}`")
+
+    vision_before = current_cfg.get("vision_sidecar") if isinstance(current_cfg.get("vision_sidecar"), dict) else {}
+    vision_after = next_cfg.get("vision_sidecar") if isinstance(next_cfg.get("vision_sidecar"), dict) else {}
+    if _mapping_digest(vision_before) != _mapping_digest(vision_after):
+        before_ref = f"{_safe_text(vision_before.get('provider_id') or vision_before.get('provider')) or '-'}/{_safe_text(vision_before.get('model') or vision_before.get('vision_model')) or '-'}"
+        after_ref = f"{_safe_text(vision_after.get('provider_id') or vision_after.get('provider')) or '-'}/{_safe_text(vision_after.get('model') or vision_after.get('vision_model')) or '-'}"
+        add_item("vision_sidecar", "Vision sidecar 变化", f"`{before_ref}` -> `{after_ref}`")
+
+    opencode_before = current_cfg.get("opencode") if isinstance(current_cfg.get("opencode"), dict) else {}
+    opencode_after = next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {}
+    if _safe_text(opencode_before.get("default_profile")) != _safe_text(opencode_after.get("default_profile")):
+        add_item("opencode_profile", "OpenCode profile 变化", f"`{_safe_text(opencode_before.get('default_profile')) or '-'}` -> `{_safe_text(opencode_after.get('default_profile')) or '-'}`")
+    before_agents = _normalize_agent_model_overrides(opencode_before.get("agent_models") or opencode_before.get("agent_model_overrides"))
+    after_agents = _normalize_agent_model_overrides(opencode_after.get("agent_models") or opencode_after.get("agent_model_overrides"))
+    if _mapping_digest(before_agents) != _mapping_digest(after_agents):
+        changed_agents = sorted(set(before_agents) | set(after_agents))
+        add_item("opencode_agent_models", "OpenCode agent 模型覆盖变化", f"影响 {len(changed_agents)} 个 agent：{', '.join(changed_agents[:8])}", meta={"agents": changed_agents})
+
+    if credential_updates:
+        provider_ids = ", ".join(item["provider_id"] for item in credential_updates)
+        add_item("credentials", "凭据写入", f"将更新 credentials.sh：{provider_ids}", level="warn")
+        add_risk("credential_update", "凭据写入", "只有输入了新 API Key 且勾选更新凭据的通道会写 credentials.sh。", level="warn")
+
+    policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
+    policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
+    if _mapping_digest({"models": policy_before_models}) != _mapping_digest({"models": policy_after_models}):
+        changed_models = sorted(set(policy_before_models) ^ set(policy_after_models))
+        common_changed = sorted(
+            model for model in (set(policy_before_models) & set(policy_after_models))
+            if _mapping_digest(policy_before_models.get(model)) != _mapping_digest(policy_after_models.get(model))
+        )
+        total = len(changed_models) + len(common_changed)
+        add_item("model_policy", "模型能力/偏好策略变化", f"将更新 {total} 个 model-policy 条目。")
+
+    if not items:
+        add_item("no_change", "没有配置变化", "当前草稿与已加载配置一致。")
+    return {
+        "schema": "mms.setup_web.review_summary.v1",
+        "counts": {
+            "items": len(items),
+            "risks": len(risks),
+            "providers_before": len(before_ids),
+            "providers_after": len(after_ids),
+            "hidden_removed": hidden_removed_total,
+            "hidden_added": hidden_added_total,
+            "credential_updates": len(credential_updates),
+        },
+        "items": items,
+        "risks": risks,
+    }
+
+
 def build_config_plan(
     current_cfg: dict[str, Any] | None,
     payload: dict[str, Any] | None,
@@ -980,6 +1164,7 @@ def build_config_plan(
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
         "credentials": "\n".join(f"credentials.sh: update provider {item['provider_id']} (secret hidden)" for item in credential_updates),
     }
+    review_summary = _build_review_summary(current_cfg, next_cfg, policy_before, policy_after, credential_updates)
     return {
         "schema": "mms.setup_web.plan.v1",
         "ok": not errors,
@@ -994,6 +1179,7 @@ def build_config_plan(
         "model_policy": policy_after,
         "credential_updates": credential_updates,
         "diffs": diffs,
+        "review_summary": review_summary,
         "summary": {
             "providers": len(next_cfg.get("providers") or []),
             "credential_updates": len(credential_updates),
@@ -1386,7 +1572,7 @@ _HTML_PAGE = r"""<!doctype html>
     <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
     <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>这里会写入 config.toml 的 [rescue] 和 [vision_sidecar]，用于失败交接和 text-only 模型的图片 sidecar。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
     <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和每个 agent 的模型覆盖会写入 [opencode]，launcher 会优先按这些 provider/model 解析；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>lite_pro_orchestrated</option><option>lite_pro_orchestrated_backend</option><option>lite_pro_orchestrated_acp</option><option>lite_pro</option><option>heavy_omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。下面可以逐个 agent 改 provider 和 model。</p></div><div class="card span12"><h3>OpenCode agent 模型选择</h3><p class="muted">留空表示使用 Lite Pro 默认路线；选择 provider + model 会保存到 [opencode.agent_models] 并由 launcher 解析为 session-local opencode.json。</p><div class="table-wrap"><table id="opencodeAgents"></table></div></div></div></section>
-    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="span12"><h3>Diff</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
+    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
     <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
   </main>
 </div>
@@ -1431,6 +1617,8 @@ function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.open
 function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=state.opencode.agent_models||{};const rows=state.opencode.agent_catalog||[];table.innerHTML=`<thead><tr><th>agent</th><th>用途</th><th>provider</th><th>model</th><th>默认路线</th><th></th></tr></thead><tbody>${rows.map(row=>{const ov=overrides[row.agent]||{};const provider=ov.provider_id||'';const model=ov.model||'';return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span></td><td>${escapeHtml(row.category||'')}</td><td><select data-oc-provider>${providerOptions(provider,{auto:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(row.category==='Vision')})}</select></td><td class="mono">${escapeHtml((row.default_models||[]).join(' / '))}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join('')}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(row=>{const provider=row.querySelector('[data-oc-provider]');const model=row.querySelector('[data-oc-model]');const catalog=(state.opencode.agent_catalog||[]).find(x=>x.agent===row.dataset.ocAgent)||{};provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{auto:true,defaultModels:catalog.default_models||[],visionFirst:(catalog.category==='Vision')});syncRuntime()};model.onchange=syncRuntime;row.querySelector('[data-oc-reset]').onclick=()=>{provider.value='';model.innerHTML=modelOptions('', '',{auto:true,defaultModels:catalog.default_models||[],visionFirst:(catalog.category==='Vision')});syncRuntime()}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'lite_pro_orchestrated';['preferredCli','codingModel','opencodeProfile'].forEach(id=>$(id).oninput=syncRuntime);renderOpencodeAgents()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
+function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
+function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}`}
 function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
 function renderAll(){renderStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
@@ -1441,7 +1629,7 @@ $('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/pro
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,warnings:data.warnings,errors:data.errors},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
