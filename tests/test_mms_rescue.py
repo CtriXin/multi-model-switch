@@ -250,6 +250,48 @@ def test_record_blocking_failure_redacts_secret_upstream_body(tmp_path):
     assert payload["safety"]["automatic_model_call"] is False
 
 
+def test_bridge_blocking_failure_incident_log_uses_config_root_and_redacts(monkeypatch, tmp_path):
+    import mms_bridge
+
+    repo = tmp_path / "repo"
+    config_root = tmp_path / "mms-config"
+    home = tmp_path / "home"
+    repo.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    server = types.SimpleNamespace(
+        rescue_enabled=True,
+        rescue_repo_root=str(repo),
+        rescue_config_root=str(config_root),
+        model_name="gpt-5.5",
+        provider_id="private-relay",
+        rescue_fallback_model="",
+        rescue_fallback_cli="",
+        rescue_hot_fallback_enabled=False,
+    )
+
+    payload = mms_bridge._record_bridge_blocking_failure(
+        server,
+        model_name="gpt-5.5",
+        provider_id="private-relay",
+        status_code=429,
+        body_text='{"error":{"message":"quota","api_key":"sk-live-secret-1234567890"}}',
+        request_url="https://relay.example/v1/responses?api_key=sk-query-secret-1234567890",
+        bridge_surface="codex_responses_proxy",
+    )
+
+    assert payload is not None
+    incident_log = config_root / "logs" / "incidents.jsonl"
+    assert incident_log.exists()
+    text = incident_log.read_text(encoding="utf-8")
+    assert "sk-query-secret" not in text
+    assert "sk-live-secret" not in text
+    entry = json.loads(text.splitlines()[0])
+    assert entry["event"] == "blocking_failure"
+    assert entry["status_code"] == 429
+    assert "<REDACTED>" in entry["request_url"]
+    assert not (home / ".config" / "mms" / "logs" / "incidents.jsonl").exists()
+
+
 def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tmp_path):
     import mms_bridge
 
@@ -335,7 +377,7 @@ def test_bridge_mocked_429_writes_file_only_rescue_without_oauth(monkeypatch, tm
     assert handover["fallback"]["automatic_model_call"] is False
 
 
-def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, tmp_path):
+def test_responses_proxy_hot_fallback_pause_writes_handover_only(monkeypatch, tmp_path):
     import mms_bridge
 
     repo = tmp_path / "repo"
@@ -430,23 +472,19 @@ def test_responses_proxy_hot_fallback_uses_configured_rescue_model(monkeypatch, 
 
     handler.do_POST()
 
-    assert captured["model_name"] == "deepseek-v4-flash"
-    assert captured["gateway_url"] == "https://deepseek.example/v1"
-    assert captured["gateway_key"] == "sk-deepseek-test"
-    assert captured["route"]["provider_id"] == "newapi-deepseek"
+    assert captured["status"] == 503
+    assert "model_name" not in captured
     latest_json = repo / ".mms" / "rescue" / "latest.json"
     assert latest_json.exists()
     latest = json.loads(latest_json.read_text(encoding="utf-8"))
-    assert latest["safety"]["automatic_model_call"] is True
+    assert latest["safety"]["automatic_model_call"] is False
     assert latest["safety"]["global_oauth_fallback"] == "disabled"
     handover = json.loads((repo / ".mms" / "rescue" / "latest-fallback-handover.json").read_text(encoding="utf-8"))
     assert handover["fallback"]["model"] == "deepseek-v4-flash"
-    assert handover["fallback"]["mode"] == "hot_fallback_attempt"
-    assert handover["fallback"]["automatic_model_call"] is True
+    assert handover["fallback"]["mode"] == "auto_default_handover"
+    assert handover["fallback"]["automatic_model_call"] is False
     assert handover["safety"]["global_oauth_fallback"] == "disabled"
-    assert emitted_events
-    assert emitted_events[0][0] == ("fallback", "deepseek-v4-flash")
-    assert "rescue_hot_fallback" in emitted_events[0][1]["note"]
+    assert emitted_events == []
 
 
 def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(monkeypatch, tmp_path):
@@ -544,12 +582,13 @@ def test_responses_proxy_hot_fallback_prefers_anthropic_messages_for_deepseek(mo
 
     handler.do_POST()
 
-    assert captured["model_name"] == "deepseek-v4-flash"
-    assert captured["gateway_url"] == "https://deepseek.example"
-    assert captured["gateway_key"] == "sk-deepseek-test"
-    assert captured["route"]["provider_id"] == "newapi-deepseek"
-    assert captured["route"]["protocol"] == "anthropic_messages"
+    assert captured["status"] == 524
+    assert "model_name" not in captured
     assert captured.get("chat_called") is None
+    routes = mms_bridge._load_rescue_hot_fallback_routes(handler.server, "deepseek-v4-flash")
+    assert routes[0]["provider_id"] == "newapi-deepseek"
+    assert routes[0]["gateway_url"] == "https://deepseek.example"
+    assert routes[0]["protocol"] == "anthropic_messages"
 
 
 def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_only_route(monkeypatch, tmp_path):
@@ -648,15 +687,16 @@ def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_o
 
     handler.do_POST()
 
-    assert captured["model_name"] == "deepseek-v4-flash"
-    assert captured["gateway_url"] == "https://deepseek.example/v1"
-    assert captured["gateway_key"] == "sk-deepseek-test"
-    assert captured["route"]["provider_id"] == "newapi-deepseek"
-    assert captured["route"]["protocol"] == "anthropic_messages"
+    assert captured["status"] == 524
+    assert "model_name" not in captured
     assert captured.get("chat_called") is None
+    routes = mms_bridge._load_rescue_hot_fallback_routes(handler.server, "deepseek-v4-flash")
+    assert routes[0]["provider_id"] == "newapi-deepseek"
+    assert routes[0]["gateway_url"] == "https://deepseek.example/v1"
+    assert routes[0]["protocol"] == "anthropic_messages"
 
 
-def test_chatcompletions_fallback_retries_messages_when_gateway_requests_messages(monkeypatch):
+def test_chatcompletions_fallback_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):
     import mms_bridge
 
     class FakeResponse:
@@ -695,6 +735,7 @@ def test_chatcompletions_fallback_retries_messages_when_gateway_requests_message
         speed_scope=None,
         reasoning_enabled=True,
         reasoning_effort="high",
+        rescue_config_root=str(tmp_path / "mms-config"),
     )
     captured = {}
 
@@ -729,9 +770,10 @@ def test_chatcompletions_fallback_retries_messages_when_gateway_requests_message
     assert captured["route"]["protocol"] == "anthropic_messages"
     assert captured["route"]["fallback_reason"] == "cache_sensitive_messages_retry"
     assert "status" not in captured
+    assert (tmp_path / "mms-config" / "logs" / "incidents.jsonl").exists()
 
 
-def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messages(monkeypatch):
+def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):
     import mms_bridge
 
     class FakeResponse:
@@ -792,6 +834,7 @@ def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messag
         route_status_paths=[],
         reasoning_enabled=True,
         reasoning_effort="high",
+        rescue_config_root=str(tmp_path / "mms-config"),
     )
     captured = {}
 
@@ -821,6 +864,7 @@ def test_primary_codex_chat_bridge_retries_messages_when_gateway_requests_messag
     assert captured["route"]["fallback_reason"] == "cache_sensitive_messages_retry"
     assert not blocking
     assert "status" not in captured
+    assert (tmp_path / "mms-config" / "logs" / "incidents.jsonl").exists()
 
 
 def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tmp_path):
@@ -900,6 +944,83 @@ def test_anthropic_messages_hot_fallback_posts_messages_endpoint(monkeypatch, tm
     assert calls[0][2]["json"]["model"] == "deepseek-v4-flash"
     assert b"response.output_text.delta" in handler.wfile.getvalue()
     assert b"ok" in handler.wfile.getvalue()
+
+
+def test_generate_rescue_summary_uses_anthropic_messages_route(monkeypatch, tmp_path):
+    import mms_bridge
+
+    config_root = tmp_path / "mms-config"
+    rescue_dir = tmp_path / "repo" / ".mms" / "rescue" / "event"
+    (config_root / "generated").mkdir(parents=True)
+    (config_root / "generated" / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {
+                            "provider_id": "newapi-deepseek",
+                            "anthropic_base_url": "https://deepseek.example",
+                            "openai_base_url": "https://deepseek.example/v1",
+                            "api_key": "sk-deepseek-test",
+                            "model_id": "deepseek-v4-flash",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read():
+            return json.dumps({"content": [{"type": "text", "text": "Resume from the rescue packet."}]}).encode()
+
+    def fake_stream(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr(mms_bridge, "httpx", types.SimpleNamespace(stream=fake_stream))
+    monkeypatch.setattr(mms_bridge, "_ensure_httpx", lambda: mms_bridge.httpx)
+    server = types.SimpleNamespace(
+        rescue_config_root=str(config_root),
+        proxy_url="",
+        no_proxy="",
+    )
+    payload = {
+        "failed": {
+            "model": "gpt-5.5",
+            "status_code": 429,
+            "failure_kind": "rate_limit_or_quota",
+            "error_summary": "quota",
+        },
+        "session_meta": {"task_goal": "fix PR #1"},
+    }
+
+    mms_bridge._generate_rescue_summary(
+        server,
+        payload,
+        fallback_model="deepseek-v4-flash",
+        rescue_dir=str(rescue_dir),
+    )
+
+    assert calls[0][0] == "POST"
+    assert calls[0][1] == "https://deepseek.example/v1/messages"
+    assert calls[0][2]["headers"]["x-api-key"] == "sk-deepseek-test"
+    assert calls[0][2]["json"]["model"] == "deepseek-v4-flash"
+    summary = (rescue_dir / "summary.md").read_text(encoding="utf-8")
+    assert "Resume from the rescue packet." in summary
 
 
 def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, tmp_path):
@@ -1006,13 +1127,13 @@ def test_responses_proxy_hot_fallback_reads_current_rescue_config(monkeypatch, t
 
     handler.do_POST()
 
-    assert captured["model_name"] == "deepseek-v4-flash"
-    assert captured["gateway_url"] == "https://deepseek.example/v1"
-    assert captured["route"]["provider_id"] == "newapi-deepseek"
-    assert handler.server.rescue_fallback_model == "deepseek-v4-flash"
-    assert handler.server.rescue_fallback_cli == "codex"
+    assert captured["status"] == 503
+    assert "model_name" not in captured
     handover = json.loads((repo / ".mms" / "rescue" / "latest-fallback-handover.json").read_text(encoding="utf-8"))
-    assert handover["fallback"]["automatic_model_call"] is True
+    assert handover["fallback"]["model"] == "deepseek-v4-flash"
+    assert handover["fallback"]["cli"] == "codex"
+    assert handover["fallback"]["mode"] == "auto_default_handover"
+    assert handover["fallback"]["automatic_model_call"] is False
     assert handover["safety"]["global_oauth_fallback"] == "disabled"
 
 

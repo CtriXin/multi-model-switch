@@ -475,3 +475,14 @@ def test_install_script_has_optional_claude_agent_packs():
     assert "install_optional_omc" in text
     assert "$MMS_HOME/agent-packs/everything-claude-code" in text
     assert "$MMS_HOME/agent-packs/oh-my-claudecode" in text
+
+
+def test_install_script_uses_bundled_handover_continuity_pack():
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    assert "install_builtin_handover_continuity" in text
+    assert "$MMS_HOME/vendor/handover" in text
+    assert "$SOURCE_DIR/vendor/handover" in text
+    assert 'HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"' in text
+    assert "/Users/xin/auto-skills/shared-skills/handover" not in text
+    assert (ROOT_DIR / "vendor" / "handover" / "scripts" / "install_global_commands.py").exists()

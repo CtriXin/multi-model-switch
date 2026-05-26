@@ -1,0 +1,27 @@
+{
+  "task_id": "ads-config-toon",
+  "run_id": "run-ads-toon-001",
+  "goal": "Implement runtime TOON conversion for flat ad config payloads only.",
+  "status": "running",
+  "owner": "Claude",
+  "cli": "claude-code",
+  "model": "claude-sonnet-4-6",
+  "next_action": "Implement detector, then fallback to compact JSON for nested payloads.",
+  "constraints": [
+    "Do not rewrite repo source JSON files",
+    "Keep runtime fallback to compact JSON"
+  ],
+  "refs": [
+    "./.ai/plan/current.md",
+    "./.ai/plan/handoff.md",
+    "./docs/TOON_RULES.md"
+  ],
+  "changed_files": [
+    "docs/TOON_RULES.md"
+  ],
+  "expected_output": [
+    "patch",
+    "tests",
+    "updated handoff"
+  ]
+}
