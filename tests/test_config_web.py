@@ -115,6 +115,16 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
     assert "mms opencode --profile lite_pro_orchestrated" in out
 
 
+def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
+    html = mms_config_web._HTML_PAGE
+
+    assert "card span8 provider-editor" in html
+    assert ".provider-editor{position:sticky" in html
+    assert "function providerEntries()" in html
+    assert "a.p.enabled?-1:1" in html
+    assert "renderProviderList();renderTestSelectors();" in html
+
+
 def _draft_payload():
     return {
         "draft": {
