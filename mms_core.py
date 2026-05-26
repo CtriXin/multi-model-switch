@@ -14048,6 +14048,17 @@ def _is_help_request(argv):
     return any(str(arg).strip() in {"-h", "--help"} for arg in argv)
 
 
+def _is_setup_web_request(argv):
+    if not argv:
+        return False
+    command = str(argv[0] or "").strip()
+    if command in {"setup", "setup-web", "web-setup"}:
+        return True
+    if command != "config" or len(argv) < 2:
+        return False
+    return str(argv[1] or "").strip() in {"web", "webui", "setup.web", "setup-web"}
+
+
 def _is_config_help_request(args_rest):
     if not args_rest:
         return False
@@ -14065,6 +14076,10 @@ def _is_config_help_request(args_rest):
         "preference.example",
         "preferences.doc",
         "preference.doc",
+        "web",
+        "webui",
+        "setup.web",
+        "setup-web",
         "gates",
         "human-gate",
         "humangate",
@@ -14100,7 +14115,7 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
-    help_request = _is_help_request(argv)
+    help_request = _is_help_request(argv) or _is_setup_web_request(argv)
     bootstrap_cfg = load_config()
     set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
 
