@@ -22,6 +22,7 @@ _SECRET_KEYS = {"api_key", "openai_api_key", "anthropic_api_key", "gateway_key",
 _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
+_OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -369,6 +370,93 @@ def _normalize_agent_model_overrides(value: Any) -> dict[str, dict[str, str]]:
     return result
 
 
+def _opencode_agent_preset(agent_id: str, category: str = "") -> str:
+    text = _safe_text(agent_id).lower()
+    category = _safe_text(category).lower()
+    if "vision" in text or category == "vision":
+        return "vision"
+    if "bughunt" in text or "找茬" in category:
+        return "bughunt"
+    if "explore" in text or "探索" in category:
+        return "explore"
+    if "review" in text or "compliance" in text or "审查" in category:
+        return "reviewer"
+    if "spec" in text:
+        return "spec"
+    if "executor" in text:
+        return "executor"
+    if "fixer" in text:
+        return "fixer"
+    return "builder"
+
+
+def _opencode_roster_defaults(profile_id: str = "lite_pro_orchestrated") -> dict[str, dict[str, Any]]:
+    defaults: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(_opencode_agent_catalog(profile_id), 1):
+        agent_id = _safe_text(row.get("agent"))
+        if not agent_id:
+            continue
+        defaults[agent_id] = {
+            "enabled": True,
+            "preset": _opencode_agent_preset(agent_id, _safe_text(row.get("category"))),
+            "priority": index * 10,
+            "custom": False,
+        }
+    return defaults
+
+
+def _normalize_opencode_agent_roster(value: Any, *, profile_id: str = "lite_pro_orchestrated") -> dict[str, dict[str, Any]]:
+    raw = value if isinstance(value, dict) else {}
+    defaults = _opencode_roster_defaults(profile_id)
+    result: dict[str, dict[str, Any]] = {}
+    for agent, entry in raw.items():
+        agent_id = _safe_text(agent)
+        if not agent_id or not isinstance(entry, dict):
+            continue
+        default = defaults.get(agent_id, {})
+        preset = _safe_text(entry.get("preset") or entry.get("category") or default.get("preset") or "explore").lower()
+        if preset not in _OPENCODE_ROSTER_PRESETS:
+            preset = "explore"
+        payload: dict[str, Any] = {"preset": preset}
+        custom = bool(entry.get("custom") is True or agent_id not in defaults)
+        if custom:
+            payload["custom"] = True
+        if "enabled" in entry:
+            payload["enabled"] = _truthy(entry.get("enabled"), True)
+        elif custom:
+            payload["enabled"] = True
+        provider_id = _safe_text(entry.get("provider_id") or entry.get("provider"))
+        model = _safe_text(entry.get("model") or entry.get("model_id"))
+        if provider_id and (model or custom):
+            payload["provider_id"] = provider_id
+        if model:
+            payload["model"] = model
+        try:
+            priority = int(entry.get("priority"))
+        except (TypeError, ValueError):
+            priority = 0
+        if priority > 0:
+            payload["priority"] = priority
+        description = _safe_text(entry.get("description"))
+        if description:
+            payload["description"] = description[:240]
+        prompt = _safe_text(entry.get("prompt"))
+        if prompt:
+            payload["prompt"] = prompt[:4000]
+
+        comparable = dict(payload)
+        if not custom:
+            if comparable.get("enabled", True) is True:
+                comparable.pop("enabled", None)
+            if comparable.get("preset") == default.get("preset"):
+                comparable.pop("preset", None)
+            if comparable.get("priority") == default.get("priority"):
+                comparable.pop("priority", None)
+        if comparable or custom:
+            result[agent_id] = payload
+    return result
+
+
 def _opencode_agent_catalog(profile_id: str = "lite_pro_orchestrated") -> list[dict[str, Any]]:
     try:
         mms_core = _load_mms_core()
@@ -400,6 +488,8 @@ def _opencode_agent_catalog(profile_id: str = "lite_pro_orchestrated") -> list[d
                 "agent": agent,
                 "route_key": key,
                 "category": category,
+                "preset": _opencode_agent_preset(agent, category),
+                "priority": len(rows) * 10 + 10,
                 "default_models": models,
                 "fallback_allowed": spec.get("gpt_fallback", True) is not False,
             }
@@ -427,12 +517,16 @@ def build_config_snapshot(
     coding_preset = presets.get("coding") if isinstance(presets.get("coding"), dict) else {}
     opencode_cfg = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     opencode_agent_models = _normalize_agent_model_overrides(opencode_cfg.get("agent_models") or opencode_cfg.get("agent_model_overrides"))
+    opencode_profile = _safe_text(opencode_cfg.get("default_profile") or "lite_pro_orchestrated")
+    opencode_agent_catalog = _opencode_agent_catalog("lite_pro_orchestrated")
     opencode = {
-        "default_profile": _safe_text(opencode_cfg.get("default_profile") or "lite_pro_orchestrated"),
+        "default_profile": opencode_profile,
         "recommended_profile": "lite_pro_orchestrated",
         "profiles": ["lite_pro_orchestrated", "lite_pro_orchestrated_backend", "lite_pro_orchestrated_acp", "lite_pro", "heavy_omo", "raw"],
         "agent_models": opencode_agent_models,
-        "agent_catalog": _opencode_agent_catalog("lite_pro_orchestrated"),
+        "agent_roster": _normalize_opencode_agent_roster(opencode_cfg.get("agent_roster"), profile_id="lite_pro_orchestrated"),
+        "agent_catalog": opencode_agent_catalog,
+        "roster_presets": list(_OPENCODE_ROSTER_PRESETS),
         "vision_agents": ["mobius-vision-mimo", "mobius-vision-kimi", "mobius-vision-qwen"],
         "executor": "mobius-executor-gpt54",
         "release_gate": "mobius-reviewer-gpt55",
@@ -1038,6 +1132,30 @@ def _build_review_summary(
                 "updated_agents": updated_agents,
             },
         )
+    before_roster = _normalize_opencode_agent_roster(opencode_before.get("agent_roster"), profile_id="lite_pro_orchestrated")
+    after_roster = _normalize_opencode_agent_roster(opencode_after.get("agent_roster"), profile_id="lite_pro_orchestrated")
+    if _mapping_digest(before_roster) != _mapping_digest(after_roster):
+        changed_roster = sorted(
+            agent for agent in (set(before_roster) | set(after_roster))
+            if _mapping_digest(before_roster.get(agent)) != _mapping_digest(after_roster.get(agent))
+        )
+        disabled = sorted(agent for agent, entry in after_roster.items() if entry.get("enabled") is False)
+        custom = sorted(agent for agent, entry in after_roster.items() if entry.get("custom") is True)
+        parts = []
+        if disabled:
+            parts.append(f"禁用 {len(disabled)}")
+        if custom:
+            parts.append(f"自定义 {len(custom)}")
+        if not parts:
+            parts.append(f"更新 {len(changed_roster)}")
+        preview = ", ".join(changed_roster[:8])
+        suffix = f" 等 {len(changed_roster)} 个" if len(changed_roster) > 8 else ""
+        add_item(
+            "opencode_agent_roster",
+            "OpenCode roster 变化",
+            f"{'，'.join(parts)}；agent：{preview}{suffix}",
+            meta={"agents": changed_roster, "disabled_agents": disabled, "custom_agents": custom},
+        )
 
     if credential_updates:
         provider_ids = ", ".join(item["provider_id"] for item in credential_updates)
@@ -1204,7 +1322,8 @@ def build_config_plan(
     opencode_payload = draft.get("opencode") if isinstance(draft.get("opencode"), dict) else {}
     default_profile = _safe_text(opencode_payload.get("default_profile"))
     agent_model_overrides = _normalize_agent_model_overrides(opencode_payload.get("agent_models") or opencode_payload.get("agent_model_overrides"))
-    if default_profile or "agent_models" in opencode_payload or "agent_model_overrides" in opencode_payload:
+    agent_roster = _normalize_opencode_agent_roster(opencode_payload.get("agent_roster"), profile_id="lite_pro_orchestrated")
+    if default_profile or "agent_models" in opencode_payload or "agent_model_overrides" in opencode_payload or "agent_roster" in opencode_payload:
         opencode_cfg = dict(next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {})
         current_default_profile = _safe_text(opencode_cfg.get("default_profile"))
         if default_profile and (current_default_profile or default_profile != "lite_pro_orchestrated"):
@@ -1215,6 +1334,10 @@ def build_config_plan(
         else:
             opencode_cfg.pop("agent_models", None)
             opencode_cfg.pop("agent_model_overrides", None)
+        if agent_roster:
+            opencode_cfg["agent_roster"] = agent_roster
+        else:
+            opencode_cfg.pop("agent_roster", None)
         if opencode_cfg:
             next_cfg["opencode"] = opencode_cfg
         else:
@@ -1640,7 +1763,7 @@ _HTML_PAGE = r"""<!doctype html>
     h1{margin:0;font-family:var(--serif);font-size:clamp(34px,6vw,70px);line-height:.95;letter-spacing:-.05em}.lead{max-width:760px;color:#46564f;font-size:17px;line-height:1.7}.statusbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.pill{border:1px solid var(--line);border-radius:999px;padding:7px 11px;background:rgba(255,250,240,.7);font-size:12px;color:#55645f}.pill.ok{color:var(--ok);border-color:#94d3a2}.pill.warn{color:#9a5b00;border-color:#ecc37d}
     .shell{display:grid;grid-template-columns:280px 1fr;gap:18px;padding:0 clamp(18px,4vw,56px) 48px}.side{position:sticky;top:12px;align-self:start;border:1px solid var(--line);background:rgba(255,250,240,.78);backdrop-filter:blur(16px);border-radius:26px;padding:14px;box-shadow:var(--shadow)}.navbtn{width:100%;border:0;background:transparent;text-align:left;border-radius:18px;padding:13px 14px;margin:3px 0;cursor:pointer;color:#44554e;font-weight:700}.navbtn.active{background:#163d32;color:#fff}.navbtn small{display:block;font-weight:500;opacity:.75;margin-top:4px}.content{display:grid;gap:18px}.panel{border:1px solid var(--line);border-radius:28px;background:rgba(255,250,240,.88);padding:22px;box-shadow:var(--shadow)}.panel h2{margin:0 0 10px;font-size:25px}.panel p{color:var(--muted);line-height:1.65}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{border:1px solid var(--line);border-radius:20px;background:var(--panel2);padding:16px}.span4{grid-column:span 4}.span5{grid-column:span 5}.span6{grid-column:span 6}.span7{grid-column:span 7}.span8{grid-column:span 8}.span12{grid-column:span 12}.provider-editor{position:sticky;top:14px;align-self:start;max-height:calc(100vh - 28px);overflow:auto;scrollbar-gutter:stable}
     label{display:block;font-size:12px;font-weight:800;color:#566760;margin:0 0 6px}input,select,textarea{width:100%;border:1px solid #cfc2ae;background:#fffef8;border-radius:14px;padding:11px 12px;font:inherit;color:var(--ink)}textarea{min-height:92px;resize:vertical;font-family:var(--mono);font-size:13px}.checks{display:flex;gap:8px;flex-wrap:wrap}.check{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:8px 10px;background:#fffef8}.check input{width:auto}.btns{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}button,.button{border:0;border-radius:999px;padding:10px 15px;background:#173d33;color:#fff;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}button.secondary{background:#f0e4d0;color:#22342e}button.ghost{background:transparent;color:#173d33;border:1px solid var(--line)}button.danger{background:var(--danger)}button:disabled{opacity:.5;cursor:not-allowed}.provider-list{display:grid;gap:8px}.provider-item{border:1px solid var(--line);border-radius:18px;padding:12px;background:#fffef8;cursor:pointer}.provider-item.active{outline:3px solid rgba(15,123,95,.18);border-color:var(--accent)}.provider-item strong{display:block}.muted{color:var(--muted)}.mono{font-family:var(--mono);font-size:12px}.tag{display:inline-block;border-radius:999px;background:#e9f3ed;color:#0f674f;padding:4px 8px;font-size:12px;margin:2px}.tag.off{background:#f3e2dc;color:#9f2d20}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:20px;background:#fffef8}table{width:100%;border-collapse:collapse;min-width:860px}th,td{border-bottom:1px solid #eadfce;padding:10px;text-align:left;font-size:13px}th{position:sticky;top:0;background:#f8efdf;z-index:1}td input[type="checkbox"]{width:auto}.chips{display:flex;flex-wrap:wrap;gap:7px}.chip{border:1px solid #d8c8b1;border-radius:999px;padding:6px 9px;background:#fffdf5;font-size:12px}.chip button{padding:0 4px;background:transparent;color:#8a2d22}.result{white-space:pre-wrap;background:#13231d;color:#e8f8ed;border-radius:18px;padding:14px;max-height:420px;overflow:auto;font-family:var(--mono);font-size:12px}.diff{white-space:pre;overflow:auto;background:#111d19;color:#e8f8ed;border-radius:18px;padding:16px;max-height:520px;font-family:var(--mono);font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#163d32;color:#fff;border-radius:18px;padding:14px 16px;box-shadow:var(--shadow);max-width:520px;display:none}.toast.show{display:block}.danger-text{color:var(--danger);font-weight:800}.ok-text{color:var(--ok);font-weight:800}.hide{display:none!important}
-    .oc-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}.oc-metric{border:1px solid var(--line);border-radius:18px;background:#fffef8;padding:12px}.oc-metric strong{display:block;font-size:22px;color:#173d33}.oc-advanced{border:1px dashed #c9b898;border-radius:20px;padding:14px;background:rgba(255,253,248,.7)}.oc-advanced summary{cursor:pointer;font-weight:900;color:#173d33}.filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}.filterbar button{background:#f0e4d0;color:#22342e}.filterbar button.active{background:#173d33;color:#fff}.empty-row{padding:18px;color:var(--muted);text-align:center}.default-route{max-width:300px;white-space:normal}
+    .oc-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}.oc-metric{border:1px solid var(--line);border-radius:18px;background:#fffef8;padding:12px}.oc-metric strong{display:block;font-size:22px;color:#173d33}.oc-advanced{border:1px dashed #c9b898;border-radius:20px;padding:14px;background:rgba(255,253,248,.7)}.oc-advanced summary{cursor:pointer;font-weight:900;color:#173d33}.filterbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0}.filterbar button{background:#f0e4d0;color:#22342e}.filterbar button.active{background:#173d33;color:#fff}.empty-row{padding:18px;color:var(--muted);text-align:center}.default-route{max-width:300px;white-space:normal}.oc-order-note{border-left:4px solid #173d33;background:#f7efe0;border-radius:14px;padding:10px 12px;margin:12px 0;color:#46564f}.oc-enabled{width:auto}
     @media(max-width:980px){header{grid-template-columns:1fr}.statusbar{justify-content:flex-start}.shell{grid-template-columns:1fr}.side,.provider-editor{position:relative;top:auto;max-height:none;overflow:visible}.span4,.span5,.span6,.span7,.span8,.span12{grid-column:span 12}.oc-summary{grid-template-columns:1fr}}
   </style>
 </head>
@@ -1656,7 +1779,7 @@ _HTML_PAGE = r"""<!doctype html>
     <section class="panel" data-section="models"><h2>模型列表</h2><p>可拉取远端列表，也可像 NewAPI 一样手动补充；取消“显示”会写入 provider.hidden_models。拉取只更新缓存/当前表格，不会自动写入 fallback_models；需要固定保留的模型请用“手动补充模型”。</p><div class="grid"><div class="card span12"><div class="btns"><button id="fetchModels">拉取当前通道模型</button><button id="testList" class="secondary">测试 /models</button><input id="modelSearch" placeholder="搜索模型" style="max-width:260px"></div><label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label><textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea><div class="btns"><button id="addManualModels" class="secondary">添加到列表</button><button id="clearHidden" class="ghost">取消当前通道全部隐藏</button><button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button></div><div id="modelChips" class="chips" style="margin-top:10px"></div></div><div class="card span12" id="staleHiddenBox"></div><div class="span12 table-wrap"><table id="modelTable"></table></div></div></section>
     <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
     <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>这里会写入 config.toml 的 [rescue] 和 [vision_sidecar]，用于失败交接和 text-only 模型的图片 sidecar。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
-    <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和每个 agent 的模型覆盖会写入 [opencode]，launcher 会优先按这些 provider/model 解析；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>lite_pro_orchestrated</option><option>lite_pro_orchestrated_backend</option><option>lite_pro_orchestrated_acp</option><option>lite_pro</option><option>heavy_omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode agent 模型选择</h3><p class="muted">默认使用 Lite Pro 自动路线。只有需要固定某个 agent 的 provider/model 时，才展开 Advanced 覆盖；留空不会写入配置。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent overrides</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
+    <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>lite_pro_orchestrated</option><option>lite_pro_orchestrated_backend</option><option>lite_pro_orchestrated_acp</option><option>lite_pro</option><option>heavy_omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode Agent Roster</h3><p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><div class="oc-order-note">Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。</div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent roster</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
     <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
     <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
   </main>
@@ -1701,13 +1824,23 @@ function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-
 function renderVisionCandidates(candidates){const wrap=$('visionCandidates');wrap.innerHTML=(candidates||[]).map((item,i)=>{const provider=item.provider_id||item.provider||'';const model=item.model||item.vision_model||'';return `<div class="grid span12" data-vision-candidate="1"><div class="span5"><label>候选 ${i+1} provider</label><select data-vc-provider>${providerOptions(provider,{blankLabel:'请选择通道'})}</select></div><div class="span5"><label>候选 ${i+1} model</label><select data-vc-model>${modelOptions(provider,model,{visionFirst:true})}</select></div><div class="span2"><label>&nbsp;</label><button class="ghost" data-vc-remove>移除</button></div></div>`}).join('');document.querySelectorAll('[data-vision-candidate]').forEach(bindVisionCandidateRow)}
 function renderFallback(){const r=state.rescue||{},v=state.vision_sidecar||{};$('rescueModel').value=r.fallback_model||'';$('rescueCli').value=r.fallback_cli||'';$('rescueHot').checked=!!r.hot_fallback_enabled;$('visionEnabled').checked=v.enabled!==false;const provider=v.provider_id||v.provider||'';const model=v.model||v.vision_model||'';$('visionProvider').innerHTML=providerOptions(provider,{blankLabel:'请选择 vision 通道'});$('visionProvider').value=provider;$('visionModel').innerHTML=modelOptions(provider,model,{visionFirst:true});$('visionModel').value=model;renderVisionCandidates(v.candidates||[]);['rescueModel','rescueCli','rescueHot','visionEnabled','visionModel'].forEach(id=>$(id).oninput=syncFallback);$('visionProvider').onchange=()=>{$('visionModel').innerHTML=modelOptions($('visionProvider').value,'',{visionFirst:true});syncFallback()};$('rescueHot').onchange=syncFallback;$('visionEnabled').onchange=syncFallback;$('addVisionCandidate').onclick=()=>{const provider=(state.providers[0]||{}).id||'';const model=(visibleModelsForProvider(provider,{visionFirst:true})[0]||{}).id||'';const list=[...(state.vision_sidecar?.candidates||[]),{provider_id:provider,model:model}];state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.candidates=list;renderVisionCandidates(list);syncFallback()}}
 function opencodeOverrides(){state.opencode=state.opencode||{};state.opencode.agent_models=state.opencode.agent_models||{};return state.opencode.agent_models}
+function opencodeRoster(){state.opencode=state.opencode||{};state.opencode.agent_roster=state.opencode.agent_roster||{};return state.opencode.agent_roster}
 function opencodeOverrideEntries(){const overrides=opencodeOverrides();return Object.entries(overrides).filter(([,v])=>v&&v.model)}
+function opencodeDefaults(){const map={};(state.opencode.agent_catalog||[]).forEach((row,i)=>{map[row.agent]={enabled:true,preset:row.preset||categoryPreset(row.category),priority:row.priority||((i+1)*10),custom:false}});return map}
+function categoryPreset(category){const c=String(category||'');if(c==='Vision')return 'vision';if(c==='探索')return 'explore';if(c==='找茬')return 'bughunt';if(c==='审查')return 'reviewer';if(c==='执行')return 'executor';return 'builder'}
+function rosterEntry(agent,row={}){const defaults=opencodeDefaults();return {...(defaults[agent]||{enabled:true,preset:row.preset||categoryPreset(row.category),priority:999,custom:!!row.custom}),...(opencodeRoster()[agent]||{})}}
 function setOpencodeOverride(agent,provider,model){const overrides=opencodeOverrides();if(model){overrides[agent]={model};if(provider)overrides[agent].provider_id=provider}else{delete overrides[agent]}}
-function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};state.runtime.preferred_cli=$('preferredCli').value;state.runtime.coding_preset_model=$('codingModel').value.trim();state.opencode.default_profile=$('opencodeProfile').value;state.opencode.agent_models=Object.fromEntries(opencodeOverrideEntries())}
-function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=state.opencode.agent_catalog||[];const count=opencodeOverrideEntries().length;const total=rows.length;const profile=state.opencode.default_profile||'lite_pro_orchestrated';box.innerHTML=`<div class="oc-metric"><span class="muted">OpenCode default profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">推荐默认：lite_pro_orchestrated</span></div><div class="oc-metric"><span class="muted">自动路线</span><strong>已启用</strong><span class="mono">留空使用 Lite Pro route</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${total} 已覆盖</strong><span class="mono">${count?'展开 Advanced 查看固定项':'当前全部自动，不写 agent_models'}</span></div>`}
-function opencodeFilterMatches(row,overridden){if(opencodeOnlyOverridden&&!overridden)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='execute')return String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return row.category==='探索';if(opencodeAgentFilter==='bughunt')return row.category==='找茬';if(opencodeAgentFilter==='vision')return row.category==='Vision';if(opencodeAgentFilter==='review')return row.category==='审查';return true}
-function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看已覆盖</span></label><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};syncRuntime();renderOpencodeAgents();toast('OpenCode agent overrides 已全部恢复自动路线')}}
-function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();const rows=state.opencode.agent_catalog||[];renderOpencodeSummary();renderOpencodeFilters();const visible=rows.filter(row=>opencodeFilterMatches(row,!!(overrides[row.agent]&&overrides[row.agent].model)));const body=visible.length?visible.map(row=>{const ov=overrides[row.agent]||{};const provider=ov.provider_id||'';const model=ov.model||'';const overridden=!!model;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${overridden?'<br><span class="tag">override</span>':''}</td><td>${escapeHtml(row.category||'')}</td><td><select data-oc-provider>${providerOptions(provider,{auto:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(row.category==='Vision')})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / '))}</td><td><button class="ghost" data-oc-reset>自动</button></td></tr>`}).join(''):`<tr><td colspan="6" class="empty-row">当前过滤条件下没有 agent；关闭“只看已覆盖”或切换分类。</td></tr>`;table.innerHTML=`<thead><tr><th>agent</th><th>用途</th><th>provider</th><th>model</th><th>默认路线</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(row=>{const provider=row.querySelector('[data-oc-provider]');const model=row.querySelector('[data-oc-model]');const catalog=(state.opencode.agent_catalog||[]).find(x=>x.agent===row.dataset.ocAgent)||{};provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{auto:true,defaultModels:catalog.default_models||[],visionFirst:(catalog.category==='Vision')});setOpencodeOverride(row.dataset.ocAgent,provider.value.trim(),'');syncRuntime();renderOpencodeSummary()};model.onchange=()=>{setOpencodeOverride(row.dataset.ocAgent,provider.value.trim(),model.value.trim());syncRuntime();renderOpencodeSummary()};row.querySelector('[data-oc-reset]').onclick=()=>{setOpencodeOverride(row.dataset.ocAgent,'','');syncRuntime();renderOpencodeAgents()}})}
+function persistRosterEntry(agent,row,patch={}){const roster=opencodeRoster();const defaults=opencodeDefaults();const base=rosterEntry(agent,row);const next={...base,...patch};const def=defaults[agent]||{};const providerMeaningful=!!next.provider_id&&(!!next.model||!!next.custom);const keep=!!next.custom||next.enabled===false||next.preset!==def.preset||Number(next.priority||0)!==Number(def.priority||0)||providerMeaningful||!!next.model||!!next.description||!!next.prompt;if(!keep){delete roster[agent];return}const payload={preset:next.preset||row.preset||categoryPreset(row.category),enabled:next.enabled!==false,priority:Number(next.priority||def.priority||999)};if(next.custom)payload.custom=true;if(providerMeaningful)payload.provider_id=next.provider_id;if(next.model)payload.model=next.model;if(next.description)payload.description=next.description;if(next.prompt)payload.prompt=next.prompt;roster[agent]=payload}
+function setRosterEnabled(agent,row,enabled){persistRosterEntry(agent,row,{enabled})}
+function opencodeAllRows(){const base=(state.opencode.agent_catalog||[]).map(row=>({...row,custom:false}));const seen=new Set(base.map(row=>row.agent));Object.entries(opencodeRoster()).forEach(([agent,entry])=>{if(seen.has(agent))return;base.push({agent,route_key:agent,category:presetLabel(entry.preset),preset:entry.preset||'explore',priority:entry.priority||999,default_models:[],custom:true})});return base.sort((a,b)=>Number(rosterEntry(a.agent,a).priority||999)-Number(rosterEntry(b.agent,b).priority||999)||a.agent.localeCompare(b.agent))}
+function presetLabel(preset){return {builder:'执行/协调',executor:'执行',explore:'探索',bughunt:'找茬',vision:'Vision',reviewer:'审查',spec:'Spec',fixer:'执行'}[preset]||preset||'custom'}
+function customAgentId(preset){const existing=new Set(opencodeAllRows().map(row=>row.agent));let i=1;let id='';do{id=`mobius-${preset}-custom-${i++}`}while(existing.has(id));return id}
+function addCustomAgent(preset){const agent=customAgentId(preset);opencodeRoster()[agent]={enabled:true,custom:true,preset,priority:900+Object.keys(opencodeRoster()).length};renderOpencodeAgents();toast(`已添加 ${agent}`)}
+function syncRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};state.runtime.preferred_cli=$('preferredCli').value;state.runtime.coding_preset_model=$('codingModel').value.trim();state.opencode.default_profile=$('opencodeProfile').value;state.opencode.agent_models=Object.fromEntries(opencodeOverrideEntries());state.opencode.agent_roster={...opencodeRoster()}}
+function renderOpencodeSummary(){const box=$('opencodeOverrideSummary');if(!box)return;const rows=opencodeAllRows();const enabled=rows.filter(row=>rosterEntry(row.agent,row).enabled!==false).length;const count=opencodeOverrideEntries().length;const custom=rows.filter(row=>rosterEntry(row.agent,row).custom).length;const profile=state.opencode.default_profile||'lite_pro_orchestrated';box.innerHTML=`<div class="oc-metric"><span class="muted">Profile</span><strong>${escapeHtml(profile)}</strong><span class="mono">Lite Pro Roster</span></div><div class="oc-metric"><span class="muted">Enabled agents</span><strong>${enabled}/${rows.length}</strong><span class="mono">进入 session-local opencode.json</span></div><div class="oc-metric"><span class="muted">Agent overrides</span><strong>${count}/${rows.length}</strong><span class="mono">Auto 不写 agent_models</span></div><div class="oc-metric"><span class="muted">Custom agents</span><strong>${custom}</strong><span class="mono">按 preset 继承 prompt/permission</span></div>`}
+function opencodeFilterMatches(row,overridden){const entry=rosterEntry(row.agent,row);if(opencodeOnlyOverridden&&!overridden&&entry.enabled!==false&&!entry.custom)return false;if(opencodeAgentFilter==='all')return true;if(opencodeAgentFilter==='enabled')return entry.enabled!==false;if(opencodeAgentFilter==='custom')return !!entry.custom;if(opencodeAgentFilter==='execute')return ['builder','executor','fixer','spec'].includes(entry.preset)||String(row.category||'').startsWith('执行');if(opencodeAgentFilter==='explore')return entry.preset==='explore'||row.category==='探索';if(opencodeAgentFilter==='bughunt')return entry.preset==='bughunt'||row.category==='找茬';if(opencodeAgentFilter==='vision')return entry.preset==='vision'||row.category==='Vision';if(opencodeAgentFilter==='review')return entry.preset==='reviewer'||row.category==='审查';return true}
+function renderOpencodeFilters(){const wrap=$('opencodeAgentFilters');if(!wrap)return;const filters=[['all','全部'],['enabled','已启用'],['custom','自定义'],['execute','执行/协调'],['explore','探索'],['bughunt','找茬'],['vision','Vision'],['review','审查']];wrap.innerHTML=`${filters.map(([id,label])=>`<button class="ghost ${opencodeAgentFilter===id?'active':''}" data-oc-filter="${id}">${label}</button>`).join('')}<label class="check"><input id="ocOnlyOverridden" type="checkbox" ${opencodeOnlyOverridden?'checked':''}><span>只看改动项</span></label><button class="ghost" data-oc-add="vision">+ Add Vision Agent</button><button class="ghost" data-oc-add="executor">+ Add Executor Agent</button><button class="ghost" data-oc-add="explore">+ Add Explore Agent</button><button class="ghost" id="ocClearAll">全部自动</button>`;document.querySelectorAll('[data-oc-filter]').forEach(btn=>btn.onclick=()=>{opencodeAgentFilter=btn.dataset.ocFilter;renderOpencodeAgents()});document.querySelectorAll('[data-oc-add]').forEach(btn=>btn.onclick=()=>addCustomAgent(btn.dataset.ocAdd));$('ocOnlyOverridden').onchange=()=>{opencodeOnlyOverridden=$('ocOnlyOverridden').checked;renderOpencodeAgents()};$('ocClearAll').onclick=()=>{state.opencode.agent_models={};state.opencode.agent_roster={};syncRuntime();renderOpencodeAgents();toast('OpenCode roster 已恢复默认自动路线')}}
+function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return;const overrides=opencodeOverrides();renderOpencodeSummary();renderOpencodeFilters();const rows=opencodeAllRows();const visible=rows.filter(row=>{const entry=rosterEntry(row.agent,row);const overridden=!!(overrides[row.agent]&&overrides[row.agent].model)||entry.enabled===false||entry.custom;return opencodeFilterMatches(row,overridden)});const presetOptions=(selected)=>['builder','executor','explore','bughunt','vision','reviewer','spec','fixer'].map(p=>`<option value="${p}" ${p===selected?'selected':''}>${p}</option>`).join('');const body=visible.length?visible.map(row=>{const entry=rosterEntry(row.agent,row);const ov=overrides[row.agent]||{};const provider=ov.provider_id||entry.provider_id||'';const model=ov.model||entry.model||'';const enabled=entry.enabled!==false;const changed=!!model||!enabled||!!entry.custom;return `<tr data-oc-agent="${escapeHtml(row.agent)}"><td><input class="oc-enabled" type="checkbox" data-oc-enabled ${enabled?'checked':''} ${row.agent==='mobius-builder-pro'?'disabled':''}></td><td class="mono">${escapeHtml(row.agent)}<br><span class="muted">${escapeHtml(row.route_key)}</span>${entry.custom?'<br><span class="tag">custom</span>':''}${changed?'<span class="tag">changed</span>':''}</td><td><select data-oc-preset ${entry.custom?'':'disabled'}>${presetOptions(entry.preset)}</select></td><td><input data-oc-priority type="number" value="${escapeHtml(entry.priority||999)}" style="max-width:86px"></td><td><select data-oc-provider>${providerOptions(provider,{auto:true})}</select></td><td><select data-oc-model>${modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision')})}</select></td><td class="mono default-route">${escapeHtml((row.default_models||[]).join(' / ')||'preset auto')}</td><td><button class="ghost" data-oc-reset>自动</button>${entry.custom?'<button class="ghost" data-oc-remove>移除</button>':''}</td></tr>`}).join(''):`<tr><td colspan="8" class="empty-row">当前过滤条件下没有 agent；关闭“只看改动项”或切换分类。</td></tr>`;table.innerHTML=`<thead><tr><th>启用</th><th>agent</th><th>preset</th><th>priority</th><th>provider</th><th>model</th><th>默认路线</th><th></th></tr></thead><tbody>${body}</tbody>`;document.querySelectorAll('[data-oc-agent]').forEach(rowEl=>{const agent=rowEl.dataset.ocAgent;const row=rows.find(x=>x.agent===agent)||{};const provider=rowEl.querySelector('[data-oc-provider]');const model=rowEl.querySelector('[data-oc-model]');const enabled=rowEl.querySelector('[data-oc-enabled]');const preset=rowEl.querySelector('[data-oc-preset]');const priority=rowEl.querySelector('[data-oc-priority]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{auto:true,defaultModels:row.default_models||[],visionFirst:(rosterEntry(agent,row).preset==='vision'||row.category==='Vision')});setOpencodeOverride(agent,provider.value.trim(),'');persistRosterEntry(agent,row,{provider_id:provider.value.trim(),model:''});syncRuntime();renderOpencodeSummary()};model.onchange=()=>{setOpencodeOverride(agent,provider.value.trim(),model.value.trim());persistRosterEntry(agent,row,{provider_id:provider.value.trim(),model:model.value.trim()});syncRuntime();renderOpencodeSummary()};enabled.onchange=()=>{setRosterEnabled(agent,row,enabled.checked);syncRuntime();renderOpencodeAgents()};preset.onchange=()=>{persistRosterEntry(agent,row,{preset:preset.value});syncRuntime();renderOpencodeAgents()};priority.onchange=()=>{persistRosterEntry(agent,row,{priority:Number(priority.value||999)});syncRuntime();renderOpencodeAgents()};rowEl.querySelector('[data-oc-reset]').onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()};const remove=rowEl.querySelector('[data-oc-remove]');if(remove)remove.onclick=()=>{setOpencodeOverride(agent,'','');delete opencodeRoster()[agent];syncRuntime();renderOpencodeAgents()}})}
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'lite_pro_orchestrated';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}

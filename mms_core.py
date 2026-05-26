@@ -10144,10 +10144,98 @@ def _opencode_agent_model_overrides(cfg):
     return overrides
 
 
+def _opencode_roster_preset(agent_id, fallback="explore"):
+    text = str(agent_id or "").strip().lower()
+    if "vision" in text:
+        return "vision"
+    if "bughunt" in text:
+        return "bughunt"
+    if "explore" in text:
+        return "explore"
+    if "review" in text or "compliance" in text:
+        return "reviewer"
+    if "spec" in text:
+        return "spec"
+    if "executor" in text:
+        return "executor"
+    if "fixer" in text:
+        return "fixer"
+    if "builder" in text:
+        return "builder"
+    return fallback
+
+
+def _opencode_roster_preset_models(preset):
+    preset = str(preset or "").strip().lower()
+    if preset == "vision":
+        return ("mimo-v2.5", "mimo-v2-omni", "kimi-k2.5", "qwen3.6-plus", "qwen3.5-plus")
+    if preset == "executor":
+        return ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")
+    if preset == "reviewer":
+        return ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")
+    if preset == "spec":
+        return ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")
+    if preset == "bughunt":
+        return ("qwen3.6-plus", "qwen3.5-plus", "deepseek-v4-pro", "deepseek-v4-flash", "glm-5.1")
+    if preset == "fixer":
+        return ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")
+    if preset == "builder":
+        return ("gpt-5.5", "gpt-5.4")
+    return ("glm-5-turbo", "glm-5.1", "kimi-for-coding", "kimi-k2.5")
+
+
+def _opencode_agent_roster_overrides(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    raw = opencode.get("agent_roster")
+    raw = raw if isinstance(raw, dict) else {}
+    roster = {}
+    for agent, entry in raw.items():
+        agent_id = str(agent or "").strip()
+        if not agent_id or not isinstance(entry, dict):
+            continue
+        payload = {}
+        preset = str(entry.get("preset") or entry.get("category") or _opencode_roster_preset(agent_id)).strip().lower()
+        if preset not in {"builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer"}:
+            preset = _opencode_roster_preset(agent_id)
+        payload["preset"] = preset
+        if "enabled" in entry:
+            payload["enabled"] = bool(entry.get("enabled"))
+        custom = entry.get("custom") is True
+        if custom:
+            payload["custom"] = True
+        provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+        model = str(entry.get("model") or entry.get("model_id") or "").strip()
+        if provider_id and (model or custom):
+            payload["provider_id"] = provider_id
+        if model:
+            payload["model"] = model
+        try:
+            priority = int(entry.get("priority"))
+        except (TypeError, ValueError):
+            priority = 0
+        if priority > 0:
+            payload["priority"] = priority
+        description = str(entry.get("description") or "").strip()
+        if description:
+            payload["description"] = description[:240]
+        prompt = str(entry.get("prompt") or "").strip()
+        if prompt:
+            payload["prompt"] = prompt[:4000]
+        roster[agent_id] = payload
+    return roster
+
+
+def _opencode_custom_route_key(agent_id):
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(agent_id or "").strip()).strip("_")
+    return f"custom_{cleaned or 'agent'}"
+
+
 def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
     routes = []
     agent_models = {}
     agent_model_overrides = _opencode_agent_model_overrides(cfg)
+    agent_roster_overrides = _opencode_agent_roster_overrides(cfg)
     unresolved_overrides = {}
     gpt_fallback = _find_opencode_model_route(
         cfg,
@@ -10158,8 +10246,17 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
         profile_id=profile_id,
     )
 
-    for spec in _opencode_lite_pro_specs(profile_id):
+    default_specs = list(_opencode_lite_pro_specs(profile_id))
+    default_agents = {str(spec.get("agent") or "").strip() for spec in default_specs}
+    default_keys = {str(spec.get("key") or "").strip() for spec in default_specs}
+
+    for spec in default_specs:
+        roster_entry = agent_roster_overrides.get(spec["agent"]) or agent_roster_overrides.get(spec["key"]) or {}
+        if roster_entry.get("enabled") is False:
+            continue
         override = agent_model_overrides.get(spec["agent"]) or agent_model_overrides.get(spec["key"])
+        if not override and roster_entry.get("model"):
+            override = {"provider_id": roster_entry.get("provider_id", ""), "model": roster_entry.get("model", "")}
         model_names = (override["model"],) if override else spec["models"]
         route = _find_opencode_model_route(
             cfg,
@@ -10188,8 +10285,39 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
         if route:
             agent_models[spec["agent"]] = spec["key"]
 
+    custom_items = []
+    for agent_id, entry in agent_roster_overrides.items():
+        if agent_id in default_agents or agent_id in default_keys:
+            continue
+        if entry.get("enabled") is False:
+            continue
+        if not entry.get("custom") and agent_id.startswith("mobius-") is False:
+            entry = dict(entry)
+            entry["custom"] = True
+        priority = int(entry.get("priority") or 1000)
+        custom_items.append((priority, agent_id, entry))
+    for _priority, agent_id, entry in sorted(custom_items, key=lambda item: (item[0], item[1])):
+        route_key = _opencode_custom_route_key(agent_id)
+        model_names = (entry["model"],) if entry.get("model") else _opencode_roster_preset_models(entry.get("preset"))
+        route = _find_opencode_model_route(
+            cfg,
+            default_provider,
+            default_models,
+            model_names,
+            route_key=route_key,
+            route_policy="mimo_direct" if entry.get("preset") == "vision" and str(entry.get("model") or "").lower().startswith("mimo-") else "",
+            profile_id=profile_id,
+            provider_id=entry.get("provider_id", ""),
+        )
+        route = _append_unique_opencode_route(routes, dict(route, id=route_key) if route else None)
+        if route:
+            agent_models[agent_id] = route_key
+
+    builder_roster = agent_roster_overrides.get("mobius-builder-pro") or agent_roster_overrides.get("builder_primary") or {}
     builder_route = next((route for route in routes if route.get("id") == "builder_primary"), None)
     if builder_route is None:
+        if builder_roster.get("enabled") is False:
+            return None, None
         builder_route = gpt_fallback
         builder_route = _append_unique_opencode_route(routes, dict(builder_route, id="builder_primary") if builder_route else None)
         if builder_route:
@@ -10211,6 +10339,8 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
     runtime["opencode_agent_model_keys"] = agent_models
     if agent_model_overrides:
         runtime["opencode_agent_model_overrides"] = agent_model_overrides
+    if agent_roster_overrides:
+        runtime["opencode_agent_roster"] = agent_roster_overrides
     if unresolved_overrides:
         runtime["opencode_agent_model_override_unresolved"] = unresolved_overrides
     runtime["opencode_default_route_key"] = "builder_primary"

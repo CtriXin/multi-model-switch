@@ -136,18 +136,22 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     html = mms_config_web._HTML_PAGE
 
     assert "OpenCode default profile" in html
-    assert "自动路线</span><strong>已启用" in html
+    assert "OpenCode Agent Roster" in html
+    assert "Order 是 priority/fallback order, not round-robin" in html
     assert "Agent overrides" in html
+    assert "Enabled agents" in html
     assert 'id="opencodeOverrideSummary"' in html
     assert 'id="opencodeAdvanced"' in html
     assert "<details" in html
-    assert "Advanced: OpenCode per-agent overrides" in html
-    assert "只看已覆盖" in html
+    assert "Advanced: OpenCode per-agent roster" in html
+    assert "只看改动项" in html
+    assert "+ Add Vision Agent" in html
+    assert "+ Add Executor Agent" in html
     assert "全部自动" in html
-    assert "当前全部自动，不写 agent_models" in html
     assert "['execute','执行/协调']" in html
     assert "state.opencode.agent_models={};" in html
-    assert "留空不会写入配置" in html
+    assert "state.opencode.agent_roster={};" in html
+    assert "session-local opencode.json" in html
 
 
 def test_config_web_snapshot_has_lite_pro_orchestrated_agent_catalog():
@@ -157,6 +161,7 @@ def test_config_web_snapshot_has_lite_pro_orchestrated_agent_catalog():
 
     assert len(catalog) == 18
     assert catalog[0]["agent"] == "mobius-builder-pro"
+    assert catalog[0]["preset"] == "builder"
     assert {
         "mobius-explore-qwen",
         "mobius-bughunt-qwen",
@@ -360,6 +365,44 @@ def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):
 
     assert "agent_models" not in plan["config"]["opencode"]
     assert any(item["kind"] == "opencode_agent_models" for item in plan["review_summary"]["items"])
+
+
+def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):
+    cfg = {"opencode": {"default_profile": "lite_pro_orchestrated"}}
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "lite_pro_orchestrated",
+                "agent_roster": {
+                    "mobius-vision-mimo": {"enabled": False, "preset": "vision", "priority": 100},
+                    "mobius-vision-custom-1": {
+                        "enabled": True,
+                        "custom": True,
+                        "preset": "vision",
+                        "provider_id": "demo",
+                        "model": "qwen3.6-plus",
+                        "priority": 910,
+                    },
+                },
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    roster = plan["config"]["opencode"]["agent_roster"]
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "opencode_agent_roster")
+
+    assert roster["mobius-vision-mimo"]["enabled"] is False
+    assert roster["mobius-vision-custom-1"] == {
+        "preset": "vision",
+        "custom": True,
+        "enabled": True,
+        "provider_id": "demo",
+        "model": "qwen3.6-plus",
+        "priority": 910,
+    }
+    assert item["meta"]["disabled_agents"] == ["mobius-vision-mimo"]
+    assert item["meta"]["custom_agents"] == ["mobius-vision-custom-1"]
 
 
 def test_config_web_review_summary_lists_only_changed_opencode_agents(tmp_path):
