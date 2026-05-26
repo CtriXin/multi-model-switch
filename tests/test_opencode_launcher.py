@@ -578,6 +578,40 @@ def test_get_export_env_for_heavy_omo_does_not_require_provider_credentials():
     }
 
 
+def test_launch_cli_opencode_omo_skips_provider_validation(monkeypatch):
+    import mms_launchers
+
+    captured = {}
+    runtime = {
+        "id": "global-opencode-omo",
+        "name": "Global OpenCode / OMO",
+        "runtime_kind": "opencode_profile",
+        "auth_mode": "global_config",
+        "opencode_profile": "heavy_omo",
+        "opencode_use_global_config": True,
+    }
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "validate_provider_for_cli",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("OMO is not a provider runtime")),
+    )
+
+    def fake_launcher(model_info, launch_runtime, once=False, **_kwargs):
+        captured["model_info"] = model_info
+        captured["runtime"] = launch_runtime
+        captured["once"] = once
+
+    monkeypatch.setitem(mms_launchers.LAUNCHERS, "opencode", fake_launcher)
+
+    mms_launchers.launch_cli("opencode", {"model": "global-omo"}, runtime, once=True)
+
+    assert captured["model_info"] == {"model": "global-omo"}
+    assert captured["runtime"]["id"] == "global-opencode-omo"
+    assert captured["runtime"]["auth_mode"] == "global_config"
+    assert captured["once"] is True
+
+
 def test_core_provider_supports_opencode_cli():
     import mms_core
 

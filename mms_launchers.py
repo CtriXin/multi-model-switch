@@ -10391,17 +10391,29 @@ LAUNCHERS = {
 }
 
 
+def _is_opencode_global_profile_runtime(cli, runtime):
+    if cli != "opencode" or not isinstance(runtime, dict):
+        return False
+    profile = str(runtime.get("opencode_profile") or "").strip().lower()
+    return (
+        profile in {"heavy", "heavy_omo", "omo"}
+        or runtime.get("opencode_use_global_config")
+        or (
+            runtime.get("runtime_kind") == "opencode_profile"
+            and runtime.get("auth_mode") == "global_config"
+        )
+    )
+
+
 def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
     runtime = runtime if isinstance(runtime, dict) else {}
-    if cli == "opencode":
-        profile = str(runtime.get("opencode_profile") or "").strip().lower()
-        if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
-            exports = {
-                "OPENCODE_CLIENT": "mms",
-                "MMS_OPENCODE_PROFILE": "heavy_omo",
-            }
-            return _opencode_apply_bypass_env(exports, runtime)
+    if _is_opencode_global_profile_runtime(cli, runtime):
+        exports = {
+            "OPENCODE_CLIENT": "mms",
+            "MMS_OPENCODE_PROFILE": "heavy_omo",
+        }
+        return _opencode_apply_bypass_env(exports, runtime)
 
     if runtime.get("auth_mode") == "broker_profile":
         return {}
@@ -10545,6 +10557,9 @@ def launch_cli(cli, model_info, runtime, once=False, extra_args=None):
         validate_account_for_cli(runtime.get("cli", cli), runtime)
         source_label = runtime.get("name", runtime.get("id", "account"))
         source_kind = "账号档案"
+    elif _is_opencode_global_profile_runtime(cli, runtime):
+        source_label = runtime.get("name", runtime.get("id", "global-opencode-omo"))
+        source_kind = "OpenCode 全局配置"
     else:
         validate_provider_for_cli(cli, runtime)
         source_label = runtime.get("name", runtime.get("id", "provider"))
