@@ -132,6 +132,41 @@ def test_config_web_fetch_models_does_not_persist_to_fallback_models():
     assert "p.fallback_models=[...new Set(data.models)]" not in html
 
 
+def test_config_web_opencode_agent_overrides_are_advanced_ui():
+    html = mms_config_web._HTML_PAGE
+
+    assert "OpenCode default profile" in html
+    assert "自动路线</span><strong>已启用" in html
+    assert "Agent overrides" in html
+    assert 'id="opencodeOverrideSummary"' in html
+    assert 'id="opencodeAdvanced"' in html
+    assert "<details" in html
+    assert "Advanced: OpenCode per-agent overrides" in html
+    assert "只看已覆盖" in html
+    assert "全部自动" in html
+    assert "当前全部自动，不写 agent_models" in html
+    assert "['execute','执行/协调']" in html
+    assert "state.opencode.agent_models={};" in html
+    assert "留空不会写入配置" in html
+
+
+def test_config_web_snapshot_has_lite_pro_orchestrated_agent_catalog():
+    snapshot = mms_config_web.build_config_snapshot({"providers": []}, config_path="/tmp/mms/config.toml")
+    catalog = snapshot["opencode"]["agent_catalog"]
+    agents = {row["agent"] for row in catalog}
+
+    assert len(catalog) == 18
+    assert catalog[0]["agent"] == "mobius-builder-pro"
+    assert {
+        "mobius-explore-qwen",
+        "mobius-bughunt-qwen",
+        "mobius-executor-gpt54",
+        "mobius-vision-qwen",
+        "mobius-reviewer-gpt55",
+    } <= agents
+    assert {row["category"] for row in catalog} >= {"执行/协调", "探索", "找茬", "Vision", "审查"}
+
+
 def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mms_config_web,
@@ -301,6 +336,67 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert any(item["kind"] == "credentials" for item in plan["review_summary"]["items"])
     assert any(risk["id"] == "credential_update" for risk in plan["review_summary"]["risks"])
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):
+    cfg = {
+        "opencode": {
+            "default_profile": "lite_pro_orchestrated",
+            "agent_models": {
+                "mobius-explore-glm": {"provider_id": "demo", "model": "qwen3.6-plus"},
+            },
+        }
+    }
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "lite_pro_orchestrated",
+                "agent_models": {},
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+
+    assert "agent_models" not in plan["config"]["opencode"]
+    assert any(item["kind"] == "opencode_agent_models" for item in plan["review_summary"]["items"])
+
+
+def test_config_web_review_summary_lists_only_changed_opencode_agents(tmp_path):
+    cfg = {
+        "opencode": {
+            "default_profile": "lite_pro_orchestrated",
+            "agent_models": {
+                "same-agent": {"model": "gpt-5.4"},
+                "updated-agent": {"provider_id": "demo", "model": "glm-5"},
+                "removed-agent": {"model": "glm-5"},
+            },
+        }
+    }
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "lite_pro_orchestrated",
+                "agent_models": {
+                    "same-agent": {"model": "gpt-5.4"},
+                    "updated-agent": {"provider_id": "demo", "model": "glm-5.1"},
+                    "new-agent": {"model": "qwen3.6-plus"},
+                },
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan(cfg, payload, config_path=str(tmp_path / "config.toml"))
+    item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "opencode_agent_models")
+
+    assert item["meta"]["agents"] == ["new-agent", "removed-agent", "updated-agent"]
+    assert item["meta"]["added_agents"] == ["new-agent"]
+    assert item["meta"]["removed_agents"] == ["removed-agent"]
+    assert item["meta"]["updated_agents"] == ["updated-agent"]
+    assert "新增 1" in item["detail"]
+    assert "移除 1" in item["detail"]
+    assert "修改 1" in item["detail"]
+    assert "same-agent" not in item["detail"]
 
 
 def test_config_web_review_summary_flags_http_and_hidden_cleanup(tmp_path):
