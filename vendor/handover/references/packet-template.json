@@ -1,0 +1,33 @@
+{
+  "schema": "agent.continuity.pickup.v1",
+  "generated": "2026-05-21T00:00:00Z",
+  "root": "/path/to/repo",
+  "active": {
+    "schema": "agent.continuity.active.v1",
+    "task_id": "task-example-001",
+    "status": "active",
+    "model": "gpt-5.4",
+    "next_action": "Exact next step",
+    "checkpoint_ref": "./.agent.local/continuity/checkpoints/task-example-001/20260521-000000-session.json"
+  },
+  "checkpoint": {
+    "task_id": "task-example-001",
+    "session_id": "session",
+    "checkpoint_hash": "abc123",
+    "summary": "One-line current truth",
+    "status": "active",
+    "next_action": "Exact next step",
+    "checkpoint_ref": "./.agent.local/continuity/checkpoints/task-example-001/20260521-000000-session.json"
+  },
+  "read_order": [
+    "./AGENTS.md",
+    "./.agent.local/continuity/pickup.md",
+    "./.agent.local/continuity/active.json",
+    "./.agent.local/continuity/checkpoints/task-example-001/20260521-000000-session.json"
+  ],
+  "writeback_required": [
+    "write future shift checkpoints under .agent.local/continuity/checkpoints/<task-id>/",
+    "write session events under .agent.local/continuity/sessions/<session-id>.jsonl",
+    "update active.json only from main/supervisor/offduty scope"
+  ]
+}

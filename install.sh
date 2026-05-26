@@ -173,6 +173,13 @@ optional_brainkeeper_context_installed() {
         && [ -x "$BIN_DIR/brainkeeper" ]
 }
 
+optional_handover_continuity_installed() {
+    [ -L "$REAL_HOME/.claude/commands/offduty.md" ] \
+        && [ -L "$REAL_HOME/.claude/commands/onduty.md" ] \
+        && [ -L "$REAL_HOME/.codex/commands/offduty.md" ] \
+        && [ -L "$REAL_HOME/.codex/commands/onduty.md" ]
+}
+
 optional_map_installed() {
     [ -x "$REAL_HOME/.claude/hooks/map-auto-index.sh" ]
 }
@@ -393,7 +400,7 @@ $(t "说明:" "Notes:")
   - $(t "--install-ops-env-safe 是高级可选项：安装 path-only host path hints；普通 MMS session 已自动带真实 HOME 路径提示，通常不用安装" "--install-ops-env-safe is advanced-only: installs path-only host path hints; normal MMS sessions already receive real-HOME path hints and usually do not need it")
   - $(t "--install-ecc / --install-omc 会把 Claude agent packs 安装为 MMS-managed session assets，不写全局 Claude 配置" "--install-ecc / --install-omc installs Claude agent packs as MMS-managed session assets without writing global Claude config")
   - $(t "--install-agent-packs 等同于同时安装 ECC 和 OMC；可用 --ecc-ref / --omc-ref 固定版本" "--install-agent-packs installs both ECC and OMC; use --ecc-ref / --omc-ref to pin refs")
-  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default")
+  - $(t "Caveman、Web automation bundle（weber router + web-access 登录态 Chrome + agent-browser headless）、TOON、token-saver、xmem 作为 MMS 内建 session assets 随安装一起提供；NSR 内建且默认开启；offduty/onduty（handover continuity）也会自动安装到 Claude/Codex/OpenCode 全局 skill 和命令目录" "Caveman, the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless), TOON, token-saver, and xmem ship as bundled MMS session assets; NSR is built in and enabled by default; offduty/onduty (handover continuity) are also auto-installed into Claude/Codex/OpenCode global skill and command dirs")
   - $(t "--install-cli 可选安装 claude/codex/opencode（支持逗号分隔）；能用 npm 的 CLI 均走 npm package" "--install-cli optionally installs claude/codex/opencode (comma-separated); CLIs with npm packages are installed through npm")
   - $(t "--write-shell-rc 支持 bash/zsh/fish；Ghostty/iTerm/Terminal 重开 tab 后即可直接输入 mms" "--write-shell-rc supports bash/zsh/fish; reopen Ghostty/iTerm/Terminal tabs to type mms directly")
   - $(t "同一条命令可重复执行，用于升级" "The same command can be re-run later for upgrades")
@@ -2165,6 +2172,12 @@ run_install_check() {
 
     print_bundled_session_asset_status
 
+    if optional_handover_continuity_installed; then
+        echo "✓ $(t "offduty/onduty 命令已安装（handover continuity）" "offduty/onduty commands installed (handover continuity)")"
+    else
+        echo "• $(t "offduty/onduty 命令未安装（内置自动安装；若缺失可重新运行 MMS 安装或升级）" "offduty/onduty commands not installed (built-in auto-install; rerun MMS install or upgrade if missing)")"
+    fi
+
     if optional_ecc_installed; then
         echo "✓ $(t "ECC agent pack 已安装" "ECC agent pack installed"): $MMS_HOME/agent-packs/everything-claude-code"
     else
@@ -3714,6 +3727,7 @@ print_dry_run_plan() {
         echo "• $(t "会安装 CLI" "would install CLI"): $INSTALL_CLI_LIST"
     fi
     [ "$INSTALL_RTK" -eq 1 ] && echo "• $(t "会安装 RTK rewrite hook" "would install RTK rewrite hook")"
+    echo "• $(t "会安装/修复 offduty/onduty（handover continuity）到 Claude/Codex/OpenCode 全局目录" "would install/repair offduty/onduty (handover continuity) into Claude/Codex/OpenCode global dirs")"
     [ "$INSTALL_BRAINKEEPER_CONTEXT" -eq 1 ] && echo "• $(t "会安装 BrainKeeper context pack" "would install BrainKeeper context pack"): ${BRAINKEEPER_INSTALL_REF:-$BRAINKEEPER_DEFAULT_REF}"
     [ "$INSTALL_MAP" -eq 1 ] && echo "• $(t "会安装 Map auto-index" "would install Map auto-index"): ${MAP_INSTALL_REF:-$MAP_DEFAULT_REF}"
     [ "$INSTALL_CODEGRAPH" -eq 1 ] && echo "• $(t "会安装 CodeGraph CLI" "would install CodeGraph CLI"): $CODEGRAPH_PACKAGE_SPEC"
@@ -3854,6 +3868,44 @@ install_optional_omc() {
         "$OMC_INSTALL_REF" \
         "$MMS_HOME/agent-packs/oh-my-claudecode" \
         validate_omc_pack_dir
+}
+
+install_builtin_handover_continuity() {
+    local handover_root=""
+    local installer_script=""
+
+    echo ""
+    echo "$(t "正在安装内置 offduty/onduty（handover continuity）..." "Installing built-in offduty/onduty (handover continuity)...")"
+
+    # Resolve handover root from the installed/bundled MMS vendor pack first.
+    for candidate in \
+        "$MMS_HOME/vendor/handover" \
+        "$SOURCE_DIR/vendor/handover" \
+        "$REAL_HOME/auto-skills/shared-skills/handover" \
+        "$(dirname "$SOURCE_DIR" 2>/dev/null || echo "")/../shared-skills/handover"; do
+        if [ -f "$candidate/scripts/install_global_commands.py" ]; then
+            handover_root="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$handover_root" ]; then
+        HANDOVER_CONTINUITY_INSTALL_STATUS="missing_source"
+        echo "⚠ $(t "未找到 vendor/handover，跳过 offduty/onduty 命令安装；请确认 MMS vendor 目录完整" "vendor/handover not found, skipping offduty/onduty command install; verify the MMS vendor directory is complete")"
+        return 0
+    fi
+
+    installer_script="$handover_root/scripts/install_global_commands.py"
+
+    if HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"; then
+        HANDOVER_CONTINUITY_INSTALL_STATUS="installed"
+        echo "✓ $(t "offduty/onduty 命令已安装（handover continuity）" "offduty/onduty commands installed (handover continuity)")"
+    else
+        HANDOVER_CONTINUITY_INSTALL_STATUS="partial"
+        echo "⚠ $(t "offduty/onduty 命令安装未完全成功，可重试或稍后手动安装" "offduty/onduty command install did not fully succeed; retry or install manually later")"
+    fi
+
+    return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -4191,6 +4243,10 @@ write_version_metadata
 repair_managed_claude_settings
 write_language_config
 
+# ── 内置安装：handover continuity (offduty/onduty) ──
+HANDOVER_CONTINUITY_INSTALL_STATUS="not_run"
+install_builtin_handover_continuity
+
 chmod +x "$MMS_HOME/mms"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
@@ -4315,6 +4371,12 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms ls                              $(t "查看可见模型" "list visible models")"
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
+    echo ""
+    if [ "$HANDOVER_CONTINUITY_INSTALL_STATUS" = "installed" ]; then
+        echo "  $(t "内建：offduty/onduty（handover continuity）已安装到 Claude/Codex/OpenCode 全局 skill 和命令目录，可在任意 session 使用。" "Built-in: offduty/onduty (handover continuity) installed into Claude/Codex/OpenCode global skill and command dirs, usable in any session.")"
+    else
+        echo "  $(t "内建：offduty/onduty（handover continuity）未自动安装完成；可重新运行安装器或检查 vendor/handover。" "Built-in: offduty/onduty (handover continuity) was not fully auto-installed; rerun the installer or check vendor/handover.")"
+    fi
     echo ""
     echo "  $(t "内建 session assets：Caveman、TOON、token-saver、xmem 和 Web automation bundle（weber 路由器 + web-access 登录态 Chrome + agent-browser headless）会随 MMS 一起提供；NSR 内建且默认开启；全部按 session 注入，不改全局 hooks/config。" "Bundled session assets: Caveman, TOON, token-saver, xmem, and the Web automation bundle (weber router + web-access logged-in Chrome + agent-browser headless) ship with MMS; NSR is built in and enabled by default; all are injected per session without global hooks/config writes.")"
     echo "  $(t "LLM 修改 MMS 前指南:" "LLM editing guide:") $MMS_HOME/docs/LLM_OPERATION_GUIDE.md"
