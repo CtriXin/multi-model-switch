@@ -134,6 +134,19 @@ from mms_opencode_profiles import (
     opencode_profile_selection as _opencode_profile_selection,
     opencode_profile_selection_ids as _opencode_profile_selection_ids,
 )
+from mms_opencode_routes import (
+    append_unique_opencode_route as _append_unique_opencode_route,
+    opencode_default_model_rank as _opencode_default_model_rank_impl,
+    opencode_is_mimo_direct_route as _opencode_is_mimo_direct_route_impl,
+    opencode_mimo_openai_base_from_anthropic as _opencode_mimo_openai_base_from_anthropic,
+    opencode_normalized_anthropic_base_url as _opencode_normalized_anthropic_base_url_impl,
+    opencode_normalized_openai_base_url as _opencode_normalized_openai_base_url_impl,
+    opencode_provider_matches_route_policy as _opencode_provider_matches_route_policy_impl,
+    opencode_provider_protocols as _opencode_provider_protocols,
+    opencode_route_candidate_score as _opencode_route_candidate_score_impl,
+    opencode_route_transport as _opencode_route_transport_impl,
+    opencode_route_transport_candidates as _opencode_route_transport_candidates_impl,
+)
 from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
@@ -9493,145 +9506,77 @@ def _select_opencode_profile(use_tui=False):
 
 
 def _opencode_default_model_rank(model_name):
-    normalized = str(model_name or "").strip().lower()
-    for idx, preferred in enumerate(_OPENCODE_DEFAULT_MODEL_PREFERENCES):
-        if normalized == preferred:
-            return idx
-    family, _ = _infer_model_family(normalized)
-    if family == "GPT":
-        return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES)
-    return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES) + 100
-
-
-def _opencode_provider_protocols(provider):
-    protocols = provider.get("protocols", [])
-    if isinstance(protocols, str):
-        protocols = [protocols]
-    return [str(item).strip() for item in protocols if str(item).strip()]
+    return _opencode_default_model_rank_impl(
+        model_name,
+        default_model_preferences=_OPENCODE_DEFAULT_MODEL_PREFERENCES,
+        infer_model_family=_infer_model_family,
+    )
 
 
 def _opencode_normalized_openai_base_url(provider):
-    base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
-    if not base_url:
-        return ""
-    path = urlparse(base_url).path.rstrip("/")
-    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
-    if last_segment != "v1":
-        return f"{base_url}/v1"
-    return base_url
+    return _opencode_normalized_openai_base_url_impl(
+        provider,
+        provider_openai_base_url=_provider_openai_base_url,
+    )
 
 
 def _opencode_normalized_anthropic_base_url(provider):
-    base_url = str(_provider_anthropic_base_url(provider) or "").strip().rstrip("/")
-    if not base_url and "anthropic_messages" in _opencode_provider_protocols(provider):
-        base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
-    if not base_url:
-        return ""
-    path = urlparse(base_url).path.rstrip("/")
-    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
-    if last_segment != "v1":
-        return f"{base_url}/v1"
-    return base_url
+    return _opencode_normalized_anthropic_base_url_impl(
+        provider,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+    )
 
 
 def _opencode_is_mimo_direct_route(provider, model_name=""):
-    provider_identity = " ".join(
-        str(value or "").strip().lower()
-        for value in (
-            provider.get("id"),
-            _provider_label(provider),
-            provider.get("base_url"),
-            provider.get("openai_base_url"),
-            provider.get("anthropic_base_url"),
-        )
+    return _opencode_is_mimo_direct_route_impl(
+        provider,
+        model_name,
+        provider_label=_provider_label,
     )
-    return "mimo" in provider_identity or "xiaomimimo.com" in provider_identity
-
-
-def _opencode_mimo_openai_base_from_anthropic(anthropic_base_url):
-    """Derive MiMo's official OpenCode/OpenAI-compatible base from Anthropic base.
-
-    MiMo documents OpenCode with `@ai-sdk/openai-compatible` and `/v1`.
-    Token Plan credentials show Anthropic as `/anthropic[/v1]`, while the
-    matching OpenAI-compatible base is the same host with `/v1`.
-    """
-    base_url = str(anthropic_base_url or "").strip().rstrip("/")
-    if not base_url or "xiaomimimo.com" not in base_url.lower():
-        return ""
-    parsed = urlparse(base_url)
-    path = parsed.path.rstrip("/")
-    if path.endswith("/anthropic/v1"):
-        path = path[: -len("/anthropic/v1")] + "/v1"
-    elif path.endswith("/anthropic"):
-        path = path[: -len("/anthropic")] + "/v1"
-    else:
-        return ""
-    return parsed._replace(path=path or "/v1", params="", query="", fragment="").geturl().rstrip("/")
 
 
 def _opencode_route_transport(provider, model_name):
-    candidates = _opencode_route_transport_candidates(provider, model_name)
-    if not candidates:
-        openai_base_url = _opencode_normalized_openai_base_url(provider)
-        anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
-        return "", openai_base_url, anthropic_base_url
-    return candidates[0]
+    return _opencode_route_transport_impl(
+        provider,
+        model_name,
+        infer_model_family=_infer_model_family,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        provider_label=_provider_label,
+    )
 
 
 def _opencode_route_transport_candidates(provider, model_name):
-    protocols = _opencode_provider_protocols(provider)
-    family, _ = _infer_model_family(model_name)
-    openai_base_url = _opencode_normalized_openai_base_url(provider)
-    anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
-    candidates = []
-    if family == "GPT":
-        if openai_base_url:
-            candidates.append(("openai_responses", openai_base_url, anthropic_base_url))
-        if "openai_chat_completions" in protocols and openai_base_url:
-            candidates.append(("openai_chat_completions", openai_base_url, anthropic_base_url))
-        return candidates
-    if _opencode_is_mimo_direct_route(provider, model_name):
-        mimo_openai_base_url = openai_base_url or _opencode_mimo_openai_base_from_anthropic(anthropic_base_url)
-        if mimo_openai_base_url:
-            # Official MiMo OpenCode guidance uses the OpenAI-compatible
-            # provider. Do not add Anthropic as a fallback: OpenCode can miss
-            # MiMo reasoning_content there during tool-result loops.
-            candidates.append(("openai_chat_completions", mimo_openai_base_url, anthropic_base_url))
-            return candidates
-    if "anthropic_messages" in protocols and anthropic_base_url:
-        candidates.append(("anthropic_messages", openai_base_url, anthropic_base_url))
-    return candidates
+    return _opencode_route_transport_candidates_impl(
+        provider,
+        model_name,
+        infer_model_family=_infer_model_family,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        provider_label=_provider_label,
+    )
 
 
 def _opencode_route_candidate_score(provider, model_name, sequence):
-    role = _normalize_role(provider.get("role", "auto"))
-    priority = _runtime_priority_for_model(provider, model_name)
-    return (
-        ROLE_WEIGHTS.get(role, 1),
-        -int(priority or DEFAULT_PRIORITY),
-        str(_provider_label(provider)),
-        int(sequence),
+    return _opencode_route_candidate_score_impl(
+        provider,
+        model_name,
+        sequence,
+        normalize_role=_normalize_role,
+        runtime_priority_for_model=_runtime_priority_for_model,
+        provider_label=_provider_label,
+        role_weights=ROLE_WEIGHTS,
+        default_priority=DEFAULT_PRIORITY,
     )
 
 
 def _opencode_provider_matches_route_policy(provider, route_policy):
-    policy = str(route_policy or "").strip()
-    if not policy:
-        return True
-    provider_id = str(provider.get("id") or "").strip().lower()
-    provider_name = str(_provider_label(provider) or "").strip().lower()
-    base_urls = " ".join(
-        str(value or "").strip().lower()
-        for value in (
-            provider.get("base_url"),
-            provider.get("openai_base_url"),
-            provider.get("anthropic_base_url"),
-        )
+    return _opencode_provider_matches_route_policy_impl(
+        provider,
+        route_policy,
+        provider_label=_provider_label,
     )
-    identity = f"{provider_id} {provider_name}"
-    if policy == "mimo_direct":
-        return "xiaomimimo.com" in base_urls or "mimo-direct" in identity or "xiaomi-direct" in identity
-    return False
 
 
 def _opencode_route_health_allows_route(row, *, now=None):
@@ -9702,18 +9647,6 @@ def _find_opencode_model_route(
         return None
     scored.sort(key=lambda item: item[0])
     return scored[0][1]
-
-
-def _append_unique_opencode_route(routes, route):
-    if not route:
-        return None
-    key = (route.get("id"), route.get("provider_id"), route.get("openai_base_url"), route.get("model"))
-    for existing in routes:
-        existing_key = (existing.get("id"), existing.get("provider_id"), existing.get("openai_base_url"), existing.get("model"))
-        if existing_key == key:
-            return existing
-    routes.append(route)
-    return route
 
 
 def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
