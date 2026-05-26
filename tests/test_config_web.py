@@ -42,6 +42,15 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
     assert "vision_sidecar" in snapshot["snippets"]
+    assert [step["id"] for step in snapshot["setup_flow"]] == [
+        "channel",
+        "model_inventory",
+        "capability",
+        "validation",
+        "fallbacks",
+        "runtime",
+    ]
+    assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
 
 
 def test_config_web_print_summary_exits_without_server(capsys):
@@ -72,4 +81,8 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
     assert "# MMS Setup Plan" in out
     assert "[vision_sidecar]" in out
     assert "[rescue]" in out
+    assert "## Visual Setup Flow" in out
+    assert "Model list test" in out
+    assert "hidden_models" in out
+    assert "preferred_cli.default" in out
     assert "mms opencode --profile lite_pro_orchestrated" in out

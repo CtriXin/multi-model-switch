@@ -115,6 +115,8 @@ def build_config_snapshot(
         "schema": "mms.setup_web.snapshot.v1",
         "mode": "read_only",
         "command": command_name,
+        "setup_flow": build_setup_flow(),
+        "test_contracts": build_test_contracts(),
         "paths": {
             "config": config_path,
             "preferences": preferences_path,
@@ -160,7 +162,123 @@ mms opencode --profile lite_pro_orchestrated
 mms opencode --profile lite_pro_orchestrated_backend
 mms opencode-smoke --profile lite_pro_orchestrated --health-summary
 """.strip()
-    return {"vision_sidecar": vision, "rescue": rescue, "opencode": opencode}
+    policy = """// Manual model-policy.json shape: hide/show and capability overrides
+{
+  "models": {
+    "qwen3.6-plus": {
+      "visible": true,
+      "favorite": true,
+      "capabilities": { "vision": true, "text": true }
+    },
+    "retired-or-noisy-model": {
+      "visible": false,
+      "hide_in": ["mms", "hive", "pilot", "ant", "mobius"]
+    }
+  },
+  "projects": {
+    "mms": {
+      "default_visible": true,
+      "hidden_models": ["retired-or-noisy-model"],
+      "favorite_models": ["gpt-5.5", "qwen3.6-plus"]
+    }
+  }
+}
+""".strip()
+    preferred_cli = """# Manual preference idea: preferred daily launch surfaces
+[launch.defaults]
+reasoning_effort = "high"
+
+[launch.cli.opencode]
+bypass = true
+
+# Future WebUI apply target: preferred CLI per task/profile
+# preferred_cli.default = "opencode"
+# preferred_cli.vision = "claude"
+""".strip()
+    return {
+        "vision_sidecar": vision,
+        "rescue": rescue,
+        "opencode": opencode,
+        "model_policy": policy,
+        "preferred_cli": preferred_cli,
+    }
+
+
+def build_setup_flow() -> list[dict[str, Any]]:
+    """Product IA for the visual setup flow; kept in snapshot for WebUI/Markdown."""
+    return [
+        {
+            "id": "channel",
+            "title": "1. Channel",
+            "summary": "Name the channel, enter URL/key, choose endpoint type, then fetch models.",
+            "fields": ["provider_id", "display_name", "base_url", "api_key", "models_endpoint", "protocols"],
+            "actions": ["fetch_models", "test_models_endpoint"],
+        },
+        {
+            "id": "model_inventory",
+            "title": "2. Model Inventory",
+            "summary": "Review pulled models, hide noisy models, and manually add aliases like NewAPI.",
+            "fields": ["visible", "favorite", "hidden_models", "manual_models", "model_aliases"],
+            "actions": ["hide_selected", "add_manual_model", "copy_selected"],
+        },
+        {
+            "id": "capability",
+            "title": "3. Capabilities",
+            "summary": "Mark text, vision/multimodal, long context, tool use, reasoning, and cache-sensitive transport.",
+            "fields": ["text", "vision", "long_context", "tool_use", "reasoning", "cache_sensitive"],
+            "actions": ["apply_known_defaults", "calibrate_from_reference_docs"],
+        },
+        {
+            "id": "validation",
+            "title": "4. Validation",
+            "summary": "Run endpoint smoke, per-model ping/pong, optional simple chat, and record request path evidence.",
+            "fields": ["stream", "protocol", "request_url", "request_path", "latency", "error"],
+            "actions": ["test_list", "test_selected_model", "test_chat"],
+        },
+        {
+            "id": "fallbacks",
+            "title": "5. Fallbacks",
+            "summary": "Pick text fallback, rescue fallback, and vision sidecar/fallback models.",
+            "fields": ["fallback_model", "fallback_cli", "vision_model", "vision_candidates", "hot_fallback_enabled"],
+            "actions": ["generate_config_snippet", "run_non_live_smoke"],
+        },
+        {
+            "id": "runtime",
+            "title": "6. Runtime Defaults",
+            "summary": "Choose preferred CLI and optionally tune OpenCode Multi-Agent roles.",
+            "fields": ["preferred_cli", "opencode_profile", "executor", "reviewer", "explore", "vision_agents"],
+            "actions": ["preview_launch", "export_setup_plan"],
+        },
+    ]
+
+
+def build_test_contracts() -> list[dict[str, str]]:
+    return [
+        {
+            "id": "models_endpoint",
+            "title": "Model list test",
+            "method": "GET /models or configured models_endpoint",
+            "result": "model IDs, endpoint status, protocol hints, and redacted transport evidence",
+        },
+        {
+            "id": "model_ping",
+            "title": "Selected model smoke",
+            "method": "minimal non-stream prompt through the selected protocol",
+            "result": "ok/fail, latency, response shape, request_url/request_path",
+        },
+        {
+            "id": "simple_chat",
+            "title": "Optional simple chat",
+            "method": "one user message with a short answer cap",
+            "result": "human-readable response preview plus cache_transport_evidence.v1",
+        },
+        {
+            "id": "vision_probe",
+            "title": "Vision probe",
+            "method": "tiny image/OCR request only when the model is marked vision-capable",
+            "result": "confirms direct vision support or suggests sidecar fallback",
+        },
+    ]
 
 
 def build_setup_markdown(snapshot: dict[str, Any]) -> str:
@@ -187,8 +305,23 @@ def build_setup_markdown(snapshot: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No providers found.")
+    flow = snapshot.get("setup_flow") or []
+    if flow:
+        lines.extend(["", "## Visual Setup Flow"])
+        for item in flow:
+            lines.append(f"- **{item.get('title')}**: {item.get('summary')}")
+            actions = ", ".join(item.get("actions") or [])
+            if actions:
+                lines.append(f"  - actions: `{actions}`")
+    tests = snapshot.get("test_contracts") or []
+    if tests:
+        lines.extend(["", "## Model Test Contracts"])
+        for item in tests:
+            lines.append(f"- **{item.get('title')}**: {item.get('method')} -> {item.get('result')}")
     lines.extend(["", "## Vision Sidecar", "", "```toml", snapshot.get("snippets", {}).get("vision_sidecar", ""), "```"])
     lines.extend(["", "## Rescue Fallback", "", "```toml", snapshot.get("snippets", {}).get("rescue", ""), "```"])
+    lines.extend(["", "## Model Visibility And Capability Policy", "", "```json", snapshot.get("snippets", {}).get("model_policy", ""), "```"])
+    lines.extend(["", "## Preferred CLI", "", "```toml", snapshot.get("snippets", {}).get("preferred_cli", ""), "```"])
     lines.extend(["", "## OpenCode", "", "```bash", snapshot.get("snippets", {}).get("opencode", ""), "```"])
     recommendations = snapshot.get("recommendations") or []
     if recommendations:
@@ -227,6 +360,29 @@ def _html_page(snapshot: dict[str, Any]) -> bytes:
     recommendations = "".join(f"<li>{html.escape(str(item))}</li>" for item in snapshot.get("recommendations") or [])
     if not recommendations:
         recommendations = "<li>No blocking recommendations.</li>"
+    flow_cards = []
+    for item in snapshot.get("setup_flow") or []:
+        actions = "".join(f"<li>{html.escape(str(action))}</li>" for action in item.get("actions") or [])
+        flow_cards.append(
+            f"""
+            <article class=\"card\">
+              <h3>{html.escape(str(item.get('title') or '-'))}</h3>
+              <p>{html.escape(str(item.get('summary') or ''))}</p>
+              <ul>{actions}</ul>
+            </article>
+            """
+        )
+    test_cards = []
+    for item in snapshot.get("test_contracts") or []:
+        test_cards.append(
+            f"""
+            <article class=\"card\">
+              <h3>{html.escape(str(item.get('title') or '-'))}</h3>
+              <p><strong>Method:</strong> {html.escape(str(item.get('method') or '-'))}</p>
+              <p><strong>Result:</strong> {html.escape(str(item.get('result') or '-'))}</p>
+            </article>
+            """
+        )
     snippets = snapshot.get("snippets") or {}
     page = f"""<!doctype html>
 <html lang=\"en\">
@@ -263,10 +419,14 @@ def _html_page(snapshot: dict[str, Any]) -> bytes:
     <a class=\"button\" href=\"/api/snapshot\">View JSON</a>
   </header>
   <main>
+    <section><h2>Setup Flow</h2><div class=\"grid\">{''.join(flow_cards)}</div></section>
     <section><h2>Providers</h2><div class=\"grid\">{''.join(provider_cards)}</div></section>
     <section><h2>Recommendations</h2><ul>{recommendations}</ul></section>
+    <section><h2>Model Tests</h2><div class=\"grid\">{''.join(test_cards)}</div></section>
     <section><h2>Vision Sidecar</h2><pre>{html.escape(snippets.get('vision_sidecar', ''))}</pre></section>
     <section><h2>Rescue Fallback</h2><pre>{html.escape(snippets.get('rescue', ''))}</pre></section>
+    <section><h2>Model Visibility & Capabilities</h2><pre>{html.escape(snippets.get('model_policy', ''))}</pre></section>
+    <section><h2>Preferred CLI</h2><pre>{html.escape(snippets.get('preferred_cli', ''))}</pre></section>
     <section><h2>OpenCode Presets</h2><pre>{html.escape(snippets.get('opencode', ''))}</pre></section>
     <section><h2>Redacted Snapshot</h2><pre>{html.escape(data)}</pre></section>
   </main>
