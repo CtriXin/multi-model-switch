@@ -1155,6 +1155,14 @@ def _record_bridge_blocking_failure(
                     handover.get("source_event_id"),
                     fallback_model,
                 )
+        _append_incident_log(
+            model=model_name or getattr(server, "model_name", ""),
+            provider_id=provider_id or getattr(server, "provider_id", ""),
+            status_code=status_code,
+            bridge_surface=bridge_surface,
+            request_url=request_url,
+            event="blocking_failure",
+        )
         return payload
     except Exception as exc:
         _bridge_error_logger.warning("rescue file-only packet failed: %s", exc, exc_info=True)
@@ -1526,6 +1534,39 @@ def _chatcompletions_error_requests_messages(body_text):
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
+
+_INCIDENT_LOG_PATH = os.path.join(
+    os.path.expanduser("~"), ".config", "mms", "logs", "incidents.jsonl"
+)
+
+
+def _append_incident_log(
+    *,
+    model="",
+    provider_id="",
+    status_code=None,
+    bridge_surface="",
+    request_url="",
+    event="blocking_failure",
+    detail="",
+):
+    """Append one JSONL line to ~/.config/mms/logs/incidents.jsonl. Best-effort, never raises."""
+    try:
+        os.makedirs(os.path.dirname(_INCIDENT_LOG_PATH), exist_ok=True)
+        entry = {
+            "ts": int(time.time()),
+            "model": str(model or ""),
+            "provider_id": str(provider_id or ""),
+            "status_code": status_code,
+            "bridge_surface": str(bridge_surface or ""),
+            "request_url": str(request_url or ""),
+            "event": str(event or ""),
+            "detail": str(detail or ""),
+        }
+        with open(_INCIDENT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _now_ms():
@@ -4760,6 +4801,15 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     "chatcompletions fallback rejected for cache-sensitive transport; retrying messages: model=%s",
                     model_name,
                 )
+                _append_incident_log(
+                    model=model_name,
+                    provider_id=provider_id,
+                    status_code=last_status,
+                    bridge_surface="chatcompletions_to_messages_retry",
+                    request_url=target_url,
+                    event="cache_sensitive_channel_switch",
+                    detail="chatcompletions rejected; retrying via anthropic messages",
+                )
                 self._do_anthropic_messages_fallback(
                     payload,
                     model_name,
@@ -5083,6 +5133,15 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                         _bridge_error_logger.warning(
                             "primary chat bridge rejected for cache-sensitive transport; retrying messages: model=%s",
                             model_name,
+                        )
+                        _append_incident_log(
+                            model=model_name,
+                            provider_id=provider_id,
+                            status_code=response.status_code,
+                            bridge_surface="chat_to_messages_retry",
+                            request_url=target_url,
+                            event="cache_sensitive_channel_switch",
+                            detail="chatcompletions rejected; retrying via anthropic messages",
                         )
                         self._do_anthropic_messages_fallback(
                             payload,
