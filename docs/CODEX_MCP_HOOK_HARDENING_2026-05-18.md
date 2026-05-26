@@ -60,6 +60,17 @@ Code changes are in `mms_launchers.py`:
 - MMS now strips inherited Looop/bugloop-style Codex hooks from generated session hooks unless a future explicit session surface re-enables them; a normal MMS launch should not enter an autonomous loop just because the real HOME has one installed.
 - Removed noisy/non-session Codex RTK/Caveman variants from generated session hooks while keeping the compact valid-JSON hook.
 
+## 2026-05-26 Follow-up
+
+Repeated `Hooks need review` prompts could still happen when a session was launched from a repo worktree or when the durable gateway cache missed trust entries that only existed in a sibling per-PID session.
+
+Follow-up changes:
+
+- `_LOCAL_HOOKS_DIR` now canonicalizes `multi-model-switch/.worktrees/<name>/mms_launchers.py` back to the parent repo `hooks/` directory when the canonical hook bundle exists. This keeps MMS-managed Codex hook command paths stable across worktree-launched sessions.
+- Codex hook trust write-back now uses a shared durable-cache writer.
+- New Codex gateway sessions refresh `~/.config/mms/codex-gateway/.codex` hook trust from real HOME, durable cache, and sibling session configs during environment preparation, not only after process exit.
+- The exit write-back path still persists current-session trust after `Trust all and continue`, but the next launch can now recover from sibling trust even if the previous durable cache was incomplete.
+
 ## Safety Rules Preserved
 
 - No direct write to real `~/.claude.json` or real `~/.codex/config.toml` was required.

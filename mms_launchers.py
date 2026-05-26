@@ -1934,7 +1934,25 @@ OPENCODE_MODEL_LIMIT_OVERRIDES = {
 _AGENT_IM_DIR = os.path.realpath(str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip()) if str(os.environ.get("MMS_AGENT_IM_DIR") or "").strip() else ""
 _AGENT_IM_SOCK = _real_user_path(".agent-im", "agent-im.sock")
 _LOCAL_STATUSLINE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statusline-command.sh")
-_LOCAL_HOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks")
+def _resolve_local_hooks_dir(module_file=None):
+    module_dir = os.path.dirname(os.path.abspath(module_file or __file__))
+    parts = module_dir.split(os.sep)
+    if ".worktrees" in parts:
+        idx = parts.index(".worktrees")
+        canonical_root = os.sep.join(parts[:idx]) or os.sep
+        canonical_hooks = os.path.join(canonical_root, "hooks")
+        required_hooks = (
+            "nsr-codex-hook.sh",
+            "xmem-session-start-hook.sh",
+            "xmem-session-end-hook.sh",
+            "xmem-gateway-hook.sh",
+        )
+        if all(os.path.isfile(os.path.join(canonical_hooks, name)) for name in required_hooks):
+            return canonical_hooks
+    return os.path.join(module_dir, "hooks")
+
+
+_LOCAL_HOOKS_DIR = _resolve_local_hooks_dir()
 _CLAUDE_FEISHU_WEBFETCH_GUARD_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "claude-feishu-webfetch-guard.sh")
 _CLAUDE_HIVE_COMPACT_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "hive-compact-hook.sh")
 _CLAUDE_BRAINKEEPER_SESSION_START_HOOK = os.path.join(_LOCAL_HOOKS_DIR, "brainkeeper-session-start-hook.sh")
@@ -7085,6 +7103,67 @@ def _sync_codex_bounded_resume_back(session_codex_dir, target_codex_dir):
     return manifest
 
 
+def _write_codex_hook_trust_cache(
+    target_codex_dir,
+    hooks_payload,
+    *,
+    trust_config_texts=None,
+    source_hook_payloads_by_path=None,
+):
+    target_codex_dir = str(target_codex_dir or "").strip()
+    if not target_codex_dir or not isinstance(hooks_payload, dict) or not hooks_payload:
+        return {}
+    os.makedirs(target_codex_dir, exist_ok=True)
+    target_hooks_path = os.path.join(target_codex_dir, "hooks.json")
+    target_config_path = os.path.join(target_codex_dir, "config.toml")
+    existing_target_hooks = _load_json_dict_unlocked(target_hooks_path)
+    try:
+        with open(target_config_path, "r", encoding="utf-8") as handle:
+            target_config_text = handle.read()
+    except Exception:
+        target_config_text = ""
+
+    source_payloads = {
+        str(path): payload
+        for path, payload in (source_hook_payloads_by_path or {}).items()
+        if str(path or "").strip() and isinstance(payload, dict)
+    }
+    if existing_target_hooks:
+        source_payloads[target_hooks_path] = existing_target_hooks
+    rendered_config = _append_codex_session_hook_trust_states(
+        target_config_text,
+        target_hooks_path=target_hooks_path,
+        target_hooks=hooks_payload,
+        trust_config_texts=[target_config_text] + [str(text) for text in (trust_config_texts or []) if text],
+        source_hook_payloads_by_path=source_payloads,
+    )
+    before_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(target_config_text)
+    }
+    after_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(rendered_config)
+    }
+    before_keys = set(before_hashes)
+    after_keys = set(after_hashes)
+    try:
+        atomic_write_json(target_hooks_path, hooks_payload, mode=0o600)
+        atomic_write_text(target_config_path, rendered_config, mode=0o600)
+    except Exception:
+        return {}
+    return {
+        "status": "synced",
+        "trusted_entries": len(after_keys),
+        "added_entries": max(0, len(after_keys - before_keys)),
+        "updated_entries": sum(
+            1
+            for key in before_keys & after_keys
+            if before_hashes.get(key) != after_hashes.get(key)
+        ),
+    }
+
+
 def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
     session_codex_dir = str(session_codex_dir or "").strip()
     target_codex_dir = str(target_codex_dir or "").strip()
@@ -7104,51 +7183,12 @@ def _sync_codex_hook_trust_back(session_codex_dir, target_codex_dir):
     except Exception:
         return {}
 
-    os.makedirs(target_codex_dir, exist_ok=True)
-    target_hooks_path = os.path.join(target_codex_dir, "hooks.json")
-    target_config_path = os.path.join(target_codex_dir, "config.toml")
-    existing_target_hooks = _load_json_dict_unlocked(target_hooks_path)
-    try:
-        with open(target_config_path, "r", encoding="utf-8") as handle:
-            target_config_text = handle.read()
-    except Exception:
-        target_config_text = ""
-
-    source_payloads = {session_hooks_path: session_hooks}
-    if existing_target_hooks:
-        source_payloads[target_hooks_path] = existing_target_hooks
-    rendered_config = _append_codex_session_hook_trust_states(
-        target_config_text,
-        target_hooks_path=target_hooks_path,
-        target_hooks=session_hooks,
-        trust_config_texts=[target_config_text, session_config_text],
-        source_hook_payloads_by_path=source_payloads,
+    return _write_codex_hook_trust_cache(
+        target_codex_dir,
+        session_hooks,
+        trust_config_texts=[session_config_text],
+        source_hook_payloads_by_path={session_hooks_path: session_hooks},
     )
-    before_hashes = {
-        record["key"]: record["trusted_hash"]
-        for record in _codex_hook_trust_records_from_config(target_config_text)
-    }
-    after_hashes = {
-        record["key"]: record["trusted_hash"]
-        for record in _codex_hook_trust_records_from_config(rendered_config)
-    }
-    before_keys = set(before_hashes)
-    after_keys = set(after_hashes)
-    try:
-        atomic_write_json(target_hooks_path, session_hooks, mode=0o600)
-        atomic_write_text(target_config_path, rendered_config, mode=0o600)
-    except Exception:
-        return {}
-    return {
-        "status": "synced",
-        "trusted_entries": len(after_keys),
-        "added_entries": max(0, len(after_keys - before_keys)),
-        "updated_entries": sum(
-            1
-            for key in before_keys & after_keys
-            if before_hashes.get(key) != after_hashes.get(key)
-        ),
-    }
 
 
 def _sync_codex_bounded_resume_back_from_env(env):
@@ -9695,6 +9735,19 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
             pass
 
     if session_hooks is not None:
+        try:
+            with open(gateway_config, "r", encoding="utf-8") as handle:
+                session_config_for_trust = handle.read()
+        except Exception:
+            session_config_for_trust = ""
+        launch_trust_payloads = dict(trust_hook_payloads)
+        launch_trust_payloads[hooks_path] = session_hooks
+        _write_codex_hook_trust_cache(
+            gateway_codex_dir,
+            session_hooks,
+            trust_config_texts=trust_config_texts + [session_config_for_trust],
+            source_hook_payloads_by_path=launch_trust_payloads,
+        )
         atomic_write_json(hooks_path, session_hooks, mode=0o600)
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等），

@@ -785,6 +785,24 @@ def test_resolve_agent_pack_roots_prefer_mms_installed_packs(monkeypatch, tmp_pa
     assert mms_launchers._resolve_omc_root() == str(omc_root)
 
 
+def test_resolve_local_hooks_dir_canonicalizes_repo_worktree(tmp_path):
+    import mms_launchers
+
+    repo = tmp_path / "multi-model-switch"
+    hooks_dir = repo / "hooks"
+    hooks_dir.mkdir(parents=True)
+    for name in (
+        "nsr-codex-hook.sh",
+        "xmem-session-start-hook.sh",
+        "xmem-session-end-hook.sh",
+        "xmem-gateway-hook.sh",
+    ):
+        (hooks_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
+    worktree_module = repo / ".worktrees" / "feature-a" / "mms_launchers.py"
+
+    assert mms_launchers._resolve_local_hooks_dir(str(worktree_module)) == str(hooks_dir)
+
+
 def test_build_codex_session_hooks_respects_session_caveman_toggle(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -1531,6 +1549,72 @@ def test_sync_codex_hook_trust_back_replaces_stale_mms_local_cache(tmp_path):
     assert result["updated_entries"] == 1
     assert 'trusted_hash = "sha256:fresh-caveman"' in target_config
     assert "sha256:stale-caveman" not in target_config
+
+
+def test_codex_gateway_env_refreshes_durable_hook_trust_cache_from_sibling(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    real_codex.mkdir(parents=True)
+    (real_codex / "config.toml").write_text('base_url = "https://api.example.com"\n', encoding="utf-8")
+    (real_codex / "hooks.json").write_text('{"hooks":{}}\n', encoding="utf-8")
+
+    hooks_payload = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "hooks": [
+                        {"type": "command", "command": "/tmp/notify.sh"},
+                        {"type": "command", "command": "/tmp/managed.sh"},
+                    ]
+                }
+            ]
+        }
+    }
+    old_session_codex = real_home / ".config" / "mms" / "codex-gateway" / "s" / "old" / ".codex"
+    old_session_codex.mkdir(parents=True)
+    old_hooks_path = old_session_codex / "hooks.json"
+    old_hooks_path.write_text(json.dumps(hooks_payload), encoding="utf-8")
+    (old_session_codex / "config.toml").write_text(
+        f'[hooks.state."{old_hooks_path}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:notify"\n\n'
+        f'[hooks.state."{old_hooks_path}:session_start:0:1"]\n'
+        'trusted_hash = "sha256:managed"\n',
+        encoding="utf-8",
+    )
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *args, **kwargs: hooks_payload)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+
+    mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
+        "https://relay.example.com",
+        model_info={"model": "gpt-5.4"},
+    )
+
+    gateway_codex = real_home / ".config" / "mms" / "codex-gateway" / ".codex"
+    gateway_hooks_path = gateway_codex / "hooks.json"
+    target_config = (gateway_codex / "config.toml").read_text(encoding="utf-8")
+    assert json.loads(gateway_hooks_path.read_text(encoding="utf-8")) == hooks_payload
+    assert f'[hooks.state."{gateway_hooks_path}:session_start:0:0"]' in target_config
+    assert f'[hooks.state."{gateway_hooks_path}:session_start:0:1"]' in target_config
+    assert "sha256:notify" in target_config
+    assert "sha256:managed" in target_config
 
 
 def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
