@@ -957,6 +957,46 @@ def test_core_opencode_lite_pro_uses_agent_roster_custom_and_disabled(monkeypatc
     assert "mobius-vision-mimo" not in payload["agent"]["mobius-builder-pro"]["permission"]["task"]
 
 
+def test_core_opencode_lite_pro_keeps_required_builder_when_roster_disables_it(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {
+            "agent_roster": {
+                "mobius-builder-pro": {"enabled": False, "preset": "builder"},
+            }
+        },
+    }
+    gpt = _runtime(
+        id="gpt",
+        name="GPT",
+        protocols=["openai_chat_completions"],
+        openai_base_url="https://gpt.example/v1",
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(gpt, ["gpt-5.5", "gpt-5.4"])],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        gpt,
+        ["gpt-5.5", "gpt-5.4"],
+        "lite_pro_orchestrated",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+
+    assert model_info == {"model": "gpt-5.5", "profile": "lite_pro_orchestrated"}
+    assert runtime["opencode_agent_model_keys"]["mobius-builder-pro"] == "builder_primary"
+    assert payload["default_agent"] == "mobius-builder-pro"
+    assert "mobius-builder-pro" in payload["agent"]
+
+
 def test_core_opencode_profile_menu_backend_and_acp_apply_entrypoints(monkeypatch):
     import mms_core
 

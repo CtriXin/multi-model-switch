@@ -23,6 +23,7 @@ _ALLOWED_PROTOCOLS = ("anthropic_messages", "openai_chat_completions")
 _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
+_OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -413,16 +414,18 @@ def _normalize_opencode_agent_roster(value: Any, *, profile_id: str = "lite_pro_
         agent_id = _safe_text(agent)
         if not agent_id or not isinstance(entry, dict):
             continue
-        default = defaults.get(agent_id, {})
+        is_required_builder = agent_id in _OPENCODE_REQUIRED_BUILDER_AGENTS
+        default = defaults.get(agent_id, {"enabled": True, "preset": "builder", "custom": False} if is_required_builder else {})
         preset = _safe_text(entry.get("preset") or entry.get("category") or default.get("preset") or "explore").lower()
         if preset not in _OPENCODE_ROSTER_PRESETS:
             preset = "explore"
         payload: dict[str, Any] = {"preset": preset}
-        custom = bool(entry.get("custom") is True or agent_id not in defaults)
+        custom = bool(entry.get("custom") is True or (agent_id not in defaults and not is_required_builder))
         if custom:
             payload["custom"] = True
         if "enabled" in entry:
-            payload["enabled"] = _truthy(entry.get("enabled"), True)
+            enabled = _truthy(entry.get("enabled"), True)
+            payload["enabled"] = True if is_required_builder and not enabled else enabled
         elif custom:
             payload["enabled"] = True
         provider_id = _safe_text(entry.get("provider_id") or entry.get("provider"))
@@ -455,6 +458,17 @@ def _normalize_opencode_agent_roster(value: Any, *, profile_id: str = "lite_pro_
         if comparable or custom:
             result[agent_id] = payload
     return result
+
+
+def _strip_empty_provider_model_lists(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Keep WebUI saves from materializing absent empty fallback model lists."""
+    providers = cfg.get("providers") if isinstance(cfg.get("providers"), list) else []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        if "fallback_models" in provider and not _normalize_model_list(provider.get("fallback_models")):
+            provider.pop("fallback_models", None)
+    return cfg
 
 
 def _opencode_agent_catalog(profile_id: str = "lite_pro_orchestrated") -> list[dict[str, Any]]:
@@ -1361,6 +1375,7 @@ def build_config_plan(
             next_cfg, _ = mms_core._ensure_provider_config(next_cfg)  # noqa: SLF001 - reuse existing normalization
     except Exception:
         pass
+    next_cfg = _strip_empty_provider_model_lists(next_cfg)
 
     before_config_text = _toml_text(_sanitize_for_output(current_cfg))
     after_config_text = _toml_text(_sanitize_for_output(next_cfg))

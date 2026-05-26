@@ -132,6 +132,34 @@ def test_config_web_fetch_models_does_not_persist_to_fallback_models():
     assert "p.fallback_models=[...new Set(data.models)]" not in html
 
 
+def test_config_web_plan_does_not_materialize_empty_fallback_models(tmp_path):
+    cfg = {
+        "provider": {"default": "demo"},
+        "providers": [
+            {
+                "id": "demo",
+                "name": "Demo",
+                "enabled": True,
+                "role": "auto",
+                "priority": 100,
+                "protocols": ["openai_chat_completions"],
+                "supported_clis": ["opencode"],
+                "models_endpoint": "/models",
+                "default_openai_base_url": "https://demo.example/v1",
+                "extra_models": ["gpt-5.5"],
+            }
+        ],
+    }
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=str(tmp_path / "config.toml"))
+    draft = {key: snapshot[key] for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=str(tmp_path / "config.toml"))
+
+    provider = plan["config"]["providers"][0]
+    assert "fallback_models" not in provider
+    assert "fallback_models" not in plan["diffs"]["config_toml"]
+
+
 def test_config_web_opencode_agent_overrides_are_advanced_ui():
     html = mms_config_web._HTML_PAGE
 
@@ -403,6 +431,23 @@ def test_config_web_plan_persists_opencode_agent_roster_delta(tmp_path):
     }
     assert item["meta"]["disabled_agents"] == ["mobius-vision-mimo"]
     assert item["meta"]["custom_agents"] == ["mobius-vision-custom-1"]
+
+
+def test_config_web_plan_ignores_disabled_required_builder(tmp_path):
+    payload = {
+        "draft": {
+            "opencode": {
+                "default_profile": "lite_pro_orchestrated",
+                "agent_roster": {
+                    "mobius-builder-pro": {"enabled": False, "preset": "builder"},
+                },
+            }
+        }
+    }
+
+    plan = mms_config_web.build_config_plan({"opencode": {"default_profile": "lite_pro_orchestrated"}}, payload, config_path=str(tmp_path / "config.toml"))
+
+    assert "agent_roster" not in plan["config"].get("opencode", {})
 
 
 def test_config_web_review_summary_lists_only_changed_opencode_agents(tmp_path):

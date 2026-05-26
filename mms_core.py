@@ -10189,6 +10189,7 @@ def _opencode_agent_roster_overrides(cfg):
     opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
     raw = opencode.get("agent_roster")
     raw = raw if isinstance(raw, dict) else {}
+    required_builder_agents = {"mobius-builder-pro", "builder_primary"}
     roster = {}
     for agent, entry in raw.items():
         agent_id = str(agent or "").strip()
@@ -10200,7 +10201,8 @@ def _opencode_agent_roster_overrides(cfg):
             preset = _opencode_roster_preset(agent_id)
         payload["preset"] = preset
         if "enabled" in entry:
-            payload["enabled"] = bool(entry.get("enabled"))
+            enabled = _config_truthy(entry.get("enabled"), default=True)
+            payload["enabled"] = True if agent_id in required_builder_agents and not enabled else enabled
         custom = entry.get("custom") is True
         if custom:
             payload["custom"] = True

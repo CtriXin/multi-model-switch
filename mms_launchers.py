@@ -10589,6 +10589,8 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster
         return entry if isinstance(entry, dict) else {}
 
     def _agent_enabled(name):
+        if name == "mobius-builder-pro":
+            return True
         return _roster_entry(name).get("enabled") is not False
 
     def _agent_preset(name):
