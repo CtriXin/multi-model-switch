@@ -174,10 +174,16 @@ optional_brainkeeper_context_installed() {
 }
 
 optional_handover_continuity_installed() {
-    [ -L "$REAL_HOME/.claude/commands/offduty.md" ] \
-        && [ -L "$REAL_HOME/.claude/commands/onduty.md" ] \
-        && [ -L "$REAL_HOME/.codex/commands/offduty.md" ] \
-        && [ -L "$REAL_HOME/.codex/commands/onduty.md" ]
+    local command_dir
+    for command_dir in \
+        "$REAL_HOME/.agents/commands" \
+        "$REAL_HOME/.claude/commands" \
+        "$REAL_HOME/.codex/commands" \
+        "$REAL_HOME/.config/opencode/commands" \
+        "$REAL_HOME/.opencode/commands"; do
+        [ -L "$command_dir/offduty.md" ] || return 1
+        [ -L "$command_dir/onduty.md" ] || return 1
+    done
 }
 
 optional_map_installed() {

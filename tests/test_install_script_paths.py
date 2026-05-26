@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 INSTALL_SCRIPT = ROOT_DIR / "install.sh"
+HANDOVER_INSTALLER = ROOT_DIR / "vendor" / "handover" / "scripts" / "install_global_commands.py"
 
 
 def _version_env_overrides(
@@ -57,6 +59,19 @@ def _extract_shell_function_body(script_text: str, function_name: str) -> str:
         i += 1
 
     raise AssertionError(f"Could not find closing brace for {function_name}")
+
+
+def _run_handover_installer(home: Path) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    return subprocess.run(
+        ["python3", str(HANDOVER_INSTALLER)],
+        cwd=ROOT_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def test_install_check_prefers_explicit_real_home(tmp_path):
@@ -577,20 +592,82 @@ def test_install_script_brainkeeper_context_flag_remains_optional():
     assert "INSTALL_BRAINKEEPER_CONTEXT=0" in text
 
 
-def test_install_check_reports_handover_installed_when_symlinks_present(tmp_path):
-    """--check reports offduty/onduty installed when symlinks exist under temp HOME."""
-    home = tmp_path / "home"
-    claude_cmds = home / ".claude" / "commands"
-    codex_cmds = home / ".codex" / "commands"
-    claude_cmds.mkdir(parents=True)
-    codex_cmds.mkdir(parents=True)
+def test_handover_installer_installs_default_global_surfaces(tmp_path):
+    completed = _run_handover_installer(tmp_path)
 
-    # Create dummy targets for symlinks
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
+
+    skill_roots = [
+        tmp_path / ".agents" / "skills",
+        tmp_path / ".claude" / "skills",
+        tmp_path / ".codex" / "skills",
+        tmp_path / ".config" / "opencode" / "skills",
+        tmp_path / ".opencode" / "skills",
+    ]
+    command_roots = [
+        tmp_path / ".agents" / "commands",
+        tmp_path / ".claude" / "commands",
+        tmp_path / ".codex" / "commands",
+        tmp_path / ".config" / "opencode" / "commands",
+        tmp_path / ".opencode" / "commands",
+    ]
+
+    for skill_root in skill_roots:
+        assert (skill_root / "handover").is_symlink()
+        assert (skill_root / "offduty").is_symlink()
+        assert (skill_root / "onduty").is_symlink()
+
+    for command_root in command_roots:
+        assert (command_root / "offduty.md").is_symlink()
+        assert (command_root / "onduty.md").is_symlink()
+
+
+def test_handover_installer_is_idempotent_on_repeat_runs(tmp_path):
+    first = _run_handover_installer(tmp_path)
+    second = _run_handover_installer(tmp_path)
+
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 0, second.stdout + second.stderr
+
+    second_payload = json.loads(second.stdout)
+    statuses = {item["status"] for item in second_payload["results"]}
+    assert statuses == {"ok"}
+
+
+def test_handover_installer_preserves_unmanaged_command_files(tmp_path):
+    commands_dir = tmp_path / ".claude" / "commands"
+    commands_dir.mkdir(parents=True)
+    unmanaged = commands_dir / "offduty.md"
+    unmanaged.write_text("# user owned\n", encoding="utf-8")
+
+    completed = _run_handover_installer(tmp_path)
+
+    assert completed.returncode == 1
+    payload = json.loads(completed.stdout)
+    skipped = [item for item in payload["results"] if item["path"].endswith(".claude/commands/offduty.md")]
+    assert skipped and skipped[0]["status"] == "skipped_existing_unmanaged"
+    assert unmanaged.read_text(encoding="utf-8") == "# user owned\n"
+    assert not unmanaged.is_symlink()
+
+
+def test_install_check_reports_handover_installed_when_all_command_symlinks_present(tmp_path):
+    """--check reports installed only when all managed command surfaces are present."""
+    home = tmp_path / "home"
+    command_roots = [
+        home / ".agents" / "commands",
+        home / ".claude" / "commands",
+        home / ".codex" / "commands",
+        home / ".config" / "opencode" / "commands",
+        home / ".opencode" / "commands",
+    ]
     dummy_target = home / "dummy.md"
+    dummy_target.parent.mkdir(parents=True, exist_ok=True)
     dummy_target.write_text("# dummy\n", encoding="utf-8")
 
-    # Create symlinks for both Claude and Codex command dirs.
-    for commands_dir in (claude_cmds, codex_cmds):
+    for commands_dir in command_roots:
+        commands_dir.mkdir(parents=True)
         (commands_dir / "offduty.md").symlink_to(dummy_target)
         (commands_dir / "onduty.md").symlink_to(dummy_target)
 
@@ -604,6 +681,32 @@ def test_install_check_reports_handover_installed_when_symlinks_present(tmp_path
     )
 
     assert ("offduty/onduty 命令已安装" in output) or ("offduty/onduty commands installed" in output)
+
+
+def test_install_check_reports_handover_missing_when_opencode_symlinks_absent(tmp_path):
+    """--check stays missing when only Claude/Codex command symlinks exist."""
+    home = tmp_path / "home"
+    claude_cmds = home / ".claude" / "commands"
+    codex_cmds = home / ".codex" / "commands"
+    claude_cmds.mkdir(parents=True)
+    codex_cmds.mkdir(parents=True)
+    dummy_target = home / "dummy.md"
+    dummy_target.write_text("# dummy\n", encoding="utf-8")
+
+    for commands_dir in (claude_cmds, codex_cmds):
+        (commands_dir / "offduty.md").symlink_to(dummy_target)
+        (commands_dir / "onduty.md").symlink_to(dummy_target)
+
+    output = _run_install_check(
+        home=home,
+        extra_env={
+            "REAL_HOME": str(home),
+            "MMS_REAL_HOME": str(home),
+            "ORIGINAL_HOME": str(home),
+        },
+    )
+
+    assert ("offduty/onduty 命令未安装" in output) or ("offduty/onduty commands not installed" in output)
 
 
 def test_install_check_reports_handover_missing_when_symlinks_absent(tmp_path):
