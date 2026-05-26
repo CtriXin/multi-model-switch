@@ -62,6 +62,12 @@ from mms_opencode_config import (
     opencode_runtime_bool as _opencode_runtime_bool,
     opencode_runtime_routes as _opencode_runtime_routes,
 )
+from mms_opencode_env import (
+    opencode_export_config_path as _opencode_export_config_path_impl,
+    opencode_gateway_env as _opencode_gateway_env_impl,
+    opencode_global_omo_env as _opencode_global_omo_env_impl,
+    opencode_write_config as _opencode_write_config_impl,
+)
 from mms_opencode_preflight import (
     opencode_run_preflight as _opencode_run_preflight_impl,
     opencode_select_launch_candidate as _opencode_select_launch_candidate_impl,
@@ -10130,105 +10136,68 @@ def _build_opencode_config_content(runtime, model_name=""):
 
 
 def _write_opencode_config(path, runtime, model):
-    config_content = _build_opencode_config_content(runtime, model)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    atomic_write_text(path, config_content + "\n", mode=0o600)
-    return config_content
+    return _opencode_write_config_impl(
+        path,
+        runtime,
+        model,
+        build_config_content=_build_opencode_config_content,
+        atomic_write_text=atomic_write_text,
+    )
 
 
 def _opencode_export_config_path(runtime, model):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    provider = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
-    model_slug = _opencode_config_slug(model or runtime.get("model"), "model")
-    return _real_user_path(
-        ".config",
-        "mms",
-        "opencode-gateway",
-        "exports",
-        f"{provider}-{model_slug}.json",
+    return _opencode_export_config_path_impl(
+        runtime,
+        model,
+        real_user_path=_real_user_path,
     )
 
 
 def _opencode_gateway_env(runtime, model_info=None):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    model = _resolve_model(model_info or runtime)
-    disabled_session_surfaces = runtime.get("disabled_session_surfaces")
-    enable_caveman = _runtime_caveman_enabled(runtime)
-    gateway_base = _real_user_path(".config", "mms", "opencode-gateway")
-    os.makedirs(gateway_base, exist_ok=True)
-    sessions_dir = os.path.join(gateway_base, "s")
-    session_home = os.path.join(sessions_dir, str(os.getpid()))
-    os.makedirs(session_home, exist_ok=True)
-    _cleanup_stale_sessions(sessions_dir)
-
-    _link_shared_dotfiles(session_home)
-
-    env = os.environ.copy()
-    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    _clear_opencode_config_env(env)
-    _inject_real_home_hints(env)
-    _inject_selected_model_name(env, model, model_info=model_info)
-    _set_opencode_soft_home(env, session_home)
-
-    config_dir = os.path.join(env["XDG_CONFIG_HOME"], "opencode")
-    os.makedirs(config_dir, exist_ok=True)
-    config_path = os.path.join(config_dir, "opencode.json")
-    _write_opencode_config(config_path, runtime, model)
-    _overlay_opencode_session_assets(
-        config_dir,
-        session_home,
-        enable_caveman=enable_caveman,
-        disabled_session_surfaces=disabled_session_surfaces,
-        runtime=runtime,
-    )
-
-    _opencode_apply_route_env(env, runtime, selected_model=model)
-    env["OPENCODE_CONFIG"] = config_path
-    env["OPENCODE_CONFIG_DIR"] = config_dir
-    env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
-    env["OPENCODE_CLIENT"] = "mms"
-    _opencode_apply_bypass_env(env, runtime)
-
-    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
-    _apply_runtime_locale_profile(env, runtime)
-    _apply_runtime_ip_stack_profile(env, runtime)
-    _install_session_command_wrappers(session_home, env)
-    _install_session_packet_env(
-        env,
-        cli="opencode",
-        runtime=runtime,
+    return _opencode_gateway_env_impl(
+        runtime,
         model_info=model_info,
-        session_home=session_home,
-        features={
-            "caveman": enable_caveman,
-            "opencode_rtk": _opencode_rtk_plugin_enabled(runtime),
-            "web_access": bool(_resolve_web_access_root()) and not _session_skill_disabled(disabled_session_surfaces, "web-access"),
-            "weber": bool(_resolve_weber_root()) and not _session_skill_disabled(disabled_session_surfaces, "weber"),
-            "toon": bool(_resolve_toon_root()) and not _session_skill_disabled(disabled_session_surfaces, "toon"),
-            "token_saver": bool(_resolve_token_saver_root()) and not _session_skill_disabled(disabled_session_surfaces, "token-saver"),
-            "xmem": bool(_resolve_xmem_root()) and not _session_skill_disabled(disabled_session_surfaces, "xmem"),
-            "opencode_xmem": _opencode_xmem_plugin_enabled(runtime),
-        },
+        resolve_model=_resolve_model,
+        real_user_path=_real_user_path,
+        cleanup_stale_sessions=_cleanup_stale_sessions,
+        link_shared_dotfiles=_link_shared_dotfiles,
+        scrub_inherited_runtime_env=_scrub_inherited_runtime_env,
+        clear_opencode_config_env=_clear_opencode_config_env,
+        inject_real_home_hints=_inject_real_home_hints,
+        inject_selected_model_name=_inject_selected_model_name,
+        set_opencode_soft_home=_set_opencode_soft_home,
+        write_opencode_config=_write_opencode_config,
+        overlay_opencode_session_assets=_overlay_opencode_session_assets,
+        apply_route_env=_opencode_apply_route_env,
+        apply_bypass_env=_opencode_apply_bypass_env,
+        apply_runtime_network_profile=_apply_runtime_network_profile,
+        apply_runtime_locale_profile=_apply_runtime_locale_profile,
+        apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
+        install_session_command_wrappers=_install_session_command_wrappers,
+        install_session_packet_env=_install_session_packet_env,
+        runtime_caveman_enabled=_runtime_caveman_enabled,
+        resolve_web_access_root=_resolve_web_access_root,
+        resolve_weber_root=_resolve_weber_root,
+        resolve_toon_root=_resolve_toon_root,
+        resolve_token_saver_root=_resolve_token_saver_root,
+        resolve_xmem_root=_resolve_xmem_root,
+        session_skill_disabled=_session_skill_disabled,
+        opencode_rtk_plugin_enabled=_opencode_rtk_plugin_enabled,
+        opencode_xmem_plugin_enabled=_opencode_xmem_plugin_enabled,
     )
-    return env
 
 
 def _opencode_global_omo_env(runtime):
-    env = os.environ.copy()
-    _clear_opencode_config_env(env)
-    _inject_real_home_hints(env, include_xdg=True)
-    env["HOME"] = _real_user_path()
-    env["XDG_CACHE_HOME"] = _real_user_path(".cache")
-    env["XDG_DATA_HOME"] = _real_user_path(".local", "share")
-    env["XDG_STATE_HOME"] = _real_user_path(".local", "state")
-    env["MMS_HOME_ISOLATION_MODE"] = "raw"
-    env["OPENCODE_CLIENT"] = "mms"
-    env["MMS_OPENCODE_PROFILE"] = "heavy_omo"
-    _opencode_apply_bypass_env(env, runtime)
-    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
-    _apply_runtime_locale_profile(env, runtime)
-    _apply_runtime_ip_stack_profile(env, runtime)
-    return env
+    return _opencode_global_omo_env_impl(
+        runtime,
+        clear_opencode_config_env=_clear_opencode_config_env,
+        inject_real_home_hints=_inject_real_home_hints,
+        real_user_path=_real_user_path,
+        apply_bypass_env=_opencode_apply_bypass_env,
+        apply_runtime_network_profile=_apply_runtime_network_profile,
+        apply_runtime_locale_profile=_apply_runtime_locale_profile,
+        apply_runtime_ip_stack_profile=_apply_runtime_ip_stack_profile,
+    )
 
 
 def launch_opencode(model_info, runtime, once=False):
