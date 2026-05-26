@@ -68,6 +68,12 @@ from mms_opencode_env import (
     opencode_global_omo_env as _opencode_global_omo_env_impl,
     opencode_write_config as _opencode_write_config_impl,
 )
+from mms_opencode_launch import (
+    opencode_gateway_health_check as _opencode_gateway_health_check_impl,
+    opencode_global_command as _opencode_global_command_impl,
+    opencode_is_global_profile_runtime as _opencode_is_global_profile_runtime_impl,
+    opencode_session_command as _opencode_session_command_impl,
+)
 from mms_opencode_preflight import (
     opencode_run_preflight as _opencode_run_preflight_impl,
     opencode_select_launch_candidate as _opencode_select_launch_candidate_impl,
@@ -10039,31 +10045,13 @@ def _opencode_select_launch_candidate(runtime, routes, model, env):
 
 
 def _opencode_gateway_health_check(runtime):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    routes = _opencode_runtime_routes(runtime, _resolve_model(runtime))
-    if len(routes) > 1:
-        seen = set()
-        for route in routes:
-            protocol = str(route.get("protocol") or "openai_chat_completions").strip()
-            route_base_url = route.get("anthropic_base_url") if protocol == "anthropic_messages" else route.get("openai_base_url")
-            key = (route.get("provider_id"), protocol, route_base_url)
-            if key in seen:
-                continue
-            seen.add(key)
-            health_runtime = dict(runtime)
-            health_runtime["id"] = route.get("provider_id") or health_runtime.get("id")
-            if protocol == "anthropic_messages":
-                health_runtime["openai_base_url"] = ""
-                health_runtime["anthropic_base_url"] = route.get("anthropic_base_url") or health_runtime.get("anthropic_base_url")
-            else:
-                health_runtime["openai_base_url"] = route.get("openai_base_url") or health_runtime.get("openai_base_url")
-                health_runtime["anthropic_base_url"] = ""
-            health_runtime["api_key"] = route.get("api_key") or health_runtime.get("api_key")
-            gateway_health_check(health_runtime)
-        return
-    health_runtime = dict(runtime)
-    health_runtime["openai_base_url"] = _opencode_provider_base_url(runtime)
-    gateway_health_check(health_runtime)
+    return _opencode_gateway_health_check_impl(
+        runtime,
+        runtime_routes=_opencode_runtime_routes,
+        resolve_model=_resolve_model,
+        provider_base_url=_opencode_provider_base_url,
+        gateway_health_check=gateway_health_check,
+    )
 
 
 def _opencode_model_config(runtime, model_name):
@@ -10200,6 +10188,20 @@ def _opencode_global_omo_env(runtime):
     )
 
 
+def _opencode_global_command(runtime, entrypoint):
+    return _opencode_global_command_impl(runtime, entrypoint)
+
+
+def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agent):
+    return _opencode_session_command_impl(
+        runtime,
+        entrypoint,
+        launch_model_ref,
+        launch_agent,
+        default_agent=OPENCODE_LITE_DEFAULT_AGENT,
+    )
+
+
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
     runtime = runtime if isinstance(runtime, dict) else {}
@@ -10208,12 +10210,7 @@ def launch_opencode(model_info, runtime, once=False):
     if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
         env = _opencode_global_omo_env(runtime)
         env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
-        cmd = ["opencode"]
-        if entrypoint in {"serve", "acp"}:
-            cmd.append(entrypoint)
-        agent = str(runtime.get("opencode_agent") or "").strip()
-        if agent and entrypoint == "tui":
-            cmd += ["--agent", agent]
+        cmd = _opencode_global_command(runtime, entrypoint)
         _exec_or_run(cmd, env, once)
         return
 
@@ -10249,16 +10246,7 @@ def launch_opencode(model_info, runtime, once=False):
             },
         )
     env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
-    cmd = ["opencode"]
-    if entrypoint in {"serve", "acp"}:
-        cmd.append(entrypoint)
-    if runtime.get("opencode_pure", True) is not False:
-        cmd.append("--pure")
-    agent = str(launch_agent or runtime.get("opencode_agent", OPENCODE_LITE_DEFAULT_AGENT) or "").strip()
-    if agent and entrypoint == "tui":
-        cmd += ["--agent", agent]
-    if entrypoint == "tui":
-        cmd += ["-m", launch_model_ref]
+    cmd = _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agent)
     _exec_or_run(cmd, env, once)
 
 
@@ -10305,17 +10293,7 @@ LAUNCHERS = {
 
 
 def _is_opencode_global_profile_runtime(cli, runtime):
-    if cli != "opencode" or not isinstance(runtime, dict):
-        return False
-    profile = str(runtime.get("opencode_profile") or "").strip().lower()
-    return (
-        profile in {"heavy", "heavy_omo", "omo"}
-        or runtime.get("opencode_use_global_config")
-        or (
-            runtime.get("runtime_kind") == "opencode_profile"
-            and runtime.get("auth_mode") == "global_config"
-        )
-    )
+    return _opencode_is_global_profile_runtime_impl(cli, runtime)
 
 
 def get_export_env(cli, runtime):
