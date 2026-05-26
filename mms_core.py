@@ -147,6 +147,12 @@ from mms_opencode_routes import (
     opencode_route_transport as _opencode_route_transport_impl,
     opencode_route_transport_candidates as _opencode_route_transport_candidates_impl,
 )
+from mms_opencode_roster import (
+    opencode_agent_model_overrides as _opencode_agent_model_overrides,
+    opencode_agent_roster_overrides as _opencode_agent_roster_overrides,
+    opencode_custom_route_key as _opencode_custom_route_key,
+    opencode_roster_preset_models as _opencode_roster_preset_models,
+)
 from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
@@ -9505,6 +9511,11 @@ def _select_opencode_profile(use_tui=False):
             return None
 
 
+def _opencode_default_profile_from_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
+
+
 def _opencode_default_model_rank(model_name):
     return _opencode_default_model_rank_impl(
         model_name,
@@ -9592,14 +9603,18 @@ def _find_opencode_model_route(
     route_key="route",
     route_policy="",
     profile_id="lite_pro",
+    provider_id="",
 ):
     wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
     if not wanted:
         return None
     wanted_lower = [item.lower() for item in wanted]
+    forced_provider_id = str(provider_id or "").strip()
     latest_health = _load_opencode_route_health_latest()
     scored = []
     for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
+        if forced_provider_id and str(provider.get("id") or "").strip() != forced_provider_id:
+            continue
         if not provider.get("enabled", True):
             continue
         if not _opencode_provider_matches_route_policy(provider, route_policy):
@@ -9652,6 +9667,9 @@ def _find_opencode_model_route(
 def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
     routes = []
     agent_models = {}
+    agent_model_overrides = _opencode_agent_model_overrides(cfg)
+    agent_roster_overrides = _opencode_agent_roster_overrides(cfg)
+    unresolved_overrides = {}
     gpt_fallback = _find_opencode_model_route(
         cfg,
         default_provider,
@@ -9661,24 +9679,82 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
         profile_id=profile_id,
     )
 
-    for spec in _opencode_lite_pro_specs(profile_id):
+    default_specs = list(_opencode_lite_pro_specs(profile_id))
+    default_agents = {str(spec.get("agent") or "").strip() for spec in default_specs}
+    default_keys = {str(spec.get("key") or "").strip() for spec in default_specs}
+
+    for spec in default_specs:
+        roster_entry = agent_roster_overrides.get(spec["agent"]) or agent_roster_overrides.get(spec["key"]) or {}
+        if roster_entry.get("enabled") is False:
+            continue
+        override = agent_model_overrides.get(spec["agent"]) or agent_model_overrides.get(spec["key"])
+        if not override and roster_entry.get("model"):
+            override = {"provider_id": roster_entry.get("provider_id", ""), "model": roster_entry.get("model", "")}
+        model_names = (override["model"],) if override else spec["models"]
         route = _find_opencode_model_route(
             cfg,
             default_provider,
             default_models,
-            spec["models"],
+            model_names,
             route_key=spec["key"],
             route_policy=spec.get("route_policy", ""),
             profile_id=profile_id,
+            provider_id=override.get("provider_id", "") if override else "",
         )
+        if route is None and override:
+            unresolved_overrides[spec["agent"]] = override
+            route = _find_opencode_model_route(
+                cfg,
+                default_provider,
+                default_models,
+                spec["models"],
+                route_key=spec["key"],
+                route_policy=spec.get("route_policy", ""),
+                profile_id=profile_id,
+            )
         if route is None and spec["key"] != "builder_primary" and spec.get("gpt_fallback", True) is not False:
             route = gpt_fallback
         route = _append_unique_opencode_route(routes, dict(route, id=spec["key"]) if route else None)
         if route:
             agent_models[spec["agent"]] = spec["key"]
 
+    custom_items = []
+    for agent_id, entry in agent_roster_overrides.items():
+        if agent_id in default_agents or agent_id in default_keys:
+            continue
+        if entry.get("enabled") is False:
+            continue
+        if entry.get("custom") is not True:
+            entry = dict(entry)
+            entry["custom"] = True
+            agent_roster_overrides[agent_id] = entry
+        priority = int(entry.get("priority") or 1000)
+        custom_items.append((priority, agent_id, entry))
+    for _priority, agent_id, entry in sorted(custom_items, key=lambda item: (item[0], item[1])):
+        route_key = _opencode_custom_route_key(agent_id)
+        model_names = (entry["model"],) if entry.get("model") else _opencode_roster_preset_models(entry.get("preset"))
+        route_policy = ""
+        if entry.get("preset") == "vision" and str(entry.get("model") or "").lower().startswith("mimo-"):
+            route_policy = "mimo_direct"
+        route = _find_opencode_model_route(
+            cfg,
+            default_provider,
+            default_models,
+            model_names,
+            route_key=route_key,
+            route_policy=route_policy,
+            profile_id=profile_id,
+            provider_id=entry.get("provider_id", ""),
+        )
+        route = _append_unique_opencode_route(routes, dict(route, id=route_key) if route else None)
+        if route:
+            agent_models[agent_id] = route_key
+
+    builder_roster = agent_roster_overrides.get("mobius-builder-pro") or agent_roster_overrides.get("builder_primary") or {}
     builder_route = next((route for route in routes if route.get("id") == "builder_primary"), None)
     if builder_route is None:
+        if builder_roster.get("enabled") is False:
+            return None, None
         builder_route = gpt_fallback
         builder_route = _append_unique_opencode_route(routes, dict(builder_route, id="builder_primary") if builder_route else None)
         if builder_route:
@@ -9698,6 +9774,12 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
     runtime["supported_clis"] = ["opencode"]
     runtime["opencode_routes"] = routes
     runtime["opencode_agent_model_keys"] = agent_models
+    if agent_model_overrides:
+        runtime["opencode_agent_model_overrides"] = agent_model_overrides
+    if agent_roster_overrides:
+        runtime["opencode_agent_roster"] = agent_roster_overrides
+    if unresolved_overrides:
+        runtime["opencode_agent_model_override_unresolved"] = unresolved_overrides
     runtime["opencode_default_route_key"] = "builder_primary"
     runtime["opencode_builder_fallback_agent"] = "mobius-builder-stable"
     model_info = {"model": builder_route["model"], "profile": profile_id}
@@ -14063,9 +14145,16 @@ def main():
         except ValueError:
             pass
 
-        if target == "opencode" and requested_opencode_profile:
+        profile_to_launch = requested_opencode_profile
+        entrypoint_to_launch = requested_opencode_entrypoint
+        if target == "opencode" and not profile_to_launch:
+            profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
+            if not entrypoint_to_launch:
+                entrypoint_to_launch = configured_entrypoint
+
+        if target == "opencode" and profile_to_launch:
             cli = "opencode"
-            _trace_record("OpenCode profile target", profile=requested_opencode_profile)
+            _trace_record("OpenCode profile target", profile=profile_to_launch)
             profile_provider = ensure_provider_credentials(cfg, args.provider) if args.provider else default_provider
             profile_models = models_cache
             if args.provider:
@@ -14074,12 +14163,12 @@ def main():
                 cfg,
                 profile_provider,
                 profile_models,
-                requested_opencode_profile,
+                profile_to_launch,
             )
             if runtime is None:
-                console.print(f"[red]opencode profile {requested_opencode_profile} 当前没有可用运行来源[/red]")
+                console.print(f"[red]opencode profile {profile_to_launch} 当前没有可用运行来源[/red]")
                 return
-            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
+            runtime = _apply_opencode_entrypoint(runtime, entrypoint_to_launch)
             _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice="opencode profile")
             if not check_cli_installed(cli):
                 from mms_installer import check_and_offer_install

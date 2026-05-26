@@ -122,9 +122,10 @@ def opencode_lite_agent_configs(model_ref):
     }
 
 
-def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
+def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_config=None):
     """Return deterministic Lite Pro roster with named fallback agents."""
     agent_models = agent_models if isinstance(agent_models, dict) else {}
+    roster_config = roster_config if isinstance(roster_config, dict) else {}
     builder_model = agent_models.get("mobius-builder-pro") or next(iter(agent_models.values()), "")
     if not builder_model:
         return {}
@@ -155,6 +156,36 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
 
     def _agent_model(name, fallback=builder_model):
         return str(agent_models.get(name) or fallback or builder_model)
+
+    def _roster_entry(name):
+        entry = roster_config.get(name)
+        return entry if isinstance(entry, dict) else {}
+
+    def _agent_enabled(name):
+        if name == "mobius-builder-pro":
+            return True
+        return _roster_entry(name).get("enabled") is not False
+
+    def _agent_preset(name):
+        raw = str(_roster_entry(name).get("preset") or "").strip().lower()
+        if raw:
+            return raw
+        lowered = str(name or "").lower()
+        if "vision" in lowered:
+            return "vision"
+        if "bughunt" in lowered:
+            return "bughunt"
+        if "explore" in lowered:
+            return "explore"
+        if "review" in lowered or "compliance" in lowered:
+            return "reviewer"
+        if "spec" in lowered:
+            return "spec"
+        if "executor" in lowered:
+            return "executor"
+        if "fixer" in lowered:
+            return "fixer"
+        return "builder"
 
     direct_builder_task_permission = {
         "*": "deny",
@@ -485,6 +516,92 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
                 "prompt": "Primary implementation executor. " + executor_prompt,
             },
         })
+
+    custom_prompt_by_preset = {
+        "vision": "Custom vision helper. Read attached images/screenshots only. Return structured observations, visible text, UI risks, and uncertainties. No edits.",
+        "explore": "Custom read-only explorer. Read code/docs only and return concise files, symbols, risks, and next action. No edits.",
+        "bughunt": "Custom read-only bug hunter. Look for concrete defects, missing tests, edge cases, and risky assumptions. No edits.",
+        "reviewer": "Custom read-only reviewer. Lead with bugs, regressions, missing tests, scope drift, and evidence gaps. No edits.",
+        "executor": "Custom implementation executor. Edit only the assigned scope, run listed validation when available, and report changed files and risks.",
+        "fixer": "Custom focused fixer. Fix only the named failure, keep scope tight, validate, and report exact diff risk.",
+        "spec": "Custom spec writer. Capture intent, non-goals, task slices, acceptance criteria, validation commands, and blockers.",
+    }
+    for name, entry in sorted(roster_config.items()):
+        if name in agents or name not in agent_models or not isinstance(entry, dict):
+            continue
+        if entry.get("enabled") is False:
+            continue
+        if entry.get("custom") is not True and not str(name).startswith("mobius-"):
+            continue
+        preset = _agent_preset(name)
+        if preset in {"executor", "fixer"}:
+            permission = fix_permission
+            variant = "high"
+            steps = None
+        elif preset == "spec":
+            permission = spec_writer_permission
+            variant = "high"
+            steps = 24
+        elif preset == "reviewer":
+            permission = read_only_permission
+            variant = "high"
+            steps = 24
+        else:
+            permission = read_only_permission
+            variant = ""
+            steps = 12
+        agent = {
+            "description": str(entry.get("description") or f"Lite Pro custom {preset} agent"),
+            "mode": "subagent",
+            "model": _agent_model(name),
+            "temperature": 0.2 if preset in {"executor", "fixer"} else 0.1,
+            "permission": permission,
+            "prompt": str(entry.get("prompt") or custom_prompt_by_preset.get(preset) or custom_prompt_by_preset["explore"]),
+        }
+        if variant:
+            agent["variant"] = variant
+        if steps:
+            agent["steps"] = steps
+        agents[name] = agent
+
+    for name, entry in roster_config.items():
+        if name not in agents or not isinstance(entry, dict):
+            continue
+        if entry.get("description"):
+            agents[name]["description"] = str(entry.get("description"))
+        if entry.get("prompt"):
+            agents[name]["prompt"] = str(entry.get("prompt"))
+
+    for name in list(agents):
+        if not _agent_enabled(name):
+            agents.pop(name, None)
+
+    task_preference = {
+        "spec": "allow",
+        "explore": "allow",
+        "executor": "allow" if orchestrated else "ask",
+        "vision": "allow" if orchestrated else "ask",
+        "bughunt": "ask",
+        "reviewer": "ask",
+        "fixer": "ask",
+        "builder": "ask",
+    }
+    existing_agents = set(agents)
+    for config in agents.values():
+        permission = config.get("permission") if isinstance(config, dict) else None
+        if not isinstance(permission, dict) or not isinstance(permission.get("task"), dict):
+            continue
+        task_permission = {
+            key: value for key, value in permission["task"].items()
+            if key == "*" or key in existing_agents
+        }
+        for name in sorted(existing_agents):
+            if name in task_permission:
+                continue
+            entry = _roster_entry(name)
+            if entry.get("custom") is True:
+                task_permission[name] = task_preference.get(_agent_preset(name), "ask")
+        permission["task"] = task_permission
     return agents
 
 

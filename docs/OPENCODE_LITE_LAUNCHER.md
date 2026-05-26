@@ -68,6 +68,45 @@ mms opencode --profile lite_pro_orchestrated --backend-agent
 
 GLM/Kimi/DeepSeek/Qwen routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages` for read-only support roles. Text-only Qwen support roles prefer `qwen3.7-max`; Qwen vision stays on `qwen3.6-plus` / `qwen3.6-flash` because `qwen3.7-max` is treated as text-only. They must not fall back to `chat/completions` silently. MiMo is the exception: Xiaomi's OpenCode guide uses OpenAI-compatible `/v1`, and warns that OpenCode + Anthropic protocol can miss `reasoning_content` in tool loops. MiMo remains direct-only and is configured with `reasoning=false` in OpenCode-generated model metadata until OpenCode can reliably preserve that field.
 
+## Configurable Agent Roster
+
+The `mobius-*` names above are default preset agents, not the long-term user-facing boundary. MMS now accepts a small `[opencode]` override layer so WebUI can hide those internal names behind labels such as "Vision Agent 1" or "Executor 2" while the launcher still writes a valid session-local `opencode.json`.
+
+Supported config shape:
+
+```toml
+[opencode]
+default_profile = "lite_pro_orchestrated"
+
+# Backward-compatible model override for an existing default agent or route key.
+[opencode.agent_models.mobius-explore-glm]
+provider_id = "domestic"
+model = "kimi-for-coding"
+
+# Disable a default agent.
+[opencode.agent_roster.mobius-vision-mimo]
+enabled = false
+preset = "vision"
+
+# Add a custom agent. Unknown roster entries are treated as custom agents.
+[opencode.agent_roster.mobius-vision-custom-1]
+enabled = true
+custom = true
+preset = "vision"
+provider_id = "domestic"
+model = "qwen3.6-plus"
+description = "Custom Qwen vision helper"
+```
+
+Roster rules:
+
+- `agent_models` only changes model/provider for an existing default agent or route key.
+- `agent_roster` controls enable/disable and custom agents; custom agents get their own `custom_<agent>` route key.
+- Required builder safety is preserved: `mobius-builder-pro` cannot be disabled by config.
+- `preset` selects safe defaults for route search and permission shape: `builder`, `executor`, `explore`, `bughunt`, `vision`, `reviewer`, `spec`, or `fixer`.
+- Missing or invalid explicit overrides fall back to the default automatic route and are recorded in runtime as `opencode_agent_model_override_unresolved`.
+- This layer is still session-local. It does not write global OpenCode config or real `~/.config/mms/**` by itself.
+
 ## Lite Pro Orchestrated
 
 `lite_pro_orchestrated` uses the same launch shape and route guardrails as Lite Pro, but changes the work split:
