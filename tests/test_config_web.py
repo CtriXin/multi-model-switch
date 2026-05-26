@@ -218,6 +218,10 @@ def test_config_web_save_requires_explicit_confirmation(tmp_path):
 def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     config_path = tmp_path / "config.toml"
     credentials_path = tmp_path / "credentials.sh"
+    policy_path = tmp_path / "model-policy.json"
+    config_path.write_text('[[providers]]\nid = "demo"\nname = "Old"\n', encoding="utf-8")
+    credentials_path.write_text('MMS_PROVIDER_DEMO_API_KEY="old-secret"\n', encoding="utf-8")
+    policy_path.write_text('{"version":1,"models":{},"projects":{}}\n', encoding="utf-8")
 
     monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
     monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
@@ -239,9 +243,14 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert config_path.exists()
     assert credentials_path.exists()
     assert "sk-super-secret-value" in credentials_path.read_text(encoding="utf-8")
-    assert (tmp_path / "model-policy.json").exists()
+    assert policy_path.exists()
     assert (tmp_path / "config-audit.jsonl").exists()
     assert "setup-web-ui:interactive-save" in (tmp_path / "config-audit.jsonl").read_text(encoding="utf-8")
+    assert result["save_report"]["config"]["bak_path"].endswith(".bak")
+    bak_paths = list((tmp_path / "backups").rglob("*.bak"))
+    assert any(path.name == "config.toml.bak" for path in bak_paths)
+    assert any(path.name == "credentials.sh.bak" for path in bak_paths)
+    assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
 
 

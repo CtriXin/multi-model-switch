@@ -468,7 +468,7 @@ def build_config_snapshot(
             "requires_confirm_save": True,
             "confirm_phrase": "保存配置",
             "writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
-            "safety": "保存走 lock + backup + audit；页面不会回显真实 API Key。",
+            "safety": "保存走 lock + backup + audit；已存在的写入目标会额外生成 *.bak；页面不会回显真实 API Key。",
         },
     }
 
@@ -1035,7 +1035,13 @@ def _copy_backup_file(target_path: str, *, config_path: str, label: str) -> str:
     os.makedirs(backup_dir, exist_ok=True)
     backup_path = os.path.join(backup_dir, os.path.basename(target_path))
     shutil.copy2(target_path, backup_path)
+    shutil.copy2(target_path, f"{backup_path}.bak")
     return backup_path
+
+
+def _bak_path_for_backup(backup_path: str) -> str:
+    bak_path = f"{backup_path}.bak" if backup_path else ""
+    return bak_path if bak_path and os.path.exists(bak_path) else ""
 
 
 def _append_audit(*, config_path: str, target_path: str, backup_path: str, reason: str, before_sha1: str, after_sha1: str, function: str) -> None:
@@ -1081,7 +1087,7 @@ def _save_provider_credentials_audited(update: dict[str, str], *, config_path: s
             after_sha1=after_sha1,
             function="setup_web_save_credentials",
         )
-    return {"provider_id": update["provider_id"], "target_path": os.path.abspath(target_path), "backup_path": backup_path}
+    return {"provider_id": update["provider_id"], "target_path": os.path.abspath(target_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
 
 
 def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, config_path: str, reason: str) -> dict[str, str]:
@@ -1107,7 +1113,7 @@ def _write_model_policy_audited(policy_path: str, payload: dict[str, Any], *, co
             after_sha1=after_sha1,
             function="setup_web_save_model_policy",
         )
-    return {"target_path": os.path.abspath(policy_path), "backup_path": backup_path}
+    return {"target_path": os.path.abspath(policy_path), "backup_path": backup_path, "bak_path": _bak_path_for_backup(backup_path)}
 
 
 def apply_config_plan(
@@ -1136,8 +1142,13 @@ def apply_config_plan(
     reason = _safe_text(payload.get("reason")) or "setup-web-ui:interactive-save"
     target_config_path = config_path or mms_core._config_write_target_path()  # noqa: SLF001
     save_report: dict[str, Any] = {"config": {}, "credentials": [], "model_policy": {}, "routes_export": False}
+    webui_config_backup_path = _copy_backup_file(target_config_path, config_path=target_config_path, label="setup-web-config-write")
     mms_core.save_config(plan["config"], reason=reason)
-    save_report["config"] = {"target_path": os.path.abspath(target_config_path)}
+    save_report["config"] = {
+        "target_path": os.path.abspath(target_config_path),
+        "backup_path": webui_config_backup_path,
+        "bak_path": _bak_path_for_backup(webui_config_backup_path),
+    }
 
     for update in plan.get("credential_updates") or []:
         save_report["credentials"].append(_save_provider_credentials_audited(update, config_path=target_config_path, reason=f"{reason}:credentials"))
