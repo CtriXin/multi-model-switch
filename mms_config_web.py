@@ -266,6 +266,7 @@ def _provider_effective_model_rows(provider: dict[str, Any], policy_payload: dic
                 "visible": visible,
                 "favorite": bool(entry.get("favorite")) if isinstance(entry, dict) else False,
                 "capabilities": _model_capability_defaults(model_id, entry if isinstance(entry, dict) else {}),
+                "policy_touched": False,
             }
         )
     return rows
@@ -289,8 +290,12 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         elif isinstance(values, dict):
             models.extend(str(item) for item in values.keys() if item)
     creds = _provider_credentials_status(provider_id) if provider_id else {}
-    openai_base = _safe_text(provider.get("openai_base_url") or provider.get("default_openai_base_url") or provider.get("base_url") or creds.get("openai_base_url") or creds.get("base_url"))
-    anthropic_base = _safe_text(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url") or creds.get("anthropic_base_url"))
+    config_openai_base = _safe_text(provider.get("openai_base_url") or provider.get("default_openai_base_url") or provider.get("base_url"))
+    config_anthropic_base = _safe_text(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url"))
+    credential_openai_base = _safe_text(creds.get("openai_base_url") or creds.get("base_url"))
+    credential_anthropic_base = _safe_text(creds.get("anthropic_base_url"))
+    openai_base = config_openai_base or credential_openai_base
+    anthropic_base = config_anthropic_base or credential_anthropic_base
     api_key = _safe_text(provider.get("api_key") or provider.get("openai_api_key"))
     policy_payload = policy_payload if isinstance(policy_payload, dict) else {}
     model_rows = _provider_effective_model_rows(provider, policy_payload)
@@ -306,6 +311,12 @@ def _provider_summary(provider: dict[str, Any], *, policy_payload: dict[str, Any
         "supported_clis": [str(item) for item in supported_clis if item],
         "openai_base_url": openai_base,
         "anthropic_base_url": anthropic_base,
+        "effective_openai_base_url": openai_base,
+        "effective_anthropic_base_url": anthropic_base,
+        "config_openai_base_url": config_openai_base,
+        "config_anthropic_base_url": config_anthropic_base,
+        "openai_base_url_source": "config" if config_openai_base else ("credentials" if credential_openai_base else ""),
+        "anthropic_base_url_source": "config" if config_anthropic_base else ("credentials" if credential_anthropic_base else ""),
         "api_key": "",
         "has_api_key": bool(api_key or creds.get("has_api_key")),
         "update_credentials": False,
@@ -740,18 +751,34 @@ def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: d
     provider["models_endpoint"] = endpoint or "/models"
     if "openai_base_url" in provider_payload or "base_url" in provider_payload:
         openai_base = _safe_text(provider_payload.get("openai_base_url") or provider_payload.get("base_url"))
+        if (
+            _safe_text(provider_payload.get("openai_base_url_source")) == "credentials"
+            and not _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url") or provider.get("base_url"))
+            and openai_base == _safe_text(provider_payload.get("effective_openai_base_url"))
+        ):
+            openai_base = ""
     else:
         openai_base = _safe_text(provider.get("default_openai_base_url") or provider.get("openai_base_url"))
     if "anthropic_base_url" in provider_payload:
         anthropic_base = _safe_text(provider_payload.get("anthropic_base_url"))
+        if (
+            _safe_text(provider_payload.get("anthropic_base_url_source")) == "credentials"
+            and not _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
+            and anthropic_base == _safe_text(provider_payload.get("effective_anthropic_base_url"))
+        ):
+            anthropic_base = ""
     else:
         anthropic_base = _safe_text(provider.get("default_anthropic_base_url") or provider.get("anthropic_base_url"))
     if openai_base:
         provider["default_openai_base_url"] = openai_base.rstrip("/")
+    elif "default_openai_base_url" in provider:
+        provider["default_openai_base_url"] = ""
     else:
         provider.pop("default_openai_base_url", None)
     if anthropic_base:
         provider["default_anthropic_base_url"] = anthropic_base.rstrip("/")
+    elif "default_anthropic_base_url" in provider:
+        provider["default_anthropic_base_url"] = ""
     else:
         provider.pop("default_anthropic_base_url", None)
     provider["fallback_models"] = _normalize_model_list(provider_payload.get("fallback_models"))
@@ -761,6 +788,7 @@ def _copy_existing_provider(existing: dict[str, Any] | None, provider_payload: d
 
 
 def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[str, Any]) -> dict[str, Any]:
+    original_policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
     policy = copy.deepcopy(policy_before) if isinstance(policy_before, dict) else {}
     policy.setdefault("version", 1)
     policy.setdefault("description", "User-maintained model visibility and preference policy. MMS never stores provider secrets here.")
@@ -773,7 +801,7 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
         if not isinstance(provider, dict):
             continue
         hidden = set(_normalize_model_list(provider.get("hidden_models")))
-        caps_map = provider.get("model_capabilities") if isinstance(provider.get("model_capabilities"), dict) else {}
+        caps_map = dict(provider.get("model_capabilities") if isinstance(provider.get("model_capabilities"), dict) else {})
         rows = provider.get("models") if isinstance(provider.get("models"), list) else []
         for row in rows:
             if not isinstance(row, dict):
@@ -781,15 +809,24 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
             model_id = _safe_text(row.get("id"))
             if not model_id:
                 continue
+            touched = row.get("policy_touched") is True or row.get("touched") is True
+            if not touched:
+                continue
             caps_map.setdefault(model_id, row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {})
             if model_id in hidden or row.get("visible") is False:
                 entry = models.setdefault(model_id, {})
                 if isinstance(entry, dict):
                     entry["visible"] = False
+            elif row.get("visible") is True:
+                entry = models.setdefault(model_id, {})
+                if isinstance(entry, dict):
+                    entry["visible"] = True
             if row.get("favorite") is True:
                 entry = models.setdefault(model_id, {})
                 if isinstance(entry, dict):
                     entry["favorite"] = True
+            elif row.get("favorite") is False and isinstance(models.get(model_id), dict) and "favorite" in models[model_id]:
+                models[model_id]["favorite"] = False
         for model_id, caps in caps_map.items():
             model_id = _safe_text(model_id)
             if not model_id or not isinstance(caps, dict):
@@ -807,7 +844,15 @@ def _build_model_policy_from_draft(policy_before: dict[str, Any], draft: dict[st
                     cap_payload[key] = bool(caps[key])
             if isinstance(caps.get("cache_sensitive"), bool):
                 cap_payload["cache_sensitive_transport"] = bool(caps["cache_sensitive"])
-    policy["updated_at"] = _now_iso()
+    def comparable(payload: dict[str, Any]) -> dict[str, Any]:
+        copy_payload = copy.deepcopy(payload) if isinstance(payload, dict) else {}
+        copy_payload.pop("updated_at", None)
+        return copy_payload
+
+    if _mapping_digest(comparable(policy)) != _mapping_digest(comparable(original_policy)):
+        policy["updated_at"] = _now_iso()
+    elif isinstance(original_policy, dict) and "updated_at" in original_policy:
+        policy["updated_at"] = original_policy["updated_at"]
     return policy
 
 
@@ -909,11 +954,17 @@ def _build_review_summary(
             if after_urls["anthropic"]:
                 url_parts.append(f"Anthropic: `{after_urls['anthropic']}`")
             add_item("provider_url", f"通道 URL：{provider_id}", "；".join(url_parts), provider_id=provider_id)
+        url_changed_by_field: dict[str, bool] = {}
         for field, label in (("openai", "OpenAI base URL"), ("anthropic", "Anthropic base URL")):
+            url_changed_by_field[field] = before_urls[field] != after_urls[field]
             url = after_urls[field]
-            if url.lower().startswith("http://"):
+            if url.lower().startswith("http://") and (provider_id not in before_ids or url_changed_by_field[field]):
                 add_risk("http_base_url", "HTTP URL", f"`{provider_id}` 的 {label} 使用 `http://`，请确认这是内网/代理预期。", provider_id=provider_id)
-        if after.get("enabled", True) is not False and not after_urls["openai"] and not after_urls["anthropic"]:
+        before_enabled = before.get("enabled", True) is not False
+        after_enabled = after.get("enabled", True) is not False
+        became_empty = bool(before_urls["openai"] or before_urls["anthropic"]) and not after_urls["openai"] and not after_urls["anthropic"]
+        became_enabled = not before_enabled and after_enabled
+        if after_enabled and not after_urls["openai"] and not after_urls["anthropic"] and (provider_id not in before_ids or became_empty or became_enabled):
             add_risk("empty_provider_url", "启用通道缺少 URL", f"`{provider_id}` 已启用但没有 OpenAI/Anthropic URL。", provider_id=provider_id)
         before_hidden = set(_normalize_model_list(before.get("hidden_models")))
         after_hidden = set(_normalize_model_list(after.get("hidden_models")))
@@ -1114,19 +1165,22 @@ def build_config_plan(
         else:
             presets = dict(next_cfg.get("presets") if isinstance(next_cfg.get("presets"), dict) else {})
             coding = dict(presets.get("coding") if isinstance(presets.get("coding"), dict) else {})
-            coding["cli"] = preferred_cli
             coding_model = _safe_text(runtime_payload.get("coding_preset_model"))
+            if coding or preferred_cli != "opencode" or coding_model:
+                coding["cli"] = preferred_cli
             if coding_model:
                 coding["model"] = coding_model
-            presets["coding"] = coding
-            next_cfg["presets"] = presets
+            if coding:
+                presets["coding"] = coding
+                next_cfg["presets"] = presets
 
     opencode_payload = draft.get("opencode") if isinstance(draft.get("opencode"), dict) else {}
     default_profile = _safe_text(opencode_payload.get("default_profile"))
     agent_model_overrides = _normalize_agent_model_overrides(opencode_payload.get("agent_models") or opencode_payload.get("agent_model_overrides"))
     if default_profile or "agent_models" in opencode_payload or "agent_model_overrides" in opencode_payload:
         opencode_cfg = dict(next_cfg.get("opencode") if isinstance(next_cfg.get("opencode"), dict) else {})
-        if default_profile:
+        current_default_profile = _safe_text(opencode_cfg.get("default_profile"))
+        if default_profile and (current_default_profile or default_profile != "lite_pro_orchestrated"):
             opencode_cfg["default_profile"] = default_profile
         if agent_model_overrides:
             opencode_cfg["agent_models"] = agent_model_overrides
@@ -1134,7 +1188,10 @@ def build_config_plan(
         else:
             opencode_cfg.pop("agent_models", None)
             opencode_cfg.pop("agent_model_overrides", None)
-        next_cfg["opencode"] = opencode_cfg
+        if opencode_cfg:
+            next_cfg["opencode"] = opencode_cfg
+        else:
+            next_cfg.pop("opencode", None)
 
     policy_path = _policy_path_for_config(config_path)
     policy_before = _load_json_file(policy_path)
@@ -1609,7 +1666,7 @@ function providerOptions(selected,{blankLabel='请选择通道',auto=false}={}){
 function modelOptions(providerId,selected,{visionFirst=false,auto=false,defaultModels=[]}={}){const rows=visibleModelsForProvider(providerId,{visionFirst});let opts=[];if(auto)opts.push(`<option value="" ${!selected?'selected':''}>自动路线${defaultModels.length?'：'+escapeHtml(defaultModels.join(' / ')):''}</option>`);else opts.push(`<option value="" ${!selected?'selected':''}>请选择模型</option>`);opts.push(...rows.map(r=>{const label=providerId?r.id:`${r.provider_id} / ${r.id}`;const tag=(r.capabilities||{}).vision?' [vision]':'';return `<option value="${escapeHtml(r.id)}" ${r.id===selected?'selected':''}>${escapeHtml(label)}${tag}</option>`}));if(selected&&!rows.some(r=>r.id===selected))opts.push(`<option value="${escapeHtml(selected)}" selected>当前配置值：${escapeHtml(selected)}</option>`);return opts.join('')}
 function renderStaleHiddenBox(p){const stale=staleHiddenModels(p);const box=$('staleHiddenBox');if(!box)return;if(!stale.length){box.innerHTML='<strong>过期隐藏项</strong><p class="muted">当前没有“已不在通道模型列表里”的 hidden_models。</p>';return}box.innerHTML=`<strong>过期隐藏项（不在当前通道模型列表）</strong><p class="muted">这些多半是之前手动隐藏过、后来通道不再返回的模型。默认保留配置但不放进主表；确认无用后可清理。</p><div class="chips">${stale.map(m=>`<span class="chip">${escapeHtml(m)} <button data-stale-rm="${escapeHtml(m)}">清理</button></span>`).join('')}</div><div class="btns"><button id="clearStaleHidden" class="ghost">清理当前通道过期隐藏项</button></div>`;document.querySelectorAll('[data-stale-rm]').forEach(b=>b.onclick=()=>{p.hidden_models=(p.hidden_models||[]).filter(x=>x!==b.dataset.staleRm);p.stale_hidden_models=(p.stale_hidden_models||[]).filter(x=>x!==b.dataset.staleRm);renderModelTable()});$('clearStaleHidden').onclick=()=>{const count=cleanupStaleHidden(p);renderModelTable();toast(count?`已清理 ${count} 个当前通道过期 hidden_models`:'没有需要清理的过期隐藏项')}}
 function renderModelTable(){const p=current(); if(!p)return;const q=($('modelSearch')?.value||'').toLowerCase();const rows=providerModels(p).filter(r=>r.id.toLowerCase().includes(q));$('modelChips').innerHTML=(p.extra_models||[]).map(m=>`<span class="chip">${escapeHtml(m)} <button data-rm="${escapeHtml(m)}">×</button></span>`).join('');document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{p.extra_models=(p.extra_models||[]).filter(x=>x!==b.dataset.rm);renderModelTable()});renderStaleHiddenBox(p);$('modelTable').innerHTML=`<thead><tr><th>显示</th><th>模型</th><th>来源</th><th>收藏</th><th>text</th><th>vision</th><th>tool</th><th>reason</th><th>long</th><th>cache</th></tr></thead><tbody>${rows.map(r=>{const c=r.capabilities||{};return `<tr><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="visible" ${r.visible?'checked':''}></td><td class="mono">${escapeHtml(r.id)}</td><td><span class="tag ${r.visible?'':'off'}">${escapeHtml(r.source||'manual')}</span></td><td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-field="favorite" ${r.favorite?'checked':''}></td>${['text','vision','tool_use','reasoning','long_context','cache_sensitive'].map(k=>`<td><input type="checkbox" data-model="${escapeHtml(r.id)}" data-cap="${k}" ${c[k]?'checked':''}></td>`).join('')}</tr>`}).join('')}</tbody>`;document.querySelectorAll('#modelTable input').forEach(x=>x.onchange=onModelToggle);renderTestSelectors();renderFallback();renderRuntime()}
-function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,capabilities:defaultCaps(model)};if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
+function onModelToggle(e){const p=current();const model=e.target.dataset.model;let row=providerModels(p).find(r=>r.id===model)||{id:model,capabilities:defaultCaps(model)};row.policy_touched=true;if(e.target.dataset.field==='visible'){row.visible=e.target.checked;p.hidden_models=e.target.checked?(p.hidden_models||[]).filter(x=>x!==model):[...(p.hidden_models||[]).filter(x=>x!==model),model]}else if(e.target.dataset.field==='favorite'){row.favorite=e.target.checked}else if(e.target.dataset.cap){row.capabilities=row.capabilities||{};row.capabilities[e.target.dataset.cap]=e.target.checked}p.model_capabilities=p.model_capabilities||{};p.model_capabilities[model]=row.capabilities;p.models=(p.models||[]).filter(r=>r.id!==model).concat(row);renderTestSelectors();renderFallback();renderRuntime()}
 function renderTestSelectors(){const tp=$('testProvider');if(!tp)return;tp.innerHTML=providerEntries().map(({p,i})=>`<option value="${i}">${escapeHtml(p.name||p.id)}${p.enabled?'':' [disabled]'}</option>`).join('');tp.value=String(activeProvider);tp.onchange=()=>{activeProvider=Number(tp.value);renderAll()};const models=providerModels(current()||{});$('testModel').innerHTML=models.map(r=>`<option>${escapeHtml(r.id)}</option>`).join('')}
 function syncFallback(){state.rescue=state.rescue||{};state.rescue.fallback_model=$('rescueModel').value.trim();state.rescue.fallback_cli=$('rescueCli').value;state.rescue.hot_fallback_enabled=$('rescueHot').checked;state.vision_sidecar=state.vision_sidecar||{};state.vision_sidecar.enabled=$('visionEnabled').checked;state.vision_sidecar.provider_id=$('visionProvider').value.trim();state.vision_sidecar.model=$('visionModel').value.trim();state.vision_sidecar.candidates=[...document.querySelectorAll('[data-vision-candidate]')].map(row=>({provider_id:row.querySelector('[data-vc-provider]').value.trim(),model:row.querySelector('[data-vc-model]').value.trim()})).filter(x=>x.provider_id&&x.model)}
 function bindVisionCandidateRow(row){const provider=row.querySelector('[data-vc-provider]');const model=row.querySelector('[data-vc-model]');provider.onchange=()=>{model.innerHTML=modelOptions(provider.value,'',{visionFirst:true});syncFallback()};model.onchange=syncFallback;row.querySelector('[data-vc-remove]').onclick=()=>{row.remove();syncFallback()}}

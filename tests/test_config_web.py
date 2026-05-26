@@ -125,6 +125,84 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
 
 
+def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        mms_config_web,
+        "_provider_credentials_status",
+        lambda _provider_id: {
+            "has_api_key": True,
+            "base_url": "",
+            "openai_base_url": "http://127.0.0.1:18080",
+            "anthropic_base_url": "http://127.0.0.1:18080",
+        },
+    )
+    cfg, _ = mms_core._ensure_provider_config(
+        {
+            "provider": {"default": "local"},
+            "providers": [
+                {
+                    "id": "local",
+                    "name": "Local",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 100,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                    "models_endpoint": "/models",
+                    "fallback_models": ["local-model"],
+                    "default_openai_base_url": "",
+                    "default_anthropic_base_url": "",
+                }
+            ],
+        }
+    )
+    config_path = str(tmp_path / "config.toml")
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=config_path)
+    provider = snapshot["providers"][0]
+    draft = {key: snapshot[key] for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")}
+
+    assert provider["openai_base_url"] == "http://127.0.0.1:18080"
+    assert provider["openai_base_url_source"] == "credentials"
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=config_path)
+
+    assert plan["summary"]["will_write_config"] is False
+    assert plan["summary"]["will_write_policy"] is False
+    assert plan["review_summary"]["risks"] == []
+    assert plan["review_summary"]["items"][0]["kind"] == "no_change"
+
+
+def test_config_web_review_summary_ignores_unchanged_http_config(tmp_path):
+    cfg, _ = mms_core._ensure_provider_config(
+        {
+            "provider": {"default": "local"},
+            "providers": [
+                {
+                    "id": "local",
+                    "name": "Local",
+                    "enabled": True,
+                    "role": "auto",
+                    "priority": 100,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                    "models_endpoint": "/models",
+                    "fallback_models": ["local-model"],
+                    "default_openai_base_url": "http://127.0.0.1:18080",
+                    "default_anthropic_base_url": "http://127.0.0.1:18080",
+                }
+            ],
+        }
+    )
+    config_path = str(tmp_path / "config.toml")
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path=config_path)
+    draft = {key: snapshot[key] for key in ("providers", "provider_default", "rescue", "vision_sidecar", "runtime", "opencode")}
+
+    plan = mms_config_web.build_config_plan(cfg, {"draft": draft}, config_path=config_path)
+
+    assert plan["summary"]["will_write_config"] is False
+    assert not any(risk["id"] == "http_base_url" for risk in plan["review_summary"]["risks"])
+
+
 def _draft_payload():
     return {
         "draft": {
@@ -160,6 +238,7 @@ def _draft_payload():
                                 "long_context": True,
                                 "cache_sensitive": True,
                             },
+                            "policy_touched": True,
                         }
                     ],
                 }
