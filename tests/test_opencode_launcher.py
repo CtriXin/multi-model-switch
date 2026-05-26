@@ -125,7 +125,7 @@ def test_opencode_model_limit_includes_required_output_value():
 def test_opencode_model_config_marks_official_vision_models_only():
     import mms_launchers
 
-    for model in ("mimo-v2.5", "K2.6", "kimi-k2.5", "qwen3.5-plus", "qwen3.6-plus", "gpt-5.3-codex"):
+    for model in ("mimo-v2.5", "K2.6", "kimi-k2.5", "qwen3.6-plus", "gpt-5.3-codex"):
         config = mms_launchers._opencode_model_config(_runtime(), model)
         assert config["attachment"] is True
         assert config["modalities"] == {"input": ["text", "image"], "output": ["text"]}
@@ -793,6 +793,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
         "glm-5.1",
         "kimi-for-coding",
         "deepseek-v4-pro",
+        "qwen3.7-max",
         "qwen3.6-plus",
     ]
     monkeypatch.setattr(
@@ -830,14 +831,14 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert payload["agent"]["mobius-bughunt-deepseek"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-bughunt-glm"]["permission"]["edit"] == "deny"
-    assert payload["agent"]["mobius-bughunt-qwen"]["model"].endswith("/qwen3.6-plus")
+    assert payload["agent"]["mobius-bughunt-qwen"]["model"].endswith("/qwen3.7-max")
     assert payload["agent"]["mobius-bughunt-qwen"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
     assert payload["agent"]["mobius-vision-qwen"]["model"].endswith("/qwen3.6-plus")
-    assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.6-plus")
+    assert payload["agent"]["mobius-explore-qwen"]["model"].endswith("/qwen3.7-max")
     executor_models = {
         payload["agent"][name]["model"].rsplit("/", 1)[-1]
         for name in payload["agent"]
@@ -868,6 +869,7 @@ def test_core_opencode_profile_menu_backend_and_acp_apply_entrypoints(monkeypatc
         "glm-5.1",
         "kimi-for-coding",
         "deepseek-v4-pro",
+        "qwen3.7-max",
         "qwen3.6-plus",
     ]
     monkeypatch.setattr(mms_core, "_provider_candidates", lambda *_args: [(provider, models)])
@@ -1522,13 +1524,13 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
                 "role": "executor_gpt54",
                 "status": "live_healthy",
             },
-            "lite_pro_orchestrated|bughunt_qwen|qwen3.6-plus|newapi|anthropic_messages": {
+            "lite_pro_orchestrated|bughunt_qwen|qwen3.7-max|newapi|anthropic_messages": {
                 "profile": "lite_pro_orchestrated",
                 "role": "bughunt_qwen",
                 "status": "degraded",
                 "finished_at": "2026-05-16T10:00:00Z",
             },
-            "lite_pro_orchestrated|bughunt_qwen|qwen3.6-plus|newapi|openai_chat_completions": {
+            "lite_pro_orchestrated|bughunt_qwen|qwen3.7-max|newapi|openai_chat_completions": {
                 "profile": "lite_pro_orchestrated",
                 "role": "bughunt_qwen",
                 "status": "live_healthy",

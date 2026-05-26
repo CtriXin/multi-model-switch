@@ -1918,7 +1918,6 @@ OPENCODE_IMAGE_INPUT_MODELS = {
     "k2.6",
     "kimi-k2.5",
     "mimo-v2.5",
-    "qwen3.5-plus",
     "qwen3.6-flash",
     "qwen3.6-plus",
 }

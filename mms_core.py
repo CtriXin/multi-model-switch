@@ -1157,7 +1157,6 @@ _VISION_CAPABLE_MODEL_NAMES = {
     "kimi-k2.6",
     "qwen3.6-flash",
     "qwen3.6-plus",
-    "qwen3.5-plus",
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite-preview",
@@ -4234,14 +4233,13 @@ def _vision_sidecar_model_candidates_for_provider(provider_id):
         "kimi-k2.5",
         "qwen3.6-flash",
         "qwen3.6-plus",
-        "qwen3.5-plus",
     ]
     if "mimo" in normalized:
         return ["mimo-v2.5", "mimo-v2-omni"]
     if "kimi" in normalized:
         return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
-        return ["qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus"]
+        return ["qwen3.6-plus", "qwen3.6-flash"]
     return generic
 
 
@@ -9514,7 +9512,7 @@ _OPENCODE_LITE_PRO_SPECS = (
     {
         "key": "vision_qwen",
         "agent": "mobius-vision-qwen",
-        "models": ("qwen3.6-plus", "qwen3.5-plus"),
+        "models": ("qwen3.6-plus", "qwen3.6-flash"),
         "gpt_fallback": False,
     },
     {
@@ -9556,12 +9554,12 @@ _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
     {
         "key": "explore_qwen",
         "agent": "mobius-explore-qwen",
-        "models": ("qwen3.6-plus", "qwen3.5-plus"),
+        "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash"),
     },
     {
         "key": "bughunt_qwen",
         "agent": "mobius-bughunt-qwen",
-        "models": ("qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"),
+        "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3-coder-plus"),
     },
     {
         "key": "executor_gpt54",

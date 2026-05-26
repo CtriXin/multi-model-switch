@@ -56,17 +56,17 @@ mms opencode --profile lite_pro_orchestrated --backend-agent
 | `mobius-explore-kimi` | subagent | `kimi-for-coding` via Anthropic | fallback explorer | deny |
 | `mobius-vision-mimo` | subagent | `mimo-v2.5` via direct MiMo OpenAI-compatible | primary image helper | deny |
 | `mobius-vision-kimi` | subagent | `kimi-k2.5` / `K2.6` via Anthropic | image helper fallback | deny |
-| `mobius-vision-qwen` | subagent | `qwen3.6-plus` via Anthropic | image helper fallback | deny |
+| `mobius-vision-qwen` | subagent | `qwen3.6-plus` / `qwen3.6-flash` via Anthropic | image helper fallback | deny |
 | `mobius-reviewer-gpt55` | subagent | `gpt-5.5` via Responses | primary release-gate reviewer | deny |
 | `mobius-reviewer-gpt54` | subagent | `gpt-5.4` via Responses | stable reviewer outage fallback | deny |
 | `mobius-reviewer-mimo` | subagent | `mimo-v2.5-pro` via direct MiMo OpenAI-compatible | supplemental CN/vision critique reviewer | deny |
 | `mobius-bughunt-deepseek` | subagent | `deepseek-v4-pro` via Anthropic | read-only defect and edge-case hunt | deny |
 | `mobius-bughunt-glm` | subagent | `glm-5.1` via Anthropic | fallback read-only defect hunt | deny |
-| `mobius-bughunt-qwen` | subagent | `qwen3.6-plus` via Anthropic | orchestrated-mode long-context bug-hunt | deny |
+| `mobius-bughunt-qwen` | subagent | `qwen3.7-max` via Anthropic | orchestrated-mode long-context bug-hunt | deny |
 | `mobius-executor-gpt54` | subagent | `gpt-5.4` via Responses | orchestrated-mode long-running implementation executor | ask |
 | `mobius-fixer-gpt54` | subagent | `gpt-5.4` | focused fixer fallback | ask |
 
-GLM/Kimi/DeepSeek/Qwen routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages` for read-only support roles. They must not fall back to `chat/completions` silently. MiMo is the exception: Xiaomi's OpenCode guide uses OpenAI-compatible `/v1`, and warns that OpenCode + Anthropic protocol can miss `reasoning_content` in tool loops. MiMo remains direct-only and is configured with `reasoning=false` in OpenCode-generated model metadata until OpenCode can reliably preserve that field.
+GLM/Kimi/DeepSeek/Qwen routes are cache-sensitive in the current config, so Lite Pro assigns them to Anthropic `/v1/messages` for read-only support roles. Text-only Qwen support roles prefer `qwen3.7-max`; Qwen vision stays on `qwen3.6-plus` / `qwen3.6-flash` because `qwen3.7-max` is treated as text-only. They must not fall back to `chat/completions` silently. MiMo is the exception: Xiaomi's OpenCode guide uses OpenAI-compatible `/v1`, and warns that OpenCode + Anthropic protocol can miss `reasoning_content` in tool loops. MiMo remains direct-only and is configured with `reasoning=false` in OpenCode-generated model metadata until OpenCode can reliably preserve that field.
 
 ## Lite Pro Orchestrated
 
