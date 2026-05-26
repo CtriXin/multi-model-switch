@@ -35,10 +35,12 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     )
     encoded = json.dumps(snapshot, ensure_ascii=False)
 
-    assert snapshot["mode"] == "read_only"
+    assert snapshot["mode"] == "interactive_audited_save"
+    assert snapshot["schema"] == "mms.setup_web.snapshot.v2"
     assert snapshot["providers"][0]["id"] == "direct-qwen"
     assert snapshot["providers"][0]["has_api_key"] is True
     assert snapshot["providers"][0]["model_count"] == 1
+    assert snapshot["providers"][0]["api_key"] == ""
     assert snapshot["vision_sidecar"]["api_key"] != "sk-vision-secret"
     assert "sk-vision-secret" not in encoded
     assert "sk-super-secret-value" not in encoded
@@ -52,6 +54,7 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
         "runtime",
     ]
     assert {item["id"] for item in snapshot["test_contracts"]} >= {"models_endpoint", "model_ping", "simple_chat"}
+    assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
 def test_config_web_print_summary_exits_without_server(capsys):
@@ -65,8 +68,9 @@ def test_config_web_print_summary_exits_without_server(capsys):
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["schema"] == "mms.setup_web.snapshot.v1"
+    assert payload["schema"] == "mms.setup_web.snapshot.v2"
     assert payload["paths"]["config"] == "/tmp/config.toml"
+    assert payload["paths"]["model_policy"] == "/tmp/model-policy.json"
     assert payload["recommendations"]
 
 
@@ -79,14 +83,155 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "# MMS Setup Plan" in out
+    assert "# MMS Setup Configuration" in out
     assert "[vision_sidecar]" in out
     assert "[rescue]" in out
     assert "## Visual Setup Flow" in out
-    assert "Model list test" in out
+    assert "模型列表测试" in out
     assert "hidden_models" in out
-    assert "preferred_cli.default" in out
+    assert "[opencode]" in out
     assert "mms opencode --profile lite_pro_orchestrated" in out
+
+
+def _draft_payload():
+    return {
+        "draft": {
+            "provider_default": "demo",
+            "providers": [
+                {
+                    "original_id": "demo",
+                    "id": "demo",
+                    "name": "Demo Gateway",
+                    "enabled": True,
+                    "role": "primary",
+                    "priority": 150,
+                    "protocols": ["anthropic_messages", "openai_chat_completions"],
+                    "supported_clis": ["claude", "codex", "opencode"],
+                    "models_endpoint": "/models",
+                    "openai_base_url": "https://demo.example/v1",
+                    "anthropic_base_url": "https://demo.example/v1",
+                    "api_key": "sk-super-secret-value",
+                    "update_credentials": True,
+                    "fallback_models": ["gpt-5.5"],
+                    "extra_models": ["qwen3.6-plus"],
+                    "hidden_models": ["noisy-model"],
+                    "models": [
+                        {
+                            "id": "qwen3.6-plus",
+                            "visible": True,
+                            "favorite": True,
+                            "capabilities": {
+                                "text": True,
+                                "vision": True,
+                                "tool_use": True,
+                                "reasoning": True,
+                                "long_context": True,
+                                "cache_sensitive": True,
+                            },
+                        }
+                    ],
+                }
+            ],
+            "rescue": {
+                "fallback_model": "deepseek-v4-flash",
+                "fallback_cli": "codex",
+                "hot_fallback_enabled": False,
+            },
+            "vision_sidecar": {
+                "enabled": True,
+                "provider_id": "demo",
+                "model": "qwen3.6-plus",
+                "candidates": [{"provider_id": "demo", "model": "qwen3.6-plus"}],
+            },
+            "runtime": {"preferred_cli": "opencode", "coding_preset_model": "gpt-5.5"},
+            "opencode": {"default_profile": "lite_pro_orchestrated"},
+        }
+    }
+
+
+def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
+    cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
+    payload = _draft_payload()
+
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        payload,
+        config_path=str(tmp_path / "config.toml"),
+        preferences_path=str(tmp_path / "preferences.toml"),
+    )
+    encoded = json.dumps(plan, ensure_ascii=False)
+
+    assert plan["ok"] is True
+    assert plan["summary"]["credential_updates"] == 1
+    assert plan["config"]["providers"][0]["hidden_models"] == ["noisy-model"]
+    assert plan["model_policy"]["models"]["qwen3.6-plus"]["capabilities"]["vision"] is True
+    assert "Demo Gateway" in plan["diffs"]["config_toml"]
+    assert "credentials.sh: update provider demo" in plan["diffs"]["credentials"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_save_requires_explicit_confirmation(tmp_path):
+    cfg = {"providers": [{"id": "demo"}]}
+    result = mms_config_web.apply_config_plan(
+        cfg,
+        _draft_payload(),
+        config_path=str(tmp_path / "config.toml"),
+    )
+
+    assert result["ok"] is False
+    assert "确认" in result["errors"][0]
+
+
+def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.toml"
+    credentials_path = tmp_path / "credentials.sh"
+
+    monkeypatch.setattr(mms_core, "_config_write_target_path", lambda: str(config_path))
+    monkeypatch.setattr(mms_core, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_core, "CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(mms_core, "_trigger_routes_export_after_credentials_write", lambda: None)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *args, **kwargs: True)
+
+    payload = _draft_payload()
+    payload["confirm_save"] = True
+    payload["confirm_phrase"] = "保存配置"
+    result = mms_config_web.apply_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert result["ok"] is True
+    assert config_path.exists()
+    assert credentials_path.exists()
+    assert "sk-super-secret-value" in credentials_path.read_text(encoding="utf-8")
+    assert (tmp_path / "model-policy.json").exists()
+    assert (tmp_path / "config-audit.jsonl").exists()
+    assert "setup-web-ui:interactive-save" in (tmp_path / "config-audit.jsonl").read_text(encoding="utf-8")
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):
+    monkeypatch.setattr(
+        mms_config_web,
+        "probe_provider_models",
+        lambda provider, force_refresh=False: {
+            "models": ["m-a", "m-b"],
+            "raw_models": ["m-a", "m-b"],
+            "base_source": "remote",
+            "working_url": "https://demo.example/v1",
+            "details": ["ok"],
+        },
+    )
+
+    payload = {"provider": {"id": "demo", "openai_base_url": "https://demo.example/v1", "api_key": "sk-secret"}}
+    result = mms_config_web.test_provider_models({"providers": []}, payload)
+
+    assert result["ok"] is True
+    assert result["models"] == ["m-a", "m-b"]
+    assert result["cache_transport_evidence"]["request_path"] == "/models"
+    assert "sk-secret" not in json.dumps(result, ensure_ascii=False)
 
 
 def test_setup_web_requests_are_guard_exempt():
