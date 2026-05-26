@@ -57,6 +57,28 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
+def test_config_web_snapshot_separates_stale_hidden_models():
+    cfg = {
+        "providers": [
+            {
+                "id": "stale-hidden-demo",
+                "name": "Stale Hidden Demo",
+                "fallback_models": ["qwen3.6-plus"],
+                "hidden_models": ["qwen3.6-plus", "retired-qwen-alias"],
+            }
+        ]
+    }
+
+    snapshot = mms_config_web.build_config_snapshot(cfg, config_path="/tmp/mms/config.toml")
+    provider = snapshot["providers"][0]
+    model_ids = [row["id"] for row in provider["models"]]
+    current = next(row for row in provider["models"] if row["id"] == "qwen3.6-plus")
+
+    assert "retired-qwen-alias" not in model_ids
+    assert provider["stale_hidden_models"] == ["retired-qwen-alias"]
+    assert current["visible"] is False
+
+
 def test_config_web_print_summary_exits_without_server(capsys):
     rc = mms_config_web.run_config_web(
         {"providers": []},
@@ -144,7 +166,13 @@ def _draft_payload():
                 "candidates": [{"provider_id": "demo", "model": "qwen3.6-plus"}],
             },
             "runtime": {"preferred_cli": "opencode", "coding_preset_model": "gpt-5.5"},
-            "opencode": {"default_profile": "lite_pro_orchestrated"},
+            "opencode": {
+                "default_profile": "lite_pro_orchestrated",
+                "agent_models": {
+                    "mobius-explore-glm": {"provider_id": "demo", "model": "qwen3.6-plus"},
+                    "mobius-reviewer-gpt55": {"model": "gpt-5.5"},
+                },
+            },
         }
     }
 
@@ -164,6 +192,11 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert plan["ok"] is True
     assert plan["summary"]["credential_updates"] == 1
     assert plan["config"]["providers"][0]["hidden_models"] == ["noisy-model"]
+    assert plan["config"]["opencode"]["agent_models"]["mobius-explore-glm"] == {
+        "provider_id": "demo",
+        "model": "qwen3.6-plus",
+    }
+    assert plan["config"]["opencode"]["agent_models"]["mobius-reviewer-gpt55"] == {"model": "gpt-5.5"}
     assert plan["model_policy"]["models"]["qwen3.6-plus"]["capabilities"]["vision"] is True
     assert "Demo Gateway" in plan["diffs"]["config_toml"]
     assert "credentials.sh: update provider demo" in plan["diffs"]["credentials"]

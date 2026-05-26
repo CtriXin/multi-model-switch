@@ -851,6 +851,53 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert vision_qwen_route["protocol"] == "anthropic_messages"
 
 
+def test_core_opencode_lite_pro_uses_agent_model_overrides(monkeypatch):
+    import mms_core
+    import mms_launchers
+
+    cfg = {
+        "providers": [],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "opencode": {
+            "agent_models": {
+                "mobius-explore-glm": {"provider_id": "domestic", "model": "kimi-for-coding"},
+            }
+        },
+    }
+    gpt = _runtime(
+        id="gpt",
+        name="GPT",
+        protocols=["openai_chat_completions"],
+        openai_base_url="https://gpt.example/v1",
+    )
+    domestic = _runtime(
+        id="domestic",
+        name="Domestic",
+        protocols=["anthropic_messages"],
+        anthropic_base_url="https://domestic.example/v1",
+    )
+    monkeypatch.setattr(
+        mms_core,
+        "_provider_candidates",
+        lambda *_args: [(gpt, ["gpt-5.5", "gpt-5.4"]), (domestic, ["glm-5-turbo", "kimi-for-coding"])],
+    )
+
+    model_info, runtime = mms_core._resolve_opencode_profile_runtime(
+        cfg,
+        gpt,
+        ["gpt-5.5", "gpt-5.4"],
+        "lite_pro_orchestrated",
+    )
+    payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
+    explore_route = next(route for route in runtime["opencode_routes"] if route["id"] == "explore_primary")
+
+    assert explore_route["provider_id"] == "domestic"
+    assert explore_route["model"] == "kimi-for-coding"
+    assert runtime["opencode_agent_model_overrides"]["mobius-explore-glm"]["model"] == "kimi-for-coding"
+    assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/kimi-for-coding")
+
+
 def test_core_opencode_profile_menu_backend_and_acp_apply_entrypoints(monkeypatch):
     import mms_core
 

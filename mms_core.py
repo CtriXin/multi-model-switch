@@ -10043,14 +10043,18 @@ def _find_opencode_model_route(
     route_key="route",
     route_policy="",
     profile_id="lite_pro",
+    provider_id="",
 ):
     wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
     if not wanted:
         return None
     wanted_lower = [item.lower() for item in wanted]
+    forced_provider_id = str(provider_id or "").strip()
     latest_health = _load_opencode_route_health_latest()
     scored = []
     for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
+        if forced_provider_id and str(provider.get("id") or "").strip() != forced_provider_id:
+            continue
         if not provider.get("enabled", True):
             continue
         if not _opencode_provider_matches_route_policy(provider, route_policy):
@@ -10112,9 +10116,39 @@ def _append_unique_opencode_route(routes, route):
     return route
 
 
+def _opencode_agent_model_overrides(cfg):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    opencode = cfg.get("opencode") if isinstance(cfg.get("opencode"), dict) else {}
+    raw = opencode.get("agent_models")
+    if not isinstance(raw, dict):
+        raw = opencode.get("agent_model_overrides")
+    raw = raw if isinstance(raw, dict) else {}
+    overrides = {}
+    for agent, entry in raw.items():
+        agent_id = str(agent or "").strip()
+        if not agent_id:
+            continue
+        provider_id = ""
+        model = ""
+        if isinstance(entry, dict):
+            provider_id = str(entry.get("provider_id") or entry.get("provider") or "").strip()
+            model = str(entry.get("model") or entry.get("model_id") or "").strip()
+        elif isinstance(entry, str):
+            model = entry.strip()
+        if not model:
+            continue
+        overrides[agent_id] = {
+            "provider_id": provider_id,
+            "model": model,
+        }
+    return overrides
+
+
 def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
     routes = []
     agent_models = {}
+    agent_model_overrides = _opencode_agent_model_overrides(cfg)
+    unresolved_overrides = {}
     gpt_fallback = _find_opencode_model_route(
         cfg,
         default_provider,
@@ -10125,15 +10159,29 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
     )
 
     for spec in _opencode_lite_pro_specs(profile_id):
+        override = agent_model_overrides.get(spec["agent"]) or agent_model_overrides.get(spec["key"])
+        model_names = (override["model"],) if override else spec["models"]
         route = _find_opencode_model_route(
             cfg,
             default_provider,
             default_models,
-            spec["models"],
+            model_names,
             route_key=spec["key"],
             route_policy=spec.get("route_policy", ""),
             profile_id=profile_id,
+            provider_id=override.get("provider_id", "") if override else "",
         )
+        if route is None and override:
+            unresolved_overrides[spec["agent"]] = override
+            route = _find_opencode_model_route(
+                cfg,
+                default_provider,
+                default_models,
+                spec["models"],
+                route_key=spec["key"],
+                route_policy=spec.get("route_policy", ""),
+                profile_id=profile_id,
+            )
         if route is None and spec["key"] != "builder_primary" and spec.get("gpt_fallback", True) is not False:
             route = gpt_fallback
         route = _append_unique_opencode_route(routes, dict(route, id=spec["key"]) if route else None)
@@ -10161,6 +10209,10 @@ def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pr
     runtime["supported_clis"] = ["opencode"]
     runtime["opencode_routes"] = routes
     runtime["opencode_agent_model_keys"] = agent_models
+    if agent_model_overrides:
+        runtime["opencode_agent_model_overrides"] = agent_model_overrides
+    if unresolved_overrides:
+        runtime["opencode_agent_model_override_unresolved"] = unresolved_overrides
     runtime["opencode_default_route_key"] = "builder_primary"
     runtime["opencode_builder_fallback_agent"] = "mobius-builder-stable"
     model_info = {"model": builder_route["model"], "profile": profile_id}

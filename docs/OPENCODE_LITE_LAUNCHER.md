@@ -19,7 +19,7 @@ MMS launches OpenCode through fixed modes. It does not ask the user to tune agen
 - Lite Pro includes optional vision helper agents. If the active coding/review model cannot read images, the coordinator can ask MiMo/Kimi/Qwen vision helpers to inspect screenshots first, then pass structured observations back to the main workflow.
 - Lite Pro launch does not make a live model request by default. Set `MMS_OPENCODE_LAUNCH_PREFLIGHT=1` to run a tiny OpenCode preflight against the primary builder route; if `builder_primary` fails and `builder_fallback` passes, MMS starts OpenCode with `mobius-builder-stable` on the fallback model instead of opening a broken session. See `docs/OPENCODE_PREFLIGHT_OPT_IN_DECISION_2026-05-18.md` for the root-cause and fix record.
 - MMS does not delete or rewrite global OMO config.
-- MMS does not write `~/.config/opencode/opencode.json`, `~/.config/opencode/oh-my-openagent.jsonc`, or `~/.config/mms/config.toml` for this mode selection.
+- MMS does not write `~/.config/opencode/opencode.json` or `~/.config/opencode/oh-my-openagent.jsonc` for this mode selection. The setup WebUI may write audited MMS config keys such as `[opencode].default_profile` and `[opencode.agent_models]` only after explicit save confirmation.
 
 ## Modes
 
@@ -33,6 +33,21 @@ MMS launches OpenCode through fixed modes. It does not ask the user to tune agen
 | `raw` / `Raw Pure` | `opencode --pure -m mms/<safe-gpt-model>` | MMS-generated session-local `opencode.json` | Debug fallback |
 
 Direct launch is also supported, for example `mms opencode --profile lite_pro_orchestrated` or `mmd opencode --profile lite_pro_orchestrated`.
+
+## Agent Model Overrides
+
+The setup WebUI can store per-agent overrides in MMS config:
+
+```toml
+[opencode]
+default_profile = "lite_pro_orchestrated"
+
+[opencode.agent_models.mobius-explore-glm]
+provider_id = "domestic"
+model = "kimi-for-coding"
+```
+
+Each override is optional. If `provider_id` is present, Lite Pro resolves that agent against the named provider first; if the route is unavailable or blocked by route health, MMS falls back to the built-in role defaults rather than launching an invalid agent route.
 
 Alternative entrypoints are explicit and opt-in:
 
