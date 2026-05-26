@@ -1144,7 +1144,7 @@ def _record_bridge_blocking_failure(
     fallback_mode="auto_default_handover",
     automatic_model_call=False,
 ):
-    """Best-effort L3 rescue hook; never calls another model or OAuth flow."""
+    """Best-effort L3 rescue hook; never switches runtime or OAuth flow."""
     if not bool(getattr(server, "rescue_enabled", False)):
         return None
     try:
@@ -1187,10 +1187,152 @@ def _record_bridge_blocking_failure(
                     handover.get("source_event_id"),
                     fallback_model,
                 )
+        _append_incident_log(
+            server=server,
+            model=model_name or getattr(server, "model_name", ""),
+            provider_id=provider_id or getattr(server, "provider_id", ""),
+            status_code=status_code,
+            bridge_surface=bridge_surface,
+            request_url=request_url,
+            event="blocking_failure",
+        )
+        if payload and fallback_model:
+            artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+            rescue_dir = str(artifacts.get("dir") or "").strip()
+            _schedule_rescue_summary(
+                server, payload,
+                fallback_model=fallback_model,
+                rescue_dir=rescue_dir,
+            )
         return payload
     except Exception as exc:
         _bridge_error_logger.warning("rescue file-only packet failed: %s", exc, exc_info=True)
         return None
+
+
+def _schedule_rescue_summary(server, payload, *, fallback_model, rescue_dir):
+    """Generate rescue summaries off the response path."""
+    try:
+        payload_copy = copy.deepcopy(payload)
+        worker = threading.Thread(
+            target=_generate_rescue_summary,
+            args=(server, payload_copy),
+            kwargs={"fallback_model": fallback_model, "rescue_dir": rescue_dir},
+            name="mms-rescue-summary",
+            daemon=True,
+        )
+        worker.start()
+    except Exception as exc:
+        _bridge_error_logger.warning("rescue summary scheduling failed: %s", exc, exc_info=True)
+
+
+def _generate_rescue_summary(server, payload, *, fallback_model, rescue_dir):
+    """Call fallback model to generate a session summary; write to rescue_dir/summary.md.
+
+    Best-effort: never raises. The bridge schedules this outside the main response path.
+    """
+    if not fallback_model or not rescue_dir:
+        return
+    try:
+        routes = _load_rescue_hot_fallback_routes(server, fallback_model)
+        if not routes:
+            return
+        route = routes[0]
+        protocol = str(route.get("protocol") or "openai_chat_completions").strip()
+        gateway_url = str(route.get("gateway_url") or route.get("openai_base_url") or "").strip()
+        gateway_key = str(route.get("gateway_key") or route.get("api_key") or "").strip()
+        model_id = str(route.get("model") or fallback_model).strip()
+        if not gateway_url or not gateway_key:
+            return
+        failed = payload.get("failed") if isinstance(payload.get("failed"), dict) else {}
+        session_meta = payload.get("session_meta") if isinstance(payload.get("session_meta"), dict) else {}
+        task_goal = str(session_meta.get("task_goal") or "").strip()
+        failed_model = str(failed.get("model") or payload.get("model") or "").strip()
+        status_code = failed.get("status_code")
+        failure_kind = str(failed.get("failure_kind") or "").strip()
+        error_summary = str(failed.get("error_summary") or "")[:500]
+        prompt_parts = [
+            "A model API call failed during an MMS session. Generate a concise recovery summary.",
+            "",
+            f"Failed model: {failed_model}",
+            f"Status: {status_code}",
+            f"Failure type: {failure_kind}",
+        ]
+        if task_goal:
+            prompt_parts.append(f"Session goal: {task_goal}")
+        if error_summary:
+            prompt_parts.append(f"Error (truncated): {error_summary[:300]}")
+        prompt_parts.extend([
+            "",
+            "Write a recovery summary in markdown with these sections:",
+            "1. **What was being worked on** (from session goal if available)",
+            "2. **What failed** (model, status, error type)",
+            "3. **Suggested next steps** (how to resume or retry)",
+            "",
+            "Keep it under 300 words. Be concrete, not generic.",
+        ])
+        user_msg = "\n".join(prompt_parts)
+        request_payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": user_msg}],
+            "max_tokens": 800,
+        }
+        auth_protocol = "anthropic_messages" if protocol == "anthropic_messages" else "openai_chat"
+        target_url = _build_gateway_url(
+            gateway_url,
+            "/messages" if protocol == "anthropic_messages" else "/chat/completions",
+        )
+        headers = {"Content-Type": "application/json"}
+        if protocol == "anthropic_messages":
+            headers.update({"x-api-key": gateway_key, "anthropic-version": "2023-06-01"})
+        else:
+            headers["Authorization"] = f"Bearer {gateway_key}"
+        apply_profile_auth_headers(
+            headers,
+            protocol=auth_protocol,
+            api_key=gateway_key,
+            provider_id=str(route.get("provider_id") or ""),
+            profile_id=str(route.get("provider_profile") or route.get("profile") or ""),
+            base_url=gateway_url,
+            model_name=model_id,
+        )
+        httpx_mod = _ensure_httpx()
+        if httpx_mod is None:
+            return
+        with httpx_mod.stream(
+            "POST",
+            target_url,
+            headers=headers,
+            json=request_payload,
+            timeout=30,
+            **_route_httpx_kwargs(server, route, target_url),
+        ) as resp:
+            resp_body = resp.read().decode("utf-8", errors="replace")
+        if resp.status_code >= 200 and resp.status_code < 300:
+            data = json.loads(resp_body)
+            if protocol == "anthropic_messages":
+                content = data.get("content") if isinstance(data.get("content"), list) else []
+                summary_text = "\n".join(
+                    str(block.get("text") or "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ).strip()
+            else:
+                summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if summary_text:
+                summary_path = os.path.join(str(rescue_dir), "summary.md")
+                os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+                with open(summary_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Rescue Summary\n\n")
+                    f.write(f"- generated_at: {int(time.time())}\n")
+                    f.write(f"- fallback_model: {fallback_model}\n")
+                    f.write(f"- source_model: {failed_model}\n\n")
+                    f.write(summary_text)
+                _bridge_error_logger.warning(
+                    "rescue summary written: model=%s path=%s", fallback_model, summary_path
+                )
+    except Exception as exc:
+        _bridge_error_logger.warning("rescue summary generation failed: %s", exc, exc_info=True)
 
 
 def _truthy(value):
@@ -1202,6 +1344,9 @@ def _truthy(value):
 
 
 def _rescue_hot_fallback_enabled(server):
+    # PAUSED: same-session hot fallback is disabled pending redesign.
+    # Keep file-first rescue + fallback handover active without switching the live request.
+    return False
     raw = str(os.environ.get("MMS_RESCUE_HOT_FALLBACK", "") or "").strip().lower()
     fallback = _current_rescue_fallback(server)
     if raw in {"1", "true", "yes", "on", "enable", "enabled"}:
@@ -1558,6 +1703,76 @@ def _chatcompletions_error_requests_messages(body_text):
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
+
+def _incident_log_path(server=None):
+    config_root = ""
+    if server is not None:
+        config_root = _rescue_config_root(server)
+    if not config_root:
+        try:
+            config_root = resolve_mms_config_dir()
+        except Exception:
+            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms")
+    return os.path.join(str(config_root), "logs", "incidents.jsonl")
+
+
+def _redact_incident_value(value):
+    try:
+        from mms_rescue import assert_secret_safe, redact_text
+
+        text = redact_text(value)
+        assert_secret_safe(text)
+        return text
+    except Exception:
+        raw = str(value or "")
+        if not raw:
+            return ""
+        try:
+            parsed = urlsplit(raw)
+            if parsed.scheme and parsed.netloc:
+                return parsed.path or "/"
+        except Exception:
+            pass
+        return "<REDACTED>"
+
+
+def _append_incident_log(
+    *,
+    server=None,
+    model="",
+    provider_id="",
+    status_code=None,
+    bridge_surface="",
+    request_url="",
+    event="blocking_failure",
+    detail="",
+):
+    """Append one JSONL line to the resolved MMS config logs dir. Best-effort, never raises."""
+    try:
+        incident_path = _incident_log_path(server)
+        os.makedirs(os.path.dirname(incident_path), exist_ok=True)
+        entry = {
+            "ts": int(time.time()),
+            "model": _redact_incident_value(model),
+            "provider_id": _redact_incident_value(provider_id),
+            "status_code": status_code,
+            "bridge_surface": _redact_incident_value(bridge_surface),
+            "request_url": _redact_incident_value(request_url),
+            "event": _redact_incident_value(event),
+            "detail": _redact_incident_value(detail),
+        }
+        line = json.dumps(entry, ensure_ascii=False, sort_keys=True)
+        try:
+            from mms_rescue import assert_secret_safe
+
+            assert_secret_safe(line)
+        except Exception:
+            return
+        with locked_state_file(incident_path):
+            with open(incident_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _now_ms():
@@ -4792,6 +5007,16 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     "chatcompletions fallback rejected for cache-sensitive transport; retrying messages: model=%s",
                     model_name,
                 )
+                _append_incident_log(
+                    server=self.server,
+                    model=model_name,
+                    provider_id=provider_id,
+                    status_code=last_status,
+                    bridge_surface="chatcompletions_to_messages_retry",
+                    request_url=target_url,
+                    event="cache_sensitive_channel_switch",
+                    detail="chatcompletions rejected; retrying via anthropic messages",
+                )
                 self._do_anthropic_messages_fallback(
                     payload,
                     model_name,
@@ -5115,6 +5340,16 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                         _bridge_error_logger.warning(
                             "primary chat bridge rejected for cache-sensitive transport; retrying messages: model=%s",
                             model_name,
+                        )
+                        _append_incident_log(
+                            server=self.server,
+                            model=model_name,
+                            provider_id=provider_id,
+                            status_code=response.status_code,
+                            bridge_surface="chat_to_messages_retry",
+                            request_url=target_url,
+                            event="cache_sensitive_channel_switch",
+                            detail="chatcompletions rejected; retrying via anthropic messages",
                         )
                         self._do_anthropic_messages_fallback(
                             payload,

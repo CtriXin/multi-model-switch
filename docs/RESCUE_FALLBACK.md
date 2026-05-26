@@ -1,15 +1,16 @@
 # MMS Rescue Fallback
 
-Status: L3 file-first rescue with thin bridge hook, TUI rescue viewer, safe fallback handover generation, and optional current-session hot fallback for Codex Responses bridge failures.
+Status: L3 file-first rescue with thin bridge hook, TUI rescue viewer, safe fallback handover generation, incident logging, and paused current-session hot fallback for Codex Responses bridge failures.
 
 ## Current Scope
 
 - Writes deterministic rescue artifacts before any continuation model call.
 - Hooks terminal bridge failures for blocking classes: 429/quota, 403/401 permission/auth, context overflow, model not found, timeout, 5xx, and unsupported capability/parameter.
-- Global fallback defaults to file-first behavior: bridge failures write the rescue packet and `fallback-handover.md/json`, but do not call the fallback model automatically.
-- Codex Responses bridge can hot-fallback inside the current request only when `[rescue].hot_fallback_enabled = true` or `MMS_RESCUE_HOT_FALLBACK=1` is explicitly set.
-- Hot fallback resolves the selected model through `generated/model-routes.json` / `model-routes.json`; it does not hardcode a vendor/model route.
-- `MMS_RESCUE_HOT_FALLBACK=0` disables the automatic model call while keeping file-only rescue artifacts and fallback handoff generation.
+- Global fallback is file-first behavior: bridge failures write the rescue packet and `fallback-handover.md/json`, but do not switch the active request to the fallback model automatically.
+- Current-session hot fallback is paused pending redesign. `[rescue].hot_fallback_enabled = true` and `MMS_RESCUE_HOT_FALLBACK=1` are still parsed for compatibility, but the bridge keeps handoff-only behavior.
+- Fallback route resolution still reads `generated/model-routes.json` / `model-routes.json` so tests can verify cache-sensitive routes select Anthropic `/v1/messages` instead of `/v1/chat/completions`.
+- Blocking failures and cache-sensitive channel switches append redacted JSONL entries to `<resolved-mms-config>/logs/incidents.jsonl`.
+- When a fallback model is configured, the bridge may generate `summary.md` asynchronously in the rescue artifact directory; this is a recovery summary only, not a same-request hot fallback.
 - Keeps global OAuth fallback disabled.
 - Keeps private/public boundary crossing disabled.
 - Exposes recent rescue packets through `MMS -> Settings -> Interrupted / Rescue`.
@@ -31,15 +32,17 @@ Repo-local:
 <repo>/.mms/rescue/<timestamp>/fallback-handover.md
 <repo>/.mms/rescue/latest-fallback-handover.json
 <repo>/.mms/rescue/latest-fallback-handover.md
+<repo>/.mms/rescue/<timestamp>/summary.md
 ```
 
 Global metadata index:
 
 ```text
 <real-home>/.config/mms/rescue/index.jsonl
+<resolved-mms-config>/logs/incidents.jsonl
 ```
 
-The global index stores metadata and pointers only. Raw upstream bodies are redacted before write, and auth-bearing raw paths such as `.codex/auth.json`, `.claude.json`, `.gemini`, `config.toml`, credentials files, key files, and account folders are skipped.
+The global index and incident log store metadata and pointers only. Raw upstream bodies are redacted before write, auth-bearing raw paths such as `.codex/auth.json`, `.claude.json`, `.gemini`, `config.toml`, credentials files, key files, and account folders are skipped, and incident URLs/details are redacted before append.
 
 ## Real Home Resolution
 
@@ -53,7 +56,7 @@ It must not write rescue metadata under an isolated session HOME such as `.confi
 
 ## Current Limits
 
-- Hot fallback is currently scoped to the Codex Responses proxy path.
+- Hot fallback execution is currently paused; only route resolution, rescue artifacts, incident logs, fallback handovers, and async summaries remain active.
 - Context-heavy failures still rely on the rescue packet/context policy; MMS does not auto-compact before choosing a smaller fallback model.
 - No automatic session resume; the TUI viewer is read-only recovery metadata + packet display.
 - No registry DB persistence beyond the file-only metadata/index shape.
