@@ -31,8 +31,6 @@ from mms_opencode_config import (
     OPENCODE_BYPASS_PERMISSION_ENV,
     OPENCODE_DEFAULT_OUTPUT_LIMIT,
     OPENCODE_IMAGE_INPUT_MODELS,
-    OPENCODE_LAUNCH_PREFLIGHT_PROMPT,
-    OPENCODE_LAUNCH_PREFLIGHT_TIMEOUT,
     OPENCODE_LITE_DEFAULT_AGENT,
     OPENCODE_MODEL_LIMIT_OVERRIDES,
     OPENCODE_PROVIDER_ID,
@@ -63,6 +61,10 @@ from mms_opencode_config import (
     opencode_route_provider_ref as _opencode_route_provider_ref,
     opencode_runtime_bool as _opencode_runtime_bool,
     opencode_runtime_routes as _opencode_runtime_routes,
+)
+from mms_opencode_preflight import (
+    opencode_run_preflight as _opencode_run_preflight_impl,
+    opencode_select_launch_candidate as _opencode_select_launch_candidate_impl,
 )
 from mms_opencode_session import (
     clear_opencode_config_env as _clear_opencode_config_env,
@@ -10004,88 +10006,30 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
 
 
 def _opencode_run_preflight(env, agent, model_ref, timeout=None, bypass=True):
-    timeout = int(timeout or _opencode_preflight_timeout())
-    cmd = ["opencode", "run", "--pure"]
-    if bool(bypass):
-        cmd.append(OPENCODE_BYPASS_FLAG)
-    if agent:
-        cmd += ["--agent", agent]
-    cmd += ["-m", model_ref, OPENCODE_LAUNCH_PREFLIGHT_PROMPT]
-    started = perf_counter()
-    try:
-        completed = subprocess.run(
-            cmd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-        combined = f"{completed.stdout}\n{completed.stderr}"
-        return {
-            "ok": completed.returncode == 0 and "OK" in combined.upper(),
-            "returncode": completed.returncode,
-            "elapsed_sec": round(perf_counter() - started, 3),
-            "stdout": " ".join(str(completed.stdout or "").split())[:500],
-            "stderr": " ".join(str(completed.stderr or "").split())[:500],
-        }
-    except FileNotFoundError:
-        return {
-            "ok": False,
-            "returncode": "not_found",
-            "elapsed_sec": round(perf_counter() - started, 3),
-            "stdout": "",
-            "stderr": "opencode not found",
-        }
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "ok": False,
-            "returncode": "timeout",
-            "elapsed_sec": timeout,
-            "stdout": " ".join(str(exc.stdout or "").split())[:500],
-            "stderr": " ".join(str(exc.stderr or "").split())[:500],
-        }
+    return _opencode_run_preflight_impl(
+        env,
+        agent,
+        model_ref,
+        timeout=timeout,
+        bypass=bypass,
+        subprocess_run=subprocess.run,
+        perf_counter_fn=perf_counter,
+        preflight_timeout=_opencode_preflight_timeout,
+    )
 
 
 def _opencode_select_launch_candidate(runtime, routes, model, env):
-    candidates = _opencode_launch_candidates(runtime, routes, model)
-    if not candidates:
-        return "", "", []
-    if not _opencode_launch_preflight_enabled(runtime):
-        first = candidates[0]
-        return first["model_ref"], first.get("agent") or "", []
-
-    checks = []
-    console.print("[dim]OpenCode Agent preflight: 检查 primary builder route...[/dim]")
-    for candidate in candidates:
-        check = _opencode_run_preflight(
-            env,
-            candidate.get("agent") or "",
-            candidate.get("model_ref") or "",
-            bypass=_opencode_bypass_enabled(runtime),
-        )
-        check.update(
-            {
-                "route_key": candidate.get("route_key"),
-                "model_ref": candidate.get("model_ref"),
-                "agent": candidate.get("agent") or "",
-            }
-        )
-        checks.append(check)
-        if check.get("ok"):
-            if candidate.get("route_key") != candidates[0].get("route_key"):
-                console.print(
-                    f"[yellow]OpenCode primary route failed; using fallback "
-                    f"{candidate.get('route_key')} ({candidate.get('model_ref')}).[/yellow]"
-                )
-            return candidate["model_ref"], candidate.get("agent") or "", checks
-        console.print(
-            f"[yellow]⚠ OpenCode route {candidate.get('route_key')} "
-            f"preflight failed: {check.get('returncode')}[/yellow]"
-        )
-
-    return "", "", checks
+    return _opencode_select_launch_candidate_impl(
+        runtime,
+        routes,
+        model,
+        env,
+        launch_candidates=_opencode_launch_candidates,
+        launch_preflight_enabled=_opencode_launch_preflight_enabled,
+        run_preflight=_opencode_run_preflight,
+        bypass_enabled=_opencode_bypass_enabled,
+        console=console,
+    )
 
 
 def _opencode_gateway_health_check(runtime):
