@@ -66,6 +66,7 @@ from mms_opencode_env import (
     opencode_export_config_path as _opencode_export_config_path_impl,
     opencode_gateway_env as _opencode_gateway_env_impl,
     opencode_global_omo_env as _opencode_global_omo_env_impl,
+    opencode_set_soft_home as _opencode_set_soft_home_impl,
     opencode_write_config as _opencode_write_config_impl,
 )
 from mms_opencode_launch import (
@@ -80,6 +81,7 @@ from mms_opencode_preflight import (
 )
 from mms_opencode_session import (
     clear_opencode_config_env as _clear_opencode_config_env,
+    overlay_opencode_session_assets as _overlay_opencode_session_assets_impl,
     opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
     opencode_session_plugin_runtime as _opencode_session_plugin_runtime,
     opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
@@ -1034,18 +1036,12 @@ def _set_codex_soft_home(env, session_home):
 
 
 def _set_opencode_soft_home(env, session_home):
-    """Keep real HOME for GUI/Keychain; keep OpenCode XDG state session-local."""
-    real_home = _real_user_path()
-    env["HOME"] = real_home
-    env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
-    env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
-    env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
-    env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
-    env["MMS_HOME_ISOLATION_MODE"] = "soft"
-    env["MMS_SOFT_HOME"] = "1"
-    env["MMS_OPENCODE_SOFT_HOME"] = "1"
-    _set_session_home_hint(env, session_home)
-    return env
+    return _opencode_set_soft_home_impl(
+        env,
+        session_home,
+        real_user_path=_real_user_path,
+        set_session_home_hint=_set_session_home_hint,
+    )
 
 
 def _model_name_from_info(model_info):
@@ -4835,24 +4831,21 @@ def _overlay_agy_session_assets(account_home, session_home, *, enable_caveman=Fa
 
 
 def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman=False, disabled_session_surfaces=None, runtime=None):
-    if not config_dir or not session_home:
-        return
-    os.makedirs(config_dir, exist_ok=True)
-    plugin_runtime = _opencode_session_plugin_runtime(runtime, disabled_session_surfaces)
-    _overlay_opencode_rtk_plugin(config_dir, plugin_runtime)
-    if enable_caveman:
-        _overlay_caveman_session_entries(
-            config_dir,
-            session_home,
-            enable_caveman=True,
-            disabled_session_surfaces=disabled_session_surfaces,
-        )
-    _overlay_web_access_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_weber_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
-    _overlay_opencode_xmem_plugin(config_dir, plugin_runtime)
+    return _overlay_opencode_session_assets_impl(
+        config_dir,
+        session_home,
+        enable_caveman=enable_caveman,
+        disabled_session_surfaces=disabled_session_surfaces,
+        runtime=runtime,
+        overlay_opencode_rtk_plugin=_overlay_opencode_rtk_plugin,
+        overlay_caveman_session_entries=_overlay_caveman_session_entries,
+        overlay_web_access_session_entries=_overlay_web_access_session_entries,
+        overlay_weber_session_entries=_overlay_weber_session_entries,
+        overlay_toon_session_entries=_overlay_toon_session_entries,
+        overlay_token_saver_session_entries=_overlay_token_saver_session_entries,
+        overlay_xmem_session_entries=_overlay_xmem_session_entries,
+        overlay_opencode_xmem_plugin=_overlay_opencode_xmem_plugin,
+    )
 
 
 def _configure_ecc_session_env(env_data, *, enable_ecc=False):

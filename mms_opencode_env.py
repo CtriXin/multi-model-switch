@@ -14,6 +14,21 @@ def opencode_write_config(path, runtime, model, *, build_config_content, atomic_
     return config_content
 
 
+def opencode_set_soft_home(env, session_home, *, real_user_path, set_session_home_hint):
+    """Keep real HOME for GUI/Keychain; keep OpenCode XDG state session-local."""
+    real_home = real_user_path()
+    env["HOME"] = real_home
+    env["XDG_CONFIG_HOME"] = os.path.join(session_home, ".config")
+    env["XDG_CACHE_HOME"] = os.path.join(session_home, ".cache")
+    env["XDG_DATA_HOME"] = os.path.join(session_home, ".local", "share")
+    env["XDG_STATE_HOME"] = os.path.join(session_home, ".local", "state")
+    env["MMS_HOME_ISOLATION_MODE"] = "soft"
+    env["MMS_SOFT_HOME"] = "1"
+    env["MMS_OPENCODE_SOFT_HOME"] = "1"
+    set_session_home_hint(env, session_home)
+    return env
+
+
 def opencode_export_config_path(runtime, model, *, real_user_path):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider = opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
@@ -157,5 +172,6 @@ __all__ = [
     "opencode_export_config_path",
     "opencode_gateway_env",
     "opencode_global_omo_env",
+    "opencode_set_soft_home",
     "opencode_write_config",
 ]

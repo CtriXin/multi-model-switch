@@ -89,3 +89,39 @@ def overlay_opencode_plugin(config_dir, plugin_path, target_name):
     except OSError:
         shutil.copy2(plugin_path, target_path)
     return True
+
+
+def overlay_opencode_session_assets(
+    config_dir,
+    session_home,
+    *,
+    enable_caveman=False,
+    disabled_session_surfaces=None,
+    runtime=None,
+    overlay_opencode_rtk_plugin,
+    overlay_caveman_session_entries,
+    overlay_web_access_session_entries,
+    overlay_weber_session_entries,
+    overlay_toon_session_entries,
+    overlay_token_saver_session_entries,
+    overlay_xmem_session_entries,
+    overlay_opencode_xmem_plugin,
+):
+    if not config_dir or not session_home:
+        return
+    os.makedirs(config_dir, exist_ok=True)
+    plugin_runtime = opencode_session_plugin_runtime(runtime, disabled_session_surfaces)
+    overlay_opencode_rtk_plugin(config_dir, plugin_runtime)
+    if enable_caveman:
+        overlay_caveman_session_entries(
+            config_dir,
+            session_home,
+            enable_caveman=True,
+            disabled_session_surfaces=disabled_session_surfaces,
+        )
+    overlay_web_access_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    overlay_weber_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    overlay_toon_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    overlay_token_saver_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    overlay_xmem_session_entries(config_dir, session_home, disabled_session_surfaces=disabled_session_surfaces)
+    overlay_opencode_xmem_plugin(config_dir, plugin_runtime)
