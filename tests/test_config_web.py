@@ -125,6 +125,13 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "renderProviderList();renderTestSelectors();" in html
 
 
+def test_config_web_fetch_models_does_not_persist_to_fallback_models():
+    html = mms_config_web._HTML_PAGE
+
+    assert "不会自动写入 fallback_models" in html
+    assert "p.fallback_models=[...new Set(data.models)]" not in html
+
+
 def test_config_web_plan_noops_credential_backed_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mms_config_web,
