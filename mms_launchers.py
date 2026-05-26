@@ -64,6 +64,13 @@ from mms_opencode_config import (
     opencode_runtime_bool as _opencode_runtime_bool,
     opencode_runtime_routes as _opencode_runtime_routes,
 )
+from mms_opencode_session import (
+    clear_opencode_config_env as _clear_opencode_config_env,
+    opencode_rtk_plugin_path as _opencode_rtk_plugin_path_impl,
+    opencode_session_plugin_runtime as _opencode_session_plugin_runtime,
+    opencode_xmem_plugin_path as _opencode_xmem_plugin_path_impl,
+    overlay_opencode_plugin as _overlay_opencode_plugin_impl,
+)
 from mms_core import (
     DEFAULT_ACCOUNT_TIMEZONE,
     _normalize_claude_1m_mode,
@@ -4817,8 +4824,7 @@ def _overlay_opencode_session_assets(config_dir, session_home, *, enable_caveman
     if not config_dir or not session_home:
         return
     os.makedirs(config_dir, exist_ok=True)
-    plugin_runtime = dict(runtime or {}) if isinstance(runtime, dict) else {}
-    plugin_runtime["disabled_session_surfaces"] = disabled_session_surfaces
+    plugin_runtime = _opencode_session_plugin_runtime(runtime, disabled_session_surfaces)
     _overlay_opencode_rtk_plugin(config_dir, plugin_runtime)
     if enable_caveman:
         _overlay_caveman_session_entries(
@@ -10119,67 +10125,40 @@ def _opencode_model_config(runtime, model_name):
 
 
 def _opencode_rtk_plugin_path(runtime=None):
-    disabled_hooks = _normalize_session_surface_disabled(
-        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
-    ).get("hooks", set())
-    if "opencode-rtk" in disabled_hooks:
-        return ""
-    if not _opencode_runtime_bool(runtime or {}, "opencode_rtk", True):
-        return ""
-    if not _opencode_env_bool("MMS_OPENCODE_RTK", True):
-        return ""
-    if not shutil.which("rtk"):
-        return ""
-    plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "opencode-rtk.ts")
-    return plugin_path if os.path.isfile(plugin_path) else ""
+    return _opencode_rtk_plugin_path_impl(
+        runtime,
+        module_file=__file__,
+        normalize_session_surface_disabled=_normalize_session_surface_disabled,
+        runtime_bool=_opencode_runtime_bool,
+        env_bool=_opencode_env_bool,
+    )
 
 
 def _opencode_xmem_plugin_path(runtime=None):
-    disabled = _normalize_session_surface_disabled(
-        (runtime or {}).get("disabled_session_surfaces") if isinstance(runtime, dict) else None
+    return _opencode_xmem_plugin_path_impl(
+        runtime,
+        module_file=__file__,
+        normalize_session_surface_disabled=_normalize_session_surface_disabled,
+        session_skill_disabled=_session_skill_disabled,
+        resolve_xmem_root=_resolve_xmem_root,
+        xmem_cli_path=_xmem_cli_path,
     )
-    if "opencode-xmem" in disabled.get("hooks", set()) or _session_skill_disabled(disabled, "xmem"):
-        return ""
-    if not _resolve_xmem_root() and not _xmem_cli_path():
-        return ""
-    plugin_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "opencode-xmem.ts")
-    return plugin_path if os.path.isfile(plugin_path) else ""
 
 
 def _overlay_opencode_rtk_plugin(config_dir, runtime=None):
-    plugin_path = _opencode_rtk_plugin_path(runtime)
-    if not plugin_path:
-        return False
-    plugins_dir = os.path.join(config_dir, "plugins")
-    os.makedirs(plugins_dir, exist_ok=True)
-    target_path = os.path.join(plugins_dir, "mms-rtk.ts")
-    try:
-        if os.path.islink(target_path) or os.path.isfile(target_path):
-            os.unlink(target_path)
-        elif os.path.isdir(target_path):
-            shutil.rmtree(target_path)
-        os.symlink(plugin_path, target_path)
-    except OSError:
-        shutil.copy2(plugin_path, target_path)
-    return True
+    return _overlay_opencode_plugin_impl(
+        config_dir,
+        _opencode_rtk_plugin_path(runtime),
+        "mms-rtk.ts",
+    )
 
 
 def _overlay_opencode_xmem_plugin(config_dir, runtime=None):
-    plugin_path = _opencode_xmem_plugin_path(runtime)
-    if not plugin_path:
-        return False
-    plugins_dir = os.path.join(config_dir, "plugins")
-    os.makedirs(plugins_dir, exist_ok=True)
-    target_path = os.path.join(plugins_dir, "mms-xmem.ts")
-    try:
-        if os.path.islink(target_path) or os.path.isfile(target_path):
-            os.unlink(target_path)
-        elif os.path.isdir(target_path):
-            shutil.rmtree(target_path)
-        os.symlink(plugin_path, target_path)
-    except OSError:
-        shutil.copy2(plugin_path, target_path)
-    return True
+    return _overlay_opencode_plugin_impl(
+        config_dir,
+        _opencode_xmem_plugin_path(runtime),
+        "mms-xmem.ts",
+    )
 
 
 def _opencode_rtk_plugin_enabled(runtime=None):
@@ -10242,8 +10221,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
     env = os.environ.copy()
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
-    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION"):
-        env.pop(key, None)
+    _clear_opencode_config_env(env)
     _inject_real_home_hints(env)
     _inject_selected_model_name(env, model, model_info=model_info)
     _set_opencode_soft_home(env, session_home)
@@ -10293,8 +10271,7 @@ def _opencode_gateway_env(runtime, model_info=None):
 
 def _opencode_global_omo_env(runtime):
     env = os.environ.copy()
-    for key in ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT", "OPENCODE_PERMISSION"):
-        env.pop(key, None)
+    _clear_opencode_config_env(env)
     _inject_real_home_hints(env, include_xdg=True)
     env["HOME"] = _real_user_path()
     env["XDG_CACHE_HOME"] = _real_user_path(".cache")
