@@ -25,10 +25,11 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v3.2.5`
+Current tagged version: `v3.2.6`
 
 Key changes in this generation:
 
+- Codex primary/rescue fallback now retries prompt-cache-sensitive GLM/DeepSeek/Qwen-compatible routes over Anthropic `/v1/messages` when a gateway rejects `/v1/chat/completions`
 - provider profiles for OpenAI, Qwen/DashScope, MiMo, MiniMax, DeepSeek, Kimi Code, and GLM/Z.ai
 - profile-driven auth/body/thinking/effort patching across bridge and dispatch paths
 - Claude resume persistence through `.claude/projects`
@@ -95,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.5/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.6/install.sh | bash -s --
 ```
 
 Verify the install:

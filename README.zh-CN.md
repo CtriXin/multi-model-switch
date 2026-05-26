@@ -25,10 +25,11 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v3.2.5`
+当前 tagged version：`v3.2.6`
 
 这一代的重点：
 
+- Codex primary/rescue fallback 遇到 GLM/DeepSeek/Qwen-compatible prompt-cache-sensitive route 拒绝 `/v1/chat/completions` 时，会自动改走 Anthropic `/v1/messages`
 - provider profiles 覆盖 OpenAI、Qwen/DashScope、MiMo、MiniMax、DeepSeek、Kimi Code、GLM/Z.ai
 - bridge / launcher / chat / discuss / router 共享 profile-driven auth/body/thinking/effort patch
 - Claude 通过 `.claude/projects` 恢复项目级 resume
@@ -95,7 +96,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.5/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.2.6/install.sh | bash -s --
 ```
 
 安装后自检：
