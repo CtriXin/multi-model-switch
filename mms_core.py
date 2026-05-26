@@ -11836,6 +11836,16 @@ def handle_config(cfg, args_rest):
     if key_path in {"preferences.doc", "preference.doc"}:
         console.print(PREFERENCES_DOC_PATH)
         return
+    if key_path in {"web", "webui", "setup.web", "setup-web"}:
+        from mms_config_web import run_config_web
+
+        raise SystemExit(run_config_web(
+            cfg,
+            args_rest[1:],
+            command_name=current_command(),
+            config_path=_config_write_target_path(),
+            preferences_path=PREFERENCES_PATHS[0],
+        ))
     if key_path in {"gates", "human-gate", "humangate", "human-gates"}:
         _display_human_gate_help()
         return
@@ -12676,6 +12686,7 @@ def _display_config_help():
     console.print(f"  {command} config set <dot.path> <value>")
     console.print(f"  {command} config unset <dot.path>")
     console.print(f"  {command} config connect")
+    console.print(f"  {command} config web [--no-open]")
     console.print(f"  {command} config preferences.help")
     console.print(f"  {command} config human-gate")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
@@ -14150,6 +14161,19 @@ def main():
                     save_config(cfg)
             handle_config(cfg, argv[1:])
             return
+        if command in {"setup", "setup-web", "web-setup"}:
+            from mms_config_web import run_config_web
+
+            setup_args = list(argv[1:])
+            if setup_args and setup_args[0] in {"web", "config-web"}:
+                setup_args = setup_args[1:]
+            raise SystemExit(run_config_web(
+                preloaded_command_cfg if preloaded_command_cfg is not None else (bootstrap_cfg or _default_config()),
+                setup_args,
+                command_name=current_command(),
+                config_path=_config_write_target_path(),
+                preferences_path=PREFERENCES_PATHS[0],
+            ))
         if command == "chat":
             from mms_chat import chat_main
 
