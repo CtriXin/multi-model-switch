@@ -119,6 +119,7 @@ from mms_opencode_health import (
     opencode_route_health_sort_key as _opencode_route_health_sort_key,
 )
 from mms_opencode_profiles import (
+    OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
     OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
     OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
@@ -9368,8 +9369,8 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     return choice
 
 
-def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"):
-    profile_id = _normalize_opencode_profile_id(profile_id) or "lite_pro"
+def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="agent"):
+    profile_id = _normalize_opencode_profile_id(profile_id) or _OPENCODE_AGENT_PROFILE_ID
     latest = _load_opencode_route_health_latest(repo_root)
     expected_roles = {str(spec.get("key") or "").strip() for spec in _opencode_lite_pro_specs(profile_id)}
     expected = len(expected_roles)
@@ -9408,7 +9409,7 @@ def _opencode_profile_menu_options():
     for option in _OPENCODE_PROFILE_OPTIONS:
         profile_id = _normalize_opencode_profile_id(option.get("profile_id") or option["id"])
         summary = option["summary"]
-        if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+        if profile_id == _OPENCODE_AGENT_PROFILE_ID:
             lite_pro_health = _opencode_lite_pro_health_summary_text(profile_id=profile_id)
         else:
             lite_pro_health = ""
@@ -9627,7 +9628,7 @@ def _find_opencode_model_route(
     *,
     route_key="route",
     route_policy="",
-    profile_id="lite_pro",
+    profile_id=_OPENCODE_AGENT_PROFILE_ID,
     provider_id="",
 ):
     return _find_opencode_model_route_impl(
@@ -9643,7 +9644,7 @@ def _find_opencode_model_route(
     )
 
 
-def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
+def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=_OPENCODE_AGENT_PROFILE_ID):
     return _resolve_opencode_lite_pro_runtime_impl(
         cfg,
         default_provider,
@@ -13689,9 +13690,9 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated  直接启动默认 OpenSpec Multi mode\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated_backend  启动 OpenSpec Multi backend server\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated_acp  启动 OpenSpec Multi ACP server\n"
+            f"  {current_command()} opencode --profile agent  启动默认 Agent mode\n"
+            f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
+            f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
@@ -13719,14 +13720,14 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 lite_pro_orchestrated / lite_pro_orchestrated_backend / lite_pro_orchestrated_acp / lite_pro / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / omo / raw")
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
-        help="OpenCode 专用入口：tui 默认交互；backend/serve=headless server；acp=Agent Client Protocol server",
+        help=argparse.SUPPRESS,
     )
-    parser.add_argument("--backend-agent", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint backend")
-    parser.add_argument("--acp", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint acp")
+    parser.add_argument("--backend-agent", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--acp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--lang", choices=["zh", "en"], help="临时指定 UI 语言")
     parser.add_argument("--trace", action="store_true",
                         help="启动前打印选择链路追踪信息（输出到 stderr）")
@@ -13893,7 +13894,7 @@ def main():
         if target is None:
             target = "opencode"
         elif target != "opencode":
-            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile lite_pro_orchestrated_backend")
+            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
 
     if target:
         # Is it a scene number?

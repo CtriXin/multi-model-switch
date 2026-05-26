@@ -44,10 +44,10 @@ cli = "codex"
 provider = "default"
 model = "gpt-5.4"
 
-# OpenCode Lite Pro / OpenSpec Multi 可选覆盖；默认留空走自动路线。
+# OpenCode Agent 可选覆盖；默认留空走自动路线。
 # 这些只影响 MMS 生成的 session-local opencode.json，不写全局 OpenCode config。
 #[opencode]
-#default_profile = "lite_pro_orchestrated"
+#default_profile = "agent"
 #
 #[opencode.agent_models.mobius-explore-glm]
 #provider_id = "default"

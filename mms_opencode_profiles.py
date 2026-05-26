@@ -1,53 +1,34 @@
-"""OpenCode profile, entrypoint, and Lite Pro roster profile helpers."""
+"""OpenCode profile, entrypoint, and agent roster profile helpers."""
 
 from __future__ import annotations
 
-OPENCODE_DEFAULT_PROFILE_ID = "lite_pro_orchestrated"
+OPENCODE_AGENT_PROFILE_ID = "lite_pro_orchestrated"
+OPENCODE_DEFAULT_PROFILE_ID = "agent"
 
-OPENCODE_BASE_PROFILE_OPTIONS = [
+OPENCODE_PROFILE_OPTIONS = [
     {
         "id": OPENCODE_DEFAULT_PROFILE_ID,
-        "label": "OpenSpec Multi",
+        "profile_id": OPENCODE_AGENT_PROFILE_ID,
+        "label": "Agent",
         "badge": "默认",
-        "summary": "默认推荐：5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt 只读找茬。",
+        "summary": "默认推荐：session-local agent roster；5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt/vision 只读辅助。",
     },
     {
-        "id": "lite_pro",
-        "label": "Pro Solo",
-        "summary": "5.5 主写；5.4 兜底执行；国产 explore/bug-hunt 只读辅助；session-local。",
-    },
-    {
-        "id": "heavy_omo",
-        "label": "OMO Global",
+        "id": "omo",
+        "profile_id": "heavy_omo",
+        "label": "OMO",
         "summary": "读取 global OpenCode + OMO；MMS 不写全局配置。",
     },
     {
         "id": "raw",
-        "label": "Raw Pure",
+        "label": "Raw",
         "summary": "纯 OpenCode；session-local；无 OMO/agents。",
     },
 ]
 
-OPENCODE_PROFILE_OPTIONS = [
-    OPENCODE_BASE_PROFILE_OPTIONS[0],
-    {
-        "id": "lite_pro_orchestrated_backend",
-        "profile_id": "lite_pro_orchestrated",
-        "entrypoint": "serve",
-        "label": "Backend Multi",
-        "badge": "后台",
-        "summary": "OpenSpec Multi-Agent + opencode serve；给 SDK/WebUI/headless client 连接。",
-    },
-    {
-        "id": "lite_pro_orchestrated_acp",
-        "profile_id": "lite_pro_orchestrated",
-        "entrypoint": "acp",
-        "label": "ACP Multi",
-        "badge": "编辑器",
-        "summary": "OpenSpec Multi-Agent + opencode acp；给 ACP-compatible editor/client 连接。",
-    },
-    *OPENCODE_BASE_PROFILE_OPTIONS[1:],
-]
+# Kept as an exported compatibility name for older imports; the user-facing
+# surface is now just OPENCODE_PROFILE_OPTIONS.
+OPENCODE_BASE_PROFILE_OPTIONS = OPENCODE_PROFILE_OPTIONS
 
 OPENCODE_DEFAULT_MODEL_PREFERENCES = (
     "gpt-5.4",
@@ -88,17 +69,22 @@ def normalize_opencode_profile_id(value):
         return ""
     normalized = raw.lower().replace("-", "_").replace(" ", "_")
     aliases = {
-        "pro": "lite_pro",
-        "pro_solo": "lite_pro",
-        "litepro": "lite_pro",
-        "lite_pro": "lite_pro",
-        "5_5_pro": "lite_pro",
-        "orchestrated": "lite_pro_orchestrated",
-        "multi_agent": "lite_pro_orchestrated",
-        "5_5_multi_agent": "lite_pro_orchestrated",
-        "openspec_multi": "lite_pro_orchestrated",
-        "lite_multi_agent": "lite_pro_orchestrated",
-        "lite_pro_orchestrated": "lite_pro_orchestrated",
+        "agent": OPENCODE_AGENT_PROFILE_ID,
+        "agents": OPENCODE_AGENT_PROFILE_ID,
+        "multi": OPENCODE_AGENT_PROFILE_ID,
+        "multi_agent": OPENCODE_AGENT_PROFILE_ID,
+        "openspec": OPENCODE_AGENT_PROFILE_ID,
+        "openspec_multi": OPENCODE_AGENT_PROFILE_ID,
+        "orchestrated": OPENCODE_AGENT_PROFILE_ID,
+        "lite_multi_agent": OPENCODE_AGENT_PROFILE_ID,
+        "5_5_multi_agent": OPENCODE_AGENT_PROFILE_ID,
+        "lite_pro_orchestrated": OPENCODE_AGENT_PROFILE_ID,
+        # Legacy pro spellings now fold into the single Agent profile.
+        "pro": OPENCODE_AGENT_PROFILE_ID,
+        "pro_solo": OPENCODE_AGENT_PROFILE_ID,
+        "litepro": OPENCODE_AGENT_PROFILE_ID,
+        "lite_pro": OPENCODE_AGENT_PROFILE_ID,
+        "5_5_pro": OPENCODE_AGENT_PROFILE_ID,
         "omo": "heavy_omo",
         "heavy": "heavy_omo",
         "heavy_omo": "heavy_omo",
@@ -142,16 +128,16 @@ def opencode_profile_selection(value):
         entrypoint = normalize_opencode_entrypoint(option.get("entrypoint") or "")
         return profile_id, entrypoint
     aliases = {
-        "backend_multi": ("lite_pro_orchestrated", "serve"),
-        "multi_backend": ("lite_pro_orchestrated", "serve"),
-        "multi_agent_backend": ("lite_pro_orchestrated", "serve"),
-        "openspec_multi_backend": ("lite_pro_orchestrated", "serve"),
-        "lite_pro_orchestrated_backend": ("lite_pro_orchestrated", "serve"),
-        "acp_multi": ("lite_pro_orchestrated", "acp"),
-        "multi_acp": ("lite_pro_orchestrated", "acp"),
-        "multi_agent_acp": ("lite_pro_orchestrated", "acp"),
-        "openspec_multi_acp": ("lite_pro_orchestrated", "acp"),
-        "lite_pro_orchestrated_acp": ("lite_pro_orchestrated", "acp"),
+        "backend_multi": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "multi_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "multi_agent_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "openspec_multi_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "lite_pro_orchestrated_backend": (OPENCODE_AGENT_PROFILE_ID, "serve"),
+        "acp_multi": (OPENCODE_AGENT_PROFILE_ID, "acp"),
+        "multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
+        "multi_agent_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
+        "openspec_multi_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
+        "lite_pro_orchestrated_acp": (OPENCODE_AGENT_PROFILE_ID, "acp"),
     }
     if normalized in aliases:
         return aliases[normalized]
@@ -159,7 +145,7 @@ def opencode_profile_selection(value):
 
 
 def opencode_profile_selection_ids():
-    ids = ["lite"] + [str(option.get("id") or "").strip() for option in OPENCODE_PROFILE_OPTIONS]
+    ids = [str(option.get("id") or "").strip() for option in OPENCODE_PROFILE_OPTIONS]
     return [item for item in ids if item]
 
 
@@ -172,7 +158,7 @@ def apply_opencode_entrypoint(runtime, entrypoint):
     return runtime
 
 
-def opencode_lite_pro_specs(profile_id="lite_pro"):
+def opencode_lite_pro_specs(profile_id=OPENCODE_AGENT_PROFILE_ID):
     specs = list(OPENCODE_LITE_PRO_SPECS)
     if normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
         insert_at = next(
@@ -188,7 +174,7 @@ def opencode_profile_label(profile_id):
     if profile_id == "lite":
         return "Lite"
     for option in OPENCODE_PROFILE_OPTIONS:
-        if option["id"] == profile_id:
+        if option["id"] == profile_id or normalize_opencode_profile_id(option.get("profile_id") or option["id"]) == profile_id:
             return option["label"]
     return profile_id or "Raw"
 
@@ -209,7 +195,7 @@ def apply_opencode_profile(runtime, profile_id):
         runtime["opencode_pure"] = True
         runtime["opencode_lite_agents"] = False
         runtime["opencode_agent"] = ""
-    elif profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+    elif profile_id == OPENCODE_AGENT_PROFILE_ID:
         runtime["opencode_use_global_config"] = False
         runtime["opencode_pure"] = True
         runtime["opencode_lite_agents"] = True
@@ -236,6 +222,7 @@ def apply_opencode_profile(runtime, profile_id):
 
 
 __all__ = [
+    "OPENCODE_AGENT_PROFILE_ID",
     "OPENCODE_BASE_PROFILE_OPTIONS",
     "OPENCODE_DEFAULT_MODEL_PREFERENCES",
     "OPENCODE_DEFAULT_PROFILE_ID",

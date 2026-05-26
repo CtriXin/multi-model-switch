@@ -10057,7 +10057,7 @@ def _opencode_select_launch_candidate(runtime, routes, model, env):
         return first["model_ref"], first.get("agent") or "", []
 
     checks = []
-    console.print("[dim]OpenCode Lite Pro preflight: 检查 primary builder route...[/dim]")
+    console.print("[dim]OpenCode Agent preflight: 检查 primary builder route...[/dim]")
     for candidate in candidates:
         check = _opencode_run_preflight(
             env,
@@ -10310,8 +10310,8 @@ def launch_opencode(model_info, runtime, once=False):
     env = _opencode_gateway_env(runtime, model_info=model_info)
     launch_model_ref, launch_agent, preflight_checks = _opencode_select_launch_candidate(runtime, routes, model, env)
     if not launch_model_ref and preflight_checks:
-        console.print("[red]OpenCode Lite Pro preflight 全部失败；未启动可能坏掉的 primary route。[/red]")
-        console.print("[dim]可运行 `mms opencode-smoke --profile lite_pro --live` 查看完整 Moebius trace。[/dim]")
+        console.print("[red]OpenCode Agent preflight 全部失败；未启动可能坏掉的 primary route。[/red]")
+        console.print("[dim]可运行 `mms opencode-smoke --profile agent --live` 查看完整 Moebius trace。[/dim]")
         sys.exit(2)
     if not launch_model_ref:
         console.print("[red]OpenCode 启动需要先选择一个模型[/red]")

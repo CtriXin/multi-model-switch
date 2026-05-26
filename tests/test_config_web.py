@@ -86,7 +86,7 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
     assert "Model list test" in out
     assert "hidden_models" in out
     assert "preferred_cli.default" in out
-    assert "mms opencode --profile lite_pro_orchestrated" in out
+    assert "mms opencode --profile agent" in out
 
 
 def test_setup_web_requests_are_guard_exempt():

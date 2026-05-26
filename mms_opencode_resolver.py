@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mms_opencode_profiles import (
+    OPENCODE_AGENT_PROFILE_ID,
     OPENCODE_DEFAULT_MODEL_PREFERENCES,
     opencode_lite_pro_specs,
     opencode_profile_label,
@@ -61,7 +62,7 @@ def find_opencode_model_route(
     deps,
     route_key="route",
     route_policy="",
-    profile_id="lite_pro",
+    profile_id=OPENCODE_AGENT_PROFILE_ID,
     provider_id="",
 ):
     wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
@@ -144,7 +145,7 @@ def find_opencode_model_route(
     return scored[0][1]
 
 
-def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro", *, deps):
+def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=OPENCODE_AGENT_PROFILE_ID, *, deps):
     routes = []
     agent_models = {}
     agent_model_overrides = opencode_agent_model_overrides(cfg)
@@ -247,7 +248,7 @@ def resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, pro
         return None, None
 
     runtime = dict(builder_route)
-    runtime["id"] = str(builder_route.get("provider_id") or "opencode-lite-pro")
+    runtime["id"] = str(builder_route.get("provider_id") or "opencode-agent")
     runtime["name"] = f"OpenCode {opencode_profile_label(profile_id)}"
     runtime["auth_mode"] = "api_key"
     runtime["runtime_kind"] = "provider"
@@ -283,7 +284,7 @@ def resolve_opencode_profile_runtime(cfg, default_provider, default_models, prof
         }
         runtime = deps.apply_profile(runtime, profile_id)
         return {"model": "global-omo"}, deps.apply_entrypoint(runtime, selection_entrypoint)
-    if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+    if profile_id == OPENCODE_AGENT_PROFILE_ID:
         model_info, runtime = resolve_opencode_lite_pro_runtime(
             cfg,
             default_provider,

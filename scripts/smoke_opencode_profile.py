@@ -111,7 +111,7 @@ def _record_trace_event(repo_root: Path, trace_id: str, status: str, data: dict[
         "--backend",
         "opencode",
         "--lane",
-        "lite_pro",
+        "opencode_agent",
         "--data-json",
         json.dumps(_safe_event_payload(data), ensure_ascii=False),
     ]
@@ -610,9 +610,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Smoke MMS OpenCode profile config; --live performs real model calls.")
     parser.add_argument(
         "--profile",
-        default="lite_pro",
-        choices=mms_core._opencode_profile_selection_ids(),
-        help="OpenCode mode/profile to smoke",
+        default="agent",
+        help="OpenCode mode/profile to smoke: agent / omo / raw",
     )
     parser.add_argument("--live", action="store_true", help="Run real opencode run calls for each selected agent")
     parser.add_argument("--agent", action="append", help="Agent to live-smoke. Repeatable. Default: all profile agents")
@@ -622,13 +621,18 @@ def main() -> int:
     parser.add_argument("--trace-id", help="Existing/new Moebius trace id")
     args = parser.parse_args()
 
+    canonical_profile, _entrypoint = mms_core._opencode_profile_selection(args.profile)
+    if not canonical_profile:
+        parser.error(f"--profile 仅支持 OpenCode mode：{', '.join(mms_core._opencode_profile_selection_ids())}")
+
     repo_root = Path(os.environ.get("MMS_TARGET_REPO") or ROOT_DIR).resolve()
     trace_id = args.trace_id or f"trc-{_now_slug()}-opencode-smoke"
-    _init_trace(repo_root, trace_id, args.profile, args.live)
+    _init_trace(repo_root, trace_id, canonical_profile, args.live)
 
     result: dict[str, Any] = {
         "schema": "mms.opencode_profile_smoke.v1",
-        "profile": args.profile,
+        "profile": canonical_profile,
+        "requested_profile": args.profile,
         "live": bool(args.live),
         "trace_id": trace_id,
         "trace_path": str(repo_root / ".ai" / "trace" / trace_id),
@@ -732,7 +736,7 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         status = "PASS" if result.get("ok") else "FAIL"
-        print(f"[{status}] profile={args.profile} live={args.live} trace={trace_id}")
+        print(f"[{status}] profile={canonical_profile} requested={args.profile} live={args.live} trace={trace_id}")
         print(f"result={result_path}")
         print(f"default={result.get('default_agent')} {result.get('default_model')}")
         for agent, model in sorted((result.get("agents") or {}).items()):

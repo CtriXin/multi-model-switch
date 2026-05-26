@@ -598,7 +598,8 @@ def test_core_provider_supports_opencode_cli():
 def test_core_opencode_profiles_are_fixed_launch_shapes():
     import mms_core
 
-    assert mms_core._normalize_opencode_profile_id("lite-pro") == "lite_pro"
+    assert mms_core._normalize_opencode_profile_id("lite-pro") == "lite_pro_orchestrated"
+    assert mms_core._normalize_opencode_profile_id("agent") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("orchestrated") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("openspec-multi") == "lite_pro_orchestrated"
     assert mms_core._normalize_opencode_profile_id("omo") == "heavy_omo"
@@ -606,21 +607,21 @@ def test_core_opencode_profiles_are_fixed_launch_shapes():
     assert mms_core._opencode_profile_selection("lite_pro_orchestrated_acp") == ("lite_pro_orchestrated", "acp")
 
     lite = mms_core._apply_opencode_profile(_runtime(), "lite")
-    lite_pro = mms_core._apply_opencode_profile(_runtime(), "lite_pro")
+    agent = mms_core._apply_opencode_profile(_runtime(), "agent")
     backend_multi = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated_backend")
-    heavy = mms_core._apply_opencode_profile(_runtime(), "heavy_omo")
+    heavy = mms_core._apply_opencode_profile(_runtime(), "omo")
     raw = mms_core._apply_opencode_profile(_runtime(), "raw")
 
     assert lite["opencode_pure"] is True
     assert lite["opencode_agent"] == "mobius-builder"
     assert lite["opencode_lite_agents"] is True
-    assert lite_pro["opencode_agent"] == "mobius-builder-pro"
-    assert lite_pro["opencode_launch_preflight"] is False
-    assert lite_pro["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
+    assert agent["opencode_agent"] == "mobius-builder-pro"
+    assert agent["opencode_launch_preflight"] is False
+    assert agent["opencode_launch_fallback_route_keys"] == ["builder_primary", "builder_fallback"]
     orchestrated = mms_core._apply_opencode_profile(_runtime(), "lite_pro_orchestrated")
     assert orchestrated["opencode_agent"] == "mobius-builder-pro"
     assert orchestrated["opencode_roster"] == "lite_pro_orchestrated"
-    assert orchestrated["opencode_profile_label"] == "OpenSpec Multi"
+    assert orchestrated["opencode_profile_label"] == "Agent"
     assert backend_multi["opencode_profile"] == "lite_pro_orchestrated"
     assert backend_multi["opencode_entrypoint"] == "serve"
     assert heavy["opencode_use_global_config"] is True
@@ -712,7 +713,7 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     )
     payload = mms_launchers._build_opencode_config_payload(runtime, model_info["model"])
 
-    assert model_info == {"model": "gpt-5.5", "profile": "lite_pro"}
+    assert model_info == {"model": "gpt-5.5", "profile": "lite_pro_orchestrated"}
     assert runtime["opencode_agent"] == "mobius-builder-pro"
     assert runtime["opencode_launch_preflight"] is False
     assert runtime["opencode_launch_fallback_agents"]["builder_fallback"] == "mobius-builder-stable"
@@ -1317,7 +1318,7 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
 
     def fake_select_family_tui(*_args, **kwargs):
         captured["profile_options"] = kwargs.get("profile_options_by_cli")
-        return ("profile", "opencode", "lite")
+        return ("profile", "opencode", "agent")
 
     def fake_confirm_tui(cli, model_info, **kwargs):
         captured["cli"] = cli
@@ -1329,26 +1330,12 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
     assert mms_core._handle_tui_scene_selection(cfg, [], provider, False, ["opencode"]) is True
-    assert [item["id"] for item in captured["profile_options"]["opencode"]] == [
-        "lite_pro_orchestrated",
-        "lite_pro_orchestrated_backend",
-        "lite_pro_orchestrated_acp",
-        "lite_pro",
-        "heavy_omo",
-        "raw",
-    ]
-    assert [item["label"] for item in captured["profile_options"]["opencode"]] == [
-        "OpenSpec Multi",
-        "Backend Multi",
-        "ACP Multi",
-        "Pro Solo",
-        "OMO Global",
-        "Raw Pure",
-    ]
+    assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "omo", "raw"]
+    assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
-    assert captured["model_info"] == {"model": "gpt-5.4"}
+    assert captured["model_info"] == {"model": "gpt-5.4", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["id"] == "dual-protocol"
-    assert captured["runtime"]["opencode_profile"] == "lite"
+    assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
 
 
 def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
@@ -1358,7 +1345,7 @@ def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
     provider = _runtime(id="default-provider", name="Default Provider")
     captured = {}
 
-    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "opencode", "--profile", "lite_pro_orchestrated_backend"])
+    monkeypatch.setattr(mms_core.sys, "argv", ["mms", "opencode", "--profile", "agent"])
     monkeypatch.setattr(mms_core, "_extract_global_lang", lambda argv: (argv, None))
     monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
     monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
@@ -1406,7 +1393,6 @@ def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
     assert captured["cli"] == "opencode"
     assert captured["model_info"] == {"model": "gpt-5.5", "profile": "lite_pro_orchestrated"}
     assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
-    assert captured["runtime"]["opencode_entrypoint"] == "serve"
 
 
 def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeypatch):
@@ -1416,7 +1402,7 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
         "providers": [],
         "account": {"defaults": {}},
         "accounts": [],
-        "opencode": {"default_profile": "lite_pro_orchestrated_acp"},
+        "opencode": {"default_profile": "agent"},
     }
     provider = _runtime(id="default-provider", name="Default Provider")
     captured = {}
@@ -1468,7 +1454,6 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
     assert captured["profile_models"] == ["gpt-5.5"]
     assert captured["cli"] == "opencode"
     assert captured["runtime"]["opencode_profile"] == "lite_pro_orchestrated"
-    assert captured["runtime"]["opencode_entrypoint"] == "acp"
 
 
 def test_existing_openai_provider_lists_show_opencode_without_config_migration(monkeypatch):
@@ -1609,12 +1594,12 @@ def test_core_opencode_model_route_skips_blocked_same_model_channel(monkeypatch)
         mms_core,
         "_load_opencode_route_health_latest",
         lambda *_args, **_kwargs: {
-            "lite_pro|explore_primary|glm-5-turbo|channel-a|anthropic_messages": {
+            "lite_pro_orchestrated|explore_primary|glm-5-turbo|channel-a|anthropic_messages": {
                 "status": "blocked",
                 "health_score": -100,
                 "finished_at": "2026-05-16T10:00:00Z",
             },
-            "lite_pro|explore_primary|glm-5-turbo|channel-b|anthropic_messages": {
+            "lite_pro_orchestrated|explore_primary|glm-5-turbo|channel-b|anthropic_messages": {
                 "status": "live_healthy",
                 "health_score": 85,
                 "finished_at": "2026-05-16T10:00:00Z",
@@ -1649,12 +1634,12 @@ def test_core_opencode_model_route_uses_peer_model_when_primary_model_is_fresh_u
         mms_core,
         "_load_opencode_route_health_latest",
         lambda *_args, **_kwargs: {
-            "lite_pro|explore_primary|glm-5-turbo|domestic|anthropic_messages": {
+            "lite_pro_orchestrated|explore_primary|glm-5-turbo|domestic|anthropic_messages": {
                 "status": "unhealthy",
                 "health_score": -25,
                 "finished_at": "2026-05-16T10:00:00Z",
             },
-            "lite_pro|explore_primary|kimi-for-coding|domestic|anthropic_messages": {
+            "lite_pro_orchestrated|explore_primary|kimi-for-coding|domestic|anthropic_messages": {
                 "status": "untested",
                 "health_score": 0,
                 "finished_at": "",
@@ -1750,24 +1735,11 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     )
 
     options = mms_core._opencode_profile_menu_options()
-    lite_pro = next(option for option in options if option["id"] == "lite_pro")
-    orchestrated = next(option for option in options if option["id"] == "lite_pro_orchestrated")
-    backend = next(option for option in options if option["id"] == "lite_pro_orchestrated_backend")
+    agent = next(option for option in options if option["id"] == "agent")
 
-    assert [option["id"] for option in options[:3]] == [
-        "lite_pro_orchestrated",
-        "lite_pro_orchestrated_backend",
-        "lite_pro_orchestrated_acp",
-    ]
-    assert orchestrated["label"] == "OpenSpec Multi"
-    assert orchestrated["badge"] == "默认"
-    assert backend["label"] == "Backend Multi"
-    assert "health: 1/18 healthy" in backend["summary"]
-    assert lite_pro["label"] == "Pro Solo"
-    assert "health: 1/15 healthy" in lite_pro["summary"]
-    assert "1 degraded" in lite_pro["summary"]
-    assert "1 blocked" in lite_pro["summary"]
-    assert "12 untested" in lite_pro["summary"]
-    assert "health: 1/18 healthy" in orchestrated["summary"]
-    assert "1 degraded" in orchestrated["summary"]
-    assert "16 untested" in orchestrated["summary"]
+    assert [option["id"] for option in options] == ["agent", "omo", "raw"]
+    assert agent["label"] == "Agent"
+    assert agent["badge"] == "默认"
+    assert "health: 1/18 healthy" in agent["summary"]
+    assert "1 degraded" in agent["summary"]
+    assert "16 untested" in agent["summary"]
