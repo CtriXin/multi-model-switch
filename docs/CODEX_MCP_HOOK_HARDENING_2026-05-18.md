@@ -70,6 +70,7 @@ Follow-up changes:
 - Codex hook trust write-back now uses a shared durable-cache writer.
 - New Codex gateway sessions refresh `~/.config/mms/codex-gateway/.codex` hook trust from real HOME, durable cache, and sibling session configs during environment preparation, not only after process exit.
 - The exit write-back path still persists current-session trust after `Trust all and continue`, but the next launch can now recover from sibling trust even if the previous durable cache was incomplete.
+- Follow-up hardening: MMS gateway Codex launches now keep the per-PID `MMS_SESSION_HOME` for wrappers/tmp files but point `CODEX_HOME` at stable `~/.config/mms/codex-gateway/.codex`, so Codex sees the same `hooks.json` trust key across isolated launches instead of treating every PID as a brand-new hook source.
 
 ## Safety Rules Preserved
 

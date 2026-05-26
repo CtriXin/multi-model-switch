@@ -319,12 +319,17 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     )
 
     session_codex = Path(env["CODEX_HOME"])
+    assert session_codex == gateway_codex
     assert not (session_codex / "history.jsonl").is_symlink()
-    assert _lines(session_codex / "history.jsonl") == ["gateway-history-2", "gateway-history-3"]
+    assert _lines(session_codex / "history.jsonl") == [
+        "gateway-history-0",
+        "gateway-history-1",
+        "gateway-history-2",
+        "gateway-history-3",
+    ]
     assert not (session_codex / "sessions").is_symlink()
-    copied_sessions = list((session_codex / "sessions").glob("2026/04/*.jsonl"))
-    assert len(copied_sessions) == 1
-    assert copied_sessions[0].name == "gateway-session-1.jsonl"
+    copied_sessions = sorted(path.name for path in (session_codex / "sessions").glob("2026/04/*.jsonl"))
+    assert copied_sessions == ["gateway-session-0.jsonl", "gateway-session-1.jsonl"]
     assert (session_codex / "memories").is_symlink()
     assert not (session_codex / "installation_id").is_symlink()
     assert (session_codex / "installation_id").read_text(encoding="utf-8") == "real-installation\n"
@@ -338,4 +343,5 @@ def test_codex_gateway_env_prefers_gateway_bounded_resume(monkeypatch, tmp_path)
     assert env["CODEX_HOME"] == str(session_codex)
     assert env["MMS_CODEX_RESUME_WRITEBACK_ROOT"] == str(gateway_codex)
     manifest = json.loads((session_codex / "mms-resume-seed.json").read_text(encoding="utf-8"))
-    assert manifest["seeded"]["files"]["history.jsonl"]["lines"] == 2
+    assert manifest["seeded"]["files"]["history.jsonl"]["status"] == "preexisting"
+    assert manifest["seeded"]["dirs"]["sessions"]["status"] == "preexisting"

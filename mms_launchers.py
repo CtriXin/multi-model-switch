@@ -4191,7 +4191,7 @@ def _decode_toml_basic_key(value):
 def _codex_hook_trust_records_from_config(config_text):
     import re
 
-    text = str(config_text or "")
+    text = _normalize_codex_hook_trust_toml_layout(config_text)
     header_pattern = re.compile(
         r'^\[hooks\.state\."((?:\\.|[^"\\])*)"\]\s*$',
         flags=re.MULTILINE,
@@ -4224,10 +4224,29 @@ def _codex_hook_trust_records_from_config(config_text):
     return records
 
 
-def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
+def _normalize_codex_hook_trust_toml_layout(config_text):
     import re
 
     text = str(config_text or "")
+    if not text:
+        return text
+    text = re.sub(
+        r'(?m)^(?P<hash>\s*trusted_hash\s*=\s*"[^"\n]*")(?=\[hooks\.state\.)',
+        r'\g<hash>' + "\n\n",
+        text,
+    )
+    text = re.sub(
+        r'(?m)^(?P<header>\[hooks\.state\."(?:\\.|[^"\\])*"\])(?=\s*trusted_hash\s*=)',
+        r'\g<header>' + "\n",
+        text,
+    )
+    return text
+
+
+def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
+    import re
+
+    text = _normalize_codex_hook_trust_toml_layout(config_text)
     replacements = {
         str(key): str(value)
         for key, value in (trusted_hashes_by_key or {}).items()
@@ -4263,7 +4282,7 @@ def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
             flags=re.MULTILINE,
         )
         text = text[:match.end()] + block + text[block_end:]
-    return text
+    return _normalize_codex_hook_trust_toml_layout(text)
 
 
 def _collect_codex_hook_trust_seed_sources(codex_roots):
@@ -4302,7 +4321,7 @@ def _append_codex_session_hook_trust_states(
     trust_config_texts=None,
     source_hook_payloads_by_path=None,
 ):
-    text = str(config_text or "")
+    text = _normalize_codex_hook_trust_toml_layout(config_text)
     target_hooks_path = str(target_hooks_path or "").strip()
     if not target_hooks_path or not isinstance(target_hooks, dict):
         return text
@@ -4332,7 +4351,7 @@ def _append_codex_session_hook_trust_states(
     seed_texts = [text]
     for seed_text in trust_config_texts or []:
         if seed_text:
-            seed_texts.append(str(seed_text))
+            seed_texts.append(_normalize_codex_hook_trust_toml_layout(seed_text))
 
     existing_hashes = {
         record["key"]: record["trusted_hash"]
@@ -4396,7 +4415,7 @@ def _append_codex_session_hook_trust_states(
     if pending_updates:
         text = _replace_codex_hook_trust_hashes(text, pending_updates)
     if not pending:
-        return text
+        return _normalize_codex_hook_trust_toml_layout(text)
     if text and not text.endswith("\n"):
         text += "\n"
     for target_key, trusted_hash in pending.items():
@@ -4404,7 +4423,7 @@ def _append_codex_session_hook_trust_states(
             text += "\n"
         text += f"[hooks.state.{_toml_quote(target_key)}]\n"
         text += f"trusted_hash = {_toml_quote(trusted_hash)}\n"
-    return text
+    return _normalize_codex_hook_trust_toml_layout(text)
 
 
 def _overlay_session_entry_dir(parent_dir, overlay_root, entry_name, extra_source_root, *, exclude_names=None):
@@ -9443,11 +9462,12 @@ def _claude_gateway_env(
 
 
 def _codex_gateway_env(runtime, base_url, model_info=None):
-    """为 gateway api_key 模式创建独立 HOME，per-PID session 隔离。"""
+    """为 gateway api_key 模式创建隔离 session，并复用稳定 CODEX_HOME。"""
     import json as _json
     openai_key = runtime.get("openai_api_key") or runtime["api_key"]
     disabled_session_surfaces = runtime.get("disabled_session_surfaces")
     gateway_base = _real_user_path(".config", "mms", "codex-gateway")
+    gateway_codex_dir = os.path.join(gateway_base, ".codex")
     os.makedirs(gateway_base, exist_ok=True)
 
     # --- per-PID session 隔离（与 Claude gateway 对齐） ---
@@ -9480,12 +9500,16 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
         disabled_session_surfaces=disabled_session_surfaces,
     )
 
-    # --- .codex 目录：auth + config 写入 session，其余从真实 ~/.codex symlink ---
-    codex_dir = os.path.join(session_home, ".codex")
-    # 如果上面 symlink 了 gateway_base/.codex，先去掉，改成真目录
-    if os.path.islink(codex_dir):
-        os.unlink(codex_dir)
+    # Codex hook trust is keyed by CODEX_HOME/hooks.json. Keep session_home
+    # per-PID for wrappers/tmp, but make CODEX_HOME stable across launches.
+    codex_dir = gateway_codex_dir
     os.makedirs(codex_dir, exist_ok=True)
+    session_codex_link = os.path.join(session_home, ".codex")
+    if not os.path.exists(session_codex_link) and not os.path.islink(session_codex_link):
+        try:
+            os.symlink(codex_dir, session_codex_link)
+        except OSError:
+            pass
 
     auth_path = os.path.join(codex_dir, "auth.json")
     with open(auth_path, "w") as f:
@@ -9494,7 +9518,6 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     enable_nsr = _runtime_nsr_enabled(runtime)
     real_codex_dir = _real_user_path(".codex")
     real_hooks_path = os.path.join(real_codex_dir, "hooks.json")
-    gateway_codex_dir = os.path.join(gateway_base, ".codex")
     sibling_codex_roots = _codex_sibling_session_roots(
         sessions_dir,
         exclude_session_home=session_home,
@@ -9783,6 +9806,7 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     _inject_real_home_hints(env, include_xdg=True)
     _inject_selected_model_name(env, model_info=model_info)
     _set_codex_soft_home(env, session_home)
+    env["CODEX_HOME"] = codex_dir
     _set_codex_resume_writeback_root(env, gateway_codex_dir)
     env["OPENAI_API_KEY"] = openai_key
     env["OPENAI_BASE_URL"] = base_url

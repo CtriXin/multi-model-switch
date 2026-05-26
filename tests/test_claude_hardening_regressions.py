@@ -1485,6 +1485,40 @@ def test_append_codex_session_hook_trust_states_replaces_stale_target_hash(tmp_p
     assert "sha256:stale" not in rendered
 
 
+def test_append_codex_session_hook_trust_states_repairs_inline_trust_headers(tmp_path):
+    import tomllib
+
+    import mms_launchers
+
+    target_hooks_path = str(tmp_path / "gateway" / ".codex" / "hooks.json")
+    hooks_payload = {
+        "hooks": {
+            "PreToolUse": [
+                {"hooks": [{"type": "command", "command": "/tmp/pre.sh"}]},
+            ],
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/tmp/start.sh"}]},
+            ],
+        }
+    }
+    malformed_config = (
+        f'[hooks.state."{target_hooks_path}:pre_tool_use:0:0"]\n'
+        'trusted_hash = "sha256:pre"'
+        f'[hooks.state."{target_hooks_path}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:start"\n'
+    )
+
+    rendered = mms_launchers._append_codex_session_hook_trust_states(
+        malformed_config,
+        target_hooks_path=target_hooks_path,
+        target_hooks=hooks_payload,
+    )
+
+    assert 'trusted_hash = "sha256:pre"\n\n[hooks.state.' in rendered
+    assert all("trusted_hash" not in line or "[hooks.state." not in line for line in rendered.splitlines())
+    tomllib.loads(rendered)
+
+
 def test_sync_codex_hook_trust_back_persists_mms_local_cache(tmp_path):
     import mms_launchers
 
@@ -1615,6 +1649,79 @@ def test_codex_gateway_env_refreshes_durable_hook_trust_cache_from_sibling(monke
     assert f'[hooks.state."{gateway_hooks_path}:session_start:0:1"]' in target_config
     assert "sha256:notify" in target_config
     assert "sha256:managed" in target_config
+
+
+def test_codex_gateway_env_reuses_stable_codex_home_for_hook_trust(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_codex = real_home / ".codex"
+    real_codex.mkdir(parents=True)
+    (real_codex / "config.toml").write_text('base_url = "https://api.example.com"\n', encoding="utf-8")
+    (real_codex / "hooks.json").write_text('{"hooks":{}}\n', encoding="utf-8")
+
+    hooks_payload = {
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": "/tmp/notify.sh"}]},
+            ],
+        },
+    }
+    gateway_base = real_home / ".config" / "mms" / "codex-gateway"
+    old_session_codex = gateway_base / "s" / "old" / ".codex"
+    old_session_codex.mkdir(parents=True)
+    old_hooks_path = old_session_codex / "hooks.json"
+    old_hooks_path.write_text(json.dumps(hooks_payload), encoding="utf-8")
+    (old_session_codex / "config.toml").write_text(
+        f'[hooks.state."{old_hooks_path}:session_start:0:0"]\n'
+        'trusted_hash = "sha256:notify"\n',
+        encoding="utf-8",
+    )
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    pid = {"value": 1111}
+    monkeypatch.chdir(repo_dir)
+    monkeypatch.setattr(mms_launchers.os, "getpid", lambda: pid["value"])
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_link_shared_dotfiles", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_sync_codex_session_claude_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_host_context_env", lambda *args, **kwargs: {})
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *args, **kwargs: hooks_payload)
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    env1 = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
+        "https://relay.example.com",
+        model_info={"model": "gpt-5.4"},
+    )
+    pid["value"] = 2222
+    env2 = mms_launchers._codex_gateway_env(
+        {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
+        "https://relay.example.com",
+        model_info={"model": "gpt-5.4"},
+    )
+
+    gateway_codex = gateway_base / ".codex"
+    gateway_hooks_path = gateway_codex / "hooks.json"
+    assert Path(env1["CODEX_HOME"]) == gateway_codex
+    assert Path(env2["CODEX_HOME"]) == gateway_codex
+    assert env1["MMS_SESSION_HOME"] != env2["MMS_SESSION_HOME"]
+    assert Path(env1["MMS_SESSION_HOME"]).parent == gateway_base / "s"
+    assert Path(env2["MMS_SESSION_HOME"]).parent == gateway_base / "s"
+    assert (Path(env1["MMS_SESSION_HOME"]) / ".codex").resolve() == gateway_codex
+    assert (Path(env2["MMS_SESSION_HOME"]) / ".codex").resolve() == gateway_codex
+
+    target_config = (gateway_codex / "config.toml").read_text(encoding="utf-8")
+    assert f'[hooks.state."{gateway_hooks_path}:session_start:0:0"]' in target_config
+    assert 'trusted_hash = "sha256:notify"' in target_config
+    assert "/s/1111/.codex/hooks.json:session_start:0:0" not in target_config
+    assert "/s/2222/.codex/hooks.json:session_start:0:0" not in target_config
 
 
 def test_overlay_caveman_session_entries_merges_session_and_caveman_assets(monkeypatch, tmp_path):
