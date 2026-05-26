@@ -1112,7 +1112,7 @@ def _record_bridge_blocking_failure(
     fallback_mode="auto_default_handover",
     automatic_model_call=False,
 ):
-    """Best-effort L3 rescue hook; never calls another model or OAuth flow."""
+    """Best-effort L3 rescue hook; never switches runtime or OAuth flow."""
     if not bool(getattr(server, "rescue_enabled", False)):
         return None
     try:
@@ -1156,6 +1156,7 @@ def _record_bridge_blocking_failure(
                     fallback_model,
                 )
         _append_incident_log(
+            server=server,
             model=model_name or getattr(server, "model_name", ""),
             provider_id=provider_id or getattr(server, "provider_id", ""),
             status_code=status_code,
@@ -1166,7 +1167,7 @@ def _record_bridge_blocking_failure(
         if payload and fallback_model:
             artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
             rescue_dir = str(artifacts.get("dir") or "").strip()
-            _generate_rescue_summary(
+            _schedule_rescue_summary(
                 server, payload,
                 fallback_model=fallback_model,
                 rescue_dir=rescue_dir,
@@ -1177,10 +1178,26 @@ def _record_bridge_blocking_failure(
         return None
 
 
+def _schedule_rescue_summary(server, payload, *, fallback_model, rescue_dir):
+    """Generate rescue summaries off the response path."""
+    try:
+        payload_copy = copy.deepcopy(payload)
+        worker = threading.Thread(
+            target=_generate_rescue_summary,
+            args=(server, payload_copy),
+            kwargs={"fallback_model": fallback_model, "rescue_dir": rescue_dir},
+            name="mms-rescue-summary",
+            daemon=True,
+        )
+        worker.start()
+    except Exception as exc:
+        _bridge_error_logger.warning("rescue summary scheduling failed: %s", exc, exc_info=True)
+
+
 def _generate_rescue_summary(server, payload, *, fallback_model, rescue_dir):
     """Call fallback model to generate a session summary; write to rescue_dir/summary.md.
 
-    Best-effort: never raises, never blocks the main response.
+    Best-effort: never raises. The bridge schedules this outside the main response path.
     """
     if not fallback_model or not rescue_dir:
         return
@@ -1189,6 +1206,7 @@ def _generate_rescue_summary(server, payload, *, fallback_model, rescue_dir):
         if not routes:
             return
         route = routes[0]
+        protocol = str(route.get("protocol") or "openai_chat_completions").strip()
         gateway_url = str(route.get("gateway_url") or route.get("openai_base_url") or "").strip()
         gateway_key = str(route.get("gateway_key") or route.get("api_key") or "").strip()
         model_id = str(route.get("model") or fallback_model).strip()
@@ -1222,24 +1240,56 @@ def _generate_rescue_summary(server, payload, *, fallback_model, rescue_dir):
             "Keep it under 300 words. Be concrete, not generic.",
         ])
         user_msg = "\n".join(prompt_parts)
-        body = json.dumps({
+        request_payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": user_msg}],
             "max_tokens": 800,
-        }).encode("utf-8")
-        target_url = f"{gateway_url.rstrip('/')}/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {gateway_key}",
         }
-        httpx = _ensure_httpx()
-        with httpx.stream("POST", target_url, headers=headers, content=body, timeout=30) as resp:
+        auth_protocol = "anthropic_messages" if protocol == "anthropic_messages" else "openai_chat"
+        target_url = _build_gateway_url(
+            gateway_url,
+            "/messages" if protocol == "anthropic_messages" else "/chat/completions",
+        )
+        headers = {"Content-Type": "application/json"}
+        if protocol == "anthropic_messages":
+            headers.update({"x-api-key": gateway_key, "anthropic-version": "2023-06-01"})
+        else:
+            headers["Authorization"] = f"Bearer {gateway_key}"
+        apply_profile_auth_headers(
+            headers,
+            protocol=auth_protocol,
+            api_key=gateway_key,
+            provider_id=str(route.get("provider_id") or ""),
+            profile_id=str(route.get("provider_profile") or route.get("profile") or ""),
+            base_url=gateway_url,
+            model_name=model_id,
+        )
+        httpx_mod = _ensure_httpx()
+        if httpx_mod is None:
+            return
+        with httpx_mod.stream(
+            "POST",
+            target_url,
+            headers=headers,
+            json=request_payload,
+            timeout=30,
+            **_route_httpx_kwargs(server, route, target_url),
+        ) as resp:
             resp_body = resp.read().decode("utf-8", errors="replace")
         if resp.status_code >= 200 and resp.status_code < 300:
             data = json.loads(resp_body)
-            summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if protocol == "anthropic_messages":
+                content = data.get("content") if isinstance(data.get("content"), list) else []
+                summary_text = "\n".join(
+                    str(block.get("text") or "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ).strip()
+            else:
+                summary_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
             if summary_text:
                 summary_path = os.path.join(str(rescue_dir), "summary.md")
+                os.makedirs(os.path.dirname(summary_path), exist_ok=True)
                 with open(summary_path, "w", encoding="utf-8") as f:
                     f.write(f"# Rescue Summary\n\n")
                     f.write(f"- generated_at: {int(time.time())}\n")
@@ -1263,7 +1313,7 @@ def _truthy(value):
 
 def _rescue_hot_fallback_enabled(server):
     # PAUSED: same-session hot fallback is disabled pending redesign.
-    # See: https://github.com/anthropics/claude-code/issues (hot fallback continuity)
+    # Keep file-first rescue + fallback handover active without switching the live request.
     return False
     raw = str(os.environ.get("MMS_RESCUE_HOT_FALLBACK", "") or "").strip().lower()
     fallback = _current_rescue_fallback(server)
@@ -1622,13 +1672,41 @@ def _chatcompletions_error_requests_messages(body_text):
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 GEMINI_BRIDGE_SCRIPT = os.path.join(ROOT_DIR, "scripts", "gemini_codeassist_bridge.mjs")
 
-_INCIDENT_LOG_PATH = os.path.join(
-    os.path.expanduser("~"), ".config", "mms", "logs", "incidents.jsonl"
-)
+def _incident_log_path(server=None):
+    config_root = ""
+    if server is not None:
+        config_root = _rescue_config_root(server)
+    if not config_root:
+        try:
+            config_root = resolve_mms_config_dir()
+        except Exception:
+            config_root = os.path.join(os.path.expanduser("~"), ".config", "mms")
+    return os.path.join(str(config_root), "logs", "incidents.jsonl")
+
+
+def _redact_incident_value(value):
+    try:
+        from mms_rescue import assert_secret_safe, redact_text
+
+        text = redact_text(value)
+        assert_secret_safe(text)
+        return text
+    except Exception:
+        raw = str(value or "")
+        if not raw:
+            return ""
+        try:
+            parsed = urlsplit(raw)
+            if parsed.scheme and parsed.netloc:
+                return parsed.path or "/"
+        except Exception:
+            pass
+        return "<REDACTED>"
 
 
 def _append_incident_log(
     *,
+    server=None,
     model="",
     provider_id="",
     status_code=None,
@@ -1637,21 +1715,30 @@ def _append_incident_log(
     event="blocking_failure",
     detail="",
 ):
-    """Append one JSONL line to ~/.config/mms/logs/incidents.jsonl. Best-effort, never raises."""
+    """Append one JSONL line to the resolved MMS config logs dir. Best-effort, never raises."""
     try:
-        os.makedirs(os.path.dirname(_INCIDENT_LOG_PATH), exist_ok=True)
+        incident_path = _incident_log_path(server)
+        os.makedirs(os.path.dirname(incident_path), exist_ok=True)
         entry = {
             "ts": int(time.time()),
-            "model": str(model or ""),
-            "provider_id": str(provider_id or ""),
+            "model": _redact_incident_value(model),
+            "provider_id": _redact_incident_value(provider_id),
             "status_code": status_code,
-            "bridge_surface": str(bridge_surface or ""),
-            "request_url": str(request_url or ""),
-            "event": str(event or ""),
-            "detail": str(detail or ""),
+            "bridge_surface": _redact_incident_value(bridge_surface),
+            "request_url": _redact_incident_value(request_url),
+            "event": _redact_incident_value(event),
+            "detail": _redact_incident_value(detail),
         }
-        with open(_INCIDENT_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        line = json.dumps(entry, ensure_ascii=False, sort_keys=True)
+        try:
+            from mms_rescue import assert_secret_safe
+
+            assert_secret_safe(line)
+        except Exception:
+            return
+        with locked_state_file(incident_path):
+            with open(incident_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
     except Exception:
         pass
 
@@ -4889,6 +4976,7 @@ class _ResponsesProxyHandler(BaseHTTPRequestHandler):
                     model_name,
                 )
                 _append_incident_log(
+                    server=self.server,
                     model=model_name,
                     provider_id=provider_id,
                     status_code=last_status,
@@ -5222,6 +5310,7 @@ class _ResponsesToChatHandler(_ResponsesProxyHandler):
                             model_name,
                         )
                         _append_incident_log(
+                            server=self.server,
                             model=model_name,
                             provider_id=provider_id,
                             status_code=response.status_code,
