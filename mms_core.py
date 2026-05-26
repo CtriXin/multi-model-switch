@@ -739,145 +739,12 @@ def _model_info_has_visible_models(model_info):
     return not found_model
 
 
-def _scene_visible_variants(scene):
-    variants = scene.get("variants")
-    if not isinstance(variants, list):
-        return []
-    return [variant for variant in variants if _model_info_has_visible_models((variant or {}).get("model_info", {}))]
-
-
-def _scene_has_visible_model_options(scene):
-    variants = scene.get("variants")
-    if isinstance(variants, list):
-        return bool(_scene_visible_variants(scene))
-    return _model_info_has_visible_models(_scene_model_info(scene))
-
-
 def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
-SCENES = {
-    "常规任务": {
-        "emoji": "⚡",
-        "desc": "简单问答、日常杂活",
-        "cli": "claude",
-        "model": "qwen3-max-2026-01-23",
-    },
-    "主力编码": {
-        "emoji": "💻",
-        "desc": "日常开发、代码重构",
-        "cli": "claude",
-        "default_tier": "high",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "GLM",
-                "desc": "中杯",
-                "model_info": {"model": "glm-5"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "默认",
-                "model_info": {"model": "gpt-5.3-codex"},
-            },
-            {
-                "tier": "xhigh",
-                "name": "Sonnet",
-                "desc": "超大杯",
-                "model_info": {"model": "claude-sonnet-4-6"},
-            },
-        ],
-    },
-    "深度思考": {
-        "emoji": "🧠",
-        "desc": "复杂推理、架构设计",
-        "cli": "claude",
-        "default_tier": "high",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Sonnet",
-                "desc": "中杯",
-                "model_info": {"model": "claude-sonnet-4-6"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "默认",
-                "model_info": {"model": "gpt-5.4"},
-            },
-            {
-                "tier": "xhigh",
-                "name": "Opus",
-                "desc": "超大杯",
-                "model_info": {"model": "claude-opus-4-6"},
-            },
-        ],
-    },
-    "中文主力": {
-        "emoji": "🇨🇳",
-        "desc": "中文内容、国内业务",
-        "cli": "claude",
-        "model": "kimi-k2.5",
-    },
-    "文字产出": {
-        "emoji": "🇺🇸",
-        "desc": "长文撰写、内容输出",
-        "cli": "codex",
-        "default_tier": "med",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Gemini",
-                "desc": "默认英文",
-                "model_info": {"model": "gemini-3.1-pro-preview"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "更稳一点",
-                "model_info": {"model": "gpt-5.4"},
-            },
-        ],
-    },
-    "负载模式": {
-        "emoji": "⚖️",
-        "desc": "自动按任务轻重切换模型",
-        "cli": "claude",
-        "load_balance": True,
-    },
-    "视觉内容": {
-        "emoji": "🎨",
-        "desc": "图片理解、UI分析",
-        "cli": "claude",
-        "default_tier": "med",
-        "variants": [
-            {
-                "tier": "xhigh",
-                "name": "Gemini",
-                "desc": "排第一",
-                "model_info": {"model": "gemini-3.1-pro-preview"},
-            },
-            {
-                "tier": "high",
-                "name": "Kimi",
-                "desc": "排第二",
-                "model_info": {"model": "kimi-k2.5"},
-            },
-            {
-                "tier": "med",
-                "name": "MiniMax",
-                "desc": "也能用",
-                "model_info": {"model": "MiniMax-M2.5"},
-            },
-        ],
-    },
-}
 
 CLI_NAMES = ["claude", "codex", "opencode", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
-SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
@@ -3749,7 +3616,7 @@ def _record_usage(runtime, cli_name, model_info):
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
-    """记录场景级启动统计（用于 TUI 启动次数排名）"""
+    """记录 legacy 场景级启动统计，保留旧 usage.json 兼容。"""
     if not scene_name or scene_name.startswith("__"):
         return
     def _mutate(stats):
@@ -3770,7 +3637,7 @@ def _record_scene_usage(scene_name, cli_name, model_info):
 
 
 def _get_scene_usage():
-    """获取上次使用信息（按 CLI 分桶）+ 场景启动次数，返回 (last_by_cli, scene_counts)"""
+    """获取上次使用信息（按 CLI 分桶）+ legacy scene counts。"""
     stats = _load_usage_stats()
     scene_counts = {}
     for name, entry in stats.get("scenes", {}).items():
@@ -7148,7 +7015,7 @@ def _model_validation_findings(provider, probe):
         findings.append({
             "severity": "low",
             "title": "可以跳过校验继续",
-            "summary": "场景和预设仍然可以继续使用，但模型浏览会受限。",
+            "summary": "预设和直接 CLI 启动仍然可以继续使用，但模型浏览会受限。",
         })
     return findings
 
@@ -7185,7 +7052,7 @@ def _build_model_recovery_actions(cfg, provider, probe):
         {
             "id": "continue_without_validation",
             "title": "跳过校验并继续",
-            "summary": "继续使用场景或预设，但不会有模型浏览列表。",
+            "summary": "继续使用预设或直接 CLI 启动，但不会有模型浏览列表。",
             "priority": 30,
             "recommended": False,
         },
@@ -7297,7 +7164,7 @@ def _run_recovery_action(cfg, provider, probe, action_id):
         selected = _select_provider_interactive(cfg, provider.get("id"))
         return (selected or provider), False
     if action_id == "continue_without_validation":
-        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但场景和预设仍可继续。[/yellow]")
+        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但预设和直接 CLI 启动仍可继续。[/yellow]")
         return provider, True
     return provider, False
 
@@ -7631,7 +7498,7 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
 def _ensure_models_cache_available(models_cache):
     if models_cache:
         return True
-    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用场景 / 预设启动。[/yellow]")
+    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]")
     return False
 
 
@@ -8272,72 +8139,6 @@ def _choose_runtime_source(
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
-class _LazySourceChoices(dict):
-    """惰性 source choices：key 首次被访问时才计算，避免预计算所有 scene/variant 的 provider 源。"""
-
-    def __init__(self, cfg, scenes, cli_names, default_provider, default_models):
-        super().__init__()
-        self._cfg = cfg
-        self._scenes = scenes
-        self._cli_names = cli_names
-        self._default_provider = default_provider
-        self._default_models = default_models
-
-    def _compute(self, key):
-        # 解析 key = "cli_name|model_or___default__"
-        parts = key.split("|", 1)
-        cli_name = parts[0]
-        model_key = parts[1] if len(parts) > 1 else "__default__"
-
-        if model_key == "__default__":
-            options, default_index = _list_runtime_sources(
-                self._cfg, cli_name, self._default_provider, self._default_models)
-        else:
-            # 从 scenes 中找到对应的 model_info
-            model_info = self._find_model_info(cli_name, key)
-            options, default_index = _list_runtime_sources(
-                self._cfg, cli_name, self._default_provider, self._default_models,
-                model_info=model_info, allow_selected_model_accounts=True)
-        result = {"options": options, "default_index": default_index or 0}
-        self[key] = result
-        return result
-
-    def _find_model_info(self, cli_name, key):
-        for scene in self._scenes.values():
-            if scene.get("cli") != cli_name:
-                continue
-            if scene.get("variants"):
-                for variant in scene["variants"]:
-                    mi = dict(variant.get("model_info", {}))
-                    if _source_choice_key(cli_name, mi) == key:
-                        return mi
-            else:
-                mi = _scene_model_info(scene)
-                if _source_choice_key(cli_name, mi) == key:
-                    return mi
-        return {}
-
-    def get(self, key, default=None):
-        if key in self:
-            return super().__getitem__(key)
-        try:
-            return self._compute(key)
-        except Exception:
-            return default
-
-    def __getitem__(self, key):
-        if key not in self:
-            return self._compute(key)
-        return super().__getitem__(key)
-
-    def __contains__(self, key):
-        return super().__contains__(key)
-
-
-def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_models):
-    return _LazySourceChoices(cfg, scenes, cli_names, default_provider, default_models)
-
-
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
@@ -8365,21 +8166,10 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
     return visible
 
 
-def _filter_scenes_by_visible_clis(cli_names):
-    visible = set(cli_names)
-    return {
-        name: scene for name, scene in SCENES.items()
-        if scene.get("cli") in visible
-        and scene.get("cli") not in DIRECT_CLI_MODES
-        and _scene_has_visible_model_options(scene)
-    }
-
-
-def _builtin_scene_catalog():
-    return {
-        name: scene for name, scene in SCENES.items()
-        if scene.get("cli") not in DIRECT_CLI_MODES and _scene_has_visible_model_options(scene)
-    }
+def _clean_model_info(model_info):
+    if not isinstance(model_info, dict):
+        return model_info
+    return {k: v for k, v in model_info.items() if k != "provider"}
 
 
 def select_model_interactive(models_list):
@@ -8392,100 +8182,6 @@ def select_model_interactive(models_list):
         except KeyboardInterrupt:
             sys.exit(0)
 
-
-def _scene_model_info(scene):
-    return {k: v for k, v in scene.items() if k not in SCENE_META_KEYS}
-
-
-def _clean_model_info(model_info):
-    if not isinstance(model_info, dict):
-        return model_info
-    return {k: v for k, v in model_info.items() if k != "provider"}
-
-
-def _source_choice_key(cli_name, model_info=None):
-    if not model_info:
-        return f"{cli_name}|__default__"
-    if isinstance(model_info, dict):
-        cleaned = _clean_model_info(model_info)
-        if not cleaned:
-            return f"{cli_name}|__default__"
-        payload = json.dumps(cleaned, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        return f"{cli_name}|{payload}"
-    return f"{cli_name}|{str(model_info).strip()}"
-
-
-def _tier_label(tier):
-    return {
-        "med": "中杯",
-        "high": "大杯",
-        "xhigh": "超大杯",
-    }.get(tier, tier)
-
-
-def _variant_line(variant):
-    model = variant.get("model_info", {}).get("model", "")
-    tier = _tier_label(variant.get("tier", ""))
-    return f"{tier:<6}  {model}"
-
-
-def _select_scene_model_info(scene_name, scene, use_tui=False):
-    variants = _scene_visible_variants(scene)
-    if not variants:
-        model_info = _scene_model_info(scene)
-        return model_info if _model_info_has_visible_models(model_info) else None
-
-    option_lines = [_variant_line(variant) for variant in variants]
-    if use_tui:
-        from mms_tui import select_model_tui
-        selected = select_model_tui(option_lines, title=f"{scene_name}：选择档位")
-        if selected is None:
-            return None
-        return dict(variants[option_lines.index(selected)]["model_info"])
-
-    console.print(f"\n[bold]{scene_name}：选择档位[/bold]")
-    for i, line in enumerate(option_lines, 1):
-        console.print(f"  {i}. {line}")
-
-    while True:
-        try:
-            choice = IntPrompt.ask("选择档位编号")
-            if 1 <= choice <= len(variants):
-                return dict(variants[choice - 1]["model_info"])
-            console.print(f"[red]请输入 1-{len(variants)}[/red]")
-        except KeyboardInterrupt:
-            sys.exit(0)
-
-
-# ── Scene Selection (fallback for non-TTY) ─────────────
-
-def show_scenes(scenes):
-    scene_list = list(scenes.keys())
-    lines = []
-    for i, name in enumerate(scene_list, 1):
-        s = scenes[name]
-        lines.append(f"  {i}. {s['emoji']} {name}  {s['desc']}")
-    lines.append("  ─" * 20)
-    lines.append(f"  {len(scene_list) + 1}. 🔧 自定义    手动选 CLI + 模型")
-
-    console.print(Panel("\n".join(lines), title=f"{display_title()} — 选择场景"))
-    return scene_list
-
-
-def select_scene_fallback(scenes):
-    """非 TTY 环境的 fallback：数字选择"""
-    scene_list = show_scenes(scenes)
-    total = len(scene_list) + 1
-    while True:
-        try:
-            choice = IntPrompt.ask("选择场景编号")
-            if 1 <= choice <= total:
-                if choice == total:
-                    return None  # custom
-                return scene_list[choice - 1]
-            console.print(f"[red]请输入 1-{total}[/red]")
-        except KeyboardInterrupt:
-            sys.exit(0)
 
 
 # ── Confirmation ────────────────────────────────────────
@@ -10057,7 +9753,7 @@ def _apply_runtime_priority_changes(cfg, pri_changes):
     return changed
 
 
-def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
+def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
@@ -13706,12 +13402,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/agy)")
+                        help="CLI 名称(claude/codex/opencode/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
-                        help="一次性会话模式（可附带场景编号）")
+                        help="一次性会话模式（可附带 CLI 名称）")
     parser.add_argument("--list", action="store_true", help="列出 API 可用模型")
-    parser.add_argument("--presets", action="store_true", help="列出已保存预设和场景")
+    parser.add_argument("--presets", action="store_true", help="列出已保存预设")
     parser.add_argument("--install", metavar="CLI", help="安装指定 CLI")
     parser.add_argument("--custom", action="store_true", help="强制手动选 CLI + 模型模式")
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
@@ -13832,9 +13528,6 @@ def main():
                 auth = _infer_preset_auth_mode(p) or "—"
                 table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str), desc, auth)
             console.print(table)
-        console.print("\n[bold]内置场景:[/bold]")
-        for i, (name, s) in enumerate(_builtin_scene_catalog().items(), 1):
-            console.print(f"  {i}. {s['emoji']} {name} — {s['desc']}")
         return
 
     # --export
@@ -13845,8 +13538,6 @@ def main():
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
     _warm_probe_cache_async(cfg, default_provider)
     visible_clis = _resolve_visible_clis(cfg, default_provider, models_cache)
-    visible_scenes = _filter_scenes_by_visible_clis(visible_clis)
-
     # --list
     if args.list:
         if not _ensure_models_cache_available(models_cache):
@@ -13897,51 +13588,6 @@ def main():
             parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
 
     if target:
-        # Is it a scene number?
-        scene_list = list(visible_scenes.keys())
-        try:
-            idx = int(target)
-            if 1 <= idx <= len(scene_list):
-                scene_name = scene_list[idx - 1]
-                scene = visible_scenes[scene_name]
-                cli = scene["cli"]
-                model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
-                _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
-                if args.account or args.provider:
-                    _trace_record("CLI flags", account=args.account, provider=args.provider)
-                runtime, _, cli = _choose_runtime_source(
-                    cfg,
-                    cli,
-                    default_provider,
-                    models_cache,
-                    account_id=args.account,
-                    provider_id=args.provider,
-                    model_info=model_info,
-                    allow_selected_model_accounts=True,
-                )
-                if runtime is None:
-                    console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-                    return
-                if not check_cli_installed(cli):
-                    from mms_installer import check_and_offer_install
-                    if not check_and_offer_install(cli):
-                        return
-                console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
-                if cli == "opencode":
-                    runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
-                    if runtime is None:
-                        return
-                    runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
-                action = confirm_launch(cli, model_info, once, runtime=runtime)
-                if action == "q":
-                    return
-                if action == "s":
-                    save_preset_interactive(user_cfg, cli, model_info)
-                _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
-                return
-        except ValueError:
-            pass
-
         profile_to_launch = requested_opencode_profile
         entrypoint_to_launch = requested_opencode_entrypoint
         if target == "opencode" and not profile_to_launch:
@@ -14107,83 +13753,41 @@ def main():
         _launch_with_tracking(cli, {"model": model}, runtime, once=once)
         return
 
-    # Default: TUI scene selection (with fallback)
+    # Default: modern TUI launcher selection, no legacy numbered scene menu.
     if _use_tui():
-        handled = _handle_tui_scene_selection(
-            cfg, visible_scenes, default_provider, once, visible_clis, account_id=args.account, provider_id=args.provider
+        handled = _handle_tui_launcher_selection(
+            cfg, default_provider, once, visible_clis, account_id=args.account, provider_id=args.provider
         )
         if handled:
             return
         # fallback if curses failed
 
-    # Fallback: number-based selection
-    scene_name = select_scene_fallback(visible_scenes)
-
-    if scene_name is None:
-        # Custom mode
-        cli = select_cli(visible_clis)
-        _trace_record("custom mode", cli=cli)
-        if args.account or args.provider:
-            _trace_record("CLI flags", account=args.account, provider=args.provider)
-        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
-        if not _ensure_models_cache_available(aggregated):
-            return
-        model, custom_provider_id = _select_custom_model(
-            aggregated,
-            cli,
-            role=role,
-            recommend=recommend,
-            use_tui=False,
-        )
-        if model is None:
-            return
-        runtime, cli_models, cli = _choose_runtime_source(
-            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
-            model_info={"model": model}
-        )
-        if runtime is None:
-            console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
-            return
-        _trace_record("manual select", model=model, provider=custom_provider_id)
-        model_info = model
-        if cli == "opencode":
-            runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
-            if runtime is None:
-                return
-            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
-        action = confirm_launch(cli, model_info, once, runtime=runtime)
-        if action == "q":
-            return
-        if action == "s":
-            save_preset_interactive(user_cfg, cli, model_info)
-        _launch_with_tracking(cli, {"model": model}, runtime, once=once)
-        return
-
-    scene = visible_scenes[scene_name]
-    cli = scene["cli"]
-    model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
-    _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
+    # Fallback: direct CLI + model selection. The legacy numbered scene menu is retired.
+    cli = select_cli(visible_clis)
+    _trace_record("custom mode", cli=cli)
     if args.account or args.provider:
         _trace_record("CLI flags", account=args.account, provider=args.provider)
-    runtime, _, cli = _choose_runtime_source(
-        cfg,
+    aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+    if not _ensure_models_cache_available(aggregated):
+        return
+    model, custom_provider_id = _select_custom_model(
+        aggregated,
         cli,
-        default_provider,
-        models_cache,
-        account_id=args.account,
-        provider_id=args.provider,
-        model_info=model_info,
-        allow_selected_model_accounts=True,
+        role=role,
+        recommend=recommend,
+        use_tui=False,
+    )
+    if model is None:
+        return
+    runtime, _, cli = _choose_runtime_source(
+        cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
+        model_info={"model": model}
     )
     if runtime is None:
-        console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+        console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
         return
-
-    if not check_cli_installed(cli):
-        from mms_installer import check_and_offer_install
-        if not check_and_offer_install(cli):
-            return
-
+    _trace_record("manual select", model=model, provider=custom_provider_id)
+    model_info = model
     if cli == "opencode":
         runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
         if runtime is None:
@@ -14194,4 +13798,4 @@ def main():
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
+    _launch_with_tracking(cli, {"model": model}, runtime, once=once)

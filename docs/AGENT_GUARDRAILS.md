@@ -4,7 +4,7 @@
 
 ## 目标
 
-- 保护 MMS 的主启动链路稳定：`场景/CLI 选择 -> 模型选择 -> 使用入口选择 -> runtime 决策 -> launcher -> bridge/env 注入 -> 实际 CLI 启动`
+- 保护 MMS 的主启动链路稳定：`CLI/profile 选择 -> 模型选择 -> 使用入口选择 -> runtime 决策 -> launcher -> bridge/env 注入 -> 实际 CLI 启动`
 - 保护现有兼容承诺：`mms` 主入口、provider / account 双来源、单次注入策略、本地隔离目录策略
 - `ccs` 已全面退休；只允许保留 stale cleanup / reset 清理逻辑，不允许重新引入 `ccs` 入口、`~/.config/ccs` fallback 或 `CCS_*` 环境变量兼容。
 - 避免 UI 展示、配置状态、启动参数、bridge 实际路由彼此脱节
@@ -13,7 +13,7 @@
 
 以下能力默认视为主功能，除非用户明确要求，否则 agent 不应改变其行为语义：
 
-- 场景选择、CLI tab、模型选择、自定义选择、最近使用与默认来源逻辑
+- CLI tab / profile / 模型选择、自定义选择、最近使用与默认来源逻辑
 - `provider` / `account` 的优先级、过滤逻辑、默认来源选择逻辑
 - `runtime` 决策和 `auth_mode` 语义，包括 `api_key`、`oauth`、`oauth_bridge`
 - `claude` / `codex` / `opencode` / `agy` 的启动参数与环境变量注入
@@ -190,7 +190,7 @@
 
 - 这次改动影响的是显示层、选择层、runtime 决策层、launcher 层，还是 bridge 层
 - 当前任务是否会影响 `mms` 主入口的默认路径
-- 当前任务是否会影响任何已有场景、预设、provider、account 的兼容行为
+- 当前任务是否会影响任何已有预设、provider、account 的兼容行为
 - 当前数据结构有没有被多个模块共享，如果有，是否会引入隐式耦合
 - 当前改动会不会让失败路径读到 real HOME / global OAuth，并把它当成 fallback 或恢复来源
 

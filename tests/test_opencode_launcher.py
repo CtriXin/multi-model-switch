@@ -1363,7 +1363,7 @@ def test_core_tui_opencode_profile_action_resolves_before_model_channel(monkeypa
     monkeypatch.setattr(mms_tui, "select_family_tui", fake_select_family_tui)
     monkeypatch.setattr(mms_tui, "confirm_tui", fake_confirm_tui)
 
-    assert mms_core._handle_tui_scene_selection(cfg, [], provider, False, ["opencode"]) is True
+    assert mms_core._handle_tui_launcher_selection(cfg, provider, False, ["opencode"]) is True
     assert [item["id"] for item in captured["profile_options"]["opencode"]] == ["agent", "omo", "raw"]
     assert [item["label"] for item in captured["profile_options"]["opencode"]] == ["Agent", "OMO", "Raw"]
     assert captured["cli"] == "opencode"
@@ -1394,7 +1394,6 @@ def test_main_accepts_direct_opencode_profile_flag(monkeypatch):
     monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["gpt-5.5"]))
     monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(mms_core, "_filter_scenes_by_visible_clis", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: True)
     monkeypatch.setattr(
         mms_core,
@@ -1456,7 +1455,6 @@ def test_main_uses_configured_opencode_default_profile_for_direct_target(monkeyp
     monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, ["gpt-5.5"]))
     monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["opencode"])
-    monkeypatch.setattr(mms_core, "_filter_scenes_by_visible_clis", lambda *_args, **_kwargs: {})
     monkeypatch.setattr(mms_core, "check_cli_installed", lambda _cli: True)
     monkeypatch.setattr(
         mms_core,
