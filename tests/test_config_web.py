@@ -177,6 +177,9 @@ def test_config_web_opencode_agent_overrides_are_advanced_ui():
     assert "+ Add Executor Agent" in html
     assert "全部自动" in html
     assert "['execute','执行/协调']" in html
+    assert "enabledOnly=false" in html
+    assert "providerOptions(provider,{auto:true,enabledOnly:true})" in html
+    assert "modelOptions(provider,model,{auto:true,defaultModels:row.default_models||[],visionFirst:(entry.preset==='vision'||row.category==='Vision'),enabledOnly:true})" in html
     assert "state.opencode.agent_models={};" in html
     assert "state.opencode.agent_roster={};" in html
     assert "session-local opencode.json" in html
