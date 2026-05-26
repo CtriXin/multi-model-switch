@@ -434,6 +434,30 @@ _QWEN_THINKING_BLOCK_PREFIXES = ("qwen-coder", "qwen3-coder")
 _DOMESTIC_EFFORT_ALLOW_PREFIXES = ("deepseek",)
 _DOMESTIC_REASONING_CONTENT_ROUNDTRIP_PREFIXES = ("deepseek", "mimo")
 _ANTHROPIC_CACHE_CONTROL_ALLOW_PREFIXES = ("qwen-plus", "qwen3.5-plus", "qwen3.6-plus", "qwen3-max")
+_KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES = {
+    "gpt-5.3-codex",
+    "gpt-5.4",
+    "gpt-5.5",
+    "k2.6",
+    "k2.6-code-preview",
+    "kimi-k2.5",
+    "kimi-k2.6",
+    "mimo-v2.5",
+    "mimo-v2-omni",
+    "qwen3.5-plus",
+    "qwen3.6-flash",
+    "qwen3.6-plus",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+}
+_KNOWN_IMAGE_INPUT_SUPPORTED_PREFIXES = (
+    "claude-",
+    "sonnet-",
+    "opus-",
+    "haiku-",
+    "gemini-",
+)
 _KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES = (
     "deepseek-chat",
     "deepseek-reasoner",
@@ -447,8 +471,6 @@ _KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES = (
     "mimo-v2-flash",
     "qwen-plus",
     "qwen3-max",
-    "qwen3.5-plus",
-    "qwen3.6-plus",
 )
 
 _CODEX_CLI_INSTRUCTIONS_PREFIX = (
@@ -508,7 +530,17 @@ def _payload_has_image_input(value):
 
 def _model_rejects_image_input(model_name):
     normalized = _selector_base_model_name(model_name)
-    return normalized.startswith(_KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES)
+    if not normalized:
+        return True
+    if normalized in _KNOWN_IMAGE_INPUT_SUPPORTED_MODEL_NAMES:
+        return False
+    if normalized.startswith(_KNOWN_IMAGE_INPUT_SUPPORTED_PREFIXES):
+        return False
+    if normalized.startswith(_KNOWN_TEXT_ONLY_IMAGE_UNSUPPORTED_PREFIXES):
+        return True
+    # New provider models are text-only until the capability registry or a
+    # user override explicitly marks them as image-capable.
+    return True
 
 
 def _unsupported_image_input_payload(model_name):

@@ -1155,6 +1155,7 @@ _VISION_CAPABLE_MODEL_NAMES = {
     "k2.6-code-preview",
     "kimi-k2.5",
     "kimi-k2.6",
+    "qwen3.6-flash",
     "qwen3.6-plus",
     "qwen3.5-plus",
     "gemini-3.1-pro-preview",
@@ -4231,6 +4232,7 @@ def _vision_sidecar_model_candidates_for_provider(provider_id):
         "K2.6",
         "K2.6-code-preview",
         "kimi-k2.5",
+        "qwen3.6-flash",
         "qwen3.6-plus",
         "qwen3.5-plus",
     ]
@@ -4239,7 +4241,7 @@ def _vision_sidecar_model_candidates_for_provider(provider_id):
     if "kimi" in normalized:
         return ["K2.6", "K2.6-code-preview", "kimi-k2.5"]
     if "qwen" in normalized:
-        return ["qwen3.6-plus", "qwen3.5-plus"]
+        return ["qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus"]
     return generic
 
 
@@ -4313,7 +4315,14 @@ def _runtime_with_vision_sidecar(cfg, runtime):
     preferred_ids = (
         [explicit_provider_id]
         if explicit_provider_id
-        else ["direct-kimi", "newapi-personal-kimi", "newapi-personal-tokyo", "xin"]
+        else [
+            "mimo-direct-anthropic",
+            "direct-mimo",
+            "direct-kimi",
+            "newapi-personal-kimi",
+            "newapi-personal-tokyo",
+            "xin",
+        ]
     )
     providers = cfg.get("providers", []) if isinstance(cfg, dict) else []
     provider_defs = _provider_map(cfg) if isinstance(cfg, dict) else {}

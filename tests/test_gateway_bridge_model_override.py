@@ -202,6 +202,67 @@ def test_gateway_bridge_allows_mimo_v25_image_input(monkeypatch):
     assert captured.get("post_called") is True
 
 
+def test_gateway_bridge_allows_known_qwen_vision_model_image_input(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="qwen3.6-flash",
+        messages=image_messages,
+    )
+
+    assert captured["status"] == 200
+    assert captured["json"]["model"] == "qwen3.6-flash"
+    assert captured.get("post_called") is True
+
+
+def test_gateway_bridge_treats_new_unknown_model_as_text_only(monkeypatch):
+    image_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what color"},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "iVBORw0KGgo=",
+                    },
+                },
+            ],
+        }
+    ]
+
+    captured = _run_gateway_bridge_once(
+        monkeypatch,
+        "claude-sonnet-4-6",
+        heavy_model="qwen3.7-max",
+        messages=image_messages,
+    )
+    body = json.loads(captured["body"].decode("utf-8"))
+
+    assert captured["status"] == 400
+    assert captured.get("post_called") is not True
+    assert "qwen3.7-max does not support image input" in body["error"]["message"]
+
+
 def test_gateway_bridge_uses_vision_sidecar_for_text_only_model_image_input(monkeypatch):
     image_messages = [
         {

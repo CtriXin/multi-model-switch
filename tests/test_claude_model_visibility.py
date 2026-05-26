@@ -221,6 +221,8 @@ def test_model_capability_summary_marks_known_vision_models():
     assert "vision" in mms_core._model_capability_tags("K2.6-code-preview")
     assert "vision" in mms_core._model_capability_tags("mimo-v2.5")
     assert "vision" in mms_core._model_capability_tags("qwen3.6-plus")
+    assert "vision" in mms_core._model_capability_tags("qwen3.6-flash")
+    assert "vision" not in mms_core._model_capability_tags("qwen3.7-max")
     assert "vision" not in mms_core._model_capability_tags("mimo-v2.5-pro")
 
 
