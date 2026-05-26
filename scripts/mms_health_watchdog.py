@@ -21,7 +21,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # Python < 3.9 fallback
+    ZoneInfo = None  # type: ignore[assignment]
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +79,9 @@ class CheckResult:
 
 
 def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    tz = ZoneInfo("Asia/Singapore") if ZoneInfo else None
+    dt = datetime.now(tz) if tz else datetime.now()
+    return dt.isoformat(timespec="seconds")
 
 
 def real_home() -> Path:
