@@ -36,6 +36,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
 - OpenCode modes：默认 `OpenSpec Multi`、`Backend Multi`、`ACP Multi`、`Pro Solo`、`OMO Global`、`Raw Pure`，并写入 repo-local health feedback
 - OpenCode Lite Pro contract lane：`mobius-spec-writer` 写 OpenSpec/SpecBridge-style task contract，`mobius-spec-compliance-reviewer` 在 release-gate review 前对照 diff + validation 逐条验收
+- OpenCode Lite Pro work split：GPT-5.5 做协调/最终 review，GPT-5.4 做长跑 implementation，国产模型保持 read-only，用于 explore、bug-hunt、vision/context checks
 - OpenCode backend entrypoints：同一份 MMS-generated session-local config 可启动 interactive TUI、headless `opencode serve` 或 ACP `opencode acp`
 - OpenCode Lite Pro mixed routes：GPT 走 OpenAI-compatible Responses/Chat，direct MiMo 走 OpenAI-compatible `/v1`，其他国产模型走 Anthropic `/v1/messages`
 - OpenCode 默认开启 bypass：通过 permission `allow` 生效，subagent 里的 `ask` 会自动放行但保留显式 `deny` 边界；可选的 `opencode run` preflight 会使用 `--dangerously-skip-permissions`

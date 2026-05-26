@@ -9320,12 +9320,12 @@ _OPENCODE_BASE_PROFILE_OPTIONS = [
         "id": _OPENCODE_DEFAULT_PROFILE_ID,
         "label": "OpenSpec Multi",
         "badge": "默认",
-        "summary": "默认推荐：5.5 总控；OpenSpec contract；executor 小包执行；spec-compliance review。",
+        "summary": "默认推荐：5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt 只读找茬。",
     },
     {
         "id": "lite_pro",
         "label": "Pro Solo",
-        "summary": "5.5 主写；OpenSpec contract + 国产 explore/review/fix fallback；session-local。",
+        "summary": "5.5 主写；5.4 兜底执行；国产 explore/bug-hunt 只读辅助；session-local。",
     },
     {
         "id": "heavy_omo",
@@ -9526,17 +9526,17 @@ _OPENCODE_LITE_PRO_SPECS = (
         "gpt_fallback": False,
     },
     {
-        "key": "fixer_primary",
-        "agent": "mobius-fixer-deepseek",
+        "key": "bughunt_deepseek",
+        "agent": "mobius-bughunt-deepseek",
         "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
     },
     {
-        "key": "fixer_fallback",
-        "agent": "mobius-fixer-glm",
+        "key": "bughunt_glm",
+        "agent": "mobius-bughunt-glm",
         "models": ("glm-5.1", "glm-5-turbo", "glm-5"),
     },
     {
-        "key": "fixer_final",
+        "key": "fixer_gpt54",
         "agent": "mobius-fixer-gpt54",
         "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
     },
@@ -9550,18 +9550,8 @@ _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
         "models": ("qwen3.6-plus", "qwen3.5-plus"),
     },
     {
-        "key": "executor_primary",
-        "agent": "mobius-executor-deepseek",
-        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
-    },
-    {
-        "key": "executor_glm",
-        "agent": "mobius-executor-glm",
-        "models": ("glm-5.1", "glm-5-turbo", "glm-5"),
-    },
-    {
-        "key": "executor_qwen",
-        "agent": "mobius-executor-qwen",
+        "key": "bughunt_qwen",
+        "agent": "mobius-bughunt-qwen",
         "models": ("qwen3.6-plus", "qwen3.5-plus", "qwen3-coder-plus"),
     },
     {

@@ -10464,7 +10464,7 @@ def _opencode_lite_agent_configs(model_ref):
             "mode": "subagent",
             "model": model_ref,
             "temperature": 0.1,
-            "steps": 8,
+            "steps": 12,
             "permission": {
                 **common_read_permissions,
                 "edit": "deny",
@@ -10511,7 +10511,7 @@ def _opencode_lite_agent_configs(model_ref):
             "model": model_ref,
             "variant": "high",
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 24,
             "permission": {
                 **common_read_permissions,
                 "edit": "deny",
@@ -10531,7 +10531,6 @@ def _opencode_lite_agent_configs(model_ref):
             "mode": "subagent",
             "model": model_ref,
             "temperature": 0.2,
-            "steps": 12,
             "permission": {
                 **common_read_permissions,
                 "edit": "ask",
@@ -10590,14 +10589,15 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-spec-compliance-reviewer": "ask",
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
+        "mobius-bughunt-deepseek": "ask",
+        "mobius-bughunt-glm": "ask",
+        "mobius-bughunt-qwen": "ask",
         "mobius-vision-mimo": "ask",
         "mobius-vision-kimi": "ask",
         "mobius-vision-qwen": "ask",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
         "mobius-reviewer-mimo": "ask",
-        "mobius-fixer-deepseek": "ask",
-        "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
     }
     orchestrator_task_permission = {
@@ -10607,18 +10607,16 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "mobius-explore-glm": "allow",
         "mobius-explore-kimi": "ask",
         "mobius-explore-qwen": "ask",
+        "mobius-bughunt-deepseek": "ask",
+        "mobius-bughunt-glm": "ask",
+        "mobius-bughunt-qwen": "ask",
         "mobius-vision-mimo": "ask",
         "mobius-vision-kimi": "ask",
         "mobius-vision-qwen": "ask",
-        "mobius-executor-deepseek": "allow",
-        "mobius-executor-glm": "ask",
-        "mobius-executor-qwen": "ask",
-        "mobius-executor-gpt54": "ask",
+        "mobius-executor-gpt54": "allow",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
         "mobius-reviewer-mimo": "ask",
-        "mobius-fixer-deepseek": "ask",
-        "mobius-fixer-glm": "ask",
         "mobius-fixer-gpt54": "ask",
     }
     read_only_permission = {
@@ -10664,35 +10662,37 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
         "task slices, acceptance criteria, validation commands, and reviewer checklist. "
         "Treat that contract as authoritative; do not let executors reinterpret the "
         "architecture. Gather context with mobius-explore-glm, mobius-explore-kimi, or "
-        "mobius-explore-qwen as needed. If images are present, delegate visual inspection "
-        "to mobius-vision-mimo, mobius-vision-kimi, or mobius-vision-qwen before "
-        "implementation. Then delegate implementation to mobius-executor-deepseek with a "
-        "bounded packet containing target files, exact acceptance criteria, validation "
-        "commands, and blockers. Inspect the actual git diff and validation evidence, not "
-        "only executor summaries. If acceptance fails or confidence is low, send a failure "
-        "packet to mobius-executor-glm; if still failing, use mobius-executor-qwen; use "
-        "mobius-executor-gpt54 only as the final stable executor. Before release-gate "
-        "review, call mobius-spec-compliance-reviewer to check implementation against "
-        "the contract item by item. Use mobius-reviewer-gpt55 as the release gate; use "
-        "mobius-reviewer-gpt54 only for reviewer-route outage. Do not let an "
-        "executor/fixer self-approve its own work. When direct MiMo is available, use "
-        "mobius-reviewer-mimo for additional CN/vision critique, not as the final gate. "
-        "Record which executor/reviewer was used."
+        "mobius-explore-qwen as needed, and use domestic bug-hunt agents only for "
+        "read-only counterexamples, missing tests, and risk discovery. If images are "
+        "present, delegate visual inspection to mobius-vision-mimo, mobius-vision-kimi, "
+        "or mobius-vision-qwen before implementation. Then delegate implementation to "
+        "mobius-executor-gpt54 with a bounded packet containing target files, exact "
+        "acceptance criteria, validation commands, and blockers. Do not split normal "
+        "implementation across domestic executor chains. Inspect the actual git diff and "
+        "validation evidence, not only executor summaries. If acceptance fails or "
+        "confidence is low, send one focused failure packet to mobius-fixer-gpt54; if the "
+        "architecture itself is suspect, escalate back to the user instead of cycling "
+        "agents. Before release-gate review, call mobius-spec-compliance-reviewer to "
+        "check implementation against the contract item by item. Use "
+        "mobius-reviewer-gpt55 as the final release gate; use mobius-reviewer-gpt54 only "
+        "for reviewer-route outage. Do not let an executor/fixer self-approve its own "
+        "work. When direct MiMo is available, use mobius-reviewer-mimo for additional "
+        "CN/vision critique, not as the final gate. Record which executor/reviewer was "
+        "used."
     ) if orchestrated else (
         "Primary path: for non-trivial or architecture-sensitive work, ask "
         "mobius-spec-writer for an OpenSpec/SpecBridge-style contract before editing; "
-        "then implement against that contract. Explore with mobius-explore-glm; when "
-        "images are present and the active model is not image-capable, ask "
+        "then implement directly against that contract. Use domestic explore and "
+        "bug-hunt agents only for read-only context, counterexamples, and risk checks. "
+        "When images are present and the active model is not image-capable, ask "
         "mobius-vision-mimo, mobius-vision-kimi, or mobius-vision-qwen for a structured "
         "visual read. Before claiming done, ask mobius-spec-compliance-reviewer to check "
-        "the implementation against the contract, then review with mobius-reviewer-gpt55 "
-        "and fix with mobius-fixer-deepseek. Fallback path: if a subagent fails, returns "
-        "low confidence, misses evidence, or validation still fails, call the paired "
-        "fallback agent. When direct MiMo is available, ask mobius-reviewer-mimo for an "
-        "additional CN/vision critique, but keep GPT as the final release gate. Use "
-        "mobius-reviewer-gpt54 only for reviewer-route outage. Use mobius-builder-stable "
-        "only when the primary model/channel is suspect or the final result remains "
-        "unstable. Record which contract, fallback, and validation were used."
+        "the implementation against the contract, then review with mobius-reviewer-gpt55. "
+        "Use mobius-fixer-gpt54 for focused fixes when needed. Keep GPT as the final "
+        "release gate. Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
+        "mobius-builder-stable only when the primary model/channel is suspect or the "
+        "final result remains unstable. Record which contract, fallback, and validation "
+        "were used."
     )
     stable_prompt = (
         "Fallback orchestrator. Do not edit files directly. Take over only after primary "
@@ -10729,7 +10729,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "model": _agent_model("mobius-spec-writer"),
             "variant": "high",
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 24,
             "permission": spec_writer_permission,
             "prompt": (
                 "Create or update the minimal OpenSpec/SpecBridge-style contract for "
@@ -10745,7 +10745,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "model": _agent_model("mobius-spec-compliance-reviewer", _agent_model("mobius-reviewer-gpt55")),
             "variant": "high",
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 24,
             "permission": read_only_permission,
             "prompt": (
                 "Review only spec compliance. Compare the OpenSpec/SpecBridge contract, "
@@ -10759,7 +10759,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "mode": "subagent",
             "model": _agent_model("mobius-explore-glm"),
             "temperature": 0.1,
-            "steps": 8,
+            "steps": 12,
             "permission": read_only_permission,
             "prompt": "Read code/docs only. Return concise map: files, symbols, risks, next action. No edits.",
         },
@@ -10768,7 +10768,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "mode": "subagent",
             "model": _agent_model("mobius-explore-kimi", _agent_model("mobius-explore-glm")),
             "temperature": 0.1,
-            "steps": 8,
+            "steps": 12,
             "permission": read_only_permission,
             "prompt": "Fallback explorer. Re-check unclear areas and contradictions. No edits.",
         },
@@ -10777,7 +10777,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "mode": "subagent",
             "model": _agent_model("mobius-explore-qwen", _agent_model("mobius-explore-glm")),
             "temperature": 0.1,
-            "steps": 8,
+            "steps": 12,
             "permission": read_only_permission,
             "prompt": "Qwen explorer. Use for broad repo context, API surfaces, and missing cross-file links. No edits.",
         },
@@ -10787,7 +10787,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "model": _agent_model("mobius-reviewer-gpt55"),
             "variant": "high",
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 24,
             "permission": read_only_permission,
             "prompt": (
                 "Review as the release gate. Lead with bugs, regressions, missing tests, "
@@ -10800,7 +10800,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "model": _agent_model("mobius-reviewer-gpt54", _agent_model("mobius-reviewer-gpt55")),
             "variant": "high",
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 24,
             "permission": read_only_permission,
             "prompt": (
                 "Fallback reviewer for primary reviewer outage. Focus on findings missed by "
@@ -10808,33 +10808,35 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
                 "edits, prefer the gpt-5.5 reviewer when available. No edits."
             ),
         },
-        "mobius-fixer-deepseek": {
-            "description": "Lite Pro primary focused fixer",
+        "mobius-bughunt-deepseek": {
+            "description": "Lite Pro domestic read-only bug hunter",
             "mode": "subagent",
-            "model": _agent_model("mobius-fixer-deepseek"),
-            "temperature": 0.2,
+            "model": _agent_model("mobius-bughunt-deepseek"),
+            "temperature": 0.1,
             "steps": 12,
-            "permission": fix_permission,
-            "prompt": "Fix one named failure only. Do not broaden scope. Report validation and remaining risk.",
+            "permission": read_only_permission,
+            "prompt": (
+                "Read-only bug hunt. Look for concrete defects, missing tests, edge cases, "
+                "and risky assumptions. Return file paths and evidence. Do not edit files."
+            ),
         },
-        "mobius-fixer-glm": {
-            "description": "Lite Pro fallback focused fixer",
+        "mobius-bughunt-glm": {
+            "description": "Lite Pro domestic fallback bug hunter",
             "mode": "subagent",
-            "model": _agent_model("mobius-fixer-glm", _agent_model("mobius-fixer-deepseek")),
-            "temperature": 0.2,
+            "model": _agent_model("mobius-bughunt-glm", _agent_model("mobius-bughunt-deepseek")),
+            "temperature": 0.1,
             "steps": 12,
-            "permission": fix_permission,
-            "prompt": "Fallback fixer. Repair only the remaining named failure after primary fixer. Keep scope tight.",
+            "permission": read_only_permission,
+            "prompt": "Fallback read-only bug hunt. Re-check defects and counterexamples. No edits.",
         },
         "mobius-fixer-gpt54": {
-            "description": "Lite Pro final stable fixer",
+            "description": "Lite Pro GPT focused fixer",
             "mode": "subagent",
             "model": _agent_model("mobius-fixer-gpt54", _agent_model("mobius-builder-stable")),
             "variant": "high",
             "temperature": 0.2,
-            "steps": 12,
             "permission": fix_permission,
-            "prompt": "Final fallback fixer. Use when domestic fixers fail or validation remains unstable.",
+            "prompt": "Focused GPT fixer. Fix only the named failure. Keep scope tight, validate, and report exact diff risk.",
         },
     }
     if not orchestrated:
@@ -10861,7 +10863,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "mode": "subagent",
             "model": _agent_model(name),
             "temperature": 0.1,
-            "steps": 8,
+            "steps": 12,
             "permission": read_only_permission,
             "prompt": config["prompt"],
         }
@@ -10871,7 +10873,7 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             "mode": "subagent",
             "model": _agent_model("mobius-reviewer-mimo"),
             "temperature": 0.1,
-            "steps": 10,
+            "steps": 12,
             "permission": read_only_permission,
             "prompt": (
                 "Supplemental reviewer. Focus on Chinese reasoning, multimodal/visual "
@@ -10880,50 +10882,33 @@ def _opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False):
             ),
         }
     if orchestrated:
+        if "mobius-bughunt-qwen" in agent_models:
+            agents["mobius-bughunt-qwen"] = {
+                "description": "Lite Pro Qwen read-only bug hunter",
+                "mode": "subagent",
+                "model": _agent_model("mobius-bughunt-qwen"),
+                "temperature": 0.1,
+                "steps": 12,
+                "permission": read_only_permission,
+                "prompt": "Qwen read-only bug hunt. Focus on long-context consistency, missed edge cases, and test gaps. No edits.",
+            }
         executor_prompt = (
             "Implement only the assigned scope from the contract packet. Edit files "
             "directly if needed, but do not reinterpret the architecture, broaden design, "
             "or start unrelated refactors. If acceptance criteria are unclear, return a "
             "blocker instead of guessing. Run listed validation commands when available. "
+            "Keep going until the acceptance criteria pass or a real blocker is reached. "
             "Return changed files, commands, results, risks, and any blocker."
         )
         agents.update({
-            "mobius-executor-deepseek": {
-                "description": "Lite Pro primary implementation executor",
-                "mode": "subagent",
-                "model": _agent_model("mobius-executor-deepseek"),
-                "temperature": 0.2,
-                "steps": 16,
-                "permission": fix_permission,
-                "prompt": executor_prompt,
-            },
-            "mobius-executor-glm": {
-                "description": "Lite Pro structured repair executor",
-                "mode": "subagent",
-                "model": _agent_model("mobius-executor-glm", _agent_model("mobius-executor-deepseek")),
-                "temperature": 0.2,
-                "steps": 16,
-                "permission": fix_permission,
-                "prompt": "Second executor. Fix only the acceptance failures from the first executor. " + executor_prompt,
-            },
-            "mobius-executor-qwen": {
-                "description": "Lite Pro Qwen implementation executor",
-                "mode": "subagent",
-                "model": _agent_model("mobius-executor-qwen", _agent_model("mobius-executor-glm")),
-                "temperature": 0.2,
-                "steps": 16,
-                "permission": fix_permission,
-                "prompt": "Third executor. Focus on integration, long-context consistency, and missing edge cases. " + executor_prompt,
-            },
             "mobius-executor-gpt54": {
-                "description": "Lite Pro final stable implementation executor",
+                "description": "Lite Pro long-running GPT implementation executor",
                 "mode": "subagent",
                 "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
                 "variant": "high",
                 "temperature": 0.2,
-                "steps": 16,
                 "permission": fix_permission,
-                "prompt": "Final stable executor. Use only after domestic executors fail or validation remains unstable. " + executor_prompt,
+                "prompt": "Primary implementation executor. " + executor_prompt,
             },
         })
     return agents

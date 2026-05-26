@@ -740,9 +740,12 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
     assert payload["provider"]["mms-reviewer_mimo"]["models"]["mimo-v2.5-pro"]["reasoning"] is False
-    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
-    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-bughunt-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-bughunt-deepseek"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-bughunt-glm"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert "steps" not in payload["agent"]["mobius-fixer-gpt54"]
     assert len(payload["provider"]) >= 7
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
     assert payload["provider"]["mms-reviewer_fallback"]["npm"] == "@ai-sdk/openai"
@@ -812,19 +815,23 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert builder["permission"]["edit"] == "deny"
     assert builder["permission"]["task"]["mobius-spec-writer"] == "allow"
     assert builder["permission"]["task"]["mobius-spec-compliance-reviewer"] == "allow"
-    assert builder["permission"]["task"]["mobius-executor-deepseek"] == "allow"
     assert builder["permission"]["task"]["mobius-explore-qwen"] == "allow"
-    assert builder["permission"]["task"]["mobius-executor-qwen"] == "allow"
+    assert builder["permission"]["task"]["mobius-executor-gpt54"] == "allow"
+    assert builder["permission"]["task"]["mobius-bughunt-qwen"] == "allow"
     assert "Do not edit files directly" in builder["prompt"]
     assert "OpenSpec/SpecBridge-style contract" in builder["prompt"]
     assert payload["agent"]["mobius-builder-stable"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
-    assert payload["agent"]["mobius-executor-deepseek"]["model"].endswith("/deepseek-v4-pro")
-    assert "do not reinterpret the architecture" in payload["agent"]["mobius-executor-deepseek"]["prompt"]
-    assert payload["agent"]["mobius-executor-glm"]["model"].endswith("/glm-5.1")
-    assert payload["agent"]["mobius-executor-qwen"]["model"].endswith("/qwen3.6-plus")
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
+    assert "steps" not in payload["agent"]["mobius-executor-gpt54"]
+    assert "do not reinterpret the architecture" in payload["agent"]["mobius-executor-gpt54"]["prompt"]
+    assert payload["agent"]["mobius-bughunt-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-bughunt-deepseek"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
+    assert payload["agent"]["mobius-bughunt-glm"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-bughunt-qwen"]["model"].endswith("/qwen3.6-plus")
+    assert payload["agent"]["mobius-bughunt-qwen"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-reviewer-mimo"]["model"].endswith("/mimo-v2.5-pro")
@@ -836,8 +843,9 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
         for name in payload["agent"]
         if name.startswith("mobius-executor-")
     }
+    assert executor_models == {"gpt-5.4"}
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].rsplit("/", 1)[-1] not in executor_models
-    qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "executor_qwen")
+    qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "bughunt_qwen")
     assert qwen_route["protocol"] == "anthropic_messages"
     vision_qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "vision_qwen")
     assert vision_qwen_route["protocol"] == "anthropic_messages"
@@ -920,8 +928,8 @@ def test_core_opencode_lite_pro_falls_back_to_gpt_when_non_gpt_anthropic_unavail
     assert payload["agent"]["mobius-reviewer-gpt54"]["model"].endswith("/gpt-5.4")
     assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
-    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/gpt-5.4")
-    assert payload["agent"]["mobius-fixer-glm"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-bughunt-deepseek"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/gpt-5.4")
     assert all(
         route["protocol"] == "openai_responses"
         for route in runtime["opencode_routes"]
@@ -1509,20 +1517,20 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
                 "role": "reviewer_primary",
                 "status": "blocked",
             },
-            "lite_pro_orchestrated|executor_primary|deepseek-v4-pro|newapi|anthropic_messages": {
+            "lite_pro_orchestrated|executor_gpt54|gpt-5.4|gpt|openai_responses": {
                 "profile": "lite_pro_orchestrated",
-                "role": "executor_primary",
+                "role": "executor_gpt54",
                 "status": "live_healthy",
             },
-            "lite_pro_orchestrated|executor_qwen|qwen3.6-plus|newapi|anthropic_messages": {
+            "lite_pro_orchestrated|bughunt_qwen|qwen3.6-plus|newapi|anthropic_messages": {
                 "profile": "lite_pro_orchestrated",
-                "role": "executor_qwen",
+                "role": "bughunt_qwen",
                 "status": "degraded",
                 "finished_at": "2026-05-16T10:00:00Z",
             },
-            "lite_pro_orchestrated|executor_qwen|qwen3.6-plus|newapi|openai_chat_completions": {
+            "lite_pro_orchestrated|bughunt_qwen|qwen3.6-plus|newapi|openai_chat_completions": {
                 "profile": "lite_pro_orchestrated",
-                "role": "executor_qwen",
+                "role": "bughunt_qwen",
                 "status": "live_healthy",
                 "finished_at": "2026-05-15T10:00:00Z",
             },
@@ -1542,12 +1550,12 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     assert orchestrated["label"] == "OpenSpec Multi"
     assert orchestrated["badge"] == "默认"
     assert backend["label"] == "Backend Multi"
-    assert "health: 1/20 healthy" in backend["summary"]
+    assert "health: 1/18 healthy" in backend["summary"]
     assert lite_pro["label"] == "Pro Solo"
     assert "health: 1/15 healthy" in lite_pro["summary"]
     assert "1 degraded" in lite_pro["summary"]
     assert "1 blocked" in lite_pro["summary"]
     assert "12 untested" in lite_pro["summary"]
-    assert "health: 1/20 healthy" in orchestrated["summary"]
+    assert "health: 1/18 healthy" in orchestrated["summary"]
     assert "1 degraded" in orchestrated["summary"]
-    assert "18 untested" in orchestrated["summary"]
+    assert "16 untested" in orchestrated["summary"]
