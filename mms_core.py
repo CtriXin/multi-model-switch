@@ -104,6 +104,20 @@ from mms_fake_upstream import (
     tail_log as _fake_upstream_tail_log,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
+from mms_opencode_health import (
+    OPENCODE_HEALTH_REL_PATH as _OPENCODE_HEALTH_REL_PATH,
+    OPENCODE_HEALTH_STATUS_RANK as _OPENCODE_HEALTH_STATUS_RANK,
+    OPENCODE_HEALTH_UNHEALTHY_TTL_SEC as _OPENCODE_HEALTH_UNHEALTHY_TTL_SEC,
+    load_opencode_route_health_latest as _load_opencode_route_health_latest,
+    opencode_health_latest_path as _opencode_health_latest_path,
+    opencode_health_repo_root as _opencode_health_repo_root,
+    opencode_parse_health_timestamp as _opencode_parse_health_timestamp,
+    opencode_route_health_allows_route as _opencode_route_health_allows_route_impl,
+    opencode_route_health_for_route as _opencode_route_health_for_route,
+    opencode_route_health_is_fresh as _opencode_route_health_is_fresh,
+    opencode_route_health_key as _opencode_route_health_key,
+    opencode_route_health_sort_key as _opencode_route_health_sort_key,
+)
 from mms_opencode_profiles import (
     OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
     OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
@@ -9620,120 +9634,8 @@ def _opencode_provider_matches_route_policy(provider, route_policy):
     return False
 
 
-_OPENCODE_HEALTH_REL_PATH = os.path.join(".ai", "opencode-health", "latest.json")
-_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC = 15 * 60
-_OPENCODE_HEALTH_STATUS_RANK = {
-    "live_healthy": 0,
-    "degraded": 1,
-    "untested": 2,
-    "unhealthy": 3,
-    "blocked": 4,
-}
-
-
-def _opencode_health_repo_root(repo_root=None):
-    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.abspath(__file__))).strip()
-    return os.path.abspath(os.path.expanduser(root))
-
-
-def _opencode_health_latest_path(repo_root=None):
-    return os.path.join(_opencode_health_repo_root(repo_root), _OPENCODE_HEALTH_REL_PATH)
-
-
-def _opencode_route_health_key(profile, role, model, provider_id, protocol):
-    return "|".join(str(item or "") for item in (profile, role, model, provider_id, protocol))
-
-
-def _load_opencode_route_health_latest(repo_root=None):
-    path = _opencode_health_latest_path(repo_root)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    routes = payload.get("routes")
-    if not isinstance(routes, dict):
-        return {}
-    latest = {}
-    for key, row in routes.items():
-        if isinstance(row, dict):
-            latest[str(key)] = dict(row)
-    return latest
-
-
-def _opencode_parse_health_timestamp(value):
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _opencode_route_health_for_route(latest_health, profile, role, route):
-    if not isinstance(route, dict):
-        return None
-    key = _opencode_route_health_key(
-        profile,
-        role or route.get("id"),
-        route.get("model"),
-        route.get("provider_id"),
-        route.get("protocol"),
-    )
-    row = latest_health.get(key) if isinstance(latest_health, dict) else None
-    if not isinstance(row, dict):
-        return None
-    model = str(route.get("model") or "").strip().lower()
-    protocol = str(route.get("protocol") or "").strip()
-    if (
-        model.startswith("mimo-")
-        and protocol == "openai_chat_completions"
-        and row.get("error_class") == "cache_sensitive_wrong_protocol"
-    ):
-        # Older smoke policy incorrectly marked direct MiMo OpenAI-compatible
-        # routes as "wrong protocol". The current MiMo OpenCode docs make this
-        # the official protocol, so ignore stale rows until the next smoke run.
-        return None
-    return row
-
-
-def _opencode_route_health_is_fresh(row, *, now=None, ttl_sec=_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC):
-    finished_at = _opencode_parse_health_timestamp(row.get("finished_at") if isinstance(row, dict) else None)
-    if finished_at is None:
-        return False
-    current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    age = (current - finished_at).total_seconds()
-    return age >= 0 and age <= ttl_sec
-
-
 def _opencode_route_health_allows_route(row, *, now=None):
-    if not row:
-        return True
-    status = str(row.get("status") or "untested")
-    if status == "blocked":
-        return False
-    if status == "unhealthy" and _opencode_route_health_is_fresh(row, now=now):
-        return False
-    return True
-
-
-def _opencode_route_health_sort_key(row):
-    status = str((row or {}).get("status") or "untested")
-    return (
-        _OPENCODE_HEALTH_STATUS_RANK.get(status, _OPENCODE_HEALTH_STATUS_RANK["untested"]),
-        -int((row or {}).get("health_score") or 0),
-        str((row or {}).get("finished_at") or ""),
-    )
+    return _opencode_route_health_allows_route_impl(row, now=now, is_fresh=_opencode_route_health_is_fresh)
 
 
 def _find_opencode_model_route(
