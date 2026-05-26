@@ -70,6 +70,7 @@ from mms_opencode_env import (
     opencode_write_config as _opencode_write_config_impl,
 )
 from mms_opencode_launch import (
+    launch_opencode as _opencode_launch_impl,
     opencode_gateway_health_check as _opencode_gateway_health_check_impl,
     opencode_global_command as _opencode_global_command_impl,
     opencode_is_global_profile_runtime as _opencode_is_global_profile_runtime_impl,
@@ -10197,50 +10198,25 @@ def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agen
 
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
-    runtime = runtime if isinstance(runtime, dict) else {}
-    profile = str(runtime.get("opencode_profile") or "lite").strip().lower() or "lite"
-    entrypoint = _opencode_entrypoint(runtime)
-    if profile in {"heavy", "heavy_omo", "omo"} or runtime.get("opencode_use_global_config"):
-        env = _opencode_global_omo_env(runtime)
-        env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
-        cmd = _opencode_global_command(runtime, entrypoint)
-        _exec_or_run(cmd, env, once)
-        return
-
-    _opencode_gateway_health_check(runtime)
-    model = _resolve_model(model_info)
-    routes = _opencode_runtime_routes(runtime, model)
-    env = _opencode_gateway_env(runtime, model_info=model_info)
-    launch_model_ref, launch_agent, preflight_checks = _opencode_select_launch_candidate(runtime, routes, model, env)
-    if not launch_model_ref and preflight_checks:
-        console.print("[red]OpenCode Agent preflight 全部失败；未启动可能坏掉的 primary route。[/red]")
-        console.print("[dim]可运行 `mms opencode-smoke --profile agent --live` 查看完整 Moebius trace。[/dim]")
-        sys.exit(2)
-    if not launch_model_ref:
-        console.print("[red]OpenCode 启动需要先选择一个模型[/red]")
-        sys.exit(1)
-    launch_model_name = launch_model_ref.rsplit("/", 1)[-1]
-    _inject_selected_model_name(env, launch_model_name)
-    env["MMS_OPENCODE_LAUNCH_MODEL"] = launch_model_ref
-    env["MMS_OPENCODE_LAUNCH_AGENT"] = str(launch_agent or "")
-    if env.get("MMS_SESSION_HOME"):
-        launch_model_info = dict(model_info) if isinstance(model_info, dict) else {}
-        launch_model_info["model"] = launch_model_name
-        launch_model_info["opencode_model_ref"] = launch_model_ref
-        _install_session_packet_env(
-            env,
-            cli="opencode",
-            runtime=runtime,
-            model_info=launch_model_info,
-            session_home=env.get("MMS_SESSION_HOME"),
-            features={
-                "opencode_launch_preflight": bool(preflight_checks),
-                "opencode_launch_route": launch_model_ref,
-            },
-        )
-    env["MMS_OPENCODE_ENTRYPOINT"] = entrypoint
-    cmd = _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agent)
-    _exec_or_run(cmd, env, once)
+    return _opencode_launch_impl(
+        model_info,
+        runtime,
+        once=once,
+        entrypoint=_opencode_entrypoint,
+        global_omo_env=_opencode_global_omo_env,
+        global_command=_opencode_global_command,
+        exec_or_run=_exec_or_run,
+        gateway_health_check=_opencode_gateway_health_check,
+        resolve_model=_resolve_model,
+        runtime_routes=_opencode_runtime_routes,
+        gateway_env=_opencode_gateway_env,
+        select_launch_candidate=_opencode_select_launch_candidate,
+        console=console,
+        sys_exit=sys.exit,
+        inject_selected_model_name=_inject_selected_model_name,
+        install_session_packet_env=_install_session_packet_env,
+        session_command=_opencode_session_command,
+    )
 
 
 def launch_gemini(model_info, runtime, once=False):
