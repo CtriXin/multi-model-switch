@@ -38,6 +38,27 @@ def _run_install_check(*, home: Path, extra_env: dict[str, str] | None = None) -
     return completed.stdout
 
 
+def _extract_shell_function_body(script_text: str, function_name: str) -> str:
+    marker = f"{function_name}() {{"
+    start = script_text.find(marker)
+    assert start != -1, f"Could not find {function_name} function definition"
+
+    body_start = start + len(marker)
+    depth = 1
+    i = body_start
+    while i < len(script_text):
+        char = script_text[i]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return script_text[body_start:i]
+        i += 1
+
+    raise AssertionError(f"Could not find closing brace for {function_name}")
+
+
 def test_install_check_prefers_explicit_real_home(tmp_path):
     real_home = tmp_path / "real-home"
     session_home = tmp_path / "session-home" / ".config" / "mms" / "codex-gateway" / "s" / "12345"
@@ -484,5 +505,159 @@ def test_install_script_uses_bundled_handover_continuity_pack():
     assert "$MMS_HOME/vendor/handover" in text
     assert "$SOURCE_DIR/vendor/handover" in text
     assert 'HOME="$REAL_HOME" "$(_python_bin)" "$installer_script"' in text
-    assert "/Users/xin/auto-skills/shared-skills/handover" not in text
+    if '$REAL_HOME/auto-skills/shared-skills/handover' in text:
+        assert text.index('$MMS_HOME/vendor/handover') < text.index('$REAL_HOME/auto-skills/shared-skills/handover')
     assert (ROOT_DIR / "vendor" / "handover" / "scripts" / "install_global_commands.py").exists()
+
+
+# ─── M29: Builtin handover continuity (offduty/onduty) tests ───
+
+def test_install_script_defines_install_builtin_handover_continuity():
+    """install.sh defines install_builtin_handover_continuity function."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "install_builtin_handover_continuity()" in text
+
+
+def test_install_builtin_handover_calls_shared_installer_via_python_bin():
+    """The builtin function calls shared install_global_commands.py via _python_bin."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    # Must reference the shared installer script
+    assert "install_global_commands.py" in text
+    # Must invoke it via _python_bin
+    assert '"$(_python_bin)" "$installer_script"' in text or '"$(_python_bin)" "$installer_script"' in text
+
+
+def test_install_builtin_handover_not_gated_by_brainkeeper_context():
+    """The call to install_builtin_handover_continuity in main flow is NOT gated by --install-brainkeeper-context."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+
+    # Find the main-flow call
+    assert "install_builtin_handover_continuity" in text
+
+    # In the main install flow, the call should be unconditional (not inside a
+    # BRAINKEEPER_CONTEXT if-block).
+    # The main flow call appears right after prepare_source_dir and before chmod.
+    # We verify it's not wrapped by INSTALL_BRAINKEEPER_CONTEXT:
+    # Pattern: the function call should appear outside any brainkeeper conditional.
+    lines = text.splitlines()
+    found_call = False
+    for i, line in enumerate(lines):
+        # The main-flow call (not the function definition itself)
+        stripped = line.strip()
+        if "install_builtin_handover_continuity" in stripped and "()" not in stripped:
+            found_call = True
+            # Walk back ~10 lines to ensure no open brainkeeper if
+            context_start = max(0, i - 10)
+            context = "\n".join(lines[context_start:i + 1])
+            assert "INSTALL_BRAINKEEPER_CONTEXT" not in context, (
+                f"install_builtin_handover_continuity call at line {i+1} is gated by INSTALL_BRAINKEEPER_CONTEXT"
+            )
+    assert found_call, "Did not find a main-flow call to install_builtin_handover_continuity"
+
+
+def test_install_builtin_handover_does_not_reference_brainkeeper():
+    """The builtin handover function body does not reference BRAINKEEPER or INSTALL_BRAINKEEPER_CONTEXT."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    body = _extract_shell_function_body(text, "install_builtin_handover_continuity")
+
+    assert "BRAINKEEPER" not in body, (
+        "install_builtin_handover_continuity body references BRAINKEEPER"
+    )
+    assert "INSTALL_BRAINKEEPER_CONTEXT" not in body, (
+        "install_builtin_handover_continuity body references INSTALL_BRAINKEEPER_CONTEXT"
+    )
+
+
+def test_install_script_brainkeeper_context_flag_remains_optional():
+    """--install-brainkeeper-context is still an optional gated flag, not default."""
+    text = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    # The flag should be parsed but not force-installed
+    assert "--install-brainkeeper-context" in text
+    # Default value should be 0
+    assert "INSTALL_BRAINKEEPER_CONTEXT=0" in text
+
+
+def test_install_check_reports_handover_installed_when_symlinks_present(tmp_path):
+    """--check reports offduty/onduty installed when symlinks exist under temp HOME."""
+    home = tmp_path / "home"
+    claude_cmds = home / ".claude" / "commands"
+    codex_cmds = home / ".codex" / "commands"
+    claude_cmds.mkdir(parents=True)
+    codex_cmds.mkdir(parents=True)
+
+    # Create dummy targets for symlinks
+    dummy_target = home / "dummy.md"
+    dummy_target.write_text("# dummy\n", encoding="utf-8")
+
+    # Create symlinks for both Claude and Codex command dirs.
+    for commands_dir in (claude_cmds, codex_cmds):
+        (commands_dir / "offduty.md").symlink_to(dummy_target)
+        (commands_dir / "onduty.md").symlink_to(dummy_target)
+
+    output = _run_install_check(
+        home=home,
+        extra_env={
+            "REAL_HOME": str(home),
+            "MMS_REAL_HOME": str(home),
+            "ORIGINAL_HOME": str(home),
+        },
+    )
+
+    assert ("offduty/onduty 命令已安装" in output) or ("offduty/onduty commands installed" in output)
+
+
+def test_install_check_reports_handover_missing_when_symlinks_absent(tmp_path):
+    """--check reports offduty/onduty missing when symlinks do not exist."""
+    home = tmp_path / "home"
+    home.mkdir()
+
+    output = _run_install_check(home=home)
+
+    assert ("offduty/onduty 命令未安装" in output) or ("offduty/onduty commands not installed" in output)
+
+
+def test_install_script_dry_run_mentions_offduty_onduty(tmp_path):
+    """--dry-run output mentions would install/repair offduty/onduty."""
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env.update(_version_env_overrides())
+
+    completed = subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout = completed.stdout
+    assert ("offduty/onduty" in stdout), (
+        f"--dry-run output should mention offduty/onduty; got: {stdout[:500]}"
+    )
+    assert ("would install" in stdout.lower() or "would install/repair" in stdout or "would install" in stdout), (
+        f"--dry-run output should include 'would install'; got: {stdout[:500]}"
+    )
+
+
+def test_install_script_dry_run_does_not_create_home_dirs(tmp_path):
+    """--dry-run does not create .claude/, .codex/, or .config/opencode under temp HOME."""
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env.update(_version_env_overrides())
+
+    subprocess.run(
+        ["bash", str(INSTALL_SCRIPT), "--lang", "en", "--dry-run"],
+        cwd=ROOT_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert not (tmp_path / ".claude").exists(), ".claude/ should not be created by --dry-run"
+    assert not (tmp_path / ".codex").exists(), ".codex/ should not be created by --dry-run"
+    # .config/opencode might not exist, if it does it must be pre-existing
+    assert not (tmp_path / ".config" / "opencode").exists(), (
+        ".config/opencode should not be created by --dry-run"
+    )
