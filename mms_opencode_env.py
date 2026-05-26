@@ -168,10 +168,41 @@ def opencode_global_omo_env(
     return env
 
 
+def opencode_global_export_env(runtime, *, apply_bypass_env):
+    exports = {
+        "OPENCODE_CLIENT": "mms",
+        "MMS_OPENCODE_PROFILE": "heavy_omo",
+    }
+    return apply_bypass_env(exports, runtime)
+
+
+def opencode_provider_export_env(
+    runtime,
+    model,
+    *,
+    export_config_path,
+    write_opencode_config,
+    apply_route_env,
+    apply_bypass_env,
+):
+    exports = {}
+    config_path = export_config_path(runtime, model)
+    write_opencode_config(config_path, runtime, model)
+    apply_route_env(exports, runtime, selected_model=model)
+    exports["OPENCODE_CONFIG"] = config_path
+    exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
+    exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+    exports["OPENCODE_CLIENT"] = "mms"
+    apply_bypass_env(exports, runtime)
+    return exports
+
+
 __all__ = [
     "opencode_export_config_path",
     "opencode_gateway_env",
+    "opencode_global_export_env",
     "opencode_global_omo_env",
+    "opencode_provider_export_env",
     "opencode_set_soft_home",
     "opencode_write_config",
 ]

@@ -65,7 +65,9 @@ from mms_opencode_config import (
 from mms_opencode_env import (
     opencode_export_config_path as _opencode_export_config_path_impl,
     opencode_gateway_env as _opencode_gateway_env_impl,
+    opencode_global_export_env as _opencode_global_export_env_impl,
     opencode_global_omo_env as _opencode_global_omo_env_impl,
+    opencode_provider_export_env as _opencode_provider_export_env_impl,
     opencode_set_soft_home as _opencode_set_soft_home_impl,
     opencode_write_config as _opencode_write_config_impl,
 )
@@ -10265,15 +10267,29 @@ def _is_opencode_global_profile_runtime(cli, runtime):
     return _opencode_is_global_profile_runtime_impl(cli, runtime)
 
 
+def _opencode_global_export_env(runtime):
+    return _opencode_global_export_env_impl(
+        runtime,
+        apply_bypass_env=_opencode_apply_bypass_env,
+    )
+
+
+def _opencode_provider_export_env(runtime, model):
+    return _opencode_provider_export_env_impl(
+        runtime,
+        model,
+        export_config_path=_opencode_export_config_path,
+        write_opencode_config=_write_opencode_config,
+        apply_route_env=_opencode_apply_route_env,
+        apply_bypass_env=_opencode_apply_bypass_env,
+    )
+
+
 def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
     runtime = runtime if isinstance(runtime, dict) else {}
     if _is_opencode_global_profile_runtime(cli, runtime):
-        exports = {
-            "OPENCODE_CLIENT": "mms",
-            "MMS_OPENCODE_PROFILE": "heavy_omo",
-        }
-        return _opencode_apply_bypass_env(exports, runtime)
+        return _opencode_global_export_env(runtime)
 
     if runtime.get("auth_mode") == "broker_profile":
         return {}
@@ -10296,14 +10312,7 @@ def get_export_env(cli, runtime):
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     elif cli == "opencode":
         model = _resolve_model(runtime)
-        config_path = _opencode_export_config_path(runtime, model)
-        _write_opencode_config(config_path, runtime, model)
-        _opencode_apply_route_env(exports, runtime, selected_model=model)
-        exports["OPENCODE_CONFIG"] = config_path
-        exports["OPENCODE_CONFIG_DIR"] = os.path.dirname(config_path)
-        exports["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
-        exports["OPENCODE_CLIENT"] = "mms"
-        _opencode_apply_bypass_env(exports, runtime)
+        exports.update(_opencode_provider_export_env(runtime, model))
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()
