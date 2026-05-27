@@ -330,6 +330,59 @@ def test_registry_command_refresh_sources_and_status(capsys, tmp_path: Path) -> 
     assert "model_identity=" in out
 
 
+def test_registry_backup_and_restore_roundtrip(capsys, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    db_path = config_dir / "model-registry.sqlite"
+
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+    backup = mms_registry_cli.backup_registry_db(
+        config_dir=config_dir,
+        db_path=db_path,
+        reason="test-roundtrip",
+    )
+    dry_run = mms_registry_cli.restore_registry_db(
+        backup["backup_path"],
+        config_dir=config_dir,
+        db_path=db_path,
+    )
+    for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if path.exists():
+            path.unlink()
+    restored = mms_registry_cli.restore_registry_db(
+        backup["backup_path"],
+        config_dir=config_dir,
+        db_path=db_path,
+        apply=True,
+        reason="test-restore",
+    )
+    status = mms_registry_cli.registry_status(db_path=db_path)
+    backup_rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "backup-db", "--config-dir", str(config_dir), "--reason", "cli-test"],
+        command_name="mms registry",
+    )
+    restore_dry_run_rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "restore-db", backup["backup_path"], "--config-dir", str(config_dir)],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+
+    assert backup["skipped"] is False
+    assert Path(backup["backup_path"]).exists()
+    assert Path(backup["manifest_path"]).exists()
+    assert backup["integrity_check"] == "ok"
+    assert dry_run["skipped"] is True
+    assert dry_run["skip_reason"] == "dry_run_apply_required"
+    assert restored["skipped"] is False
+    assert restored["restored_integrity_check"] == "ok"
+    assert status["counts"]["source_snapshot"] == 1
+    assert status["counts"]["source_check"] == 1
+    assert backup_rc == 0
+    assert restore_dry_run_rc == 0
+    assert "MMS Registry DB Backup" in out
+    assert "MMS Registry DB Restore" in out
+    assert "skip_reason=dry_run_apply_required" in out
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,

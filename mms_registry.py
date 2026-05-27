@@ -22,6 +22,7 @@ from mms_state_io import resolve_mms_config_dir
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 CALIBRATION_SOURCE_KIND = "model_capability_calibration"
 OPENROUTER_MODELS_SOURCE_KIND = "openrouter_models_api"
+REGISTRY_DB_BACKUP_SCHEMA = "mms.registry_db_backup.v1"
 
 _SECRET_FIELD_PARTS = (
     "api_key",
@@ -100,6 +101,160 @@ def _source_model_count(payload: Mapping[str, Any]) -> int:
 def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None) -> Path:
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(env))
     return root / "model-registry.sqlite"
+
+
+def _registry_config_root(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    if config_dir is not None:
+        return Path(config_dir).expanduser()
+    if db_path is not None:
+        return Path(db_path).expanduser().parent
+    return Path(resolve_mms_config_dir())
+
+
+def _timestamp_slug(value: str | None = None) -> str:
+    return re.sub(r"[^0-9]", "", value or utc_now())[:14] or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _sqlite_integrity(path: Path) -> str:
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return str(db.execute("PRAGMA integrity_check").fetchone()[0])
+    finally:
+        db.close()
+
+
+def backup_registry_db(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    backup_dir: str | os.PathLike[str] | None = None,
+    reason: str = "manual",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Create a self-contained SQLite backup for the local registry DB."""
+    config_root = _registry_config_root(config_dir=config_dir, db_path=db_path)
+    source = Path(db_path) if db_path is not None else default_registry_db_path(config_root)
+    source = source.expanduser()
+    backup_root = Path(backup_dir).expanduser() if backup_dir is not None else config_root / "backups" / "db"
+    created_at = generated_at or utc_now()
+    if not source.exists():
+        return {
+            "schema": REGISTRY_DB_BACKUP_SCHEMA,
+            "skipped": True,
+            "reason": "missing_db",
+            "source_db_path": str(source),
+            "backup_dir": str(backup_root),
+            "created_at": created_at,
+        }
+
+    backup_root.mkdir(parents=True, exist_ok=True)
+    slug = _timestamp_slug(created_at)
+    fd, temp_name = tempfile.mkstemp(prefix=f"model-registry.{slug}.", suffix=".tmp.sqlite", dir=str(backup_root))
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(temp_path))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        integrity = _sqlite_integrity(temp_path)
+        if integrity.lower() != "ok":
+            raise RegistryValidationError(f"registry backup integrity check failed: {integrity}")
+        digest = sha256_hex(temp_path.read_bytes())
+        backup_path = backup_root / f"model-registry.{slug}.{digest[:12]}.sqlite"
+        os.replace(temp_path, backup_path)
+        os.chmod(backup_path, 0o600)
+        manifest_path = backup_path.with_name(f"{backup_path.name}.json")
+        manifest = {
+            "schema": REGISTRY_DB_BACKUP_SCHEMA,
+            "skipped": False,
+            "reason": str(reason or "manual"),
+            "created_at": created_at,
+            "source_db_path": str(source),
+            "backup_path": str(backup_path),
+            "sha256": digest,
+            "size_bytes": backup_path.stat().st_size,
+            "integrity_check": integrity,
+        }
+        write_json_atomic(manifest_path, manifest)
+        manifest["manifest_path"] = str(manifest_path)
+        return manifest
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def restore_registry_db(
+    backup_path: str | os.PathLike[str],
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    apply: bool = False,
+    reason: str = "manual",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Restore registry DB from a backup. Dry-run unless apply=True."""
+    backup = Path(backup_path).expanduser()
+    if not backup.exists():
+        raise RegistryValidationError(f"registry backup not found: {backup}")
+    config_root = _registry_config_root(config_dir=config_dir, db_path=db_path)
+    target = Path(db_path) if db_path is not None else default_registry_db_path(config_root)
+    target = target.expanduser()
+    if backup.resolve() == target.resolve():
+        raise RegistryValidationError("backup path and target DB path are identical")
+    integrity = _sqlite_integrity(backup)
+    if integrity.lower() != "ok":
+        raise RegistryValidationError(f"registry backup integrity check failed: {integrity}")
+    summary: dict[str, Any] = {
+        "schema": REGISTRY_DB_BACKUP_SCHEMA,
+        "apply": bool(apply),
+        "reason": str(reason or "manual"),
+        "created_at": generated_at or utc_now(),
+        "backup_path": str(backup),
+        "target_db_path": str(target),
+        "backup_sha256": sha256_hex(backup.read_bytes()),
+        "backup_size_bytes": backup.stat().st_size,
+        "integrity_check": integrity,
+    }
+    if not apply:
+        summary["skipped"] = True
+        summary["skip_reason"] = "dry_run_apply_required"
+        return summary
+
+    pre_restore = backup_registry_db(
+        config_dir=config_root,
+        db_path=target,
+        reason=f"pre-restore:{reason or 'manual'}",
+        generated_at=generated_at,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    copy_file_atomic(backup, target, mode=0o600)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{target}{suffix}")
+        if sidecar.exists():
+            sidecar.unlink()
+    restored_integrity = _sqlite_integrity(target)
+    if restored_integrity.lower() != "ok":
+        raise RegistryValidationError(f"restored registry integrity check failed: {restored_integrity}")
+    summary.update(
+        {
+            "skipped": False,
+            "pre_restore_backup": pre_restore,
+            "restored_integrity_check": restored_integrity,
+            "target_sha256": sha256_hex(target.read_bytes()),
+        }
+    )
+    return summary
 
 
 def connect_registry(db_path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:

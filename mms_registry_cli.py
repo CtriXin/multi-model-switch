@@ -564,6 +564,38 @@ def resolve_approved_model(
     return resolve_model_capabilities(model_name, approved_facts_path=facts_path)
 
 
+def backup_registry_db(
+    *,
+    config_dir: str | Path | None = None,
+    db_path: str | Path | None = None,
+    backup_dir: str | Path | None = None,
+    reason: str = "manual",
+) -> dict[str, Any]:
+    return mms_registry.backup_registry_db(
+        config_dir=config_dir,
+        db_path=db_path,
+        backup_dir=backup_dir,
+        reason=reason,
+    )
+
+
+def restore_registry_db(
+    backup_path: str | Path,
+    *,
+    config_dir: str | Path | None = None,
+    db_path: str | Path | None = None,
+    apply: bool = False,
+    reason: str = "manual",
+) -> dict[str, Any]:
+    return mms_registry.restore_registry_db(
+        backup_path,
+        config_dir=config_dir,
+        db_path=db_path,
+        apply=apply,
+        reason=reason,
+    )
+
+
 def _print_status(status: dict[str, Any]) -> None:
     counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
     latest = status.get("latest_source_snapshot") if isinstance(status.get("latest_source_snapshot"), dict) else {}
@@ -710,6 +742,31 @@ def _print_scheduled_refresh(summary: dict[str, Any]) -> None:
     print(f"candidate_skip_reason={openrouter_diff.get('reason', '')}")
 
 
+def _print_backup(summary: dict[str, Any]) -> None:
+    print("MMS Registry DB Backup")
+    print(f"skipped={summary.get('skipped', False)}")
+    print(f"reason={summary.get('reason', '')}")
+    print(f"source_db_path={summary.get('source_db_path', '')}")
+    print(f"backup_path={summary.get('backup_path', '')}")
+    print(f"manifest_path={summary.get('manifest_path', '')}")
+    print(f"sha256={summary.get('sha256', '')}")
+    print(f"integrity_check={summary.get('integrity_check', '')}")
+
+
+def _print_restore(summary: dict[str, Any]) -> None:
+    print("MMS Registry DB Restore")
+    print(f"apply={summary.get('apply', False)}")
+    print(f"skipped={summary.get('skipped', False)}")
+    print(f"skip_reason={summary.get('skip_reason', '')}")
+    print(f"backup_path={summary.get('backup_path', '')}")
+    print(f"target_db_path={summary.get('target_db_path', '')}")
+    print(f"backup_sha256={summary.get('backup_sha256', '')}")
+    print(f"integrity_check={summary.get('integrity_check', '')}")
+    pre_restore = summary.get("pre_restore_backup") if isinstance(summary.get("pre_restore_backup"), dict) else {}
+    print(f"pre_restore_backup_path={pre_restore.get('backup_path', '')}")
+    print(f"restored_integrity_check={summary.get('restored_integrity_check', '')}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -720,6 +777,15 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
 
     subparsers.add_parser("status", help="Show local registry DB status")
     subparsers.add_parser("doctor", help="Alias of status for now; does not change runtime truth")
+    backup_parser = subparsers.add_parser("backup-db", help="Create a SQLite backup of the registry DB")
+    backup_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    backup_parser.add_argument("--backup-dir", default="", help="Override backup output dir")
+    backup_parser.add_argument("--reason", default="manual", help="Audit reason for this backup")
+    restore_parser = subparsers.add_parser("restore-db", help="Restore registry DB from a backup; dry-run unless --apply")
+    restore_parser.add_argument("backup_path", help="Backup sqlite path to restore")
+    restore_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    restore_parser.add_argument("--apply", action="store_true", help="Actually replace the target DB after pre-restore backup")
+    restore_parser.add_argument("--reason", default="manual", help="Audit reason for this restore")
     refresh_parser = subparsers.add_parser(
         "refresh-sources",
         help="Import local reference snapshots as source_truth/candidate evidence",
@@ -776,6 +842,25 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     db_path = args.db or None
     if args.subcommand in {None, "status", "doctor"}:
         _print_status(registry_status(db_path=db_path))
+        return 0
+    if args.subcommand == "backup-db":
+        summary = backup_registry_db(
+            config_dir=args.config_dir or None,
+            db_path=db_path,
+            backup_dir=args.backup_dir or None,
+            reason=args.reason or "manual",
+        )
+        _print_backup(summary)
+        return 0
+    if args.subcommand == "restore-db":
+        summary = restore_registry_db(
+            args.backup_path,
+            config_dir=args.config_dir or None,
+            db_path=db_path,
+            apply=bool(args.apply),
+            reason=args.reason or "manual",
+        )
+        _print_restore(summary)
         return 0
     if args.subcommand == "refresh-sources":
         summary = refresh_source_snapshots(
@@ -847,9 +932,11 @@ __all__ = [
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
     "scheduled_refresh",
+    "backup_registry_db",
     "publish_approved_bundle",
     "refresh_source_snapshots",
     "registry_status",
+    "restore_registry_db",
     "resolve_approved_model",
     "source_freshness",
     "verify_approved_bundle",

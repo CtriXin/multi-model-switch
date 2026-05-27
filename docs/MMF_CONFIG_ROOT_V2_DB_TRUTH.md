@@ -333,6 +333,10 @@ Required checks:
 ### Stage 2 - Backup And Import
 
 - Add SQLite backup/restore helpers.
+  - CLI preview commands:
+    - `mmf registry backup-db --config-dir <preview-root> [--db <db-path>]`
+    - `mmf registry restore-db <backup.sqlite> --config-dir <preview-root> [--db <db-path>]`
+  - `restore-db` is dry-run by default; `--apply` first creates a pre-restore backup, then verifies SQLite integrity.
 - Import legacy config, credentials metadata, model policy, provider profiles, and lineup facts into DB.
 - Generate import report with conflicts and non-imported fields.
 - Keep imported secrets as `secret_ref`, not plaintext DB rows.
