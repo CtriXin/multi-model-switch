@@ -5,6 +5,7 @@ from mms_tui_launcher_flow import (
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
     provider_browse_options,
+    refresh_tui_runtime_state_after_config_change,
     safe_tui_call,
 )
 
@@ -154,3 +155,47 @@ def test_last_used_model_info_preserves_dict_model_info() -> None:
 
 def test_last_used_model_info_falls_back_to_model_name() -> None:
     assert last_used_model_info({"model": "gpt-5.4", "model_info": "bad"}) == {"model": "gpt-5.4"}
+
+
+def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> None:
+    calls = []
+
+    class FakeProbeCache:
+        def clear(self):
+            calls.append(("clear",))
+
+    def fake_rmtree(path, *, ignore_errors):
+        calls.append(("rmtree", path, ignore_errors))
+
+    def fake_ensure_provider_credentials(cfg):
+        calls.append(("ensure", cfg))
+        return {"id": "provider"}
+
+    def fake_probe_models(provider, *, emit_output):
+        calls.append(("probe", provider, emit_output))
+        return {"models": ["gpt-5.4"]}
+
+    def fake_resolve_visible_clis(cfg, provider, models):
+        calls.append(("visible", cfg, provider, models))
+        return ["codex"]
+
+    provider, models, clis = refresh_tui_runtime_state_after_config_change(
+        {"cfg": True},
+        probe_cache=FakeProbeCache(),
+        probe_file_cache_dir="/tmp/probe-cache",
+        rmtree=fake_rmtree,
+        ensure_provider_credentials=fake_ensure_provider_credentials,
+        probe_models=fake_probe_models,
+        resolve_visible_clis=fake_resolve_visible_clis,
+    )
+
+    assert provider == {"id": "provider"}
+    assert models == ["gpt-5.4"]
+    assert clis == ["codex"]
+    assert calls == [
+        ("clear",),
+        ("rmtree", "/tmp/probe-cache", True),
+        ("ensure", {"cfg": True}),
+        ("probe", {"id": "provider"}, False),
+        ("visible", {"cfg": True}, {"id": "provider"}, ["gpt-5.4"]),
+    ]

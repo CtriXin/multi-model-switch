@@ -307,3 +307,21 @@ def last_used_model_info(action_data):
         if isinstance(action_data.get("model_info"), dict)
         else {"model": action_data["model"]}
     )
+
+
+def refresh_tui_runtime_state_after_config_change(
+    cfg,
+    *,
+    probe_cache,
+    probe_file_cache_dir,
+    rmtree,
+    ensure_provider_credentials,
+    probe_models,
+    resolve_visible_clis,
+):
+    probe_cache.clear()
+    rmtree(probe_file_cache_dir, ignore_errors=True)
+    current_provider = ensure_provider_credentials(cfg)
+    default_models = probe_models(current_provider, emit_output=False).get("models")
+    current_cli_names = resolve_visible_clis(cfg, current_provider, default_models)
+    return current_provider, default_models, current_cli_names

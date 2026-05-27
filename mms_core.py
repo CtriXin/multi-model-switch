@@ -9772,12 +9772,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             else:
                 current_cfg, changed = run_connect_wizard(current_cfg)
             if changed:
-                _PROBE_CACHE.clear()
                 import shutil as _shutil
-                _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
-                current_provider = ensure_provider_credentials(current_cfg)
-                default_models = _probe_models(current_provider, emit_output=False).get("models")
-                current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
+                from mms_tui_launcher_flow import refresh_tui_runtime_state_after_config_change
+
+                current_provider, default_models, current_cli_names = refresh_tui_runtime_state_after_config_change(
+                    current_cfg,
+                    probe_cache=_PROBE_CACHE,
+                    probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
+                    rmtree=_shutil.rmtree,
+                    ensure_provider_credentials=ensure_provider_credentials,
+                    probe_models=_probe_models,
+                    resolve_visible_clis=_resolve_visible_clis,
+                )
                 _families_dirty = True
             continue
 
@@ -9811,12 +9817,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if action_data == _AGY_CONNECT_PROFILE_ID:
                 current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
                 if changed:
-                    _PROBE_CACHE.clear()
                     import shutil as _shutil
-                    _shutil.rmtree(_PROBE_FILE_CACHE_DIR, ignore_errors=True)
-                    current_provider = ensure_provider_credentials(current_cfg)
-                    default_models = _probe_models(current_provider, emit_output=False).get("models")
-                    current_cli_names = _resolve_visible_clis(current_cfg, current_provider, default_models)
+                    from mms_tui_launcher_flow import refresh_tui_runtime_state_after_config_change
+
+                    current_provider, default_models, current_cli_names = refresh_tui_runtime_state_after_config_change(
+                        current_cfg,
+                        probe_cache=_PROBE_CACHE,
+                        probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
+                        rmtree=_shutil.rmtree,
+                        ensure_provider_credentials=ensure_provider_credentials,
+                        probe_models=_probe_models,
+                        resolve_visible_clis=_resolve_visible_clis,
+                    )
                     _families_dirty = True
                 continue
             runtime_runtime = resolve_account_context(current_cfg, account_id=action_data, cli_name=cli)
