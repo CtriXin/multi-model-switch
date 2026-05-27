@@ -9875,6 +9875,18 @@ def _codex_provider_base_url(base_url):
     return normalized
 
 
+def _append_codex_bypass_flags(cmd, runtime):
+    """In MMS bypass mode, skip Codex approval and hook-review prompts together."""
+    if not (runtime or {}).get("bypass"):
+        return
+    for flag in (
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+    ):
+        if flag not in cmd:
+            cmd.append(flag)
+
+
 def launch_codex(model_info, runtime, once=False, extra_args=None):
     """启动 Codex，支持 provider 和 OAuth 账号档案两种模式。
     GPT 模型优先直连 Responses API；非 GPT 模型走本地 Chat Completions bridge。"""
@@ -9888,10 +9900,9 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         cmd = ["codex"]
         if model:
             cmd += ["-m", model]
-        if runtime.get("bypass"):
-            cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if extra_args:
             cmd += list(extra_args)
+        _append_codex_bypass_flags(cmd, runtime)
         _exec_or_run(cmd, env, once, exit_callback=_codex_resume_writeback_callback(env))
         return
 
@@ -9939,10 +9950,9 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
             cmd += ["-c", "features.responses_websockets_v2=false"]
             if model:
                 cmd += ["-m", model]
-            if runtime.get("bypass"):
-                cmd.append("--dangerously-bypass-approvals-and-sandbox")
             if extra_args:
                 cmd += list(extra_args)
+            _append_codex_bypass_flags(cmd, runtime)
             exit_code = 0
             resume_exit_callback = _codex_resume_writeback_callback(env)
             try:
@@ -9998,10 +10008,9 @@ def launch_codex(model_info, runtime, once=False, extra_args=None):
         cmd += ["-c", "features.responses_websockets_v2=false"]
         if model:
             cmd += ["-m", model]
-        if runtime.get("bypass"):
-            cmd.append("--dangerously-bypass-approvals-and-sandbox")
         if extra_args:
             cmd += list(extra_args)
+        _append_codex_bypass_flags(cmd, runtime)
         # 本地 responses bridge 运行在当前 Python 进程内；交互模式若 exec 替换自身，
         # bridge 线程会一并消失，Codex 随后访问 127.0.0.1:port 只会得到 5xx/连接失败。
         _exec_or_run(
