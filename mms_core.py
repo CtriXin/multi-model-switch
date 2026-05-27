@@ -9836,26 +9836,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # ── Provider 浏览 ──
         if action_type == "provider_browse":
             from mms_tui import select_provider_browse_tui, select_provider_models_tui
-            # 构建可用 provider 列表（当前 CLI 支持的、有 api_key 的）
-            browse_providers = []
-            seen_ids = set()
-            for prov, _cached in _provider_candidates(current_cfg, current_provider, default_models):
-                pid = prov.get("id", DEFAULT_PROVIDER_ID)
-                if pid in seen_ids:
-                    continue
-                if not prov.get("enabled", True):
-                    continue
-                if not _provider_supports_cli_name(prov, cli):
-                    continue
-                if not prov.get("api_key"):
-                    continue
-                seen_ids.add(pid)
-                browse_providers.append({
-                    "id": pid,
-                    "name": _provider_label(prov),
-                    "role": prov.get("role", "auto"),
-                    "priority": prov.get("priority", 100),
-                })
+            from mms_tui_launcher_flow import provider_browse_options
+
+            browse_providers = provider_browse_options(
+                current_cfg,
+                current_provider,
+                default_models,
+                cli,
+                provider_candidates=_provider_candidates,
+                default_provider_id=DEFAULT_PROVIDER_ID,
+                provider_supports_cli_name=_provider_supports_cli_name,
+                provider_label=_provider_label,
+            )
             if not browse_providers:
                 console.print("[yellow]没有可用的 Provider[/yellow]")
                 continue

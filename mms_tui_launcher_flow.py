@@ -224,3 +224,36 @@ def build_tui_family_payloads(
             cfg, cli_name, current_provider, default_models
         )
     return families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli
+
+
+def provider_browse_options(
+    cfg,
+    current_provider,
+    default_models,
+    cli_name,
+    *,
+    provider_candidates,
+    default_provider_id,
+    provider_supports_cli_name,
+    provider_label,
+):
+    browse_providers = []
+    seen_ids = set()
+    for provider, _cached in provider_candidates(cfg, current_provider, default_models):
+        provider_id = provider.get("id", default_provider_id)
+        if provider_id in seen_ids:
+            continue
+        if not provider.get("enabled", True):
+            continue
+        if not provider_supports_cli_name(provider, cli_name):
+            continue
+        if not provider.get("api_key"):
+            continue
+        seen_ids.add(provider_id)
+        browse_providers.append({
+            "id": provider_id,
+            "name": provider_label(provider),
+            "role": provider.get("role", "auto"),
+            "priority": provider.get("priority", 100),
+        })
+    return browse_providers
