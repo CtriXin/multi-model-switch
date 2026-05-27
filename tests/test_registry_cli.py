@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -656,6 +657,143 @@ def test_init_config_root_refuses_stable_root_without_allow_stable(capsys, tmp_p
     assert payload["ok"] is False
     assert "refusing to initialize stable config root" in payload["error"]
     assert not stable_root.exists()
+
+
+def test_mmf_registry_legacy_import_dry_run_is_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "local"
+        name = "Local"
+        default_openai_base_url = "https://config-local.example/v1"
+        api_key = "sk-config-local-secret"
+        protocols = ["openai_chat_completions"]
+        fallback_models = ["gpt-5.5"]
+        extra_models = ["qwen3.7-max"]
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_PROVIDER_LOCAL_API_KEY='sk-creds-local-secret'\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_SCHEMA
+    assert payload["skipped"] is True
+    assert payload["skip_reason"] == "dry_run_apply_required"
+    assert payload["model_count"] == 2
+    assert "sk-config-local-secret" not in combined
+    assert "sk-creds-local-secret" not in combined
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "imports").exists()
+
+
+def test_registry_legacy_import_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    stable_root.mkdir()
+    (stable_root / "config.toml").write_text("[api]\nbase_url = 'https://stable.example/v1'\n", encoding="utf-8")
+
+    try:
+        mms_registry_cli.import_legacy_config(config_dir=stable_root, apply=True, command_name="mms registry")
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to import into stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable legacy import should require --allow-stable")
+
+    assert not (stable_root / "registry").exists()
+    assert not (stable_root / "imports").exists()
+
+
+def test_mmf_registry_legacy_import_apply_writes_preview_db_without_plaintext(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "local"
+        name = "Local"
+        default_openai_base_url = "https://config-local.example/v1"
+        default_anthropic_base_url = "https://config-local.example/anthropic"
+        api_key = "sk-config-local-secret"
+        protocols = ["anthropic_messages", "openai_chat_completions"]
+        fallback_models = ["gpt-5.5"]
+        extra_models = ["qwen3.7-max"]
+        hidden_models = ["retired-model"]
+        priority = 42
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_PROVIDER_LOCAL_OPENAI_BASE_URL='https://creds-local.example/v1'
+        export MMS_PROVIDER_LOCAL_API_KEY='sk-creds-local-secret'
+        """,
+        encoding="utf-8",
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-policy.json",
+        {"version": 1, "models": {"gpt-5.5": {"favorite": True}}},
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-routes.lineup.json",
+        {"version": 1, "routes": {"lineup-only-model": {"context_window": 123}}},
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-import", "--config-dir", str(config_dir), "--apply", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    import_path = Path(payload["import_path"])
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_SCHEMA
+    assert payload["skipped"] is False
+    assert payload["model_count"] == 4
+    assert payload["plaintext_secret_in_db"] is False
+    assert payload["source_snapshot"]["model_count"] == 4
+    assert payload["route_candidates"]["provider_route_count"] == 2
+    assert db_path.exists()
+    assert import_path.exists()
+    import_text = import_path.read_text(encoding="utf-8")
+    assert "sk-config-local-secret" not in combined
+    assert "sk-creds-local-secret" not in combined
+    assert "sk-config-local-secret" not in import_text
+    assert "sk-creds-local-secret" not in import_text
+
+    db = sqlite3.connect(db_path)
+    try:
+        assert db.execute("SELECT count(*) FROM source_snapshot WHERE source_kind = ?", (mms_registry_cli.LEGACY_IMPORT_SOURCE_KIND,)).fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM model_identity").fetchone()[0] == 4
+        assert db.execute("SELECT count(*) FROM provider_route").fetchone()[0] == 2
+        secret_ref = db.execute("SELECT secret_ref FROM provider_route LIMIT 1").fetchone()[0]
+        assert secret_ref.startswith("legacy-")
+        assert "sk-" not in secret_ref
+    finally:
+        db.close()
 
 
 def _write_config_artifacts(config_dir: Path) -> None:

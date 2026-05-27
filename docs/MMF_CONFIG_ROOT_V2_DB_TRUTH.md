@@ -310,12 +310,14 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf config web --no-open
 ./mmf registry status
 ./mmf registry legacy-report --config-dir "$MMS_CONFIG_ROOT" --json
+./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --json
+./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --apply --json
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
 ./mmf registry backup-db --config-dir "$MMS_CONFIG_ROOT" --reason manual-smoke
 ./mmf registry restore-db <backup.sqlite> --config-dir "$MMS_CONFIG_ROOT"
 ```
 
-`config root` and `legacy-report` are read-only. `preview init` is the explicit write boundary for creating the preview root layout and empty registry DB under `<config_root>/registry/`; it refuses stable-root init unless `--allow-stable` is explicitly used on the lower-level `registry init-root` command. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
+`config root` and `legacy-report` are read-only. `preview init` is the explicit write boundary for creating the preview root layout and empty registry DB under `<config_root>/registry/`; it refuses stable-root init unless `--allow-stable` is explicitly used on the lower-level `registry init-root` command. `legacy-import` is dry-run by default; `--apply` writes sanitized candidate/evidence rows into the preview DB and writes an import report under `<config_root>/imports/`, without plaintext secrets. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
 `config web --print-summary` includes the same Model Source status in the WebUI snapshot; starting the full WebUI still uses the existing audited config save path, so this slice only adds the read-only status panel and does not change save semantics.
 TUI Settings -> `模型真源 / Registry Truth` now opens on the same read-only Model Source status before any explicit registry write action is selected.
 
@@ -383,6 +385,13 @@ Current preview init implementation:
 - It initializes `<config_root>/registry/model-registry.sqlite` unless `--no-db` is passed.
 - It writes a non-secret `<config_root>/root-manifest.json`.
 - Lower-level `mms registry init-root` refuses stable roots by default; stable init requires explicit `--allow-stable`.
+
+Current legacy import candidate implementation:
+
+- `mmf registry legacy-import --config-dir <preview-root> [--json]` is dry-run by default and reports what would be imported.
+- `--apply` initializes the preview layout if needed, writes a sanitized import report to `<config_root>/imports/`, stores a `legacy_config_import` source snapshot, imports model identity/facts from legacy model lists and generated route keys, and creates candidate route/provider rows for configured `fallback_models` / `extra_models`.
+- It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
+- Stable-root import is refused unless the lower-level command is explicitly passed `--allow-stable`.
 
 ### Stage 4 - Write Path And Publish
 

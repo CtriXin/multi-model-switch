@@ -20,6 +20,8 @@ DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
 DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS = 24 * 7
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 LEGACY_IMPORT_REPORT_SCHEMA = "mms.legacy_import_report.v1"
+LEGACY_IMPORT_SOURCE_KIND = "legacy_config_import"
+LEGACY_IMPORT_SCHEMA = "mms.legacy_config_import.v1"
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 CONFIG_ROOT_LAYOUT_DIRS = (
     "registry",
@@ -83,6 +85,16 @@ def _load_toml_file(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _load_json_mapping(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _secret_fingerprint(value: Any) -> str:
     text = str(value or "")
     if not text:
@@ -94,6 +106,14 @@ def _secret_ref(source_key: str) -> str:
     return f"legacy-env:{source_key}"
 
 
+def _legacy_secret_ref(source: str) -> str:
+    token = str(source or "").split(":", 1)[-1].strip()
+    if not token:
+        token = "unknown"
+    prefix = "legacy-env" if str(source or "").startswith("credentials.sh:") else "legacy-config"
+    return f"{prefix}:{token}"
+
+
 def _safe_value(field: str, value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -101,6 +121,26 @@ def _safe_value(field: str, value: Any) -> str:
     if "key" in field.lower() or "token" in field.lower() or "secret" in field.lower():
         return f"sha256:{_secret_fingerprint(text)}"
     return text
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    elif isinstance(value, tuple):
+        raw = list(value)
+    elif isinstance(value, str):
+        raw = [item.strip() for item in value.replace("\n", ",").split(",")]
+    else:
+        raw = []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _credential_value(values: dict[str, str], key: str) -> str:
@@ -172,17 +212,25 @@ def legacy_import_report(
         credential_values = _provider_credential_values(provider_id, credentials)
         provider_conflicts = []
         imported_fields = []
+        seen_secret_refs: set[tuple[str, str, str]] = set()
         for field in ("base_url", "openai_base_url", "anthropic_base_url", "api_key", "openai_api_key"):
             config_value, config_source = config_values[field]
             credential_value, credential_source = credential_values[field]
-            if credential_value and ("key" in field):
+            for secret_value, secret_source in ((config_value, config_source), (credential_value, credential_source)):
+                if not secret_value or "key" not in field:
+                    continue
+                ref = _legacy_secret_ref(secret_source)
+                dedupe_key = (provider_id, field, ref)
+                if dedupe_key in seen_secret_refs:
+                    continue
+                seen_secret_refs.add(dedupe_key)
                 secret_refs.append(
                     {
                         "provider_id": provider_id,
                         "field": field,
-                        "secret_ref": _secret_ref(credential_source.split(":", 1)[-1]),
-                        "fingerprint": _secret_fingerprint(credential_value),
-                        "source": credential_source,
+                        "secret_ref": ref,
+                        "fingerprint": _secret_fingerprint(secret_value),
+                        "source": secret_source,
                     }
                 )
             if config_value:
@@ -210,6 +258,9 @@ def legacy_import_report(
                 "role": str(provider.get("role") or "auto"),
                 "priority": provider.get("priority"),
                 "models_endpoint": str(provider.get("models_endpoint") or ""),
+                "fallback_models": _as_string_list(provider.get("fallback_models")),
+                "extra_models": _as_string_list(provider.get("extra_models")),
+                "hidden_models": _as_string_list(provider.get("hidden_models")),
                 "imported_fields": imported_fields,
                 "conflict_count": len(provider_conflicts),
             }
@@ -382,6 +433,330 @@ def init_config_root(
     mms_registry.write_json_atomic(manifest_path, manifest)
     manifest["manifest_path"] = str(manifest_path)
     return manifest
+
+
+def _slug_id(value: Any, default: str = "item") -> str:
+    text = str(value or "").strip().lower()
+    chars = [ch if ch.isalnum() else "_" for ch in text]
+    slug = "_".join(part for part in "".join(chars).split("_") if part)
+    return slug or default
+
+
+def _timestamp_slug(value: str | None = None) -> str:
+    text = "".join(ch for ch in str(value or mms_registry.utc_now()) if ch.isdigit())
+    return text[:14] or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _import_field_map(provider: dict[str, Any]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for item in provider.get("imported_fields") or []:
+        if not isinstance(item, dict):
+            continue
+        field = str(item.get("field") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if field and value and not value.startswith("sha256:"):
+            values[field] = value
+    if not values.get("openai_base_url") and values.get("base_url"):
+        values["openai_base_url"] = values["base_url"]
+    return values
+
+
+def _provider_secret_ref(report: dict[str, Any], provider_id: str) -> str:
+    for item in report.get("secret_refs") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("provider_id") or "") != provider_id:
+            continue
+        if str(item.get("field") or "") in {"api_key", "openai_api_key"}:
+            return str(item.get("secret_ref") or "")
+    return ""
+
+
+def _legacy_artifact_summary(root: Path) -> dict[str, Any]:
+    policy = _load_json_mapping(root / "model-policy.json")
+    profiles = _load_json_mapping(root / "provider-profiles.json")
+    lineup = _load_json_mapping(root / "model-routes.lineup.json")
+    routes = _load_json_mapping(root / "model-routes.json")
+    policy_models = policy.get("models") if isinstance(policy.get("models"), dict) else {}
+    profile_items = profiles.get("profiles") if isinstance(profiles.get("profiles"), dict) else {}
+    lineup_routes = lineup.get("routes") if isinstance(lineup.get("routes"), dict) else {}
+    route_items = routes.get("routes") if isinstance(routes.get("routes"), dict) else {}
+    return {
+        "model_policy": {"model_count": len(policy_models), "project_count": len(policy.get("projects") or {}) if isinstance(policy.get("projects"), dict) else 0},
+        "provider_profiles": {"profile_count": len(profile_items)},
+        "lineup": {"route_count": len(lineup_routes), "model_keys": sorted(str(key) for key in lineup_routes.keys())[:200]},
+        "routes": {"route_count": len(route_items), "model_keys": sorted(str(key) for key in route_items.keys())[:200]},
+    }
+
+
+def _legacy_import_models(report: dict[str, Any], artifact_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    models: dict[str, dict[str, Any]] = {}
+
+    def add_model(model_id: str, *, provider_id: str = "", source: str = "legacy_config", protocols: list[str] | None = None, hidden: bool = False) -> None:
+        model = str(model_id or "").strip()
+        if not model:
+            return
+        entry = models.setdefault(
+            model,
+            {
+                "alias": model,
+                "canonical_model_id": model,
+                "routed_model_id": model,
+                "provider_id": provider_id,
+                "vendor": provider_id,
+                "family": "",
+                "confidence": "legacy_candidate",
+                "evidence": {"sources": []},
+            },
+        )
+        if provider_id and not entry.get("provider_id"):
+            entry["provider_id"] = provider_id
+            entry["vendor"] = provider_id
+        if protocols and "expected_protocol" not in entry:
+            entry["expected_protocol"] = protocols[0]
+        entry["evidence"]["sources"].append(source)
+        if hidden:
+            entry["evidence"]["hidden"] = True
+
+    for provider in report.get("providers") or []:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = str(provider.get("provider_id") or "").strip()
+        protocols = _as_string_list(provider.get("protocols"))
+        hidden = set(_as_string_list(provider.get("hidden_models")))
+        for model in _as_string_list(provider.get("fallback_models")):
+            add_model(model, provider_id=provider_id, source="config.toml:providers.fallback_models", protocols=protocols, hidden=model in hidden)
+        for model in _as_string_list(provider.get("extra_models")):
+            add_model(model, provider_id=provider_id, source="config.toml:providers.extra_models", protocols=protocols, hidden=model in hidden)
+        for model in hidden:
+            add_model(model, provider_id=provider_id, source="config.toml:providers.hidden_models", protocols=protocols, hidden=True)
+
+    for source_name in ("lineup", "routes"):
+        source = artifact_summary.get(source_name) if isinstance(artifact_summary.get(source_name), dict) else {}
+        for model in source.get("model_keys") or []:
+            add_model(str(model), source=f"{source_name}:model_key")
+
+    return sorted(models.values(), key=lambda item: str(item.get("alias") or "").lower())
+
+
+def _db_safe_legacy_report(report: dict[str, Any]) -> dict[str, Any]:
+    files = report.get("files") if isinstance(report.get("files"), dict) else {}
+    file_rows = []
+    for name, item in files.items():
+        item = item if isinstance(item, dict) else {}
+        file_rows.append(
+            {
+                "kind": str(name or ""),
+                "path": str(item.get("path") or ""),
+                "exists": bool(item.get("exists")),
+            }
+        )
+    conflicts = []
+    for item in report.get("conflicts") or []:
+        if not isinstance(item, dict):
+            continue
+        conflicts.append(
+            {
+                "provider_id": item.get("provider_id") or "",
+                "field": item.get("field") or "",
+                "config_source": item.get("config_source") or "",
+                "env_source": item.get("credentials_source") or "",
+                "config_fingerprint_or_value": item.get("config_value") or "",
+                "env_fingerprint_or_value": item.get("credentials_value") or "",
+                "winner": item.get("winner") or "",
+                "severity": item.get("severity") or "",
+            }
+        )
+    providers = []
+    for item in report.get("providers") or []:
+        if not isinstance(item, dict):
+            continue
+        providers.append(
+            {
+                "provider_id": item.get("provider_id") or "",
+                "name": item.get("name") or "",
+                "protocols": _as_string_list(item.get("protocols")),
+                "role": item.get("role") or "auto",
+                "priority": item.get("priority"),
+                "models_endpoint": item.get("models_endpoint") or "",
+                "fallback_models": _as_string_list(item.get("fallback_models")),
+                "extra_models": _as_string_list(item.get("extra_models")),
+                "hidden_models": _as_string_list(item.get("hidden_models")),
+                "conflict_count": item.get("conflict_count", 0),
+            }
+        )
+    return {
+        "schema": report.get("schema") or LEGACY_IMPORT_REPORT_SCHEMA,
+        "config_root": report.get("config_root") or "",
+        "read_only": True,
+        "files": file_rows,
+        "providers": providers,
+        "provider_count": report.get("provider_count", 0),
+        "conflict_count": report.get("conflict_count", 0),
+        "conflicts": conflicts,
+        "secret_refs": report.get("secret_refs") or [],
+        "contains_plaintext_sensitive_value": False,
+        "next_action": report.get("next_action") or "",
+    }
+
+
+def _legacy_import_payload(report: dict[str, Any]) -> dict[str, Any]:
+    root = Path(report.get("config_root") or "").expanduser()
+    artifact_summary = _legacy_artifact_summary(root)
+    payload = {
+        "schema": LEGACY_IMPORT_SCHEMA,
+        "config_root": str(root),
+        "captured_at": mms_registry.utc_now(),
+        "report": _db_safe_legacy_report(report),
+        "legacy_artifacts": artifact_summary,
+        "models": _legacy_import_models(report, artifact_summary),
+    }
+    mms_registry.validate_non_secret_payload(payload, context="legacy_import_payload")
+    return payload
+
+
+def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, Any], *, actor: str) -> dict[str, Any]:
+    route_entries: list[dict[str, Any]] = []
+    for provider in report.get("providers") or []:
+        if not isinstance(provider, dict):
+            continue
+        provider_id = str(provider.get("provider_id") or "").strip()
+        if not provider_id:
+            continue
+        fields = _import_field_map(provider)
+        models = _as_string_list(provider.get("fallback_models")) + _as_string_list(provider.get("extra_models"))
+        seen_models: set[str] = set()
+        for model in models:
+            if model in seen_models:
+                continue
+            seen_models.add(model)
+            route_entries.append(
+                {
+                    "provider_id": provider_id,
+                    "model": model,
+                    "priority": int(provider.get("priority") or 0),
+                    "anthropic_base_url": fields.get("anthropic_base_url", ""),
+                    "openai_base_url": fields.get("openai_base_url", ""),
+                    "secret_ref": _provider_secret_ref(report, provider_id),
+                    "metadata": {
+                        "role": provider.get("role") or "auto",
+                        "models_endpoint": provider.get("models_endpoint") or "",
+                        "protocols": _as_string_list(provider.get("protocols")),
+                        "source": "legacy-import",
+                    },
+                }
+            )
+    if not route_entries:
+        return {"route_revision_id": "", "route_group_count": 0, "provider_route_count": 0}
+
+    digest = mms_registry.sha256_hex(json.dumps(route_entries, ensure_ascii=False, sort_keys=True))
+    revision_stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    route_revision_id = f"legacy_route_{revision_stamp}_{digest[:12]}"
+    mms_registry.create_revision(
+        db,
+        route_revision_id,
+        "route",
+        status="candidate",
+        revision_hash=digest,
+        metadata={"source": "legacy-import", "route_count": len(route_entries)},
+    )
+    groups: set[str] = set()
+    for idx, entry in enumerate(route_entries, start=1):
+        model = str(entry["model"])
+        group_id = f"{route_revision_id}_{_slug_id(model, 'model')}"
+        if group_id not in groups:
+            mms_registry.insert_route_group(
+                db,
+                group_id,
+                route_revision_id,
+                logical_model=model,
+                display_name=model,
+                metadata={"source": "legacy-import"},
+            )
+            groups.add(group_id)
+        mms_registry.insert_provider_route(
+            db,
+            f"{group_id}_{_slug_id(entry['provider_id'], 'provider')}_{idx}",
+            group_id,
+            route_revision_id,
+            provider_id=str(entry["provider_id"]),
+            wire_model_id=model,
+            priority=int(entry["priority"] or 0),
+            anthropic_base_url=str(entry["anthropic_base_url"] or ""),
+            openai_base_url=str(entry["openai_base_url"] or ""),
+            secret_ref=str(entry["secret_ref"] or ""),
+            validation_state="candidate",
+            metadata=entry.get("metadata") or {},
+        )
+    db.execute(
+        """
+        INSERT INTO audit_log(event_type, actor, target_type, target_id, details_json)
+        VALUES ('legacy_import.route_candidates', ?, 'registry_revision', ?, ?)
+        """,
+        (actor, route_revision_id, json.dumps({"provider_route_count": len(route_entries)}, ensure_ascii=False, sort_keys=True)),
+    )
+    return {
+        "route_revision_id": route_revision_id,
+        "route_group_count": len(groups),
+        "provider_route_count": len(route_entries),
+    }
+
+
+def import_legacy_config(
+    *,
+    config_dir: str | Path | None = None,
+    db_path: str | Path | None = None,
+    apply: bool = False,
+    allow_stable: bool = False,
+    command_name: str = "mms registry",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
+    if root_status.get("mode") != "preview" and not allow_stable:
+        raise mms_registry.RegistryValidationError("refusing to import into stable config root without --allow-stable")
+    report = legacy_import_report(config_dir=root)
+    payload = _legacy_import_payload(report)
+    target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)
+    summary: dict[str, Any] = {
+        "schema": LEGACY_IMPORT_SCHEMA,
+        "apply": bool(apply),
+        "config_root": str(root),
+        "db_path": str(target_db),
+        "conflict_count": report.get("conflict_count", 0),
+        "provider_count": report.get("provider_count", 0),
+        "model_count": len(payload.get("models") or []),
+        "plaintext_secret_in_db": False,
+        "read_only_report": report,
+    }
+    if not apply:
+        summary["skipped"] = True
+        summary["skip_reason"] = "dry_run_apply_required"
+        return summary
+
+    init_summary = init_config_root(config_dir=root, create_db=True, allow_stable=allow_stable, command_name=command_name)
+    import_dir = root / "imports"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    payload_hash = mms_registry.sha256_hex(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    import_path = import_dir / f"legacy-import.{_timestamp_slug()}.{payload_hash[:12]}.json"
+    mms_registry.write_json_atomic(import_path, payload)
+    db = mms_registry.open_registry(target_db)
+    try:
+        source_summary = mms_registry.import_source_snapshot(db, import_path, source_kind=LEGACY_IMPORT_SOURCE_KIND)
+        with db:
+            route_summary = _insert_legacy_route_candidates(db, report, actor=command_name.split()[0] if command_name else "mms")
+    finally:
+        db.close()
+    summary.update(
+        {
+            "skipped": False,
+            "init": init_summary,
+            "import_path": str(import_path),
+            "source_snapshot": source_summary,
+            "route_candidates": route_summary,
+        }
+    )
+    return summary
 
 
 
@@ -1198,6 +1573,26 @@ def _print_init_config_root(summary: dict[str, Any]) -> None:
     print(f"layout_dirs={len(summary.get('layout_dirs') or [])}")
 
 
+def _print_legacy_import(summary: dict[str, Any]) -> None:
+    route_candidates = summary.get("route_candidates") if isinstance(summary.get("route_candidates"), dict) else {}
+    source_snapshot = summary.get("source_snapshot") if isinstance(summary.get("source_snapshot"), dict) else {}
+    print("MMS Legacy Import")
+    print(f"apply={summary.get('apply')}")
+    print(f"skipped={summary.get('skipped', False)}")
+    if summary.get("skip_reason"):
+        print(f"skip_reason={summary.get('skip_reason')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"provider_count={summary.get('provider_count')}")
+    print(f"model_count={summary.get('model_count')}")
+    print(f"conflict_count={summary.get('conflict_count')}")
+    print(f"import_path={summary.get('import_path', '')}")
+    print(f"source_snapshot_id={source_snapshot.get('snapshot_id', '')}")
+    print(f"route_revision_id={route_candidates.get('route_revision_id', '')}")
+    print(f"provider_route_count={route_candidates.get('provider_route_count', 0)}")
+    print(f"plaintext_secret_in_db={summary.get('plaintext_secret_in_db')}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -1231,6 +1626,14 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     )
     legacy_report_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     legacy_report_parser.add_argument("--json", action="store_true", help="Print the full report as JSON")
+    legacy_import_parser = subparsers.add_parser(
+        "legacy-import",
+        help="Import sanitized legacy config evidence into the preview registry DB; dry-run unless --apply",
+    )
+    legacy_import_parser.add_argument("--config-dir", default="", help="Override MMS config dir to import")
+    legacy_import_parser.add_argument("--apply", action="store_true", help="Write sanitized import evidence into the selected preview DB")
+    legacy_import_parser.add_argument("--allow-stable", action="store_true", help="Allow importing into a stable root explicitly")
+    legacy_import_parser.add_argument("--json", action="store_true", help="Print import summary as JSON")
     refresh_parser = subparsers.add_parser(
         "refresh-sources",
         help="Import local reference snapshots as source_truth/candidate evidence",
@@ -1340,6 +1743,26 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         else:
             _print_legacy_import_report(summary)
         return 0
+    if args.subcommand == "legacy-import":
+        try:
+            summary = import_legacy_config(
+                config_dir=args.config_dir or None,
+                db_path=db_path,
+                apply=bool(args.apply),
+                allow_stable=bool(args.allow_stable),
+                command_name=command_name,
+            )
+        except mms_registry.RegistryValidationError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(f"error={exc}")
+            return 2
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_legacy_import(summary)
+        return 0
     if args.subcommand == "refresh-sources":
         summary = refresh_source_snapshots(
             db_path=db_path,
@@ -1410,6 +1833,7 @@ __all__ = [
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
     "legacy_import_report",
+    "import_legacy_config",
     "init_config_root",
     "model_source_status",
     "scheduled_refresh",
