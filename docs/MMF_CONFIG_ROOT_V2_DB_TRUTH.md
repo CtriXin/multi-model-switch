@@ -300,6 +300,19 @@ MMS_CONFIG_ROOT=~/.config/mms-next mmf test --provider <id> --cli codex
 MMS_CONFIG_ROOT=~/.config/mms-next mmf test --provider <id> --cli claude
 ```
 
+Current Stage 1 / Stage 2 preview commands that are safe to run without writing stable `~/.config/mms/**`:
+
+```text
+./mmf config root --json
+./mmf registry status
+./mmf registry legacy-report --config-dir "$MMS_CONFIG_ROOT" --json
+./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
+./mmf registry backup-db --config-dir "$MMS_CONFIG_ROOT" --reason manual-smoke
+./mmf registry restore-db <backup.sqlite> --config-dir "$MMS_CONFIG_ROOT"
+```
+
+`config root` and `legacy-report` are read-only. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
+
 Required checks:
 
 - root resolution never writes old root during `mmf` flow
