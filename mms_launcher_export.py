@@ -215,6 +215,143 @@ def xmem_cli_path(*, environ, real_user_path, which):
     return ""
 
 
+def real_home_wrapper_scrub_lines():
+    return [
+        'for _mms_var in $(env | cut -d= -f1); do',
+        '  case "$_mms_var" in',
+        '    ANTHROPIC_*|CLAUDE_CODE_*|OPENAI_*|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|http_proxy|https_proxy|all_proxy|no_proxy|MMS_FAKE_UPSTREAM_*|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|REQUESTS_CA_BUNDLE)',
+        '      unset "$_mms_var" ;;',
+        '  esac',
+        'done',
+        'unset _mms_var',
+    ]
+
+
+def filter_real_home_wrapper_path(path_value, *, session_home=None, real_user_home, environ):
+    raw_path = str(path_value or "")
+    if not raw_path:
+        return ""
+    real_home = os.path.abspath(os.path.expanduser(real_user_home()))
+    session_roots = []
+    for candidate in (session_home, environ.get("HOME") or ""):
+        normalized_candidate = os.path.abspath(os.path.expanduser(str(candidate or "").strip()))
+        if normalized_candidate and normalized_candidate != real_home and normalized_candidate not in session_roots:
+            session_roots.append(normalized_candidate)
+    filtered = []
+    for part in raw_path.split(os.pathsep):
+        normalized = os.path.abspath(os.path.expanduser(str(part or "").strip()))
+        if not normalized:
+            continue
+        if normalized.endswith(os.path.join(".mms", "bin")):
+            continue
+        if any(normalized.startswith(root + os.sep) for root in session_roots):
+            continue
+        filtered.append(part)
+    return os.pathsep.join(filtered)
+
+
+def dedupe_path_parts(parts):
+    seen = set()
+    result = []
+    for part in parts:
+        normalized = str(part or "").strip()
+        if not normalized:
+            continue
+        key = os.path.abspath(os.path.expanduser(normalized))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def real_home_wrapper_search_path(
+    session_home,
+    env=None,
+    *,
+    real_user_home,
+    environ,
+    filter_real_home_wrapper_path,
+    dedupe_path_parts,
+    cli_search_dirs,
+):
+    real_home = real_user_home()
+    path_parts = []
+    for path_value in (
+        str(env.get("PATH") or "") if isinstance(env, dict) else "",
+        environ.get("PATH", ""),
+    ):
+        filtered = filter_real_home_wrapper_path(path_value, session_home=session_home)
+        if filtered:
+            path_parts.extend(filtered.split(os.pathsep))
+    try:
+        path_parts.extend(
+            cli_search_dirs(
+                {
+                    "HOME": real_home,
+                    "REAL_HOME": real_home,
+                    "MMS_REAL_HOME": real_home,
+                    "ORIGINAL_HOME": real_home,
+                    "PATH": os.pathsep.join(path_parts) or os.defpath,
+                },
+                real_home=real_home,
+            )
+        )
+    except Exception:
+        pass
+    return os.pathsep.join(dedupe_path_parts(path_parts)) or os.defpath
+
+
+def write_real_home_script(path, lines):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+    os.chmod(path, 0o755)
+
+
+def install_chrome_host_wrapper(
+    wrapper_dir,
+    env,
+    wrapper_path_env,
+    *,
+    real_user_home,
+    real_user_path,
+    real_home_wrapper_scrub_lines,
+    write_real_home_script,
+):
+    chrome_host_path = os.path.join(wrapper_dir, "mms-chrome-host")
+    real_home = real_user_home()
+    wrapper = [
+        "#!/bin/sh",
+        f'export HOME={json.dumps(real_home)}',
+        f'export MMS_REAL_HOME={json.dumps(real_home)}',
+        f'export REAL_HOME={json.dumps(real_home)}',
+        f'export ORIGINAL_HOME={json.dumps(real_home)}',
+        f"export PATH={wrapper_path_env}",
+        f'export XDG_CONFIG_HOME={json.dumps(real_user_path(".config"))}',
+        f'export XDG_CACHE_HOME={json.dumps(real_user_path(".cache"))}',
+        f'export XDG_DATA_HOME={json.dumps(real_user_path(".local", "share"))}',
+        f'export XDG_STATE_HOME={json.dumps(real_user_path(".local", "state"))}',
+        *real_home_wrapper_scrub_lines(),
+        'case "$(uname -s 2>/dev/null || printf unknown)" in',
+        "  Darwin)",
+        '    if [ -x /usr/bin/open ]; then exec /usr/bin/open -a "Google Chrome" "$@"; fi',
+        "    ;;",
+        "esac",
+        'for _mms_browser in google-chrome-stable google-chrome chromium chromium-browser; do',
+        '  _mms_browser_bin="$(command -v "$_mms_browser" 2>/dev/null || true)"',
+        '  if [ -n "$_mms_browser_bin" ]; then exec "$_mms_browser_bin" "$@"; fi',
+        "done",
+        'printf "%s\\n" "mms: Chrome host launcher could not find Google Chrome" >&2',
+        "exit 127",
+        "",
+    ]
+    write_real_home_script(chrome_host_path, wrapper)
+    if isinstance(env, dict):
+        env["MMS_CHROME_HOST_BIN"] = chrome_host_path
+        env["BROWSER"] = chrome_host_path
+    return chrome_host_path
+
+
 def install_session_command_wrappers(
     session_home,
     env,
