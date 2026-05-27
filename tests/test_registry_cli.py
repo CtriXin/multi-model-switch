@@ -1265,6 +1265,87 @@ def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: 
     assert "sk-doctor-ready-secret" not in combined
 
 
+def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-local", api_key="sk-prepare-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == "mms.preview_prepare.v1"
+    assert payload["ok"] is True
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["include_secrets"] is False
+    assert payload["stages"]["import"]["provider_route_count"] == 1
+    assert payload["stages"]["publish"]["runtime_ready"] is False
+    assert payload["stages"]["verify"]["verified"] is True
+    assert payload["doctor"]["status"] == "verified_not_runtime_ready"
+    assert (target_dir / "generated" / "model-registry.latest-approved.json").exists()
+    assert not (source_dir / "registry").exists()
+    assert "sk-prepare-secret" not in combined
+
+
+def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-secret", api_key="sk-prepare-ready-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--include-secrets",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    secret_path = target_dir / "secrets" / "legacy-secrets.json"
+
+    assert payload["ok"] is True
+    assert payload["include_secrets"] is True
+    assert payload["stages"]["import"]["secret_backend_count"] == 1
+    assert payload["stages"]["publish"]["runtime_ready"] is True
+    assert payload["stages"]["publish"]["missing_api_key_count"] == 0
+    assert payload["doctor"]["status"] == "ready"
+    assert secret_path.exists()
+    assert oct(secret_path.stat().st_mode & 0o777) == "0o600"
+    assert "sk-prepare-ready-secret" not in combined
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,

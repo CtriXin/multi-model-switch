@@ -657,6 +657,71 @@ def preview_doctor(
     }
 
 
+def preview_prepare(
+    *,
+    config_dir: str | Path | None = None,
+    source_config_dir: str | Path | None = None,
+    include_secrets: bool = False,
+    command_name: str = "mmf preview prepare",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    source_root = Path(source_config_dir).expanduser() if source_config_dir is not None else root
+    init_summary = init_config_root(config_dir=root, create_db=True, command_name=command_name)
+    import_summary = import_legacy_config(
+        config_dir=root,
+        source_config_dir=source_root,
+        apply=True,
+        include_secrets=bool(include_secrets),
+        command_name=command_name,
+    )
+    publish_summary = publish_preview_bundle(config_dir=root)
+    verify_summary = verify_approved_bundle(config_dir=root)
+    doctor_summary = preview_doctor(config_dir=root, command_name=command_name)
+    route_candidates = import_summary.get("route_candidates") if isinstance(import_summary.get("route_candidates"), dict) else {}
+    secret_backend = import_summary.get("secret_backend") if isinstance(import_summary.get("secret_backend"), dict) else {}
+    return {
+        "schema": "mms.preview_prepare.v1",
+        "ok": bool(verify_summary.get("verified")) and doctor_summary.get("status") in {"ready", "verified_not_runtime_ready"},
+        "config_root": str(root),
+        "source_config_root": str(source_root),
+        "include_secrets": bool(include_secrets),
+        "stages": {
+            "init": {
+                "db_initialized": bool(init_summary.get("db_initialized")),
+                "db_created": bool(init_summary.get("db_created")),
+                "layout_dirs": len(init_summary.get("layout_dirs") or []),
+            },
+            "import": {
+                "provider_count": import_summary.get("provider_count", 0),
+                "model_count": import_summary.get("model_count", 0),
+                "conflict_count": import_summary.get("conflict_count", 0),
+                "provider_route_count": route_candidates.get("provider_route_count", 0),
+                "secret_backend_count": secret_backend.get("secret_count", 0),
+            },
+            "publish": {
+                "route_count": publish_summary.get("route_count", 0),
+                "provider_route_count": publish_summary.get("provider_route_count", 0),
+                "runtime_ready": publish_summary.get("runtime_ready"),
+                "missing_api_key_count": publish_summary.get("missing_api_key_count", 0),
+            },
+            "verify": {
+                "verified": bool(verify_summary.get("verified")),
+                "file_count": verify_summary.get("file_count", 0),
+            },
+        },
+        "doctor": {
+            "status": doctor_summary.get("status"),
+            "next_actions": doctor_summary.get("next_actions") or [],
+        },
+        "writes": {
+            "target_preview_root": True,
+            "source_root": False,
+            "secret_backend": bool(include_secrets),
+        },
+    }
+
+
 def init_config_root(
     *,
     config_dir: str | Path | None = None,
@@ -1982,6 +2047,26 @@ def _print_preview_doctor(summary: dict[str, Any]) -> None:
         print(f"next_command={first.get('command', '')}")
 
 
+def _print_preview_prepare(summary: dict[str, Any]) -> None:
+    print("MMF Preview Prepare")
+    print(f"ok={summary.get('ok')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"source_config_root={summary.get('source_config_root')}")
+    print(f"include_secrets={summary.get('include_secrets')}")
+    stages = summary.get("stages") if isinstance(summary.get("stages"), dict) else {}
+    for name in ("init", "import", "publish", "verify"):
+        stage = stages.get(name) if isinstance(stages.get(name), dict) else {}
+        compact = " ".join(f"{key}={stage[key]}" for key in sorted(stage))
+        print(f"stage_{name}={compact}")
+    doctor = summary.get("doctor") if isinstance(summary.get("doctor"), dict) else {}
+    print(f"doctor_status={doctor.get('status')}")
+    next_actions = [item for item in (doctor.get("next_actions") or []) if isinstance(item, dict)]
+    if next_actions:
+        first = next_actions[0]
+        print(f"next_action={first.get('label', '')}")
+        print(f"next_command={first.get('command', '')}")
+
+
 def _print_init_config_root(summary: dict[str, Any]) -> None:
     root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
     print("MMS Config Root Init")
@@ -2035,6 +2120,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
+    preview_prepare_parser = subparsers.add_parser("preview-prepare", help="Initialize, import, publish, verify, and doctor a preview root")
+    preview_prepare_parser.add_argument("--config-dir", default="", help="Override MMS config dir to prepare")
+    preview_prepare_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root")
+    preview_prepare_parser.add_argument("--include-secrets", action="store_true", help="Also copy legacy API keys into the preview secret backend")
+    preview_prepare_parser.add_argument("--json", action="store_true", help="Print the full prepare summary as JSON")
     init_root_parser = subparsers.add_parser("init-root", help="Initialize selected config root layout")
     init_root_parser.add_argument("--config-dir", default="", help="Override MMS config dir to initialize")
     init_root_parser.add_argument("--no-db", action="store_true", help="Create directories/manifest only; do not initialize SQLite")
@@ -2142,6 +2232,25 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_preview_doctor(summary)
+        return 0
+    if args.subcommand == "preview-prepare":
+        try:
+            summary = preview_prepare(
+                config_dir=args.config_dir or None,
+                source_config_dir=args.source_config_dir or None,
+                include_secrets=bool(args.include_secrets),
+                command_name=command_name,
+            )
+        except mms_registry.RegistryValidationError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(f"error={exc}")
+            return 2
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_preview_prepare(summary)
         return 0
     if args.subcommand == "init-root":
         try:
@@ -2301,6 +2410,7 @@ __all__ = [
     "init_config_root",
     "model_source_status",
     "preview_doctor",
+    "preview_prepare",
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",
