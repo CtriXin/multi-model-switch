@@ -9882,10 +9882,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 continue  # B 返回 provider 列表
             if model_result == "__exit__":
                 return True  # Esc 完全退出
-            model_info = model_result
-            runtime_runtime = selected_prov
-            _trace_record("provider browse", cli=cli, provider=selected_pid, model=model_info.get("model"))
-            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="provider browse")
+            from mms_tui_launcher_flow import provider_browse_launch_context
+
+            model_info, runtime_runtime = provider_browse_launch_context(
+                cli,
+                selected_pid,
+                selected_prov,
+                model_result,
+                trace_record=_trace_record,
+                trace_runtime_choice=_trace_runtime_choice,
+            )
             # fall through to confirm
 
         # ── 负载模式 ──

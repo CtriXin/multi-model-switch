@@ -280,6 +280,22 @@ def provider_browse_model_options(
     return selected_provider, provider_models
 
 
+def provider_browse_launch_context(
+    cli_name,
+    selected_provider_id,
+    selected_provider,
+    model_result,
+    *,
+    trace_record,
+    trace_runtime_choice,
+):
+    model_info = model_result
+    runtime = selected_provider
+    trace_record("provider browse", cli=cli_name, provider=selected_provider_id, model=model_info.get("model"))
+    trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice="provider browse")
+    return model_info, runtime
+
+
 def load_balance_tui_payload(
     cfg,
     cli_name,

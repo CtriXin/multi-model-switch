@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     normalize_confirm_result,
     official_account_profile_context,
     opencode_profile_launch_context,
+    provider_browse_launch_context,
     provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
@@ -115,6 +116,27 @@ def test_provider_browse_model_options_resolves_and_filters_models() -> None:
         ("probe", provider, False),
         ("filter", ["gpt-5.4", "hidden-model"]),
     ]
+
+
+def test_provider_browse_launch_context_traces_selection() -> None:
+    trace_records = []
+    trace_choices = []
+    provider = {"id": "p1"}
+    model_info = {"model": "gpt-5.4"}
+
+    selected_model_info, runtime = provider_browse_launch_context(
+        "codex",
+        "p1",
+        provider,
+        model_info,
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert selected_model_info is model_info
+    assert runtime is provider
+    assert trace_records == [(("provider browse",), {"cli": "codex", "provider": "p1", "model": "gpt-5.4"})]
+    assert trace_choices == [(("runtime resolve", provider), {"launch_cli": "codex", "choice": "provider browse"})]
 
 
 def test_safe_tui_call_normalizes_keyboard_interrupt() -> None:
