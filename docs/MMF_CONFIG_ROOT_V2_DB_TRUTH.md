@@ -388,6 +388,7 @@ Current Stage 3a implementation:
 
 - CLI: `mms config source [--json]` / `mmf config source [--json]`.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
+- WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the future DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. It is plan-only and does not enable DB writes yet.
 - TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts; explicit refresh/publish/doctor actions remain separate.
 - Existing WebUI Save behavior is not changed in this slice; disabling or redirecting save to preview candidates belongs to Stage 4.
 

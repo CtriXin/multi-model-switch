@@ -145,6 +145,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "function renderSourceStatus()" in html
     assert "candidate routes" in html
     assert "missing keys" in html
+    assert "registry_v2_save_plan" in html
     assert "renderStatus();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html
@@ -402,6 +403,57 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert any(item["kind"] == "credentials" for item in plan["review_summary"]["items"])
     assert any(risk["id"] == "credential_update" for risk in plan["review_summary"]["risks"])
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_plan_includes_read_only_registry_v2_save_plan(tmp_path):
+    config_root = tmp_path / "mms-next"
+    registry_dir = config_root / "registry"
+    registry_dir.mkdir(parents=True)
+    db_path = registry_dir / "model-registry.sqlite"
+    db_path.write_bytes(b"not-a-real-db")
+    cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
+    payload = _draft_payload()
+
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+    v2_plan = plan["registry_v2_save_plan"]
+    encoded = json.dumps(v2_plan, ensure_ascii=False)
+
+    assert v2_plan["schema"] == "mms.setup_web.registry_v2_save_plan.v1"
+    assert v2_plan["read_only"] is True
+    assert v2_plan["execution_state"] == "plan_only"
+    assert v2_plan["actual_save_enabled"] is False
+    assert v2_plan["root"]["mode"] == "preview"
+    assert v2_plan["db"]["path"] == str(db_path)
+    assert v2_plan["db"]["would_backup_existing_db"] is True
+    assert v2_plan["would_write"]["db_candidate_revision"] is True
+    assert v2_plan["would_write"]["secret_backend"] is True
+    assert v2_plan["would_write"]["generated_latest_approved_bundle"] is True
+    assert v2_plan["blocked_reasons"] == []
+    assert "rollback" in " ".join(v2_plan["ordered_steps"])
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_save_plan_blocks_stable_root(tmp_path):
+    config_root = tmp_path / "mms"
+    cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
+    payload = _draft_payload()
+
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+    v2_plan = plan["registry_v2_save_plan"]
+
+    assert v2_plan["root"]["mode"] == "stable"
+    assert v2_plan["would_write"]["db_candidate_revision"] is False
+    assert v2_plan["would_write"]["secret_backend"] is False
+    assert v2_plan["would_write"]["generated_latest_approved_bundle"] is False
+    assert "stable_root_human_only" in v2_plan["blocked_reasons"]
 
 
 def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):

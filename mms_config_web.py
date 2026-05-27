@@ -1237,6 +1237,72 @@ def _build_review_summary(
     }
 
 
+def _build_registry_v2_save_plan(
+    *,
+    config_path: str,
+    plan_summary: dict[str, Any],
+    credential_updates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Describe the future DB-truth save path without writing anything."""
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_state_io import mms_config_root_status
+
+        root_status = mms_config_root_status(command="mms-config-web", config_dir=config_root, env={})
+    except Exception:
+        root_status = {"mode": "unknown", "config_root": config_root}
+    try:
+        import mms_registry
+
+        db_path = str(mms_registry.default_registry_db_path(config_dir=config_root, env={}))
+    except Exception:
+        db_path = os.path.join(config_root, "registry", "model-registry.sqlite")
+    mode = _safe_text(root_status.get("mode"))
+    has_changes = any(
+        bool(plan_summary.get(key))
+        for key in ("will_write_config", "will_write_policy", "will_write_credentials")
+    )
+    backup_dir = os.path.join(config_root, "backups", "db") if config_root else ""
+    blocked_reasons: list[str] = []
+    if mode != "preview":
+        blocked_reasons.append("stable_root_human_only")
+    if not has_changes:
+        blocked_reasons.append("no_draft_changes")
+    return {
+        "schema": "mms.setup_web.registry_v2_save_plan.v1",
+        "read_only": True,
+        "execution_state": "plan_only",
+        "actual_save_enabled": False,
+        "root": root_status,
+        "db": {
+            "path": db_path,
+            "exists": os.path.exists(db_path),
+            "backup_dir": backup_dir,
+            "would_backup_existing_db": bool(os.path.exists(db_path) and has_changes and mode == "preview"),
+        },
+        "would_write": {
+            "db_candidate_revision": bool(has_changes and mode == "preview"),
+            "secret_backend": bool(credential_updates and mode == "preview"),
+            "generated_latest_approved_bundle": bool(has_changes and mode == "preview"),
+            "legacy_compat_files": {
+                "config_toml": bool(plan_summary.get("will_write_config")),
+                "model_policy_json": bool(plan_summary.get("will_write_policy")),
+                "credentials_sh": bool(plan_summary.get("will_write_credentials")),
+            },
+        },
+        "ordered_steps": [
+            "backup preview registry DB",
+            "write DB candidate revisions for route/policy/profile facts",
+            "write secret backend only for explicit credential updates",
+            "publish generated/latest-approved bundle",
+            "verify manifest hashes",
+            "rollback to backup on failure",
+        ],
+        "blocked_reasons": blocked_reasons,
+        "next_implementation_step": "wire WebUI save to DB writer after rollback tests pass",
+    }
+
+
 def build_config_plan(
     current_cfg: dict[str, Any] | None,
     payload: dict[str, Any] | None,
@@ -1419,6 +1485,14 @@ def build_config_plan(
         "credentials": "\n".join(f"credentials.sh: update provider {item['provider_id']} (secret hidden)" for item in credential_updates),
     }
     review_summary = _build_review_summary(current_cfg, next_cfg, policy_before, policy_after, credential_updates)
+    summary = {
+        "providers": len(next_cfg.get("providers") or []),
+        "credential_updates": len(credential_updates),
+        "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
+        "will_write_config": bool(diffs["config_toml"]),
+        "will_write_policy": bool(diffs["model_policy_json"]),
+        "will_write_credentials": bool(credential_updates),
+    }
     return {
         "schema": "mms.setup_web.plan.v1",
         "ok": not errors,
@@ -1434,14 +1508,12 @@ def build_config_plan(
         "credential_updates": credential_updates,
         "diffs": diffs,
         "review_summary": review_summary,
-        "summary": {
-            "providers": len(next_cfg.get("providers") or []),
-            "credential_updates": len(credential_updates),
-            "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
-            "will_write_config": bool(diffs["config_toml"]),
-            "will_write_policy": bool(diffs["model_policy_json"]),
-            "will_write_credentials": bool(credential_updates),
-        },
+        "registry_v2_save_plan": _build_registry_v2_save_plan(
+            config_path=config_path,
+            plan_summary=summary,
+            credential_updates=credential_updates,
+        ),
+        "summary": summary,
     }
 
 
@@ -1906,7 +1978,7 @@ $('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/pro
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
