@@ -200,3 +200,49 @@ def test_launch_codex_bypass_mode_skips_hook_review_prompt(monkeypatch):
 
     assert "--dangerously-bypass-approvals-and-sandbox" in captured["cmd"]
     assert "--dangerously-bypass-hook-trust" in captured["cmd"]
+
+
+def test_launch_codex_uses_lazy_helpers_after_initialization(monkeypatch):
+    import mms_launchers
+    import mms_tui
+
+    captured = {}
+
+    def fake_ensure_bridge_helpers():
+        mms_launchers.codex_responses_bridge = fake_bridge
+
+    def fake_ensure_speed_stats():
+        mms_launchers.build_provider_speed_scope = lambda runtime: {"provider": runtime["id"]}
+
+    @contextmanager
+    def fake_bridge(_gateway_url, _api_key, **kwargs):
+        captured["speed_scope"] = kwargs.get("speed_scope")
+        yield {"base_url": "http://127.0.0.1:8765", "api_key": "bridge-key"}
+
+    monkeypatch.setattr(mms_launchers, "codex_responses_bridge", None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", None)
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", fake_ensure_bridge_helpers)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", fake_ensure_speed_stats)
+    monkeypatch.setattr(mms_launchers, "gateway_health_check", lambda runtime: None)
+    monkeypatch.setattr(mms_launchers, "_resolve_model", lambda model_info: "gpt-5.4")
+    monkeypatch.setattr(mms_launchers, "_openai_base_url", lambda runtime: "https://example.test/v1")
+    monkeypatch.setattr(mms_launchers, "_probe_models", lambda runtime, emit_output=False: {"models": ["gpt-5.4"]})
+    monkeypatch.setattr(mms_launchers, "_codex_gateway_env", lambda runtime, base_url, model_info=None: {"PATH": ""})
+    monkeypatch.setattr(mms_launchers, "_resolve_codex_responses_fallback_routes", lambda runtime, model: [])
+    monkeypatch.setattr(
+        mms_tui,
+        "select_reasoning_effort_tui",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected prompt")),
+    )
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", lambda *args, **kwargs: None)
+
+    runtime = {
+        "id": "openai-main",
+        "auth_mode": "api_key",
+        "api_key": "sk-test",
+        "reasoning_effort": "medium",
+    }
+
+    mms_launchers.launch_codex({"model": "gpt-5.4"}, runtime, once=True)
+
+    assert captured["speed_scope"] == {"provider": "openai-main"}
