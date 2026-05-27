@@ -369,6 +369,45 @@ def test_registry_truth_tui_payload_uses_chinese_labels() -> None:
     assert "Registry Doctor / 状态" in action_labels
 
 
+def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
+    import mms_core
+    import mms_i18n
+
+    mms_i18n.set_language("zh")
+    title, info_lines, actions = mms_core._model_source_status_tui_payload(
+        {
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "registry_db": {
+                "path": "/tmp/mms-next/registry/model-registry.sqlite",
+                "status": "missing",
+                "counts": {"source_snapshot": 0, "model_fact": 0},
+            },
+            "legacy_import": {"conflict_count": 2, "next_action": "review_conflicts_before_import"},
+            "generated_bundle": {"status": "missing", "verified": False},
+        }
+    )
+    report_title, rows, note = mms_core._model_source_status_report_payload(
+        {
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "registry_db": {"path": "/tmp/mms-next/registry/model-registry.sqlite", "status": "missing", "counts": {}},
+            "legacy_import": {"conflict_count": 2, "next_action": "review_conflicts_before_import"},
+            "generated_bundle": {"status": "missing", "verified": False},
+        }
+    )
+
+    assert title == "模型真源 / Registry Truth"
+    assert info_lines[:4] == [
+        ("Root", "/tmp/mms-next"),
+        ("Mode", "preview"),
+        ("DB", "/tmp/mms-next/registry/model-registry.sqlite"),
+        ("DB 状态", "missing"),
+    ]
+    assert actions[0] == ("model_source_status", "查看 Model Source Status")
+    assert report_title == "Model Source Status"
+    assert ("Legacy 冲突", 2) in rows
+    assert "只读视图" in note
+
+
 def test_registry_result_payloads_are_chinese_first_and_compact() -> None:
     import mms_core
     import mms_i18n

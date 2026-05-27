@@ -305,6 +305,8 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ```text
 ./mmf config root --json
 ./mmf config source --json
+./mmf config web --print-summary
+./mmf config web --no-open
 ./mmf registry status
 ./mmf registry legacy-report --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
@@ -313,6 +315,8 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ```
 
 `config root` and `legacy-report` are read-only. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
+`config web --print-summary` includes the same Model Source status in the WebUI snapshot; starting the full WebUI still uses the existing audited config save path, so this slice only adds the read-only status panel and does not change save semantics.
+TUI Settings -> `模型真源 / Registry Truth` now opens on the same read-only Model Source status before any explicit registry write action is selected.
 
 Required checks:
 
@@ -363,6 +367,13 @@ Required checks:
 - WebUI/TUI reads DB and shows unified Model Source view.
 - Save stays disabled or writes only a preview candidate.
 - No launcher behavior change.
+
+Current Stage 3a implementation:
+
+- CLI: `mms config source [--json]` / `mmf config source [--json]`.
+- WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, and latest-approved bundle status.
+- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status; explicit refresh/publish/doctor actions remain separate.
+- Existing WebUI Save behavior is not changed in this slice; disabling or redirecting save to preview candidates belongs to Stage 4.
 
 ### Stage 4 - Write Path And Publish
 

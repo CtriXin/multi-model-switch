@@ -158,6 +158,37 @@ def _policy_path_for_config(config_path: str = "") -> str:
         return ""
 
 
+def _config_root_for_snapshot(config_path: str = "") -> str:
+    config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
+    if config_path:
+        return os.path.dirname(config_path)
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        return resolve_mms_config_dir()
+    except Exception:
+        return ""
+
+
+def _model_source_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import model_source_status
+
+        return model_source_status(
+            config_dir=config_root or None,
+            command_name=f"{command_name} config source",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.model_source_status.v1",
+            "read_only": True,
+            "status": "error",
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
 def _load_json_file(path: str) -> dict[str, Any]:
     if not path or not os.path.exists(path):
         return {}
@@ -579,6 +610,7 @@ def build_config_snapshot(
             "model_count": len((policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}) or {}),
             "project_count": len((policy_payload.get("projects") if isinstance(policy_payload.get("projects"), dict) else {}) or {}),
         },
+        "model_source_status": _model_source_status_for_snapshot(config_path, command_name=command_name),
         "references": build_reference_cards(),
         "recommendations": recommendations,
         "snippets": build_config_snippets(),
@@ -1790,6 +1822,7 @@ _HTML_PAGE = r"""<!doctype html>
 <div class="shell">
   <aside class="side" id="nav"></aside>
   <main class="content">
+    <section class="panel" data-section="source"><h2>真源状态</h2><p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p><div class="grid" id="sourceStatus"></div></section>
     <section class="panel" data-section="channel"><h2>通道配置</h2><p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p><div class="grid"><div class="card span4"><div class="provider-list" id="providerList"></div><div class="btns"><button id="addProvider" class="secondary">+ 添加通道</button><button id="duplicateProvider" class="ghost">复制当前</button></div></div><div class="card span8 provider-editor" id="providerForm"></div></div></section>
     <section class="panel" data-section="models"><h2>模型列表</h2><p>可拉取远端列表，也可像 NewAPI 一样手动补充；取消“显示”会写入 provider.hidden_models。拉取只更新缓存/当前表格，不会自动写入 fallback_models；需要固定保留的模型请用“手动补充模型”。</p><div class="grid"><div class="card span12"><div class="btns"><button id="fetchModels">拉取当前通道模型</button><button id="testList" class="secondary">测试 /models</button><input id="modelSearch" placeholder="搜索模型" style="max-width:260px"></div><label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label><textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea><div class="btns"><button id="addManualModels" class="secondary">添加到列表</button><button id="clearHidden" class="ghost">取消当前通道全部隐藏</button><button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button></div><div id="modelChips" class="chips" style="margin-top:10px"></div></div><div class="card span12" id="staleHiddenBox"></div><div class="span12 table-wrap"><table id="modelTable"></table></div></div></section>
     <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
@@ -1802,7 +1835,7 @@ _HTML_PAGE = r"""<!doctype html>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
-  ['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
+  ['source','真源状态','DB / legacy / bundle'],['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
 ];
 let state=null; let activeProvider=0; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
 const $=id=>document.getElementById(id);
@@ -1810,9 +1843,10 @@ function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('sho
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
 function current(){return state.providers[activeProvider]}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('channel') }
-function renderStatus(){const providers=state.providers||[];$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
+function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
+function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function renderSourceStatus(){const box=$('sourceStatus');if(!box)return;const status=state.model_source_status||{};const root=status.root||{};const db=status.registry_db||{};const legacy=status.legacy_import||{};const bundle=status.generated_bundle||{};const counts=db.counts||{};const okBundle=bundle.verified?'ok':'warn';box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||'-')}</p><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify(status,null,2))}</div></div>`}
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
 function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>`<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>'}<span class="tag">${p.models?.length||0} models</span></div>`).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
@@ -1863,7 +1897,7 @@ function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<d
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
 function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}`}
 function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
-function renderAll(){renderStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
+function renderAll(){renderStatus();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}

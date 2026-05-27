@@ -5240,6 +5240,53 @@ def _registry_truth_tui_payload(status):
     return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
 
 
+def _model_source_status_rows(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    registry_db = summary.get("registry_db") if isinstance(summary.get("registry_db"), dict) else {}
+    legacy = summary.get("legacy_import") if isinstance(summary.get("legacy_import"), dict) else {}
+    bundle = summary.get("generated_bundle") if isinstance(summary.get("generated_bundle"), dict) else {}
+    counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
+    return [
+        ("Root", root.get("config_root") or summary.get("config_root") or "-"),
+        ("Mode", root.get("mode") or "-"),
+        ("DB", registry_db.get("path") or "-"),
+        (_L("DB 状态", "DB status"), registry_db.get("status") or "-"),
+        (_L("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
+        (_L("模型事实", "model facts"), counts.get("model_fact", 0)),
+        (_L("Legacy 冲突", "legacy conflicts"), legacy.get("conflict_count", 0)),
+        (_L("Legacy 下一步", "legacy next action"), legacy.get("next_action") or "-"),
+        (_L("Bundle 状态", "bundle status"), bundle.get("status") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+    ]
+
+
+def _model_source_status_report_payload(summary):
+    return (
+        _L("Model Source Status", "Model Source Status"),
+        _model_source_status_rows(summary),
+        _L("只读视图：不写 DB、不发布 bundle、不改变 runtime defaults。", "Read-only view: no DB writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
+def _model_source_status_tui_payload(summary):
+    actions = [
+        ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
+        ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
+        ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
+        ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
+        ("scheduled_no_network", _L("定时刷新 No Network", "Scheduled Refresh No Network")),
+        ("refresh_sources", _L("刷新全部 Sources", "Refresh Sources")),
+        ("fetch_openrouter", _L("拉取 OpenRouter Catalog", "Fetch OpenRouter Catalog")),
+        ("diff_openrouter", _L("对比 OpenRouter Candidate", "OpenRouter Candidate Diff")),
+        ("publish_approved", _L("发布 Approved Bundle", "Publish Approved Bundle")),
+        ("verify_approved", _L("验证 Approved Bundle", "Verify Approved Bundle")),
+        ("doctor", _L("Registry Doctor / 状态", "Registry Doctor / Status")),
+        ("back", _L("返回", "Back")),
+    ]
+    return _L("模型真源 / Registry Truth", "Registry Truth"), _model_source_status_rows(summary), actions
+
+
 def _compact_tui_report_value(value, max_len=96):
     text = str(value if value is not None else "-").replace("\n", " ").strip()
     if len(text) <= max_len:
@@ -10116,10 +10163,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 
-                status = registry_status()
-                registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
+                source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
+                registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
                 registry_action = _safe_tui_call(
                     select_channel_action_tui,
                     registry_title,
@@ -10128,7 +10175,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 )
                 if registry_action == "__interrupt__":
                     return True
-                if registry_action == "check_staleness":
+                if registry_action == "model_source_status":
+                    _print_settings_result_report(*_model_source_status_report_payload(source_status))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "check_staleness":
                     try:
                         summary = source_freshness()
                     except Exception as exc:
