@@ -930,11 +930,9 @@ def _inject_real_home_hints(env, *, include_xdg=False):
 
 
 def _truthy(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+    from mms_launcher_export import truthy
+
+    return truthy(value)
 
 
 def _rescue_default_fallback_config():

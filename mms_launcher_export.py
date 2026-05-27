@@ -5,6 +5,14 @@ from __future__ import annotations
 import os
 
 
+def truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
 def host_context_real_home(*, real_user_path, real_user_home):
     """Resolve the real user home used in launcher host-context payloads."""
     try:
