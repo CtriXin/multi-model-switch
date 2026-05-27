@@ -9135,35 +9135,16 @@ def _official_account_menu_options(cfg, cli_name):
 
 
 def _select_opencode_profile(use_tui=False):
-    options = _opencode_profile_menu_options()
-    if use_tui:
-        try:
-            from mms_tui import select_channel_action_tui
-            return select_channel_action_tui(
-                "OpenCode Mode",
-                [(option["label"], option["summary"]) for option in options[:4]],
-                [(option["id"], option["label"]) for option in options],
-            )
-        except Exception:
-            return None
+    from mms_tui_launcher_flow import select_opencode_profile
 
-    _ensure_rich()
-    table = Table(title="OpenCode Mode")
-    table.add_column("#", style="cyan", width=4)
-    table.add_column("Mode", style="green")
-    table.add_column("说明", style="dim")
-    for idx, option in enumerate(options, 1):
-        label = f"{option.get('badge')} {option['label']}".strip()
-        table.add_row(str(idx), label, option["summary"])
-    console.print(table)
-    while True:
-        try:
-            choice = IntPrompt.ask("选择 OpenCode mode")
-            if 1 <= choice <= len(options):
-                return options[choice - 1]["id"]
-            console.print(f"[red]请输入 1-{len(options)}[/red]")
-        except KeyboardInterrupt:
-            return None
+    return select_opencode_profile(
+        use_tui=use_tui,
+        profile_menu_options=_opencode_profile_menu_options,
+        ensure_rich=_ensure_rich,
+        table_cls=lambda: Table,
+        int_prompt_cls=lambda: IntPrompt,
+        console=console,
+    )
 
 
 def _opencode_default_profile_from_config(cfg):

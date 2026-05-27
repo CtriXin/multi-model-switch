@@ -1776,3 +1776,43 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     assert "health: 1/18 healthy" in agent["summary"]
     assert "1 degraded" in agent["summary"]
     assert "16 untested" in agent["summary"]
+
+
+def test_core_select_opencode_profile_uses_numbered_console_choice(monkeypatch):
+    import mms_core
+
+    printed = []
+
+    class FakeConsole:
+        def print(self, value):
+            printed.append(value)
+
+    class FakeTable:
+        def __init__(self, title=None):
+            self.title = title
+            self.columns = []
+            self.rows = []
+
+        def add_column(self, *args, **kwargs):
+            self.columns.append((args, kwargs))
+
+        def add_row(self, *args):
+            self.rows.append(args)
+
+    class FakeIntPrompt:
+        @staticmethod
+        def ask(_prompt):
+            return 2
+
+    monkeypatch.setattr(mms_core, "_opencode_profile_menu_options", lambda: [
+        {"id": "agent", "label": "Agent", "summary": "default", "badge": "默认"},
+        {"id": "raw", "label": "Raw", "summary": "raw mode", "badge": "R"},
+    ])
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: None)
+    monkeypatch.setattr(mms_core, "Table", FakeTable)
+    monkeypatch.setattr(mms_core, "IntPrompt", FakeIntPrompt)
+    monkeypatch.setattr(mms_core, "console", FakeConsole())
+
+    assert mms_core._select_opencode_profile(use_tui=False) == "raw"
+    assert printed and printed[0].title == "OpenCode Mode"
+    assert printed[0].rows[1] == ("2", "R Raw", "raw mode")

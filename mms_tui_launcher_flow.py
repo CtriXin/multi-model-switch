@@ -131,3 +131,43 @@ def official_account_menu_options(
         "summary": summary,
         "badge": "O",
     }]
+
+
+def select_opencode_profile(
+    *,
+    use_tui=False,
+    profile_menu_options,
+    ensure_rich,
+    table_cls,
+    int_prompt_cls,
+    console,
+):
+    options = profile_menu_options()
+    if use_tui:
+        try:
+            from mms_tui import select_channel_action_tui
+            return select_channel_action_tui(
+                "OpenCode Mode",
+                [(option["label"], option["summary"]) for option in options[:4]],
+                [(option["id"], option["label"]) for option in options],
+            )
+        except Exception:
+            return None
+
+    ensure_rich()
+    table = table_cls()(title="OpenCode Mode")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("Mode", style="green")
+    table.add_column("说明", style="dim")
+    for idx, option in enumerate(options, 1):
+        label = f"{option.get('badge')} {option['label']}".strip()
+        table.add_row(str(idx), label, option["summary"])
+    console.print(table)
+    while True:
+        try:
+            choice = int_prompt_cls().ask("选择 OpenCode mode")
+            if 1 <= choice <= len(options):
+                return options[choice - 1]["id"]
+            console.print(f"[red]请输入 1-{len(options)}[/red]")
+        except KeyboardInterrupt:
+            return None
