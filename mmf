@@ -26,6 +26,38 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "init":
     forwarded = ["init-root", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "import-legacy":
+    from mms_registry_cli import handle_registry_command
+
+    source_default = os.path.join(resolve_real_user_home(os.environ), ".config", "mms")
+    translated = []
+    has_source = False
+    i = 2
+    while i < len(argv):
+        item = argv[i]
+        if item == "--from":
+            translated.append("--source-config-dir")
+            if i + 1 < len(argv):
+                translated.append(argv[i + 1])
+                i += 2
+            else:
+                i += 1
+            has_source = True
+            continue
+        if item.startswith("--from="):
+            translated.append("--source-config-dir=" + item.split("=", 1)[1])
+            has_source = True
+            i += 1
+            continue
+        if item == "--source-config-dir" or item.startswith("--source-config-dir="):
+            has_source = True
+        translated.append(item)
+        i += 1
+    if not has_source:
+        translated.extend(["--source-config-dir", source_default])
+    forwarded = ["legacy-import", *translated, "--config-dir", os.environ["MMS_CONFIG_ROOT"]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
 if argv and argv[0] == "registry":
     from mms_registry_cli import handle_registry_command
 

@@ -758,6 +758,61 @@ def test_mmf_registry_legacy_import_can_read_source_root_and_write_preview_targe
     assert "sk-source-local-secret" not in combined
 
 
+def test_mmf_preview_import_legacy_wrapper_targets_preview_root(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    real_home = tmp_path / "home"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "wrapped-source"
+        default_openai_base_url = "https://wrapped-source.example/v1"
+        api_key = "sk-wrapped-source-secret"
+        fallback_models = ["wrapped-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "MMS_CONFIG_ROOT": str(target_dir),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "import-legacy",
+            "--from",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["route_candidates"]["provider_route_count"] == 1
+    assert (target_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (source_dir / "registry").exists()
+    assert not (real_home / ".config" / "mms-next").exists()
+    assert "sk-wrapped-source-secret" not in combined
+
+
 def test_registry_legacy_import_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
     stable_root = tmp_path / "mms"
     stable_root.mkdir()
