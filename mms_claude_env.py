@@ -422,4 +422,3 @@ def build_claude_gateway_env(
             pass
 
     return env
-
