@@ -105,6 +105,25 @@ def test_direct_mimo_anthropic_model_patch_exposes_non_pro_selector():
     assert patched["model_sources"]["mimo-v2.5[1m]"] == "derived_alias"
 
 
+def test_direct_mimo_base_url_anthropic_model_patch_exposes_non_pro_selector():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "direct-mimo",
+            "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" in patched["models"]
+    assert "mimo-v2.5-pro[1m]" in patched["models"]
+
+
 def test_openrouter_mimo_model_patch_does_not_expose_selector_alias():
     import mms_core
 

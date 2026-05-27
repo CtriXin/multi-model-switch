@@ -6760,6 +6760,9 @@ def _provider_supports_mimo_anthropic_selectors(provider):
     anthropic_base = str(provider.get("anthropic_base_url") or "").strip().lower()
     if "xiaomimimo.com" in anthropic_base:
         return True
+    base_url = str(provider.get("base_url") or "").strip().lower()
+    if "xiaomimimo.com" in base_url and "/anthropic" in base_url:
+        return True
     return bool(anthropic_base and any(token in identity for token in ("mimo", "xiaomi")))
 
 
