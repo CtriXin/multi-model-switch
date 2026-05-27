@@ -417,6 +417,7 @@ Current preview publish implementation:
 - `mmf preview doctor [--json]` is the single read-only "what next?" command for preview setup. It checks preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, and then prints one next action.
 - `mmf preview doctor --strict-exit` exits non-zero unless the preview root is runtime-ready. This avoids treating "printed something and did not crash" as success.
 - `mmf preview prepare --from <legacy-root> [--include-secrets] [--json]` is the single explicit preview write command for user testing. It runs preview init, legacy import, publish, verify, and doctor against the active preview root; the source root remains read-only.
+- Re-running `mmf preview prepare` backs up the existing preview DB under `<config_root>/backups/db/` before importing new candidate evidence.
 - It writes generated Router/Lineup/Profile/Policy/Capabilities files, then writes and verifies a manifest-compatible latest-approved bundle.
 - It approves the imported route revision and generated component/bundle revisions inside the preview DB.
 - Without `--include-secrets`, it is not runtime-ready because plaintext secrets are not stored in DB; generated Router entries carry `secret_ref` and `api_key=""`, with `runtime_ready=false`.

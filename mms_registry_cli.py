@@ -670,6 +670,7 @@ def preview_prepare(
     root = root.expanduser()
     source_root = Path(source_config_dir).expanduser() if source_config_dir is not None else root
     init_summary = init_config_root(config_dir=root, create_db=True, command_name=command_name)
+    pre_import_backup = backup_registry_db(config_dir=root, reason="preview-prepare") if not bool(init_summary.get("db_created")) else {"skipped": True, "reason": "new_db"}
     import_summary = import_legacy_config(
         config_dir=root,
         source_config_dir=source_root,
@@ -695,6 +696,11 @@ def preview_prepare(
                 "db_initialized": bool(init_summary.get("db_initialized")),
                 "db_created": bool(init_summary.get("db_created")),
                 "layout_dirs": len(init_summary.get("layout_dirs") or []),
+            },
+            "backup": {
+                "skipped": bool(pre_import_backup.get("skipped")),
+                "reason": str(pre_import_backup.get("reason") or ""),
+                "backup_path": str(pre_import_backup.get("backup_path") or ""),
             },
             "import": {
                 "provider_count": import_summary.get("provider_count", 0),
@@ -2062,7 +2068,7 @@ def _print_preview_prepare(summary: dict[str, Any]) -> None:
     print(f"source_config_root={summary.get('source_config_root')}")
     print(f"include_secrets={summary.get('include_secrets')}")
     stages = summary.get("stages") if isinstance(summary.get("stages"), dict) else {}
-    for name in ("init", "import", "publish", "verify"):
+    for name in ("init", "backup", "import", "publish", "verify"):
         stage = stages.get(name) if isinstance(stages.get(name), dict) else {}
         compact = " ".join(f"{key}={stage[key]}" for key in sorted(stage))
         print(f"stage_{name}={compact}")

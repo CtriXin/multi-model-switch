@@ -1430,6 +1430,61 @@ def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(t
     assert "sk-prepare-ready-secret" not in combined
 
 
+def test_mmf_preview_prepare_repeated_run_backs_up_existing_preview_db(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-backup", api_key="sk-prepare-backup-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+
+    first = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    second = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    first_payload = json.loads(first.stdout)
+    second_payload = json.loads(second.stdout)
+    backup_path = Path(second_payload["stages"]["backup"]["backup_path"])
+
+    assert first_payload["stages"]["backup"]["skipped"] is True
+    assert first_payload["stages"]["backup"]["reason"] == "new_db"
+    assert second_payload["stages"]["backup"]["skipped"] is False
+    assert backup_path.exists()
+    assert backup_path.parent == target_dir / "backups" / "db"
+    assert not (source_dir / "backups").exists()
+    assert "sk-prepare-backup-secret" not in (second.stdout + second.stderr)
+
+
 def test_mmf_preview_prepare_strict_exit_requires_runtime_ready(tmp_path: Path) -> None:
     source_dir = tmp_path / "mms"
     target_dir = tmp_path / "mms-next"
