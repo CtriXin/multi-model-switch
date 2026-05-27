@@ -2557,6 +2557,15 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
     monkeypatch.setattr(mms_launchers, "_claude_route_status_paths", lambda: [str(tmp_path / "route-status.json")])
     monkeypatch.setattr(mms_launchers, "list_indexed_sessions", lambda _cli="claude": [])
+    route_status_calls = []
+
+    def fake_ensure_bridge_helpers():
+        mms_launchers._write_route_status = (
+            lambda *args, **kwargs: route_status_calls.append((args, kwargs))
+        )
+
+    monkeypatch.setattr(mms_launchers, "_write_route_status", None)
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", fake_ensure_bridge_helpers)
 
     env = mms_launchers._claude_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "ecc_mode": "enable"},
@@ -2581,6 +2590,7 @@ def test_claude_gateway_env_materializes_session_ecc_assets_and_env(monkeypatch,
     assert os.path.islink(session_home / ".claude" / "commands" / "feature-development.md")
     assert os.path.islink(session_home / ".claude" / "skills" / "core-skill")
     assert os.path.islink(session_home / ".claude" / "rules" / "common")
+    assert route_status_calls
 
 
 def test_claude_gateway_env_materializes_session_web_access_skill(monkeypatch, tmp_path):
@@ -3191,6 +3201,66 @@ def test_launch_claude_failed_probe_still_uses_bridge_for_non_claude_model(monke
     assert captured["prepare_kwargs"]["selected_model"] == "claude-sonnet-4-6"
     assert captured["prepare_kwargs"]["display_model"] == "mimo-v2.5-pro"
     assert captured["exec_kwargs"]["bridge_info"]["base_url"] == "http://127.0.0.1:4567/v1"
+
+
+def test_launch_claude_uses_speed_scope_after_lazy_initialization(monkeypatch, tmp_path):
+    import mms_launchers
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.chdir(repo_dir)
+    captured = {}
+
+    class FakeBridge:
+        def __enter__(self):
+            return {"base_url": "http://127.0.0.1:4567/v1", "api_key": "bridge-token"}
+
+        def __exit__(self, *_args):
+            return None
+
+    def fake_ensure_speed_stats():
+        mms_launchers.build_provider_speed_scope = lambda runtime: {"provider": runtime["id"]}
+
+    def fake_bridge(_gateway_url, _gateway_key, **kwargs):
+        captured["speed_scope"] = kwargs.get("speed_scope")
+        return FakeBridge()
+
+    def fake_prepare(_runtime, **_kwargs):
+        return {"HOME": str(tmp_path / "session"), "PATH": "/usr/bin"}
+
+    monkeypatch.setattr(mms_launchers, "_ensure_bridge_helpers", lambda: None)
+    monkeypatch.setattr(mms_launchers, "build_provider_speed_scope", None)
+    monkeypatch.setattr(mms_launchers, "_ensure_speed_stats", fake_ensure_speed_stats)
+    monkeypatch.setattr(mms_launchers, "_health_check_due", lambda _provider_id: False)
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda *_args, **_kwargs: {"models": ["claude-sonnet-4-6"], "base_source": "test"},
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_resolve_anthropic_base_url",
+        lambda *_args, **_kwargs: ("https://relay.example.com", "configured"),
+    )
+    monkeypatch.setattr(mms_launchers, "_resolve_native_fallback_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(mms_launchers, "_gateway_claude_bridge_context", fake_bridge)
+    monkeypatch.setattr(mms_launchers, "_prepare_claude_env_with_status", fake_prepare)
+    monkeypatch.setattr(mms_launchers, "_resolve_real_home_command_path", lambda *_args, **_kwargs: "claude")
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_finalize_claude_slot", lambda *_args, **_kwargs: None)
+
+    mms_launchers.launch_claude(
+        {"model": "claude-sonnet-4-6"},
+        {
+            "id": "relay-a",
+            "auth_mode": "api_key",
+            "api_key": "sk-runtime",
+            "anthropic_base_url": "https://relay.example.com",
+        },
+        once=True,
+    )
+
+    assert captured["speed_scope"] == {"provider": "relay-a"}
 
 
 def test_load_probe_file_cache_marks_stale_and_preserves_error(monkeypatch, tmp_path):

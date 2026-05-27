@@ -37,6 +37,7 @@ def build_claude_gateway_env(
     light_model: bridge 模式下可选 light model（仅用于展示）。
     """
     import json as _json
+    import mms_launchers as _launchers
     from mms_launchers import (
         _anthropic_base_url,
         _apply_claude_model_overrides,
@@ -101,7 +102,6 @@ def build_claude_gateway_env(
         _timed_launch_step,
         _with_1m_suffix,
         _write_claude_session_settings,
-        _write_route_status,
         atomic_write_json,
         locked_state_file,
     )
@@ -406,7 +406,7 @@ def build_claude_gateway_env(
         status_reason = "init_selected_model" if selected_model else ("bridge_ready" if auth_token else "direct")
         _ensure_bridge_helpers()
         try:
-            _write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
+            _launchers._write_route_status(status_tier, status_model, status_reason, status_paths=[route_status_path])
         except Exception:
             pass
 

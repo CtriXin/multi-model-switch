@@ -12,6 +12,7 @@ import sys
 
 def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
     """启动 Claude Code，支持 provider 和 OAuth 账号档案两种模式。"""
+    import mms_launchers as _launchers
     from mms_launchers import (
         _anthropic_base_url,
         _apply_claude_model_overrides,
@@ -43,7 +44,6 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
         _runtime_thinking_enabled,
         _runtime_vision_sidecar,
         _safe_getcwd,
-        build_provider_speed_scope,
         codex_claude_bridge,
         console,
         gateway_health_check,
@@ -52,6 +52,9 @@ def launch_claude_runtime(model_info, runtime, once=False, extra_args=None):
 
     _ensure_bridge_helpers()
     _ensure_speed_stats()
+    build_provider_speed_scope = _launchers.build_provider_speed_scope
+    codex_claude_bridge = _launchers.codex_claude_bridge
+    gemini_claude_bridge = _launchers.gemini_claude_bridge
     auth_mode = runtime.get("auth_mode", "api_key")
     enable_claude_1m = _runtime_supports_claude_1m(runtime)
     advertised_models = []
