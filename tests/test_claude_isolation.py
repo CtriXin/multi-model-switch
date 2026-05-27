@@ -217,7 +217,7 @@ def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
         assert reloaded_core._config_root_status()["mode"] == "preview"
         assert reloaded_core._config_root_status()["command"] == "mmf"
         assert reloaded_router.MODEL_ROUTES_PATH == str(preview_root / "model-routes.json")
-        assert mms_registry.default_registry_db_path(env=os.environ) == preview_root / "model-registry.sqlite"
+        assert mms_registry.default_registry_db_path(env=os.environ) == preview_root / "registry" / "model-registry.sqlite"
         assert not str(reloaded_core.CONFIG_PATH).startswith(str(stable_root))
     finally:
         monkeypatch.delenv("HOME", raising=False)

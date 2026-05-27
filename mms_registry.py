@@ -99,7 +99,13 @@ def _source_model_count(payload: Mapping[str, Any]) -> int:
 
 
 def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None) -> Path:
-    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(env))
+    source_env = env or os.environ
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(source_env))
+    root = root.expanduser()
+    explicit_root = str(source_env.get("MMS_CONFIG_ROOT") or "").strip()
+    explicit_path = Path(explicit_root).expanduser() if explicit_root else None
+    if root.name == "mms-next" or (explicit_path and explicit_path.absolute() == root.absolute()):
+        return root / "registry" / "model-registry.sqlite"
     return root / "model-registry.sqlite"
 
 

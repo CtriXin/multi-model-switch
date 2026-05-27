@@ -30,6 +30,23 @@ def test_refresh_sources_imports_reference_snapshot_to_db(tmp_path: Path) -> Non
     assert status["counts"]["model_fact"] == summary["fact_count"]
 
 
+def test_preview_config_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_registry.default_registry_db_path() == preview_root / "registry" / "model-registry.sqlite"
+    assert mms_registry.default_registry_db_path(config_dir=preview_root) == preview_root / "registry" / "model-registry.sqlite"
+
+
+def test_legacy_config_dir_keeps_root_level_registry_db(monkeypatch, tmp_path: Path) -> None:
+    legacy_root = tmp_path / "mms"
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+
+    assert mms_registry.default_registry_db_path(config_dir=legacy_root) == legacy_root / "model-registry.sqlite"
+
+
 def test_source_freshness_and_if_due_refresh_use_check_timestamp(tmp_path: Path) -> None:
     db_path = tmp_path / "model-registry.sqlite"
     old_captured = "2026-05-01T00:00:00.000Z"
