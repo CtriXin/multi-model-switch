@@ -163,6 +163,9 @@ MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isol
 - Real `~/.codex/hooks.json` trust wins over stale sibling sessions. Sibling `codex-gateway/s/<pid>/.codex/config.toml` trust can backfill missing entries, but cannot overwrite matching real-home trust.
 - Codex upgrade/hash drift must be repaired from the current Codex `app-server` `hooks/list` `currentHash` before launch; do not rely only on stale copied `trusted_hash` values.
 - Real `~/.codex/config.toml` refresh is allowed only for MMS-managed hook trust hashes; do not auto-trust arbitrary project/user hooks there.
+- If an isolated MMS/Codex session approves hook trust once, that trust must be written back to stable gateway trust and reused by later sessions. Asking the user to approve the same MMS-managed hooks again is a bug.
+- On recurrence, immediately inspect actual active `CODEX_HOME`, `MMS_SESSION_HOME`, launch flags, Codex version, and Codex `app-server` `hooks/list` statuses for gateway and real Codex homes before changing code.
+- Expected healthy state after any repair: gateway `hooks/list` has `0` `untrusted`/`modified` hooks; real `~/.codex` may only be auto-refreshed for MMS-managed hook hashes.
 - Any change to Codex hook generation, hook order, `CODEX_HOME`, or hook trust copy/write-back must run `tests/test_codex_hook_trust_contract.py` plus the targeted Codex hook trust tests.
 
 ## User Preferences And Human Gate
