@@ -306,6 +306,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf config root --json
 ./mmf config source --json
 ./mmf preview --help
+./mmf preview doctor --strict-exit
 ./mmf preview init --json
 ./mmf preview prepare --from ~/.config/mms --json
 ./mmf preview prepare --from ~/.config/mms --include-secrets --json
@@ -414,6 +415,7 @@ Current preview publish implementation:
 - `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB legacy import route candidate.
 - `mmf preview verify [--json]` verifies manifest hashes for the active preview root; `mmf preview status [--json]` is a wrapper for Model Source status.
 - `mmf preview doctor [--json]` is the single read-only "what next?" command for preview setup. It checks preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, and then prints one next action.
+- `mmf preview doctor --strict-exit` exits non-zero unless the preview root is runtime-ready. This avoids treating "printed something and did not crash" as success.
 - `mmf preview prepare --from <legacy-root> [--include-secrets] [--json]` is the single explicit preview write command for user testing. It runs preview init, legacy import, publish, verify, and doctor against the active preview root; the source root remains read-only.
 - It writes generated Router/Lineup/Profile/Policy/Capabilities files, then writes and verifies a manifest-compatible latest-approved bundle.
 - It approves the imported route revision and generated component/bundle revisions inside the preview DB.

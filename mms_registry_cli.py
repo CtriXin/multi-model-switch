@@ -630,6 +630,8 @@ def preview_doctor(
     return {
         "schema": "mms.preview_doctor.v1",
         "status": overall,
+        "ready": overall == "ready",
+        "result": "READY" if overall == "ready" else "VERIFIED_NOT_RUNTIME_READY" if overall == "verified_not_runtime_ready" else "NOT_READY",
         "config_root": str(root),
         "checks": checks,
         "counts": {
@@ -683,6 +685,8 @@ def preview_prepare(
     return {
         "schema": "mms.preview_prepare.v1",
         "ok": bool(verify_summary.get("verified")) and doctor_summary.get("status") in {"ready", "verified_not_runtime_ready"},
+        "ready": doctor_summary.get("status") == "ready",
+        "result": "READY" if doctor_summary.get("status") == "ready" else "VERIFIED_NOT_RUNTIME_READY" if doctor_summary.get("status") == "verified_not_runtime_ready" else "NOT_READY",
         "config_root": str(root),
         "source_config_root": str(source_root),
         "include_secrets": bool(include_secrets),
@@ -2024,6 +2028,8 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
 
 def _print_preview_doctor(summary: dict[str, Any]) -> None:
     print("MMF Preview Doctor")
+    print(f"result={summary.get('result')}")
+    print(f"ready={summary.get('ready')}")
     print(f"status={summary.get('status')}")
     print(f"config_root={summary.get('config_root')}")
     print(f"read_only={summary.get('read_only', False)}")
@@ -2049,6 +2055,8 @@ def _print_preview_doctor(summary: dict[str, Any]) -> None:
 
 def _print_preview_prepare(summary: dict[str, Any]) -> None:
     print("MMF Preview Prepare")
+    print(f"result={summary.get('result')}")
+    print(f"ready={summary.get('ready')}")
     print(f"ok={summary.get('ok')}")
     print(f"config_root={summary.get('config_root')}")
     print(f"source_config_root={summary.get('source_config_root')}")
@@ -2120,11 +2128,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
+    preview_doctor_parser.add_argument("--strict-exit", action="store_true", help="Exit non-zero unless preview root is runtime-ready")
     preview_prepare_parser = subparsers.add_parser("preview-prepare", help="Initialize, import, publish, verify, and doctor a preview root")
     preview_prepare_parser.add_argument("--config-dir", default="", help="Override MMS config dir to prepare")
     preview_prepare_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root")
     preview_prepare_parser.add_argument("--include-secrets", action="store_true", help="Also copy legacy API keys into the preview secret backend")
     preview_prepare_parser.add_argument("--json", action="store_true", help="Print the full prepare summary as JSON")
+    preview_prepare_parser.add_argument("--strict-exit", action="store_true", help="Exit non-zero unless preview root is runtime-ready")
     init_root_parser = subparsers.add_parser("init-root", help="Initialize selected config root layout")
     init_root_parser.add_argument("--config-dir", default="", help="Override MMS config dir to initialize")
     init_root_parser.add_argument("--no-db", action="store_true", help="Create directories/manifest only; do not initialize SQLite")
@@ -2232,7 +2242,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_preview_doctor(summary)
-        return 0
+        return 0 if not bool(args.strict_exit) or summary.get("ready") is True else 2
     if args.subcommand == "preview-prepare":
         try:
             summary = preview_prepare(
@@ -2251,7 +2261,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_preview_prepare(summary)
-        return 0
+        return 0 if not bool(args.strict_exit) or summary.get("ready") is True else 2
     if args.subcommand == "init-root":
         try:
             summary = init_config_root(

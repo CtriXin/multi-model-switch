@@ -29,6 +29,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "",
                 "Read-only:",
                 "  mmf preview doctor [--json]       show current state and one next action",
+                "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
                 "  mmf preview status [--json]       show full model source status",
                 "  mmf preview verify [--json]       verify latest-approved bundle hashes",
                 "",

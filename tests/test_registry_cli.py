@@ -1291,11 +1291,58 @@ def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: 
     combined = result.stdout + result.stderr
 
     assert payload["status"] == "ready"
+    assert payload["ready"] is True
+    assert payload["result"] == "READY"
     assert payload["bundle"]["verified"] is True
     assert payload["bundle"]["runtime_ready"] is True
     assert payload["secrets"]["secret_count"] == 1
     assert payload["next_actions"][0]["command"].startswith("scripts/mms_health_watchdog.py")
     assert "sk-doctor-ready-secret" not in combined
+
+
+def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-doctor-strict-secret")
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    not_ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--strict-exit", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    not_ready_payload = json.loads(not_ready.stdout)
+    assert not_ready.returncode == 2
+    assert not_ready_payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
+    assert not_ready_payload["ready"] is False
+
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    ready = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert ready.returncode == 0
+    assert "result=READY" in ready.stdout
+    assert "ready=True" in ready.stdout
+    assert "sk-doctor-strict-secret" not in (ready.stdout + ready.stderr)
 
 
 def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_path: Path) -> None:
@@ -1327,6 +1374,8 @@ def test_mmf_preview_prepare_wrapper_runs_full_preview_flow_without_secrets(tmp_
 
     assert payload["schema"] == "mms.preview_prepare.v1"
     assert payload["ok"] is True
+    assert payload["ready"] is False
+    assert payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
     assert payload["config_root"] == str(target_dir)
     assert payload["source_config_root"] == str(source_dir)
     assert payload["include_secrets"] is False
@@ -1369,6 +1418,8 @@ def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(t
     secret_path = target_dir / "secrets" / "legacy-secrets.json"
 
     assert payload["ok"] is True
+    assert payload["ready"] is True
+    assert payload["result"] == "READY"
     assert payload["include_secrets"] is True
     assert payload["stages"]["import"]["secret_backend_count"] == 1
     assert payload["stages"]["publish"]["runtime_ready"] is True
@@ -1377,6 +1428,40 @@ def test_mmf_preview_prepare_include_secrets_reports_ready_without_stdout_leak(t
     assert secret_path.exists()
     assert oct(secret_path.stat().st_mode & 0o777) == "0o600"
     assert "sk-prepare-ready-secret" not in combined
+
+
+def test_mmf_preview_prepare_strict_exit_requires_runtime_ready(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(source_dir, provider_id="prepare-strict", api_key="sk-prepare-strict-secret")
+    target_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "prepare",
+            "--from",
+            str(source_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["ok"] is True
+    assert payload["ready"] is False
+    assert payload["result"] == "VERIFIED_NOT_RUNTIME_READY"
+    assert "sk-prepare-strict-secret" not in (result.stdout + result.stderr)
 
 
 def _write_config_artifacts(config_dir: Path) -> None:
