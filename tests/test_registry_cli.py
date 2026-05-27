@@ -513,6 +513,43 @@ def test_mmf_registry_legacy_report_does_not_bootstrap_config_migration(tmp_path
     assert "sk-creds-default-secret" not in combined
     assert not (config_dir / "backups").exists()
     assert not (config_dir / "config-audit.jsonl").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mmf_config_root_does_not_bootstrap_config_migration(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_API_BASE_URL='https://creds-default.example/v1'\nexport MMS_API_KEY='sk-creds-default-secret'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "root", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["command"] == "mmf"
+    assert payload["mode"] == "preview"
+    assert payload["config_root"] == str(config_dir)
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "backups").exists()
+    assert not (config_dir / "config-audit.jsonl").exists()
+    assert not (config_dir / "cache").exists()
 
 
 def _write_config_artifacts(config_dir: Path) -> None:

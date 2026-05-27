@@ -134,6 +134,24 @@ def mms_config_root_mode(config_dir=None, env=None):
     return "stable"
 
 
+def mms_config_root_status(command=None, config_dir=None, env=None):
+    env = env or os.environ
+    root = os.path.normpath(str(config_dir or resolve_mms_config_dir(env)))
+    real_home = resolve_real_user_home(env)
+    return {
+        "command": str(command or env.get("MMS_COMMAND_NAME") or "mms"),
+        "mode": mms_config_root_mode(root, env),
+        "root_source": mms_config_root_source(env),
+        "config_root": root,
+        "config_path": os.path.join(root, "config.toml"),
+        "credentials_path": os.path.join(root, "credentials.sh"),
+        "usage_path": os.path.join(root, "usage.json"),
+        "stable_root": os.path.join(real_home, ".config", "mms"),
+        "preview_root": os.path.join(real_home, ".config", "mms-next"),
+        "explicit_root": mms_config_root_is_explicit(env),
+    }
+
+
 
 @contextmanager
 def locked_state_file(path):

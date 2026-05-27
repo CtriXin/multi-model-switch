@@ -155,8 +155,7 @@ from mms_opencode_resolver import (
 )
 from mms_state_io import (
     mms_config_root_is_explicit,
-    mms_config_root_mode,
-    mms_config_root_source,
+    mms_config_root_status,
     resolve_mms_config_dir,
     resolve_real_user_home,
 )
@@ -11851,21 +11850,7 @@ def _display_config_help():
 
 
 def _config_root_status():
-    real_home = resolve_real_user_home()
-    stable_root = os.path.join(real_home, ".config", "mms")
-    preview_root = os.path.join(real_home, ".config", "mms-next")
-    return {
-        "command": current_command(),
-        "mode": mms_config_root_mode(PRIMARY_CONFIG_DIR),
-        "root_source": mms_config_root_source(),
-        "config_root": PRIMARY_CONFIG_DIR,
-        "config_path": CONFIG_PATH,
-        "credentials_path": CREDENTIALS_PATH,
-        "usage_path": USAGE_PATH,
-        "stable_root": stable_root,
-        "preview_root": preview_root,
-        "explicit_root": mms_config_root_is_explicit(),
-    }
+    return mms_config_root_status(command=current_command(), config_dir=PRIMARY_CONFIG_DIR)
 
 
 def _display_config_root(json_output=False):
@@ -13265,6 +13250,12 @@ def _is_config_help_request(args_rest):
     }
 
 
+def _is_config_root_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"root", "root.status", "status.root"}
+
+
 def _is_session_prune_dry_run(argv):
     if len(argv) < 2:
         return False
@@ -13298,6 +13289,9 @@ def main():
         from mms_registry_cli import handle_registry_command
 
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
+    if _is_config_root_status_request(argv):
+        _display_config_root(json_output="--json" in argv[2:])
+        return
 
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
     bootstrap_cfg = load_config()

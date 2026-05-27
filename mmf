@@ -3,6 +3,7 @@
 
 import os
 import sys
+import json
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
@@ -11,12 +12,30 @@ from mms_runtime import ensure_supported_python
 
 ensure_supported_python("MMF")
 
-from mms_state_io import resolve_real_user_home
+from mms_state_io import mms_config_root_status, resolve_real_user_home
 
 os.environ.setdefault("MMS_COMMAND_NAME", "mmf")
 os.environ.setdefault("MMS_PREVIEW_MODE", "mmf")
 if not str(os.environ.get("MMS_CONFIG_ROOT") or "").strip():
     os.environ["MMS_CONFIG_ROOT"] = os.path.join(resolve_real_user_home(os.environ), ".config", "mms-next")
+
+argv = sys.argv[1:]
+if argv and argv[0] == "registry":
+    from mms_registry_cli import handle_registry_command
+
+    raise SystemExit(handle_registry_command(argv[1:], command_name="mmf registry"))
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"root", "root.status", "status.root"}:
+    status = mms_config_root_status(command="mmf", env=os.environ)
+    if "--json" in argv[2:]:
+        print(json.dumps(status, ensure_ascii=False, sort_keys=True))
+    else:
+        print("MMS config root")
+        for key in ("command", "mode", "root_source", "config_root", "config_path", "credentials_path", "usage_path"):
+            print(f"{key}={status[key]}")
+        if status["mode"] == "preview":
+            print("Preview root: fail closed inside this root; no silent fallback to stable credentials/OAuth.")
+    raise SystemExit(0)
 
 from mms_core import main
 
