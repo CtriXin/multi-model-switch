@@ -58,6 +58,12 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "import-legacy":
     forwarded = ["legacy-import", *translated, "--config-dir", os.environ["MMS_CONFIG_ROOT"]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "publish":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["publish-preview", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
 if argv and argv[0] == "registry":
     from mms_registry_cli import handle_registry_command
 

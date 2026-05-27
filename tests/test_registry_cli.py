@@ -920,6 +920,149 @@ def test_mmf_registry_legacy_import_apply_writes_preview_db_without_plaintext(tm
     assert "sk-creds-local-secret" not in status_text
 
 
+def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "primary-local"
+        default_openai_base_url = "https://primary.example/v1"
+        api_key = "sk-primary-local-secret"
+        fallback_models = ["shared-model"]
+        priority = 100
+        role = "primary"
+
+        [[providers]]
+        id = "fallback-local"
+        default_openai_base_url = "https://fallback.example/v1"
+        api_key = "sk-fallback-local-secret"
+        fallback_models = ["shared-model"]
+        priority = 10
+        role = "fallback"
+        """,
+        encoding="utf-8",
+    )
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    verified = mms_registry_cli.verify_approved_bundle(config_dir=config_dir)
+    manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
+    router_path = config_dir / "generated" / "model-routes.json"
+    lineup_path = config_dir / "generated" / "model-routes.lineup.json"
+    router = json.loads(router_path.read_text(encoding="utf-8"))
+    lineup = json.loads(lineup_path.read_text(encoding="utf-8"))
+    generated_text = "\n".join(path.read_text(encoding="utf-8") for path in (manifest_path, router_path, lineup_path))
+
+    assert publish_summary["schema"] == "mms.preview_bundle_publish.v1"
+    assert publish_summary["route_revision"] == import_summary["route_candidates"]["route_revision_id"]
+    assert publish_summary["route_count"] == 1
+    assert publish_summary["provider_route_count"] == 2
+    assert publish_summary["runtime_ready"] is False
+    assert verified["verified"] is True
+    assert router["runtime_ready"] is False
+    assert router["routes"]["shared-model"]["primary"]["provider_id"] == "primary-local"
+    assert router["routes"]["shared-model"]["primary"]["api_key"] == ""
+    assert router["routes"]["shared-model"]["primary"]["secret_ref"].startswith("legacy-config:")
+    assert router["routes"]["shared-model"]["fallbacks"][0]["provider_id"] == "fallback-local"
+    assert lineup["routes"]["shared-model"]["primary"] == {"provider_id": "primary-local", "model_id": "shared-model"}
+    assert "api_key" not in json.dumps(lineup, ensure_ascii=False)
+    assert "sk-primary-local-secret" not in generated_text
+    assert "sk-fallback-local-secret" not in generated_text
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        status = db.execute(
+            "SELECT status FROM registry_revision WHERE revision_id = ?",
+            (publish_summary["route_revision"],),
+        ).fetchone()[0]
+        assert status == "approved"
+    finally:
+        db.close()
+
+
+def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "publish", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["ok"] is False
+    assert "legacy import route candidate" in payload["error"]
+    assert not (config_dir / "generated" / "model-registry.latest-approved.json").exists()
+
+
+def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "wrapped-publish"
+        default_openai_base_url = "https://wrapped-publish.example/v1"
+        api_key = "sk-wrapped-publish-secret"
+        fallback_models = ["wrapped-publish-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "preview",
+            "import-legacy",
+            "--from",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    publish = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "publish", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(publish.stdout)
+    router = json.loads((target_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    verified = mms_registry_cli.verify_approved_bundle(config_dir=target_dir)
+    combined = publish.stdout + publish.stderr + json.dumps(router, ensure_ascii=False)
+
+    assert payload["schema"] == "mms.preview_bundle_publish.v1"
+    assert payload["route_count"] == 1
+    assert payload["runtime_ready"] is False
+    assert verified["verified"] is True
+    assert router["routes"]["wrapped-publish-model"]["primary"]["provider_id"] == "wrapped-publish"
+    assert "sk-wrapped-publish-secret" not in combined
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,

@@ -1245,6 +1245,344 @@ def _approve_if_candidate(db: sqlite3.Connection, revision_id: str, *, actor: st
     approve_revision(db, revision_id, actor=actor)
 
 
+def _metadata_dict(value: Any) -> dict[str, Any]:
+    parsed = _json_loads_safe(str(value or "{}"))
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
+    rows = db.execute(
+        """
+        SELECT revision_id, status, metadata_json
+        FROM registry_revision
+        WHERE revision_class = 'route' AND status IN ('candidate', 'approved')
+        ORDER BY created_at DESC, revision_id DESC
+        """
+    ).fetchall()
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        if metadata.get("source") == "legacy-import":
+            return row
+    raise RegistryValidationError("no legacy import route candidate found; run legacy-import --apply first")
+
+
+def _legacy_route_role_rank(value: Any) -> int:
+    role = str(value or "auto").strip().lower()
+    return {"primary": 0, "auto": 1, "fallback": 2}.get(role, 1)
+
+
+def _route_leaf_from_provider_row(row: sqlite3.Row) -> dict[str, Any]:
+    leaf = {
+        "provider_id": str(row["provider_id"] or ""),
+        "anthropic_base_url": str(row["anthropic_base_url"] or ""),
+        "openai_base_url": str(row["openai_base_url"] or ""),
+        "api_key": "",
+        "model_id": str(row["wire_model_id"] or row["logical_model"] or ""),
+    }
+    secret_ref = str(row["secret_ref"] or "").strip()
+    if secret_ref:
+        leaf["secret_ref"] = secret_ref
+    return leaf
+
+
+def _lineup_leaf_from_route_leaf(leaf: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "provider_id": str(leaf.get("provider_id") or ""),
+        "model_id": str(leaf.get("model_id") or ""),
+    }
+
+
+def _build_preview_bundle_payloads_from_route_revision(
+    db: sqlite3.Connection,
+    *,
+    route_revision_id: str,
+    generated_at: str,
+) -> dict[str, Any]:
+    rows = db.execute(
+        """
+        SELECT
+            rg.logical_model,
+            rg.display_name,
+            pr.route_id,
+            pr.provider_id,
+            pr.wire_model_id,
+            pr.priority,
+            pr.anthropic_base_url,
+            pr.openai_base_url,
+            pr.secret_ref,
+            pr.metadata_json
+        FROM provider_route pr
+        JOIN route_group rg ON rg.route_group_id = pr.route_group_id
+        WHERE pr.route_revision_id = ?
+        ORDER BY lower(rg.logical_model), pr.route_id
+        """,
+        (route_revision_id,),
+    ).fetchall()
+    if not rows:
+        raise RegistryValidationError(f"route revision has no provider routes: {route_revision_id}")
+
+    by_model: dict[str, list[tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        model = str(row["logical_model"] or row["wire_model_id"] or "").strip()
+        if not model:
+            continue
+        leaf = _route_leaf_from_provider_row(row)
+        sort_key = (
+            _legacy_route_role_rank(metadata.get("role")),
+            -int(row["priority"] or 0),
+            str(row["provider_id"] or ""),
+            str(row["route_id"] or ""),
+        )
+        by_model.setdefault(model, []).append((sort_key, leaf, metadata))
+        provider_id = str(row["provider_id"] or "").strip()
+        if provider_id and provider_id not in profiles:
+            protocols = metadata.get("protocols") if isinstance(metadata.get("protocols"), list) else []
+            profiles[provider_id] = {
+                "source": "registry-preview-legacy-import",
+                "protocols": [str(item) for item in protocols if str(item or "").strip()],
+                "models_endpoint": str(metadata.get("models_endpoint") or ""),
+            }
+
+    routes: dict[str, dict[str, Any]] = {}
+    lineup_routes: dict[str, dict[str, Any]] = {}
+    for model in sorted(by_model):
+        ordered = [item for _, item, _ in sorted(by_model[model], key=lambda value: value[0])]
+        routes[model] = {"primary": ordered[0], "fallbacks": ordered[1:]}
+        lineup_routes[model] = {
+            "primary": _lineup_leaf_from_route_leaf(ordered[0]),
+            "fallbacks": [_lineup_leaf_from_route_leaf(item) for item in ordered[1:]],
+        }
+
+    router_payload = {
+        "version": 1,
+        "generated_at": generated_at,
+        "source": "registry-preview-legacy-import",
+        "route_revision": route_revision_id,
+        "runtime_ready": False,
+        "runtime_ready_reason": "plaintext secrets are not stored in registry DB; router entries carry secret_ref only",
+        "routes": routes,
+    }
+    lineup_payload = {
+        "version": 1,
+        "generated_at": generated_at,
+        "source": "registry-preview-legacy-import",
+        "source_routes_hash": sha256_hex(_canonical_json_bytes({"version": 1, "routes": routes})),
+        "routes": lineup_routes,
+    }
+    policy_payload = {
+        "version": 1,
+        "generated_at": generated_at,
+        "source": "registry-preview-legacy-import",
+        "models": {model: {"visible": True, "source": "registry-preview-legacy-import"} for model in sorted(routes)},
+    }
+    profile_payload = {
+        "schema_version": 1,
+        "generated_at": generated_at,
+        "source": "registry-preview-legacy-import",
+        "profiles": profiles,
+    }
+    validate_non_secret_payload(lineup_payload, context="preview_lineup")
+    validate_non_secret_payload(policy_payload, context="preview_policy")
+    validate_non_secret_payload(profile_payload, context="preview_profile")
+    return {
+        "router": router_payload,
+        "lineup": lineup_payload,
+        "policy": policy_payload,
+        "profile": profile_payload,
+        "route_count": len(routes),
+        "provider_route_count": len(rows),
+    }
+
+
+def publish_latest_approved_bundle_from_legacy_candidates(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    generated_at: str | None = None,
+    actor: str = "agent",
+) -> dict[str, Any]:
+    """Publish a preview latest-approved bundle from DB legacy import candidates.
+
+    This is an explicit preview bridge toward DB truth. It does not read root
+    legacy artifacts and it does not resolve plaintext secrets; generated
+    router entries carry `secret_ref` and `runtime_ready=false`.
+    """
+    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    generated_dir = config_root / "generated"
+    generated = generated_at or utc_now()
+    db = open_registry(db_path or default_registry_db_path(config_root))
+    try:
+        route_revision_row = _latest_legacy_import_route_revision(db)
+        route_revision = str(route_revision_row["revision_id"] or "")
+        payloads = _build_preview_bundle_payloads_from_route_revision(
+            db,
+            route_revision_id=route_revision,
+            generated_at=generated,
+        )
+        output_files = {
+            "router": generated_dir / "model-routes.json",
+            "lineup": generated_dir / "model-routes.lineup.json",
+            "profile": generated_dir / "provider-profiles.generated.json",
+            "policy": generated_dir / "model-policy.effective.json",
+            "capabilities": generated_dir / "model-capabilities.approved.json",
+        }
+        for name in ("router", "lineup", "profile", "policy"):
+            write_json_atomic(output_files[name], payloads[name])
+
+        capability_revision_seed = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "source": "registry-preview-legacy-import",
+                    "route_revision": route_revision,
+                    "route_count": payloads["route_count"],
+                    "generated_at": generated,
+                }
+            )
+        )
+        capability_revision = _revision_slug("cap", capability_revision_seed, generated_at=generated)
+        capabilities_payload = build_approved_capabilities_payload(
+            db,
+            capability_revision=capability_revision,
+            generated_at=generated,
+        )
+        write_json_atomic(output_files["capabilities"], capabilities_payload)
+
+        file_hashes = {name: sha256_hex(path.read_bytes()) for name, path in output_files.items()}
+        policy_revision = _revision_slug("policy", file_hashes["policy"], generated_at=generated)
+        profile_revision = _revision_slug("profile", file_hashes["profile"], generated_at=generated)
+        bundle_hash = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "source": "registry-preview-legacy-import",
+                    "capability_revision": capability_revision,
+                    "route_revision": route_revision,
+                    "policy_revision": policy_revision,
+                    "profile_revision": profile_revision,
+                    "file_hashes": file_hashes,
+                }
+            )
+        )
+        bundle_revision = _revision_slug("bundle", bundle_hash, generated_at=generated)
+
+        for revision_id, revision_class, revision_hash in (
+            (capability_revision, "capability", file_hashes["capabilities"]),
+            (policy_revision, "policy", file_hashes["policy"]),
+            (profile_revision, "profile", file_hashes["profile"]),
+            (bundle_revision, "bundle", bundle_hash),
+        ):
+            _create_revision_for_publish(
+                db,
+                revision_id,
+                revision_class,
+                revision_hash=revision_hash,
+                metadata={"source": "registry-preview-legacy-import", "publish_generated_at": generated},
+            )
+
+        for revision_id, revision_class in (
+            (capability_revision, "capability"),
+            (route_revision, "route"),
+            (policy_revision, "policy"),
+            (profile_revision, "profile"),
+        ):
+            add_revision_membership(
+                db,
+                bundle_revision,
+                revision_id,
+                revision_class,
+                metadata={"source": "registry-preview-legacy-import", "publish_generated_at": generated},
+            )
+
+        for revision_id in (capability_revision, route_revision, policy_revision, profile_revision, bundle_revision):
+            _approve_if_candidate(db, revision_id, actor=actor)
+
+        manifest_path = generated_dir / "model-registry.latest-approved.json"
+        manifest = export_latest_approved_bundle_manifest(
+            manifest_path,
+            bundle_revision=bundle_revision,
+            capability_revision=capability_revision,
+            route_revision=route_revision,
+            policy_revision=policy_revision,
+            profile_revision=profile_revision,
+            files={
+                "router": {
+                    "path": output_files["router"],
+                    "canonical_path": "generated/model-routes.json",
+                    "legacy_alias_path": "model-routes.json",
+                    "sensitivity": "secret",
+                    "legacy_alias_compat": True,
+                },
+                "lineup": {
+                    "path": output_files["lineup"],
+                    "canonical_path": "generated/model-routes.lineup.json",
+                    "legacy_alias_path": "model-routes.lineup.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "profile": {
+                    "path": output_files["profile"],
+                    "canonical_path": "generated/provider-profiles.generated.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+                "policy": {
+                    "path": output_files["policy"],
+                    "canonical_path": "generated/model-policy.effective.json",
+                    "legacy_alias_path": "model-policy.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "capabilities": {
+                    "path": output_files["capabilities"],
+                    "canonical_path": "generated/model-capabilities.approved.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+            },
+            generated_at=generated,
+            db=db,
+        )
+        with db:
+            db.execute(
+                """
+                INSERT INTO audit_log(event_type, actor, target_type, target_id, details_json)
+                VALUES ('preview_bundle.published', ?, 'registry_revision', ?, ?)
+                """,
+                (
+                    actor,
+                    bundle_revision,
+                    _json_text(
+                        {
+                            "manifest_path": str(manifest_path),
+                            "route_revision": route_revision,
+                            "runtime_ready": False,
+                        }
+                    ),
+                ),
+            )
+        return {
+            "schema": "mms.preview_bundle_publish.v1",
+            "source": "registry-preview-legacy-import",
+            "manifest": manifest,
+            "manifest_path": str(manifest_path),
+            "generated_dir": str(generated_dir),
+            "bundle_revision": bundle_revision,
+            "capability_revision": capability_revision,
+            "route_revision": route_revision,
+            "policy_revision": policy_revision,
+            "profile_revision": profile_revision,
+            "route_count": payloads["route_count"],
+            "provider_route_count": payloads["provider_route_count"],
+            "runtime_ready": False,
+            "runtime_ready_reason": router_payload.get("runtime_ready_reason")
+            if (router_payload := payloads.get("router")) else "",
+            "files": {name: str(path) for name, path in output_files.items()},
+        }
+    finally:
+        db.close()
+
+
 def publish_latest_approved_bundle(
     *,
     config_dir: str | os.PathLike[str] | None = None,

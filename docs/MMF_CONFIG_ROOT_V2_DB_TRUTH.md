@@ -314,6 +314,9 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --apply --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --source-config-dir ~/.config/mms --apply --json
 ./mmf preview import-legacy --from ~/.config/mms --apply --json
+./mmf preview publish --json
+./mmf registry publish-preview --config-dir "$MMS_CONFIG_ROOT" --json
+./mmf registry verify --config-dir "$MMS_CONFIG_ROOT"
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
 ./mmf registry backup-db --config-dir "$MMS_CONFIG_ROOT" --reason manual-smoke
 ./mmf registry restore-db <backup.sqlite> --config-dir "$MMS_CONFIG_ROOT"
@@ -397,6 +400,14 @@ Current legacy import candidate implementation:
 - It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
 - After import, `mmf config source --json` and WebUI/TUI Model Source status show read-only candidate counts from DB: legacy import snapshots, legacy route revisions, route groups, and provider routes.
 - Stable-root import is refused unless the lower-level command is explicitly passed `--allow-stable`.
+
+Current preview publish implementation:
+
+- `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB legacy import route candidate.
+- It writes generated Router/Lineup/Profile/Policy/Capabilities files, then writes and verifies a manifest-compatible latest-approved bundle.
+- It approves the imported route revision and generated component/bundle revisions inside the preview DB.
+- It is not runtime-ready yet because plaintext secrets are not stored in DB; generated Router entries carry `secret_ref` and `api_key=""`, with `runtime_ready=false`.
+- Missing legacy import candidates fail closed and do not create a generated manifest.
 
 ### Stage 4 - Write Path And Publish
 

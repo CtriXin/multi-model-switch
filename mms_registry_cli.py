@@ -1407,6 +1407,18 @@ def publish_approved_bundle(
     return mms_registry.publish_latest_approved_bundle(config_dir=config_dir, db_path=db_path, actor="mms")
 
 
+def publish_preview_bundle(
+    *,
+    config_dir: str | Path | None = None,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    return mms_registry.publish_latest_approved_bundle_from_legacy_candidates(
+        config_dir=config_dir,
+        db_path=db_path,
+        actor="mms",
+    )
+
+
 def verify_approved_bundle(
     *,
     config_dir: str | Path | None = None,
@@ -1809,6 +1821,12 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     )
     publish_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     publish_parser.add_argument("--refresh-sources", action="store_true", help="Refresh source snapshots before publishing")
+    preview_publish_parser = subparsers.add_parser(
+        "publish-preview",
+        help="Publish generated/latest-approved bundle from preview DB legacy import candidates",
+    )
+    preview_publish_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
+    preview_publish_parser.add_argument("--json", action="store_true", help="Print publish summary as JSON")
     verify_parser = subparsers.add_parser("verify", help="Verify latest-approved manifest hashes")
     verify_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     verify_parser.add_argument("--manifest", default="", help="Override manifest path")
@@ -1948,6 +1966,20 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         summary = publish_approved_bundle(config_dir=config_dir, db_path=db_path)
         _print_publish(summary)
         return 0
+    if args.subcommand == "publish-preview":
+        try:
+            summary = publish_preview_bundle(config_dir=args.config_dir or None, db_path=db_path)
+        except mms_registry.RegistryValidationError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(f"error={exc}")
+            return 2
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_publish(summary)
+        return 0
     if args.subcommand == "verify":
         summary = verify_approved_bundle(config_dir=args.config_dir or None, manifest_path=args.manifest or None)
         _print_verify(summary)
@@ -1971,6 +2003,7 @@ __all__ = [
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",
+    "publish_preview_bundle",
     "refresh_source_snapshots",
     "registry_status",
     "restore_registry_db",
