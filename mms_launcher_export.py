@@ -100,6 +100,34 @@ def set_codex_soft_home(
     return env
 
 
+def inject_rescue_launch_env(
+    env,
+    *,
+    safe_getcwd,
+    real_user_path,
+    rescue_default_fallback_config,
+):
+    if not isinstance(env, dict):
+        return env
+    try:
+        project_root = os.path.realpath(safe_getcwd())
+    except Exception:
+        project_root = os.path.realpath(os.getcwd())
+    if project_root:
+        env["MMS_PROJECT_ROOT"] = project_root
+        env["MMS_CWD"] = project_root
+    env.setdefault("MMS_RESCUE_CONFIG_ROOT", real_user_path(".config", "mms"))
+    fallback = rescue_default_fallback_config()
+    if fallback.get("model"):
+        env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
+        if fallback.get("cli"):
+            env["MMS_RESCUE_FALLBACK_CLI"] = str(fallback.get("cli") or "")
+        else:
+            env.pop("MMS_RESCUE_FALLBACK_CLI", None)
+        env["MMS_RESCUE_HOT_FALLBACK"] = "1" if fallback.get("hot_fallback_enabled") else "0"
+    return env
+
+
 def install_host_context_env(
     env,
     *,
