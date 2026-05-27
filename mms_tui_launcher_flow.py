@@ -367,6 +367,29 @@ def resolve_last_used_launch_context(
     return model_info, runtime, cli_name
 
 
+def selected_model_launch_context(
+    cfg,
+    cli_name,
+    selected,
+    current_provider,
+    default_models,
+    *,
+    resolve_best_provider,
+    trace_runtime_choice,
+):
+    model_info = {"model": selected["model"]}
+    runtime = selected.get("provider_ctx")
+    runtime_from_best_provider = runtime is not None
+    if runtime is None:
+        runtime, _ = resolve_best_provider(
+            cfg, selected["model"], current_provider, default_models, cli_name=cli_name
+        )
+        runtime_from_best_provider = runtime is not None
+    if runtime_from_best_provider:
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice="best provider")
+    return model_info, runtime
+
+
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,

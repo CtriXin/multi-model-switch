@@ -10406,14 +10406,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception:
                     pass
 
-            model_info = {"model": selected["model"]}
-            runtime_runtime = selected.get("provider_ctx")
-            runtime_from_best_provider = runtime_runtime is not None
-            if runtime_runtime is None:
-                runtime_runtime, _ = _resolve_best_provider(
-                    current_cfg, selected["model"], current_provider, default_models, cli_name=cli
-                )
-                runtime_from_best_provider = runtime_runtime is not None
+            from mms_tui_launcher_flow import selected_model_launch_context
+
+            model_info, runtime_runtime = selected_model_launch_context(
+                current_cfg,
+                cli,
+                selected,
+                current_provider,
+                default_models,
+                resolve_best_provider=_resolve_best_provider,
+                trace_runtime_choice=_trace_runtime_choice,
+            )
             if runtime_runtime is None:
                 console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
                 continue
@@ -10423,8 +10426,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 model=selected.get("model"),
                 provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
             )
-            if runtime_from_best_provider:
-                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
 
         elif action_type == "family":
@@ -10483,14 +10484,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     except Exception:
                         pass
 
-                model_info = {"model": selected["model"]}
-                runtime_runtime = selected.get("provider_ctx")
-                runtime_from_best_provider = runtime_runtime is not None
-                if runtime_runtime is None:
-                    runtime_runtime, _ = _resolve_best_provider(
-                        current_cfg, selected["model"], current_provider, default_models, cli_name=cli
-                    )
-                    runtime_from_best_provider = runtime_runtime is not None
+                from mms_tui_launcher_flow import selected_model_launch_context
+
+                model_info, runtime_runtime = selected_model_launch_context(
+                    current_cfg,
+                    cli,
+                    selected,
+                    current_provider,
+                    default_models,
+                    resolve_best_provider=_resolve_best_provider,
+                    trace_runtime_choice=_trace_runtime_choice,
+                )
                 if runtime_runtime is None:
                     console.print(f"[yellow]没有可用 provider 承载 {selected['model']}[/yellow]")
                     continue
@@ -10500,8 +10504,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     model=selected.get("model"),
                     provider=(runtime_runtime or {}).get("id") if isinstance(runtime_runtime, dict) else selected.get("provider_id"),
                 )
-                if runtime_from_best_provider:
-                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
         elif action_type == "profile" and cli not in {"opencode", "agy"}:
             continue

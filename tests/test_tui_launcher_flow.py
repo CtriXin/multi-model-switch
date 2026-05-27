@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     refresh_tui_runtime_state_after_config_change,
     resolve_last_used_launch_context,
     safe_tui_call,
+    selected_model_launch_context,
 )
 
 
@@ -279,6 +280,48 @@ def test_resolve_last_used_launch_context_falls_back_to_runtime_picker() -> None
                 "allow_selected_model_accounts": True,
             },
         )
+    ]
+
+
+def test_selected_model_launch_context_uses_embedded_provider_context() -> None:
+    trace_calls = []
+    provider_ctx = {"id": "embedded"}
+
+    model_info, runtime = selected_model_launch_context(
+        {},
+        "codex",
+        {"model": "gpt-5.4", "provider_ctx": provider_ctx},
+        {"id": "current"},
+        ["gpt-5.4"],
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime is provider_ctx
+    assert trace_calls == [
+        (("runtime resolve", provider_ctx), {"launch_cli": "codex", "choice": "best provider"})
+    ]
+
+
+def test_selected_model_launch_context_falls_back_to_best_provider() -> None:
+    trace_calls = []
+    best_provider = {"id": "best"}
+
+    model_info, runtime = selected_model_launch_context(
+        {"cfg": True},
+        "claude",
+        {"model": "claude-sonnet-4.5"},
+        {"id": "current"},
+        ["claude-sonnet-4.5"],
+        resolve_best_provider=lambda *_args, **_kwargs: (best_provider, None),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "claude-sonnet-4.5"}
+    assert runtime is best_provider
+    assert trace_calls == [
+        (("runtime resolve", best_provider), {"launch_cli": "claude", "choice": "best provider"})
     ]
 
 
