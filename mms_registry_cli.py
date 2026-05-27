@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,212 @@ DEFAULT_REFERENCE_DIR = ROOT / "docs" / "reference" / "model-capability-calibrat
 DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
 DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS = 24 * 7
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
+LEGACY_IMPORT_REPORT_SCHEMA = "mms.legacy_import_report.v1"
+
+
+def _sanitize_provider_env_id(provider_id: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in str(provider_id or "").upper())
+    cleaned = cleaned.strip("_")
+    return cleaned or "DEFAULT"
+
+
+def _provider_env_name(provider_id: str, field: str) -> str:
+    return f"MMS_PROVIDER_{_sanitize_provider_env_id(provider_id)}_{field}"
+
+
+def _parse_shell_value(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        parts = shlex.split(f"v {text}")
+    except ValueError:
+        return text.strip("\"'")
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _load_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):]
+        key, sep, raw_value = line.partition("=")
+        if not sep:
+            continue
+        values[key.strip()] = _parse_shell_value(raw_value)
+    return values
+
+
+def _load_toml_file(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - Python < 3.11 fallback
+        import tomli as tomllib  # type: ignore
+    payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
+def _secret_fingerprint(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    return mms_registry.sha256_hex(text)[:12]
+
+
+def _secret_ref(source_key: str) -> str:
+    return f"legacy-env:{source_key}"
+
+
+def _safe_value(field: str, value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "key" in field.lower() or "token" in field.lower() or "secret" in field.lower():
+        return f"sha256:{_secret_fingerprint(text)}"
+    return text
+
+
+def _credential_value(values: dict[str, str], key: str) -> str:
+    return str(values.get(key) or "").strip()
+
+
+def _provider_config_values(provider: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    return {
+        "base_url": (str(provider.get("base_url") or "").strip().rstrip("/"), "config.toml:providers.base_url"),
+        "openai_base_url": (
+            str(provider.get("openai_base_url") or provider.get("default_openai_base_url") or "").strip().rstrip("/"),
+            "config.toml:providers.openai_base_url",
+        ),
+        "anthropic_base_url": (
+            str(provider.get("anthropic_base_url") or provider.get("default_anthropic_base_url") or "").strip().rstrip("/"),
+            "config.toml:providers.anthropic_base_url",
+        ),
+        "api_key": (str(provider.get("api_key") or "").strip(), "config.toml:providers.api_key"),
+        "openai_api_key": (str(provider.get("openai_api_key") or "").strip(), "config.toml:providers.openai_api_key"),
+    }
+
+
+def _provider_credential_values(provider_id: str, values: dict[str, str]) -> dict[str, tuple[str, str]]:
+    keys = {
+        "base_url": _provider_env_name(provider_id, "BASE_URL"),
+        "openai_base_url": _provider_env_name(provider_id, "OPENAI_BASE_URL"),
+        "anthropic_base_url": _provider_env_name(provider_id, "ANTHROPIC_BASE_URL"),
+        "api_key": _provider_env_name(provider_id, "API_KEY"),
+        "openai_api_key": _provider_env_name(provider_id, "OPENAI_API_KEY"),
+    }
+    result = {field: (_credential_value(values, key).rstrip("/") if "url" in field else _credential_value(values, key), f"credentials.sh:{key}") for field, key in keys.items()}
+    if provider_id == "default":
+        if not result["base_url"][0] and values.get("MMS_API_BASE_URL"):
+            result["base_url"] = (str(values.get("MMS_API_BASE_URL") or "").strip().rstrip("/"), "credentials.sh:MMS_API_BASE_URL")
+        if not result["api_key"][0] and values.get("MMS_API_KEY"):
+            result["api_key"] = (str(values.get("MMS_API_KEY") or "").strip(), "credentials.sh:MMS_API_KEY")
+    return result
+
+
+def legacy_import_report(
+    *,
+    config_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build a read-only legacy config/import report with conflict evidence."""
+    root = Path(config_dir) if config_dir is not None else mms_registry.default_registry_db_path().parent
+    root = root.expanduser()
+    config_path = root / "config.toml"
+    credentials_path = root / "credentials.sh"
+    config = _load_toml_file(config_path)
+    credentials = _load_env_file(credentials_path)
+    raw_providers = config.get("providers") if isinstance(config.get("providers"), list) else []
+    providers = [item for item in raw_providers if isinstance(item, dict)]
+    if not providers:
+        providers = [{"id": "default", "name": "Default Gateway"}]
+
+    conflicts: list[dict[str, Any]] = []
+    secret_refs: list[dict[str, Any]] = []
+    provider_reports: list[dict[str, Any]] = []
+    legacy_api = config.get("api") if isinstance(config.get("api"), dict) else {}
+
+    for provider in providers:
+        provider_id = str(provider.get("id") or "default").strip() or "default"
+        config_values = _provider_config_values(provider)
+        if provider_id == "default":
+            if legacy_api.get("base_url") and not config_values["base_url"][0]:
+                config_values["base_url"] = (str(legacy_api.get("base_url") or "").strip().rstrip("/"), "config.toml:api.base_url")
+            if legacy_api.get("api_key") and not config_values["api_key"][0]:
+                config_values["api_key"] = (str(legacy_api.get("api_key") or "").strip(), "config.toml:api.api_key")
+        credential_values = _provider_credential_values(provider_id, credentials)
+        provider_conflicts = []
+        imported_fields = []
+        for field in ("base_url", "openai_base_url", "anthropic_base_url", "api_key", "openai_api_key"):
+            config_value, config_source = config_values[field]
+            credential_value, credential_source = credential_values[field]
+            if credential_value and ("key" in field):
+                secret_refs.append(
+                    {
+                        "provider_id": provider_id,
+                        "field": field,
+                        "secret_ref": _secret_ref(credential_source.split(":", 1)[-1]),
+                        "fingerprint": _secret_fingerprint(credential_value),
+                        "source": credential_source,
+                    }
+                )
+            if config_value:
+                imported_fields.append({"field": field, "source": config_source, "value": _safe_value(field, config_value)})
+            if credential_value:
+                imported_fields.append({"field": field, "source": credential_source, "value": _safe_value(field, credential_value)})
+            if config_value and credential_value and config_value != credential_value:
+                conflict = {
+                    "provider_id": provider_id,
+                    "field": field,
+                    "config_source": config_source,
+                    "credentials_source": credential_source,
+                    "config_value": _safe_value(field, config_value),
+                    "credentials_value": _safe_value(field, credential_value),
+                    "winner": "credentials.sh",
+                    "severity": "warning",
+                }
+                conflicts.append(conflict)
+                provider_conflicts.append(conflict)
+        provider_reports.append(
+            {
+                "provider_id": provider_id,
+                "name": str(provider.get("name") or provider_id),
+                "protocols": provider.get("protocols") if isinstance(provider.get("protocols"), list) else [],
+                "role": str(provider.get("role") or "auto"),
+                "priority": provider.get("priority"),
+                "models_endpoint": str(provider.get("models_endpoint") or ""),
+                "imported_fields": imported_fields,
+                "conflict_count": len(provider_conflicts),
+            }
+        )
+
+    file_status = {
+        "config_toml": {"path": str(config_path), "exists": config_path.exists()},
+        "credentials_sh": {"path": str(credentials_path), "exists": credentials_path.exists()},
+        "model_policy": {"path": str(root / "model-policy.json"), "exists": (root / "model-policy.json").exists()},
+        "provider_profiles": {"path": str(root / "provider-profiles.json"), "exists": (root / "provider-profiles.json").exists()},
+        "lineup": {"path": str(root / "model-routes.lineup.json"), "exists": (root / "model-routes.lineup.json").exists()},
+        "routes": {"path": str(root / "model-routes.json"), "exists": (root / "model-routes.json").exists()},
+    }
+    return {
+        "schema": LEGACY_IMPORT_REPORT_SCHEMA,
+        "config_root": str(root),
+        "read_only": True,
+        "files": file_status,
+        "provider_count": len(provider_reports),
+        "providers": provider_reports,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts,
+        "secret_refs": secret_refs,
+        "plaintext_secret_in_db": False,
+        "next_action": "review_conflicts_before_import" if conflicts else "ready_for_preview_import",
+    }
+
 
 
 def _reference_snapshot_paths(paths: Iterable[str | Path] | None = None) -> list[Path]:
@@ -767,6 +974,36 @@ def _print_restore(summary: dict[str, Any]) -> None:
     print(f"restored_integrity_check={summary.get('restored_integrity_check', '')}")
 
 
+def _print_legacy_import_report(summary: dict[str, Any]) -> None:
+    print("MMS Legacy Import Report")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"read_only={summary.get('read_only')}")
+    print(f"provider_count={summary.get('provider_count')}")
+    print(f"conflict_count={summary.get('conflict_count')}")
+    print(f"next_action={summary.get('next_action')}")
+    files = summary.get("files") if isinstance(summary.get("files"), dict) else {}
+    for name in sorted(files):
+        item = files[name] if isinstance(files[name], dict) else {}
+        print(f"file_{name}_exists={item.get('exists', False)} path={item.get('path', '')}")
+    for item in summary.get("conflicts") or []:
+        print(
+            "conflict="
+            f"provider={item.get('provider_id')} "
+            f"field={item.get('field')} "
+            f"config={item.get('config_source')} "
+            f"credentials={item.get('credentials_source')} "
+            f"winner={item.get('winner')}"
+        )
+    for item in summary.get("secret_refs") or []:
+        print(
+            "secret_ref="
+            f"provider={item.get('provider_id')} "
+            f"field={item.get('field')} "
+            f"ref={item.get('secret_ref')} "
+            f"fingerprint={item.get('fingerprint')}"
+        )
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -786,6 +1023,12 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     restore_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     restore_parser.add_argument("--apply", action="store_true", help="Actually replace the target DB after pre-restore backup")
     restore_parser.add_argument("--reason", default="manual", help="Audit reason for this restore")
+    legacy_report_parser = subparsers.add_parser(
+        "legacy-report",
+        help="Read legacy config artifacts and report import conflicts without writing DB",
+    )
+    legacy_report_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    legacy_report_parser.add_argument("--json", action="store_true", help="Print the full report as JSON")
     refresh_parser = subparsers.add_parser(
         "refresh-sources",
         help="Import local reference snapshots as source_truth/candidate evidence",
@@ -862,6 +1105,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         )
         _print_restore(summary)
         return 0
+    if args.subcommand == "legacy-report":
+        summary = legacy_import_report(config_dir=args.config_dir or None)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_legacy_import_report(summary)
+        return 0
     if args.subcommand == "refresh-sources":
         summary = refresh_source_snapshots(
             db_path=db_path,
@@ -931,6 +1181,7 @@ __all__ = [
     "handle_registry_command",
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
+    "legacy_import_report",
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",

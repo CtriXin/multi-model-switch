@@ -339,6 +339,9 @@ Required checks:
   - `restore-db` is dry-run by default; `--apply` first creates a pre-restore backup, then verifies SQLite integrity.
 - Import legacy config, credentials metadata, model policy, provider profiles, and lineup facts into DB.
 - Generate import report with conflicts and non-imported fields.
+  - Read-only preview command:
+    - `mmf registry legacy-report --config-dir <preview-root> [--json]`
+  - The report names both sides of a conflict, for example `config.toml:api.base_url` vs `credentials.sh:MMS_API_BASE_URL`, and does not emit plaintext API keys.
 - Keep imported secrets as `secret_ref`, not plaintext DB rows.
 
 ### Stage 3 - Read-Only Unified View

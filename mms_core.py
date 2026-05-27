@@ -4068,7 +4068,7 @@ def _migrate_legacy_api_config(cfg):
     if isinstance(api_cfg, dict):
         base_url = str(api_cfg.get("base_url", "")).strip()
         api_key = str(api_cfg.get("api_key", "")).strip()
-        file_base_url, file_api_key, _ = load_api_credentials()
+        file_base_url, file_api_key = load_api_credentials()
 
         if base_url and api_key and (not file_base_url or not file_api_key):
             try:
@@ -13293,6 +13293,12 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    if len(argv) >= 1 and argv[0] == "registry":
+        set_language(_resolve_ui_language(None, lang_override))
+        from mms_registry_cli import handle_registry_command
+
+        raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
+
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
     bootstrap_cfg = load_config()
     set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
@@ -13315,10 +13321,6 @@ def main():
         if command == "exposure":
             handle_exposure_command(argv[1:])
             return
-        if command == "registry":
-            from mms_registry_cli import handle_registry_command
-
-            raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
         if _is_session_prune_dry_run(argv):
             handle_session_command(argv[1:])
             return

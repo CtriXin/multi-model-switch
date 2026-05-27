@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import mms_registry
@@ -381,6 +385,117 @@ def test_registry_backup_and_restore_roundtrip(capsys, tmp_path: Path) -> None:
     assert "MMS Registry DB Backup" in out
     assert "MMS Registry DB Restore" in out
     assert "skip_reason=dry_run_apply_required" in out
+
+
+def test_legacy_import_report_detects_credential_conflicts_without_plaintext(capsys, tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [api]
+        base_url = "https://config-default.example/v1"
+        api_key = "sk-config-default-secret"
+
+        [[providers]]
+        id = "default"
+        name = "Default"
+        default_openai_base_url = "https://provider-default.example/v1"
+        protocols = ["openai_chat_completions"]
+
+        [[providers]]
+        id = "kimi-direct"
+        name = "Kimi Direct"
+        default_openai_base_url = "https://config-kimi.example/v1"
+        default_anthropic_base_url = "https://config-kimi.example/anthropic"
+        protocols = ["anthropic_messages", "openai_chat_completions"]
+        models_endpoint = "/models"
+        priority = 10
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_PROVIDER_KIMI_DIRECT_OPENAI_BASE_URL='https://creds-kimi.example/v1'
+        export MMS_PROVIDER_KIMI_DIRECT_API_KEY='sk-creds-kimi-secret'
+        export MMS_API_BASE_URL='https://creds-default.example/v1'
+        export MMS_API_KEY='sk-creds-default-secret'
+        """,
+        encoding="utf-8",
+    )
+
+    summary = mms_registry_cli.legacy_import_report(config_dir=config_dir)
+    rc = mms_registry_cli.handle_registry_command(
+        ["legacy-report", "--config-dir", str(config_dir)],
+        command_name="mms registry",
+    )
+    json_rc = mms_registry_cli.handle_registry_command(
+        ["legacy-report", "--config-dir", str(config_dir), "--json"],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+    encoded = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+    assert rc == 0
+    assert json_rc == 0
+    assert summary["read_only"] is True
+    assert summary["plaintext_secret_in_db"] is False
+    assert summary["provider_count"] == 2
+    assert summary["conflict_count"] >= 2
+    assert any(item["provider_id"] == "kimi-direct" and item["field"] == "openai_base_url" for item in summary["conflicts"])
+    assert any(item["provider_id"] == "default" and item["field"] == "base_url" for item in summary["conflicts"])
+    assert any(item["provider_id"] == "kimi-direct" and item["field"] == "api_key" for item in summary["secret_refs"])
+    assert "MMS Legacy Import Report" in out
+    assert "conflict=provider=kimi-direct field=openai_base_url" in out
+    assert "secret_ref=provider=kimi-direct field=api_key" in out
+    assert "sk-config-default-secret" not in encoded
+    assert "sk-creds-default-secret" not in encoded
+    assert "sk-creds-kimi-secret" not in encoded
+    assert "sk-config-default-secret" not in out
+    assert "sk-creds-default-secret" not in out
+    assert "sk-creds-kimi-secret" not in out
+
+
+def test_mmf_registry_legacy_report_does_not_bootstrap_config_migration(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [api]
+        base_url = "https://config-default.example/v1"
+        api_key = "sk-config-default-secret"
+        """,
+        encoding="utf-8",
+    )
+    (config_dir / "credentials.sh").write_text(
+        """
+        export MMS_API_BASE_URL='https://creds-default.example/v1'
+        export MMS_API_KEY='sk-creds-default-secret'
+        """,
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "registry", "legacy-report", "--config-dir", str(config_dir), "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.LEGACY_IMPORT_REPORT_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["conflict_count"] >= 1
+    assert "sk-config-default-secret" not in combined
+    assert "sk-creds-default-secret" not in combined
+    assert not (config_dir / "backups").exists()
+    assert not (config_dir / "config-audit.jsonl").exists()
 
 
 def _write_config_artifacts(config_dir: Path) -> None:
