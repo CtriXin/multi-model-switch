@@ -9697,7 +9697,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
-    from mms_tui_launcher_flow import safe_tui_call
+    import mms_tui_launcher_flow as tui_flow
     from mms_launchers import (
         _caveman_available_for_cli,
         _ecc_available_for_claude,
@@ -9716,9 +9716,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
     # 预构建品类数据（仅在配置变更时重建）
     def _rebuild_families():
-        from mms_tui_launcher_flow import build_tui_family_payloads
-
-        return build_tui_family_payloads(
+        return tui_flow.build_tui_family_payloads(
             current_cfg,
             current_cli_names,
             current_provider,
@@ -9741,7 +9739,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
         last_by_cli, _ = _get_scene_usage()
 
-        result = safe_tui_call(
+        result = tui_flow.safe_tui_call(
             select_family_tui,
             families_by_cli,
             current_cli_names,
@@ -9773,9 +9771,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 current_cfg, changed = run_connect_wizard(current_cfg)
             if changed:
                 import shutil as _shutil
-                from mms_tui_launcher_flow import refresh_tui_runtime_state_after_config_change
 
-                current_provider, default_models, current_cli_names = refresh_tui_runtime_state_after_config_change(
+                current_provider, default_models, current_cli_names = tui_flow.refresh_tui_runtime_state_after_config_change(
                     current_cfg,
                     probe_cache=_PROBE_CACHE,
                     probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
@@ -9795,9 +9792,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── OpenCode profile ──
         if action_type == "profile" and cli == "opencode":
-            from mms_tui_launcher_flow import opencode_profile_launch_context
 
-            model_info, runtime_runtime = opencode_profile_launch_context(
+            model_info, runtime_runtime = tui_flow.opencode_profile_launch_context(
                 current_cfg,
                 current_provider,
                 default_models,
@@ -9815,9 +9811,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
                 if changed:
                     import shutil as _shutil
-                    from mms_tui_launcher_flow import refresh_tui_runtime_state_after_config_change
 
-                    current_provider, default_models, current_cli_names = refresh_tui_runtime_state_after_config_change(
+                    current_provider, default_models, current_cli_names = tui_flow.refresh_tui_runtime_state_after_config_change(
                         current_cfg,
                         probe_cache=_PROBE_CACHE,
                         probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
@@ -9828,9 +9823,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     )
                     _families_dirty = True
                 continue
-            from mms_tui_launcher_flow import official_account_profile_context
 
-            model_info, runtime_runtime = official_account_profile_context(
+            model_info, runtime_runtime = tui_flow.official_account_profile_context(
                 current_cfg,
                 cli,
                 action_data,
@@ -9846,9 +9840,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # ── Provider 浏览 ──
         if action_type == "provider_browse":
             from mms_tui import select_provider_browse_tui, select_provider_models_tui
-            from mms_tui_launcher_flow import provider_browse_options
 
-            browse_providers = provider_browse_options(
+            browse_providers = tui_flow.provider_browse_options(
                 current_cfg,
                 current_provider,
                 default_models,
@@ -9861,13 +9854,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if not browse_providers:
                 console.print("[yellow]没有可用的 Provider[/yellow]")
                 continue
-            prov_result = safe_tui_call(select_provider_browse_tui, browse_providers)
+            prov_result = tui_flow.safe_tui_call(select_provider_browse_tui, browse_providers)
             if prov_result is None or prov_result == "__interrupt__":
                 continue
             selected_pid, selected_pname = prov_result
-            from mms_tui_launcher_flow import provider_browse_model_options
 
-            selected_prov, prov_models = provider_browse_model_options(
+            selected_prov, prov_models = tui_flow.provider_browse_model_options(
                 current_cfg,
                 selected_pid,
                 resolve_provider_context=resolve_provider_context,
@@ -9877,14 +9869,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if not prov_models:
                 console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
                 continue
-            model_result = safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
+            model_result = tui_flow.safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
             if model_result is None:
                 continue  # B 返回 provider 列表
             if model_result == "__exit__":
                 return True  # Esc 完全退出
-            from mms_tui_launcher_flow import provider_browse_launch_context
 
-            model_info, runtime_runtime = provider_browse_launch_context(
+            model_info, runtime_runtime = tui_flow.provider_browse_launch_context(
                 cli,
                 selected_pid,
                 selected_prov,
@@ -9896,9 +9887,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 负载模式 ──
         if action_type == "load_balance":
-            from mms_tui_launcher_flow import load_balance_slot_provider_ids, load_balance_tui_payload
 
-            all_models, cli_families, lb_profiles, lb_default_profile, lb_prov_opts = load_balance_tui_payload(
+            all_models, cli_families, lb_profiles, lb_default_profile, lb_prov_opts = tui_flow.load_balance_tui_payload(
                 current_cfg,
                 cli,
                 current_provider,
@@ -9908,7 +9898,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 default_load_balance_profile_name=_default_load_balance_profile_name,
                 build_provider_options_map=_build_provider_options_map,
             )
-            lb_result = safe_tui_call(
+            lb_result = tui_flow.safe_tui_call(
                 select_load_balance_tui,
                 available_models=all_models or None,
                 families_detail=cli_families,
@@ -9920,10 +9910,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 return True
             if lb_result is None:
                 continue
-            slot_provider_ids = load_balance_slot_provider_ids(lb_result)
-            from mms_tui_launcher_flow import resolve_load_balance_launch_context
+            slot_provider_ids = tui_flow.load_balance_slot_provider_ids(lb_result)
 
-            model_info, runtime_runtime, cli, lb_error = resolve_load_balance_launch_context(
+            model_info, runtime_runtime, cli, lb_error = tui_flow.resolve_load_balance_launch_context(
                 current_cfg,
                 cli,
                 lb_result,
@@ -9958,14 +9947,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
-            settings_action = safe_tui_call(select_settings_tui)
+            settings_action = tui_flow.safe_tui_call(select_settings_tui)
             if settings_action == "__interrupt__":
                 return True
             if settings_action is None:
                 continue
             if settings_action == "provider_mgmt":
                 providers_raw = current_cfg.get("providers", [])
-                result_providers = safe_tui_call(select_provider_mgmt_tui, providers_raw)
+                result_providers = tui_flow.safe_tui_call(select_provider_mgmt_tui, providers_raw)
                 if result_providers == "__interrupt__":
                     return True
                 if result_providers is not None:
@@ -9989,7 +9978,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     except Exception:
                         pass
             elif settings_action == "language":
-                chosen_lang = safe_tui_call(select_language_tui)
+                chosen_lang = tui_flow.safe_tui_call(select_language_tui)
                 if chosen_lang == "__interrupt__":
                     return True
                 if chosen_lang in {"zh", "en"}:
@@ -10009,7 +9998,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
                 status = registry_status()
                 registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
-                registry_action = safe_tui_call(
+                registry_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     registry_title,
                     registry_info,
@@ -10084,7 +10073,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 while True:
                     about_snapshot = _about_status_snapshot(force_update=False)
                     about_title, about_lines, about_actions = _about_tui_payload(about_snapshot)
-                    about_action = safe_tui_call(
+                    about_action = tui_flow.safe_tui_call(
                         select_channel_action_tui,
                         about_title,
                         about_lines,
@@ -10109,7 +10098,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         continue
             elif settings_action == "guard":
                 guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()
-                guard_action = safe_tui_call(
+                guard_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     guard_title,
                     guard_info,
@@ -10143,7 +10132,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     _latest_rescue_hot_fallback_event(),
                     hot_fallback_enabled,
                 )
-                landing_action = safe_tui_call(
+                landing_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     "Rescue / Current-session Fallback",
                     landing_info,
@@ -10172,7 +10161,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if landing_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = safe_tui_call(
+                    fallback_model = tui_flow.safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择全局默认 fallback model",
@@ -10222,7 +10211,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     )
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
-                selected_rescue = safe_tui_call(select_rescue_event_tui, rescue_events)
+                selected_rescue = tui_flow.safe_tui_call(select_rescue_event_tui, rescue_events)
                 if selected_rescue == "__interrupt__":
                     return True
                 if not selected_rescue:
@@ -10249,7 +10238,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     (f"default::{model}", f"设为全局默认 fallback -> {model}")
                     for model in fallback_candidates
                 ]
-                rescue_action = safe_tui_call(
+                rescue_action = tui_flow.safe_tui_call(
                     select_channel_action_tui,
                     "Rescue Packet",
                     info_lines,
@@ -10301,7 +10290,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
 
-                    fallback_model = safe_tui_call(
+                    fallback_model = tui_flow.safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择 fallback handover model",
@@ -10335,7 +10324,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = safe_tui_call(
+                    fallback_model = tui_flow.safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择全局默认 fallback model",
@@ -10359,10 +10348,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 上次使用 ──
         elif action_type == "last":
-            from mms_tui_launcher_flow import resolve_last_used_launch_context
 
             _trace_record("last used", cli=cli, model=action_data.get("model"))
-            model_info, runtime_runtime, cli = resolve_last_used_launch_context(
+            model_info, runtime_runtime, cli = tui_flow.resolve_last_used_launch_context(
                 current_cfg,
                 cli,
                 action_data,
@@ -10386,9 +10374,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             family_name = selected.pop("_family_name", "模型")
 
             pri_changes = selected.pop("priority_changes", None)
-            from mms_tui_launcher_flow import apply_tui_priority_changes
 
-            if apply_tui_priority_changes(
+            if tui_flow.apply_tui_priority_changes(
                 current_cfg,
                 pri_changes,
                 apply_runtime_priority_changes=_apply_runtime_priority_changes,
@@ -10397,9 +10384,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             ):
                 _families_dirty = True
 
-            from mms_tui_launcher_flow import selected_model_launch_context
 
-            model_info, runtime_runtime = selected_model_launch_context(
+            model_info, runtime_runtime = tui_flow.selected_model_launch_context(
                 current_cfg,
                 cli,
                 selected,
@@ -10428,7 +10414,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
             provider_options = provider_options_by_cli.get(cli, {})
 
-            selected = safe_tui_call(
+            selected = tui_flow.safe_tui_call(
                 select_submodel_tui,
                 family_name,
                 models,
@@ -10443,10 +10429,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 action_data = last_by_cli.get(cli) or {}
                 if not action_data.get("model"):
                     continue
-                from mms_tui_launcher_flow import resolve_last_used_launch_context
 
                 _trace_record("last used", cli=cli, model=action_data.get("model"))
-                model_info, runtime_runtime, cli = resolve_last_used_launch_context(
+                model_info, runtime_runtime, cli = tui_flow.resolve_last_used_launch_context(
                     current_cfg,
                     cli,
                     action_data,
@@ -10465,9 +10450,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             else:
                 # 持久化 priority 变更
                 pri_changes = selected.pop("priority_changes", None)
-                from mms_tui_launcher_flow import apply_tui_priority_changes
 
-                if apply_tui_priority_changes(
+                if tui_flow.apply_tui_priority_changes(
                     current_cfg,
                     pri_changes,
                     apply_runtime_priority_changes=_apply_runtime_priority_changes,
@@ -10476,9 +10460,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 ):
                     _families_dirty = True
 
-                from mms_tui_launcher_flow import selected_model_launch_context
 
-                model_info, runtime_runtime = selected_model_launch_context(
+                model_info, runtime_runtime = tui_flow.selected_model_launch_context(
                     current_cfg,
                     cli,
                     selected,
@@ -10534,9 +10517,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     "targets": [],
                     "no_proxy_conflicts": [],
                 }
-        from mms_tui_launcher_flow import build_confirm_capability_context
 
-        confirm_context = build_confirm_capability_context(
+        confirm_context = tui_flow.build_confirm_capability_context(
             cli,
             runtime_runtime,
             clean_model_info,
@@ -10556,13 +10538,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         has_omc = confirm_context["has_omc"]
         default_reasoning_effort = confirm_context["default_reasoning_effort"]
         preview_catalog = confirm_context["preview_catalog"]
-        from mms_tui_launcher_flow import confirm_tui_options
 
-        result = safe_tui_call(
+        result = tui_flow.safe_tui_call(
             confirm_tui,
             cli,
             clean_model_info,
-            **confirm_tui_options(
+            **tui_flow.confirm_tui_options(
                 env_vars=env_vars,
                 once=once,
                 context_lines=context_lines,
@@ -10577,9 +10558,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         )
         if result == "__interrupt__":
             return True
-        from mms_tui_launcher_flow import normalize_confirm_result
 
-        confirm_result = normalize_confirm_result(result, default_reasoning_effort)
+        confirm_result = tui_flow.normalize_confirm_result(result, default_reasoning_effort)
         action = confirm_result["action"]
         bypass = confirm_result["bypass"]
         claude_1m_enabled = confirm_result["claude_1m_enabled"]
@@ -10594,9 +10574,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
-        from mms_tui_launcher_flow import apply_confirm_bypass_flag
 
-        apply_confirm_bypass_flag(runtime_runtime, cli, bypass)
+        tui_flow.apply_confirm_bypass_flag(runtime_runtime, cli, bypass)
         if bypass:
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
                 from mms_launchers import _enforce_claude_network_guard_or_exit, _claude_bypass_requires_proxy
@@ -10604,9 +10583,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     runtime_runtime,
                     require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
                 )
-        from mms_tui_launcher_flow import apply_confirm_runtime_preferences
 
-        apply_confirm_runtime_preferences(
+        tui_flow.apply_confirm_runtime_preferences(
             runtime_runtime,
             cli,
             claude_1m_enabled=claude_1m_enabled,
