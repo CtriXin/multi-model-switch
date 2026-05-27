@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""MMF preview entrypoint for the next MMS config root."""
+
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+
+from mms_runtime import ensure_supported_python
+
+ensure_supported_python("MMF")
+
+from mms_state_io import resolve_real_user_home
+
+os.environ.setdefault("MMS_COMMAND_NAME", "mmf")
+os.environ.setdefault("MMS_PREVIEW_MODE", "mmf")
+if not str(os.environ.get("MMS_CONFIG_ROOT") or "").strip():
+    os.environ["MMS_CONFIG_ROOT"] = os.path.join(resolve_real_user_home(os.environ), ".config", "mms-next")
+
+from mms_core import main
+
+if __name__ == "__main__":
+    main()

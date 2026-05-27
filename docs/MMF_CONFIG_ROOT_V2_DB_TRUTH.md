@@ -78,10 +78,11 @@ Rules:
 
 - `mms` continues reading `~/.config/mms` by default.
 - `mmf` sets `MMS_CONFIG_ROOT=~/.config/mms-next` and uses the same MMS code path.
+- `MMS_CONFIG_ROOT` is the v2 root selector. Existing `MMS_CONFIG_DIR` remains only as legacy/test compatibility below it.
 - `mms-next` is a directory name, not a permanent architecture contract.
 - All paths must derive from `config_root`; business logic must not hardcode `mms-next`.
 - New root failures must fail closed inside the selected root. They must not silently fall back to old `~/.config/mms` credentials or account state.
-- WebUI/TUI must show the active root clearly: legacy vs future.
+- CLI/WebUI/TUI must show the active root clearly: legacy vs future. CLI status is available through `mms config root [--json]` and `mmf config root [--json]`.
 
 Recommended future root layout:
 
@@ -324,9 +325,10 @@ Required checks:
 
 - Add `MMS_CONFIG_ROOT` root resolver for preview use.
 - Add thin `mmf` wrapper.
-- Initialize `~/.config/mms-next` without touching old root.
-- Add root banner/status in CLI/WebUI.
+- Keep `mms` default root unchanged.
+- Add root banner/status in CLI first; WebUI/TUI can adopt the same root status helper later.
 - Add tests proving default `mms` still uses old root.
+- Add tests proving explicit preview root does not read/fallback to stable `~/.config/mms` credentials or usage paths.
 
 ### Stage 2 - Backup And Import
 

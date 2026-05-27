@@ -153,7 +153,13 @@ from mms_opencode_resolver import (
     resolve_opencode_lite_pro_runtime as _resolve_opencode_lite_pro_runtime_impl,
     resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
 )
-from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
+from mms_state_io import (
+    mms_config_root_is_explicit,
+    mms_config_root_mode,
+    mms_config_root_source,
+    resolve_mms_config_dir,
+    resolve_real_user_home,
+)
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
@@ -250,6 +256,8 @@ _GATEWAY_SESSION_MARKERS = (
 
 
 def _base_user_config_path_from_gateway(config_path):
+    if mms_config_root_is_explicit():
+        return ""
     normalized = os.path.normpath(str(config_path or ""))
     for marker in _GATEWAY_SESSION_MARKERS:
         idx = normalized.find(marker)
@@ -262,6 +270,8 @@ def _base_user_config_path_from_gateway(config_path):
 
 
 def _base_user_primary_dir_from_gateway(path):
+    if mms_config_root_is_explicit():
+        return ""
     normalized = os.path.normpath(str(path or ""))
     for marker in _GATEWAY_SESSION_MARKERS:
         idx = normalized.find(marker)
@@ -749,11 +759,17 @@ LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
+    explicit = str(os.environ.get("MMS_COMMAND_NAME") or "").strip()
+    if explicit:
+        return explicit
+    invoked = os.path.basename(str(sys.argv[0] or "")).strip()
+    if invoked == "mmf":
+        return "mmf"
     return PRIMARY_COMMAND
 
 
 def display_title():
-    return "MMS"
+    return "MMF" if current_command() == "mmf" else "MMS"
 
 
 def _git_output(args):
@@ -10933,6 +10949,9 @@ def handle_config(cfg, args_rest):
     if key_path == "file":
         _handle_config_file()
         return
+    if key_path in {"root", "root.status", "status.root"}:
+        _display_config_root(json_output="--json" in args_rest[1:])
+        return
     if key_path == "validate":
         _handle_config_validate(cfg)
         return
@@ -11793,6 +11812,7 @@ def _display_config_help():
     console.print("\n[bold]常用子命令:[/bold]")
     console.print(f"  {command} config")
     console.print(f"  {command} config file")
+    console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config validate")
     console.print(f"  {command} config get <dot.path>")
     console.print(f"  {command} config set <dot.path> <value>")
@@ -11828,6 +11848,43 @@ def _display_config_help():
     console.print("\n[bold]其他:[/bold]")
     console.print(f"  {command} config stats")
     console.print(f"  {command} config api.edit")
+
+
+def _config_root_status():
+    real_home = resolve_real_user_home()
+    stable_root = os.path.join(real_home, ".config", "mms")
+    preview_root = os.path.join(real_home, ".config", "mms-next")
+    return {
+        "command": current_command(),
+        "mode": mms_config_root_mode(PRIMARY_CONFIG_DIR),
+        "root_source": mms_config_root_source(),
+        "config_root": PRIMARY_CONFIG_DIR,
+        "config_path": CONFIG_PATH,
+        "credentials_path": CREDENTIALS_PATH,
+        "usage_path": USAGE_PATH,
+        "stable_root": stable_root,
+        "preview_root": preview_root,
+        "explicit_root": mms_config_root_is_explicit(),
+    }
+
+
+def _display_config_root(json_output=False):
+    status = _config_root_status()
+    if json_output:
+        print(json.dumps(status, ensure_ascii=False, sort_keys=True))
+        return
+    console.print("[bold]MMS config root[/bold]")
+    console.print(f"  [cyan]command[/cyan] = {status['command']}")
+    console.print(f"  [cyan]mode[/cyan] = {status['mode']}")
+    console.print(f"  [cyan]root_source[/cyan] = {status['root_source']}")
+    console.print(f"  [cyan]config_root[/cyan] = {status['config_root']}")
+    console.print(f"  [cyan]config_path[/cyan] = {status['config_path']}")
+    console.print(f"  [cyan]credentials_path[/cyan] = {status['credentials_path']}")
+    console.print(f"  [cyan]usage_path[/cyan] = {status['usage_path']}")
+    if status["mode"] == "preview":
+        console.print("[yellow]Preview root:[/yellow] fail closed inside this root; no silent fallback to stable credentials/OAuth.")
+    else:
+        console.print("[dim]Stable root: current default MMS behavior.[/dim]")
 
 
 def _display_preferences_path():
@@ -11881,6 +11938,12 @@ def _display_preferences_help():
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
+        status = _config_root_status()
+        console.print("[bold]配置根:[/bold]")
+        console.print(f"  [cyan]command[/cyan] = {status['command']}")
+        console.print(f"  [cyan]mode[/cyan] = {status['mode']}")
+        console.print(f"  [cyan]root_source[/cyan] = {status['root_source']}")
+        console.print(f"  [cyan]config_root[/cyan] = {status['config_root']}")
         provider = resolve_provider_context(cfg)
         console.print("[bold]模型源:[/bold]")
         console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
@@ -13188,6 +13251,9 @@ def _is_config_help_request(args_rest):
         "preference.example",
         "preferences.doc",
         "preference.doc",
+        "root",
+        "root.status",
+        "status.root",
         "web",
         "webui",
         "setup.web",

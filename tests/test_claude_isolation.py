@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import subprocess
+import sys
 import types
 from contextlib import contextmanager
 from datetime import datetime
@@ -181,6 +184,95 @@ def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp
         monkeypatch.delenv("ORIGINAL_HOME", raising=False)
         importlib.reload(mms_router)
         importlib.reload(mms_core)
+
+
+def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
+    import mms_core
+    import mms_registry
+    import mms_router
+
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
+    preview_root = tmp_path / "preview-root"
+    gateway_home.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(gateway_home / ".config"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setenv("MMS_PREVIEW_MODE", "mmf")
+
+    reloaded_core = importlib.reload(mms_core)
+    reloaded_router = importlib.reload(mms_router)
+    try:
+        stable_root = real_home / ".config" / "mms"
+        assert reloaded_core.CONFIG_PATH == str(preview_root / "config.toml")
+        assert reloaded_core.CREDENTIALS_PATH == str(preview_root / "credentials.sh")
+        assert reloaded_core._active_config_path() == str(preview_root / "config.toml")
+        assert reloaded_core._active_credentials_path() == str(preview_root / "credentials.sh")
+        assert reloaded_core._active_usage_path() == str(preview_root / "usage.json")
+        assert reloaded_core._config_root_status()["mode"] == "preview"
+        assert reloaded_core._config_root_status()["command"] == "mmf"
+        assert reloaded_router.MODEL_ROUTES_PATH == str(preview_root / "model-routes.json")
+        assert mms_registry.default_registry_db_path(env=os.environ) == preview_root / "model-registry.sqlite"
+        assert not str(reloaded_core.CONFIG_PATH).startswith(str(stable_root))
+    finally:
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+        monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+        importlib.reload(mms_router)
+        importlib.reload(mms_core)
+
+
+def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(gateway_home),
+            "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        }
+    )
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    env.pop("MMS_COMMAND_NAME", None)
+
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "mmf"), "config", "root", "--json"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    status = json.loads(result.stdout.strip())
+    expected_preview_root = real_home / ".config" / "mms-next"
+    assert status["command"] == "mmf"
+    assert status["mode"] == "preview"
+    assert status["root_source"] == "MMS_CONFIG_ROOT"
+    assert status["config_root"] == str(expected_preview_root)
+    assert status["config_path"] == str(expected_preview_root / "config.toml")
+    stable_root = real_home / ".config" / "mms"
+    assert not (stable_root / "config.toml").exists()
+    assert not (stable_root / "credentials.sh").exists()
+    assert not (stable_root / "cache").exists()
 
 
 def test_sync_claude_session_state_back_to_account(tmp_path):
