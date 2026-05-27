@@ -6745,12 +6745,36 @@ def _probe_models_for_startup(cfg, provider, emit_output=True):
     return _probe_models(provider, emit_output=emit_output)
 
 
-def _derived_model_aliases(base_models):
+def _provider_supports_mimo_anthropic_selectors(provider):
+    provider = provider if isinstance(provider, dict) else {}
+    identity = " ".join(
+        str(provider.get(key) or "").strip().lower()
+        for key in ("id", "name", "label", "provider_profile")
+    )
+    urls = " ".join(
+        str(provider.get(key) or "").strip().lower()
+        for key in ("anthropic_base_url", "openai_base_url", "base_url")
+    )
+    if "openrouter" in identity or "openrouter.ai" in urls:
+        return False
+    anthropic_base = str(provider.get("anthropic_base_url") or "").strip().lower()
+    if "xiaomimimo.com" in anthropic_base:
+        return True
+    return bool(anthropic_base and any(token in identity for token in ("mimo", "xiaomi")))
+
+
+def _derived_model_aliases(base_models, provider=None):
     aliases = []
     if any(model_id.startswith("claude-sonnet-4-") for model_id in base_models):
         aliases.append("claude-sonnet-4-6")
     if any(model_id.startswith("claude-opus-4-") for model_id in base_models):
         aliases.append("claude-opus-4-6")
+    if _provider_supports_mimo_anthropic_selectors(provider):
+        model_set = set(base_models)
+        for model_id in ("mimo-v2.5-pro", "mimo-v2.5"):
+            selector = f"{model_id}[1m]"
+            if model_id in model_set and selector not in model_set:
+                aliases.append(selector)
     return aliases
 
 
@@ -6758,7 +6782,7 @@ def _apply_provider_model_patch(provider, base_result):
     result = dict(base_result)
     base_models = _normalize_model_id_list(result.get("raw_models") or result.get("models") or [])
     extra_models = _normalize_model_id_list(provider.get("extra_models", []))
-    derived_aliases = _derived_model_aliases(base_models)
+    derived_aliases = _derived_model_aliases(base_models, provider)
     hidden_requested = set(_normalize_model_id_list(provider.get("hidden_models", [])))
     base_source = result.get("base_source") or ("fallback" if result.get("used_fallback") else "remote")
 

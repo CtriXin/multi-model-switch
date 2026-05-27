@@ -85,6 +85,45 @@ def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch
     assert mms_launchers._lookup_context_window("mimo-v2.5-pro", provider_id="mimo-direct-openai") == 1_048_576
 
 
+def test_direct_mimo_anthropic_model_patch_exposes_non_pro_selector():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "direct-mimo",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" in patched["models"]
+    assert "mimo-v2.5-pro[1m]" in patched["models"]
+    assert patched["model_sources"]["mimo-v2.5[1m]"] == "derived_alias"
+
+
+def test_openrouter_mimo_model_patch_does_not_expose_selector_alias():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "openrouter",
+            "openai_base_url": "https://openrouter.ai/api/v1",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" not in patched["models"]
+    assert "mimo-v2.5-pro[1m]" not in patched["models"]
+
+
 def test_exact_1m_context_override_wins_before_suffix_stripping(monkeypatch):
     import mms_launchers
 
