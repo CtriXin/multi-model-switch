@@ -289,9 +289,111 @@ def legacy_import_report(
     }
 
 
+def _empty_legacy_import_candidate_summary() -> dict[str, Any]:
+    return {
+        "status": "not_imported",
+        "source_snapshot_count": 0,
+        "route_revision_count": 0,
+        "route_group_count": 0,
+        "provider_route_count": 0,
+        "latest_snapshot": {},
+        "latest_route_revision": {},
+    }
+
+
+def _read_only_legacy_import_candidate_summary(
+    db: sqlite3.Connection,
+    table_names: set[str],
+) -> dict[str, Any]:
+    summary = _empty_legacy_import_candidate_summary()
+    if "source_snapshot" in table_names:
+        summary["source_snapshot_count"] = int(
+            db.execute(
+                "SELECT count(*) FROM source_snapshot WHERE source_kind = ?",
+                (LEGACY_IMPORT_SOURCE_KIND,),
+            ).fetchone()[0]
+        )
+        row = db.execute(
+            """
+            SELECT snapshot_id, captured_at, source_path, model_count, content_hash
+            FROM source_snapshot
+            WHERE source_kind = ?
+            ORDER BY snapshot_id DESC
+            LIMIT 1
+            """,
+            (LEGACY_IMPORT_SOURCE_KIND,),
+        ).fetchone()
+        if row:
+            summary["latest_snapshot"] = {
+                "snapshot_id": int(row[0]),
+                "captured_at": str(row[1] or ""),
+                "source_path": str(row[2] or ""),
+                "model_count": int(row[3] or 0),
+                "content_hash": str(row[4] or ""),
+            }
+
+    legacy_route_revision_ids: list[str] = []
+    if "registry_revision" in table_names:
+        rows = db.execute(
+            """
+            SELECT revision_id, created_at, revision_hash, metadata_json
+            FROM registry_revision
+            WHERE revision_class = 'route' AND status = 'candidate'
+            ORDER BY created_at DESC, revision_id DESC
+            """
+        ).fetchall()
+        for row in rows:
+            metadata: dict[str, Any] = {}
+            try:
+                parsed = json.loads(str(row[3] or "{}"))
+                metadata = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                metadata = {}
+            if metadata.get("source") != "legacy-import":
+                continue
+            revision_id = str(row[0] or "")
+            if not revision_id:
+                continue
+            legacy_route_revision_ids.append(revision_id)
+            if not summary["latest_route_revision"]:
+                summary["latest_route_revision"] = {
+                    "revision_id": revision_id,
+                    "created_at": str(row[1] or ""),
+                    "revision_hash": str(row[2] or ""),
+                }
+
+    summary["route_revision_count"] = len(legacy_route_revision_ids)
+    if legacy_route_revision_ids:
+        placeholders = ",".join("?" for _ in legacy_route_revision_ids)
+        if "route_group" in table_names:
+            summary["route_group_count"] = int(
+                db.execute(
+                    f"SELECT count(*) FROM route_group WHERE route_revision_id IN ({placeholders})",
+                    legacy_route_revision_ids,
+                ).fetchone()[0]
+            )
+        if "provider_route" in table_names:
+            summary["provider_route_count"] = int(
+                db.execute(
+                    f"SELECT count(*) FROM provider_route WHERE route_revision_id IN ({placeholders})",
+                    legacy_route_revision_ids,
+                ).fetchone()[0]
+            )
+    if summary["source_snapshot_count"] or summary["route_revision_count"]:
+        summary["status"] = "imported"
+    return summary
+
+
 def _read_only_registry_summary(db_path: Path) -> dict[str, Any]:
+    legacy_candidates = _empty_legacy_import_candidate_summary()
     if not db_path.exists():
-        return {"path": str(db_path), "exists": False, "status": "missing", "counts": {}}
+        return {
+            "path": str(db_path),
+            "exists": False,
+            "status": "missing",
+            "counts": {},
+            "legacy_import_candidates": legacy_candidates,
+        }
     counts: dict[str, int] = {}
     try:
         db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -307,15 +409,31 @@ def _read_only_registry_summary(db_path: Path) -> dict[str, Any]:
                 "model_identity",
                 "model_fact",
                 "registry_revision",
+                "route_group",
+                "provider_route",
                 "export_snapshot",
             ):
                 if table in table_names:
                     counts[table] = int(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            legacy_candidates = _read_only_legacy_import_candidate_summary(db, table_names)
         finally:
             db.close()
     except sqlite3.Error as exc:
-        return {"path": str(db_path), "exists": True, "status": "error", "counts": counts, "error": str(exc)}
-    return {"path": str(db_path), "exists": True, "status": "ok", "counts": counts}
+        return {
+            "path": str(db_path),
+            "exists": True,
+            "status": "error",
+            "counts": counts,
+            "legacy_import_candidates": legacy_candidates,
+            "error": str(exc),
+        }
+    return {
+        "path": str(db_path),
+        "exists": True,
+        "status": "ok",
+        "counts": counts,
+        "legacy_import_candidates": legacy_candidates,
+    }
 
 
 def _generated_bundle_summary(root: Path) -> dict[str, Any]:
@@ -352,14 +470,16 @@ def model_source_status(
     root = root.expanduser()
     legacy = legacy_import_report(config_dir=root)
     db_path = mms_registry.default_registry_db_path(config_dir=root)
+    registry_db = _read_only_registry_summary(db_path)
     return {
         "schema": "mms.model_source_status.v1",
         "root": mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root),
-        "registry_db": _read_only_registry_summary(db_path),
+        "registry_db": registry_db,
         "legacy_import": {
             "read_only": True,
             "provider_count": legacy.get("provider_count", 0),
             "conflict_count": legacy.get("conflict_count", 0),
+            "candidates": registry_db.get("legacy_import_candidates", _empty_legacy_import_candidate_summary()),
             "next_action": legacy.get("next_action", ""),
             "files": legacy.get("files", {}),
         },
@@ -1544,6 +1664,7 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     legacy = summary.get("legacy_import") if isinstance(summary.get("legacy_import"), dict) else {}
     bundle = summary.get("generated_bundle") if isinstance(summary.get("generated_bundle"), dict) else {}
     counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
+    candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
     print("MMS Model Source Status")
     print(f"command={root.get('command')}")
     print(f"mode={root.get('mode')}")
@@ -1552,8 +1673,13 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"registry_db_status={registry_db.get('status')}")
     print(f"registry_source_snapshots={counts.get('source_snapshot', 0)}")
     print(f"registry_model_facts={counts.get('model_fact', 0)}")
+    print(f"registry_provider_routes={counts.get('provider_route', 0)}")
     print(f"legacy_provider_count={legacy.get('provider_count', 0)}")
     print(f"legacy_conflict_count={legacy.get('conflict_count', 0)}")
+    print(f"legacy_candidate_status={candidates.get('status', 'not_imported')}")
+    print(f"legacy_candidate_snapshots={candidates.get('source_snapshot_count', 0)}")
+    print(f"legacy_candidate_route_revisions={candidates.get('route_revision_count', 0)}")
+    print(f"legacy_candidate_provider_routes={candidates.get('provider_route_count', 0)}")
     print(f"legacy_next_action={legacy.get('next_action', '')}")
     print(f"bundle_manifest_path={bundle.get('manifest_path')}")
     print(f"bundle_status={bundle.get('status')}")

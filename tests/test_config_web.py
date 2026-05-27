@@ -73,6 +73,8 @@ def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
     assert status["root"]["config_root"] == str(config_root)
     assert status["registry_db"]["status"] == "missing"
     assert status["registry_db"]["path"] == str(config_root / "registry" / "model-registry.sqlite")
+    assert status["legacy_import"]["candidates"]["status"] == "not_imported"
+    assert status["legacy_import"]["candidates"]["provider_route_count"] == 0
     assert status["generated_bundle"]["status"] == "missing"
     assert not (config_root / "registry").exists()
 
@@ -141,6 +143,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "['source','真源状态','DB / legacy / bundle']" in html
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
+    assert "candidate routes" in html
     assert "renderStatus();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html

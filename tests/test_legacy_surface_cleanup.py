@@ -380,9 +380,13 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
             "registry_db": {
                 "path": "/tmp/mms-next/registry/model-registry.sqlite",
                 "status": "missing",
-                "counts": {"source_snapshot": 0, "model_fact": 0},
+                "counts": {"source_snapshot": 0, "model_fact": 0, "provider_route": 0},
             },
-            "legacy_import": {"conflict_count": 2, "next_action": "review_conflicts_before_import"},
+            "legacy_import": {
+                "conflict_count": 2,
+                "candidates": {"status": "not_imported", "provider_route_count": 0},
+                "next_action": "review_conflicts_before_import",
+            },
             "generated_bundle": {"status": "missing", "verified": False},
         }
     )
@@ -390,7 +394,11 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
         {
             "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
             "registry_db": {"path": "/tmp/mms-next/registry/model-registry.sqlite", "status": "missing", "counts": {}},
-            "legacy_import": {"conflict_count": 2, "next_action": "review_conflicts_before_import"},
+            "legacy_import": {
+                "conflict_count": 2,
+                "candidates": {"status": "not_imported", "provider_route_count": 0},
+                "next_action": "review_conflicts_before_import",
+            },
             "generated_bundle": {"status": "missing", "verified": False},
         }
     )
@@ -405,6 +413,8 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert actions[0] == ("model_source_status", "查看 Model Source Status")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
+    assert ("Legacy 候选状态", "not_imported") in rows
+    assert ("Legacy 候选 routes", 0) in rows
     assert "只读视图" in note
 
 

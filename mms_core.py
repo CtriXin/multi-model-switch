@@ -5247,6 +5247,9 @@ def _model_source_status_rows(summary):
     legacy = summary.get("legacy_import") if isinstance(summary.get("legacy_import"), dict) else {}
     bundle = summary.get("generated_bundle") if isinstance(summary.get("generated_bundle"), dict) else {}
     counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
+    candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
+    if not candidates and isinstance(registry_db.get("legacy_import_candidates"), dict):
+        candidates = registry_db.get("legacy_import_candidates")
     return [
         ("Root", root.get("config_root") or summary.get("config_root") or "-"),
         ("Mode", root.get("mode") or "-"),
@@ -5254,7 +5257,10 @@ def _model_source_status_rows(summary):
         (_L("DB 状态", "DB status"), registry_db.get("status") or "-"),
         (_L("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
         (_L("模型事实", "model facts"), counts.get("model_fact", 0)),
+        (_L("Provider routes", "provider routes"), counts.get("provider_route", 0)),
         (_L("Legacy 冲突", "legacy conflicts"), legacy.get("conflict_count", 0)),
+        (_L("Legacy 候选状态", "legacy candidate status"), candidates.get("status") or "not_imported"),
+        (_L("Legacy 候选 routes", "legacy candidate routes"), candidates.get("provider_route_count", 0)),
         (_L("Legacy 下一步", "legacy next action"), legacy.get("next_action") or "-"),
         (_L("Bundle 状态", "bundle status"), bundle.get("status") or "-"),
         (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),

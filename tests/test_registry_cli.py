@@ -588,6 +588,8 @@ def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_pat
     assert payload["legacy_import"]["conflict_count"] >= 1
     assert payload["registry_db"]["status"] == "missing"
     assert payload["registry_db"]["path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert payload["legacy_import"]["candidates"]["status"] == "not_imported"
+    assert payload["legacy_import"]["candidates"]["provider_route_count"] == 0
     assert payload["generated_bundle"]["status"] == "missing"
     assert "sk-config-default-secret" not in combined
     assert "sk-creds-default-secret" not in combined
@@ -794,6 +796,20 @@ def test_mmf_registry_legacy_import_apply_writes_preview_db_without_plaintext(tm
         assert "sk-" not in secret_ref
     finally:
         db.close()
+
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    candidates = status["legacy_import"]["candidates"]
+
+    assert status["registry_db"]["counts"]["provider_route"] == 2
+    assert candidates["status"] == "imported"
+    assert candidates["source_snapshot_count"] == 1
+    assert candidates["route_revision_count"] == 1
+    assert candidates["route_group_count"] == 2
+    assert candidates["provider_route_count"] == 2
+    assert candidates["latest_snapshot"]["model_count"] == 4
+    assert "sk-config-local-secret" not in status_text
+    assert "sk-creds-local-secret" not in status_text
 
 
 def _write_config_artifacts(config_dir: Path) -> None:

@@ -374,8 +374,8 @@ Required checks:
 Current Stage 3a implementation:
 
 - CLI: `mms config source [--json]` / `mmf config source [--json]`.
-- WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, and latest-approved bundle status.
-- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status; explicit refresh/publish/doctor actions remain separate.
+- WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
+- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts; explicit refresh/publish/doctor actions remain separate.
 - Existing WebUI Save behavior is not changed in this slice; disabling or redirecting save to preview candidates belongs to Stage 4.
 
 Current preview init implementation:
@@ -391,6 +391,7 @@ Current legacy import candidate implementation:
 - `mmf registry legacy-import --config-dir <preview-root> [--json]` is dry-run by default and reports what would be imported.
 - `--apply` initializes the preview layout if needed, writes a sanitized import report to `<config_root>/imports/`, stores a `legacy_config_import` source snapshot, imports model identity/facts from legacy model lists and generated route keys, and creates candidate route/provider rows for configured `fallback_models` / `extra_models`.
 - It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
+- After import, `mmf config source --json` and WebUI/TUI Model Source status show read-only candidate counts from DB: legacy import snapshots, legacy route revisions, route groups, and provider routes.
 - Stable-root import is refused unless the lower-level command is explicitly passed `--allow-stable`.
 
 ### Stage 4 - Write Path And Publish
