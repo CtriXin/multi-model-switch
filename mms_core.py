@@ -10596,53 +10596,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         )
         if result == "__interrupt__":
             return True
-        disabled_session_surfaces = {}
-        agent_pack = "none"
-        nsr_enabled = False
-        confirm_returned_surfaces = False
+        from mms_tui_launcher_flow import normalize_confirm_result
 
-        def _confirm_agent_pack(value):
-            raw = str(value or "").strip().lower()
-            if raw in {"ecc", "omc", "none"}:
-                return raw
-            return "ecc" if bool(value) else "none"
-
-        if isinstance(result, tuple):
-            if len(result) >= 9:
-                action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces, nsr_enabled = result[:9]
-                agent_pack = _confirm_agent_pack(pack_value)
-                confirm_returned_surfaces = True
-            elif len(result) >= 8:
-                action, bypass, claude_1m_enabled, caveman_enabled, pack_value, thinking_enabled, reasoning_effort, disabled_session_surfaces = result[:8]
-                agent_pack = _confirm_agent_pack(pack_value)
-                confirm_returned_surfaces = True
-            elif len(result) >= 7:
-                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
-                agent_pack = _confirm_agent_pack(ecc_enabled)
-            elif len(result) >= 5:
-                action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
-                agent_pack = _confirm_agent_pack(ecc_enabled)
-                thinking_enabled = True
-                reasoning_effort = default_reasoning_effort
-            elif len(result) >= 4:
-                action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
-                thinking_enabled = True
-                reasoning_effort = default_reasoning_effort
-            elif len(result) >= 3:
-                action, bypass, claude_1m_enabled = result[:3]
-                caveman_enabled = False
-                thinking_enabled = True
-                reasoning_effort = default_reasoning_effort
-            else:
-                action, bypass = result[:2]
-                claude_1m_enabled = False
-                caveman_enabled = False
-                thinking_enabled = True
-                reasoning_effort = default_reasoning_effort
-        else:
-            action, bypass, claude_1m_enabled, caveman_enabled, thinking_enabled, reasoning_effort = result, False, False, False, True, default_reasoning_effort
-            disabled_session_surfaces = {}
-            nsr_enabled = False
+        confirm_result = normalize_confirm_result(result, default_reasoning_effort)
+        action = confirm_result["action"]
+        bypass = confirm_result["bypass"]
+        claude_1m_enabled = confirm_result["claude_1m_enabled"]
+        caveman_enabled = confirm_result["caveman_enabled"]
+        agent_pack = confirm_result["agent_pack"]
+        thinking_enabled = confirm_result["thinking_enabled"]
+        reasoning_effort = confirm_result["reasoning_effort"]
+        disabled_session_surfaces = confirm_result["disabled_session_surfaces"]
+        nsr_enabled = confirm_result["nsr_enabled"]
+        confirm_returned_surfaces = confirm_result["confirm_returned_surfaces"]
         if action == "q":
             return True
         if action == "b":

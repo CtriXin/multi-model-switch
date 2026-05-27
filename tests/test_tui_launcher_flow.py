@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from mms_tui_launcher_flow import (
+    confirm_agent_pack,
     last_used_model_info,
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
+    normalize_confirm_result,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
     safe_tui_call,
@@ -199,3 +201,48 @@ def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> 
         ("probe", {"id": "provider"}, False),
         ("visible", {"cfg": True}, {"id": "provider"}, ["gpt-5.4"]),
     ]
+
+
+def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:
+    assert confirm_agent_pack("OMC") == "omc"
+    assert confirm_agent_pack("none") == "none"
+    assert confirm_agent_pack(True) == "ecc"
+    assert confirm_agent_pack(False) == "none"
+
+
+def test_normalize_confirm_result_supports_current_tuple_shape() -> None:
+    surfaces = {"xmem": True}
+    result = normalize_confirm_result(
+        ("", True, True, False, "omc", False, "medium", surfaces, True),
+        "high",
+    )
+
+    assert result == {
+        "action": "",
+        "bypass": True,
+        "claude_1m_enabled": True,
+        "caveman_enabled": False,
+        "agent_pack": "omc",
+        "thinking_enabled": False,
+        "reasoning_effort": "medium",
+        "disabled_session_surfaces": surfaces,
+        "nsr_enabled": True,
+        "confirm_returned_surfaces": True,
+    }
+
+
+def test_normalize_confirm_result_supports_legacy_tuple_shapes() -> None:
+    assert normalize_confirm_result(("s", True, False, True, True), "high") == {
+        "action": "s",
+        "bypass": True,
+        "claude_1m_enabled": False,
+        "caveman_enabled": True,
+        "agent_pack": "ecc",
+        "thinking_enabled": True,
+        "reasoning_effort": "high",
+        "disabled_session_surfaces": {},
+        "nsr_enabled": False,
+        "confirm_returned_surfaces": False,
+    }
+    assert normalize_confirm_result(("b", False, True), "low")["caveman_enabled"] is False
+    assert normalize_confirm_result("q", "medium")["action"] == "q"

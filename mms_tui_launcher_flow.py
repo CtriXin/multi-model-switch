@@ -325,3 +325,93 @@ def refresh_tui_runtime_state_after_config_change(
     default_models = probe_models(current_provider, emit_output=False).get("models")
     current_cli_names = resolve_visible_clis(cfg, current_provider, default_models)
     return current_provider, default_models, current_cli_names
+
+
+def confirm_agent_pack(value):
+    raw = str(value or "").strip().lower()
+    if raw in {"ecc", "omc", "none"}:
+        return raw
+    return "ecc" if bool(value) else "none"
+
+
+def normalize_confirm_result(result, default_reasoning_effort):
+    disabled_session_surfaces = {}
+    agent_pack = "none"
+    nsr_enabled = False
+    confirm_returned_surfaces = False
+
+    if isinstance(result, tuple):
+        if len(result) >= 9:
+            (
+                action,
+                bypass,
+                claude_1m_enabled,
+                caveman_enabled,
+                pack_value,
+                thinking_enabled,
+                reasoning_effort,
+                disabled_session_surfaces,
+                nsr_enabled,
+            ) = result[:9]
+            agent_pack = confirm_agent_pack(pack_value)
+            confirm_returned_surfaces = True
+        elif len(result) >= 8:
+            (
+                action,
+                bypass,
+                claude_1m_enabled,
+                caveman_enabled,
+                pack_value,
+                thinking_enabled,
+                reasoning_effort,
+                disabled_session_surfaces,
+            ) = result[:8]
+            agent_pack = confirm_agent_pack(pack_value)
+            confirm_returned_surfaces = True
+        elif len(result) >= 7:
+            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled, thinking_enabled, reasoning_effort = result[:7]
+            agent_pack = confirm_agent_pack(ecc_enabled)
+        elif len(result) >= 5:
+            action, bypass, claude_1m_enabled, caveman_enabled, ecc_enabled = result[:5]
+            agent_pack = confirm_agent_pack(ecc_enabled)
+            thinking_enabled = True
+            reasoning_effort = default_reasoning_effort
+        elif len(result) >= 4:
+            action, bypass, claude_1m_enabled, caveman_enabled = result[:4]
+            thinking_enabled = True
+            reasoning_effort = default_reasoning_effort
+        elif len(result) >= 3:
+            action, bypass, claude_1m_enabled = result[:3]
+            caveman_enabled = False
+            thinking_enabled = True
+            reasoning_effort = default_reasoning_effort
+        else:
+            action, bypass = result[:2]
+            claude_1m_enabled = False
+            caveman_enabled = False
+            thinking_enabled = True
+            reasoning_effort = default_reasoning_effort
+    else:
+        action, bypass, claude_1m_enabled, caveman_enabled, thinking_enabled, reasoning_effort = (
+            result,
+            False,
+            False,
+            False,
+            True,
+            default_reasoning_effort,
+        )
+        disabled_session_surfaces = {}
+        nsr_enabled = False
+
+    return {
+        "action": action,
+        "bypass": bypass,
+        "claude_1m_enabled": claude_1m_enabled,
+        "caveman_enabled": caveman_enabled,
+        "agent_pack": agent_pack,
+        "thinking_enabled": thinking_enabled,
+        "reasoning_effort": reasoning_effort,
+        "disabled_session_surfaces": disabled_session_surfaces,
+        "nsr_enabled": nsr_enabled,
+        "confirm_returned_surfaces": confirm_returned_surfaces,
+    }
