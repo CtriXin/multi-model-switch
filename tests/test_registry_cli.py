@@ -990,6 +990,66 @@ def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_pat
         db.close()
 
 
+def test_preview_include_secrets_enables_runtime_ready_publish_without_db_plaintext(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "secret-primary"
+        default_openai_base_url = "https://secret-primary.example/v1"
+        api_key = "sk-secret-primary-value"
+        fallback_models = ["secret-model"]
+        priority = 100
+        role = "primary"
+
+        [[providers]]
+        id = "secret-fallback"
+        default_openai_base_url = "https://secret-fallback.example/v1"
+        api_key = "sk-secret-fallback-value"
+        fallback_models = ["secret-model"]
+        priority = 10
+        role = "fallback"
+        """,
+        encoding="utf-8",
+    )
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    import_text = json.dumps(import_summary, ensure_ascii=False, sort_keys=True)
+    secret_backend = import_summary["secret_backend"]
+    secret_path = Path(secret_backend["path"])
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+
+    assert secret_backend["secret_count"] == 2
+    assert secret_path.exists()
+    assert oct(secret_path.stat().st_mode & 0o777) == "0o600"
+    assert "sk-secret-primary-value" not in import_text
+    assert "sk-secret-fallback-value" not in import_text
+    assert publish_summary["runtime_ready"] is True
+    assert publish_summary["missing_api_key_count"] == 0
+    assert router["runtime_ready"] is True
+    assert router["routes"]["secret-model"]["primary"]["api_key"] == "sk-secret-primary-value"
+    assert router["routes"]["secret-model"]["fallbacks"][0]["api_key"] == "sk-secret-fallback-value"
+    assert status["generated_bundle"]["runtime_ready"] is True
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 0
+    assert status["generated_bundle"]["router_secret_ref_count"] == 2
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        leaked = db.execute(
+            "SELECT count(*) FROM provider_route WHERE secret_ref LIKE 'sk-%'"
+        ).fetchone()[0]
+        assert leaked == 0
+    finally:
+        db.close()
+
+
 def test_mmf_preview_publish_wrapper_fails_closed_without_candidates(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     config_dir.mkdir()

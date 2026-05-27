@@ -22,6 +22,7 @@ OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 LEGACY_IMPORT_REPORT_SCHEMA = "mms.legacy_import_report.v1"
 LEGACY_IMPORT_SOURCE_KIND = "legacy_config_import"
 LEGACY_IMPORT_SCHEMA = "mms.legacy_config_import.v1"
+LEGACY_SECRET_BACKEND_SCHEMA = "mms.legacy_secret_backend.v1"
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 CONFIG_ROOT_LAYOUT_DIRS = (
     "registry",
@@ -106,12 +107,19 @@ def _secret_ref(source_key: str) -> str:
     return f"legacy-env:{source_key}"
 
 
-def _legacy_secret_ref(source: str) -> str:
+def _secret_ref_part(value: Any, default: str = "default") -> str:
+    text = str(value or "").strip().lower()
+    chars = [ch if ch.isalnum() else "_" for ch in text]
+    token = "_".join(part for part in "".join(chars).split("_") if part)
+    return token or default
+
+
+def _legacy_secret_ref(source: str, provider_id: str = "") -> str:
     token = str(source or "").split(":", 1)[-1].strip()
     if not token:
         token = "unknown"
     prefix = "legacy-env" if str(source or "").startswith("credentials.sh:") else "legacy-config"
-    return f"{prefix}:{token}"
+    return f"{prefix}:{_secret_ref_part(provider_id)}:{_secret_ref_part(token, 'secret')}"
 
 
 def _safe_value(field: str, value: Any) -> str:
@@ -219,7 +227,7 @@ def legacy_import_report(
             for secret_value, secret_source in ((config_value, config_source), (credential_value, credential_source)):
                 if not secret_value or "key" not in field:
                     continue
-                ref = _legacy_secret_ref(secret_source)
+                ref = _legacy_secret_ref(secret_source, provider_id)
                 dedupe_key = (provider_id, field, ref)
                 if dedupe_key in seen_secret_refs:
                     continue
@@ -865,6 +873,79 @@ def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, An
     }
 
 
+def _legacy_secret_entries(source_root: Path) -> list[dict[str, Any]]:
+    config = _load_toml_file(source_root / "config.toml")
+    credentials = _load_env_file(source_root / "credentials.sh")
+    raw_providers = config.get("providers") if isinstance(config.get("providers"), list) else []
+    providers = [item for item in raw_providers if isinstance(item, dict)]
+    if not providers:
+        providers = [{"id": "default", "name": "Default Gateway"}]
+    legacy_api = config.get("api") if isinstance(config.get("api"), dict) else {}
+    entries: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for provider in providers:
+        provider_id = str(provider.get("id") or "default").strip() or "default"
+        config_values = _provider_config_values(provider)
+        if provider_id == "default":
+            if legacy_api.get("api_key") and not config_values["api_key"][0]:
+                config_values["api_key"] = (str(legacy_api.get("api_key") or "").strip(), "config.toml:api.api_key")
+        credential_values = _provider_credential_values(provider_id, credentials)
+        for field in ("api_key", "openai_api_key"):
+            for value, source in (config_values[field], credential_values[field]):
+                secret_value = str(value or "").strip()
+                if not secret_value:
+                    continue
+                secret_ref = _legacy_secret_ref(source, provider_id)
+                key = (provider_id, field, secret_ref)
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append(
+                    {
+                        "provider_id": provider_id,
+                        "field": field,
+                        "source": source,
+                        "secret_ref": secret_ref,
+                        "fingerprint": _secret_fingerprint(secret_value),
+                        "value": secret_value,
+                    }
+                )
+    return entries
+
+
+def _write_legacy_secret_backend(*, target_root: Path, source_root: Path) -> dict[str, Any]:
+    entries = _legacy_secret_entries(source_root)
+    secret_dir = target_root / "secrets"
+    secret_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        secret_dir.chmod(0o700)
+    except OSError:
+        pass
+    path = secret_dir / "legacy-secrets.json"
+    backup_path = ""
+    if path.exists():
+        backup_dir = target_root / "backups" / "legacy-import"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        digest = mms_registry.sha256_hex(path.read_bytes())
+        backup = backup_dir / f"legacy-secrets.{_timestamp_slug()}.{digest[:12]}.json"
+        mms_registry.copy_file_atomic(path, backup, mode=0o600)
+        backup_path = str(backup)
+    payload = {
+        "schema": LEGACY_SECRET_BACKEND_SCHEMA,
+        "source_config_root": str(source_root),
+        "written_at": mms_registry.utc_now(),
+        "secrets": entries,
+    }
+    mms_registry.write_json_atomic(path, payload, mode=0o600)
+    return {
+        "schema": LEGACY_SECRET_BACKEND_SCHEMA,
+        "path": str(path),
+        "secret_count": len(entries),
+        "backup_path": backup_path,
+        "plaintext_secret_store": True,
+    }
+
+
 def import_legacy_config(
     *,
     config_dir: str | Path | None = None,
@@ -872,6 +953,7 @@ def import_legacy_config(
     db_path: str | Path | None = None,
     apply: bool = False,
     allow_stable: bool = False,
+    include_secrets: bool = False,
     command_name: str = "mms registry",
 ) -> dict[str, Any]:
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
@@ -893,11 +975,18 @@ def import_legacy_config(
         "provider_count": report.get("provider_count", 0),
         "model_count": len(payload.get("models") or []),
         "plaintext_secret_in_db": False,
+        "include_secrets": bool(include_secrets),
         "read_only_report": report,
     }
     if not apply:
         summary["skipped"] = True
         summary["skip_reason"] = "dry_run_apply_required"
+        if include_secrets:
+            summary["secret_backend"] = {
+                "skipped": True,
+                "skip_reason": "dry_run_apply_required",
+                "secret_count": len(_legacy_secret_entries(source_root)),
+            }
         return summary
 
     init_summary = init_config_root(config_dir=root, create_db=True, allow_stable=allow_stable, command_name=command_name)
@@ -922,6 +1011,8 @@ def import_legacy_config(
             "route_candidates": route_summary,
         }
     )
+    if include_secrets:
+        summary["secret_backend"] = _write_legacy_secret_backend(target_root=root, source_root=source_root)
     return summary
 
 
@@ -1763,6 +1854,7 @@ def _print_init_config_root(summary: dict[str, Any]) -> None:
 def _print_legacy_import(summary: dict[str, Any]) -> None:
     route_candidates = summary.get("route_candidates") if isinstance(summary.get("route_candidates"), dict) else {}
     source_snapshot = summary.get("source_snapshot") if isinstance(summary.get("source_snapshot"), dict) else {}
+    secret_backend = summary.get("secret_backend") if isinstance(summary.get("secret_backend"), dict) else {}
     print("MMS Legacy Import")
     print(f"apply={summary.get('apply')}")
     print(f"skipped={summary.get('skipped', False)}")
@@ -1778,6 +1870,9 @@ def _print_legacy_import(summary: dict[str, Any]) -> None:
     print(f"source_snapshot_id={source_snapshot.get('snapshot_id', '')}")
     print(f"route_revision_id={route_candidates.get('route_revision_id', '')}")
     print(f"provider_route_count={route_candidates.get('provider_route_count', 0)}")
+    print(f"include_secrets={summary.get('include_secrets', False)}")
+    print(f"secret_backend_path={secret_backend.get('path', '')}")
+    print(f"secret_backend_count={secret_backend.get('secret_count', 0)}")
     print(f"plaintext_secret_in_db={summary.get('plaintext_secret_in_db')}")
 
 
@@ -1821,6 +1916,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     legacy_import_parser.add_argument("--config-dir", default="", help="Override MMS config dir to import")
     legacy_import_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root while writing into --config-dir")
     legacy_import_parser.add_argument("--apply", action="store_true", help="Write sanitized import evidence into the selected preview DB")
+    legacy_import_parser.add_argument("--include-secrets", action="store_true", help="Also copy legacy API keys into the preview secret backend")
     legacy_import_parser.add_argument("--allow-stable", action="store_true", help="Allow importing into a stable root explicitly")
     legacy_import_parser.add_argument("--json", action="store_true", help="Print import summary as JSON")
     refresh_parser = subparsers.add_parser(
@@ -1946,6 +2042,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
                 db_path=db_path,
                 apply=bool(args.apply),
                 allow_stable=bool(args.allow_stable),
+                include_secrets=bool(args.include_secrets),
                 command_name=command_name,
             )
         except mms_registry.RegistryValidationError as exc:

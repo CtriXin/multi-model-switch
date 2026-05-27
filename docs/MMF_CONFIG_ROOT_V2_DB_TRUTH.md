@@ -314,6 +314,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --apply --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --source-config-dir ~/.config/mms --apply --json
 ./mmf preview import-legacy --from ~/.config/mms --apply --json
+./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json
 ./mmf preview publish --json
 ./mmf registry publish-preview --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry verify --config-dir "$MMS_CONFIG_ROOT"
@@ -396,6 +397,7 @@ Current legacy import candidate implementation:
 - `mmf registry legacy-import --config-dir <preview-root> [--json]` is dry-run by default and reports what would be imported.
 - `--source-config-dir <legacy-root>` can read legacy artifacts from a different root while writing only into the preview target selected by `--config-dir`; this supports read-only stable-root inspection plus preview DB import.
 - `mmf preview import-legacy --from <legacy-root> [--apply] [--json]` is a thin wrapper around the same importer with target fixed to the active `mmf` preview root.
+- `--include-secrets` is explicit and copies legacy API keys into `<preview-root>/secrets/legacy-secrets.json` with `0600` mode; DB rows still store only `secret_ref`.
 - `--apply` initializes the preview layout if needed, writes a sanitized import report to `<config_root>/imports/`, stores a `legacy_config_import` source snapshot, imports model identity/facts from legacy model lists and generated route keys, and creates candidate route/provider rows for configured `fallback_models` / `extra_models`.
 - It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
 - After import, `mmf config source --json` and WebUI/TUI Model Source status show read-only candidate counts from DB: legacy import snapshots, legacy route revisions, route groups, and provider routes.
@@ -406,7 +408,8 @@ Current preview publish implementation:
 - `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB legacy import route candidate.
 - It writes generated Router/Lineup/Profile/Policy/Capabilities files, then writes and verifies a manifest-compatible latest-approved bundle.
 - It approves the imported route revision and generated component/bundle revisions inside the preview DB.
-- It is not runtime-ready yet because plaintext secrets are not stored in DB; generated Router entries carry `secret_ref` and `api_key=""`, with `runtime_ready=false`.
+- Without `--include-secrets`, it is not runtime-ready because plaintext secrets are not stored in DB; generated Router entries carry `secret_ref` and `api_key=""`, with `runtime_ready=false`.
+- With the preview secret backend present, publish resolves `secret_ref` into generated Router `api_key` values and reports `runtime_ready=true`.
 - `mmf config source`, WebUI, and TUI surface this distinction as bundle `verified` versus bundle `runtime_ready`.
 - Missing legacy import candidates fail closed and do not create a generated manifest.
 

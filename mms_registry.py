@@ -1271,15 +1271,16 @@ def _legacy_route_role_rank(value: Any) -> int:
     return {"primary": 0, "auto": 1, "fallback": 2}.get(role, 1)
 
 
-def _route_leaf_from_provider_row(row: sqlite3.Row) -> dict[str, Any]:
+def _route_leaf_from_provider_row(row: sqlite3.Row, secret_values: Mapping[str, str] | None = None) -> dict[str, Any]:
+    secrets = secret_values or {}
+    secret_ref = str(row["secret_ref"] or "").strip()
     leaf = {
         "provider_id": str(row["provider_id"] or ""),
         "anthropic_base_url": str(row["anthropic_base_url"] or ""),
         "openai_base_url": str(row["openai_base_url"] or ""),
-        "api_key": "",
+        "api_key": str(secrets.get(secret_ref) or ""),
         "model_id": str(row["wire_model_id"] or row["logical_model"] or ""),
     }
-    secret_ref = str(row["secret_ref"] or "").strip()
     if secret_ref:
         leaf["secret_ref"] = secret_ref
     return leaf
@@ -1297,6 +1298,7 @@ def _build_preview_bundle_payloads_from_route_revision(
     *,
     route_revision_id: str,
     generated_at: str,
+    secret_values: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     rows = db.execute(
         """
@@ -1328,7 +1330,7 @@ def _build_preview_bundle_payloads_from_route_revision(
         model = str(row["logical_model"] or row["wire_model_id"] or "").strip()
         if not model:
             continue
-        leaf = _route_leaf_from_provider_row(row)
+        leaf = _route_leaf_from_provider_row(row, secret_values)
         sort_key = (
             _legacy_route_role_rank(metadata.get("role")),
             -int(row["priority"] or 0),
@@ -1355,13 +1357,18 @@ def _build_preview_bundle_payloads_from_route_revision(
             "fallbacks": [_lineup_leaf_from_route_leaf(item) for item in ordered[1:]],
         }
 
+    leaves = [info["primary"] for info in routes.values()]
+    for info in routes.values():
+        leaves.extend(info.get("fallbacks") or [])
+    missing_api_key_count = sum(1 for item in leaves if not str(item.get("api_key") or "").strip())
+    runtime_ready = bool(leaves) and missing_api_key_count == 0
     router_payload = {
         "version": 1,
         "generated_at": generated_at,
         "source": "registry-preview-legacy-import",
         "route_revision": route_revision_id,
-        "runtime_ready": False,
-        "runtime_ready_reason": "plaintext secrets are not stored in registry DB; router entries carry secret_ref only",
+        "runtime_ready": runtime_ready,
+        "runtime_ready_reason": "" if runtime_ready else "missing plaintext secrets in preview secret backend",
         "routes": routes,
     }
     lineup_payload = {
@@ -1393,7 +1400,29 @@ def _build_preview_bundle_payloads_from_route_revision(
         "profile": profile_payload,
         "route_count": len(routes),
         "provider_route_count": len(rows),
+        "runtime_ready": runtime_ready,
+        "missing_api_key_count": missing_api_key_count,
     }
+
+
+def _load_preview_secret_values(config_root: Path) -> dict[str, str]:
+    path = config_root / "secrets" / "legacy-secrets.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    values: dict[str, str] = {}
+    items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        ref = str(item.get("secret_ref") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if ref and value:
+            values[ref] = value
+    return values
 
 
 def publish_latest_approved_bundle_from_legacy_candidates(
@@ -1420,6 +1449,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
             db,
             route_revision_id=route_revision,
             generated_at=generated,
+            secret_values=_load_preview_secret_values(config_root),
         )
         output_files = {
             "router": generated_dir / "model-routes.json",
@@ -1574,9 +1604,9 @@ def publish_latest_approved_bundle_from_legacy_candidates(
             "profile_revision": profile_revision,
             "route_count": payloads["route_count"],
             "provider_route_count": payloads["provider_route_count"],
-            "runtime_ready": False,
-            "runtime_ready_reason": router_payload.get("runtime_ready_reason")
-            if (router_payload := payloads.get("router")) else "",
+            "runtime_ready": payloads["runtime_ready"],
+            "runtime_ready_reason": str((payloads.get("router") or {}).get("runtime_ready_reason") or ""),
+            "missing_api_key_count": payloads["missing_api_key_count"],
             "files": {name: str(path) for name, path in output_files.items()},
         }
     finally:
