@@ -123,7 +123,7 @@ def test_provider_profile_wins_over_conservative_fallback_and_preserves_mimo_ali
         base_url="https://api.xiaomimimo.com/v1",
     )
 
-    assert caps["context_window_tokens"] == 262_144
+    assert caps["context_window_tokens"] == 1_048_576
     assert caps["max_output_tokens"] == 131_072
     assert caps["body_patch_aliases"]["parameter_aliases"]["openai_chat"]["max_tokens"] == "max_completion_tokens"
     assert caps["sources"]["context_window_tokens"] == "provider_profile"

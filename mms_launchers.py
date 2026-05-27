@@ -340,12 +340,25 @@ _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
     "mimo-v2.5-pro": 1_000_000,
+    "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
     # The base wire model can support 1M in some surfaces, but Claude Code must
     # opt in with the selector suffix before MMS advertises that large window.
     "mimo-v2.5-pro": 262_144,
+    "mimo-v2.5": 262_144,
 }
+_MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS = {
+    "mimo-v2.5-pro": 1_048_576,
+    "mimo-v2.5": 1_048_576,
+}
+_MIMO_PLAIN_ONE_M_PROVIDER_HINTS = (
+    "openrouter",
+    "mimo-openai",
+    "mimo-direct-openai",
+    "xiaomi-openai",
+    "openai-mimo",
+)
 
 
 
@@ -375,6 +388,11 @@ def _coerce_context_window(value):
     except Exception:
         return None
     return window if window > 0 else None
+
+
+def _provider_advertises_plain_mimo_1m(provider_id):
+    provider = str(provider_id or "").strip().lower()
+    return bool(provider and any(token in provider for token in _MIMO_PLAIN_ONE_M_PROVIDER_HINTS))
 
 
 def _load_model_context_overrides():
@@ -481,9 +499,14 @@ def _lookup_context_window(model_name, provider_id=None):
         if suffixed_window is not None:
             return suffixed_window
     else:
-        safe_base_window = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get(lower)
-        if safe_base_window is not None:
-            return safe_base_window
+        if _provider_advertises_plain_mimo_1m(provider_key):
+            plain_one_m_window = _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS.get(lower)
+            if plain_one_m_window is not None:
+                return plain_one_m_window
+        else:
+            safe_base_window = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get(lower)
+            if safe_base_window is not None:
+                return safe_base_window
 
     if provider_key:
         provider_clean = _provider_override_lookup(clean, lower)
@@ -8098,7 +8121,10 @@ def _is_mimo_one_m_context_selector(model_name):
     normalized = _normalized_model_name(model_name).lower()
     if "/" in normalized:
         normalized = normalized.rsplit("/", 1)[-1]
-    return normalized == f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}"
+    return normalized in {
+        f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}",
+        f"mimo-v2.5{_ONE_M_CONTEXT_SUFFIX}",
+    }
 
 
 def _claude_visible_model_name(model_name, *, fallback_model=""):
