@@ -344,9 +344,9 @@ def _read_only_legacy_import_candidate_summary(
     if "registry_revision" in table_names:
         rows = db.execute(
             """
-            SELECT revision_id, created_at, revision_hash, metadata_json
+            SELECT revision_id, created_at, revision_hash, metadata_json, status
             FROM registry_revision
-            WHERE revision_class = 'route' AND status = 'candidate'
+            WHERE revision_class = 'route' AND status IN ('candidate', 'approved')
             ORDER BY created_at DESC, revision_id DESC
             """
         ).fetchall()
@@ -368,6 +368,7 @@ def _read_only_legacy_import_candidate_summary(
                     "revision_id": revision_id,
                     "created_at": str(row[1] or ""),
                     "revision_hash": str(row[2] or ""),
+                    "status": str(row[4] or ""),
                 }
 
     summary["route_revision_count"] = len(legacy_route_revision_ids)
@@ -512,6 +513,30 @@ def _generated_router_runtime_summary(verified: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _preview_secret_backend_summary(root: Path) -> dict[str, Any]:
+    path = root / "secrets" / "legacy-secrets.json"
+    if not path.exists():
+        return {"path": str(path), "exists": False, "status": "missing", "secret_count": 0}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "path": str(path),
+            "exists": True,
+            "status": "invalid",
+            "secret_count": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+    return {
+        "path": str(path),
+        "exists": True,
+        "status": "ok",
+        "secret_count": len(items),
+        "schema": payload.get("schema") or "",
+    }
+
+
 def model_source_status(
     *,
     config_dir: str | Path | None = None,
@@ -535,6 +560,99 @@ def model_source_status(
             "files": legacy.get("files", {}),
         },
         "generated_bundle": _generated_bundle_summary(root),
+        "read_only": True,
+    }
+
+
+def preview_doctor(
+    *,
+    config_dir: str | Path | None = None,
+    command_name: str = "mmf preview doctor",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    source = model_source_status(config_dir=root, command_name=command_name)
+    root_status = source.get("root") if isinstance(source.get("root"), dict) else {}
+    registry_db = source.get("registry_db") if isinstance(source.get("registry_db"), dict) else {}
+    legacy = source.get("legacy_import") if isinstance(source.get("legacy_import"), dict) else {}
+    candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
+    bundle = source.get("generated_bundle") if isinstance(source.get("generated_bundle"), dict) else {}
+    secrets = _preview_secret_backend_summary(root)
+
+    checks = [
+        {
+            "id": "preview_root",
+            "ok": root_status.get("mode") == "preview",
+            "detail": root_status.get("mode") or "unknown",
+        },
+        {
+            "id": "registry_db",
+            "ok": registry_db.get("status") == "ok",
+            "detail": registry_db.get("status") or "missing",
+        },
+        {
+            "id": "legacy_candidates",
+            "ok": int(candidates.get("provider_route_count") or 0) > 0,
+            "detail": f"provider_routes={int(candidates.get('provider_route_count') or 0)}",
+        },
+        {
+            "id": "latest_bundle",
+            "ok": bool(bundle.get("verified")),
+            "detail": bundle.get("status") or "missing",
+        },
+        {
+            "id": "runtime_ready",
+            "ok": bundle.get("runtime_ready") is True,
+            "detail": bundle.get("runtime_ready_status") or "unknown",
+        },
+    ]
+
+    next_actions: list[dict[str, str]] = []
+    if root_status.get("mode") != "preview":
+        overall = "wrong_root"
+        next_actions.append({"label": "Use mmf preview root", "command": "./mmf config root --json"})
+    elif registry_db.get("status") != "ok":
+        overall = "needs_init"
+        next_actions.append({"label": "Initialize preview root", "command": "./mmf preview init --json"})
+    elif int(candidates.get("provider_route_count") or 0) <= 0:
+        overall = "needs_import"
+        next_actions.append({"label": "Import legacy config into preview DB", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json"})
+    elif not bundle.get("verified"):
+        overall = "needs_publish"
+        next_actions.append({"label": "Publish and verify preview bundle", "command": "./mmf preview publish --json && ./mmf preview verify --json"})
+    elif bundle.get("runtime_ready") is not True:
+        overall = "verified_not_runtime_ready"
+        next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})
+    else:
+        overall = "ready"
+        next_actions.append({"label": "Optional: run read-only watchdog check", "command": "scripts/mms_health_watchdog.py --config-dir \"$MMS_CONFIG_ROOT\" --require-bundle --dry-run --print-json"})
+
+    return {
+        "schema": "mms.preview_doctor.v1",
+        "status": overall,
+        "config_root": str(root),
+        "checks": checks,
+        "counts": {
+            "legacy_provider_count": legacy.get("provider_count", 0),
+            "legacy_conflict_count": legacy.get("conflict_count", 0),
+            "candidate_provider_routes": candidates.get("provider_route_count", 0),
+            "bundle_files": bundle.get("file_count", 0),
+            "bundle_routes": bundle.get("router_route_count", 0),
+            "missing_api_keys": bundle.get("router_missing_api_key_count", 0),
+            "preview_secret_count": secrets.get("secret_count", 0),
+        },
+        "bundle": {
+            "verified": bool(bundle.get("verified")),
+            "runtime_ready": bundle.get("runtime_ready"),
+            "runtime_ready_status": bundle.get("runtime_ready_status") or "unknown",
+            "manifest_path": bundle.get("manifest_path") or "",
+        },
+        "secrets": {
+            "status": secrets.get("status"),
+            "path": secrets.get("path"),
+            "secret_count": secrets.get("secret_count", 0),
+        },
+        "next_actions": next_actions,
         "read_only": True,
     }
 
@@ -1839,6 +1957,31 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"read_only={summary.get('read_only', False)}")
 
 
+def _print_preview_doctor(summary: dict[str, Any]) -> None:
+    print("MMF Preview Doctor")
+    print(f"status={summary.get('status')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"read_only={summary.get('read_only', False)}")
+    for item in summary.get("checks") or []:
+        if not isinstance(item, dict):
+            continue
+        state = "ok" if item.get("ok") else "fail"
+        print(f"check_{item.get('id')}={state} detail={item.get('detail', '')}")
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    print(f"candidate_provider_routes={counts.get('candidate_provider_routes', 0)}")
+    print(f"bundle_routes={counts.get('bundle_routes', 0)}")
+    print(f"missing_api_keys={counts.get('missing_api_keys', 0)}")
+    print(f"preview_secret_count={counts.get('preview_secret_count', 0)}")
+    bundle = summary.get("bundle") if isinstance(summary.get("bundle"), dict) else {}
+    print(f"bundle_verified={bundle.get('verified', False)}")
+    print(f"bundle_runtime_ready={bundle.get('runtime_ready')}")
+    next_actions = [item for item in (summary.get("next_actions") or []) if isinstance(item, dict)]
+    if next_actions:
+        first = next_actions[0]
+        print(f"next_action={first.get('label', '')}")
+        print(f"next_command={first.get('command', '')}")
+
+
 def _print_init_config_root(summary: dict[str, Any]) -> None:
     root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
     print("MMS Config Root Init")
@@ -1889,6 +2032,9 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     source_status_parser = subparsers.add_parser("source-status", help="Read-only model source status summary")
     source_status_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     source_status_parser.add_argument("--json", action="store_true", help="Print the full status as JSON")
+    preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
+    preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
     init_root_parser = subparsers.add_parser("init-root", help="Initialize selected config root layout")
     init_root_parser.add_argument("--config-dir", default="", help="Override MMS config dir to initialize")
     init_root_parser.add_argument("--no-db", action="store_true", help="Create directories/manifest only; do not initialize SQLite")
@@ -1989,6 +2135,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_model_source_status(summary)
+        return 0
+    if args.subcommand == "preview-doctor":
+        summary = preview_doctor(config_dir=args.config_dir or None, command_name=command_name)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_preview_doctor(summary)
         return 0
     if args.subcommand == "init-root":
         try:
@@ -2147,6 +2300,7 @@ __all__ = [
     "import_legacy_config",
     "init_config_root",
     "model_source_status",
+    "preview_doctor",
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",

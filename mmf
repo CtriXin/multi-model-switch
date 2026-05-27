@@ -76,6 +76,12 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"status", "source"}:
     forwarded = ["source-status", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "doctor":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["preview-doctor", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
 if argv and argv[0] == "registry":
     from mms_registry_cli import handle_registry_command
 

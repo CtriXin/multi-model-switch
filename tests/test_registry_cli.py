@@ -1152,6 +1152,119 @@ def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path)
     assert "sk-wrapped-publish-secret" not in combined
 
 
+def _write_preview_doctor_provider(config_dir: Path, *, provider_id: str = "doctor-local", api_key: str = "sk-doctor-secret") -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        f"""
+        [[providers]]
+        id = "{provider_id}"
+        default_openai_base_url = "https://{provider_id}.example/v1"
+        api_key = "{api_key}"
+        fallback_models = ["doctor-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+
+
+def test_preview_doctor_reports_needs_init_without_writing(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["schema"] == "mms.preview_doctor.v1"
+    assert summary["status"] == "needs_init"
+    assert summary["read_only"] is True
+    assert summary["next_actions"][0]["command"] == "./mmf preview init --json"
+    assert not config_dir.exists()
+
+
+def test_preview_doctor_reports_wrong_root_for_stable_config(monkeypatch, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+
+    summary = mms_registry_cli.preview_doctor(config_dir=stable_root, command_name="mms registry")
+
+    assert summary["status"] == "wrong_root"
+    assert summary["checks"][0] == {"id": "preview_root", "ok": False, "detail": "stable"}
+    assert summary["next_actions"][0]["command"] == "./mmf config root --json"
+    assert not stable_root.exists()
+
+
+def test_preview_doctor_reports_needs_import_after_init(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    mms_registry_cli.init_config_root(config_dir=config_dir, command_name="mmf preview")
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "needs_import"
+    assert summary["counts"]["candidate_provider_routes"] == 0
+    assert summary["next_actions"][0]["command"].startswith("./mmf preview import-legacy")
+
+
+def test_preview_doctor_reports_needs_publish_after_import(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir)
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "needs_publish"
+    assert summary["counts"]["candidate_provider_routes"] == 1
+    assert summary["bundle"]["verified"] is False
+    assert summary["next_actions"][0]["command"] == "./mmf preview publish --json && ./mmf preview verify --json"
+
+
+def test_preview_doctor_reports_verified_not_runtime_ready_without_secret_backend(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir)
+    mms_registry_cli.import_legacy_config(config_dir=config_dir, apply=True, command_name="mmf preview")
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+
+    summary = mms_registry_cli.preview_doctor(config_dir=config_dir)
+
+    assert summary["status"] == "verified_not_runtime_ready"
+    assert summary["bundle"]["verified"] is True
+    assert summary["bundle"]["runtime_ready"] is False
+    assert summary["counts"]["missing_api_keys"] == 1
+    assert summary["secrets"]["status"] == "missing"
+
+
+def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-doctor-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "doctor", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["status"] == "ready"
+    assert payload["bundle"]["verified"] is True
+    assert payload["bundle"]["runtime_ready"] is True
+    assert payload["secrets"]["secret_count"] == 1
+    assert payload["next_actions"][0]["command"].startswith("scripts/mms_health_watchdog.py")
+    assert "sk-doctor-ready-secret" not in combined
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,
