@@ -825,6 +825,7 @@ def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, An
 def import_legacy_config(
     *,
     config_dir: str | Path | None = None,
+    source_config_dir: str | Path | None = None,
     db_path: str | Path | None = None,
     apply: bool = False,
     allow_stable: bool = False,
@@ -832,16 +833,18 @@ def import_legacy_config(
 ) -> dict[str, Any]:
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
     root = root.expanduser()
+    source_root = Path(source_config_dir).expanduser() if source_config_dir is not None else root
     root_status = mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root)
     if root_status.get("mode") != "preview" and not allow_stable:
         raise mms_registry.RegistryValidationError("refusing to import into stable config root without --allow-stable")
-    report = legacy_import_report(config_dir=root)
+    report = legacy_import_report(config_dir=source_root)
     payload = _legacy_import_payload(report)
     target_db = Path(db_path).expanduser() if db_path is not None else mms_registry.default_registry_db_path(config_dir=root)
     summary: dict[str, Any] = {
         "schema": LEGACY_IMPORT_SCHEMA,
         "apply": bool(apply),
         "config_root": str(root),
+        "source_config_root": str(source_root),
         "db_path": str(target_db),
         "conflict_count": report.get("conflict_count", 0),
         "provider_count": report.get("provider_count", 0),
@@ -1708,6 +1711,7 @@ def _print_legacy_import(summary: dict[str, Any]) -> None:
     if summary.get("skip_reason"):
         print(f"skip_reason={summary.get('skip_reason')}")
     print(f"config_root={summary.get('config_root')}")
+    print(f"source_config_root={summary.get('source_config_root')}")
     print(f"db_path={summary.get('db_path')}")
     print(f"provider_count={summary.get('provider_count')}")
     print(f"model_count={summary.get('model_count')}")
@@ -1757,6 +1761,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         help="Import sanitized legacy config evidence into the preview registry DB; dry-run unless --apply",
     )
     legacy_import_parser.add_argument("--config-dir", default="", help="Override MMS config dir to import")
+    legacy_import_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root while writing into --config-dir")
     legacy_import_parser.add_argument("--apply", action="store_true", help="Write sanitized import evidence into the selected preview DB")
     legacy_import_parser.add_argument("--allow-stable", action="store_true", help="Allow importing into a stable root explicitly")
     legacy_import_parser.add_argument("--json", action="store_true", help="Print import summary as JSON")
@@ -1873,6 +1878,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         try:
             summary = import_legacy_config(
                 config_dir=args.config_dir or None,
+                source_config_dir=args.source_config_dir or None,
                 db_path=db_path,
                 apply=bool(args.apply),
                 allow_stable=bool(args.allow_stable),

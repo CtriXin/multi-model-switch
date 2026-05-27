@@ -312,6 +312,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf registry legacy-report --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --apply --json
+./mmf registry legacy-import --config-dir "$MMS_CONFIG_ROOT" --source-config-dir ~/.config/mms --apply --json
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
 ./mmf registry backup-db --config-dir "$MMS_CONFIG_ROOT" --reason manual-smoke
 ./mmf registry restore-db <backup.sqlite> --config-dir "$MMS_CONFIG_ROOT"
@@ -389,6 +390,7 @@ Current preview init implementation:
 Current legacy import candidate implementation:
 
 - `mmf registry legacy-import --config-dir <preview-root> [--json]` is dry-run by default and reports what would be imported.
+- `--source-config-dir <legacy-root>` can read legacy artifacts from a different root while writing only into the preview target selected by `--config-dir`; this supports read-only stable-root inspection plus preview DB import.
 - `--apply` initializes the preview layout if needed, writes a sanitized import report to `<config_root>/imports/`, stores a `legacy_config_import` source snapshot, imports model identity/facts from legacy model lists and generated route keys, and creates candidate route/provider rows for configured `fallback_models` / `extra_models`.
 - It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
 - After import, `mmf config source --json` and WebUI/TUI Model Source status show read-only candidate counts from DB: legacy import snapshots, legacy route revisions, route groups, and provider routes.

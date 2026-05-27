@@ -705,6 +705,59 @@ def test_mmf_registry_legacy_import_dry_run_is_read_only(tmp_path: Path) -> None
     assert not (config_dir / "imports").exists()
 
 
+def test_mmf_registry_legacy_import_can_read_source_root_and_write_preview_target(tmp_path: Path) -> None:
+    source_dir = tmp_path / "mms"
+    target_dir = tmp_path / "mms-next"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "source-local"
+        name = "Source Local"
+        default_openai_base_url = "https://source-local.example/v1"
+        api_key = "sk-source-local-secret"
+        protocols = ["openai_chat_completions"]
+        fallback_models = ["source-model"]
+        """,
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(target_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mmf"),
+            "registry",
+            "legacy-import",
+            "--config-dir",
+            str(target_dir),
+            "--source-config-dir",
+            str(source_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["config_root"] == str(target_dir)
+    assert payload["source_config_root"] == str(source_dir)
+    assert payload["read_only_report"]["config_root"] == str(source_dir)
+    assert payload["model_count"] == 1
+    assert payload["route_candidates"]["provider_route_count"] == 1
+    assert (target_dir / "registry" / "model-registry.sqlite").exists()
+    assert not (source_dir / "registry").exists()
+    assert not (source_dir / "imports").exists()
+    assert "sk-source-local-secret" not in combined
+
+
 def test_registry_legacy_import_refuses_stable_root_without_allow_stable(tmp_path: Path) -> None:
     stable_root = tmp_path / "mms"
     stable_root.mkdir()
