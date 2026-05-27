@@ -631,6 +631,121 @@ def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_pat
     assert not (config_dir / "cache").exists()
 
 
+def test_registry_v2_save_plan_reports_preview_backup_sequence_without_secrets(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    db_path = config_dir / "registry" / "model-registry.sqlite"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"not-a-real-db")
+
+    plan = mms_registry_cli.registry_v2_save_plan(
+        config_dir=config_dir,
+        command_name="mmf config save-plan",
+        plan_summary={
+            "will_write_config": True,
+            "will_write_policy": True,
+            "will_write_credentials": True,
+        },
+        credential_updates=[{"provider_id": "demo", "api_key": "sk-preview-secret"}],
+    )
+    encoded = json.dumps(plan, ensure_ascii=False, sort_keys=True)
+
+    assert plan["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert plan["read_only"] is True
+    assert plan["execution_state"] == "plan_only"
+    assert plan["actual_save_enabled"] is False
+    assert plan["root"]["command"] == "mmf"
+    assert plan["root"]["mode"] == "preview"
+    assert plan["db"]["path"] == str(db_path)
+    assert plan["db"]["would_backup_existing_db"] is True
+    assert plan["would_write"]["db_candidate_revision"] is True
+    assert plan["would_write"]["secret_backend"] is True
+    assert plan["would_write"]["generated_latest_approved_bundle"] is True
+    assert plan["would_write"]["legacy_compat_files"]["credentials_sh"] is True
+    assert plan["blocked_reasons"] == []
+    assert "rollback" in " ".join(plan["ordered_steps"])
+    assert "sk-preview-secret" not in encoded
+
+
+def test_mmf_config_save_plan_is_read_only_and_reports_no_draft_changes(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "save-plan", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["actual_save_enabled"] is False
+    assert payload["would_write"]["db_candidate_revision"] is False
+    assert payload["would_write"]["secret_backend"] is False
+    assert payload["would_write"]["generated_latest_approved_bundle"] is False
+    assert "no_draft_changes" in payload["blocked_reasons"]
+    assert "stable_root_human_only" not in payload["blocked_reasons"]
+    assert payload["db"]["path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
+def test_mms_config_save_plan_blocks_stable_root_without_writing(tmp_path: Path) -> None:
+    real_home = tmp_path / "home"
+    stable_root = real_home / ".config" / "mms"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    env.pop("MMS_PREVIEW_MODE", None)
+    env.pop("MMS_COMMAND_NAME", None)
+    env.pop("XDG_CONFIG_HOME", None)
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mms"), "config", "save-plan", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_SAVE_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["root"]["command"] == "mms"
+    assert payload["root"]["mode"] == "stable"
+    assert payload["root"]["config_root"] == str(stable_root)
+    assert payload["actual_save_enabled"] is False
+    assert payload["would_write"]["db_candidate_revision"] is False
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "no_draft_changes" in payload["blocked_reasons"]
+    assert not stable_root.exists()
+
+
 def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     real_home = tmp_path / "home"

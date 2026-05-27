@@ -421,6 +421,7 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
         ("DB 状态", "missing"),
     ]
     assert actions[0] == ("model_source_status", "查看 Model Source Status")
+    assert actions[1] == ("registry_v2_save_plan", "查看 v2 Save Plan")
     assert report_title == "Model Source Status"
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
@@ -428,6 +429,37 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("Bundle runtime", "unknown") in rows
     assert ("Router 缺失 key", 0) in rows
     assert "只读视图" in note
+
+    plan_title, plan_rows, plan_note = mms_core._registry_v2_save_plan_report_payload(
+        {
+            "root": {"config_root": "/tmp/mms-next", "mode": "preview"},
+            "execution_state": "plan_only",
+            "actual_save_enabled": False,
+            "db": {
+                "path": "/tmp/mms-next/registry/model-registry.sqlite",
+                "exists": True,
+                "backup_dir": "/tmp/mms-next/backups/db",
+                "would_backup_existing_db": True,
+            },
+            "would_write": {
+                "db_candidate_revision": True,
+                "secret_backend": False,
+                "generated_latest_approved_bundle": True,
+                "legacy_compat_files": {"config_toml": True, "model_policy_json": False, "credentials_sh": False},
+            },
+            "ordered_steps": ["backup preview registry DB", "verify manifest hashes"],
+            "blocked_reasons": [],
+            "next_implementation_step": "wire save later",
+        }
+    )
+
+    assert plan_title == "Registry v2 Save Plan"
+    assert ("执行状态", "plan_only") in plan_rows
+    assert ("实际保存启用", "no") in plan_rows
+    assert ("将备份 DB", "yes") in plan_rows
+    assert ("Secret backend", "no") in plan_rows
+    assert ("阻塞原因", "-") in plan_rows
+    assert "只读计划" in plan_note
 
 
 def test_registry_result_payloads_are_chinese_first_and_compact() -> None:

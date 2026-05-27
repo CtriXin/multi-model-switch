@@ -1244,63 +1244,14 @@ def _build_registry_v2_save_plan(
     credential_updates: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Describe the future DB-truth save path without writing anything."""
-    config_root = _config_root_for_snapshot(config_path)
-    try:
-        from mms_state_io import mms_config_root_status
+    from mms_registry_cli import registry_v2_save_plan
 
-        root_status = mms_config_root_status(command="mms-config-web", config_dir=config_root, env={})
-    except Exception:
-        root_status = {"mode": "unknown", "config_root": config_root}
-    try:
-        import mms_registry
-
-        db_path = str(mms_registry.default_registry_db_path(config_dir=config_root, env={}))
-    except Exception:
-        db_path = os.path.join(config_root, "registry", "model-registry.sqlite")
-    mode = _safe_text(root_status.get("mode"))
-    has_changes = any(
-        bool(plan_summary.get(key))
-        for key in ("will_write_config", "will_write_policy", "will_write_credentials")
+    return registry_v2_save_plan(
+        config_path=config_path,
+        command_name="mms-config-web",
+        plan_summary=plan_summary,
+        credential_updates=credential_updates,
     )
-    backup_dir = os.path.join(config_root, "backups", "db") if config_root else ""
-    blocked_reasons: list[str] = []
-    if mode != "preview":
-        blocked_reasons.append("stable_root_human_only")
-    if not has_changes:
-        blocked_reasons.append("no_draft_changes")
-    return {
-        "schema": "mms.setup_web.registry_v2_save_plan.v1",
-        "read_only": True,
-        "execution_state": "plan_only",
-        "actual_save_enabled": False,
-        "root": root_status,
-        "db": {
-            "path": db_path,
-            "exists": os.path.exists(db_path),
-            "backup_dir": backup_dir,
-            "would_backup_existing_db": bool(os.path.exists(db_path) and has_changes and mode == "preview"),
-        },
-        "would_write": {
-            "db_candidate_revision": bool(has_changes and mode == "preview"),
-            "secret_backend": bool(credential_updates and mode == "preview"),
-            "generated_latest_approved_bundle": bool(has_changes and mode == "preview"),
-            "legacy_compat_files": {
-                "config_toml": bool(plan_summary.get("will_write_config")),
-                "model_policy_json": bool(plan_summary.get("will_write_policy")),
-                "credentials_sh": bool(plan_summary.get("will_write_credentials")),
-            },
-        },
-        "ordered_steps": [
-            "backup preview registry DB",
-            "write DB candidate revisions for route/policy/profile facts",
-            "write secret backend only for explicit credential updates",
-            "publish generated/latest-approved bundle",
-            "verify manifest hashes",
-            "rollback to backup on failure",
-        ],
-        "blocked_reasons": blocked_reasons,
-        "next_implementation_step": "wire WebUI save to DB writer after rollback tests pass",
-    }
 
 
 def build_config_plan(

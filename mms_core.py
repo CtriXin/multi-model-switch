@@ -5277,9 +5277,47 @@ def _model_source_status_report_payload(summary):
     )
 
 
+def _registry_v2_save_plan_rows(plan):
+    plan = plan if isinstance(plan, dict) else {}
+    root = plan.get("root") if isinstance(plan.get("root"), dict) else {}
+    db = plan.get("db") if isinstance(plan.get("db"), dict) else {}
+    would_write = plan.get("would_write") if isinstance(plan.get("would_write"), dict) else {}
+    legacy = would_write.get("legacy_compat_files") if isinstance(would_write.get("legacy_compat_files"), dict) else {}
+    blocked = ", ".join(str(item) for item in (plan.get("blocked_reasons") or [])) or "-"
+    steps = " -> ".join(str(item) for item in (plan.get("ordered_steps") or [])) or "-"
+    return [
+        ("Root", root.get("config_root") or "-"),
+        ("Mode", root.get("mode") or "-"),
+        (_L("执行状态", "execution state"), plan.get("execution_state") or "-"),
+        (_L("实际保存启用", "actual save enabled"), "yes" if plan.get("actual_save_enabled") else "no"),
+        ("DB", db.get("path") or "-"),
+        (_L("DB 存在", "DB exists"), "yes" if db.get("exists") else "no"),
+        (_L("DB 备份目录", "DB backup dir"), db.get("backup_dir") or "-"),
+        (_L("将备份 DB", "would backup DB"), "yes" if db.get("would_backup_existing_db") else "no"),
+        (_L("DB candidate revision", "DB candidate revision"), "yes" if would_write.get("db_candidate_revision") else "no"),
+        (_L("Secret backend", "secret backend"), "yes" if would_write.get("secret_backend") else "no"),
+        (_L("Generated bundle", "generated bundle"), "yes" if would_write.get("generated_latest_approved_bundle") else "no"),
+        (_L("Legacy config.toml", "legacy config.toml"), "yes" if legacy.get("config_toml") else "no"),
+        (_L("Legacy model-policy.json", "legacy model-policy.json"), "yes" if legacy.get("model_policy_json") else "no"),
+        (_L("Legacy credentials.sh", "legacy credentials.sh"), "yes" if legacy.get("credentials_sh") else "no"),
+        (_L("阻塞原因", "blocked reasons"), blocked),
+        (_L("步骤", "steps"), steps),
+        (_L("下一步", "next step"), plan.get("next_implementation_step") or "-"),
+    ]
+
+
+def _registry_v2_save_plan_report_payload(plan):
+    return (
+        _L("Registry v2 Save Plan", "Registry v2 Save Plan"),
+        _registry_v2_save_plan_rows(plan),
+        _L("只读计划：不写 DB、不写 secret backend、不发布 bundle、不改变 runtime defaults。", "Read-only plan: no DB writes, no secret backend writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
 def _model_source_status_tui_payload(summary):
     actions = [
         ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
+        ("registry_v2_save_plan", _L("查看 v2 Save Plan", "View v2 Save Plan")),
         ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
         ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
         ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
@@ -10171,7 +10209,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
 
                 source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
                 registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
@@ -10185,6 +10223,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     return True
                 if registry_action == "model_source_status":
                     _print_settings_result_report(*_model_source_status_report_payload(source_status))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "registry_v2_save_plan":
+                    plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
+                    _print_settings_result_report(*_registry_v2_save_plan_report_payload(plan))
                     _pause_after_tui_report("按 Enter 返回设置")
                 elif registry_action == "check_staleness":
                     try:
@@ -11874,6 +11916,7 @@ def _display_config_help():
     console.print(f"  {command} config file")
     console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config source [--json]")
+    console.print(f"  {command} config save-plan [--json]")
     console.print(f"  {command} config validate")
     console.print(f"  {command} config get <dot.path>")
     console.print(f"  {command} config set <dot.path> <value>")
@@ -11942,6 +11985,16 @@ def _display_model_source_status(json_output=False):
         print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_model_source_status(status)
+
+
+def _display_registry_v2_save_plan(json_output=False):
+    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+
+    plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
+    if json_output:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_registry_v2_save_plan(plan)
 
 
 def _display_preferences_path():
@@ -13311,6 +13364,9 @@ def _is_config_help_request(args_rest):
         "root",
         "root.status",
         "status.root",
+        "save-plan",
+        "save.plan",
+        "v2-save-plan",
         "web",
         "webui",
         "setup.web",
@@ -13332,6 +13388,12 @@ def _is_config_model_source_status_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"source", "sources", "model-source", "model-sources"}
+
+
+def _is_config_registry_v2_save_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
 
 
 def _is_session_prune_dry_run(argv):
@@ -13372,6 +13434,9 @@ def main():
         return
     if _is_config_model_source_status_request(argv):
         _display_model_source_status(json_output="--json" in argv[2:])
+        return
+    if _is_config_registry_v2_save_plan_request(argv):
+        _display_registry_v2_save_plan(json_output="--json" in argv[2:])
         return
 
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)

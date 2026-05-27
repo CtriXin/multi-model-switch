@@ -32,6 +32,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
                 "  mmf preview status [--json]       show full model source status",
                 "  mmf preview verify [--json]       verify latest-approved bundle hashes",
+                "  mmf config save-plan [--json]     show future DB-truth save sequence",
                 "",
                 "Prepare preview root:",
                 "  mmf preview prepare --from ~/.config/mms --json",
@@ -167,6 +168,16 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "
         print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_model_source_status(status)
+    raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}:
+    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+
+    plan = registry_v2_save_plan(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config save-plan")
+    if "--json" in argv[2:]:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_registry_v2_save_plan(plan)
     raise SystemExit(0)
 
 from mms_core import main

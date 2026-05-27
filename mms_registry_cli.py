@@ -24,6 +24,7 @@ LEGACY_IMPORT_SOURCE_KIND = "legacy_config_import"
 LEGACY_IMPORT_SCHEMA = "mms.legacy_config_import.v1"
 LEGACY_SECRET_BACKEND_SCHEMA = "mms.legacy_secret_backend.v1"
 CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
+REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
 CONFIG_ROOT_LAYOUT_DIRS = (
     "registry",
     "secrets",
@@ -561,6 +562,80 @@ def model_source_status(
         },
         "generated_bundle": _generated_bundle_summary(root),
         "read_only": True,
+    }
+
+
+def _config_root_from_config_path(config_path: str | Path | None = None) -> Path | None:
+    if not str(config_path or "").strip():
+        return None
+    path = Path(str(config_path)).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.parent
+
+
+def registry_v2_save_plan(
+    *,
+    config_dir: str | Path | None = None,
+    config_path: str | Path | None = None,
+    command_name: str = "mms config save-plan",
+    plan_summary: dict[str, Any] | None = None,
+    credential_updates: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Describe the future DB-truth save path without writing anything."""
+    root = Path(config_dir).expanduser() if config_dir is not None else _config_root_from_config_path(config_path)
+    if root is None:
+        root = Path(resolve_mms_config_dir()).expanduser()
+    root_status = mms_config_root_status(
+        command=command_name.split()[0] if command_name else "mms",
+        config_dir=root,
+    )
+    db_path = mms_registry.default_registry_db_path(config_dir=root)
+    summary = plan_summary if isinstance(plan_summary, dict) else {}
+    credentials = credential_updates if isinstance(credential_updates, list) else []
+    mode = str(root_status.get("mode") or "")
+    has_changes = any(
+        bool(summary.get(key))
+        for key in ("will_write_config", "will_write_policy", "will_write_credentials")
+    )
+    backup_dir = root / "backups" / "db"
+    blocked_reasons: list[str] = []
+    if mode != "preview":
+        blocked_reasons.append("stable_root_human_only")
+    if not has_changes:
+        blocked_reasons.append("no_draft_changes")
+    return {
+        "schema": REGISTRY_V2_SAVE_PLAN_SCHEMA,
+        "read_only": True,
+        "execution_state": "plan_only",
+        "actual_save_enabled": False,
+        "root": root_status,
+        "db": {
+            "path": str(db_path),
+            "exists": db_path.exists(),
+            "backup_dir": str(backup_dir),
+            "would_backup_existing_db": bool(db_path.exists() and has_changes and mode == "preview"),
+        },
+        "would_write": {
+            "db_candidate_revision": bool(has_changes and mode == "preview"),
+            "secret_backend": bool(credentials and mode == "preview"),
+            "generated_latest_approved_bundle": bool(has_changes and mode == "preview"),
+            "legacy_compat_files": {
+                "config_toml": bool(summary.get("will_write_config")),
+                "model_policy_json": bool(summary.get("will_write_policy")),
+                "credentials_sh": bool(summary.get("will_write_credentials")),
+            },
+        },
+        "ordered_steps": [
+            "backup preview registry DB",
+            "write DB candidate revisions for route/policy/profile facts",
+            "write secret backend only for explicit credential updates",
+            "publish generated/latest-approved bundle",
+            "verify manifest hashes",
+            "rollback to backup on failure",
+        ],
+        "blocked_reasons": blocked_reasons,
+        "next_implementation_step": "wire WebUI/TUI/mms config save to DB writer after rollback tests pass",
     }
 
 
@@ -2032,6 +2107,35 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"read_only={summary.get('read_only', False)}")
 
 
+def _print_registry_v2_save_plan(plan: dict[str, Any]) -> None:
+    root = plan.get("root") if isinstance(plan.get("root"), dict) else {}
+    db = plan.get("db") if isinstance(plan.get("db"), dict) else {}
+    would_write = plan.get("would_write") if isinstance(plan.get("would_write"), dict) else {}
+    legacy = would_write.get("legacy_compat_files") if isinstance(would_write.get("legacy_compat_files"), dict) else {}
+    print("MMS Registry v2 Save Plan")
+    print(f"schema={plan.get('schema')}")
+    print(f"read_only={plan.get('read_only', False)}")
+    print(f"execution_state={plan.get('execution_state')}")
+    print(f"actual_save_enabled={plan.get('actual_save_enabled', False)}")
+    print(f"command={root.get('command')}")
+    print(f"mode={root.get('mode')}")
+    print(f"config_root={root.get('config_root')}")
+    print(f"registry_db_path={db.get('path')}")
+    print(f"registry_db_exists={db.get('exists', False)}")
+    print(f"backup_dir={db.get('backup_dir')}")
+    print(f"would_backup_existing_db={db.get('would_backup_existing_db', False)}")
+    print(f"would_write_db_candidate_revision={would_write.get('db_candidate_revision', False)}")
+    print(f"would_write_secret_backend={would_write.get('secret_backend', False)}")
+    print(f"would_write_generated_latest_approved_bundle={would_write.get('generated_latest_approved_bundle', False)}")
+    print(f"would_write_legacy_config_toml={legacy.get('config_toml', False)}")
+    print(f"would_write_legacy_model_policy_json={legacy.get('model_policy_json', False)}")
+    print(f"would_write_legacy_credentials_sh={legacy.get('credentials_sh', False)}")
+    print(f"blocked_reasons={','.join(str(item) for item in (plan.get('blocked_reasons') or []))}")
+    for index, step in enumerate(plan.get("ordered_steps") or [], start=1):
+        print(f"step_{index}={step}")
+    print(f"next_implementation_step={plan.get('next_implementation_step', '')}")
+
+
 def _print_preview_doctor(summary: dict[str, Any]) -> None:
     print("MMF Preview Doctor")
     print(f"result={summary.get('result')}")
@@ -2131,6 +2235,9 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     source_status_parser = subparsers.add_parser("source-status", help="Read-only model source status summary")
     source_status_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     source_status_parser.add_argument("--json", action="store_true", help="Print the full status as JSON")
+    save_plan_parser = subparsers.add_parser("save-plan", help="Read-only v2 DB-truth save plan; does not write")
+    save_plan_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    save_plan_parser.add_argument("--json", action="store_true", help="Print the full save plan as JSON")
     preview_doctor_parser = subparsers.add_parser("preview-doctor", help="Read-only preview root doctor with one next action")
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
@@ -2241,6 +2348,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_model_source_status(summary)
+        return 0
+    if args.subcommand == "save-plan":
+        plan = registry_v2_save_plan(config_dir=args.config_dir or None, command_name=command_name)
+        if args.json:
+            print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_registry_v2_save_plan(plan)
         return 0
     if args.subcommand == "preview-doctor":
         summary = preview_doctor(config_dir=args.config_dir or None, command_name=command_name)
@@ -2427,6 +2541,7 @@ __all__ = [
     "model_source_status",
     "preview_doctor",
     "preview_prepare",
+    "registry_v2_save_plan",
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",
