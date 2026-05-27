@@ -305,6 +305,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ```text
 ./mmf config root --json
 ./mmf config source --json
+./mmf preview init --json
 ./mmf config web --print-summary
 ./mmf config web --no-open
 ./mmf registry status
@@ -314,7 +315,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf registry restore-db <backup.sqlite> --config-dir "$MMS_CONFIG_ROOT"
 ```
 
-`config root` and `legacy-report` are read-only. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
+`config root` and `legacy-report` are read-only. `preview init` is the explicit write boundary for creating the preview root layout and empty registry DB under `<config_root>/registry/`; it refuses stable-root init unless `--allow-stable` is explicitly used on the lower-level `registry init-root` command. `restore-db` is dry-run by default; `--apply` is explicit and creates a pre-restore backup before replacing the preview DB.
 `config web --print-summary` includes the same Model Source status in the WebUI snapshot; starting the full WebUI still uses the existing audited config save path, so this slice only adds the read-only status panel and does not change save semantics.
 TUI Settings -> `模型真源 / Registry Truth` now opens on the same read-only Model Source status before any explicit registry write action is selected.
 
@@ -374,6 +375,14 @@ Current Stage 3a implementation:
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, and latest-approved bundle status.
 - TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status; explicit refresh/publish/doctor actions remain separate.
 - Existing WebUI Save behavior is not changed in this slice; disabling or redirecting save to preview candidates belongs to Stage 4.
+
+Current preview init implementation:
+
+- `mmf preview init [--json]` creates the v2 preview layout under the selected `MMS_CONFIG_ROOT`.
+- Created directories: `registry/`, `secrets/`, `generated/`, `backups/db/`, `backups/generated/`, `backups/legacy-import/`, `imports/`, `logs/`, and `snapshots/`.
+- It initializes `<config_root>/registry/model-registry.sqlite` unless `--no-db` is passed.
+- It writes a non-secret `<config_root>/root-manifest.json`.
+- Lower-level `mms registry init-root` refuses stable roots by default; stable init requires explicit `--allow-stable`.
 
 ### Stage 4 - Write Path And Publish
 

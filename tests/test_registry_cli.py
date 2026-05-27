@@ -595,6 +595,69 @@ def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_pat
     assert not (config_dir / "cache").exists()
 
 
+def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    real_home = tmp_path / "home"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(real_home),
+            "MMS_REAL_HOME": str(real_home),
+            "MMS_CONFIG_ROOT": str(config_dir),
+            "PYTHONPATH": str(ROOT),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "init", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_ROOT_INIT_SCHEMA
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["root"]["config_root"] == str(config_dir)
+    assert payload["db_initialized"] is True
+    assert payload["db_path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert (config_dir / "root-manifest.json").exists()
+    assert (config_dir / "registry" / "model-registry.sqlite").exists()
+    for rel in mms_registry_cli.CONFIG_ROOT_LAYOUT_DIRS:
+        assert (config_dir / rel).is_dir()
+    assert not (real_home / ".config" / "mms").exists()
+    assert "api_key" not in combined.lower()
+    assert "token" not in combined.lower()
+
+
+def test_init_config_root_refuses_stable_root_without_allow_stable(capsys, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+
+    try:
+        mms_registry_cli.init_config_root(config_dir=stable_root, command_name="mms registry")
+    except mms_registry.RegistryValidationError as exc:
+        assert "refusing to initialize stable config root" in str(exc)
+    else:  # pragma: no cover - defensive assertion path
+        raise AssertionError("stable config root init should require --allow-stable")
+
+    assert not stable_root.exists()
+    rc = mms_registry_cli.handle_registry_command(
+        ["init-root", "--config-dir", str(stable_root), "--json"],
+        command_name="mms registry",
+    )
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+
+    assert rc == 2
+    assert payload["ok"] is False
+    assert "refusing to initialize stable config root" in payload["error"]
+    assert not stable_root.exists()
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,

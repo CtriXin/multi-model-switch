@@ -20,6 +20,18 @@ DEFAULT_SOURCE_REFRESH_MAX_AGE_HOURS = 24 * 14
 DEFAULT_OPENROUTER_REFRESH_MAX_AGE_HOURS = 24 * 7
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 LEGACY_IMPORT_REPORT_SCHEMA = "mms.legacy_import_report.v1"
+CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
+CONFIG_ROOT_LAYOUT_DIRS = (
+    "registry",
+    "secrets",
+    "generated",
+    "backups/db",
+    "backups/generated",
+    "backups/legacy-import",
+    "imports",
+    "logs",
+    "snapshots",
+)
 
 
 def _sanitize_provider_env_id(provider_id: str) -> str:
@@ -303,6 +315,73 @@ def model_source_status(
         "generated_bundle": _generated_bundle_summary(root),
         "read_only": True,
     }
+
+
+def init_config_root(
+    *,
+    config_dir: str | Path | None = None,
+    create_db: bool = True,
+    allow_stable: bool = False,
+    command_name: str = "mms registry",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    command = command_name.split()[0] if command_name else "mms"
+    root_status = mms_config_root_status(command=command, config_dir=root)
+    if root_status.get("mode") != "preview" and not allow_stable:
+        raise mms_registry.RegistryValidationError(
+            "refusing to initialize stable config root without --allow-stable"
+        )
+
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
+
+    dirs: list[dict[str, Any]] = []
+    for rel in CONFIG_ROOT_LAYOUT_DIRS:
+        path = root / rel
+        path.mkdir(parents=True, exist_ok=True)
+        mode = 0o700 if rel == "secrets" else 0o755
+        try:
+            path.chmod(mode)
+        except OSError:
+            pass
+        dirs.append({"path": str(path), "relative_path": rel, "mode": oct(mode)})
+
+    db_path = mms_registry.default_registry_db_path(config_dir=root)
+    db_created = False
+    if create_db:
+        existed_before = db_path.exists()
+        db = mms_registry.open_registry(db_path)
+        try:
+            db.execute("PRAGMA user_version").fetchone()
+        finally:
+            db.close()
+        db_created = not existed_before and db_path.exists()
+
+    manifest_root = {
+        key: root_status.get(key)
+        for key in ("command", "mode", "root_source", "config_root", "stable_root", "preview_root", "explicit_root")
+    }
+    manifest = {
+        "schema": CONFIG_ROOT_INIT_SCHEMA,
+        "created_at": mms_registry.utc_now(),
+        "command": command,
+        "root": manifest_root,
+        "layout_dirs": dirs,
+        "db_path": str(db_path),
+        "db_created": db_created,
+        "db_initialized": bool(create_db),
+        "read_only": False,
+        "stable_init_allowed": bool(allow_stable),
+    }
+    mms_registry.validate_non_secret_payload(manifest, context="config_root_init")
+    manifest_path = root / "root-manifest.json"
+    mms_registry.write_json_atomic(manifest_path, manifest)
+    manifest["manifest_path"] = str(manifest_path)
+    return manifest
 
 
 
@@ -1107,6 +1186,18 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"read_only={summary.get('read_only', False)}")
 
 
+def _print_init_config_root(summary: dict[str, Any]) -> None:
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    print("MMS Config Root Init")
+    print(f"config_root={root.get('config_root')}")
+    print(f"mode={root.get('mode')}")
+    print(f"db_path={summary.get('db_path')}")
+    print(f"db_initialized={summary.get('db_initialized')}")
+    print(f"db_created={summary.get('db_created')}")
+    print(f"manifest_path={summary.get('manifest_path')}")
+    print(f"layout_dirs={len(summary.get('layout_dirs') or [])}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -1120,6 +1211,11 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     source_status_parser = subparsers.add_parser("source-status", help="Read-only model source status summary")
     source_status_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     source_status_parser.add_argument("--json", action="store_true", help="Print the full status as JSON")
+    init_root_parser = subparsers.add_parser("init-root", help="Initialize selected config root layout")
+    init_root_parser.add_argument("--config-dir", default="", help="Override MMS config dir to initialize")
+    init_root_parser.add_argument("--no-db", action="store_true", help="Create directories/manifest only; do not initialize SQLite")
+    init_root_parser.add_argument("--allow-stable", action="store_true", help="Allow initializing a stable root explicitly")
+    init_root_parser.add_argument("--json", action="store_true", help="Print init summary as JSON")
     backup_parser = subparsers.add_parser("backup-db", help="Create a SQLite backup of the registry DB")
     backup_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     backup_parser.add_argument("--backup-dir", default="", help="Override backup output dir")
@@ -1198,6 +1294,25 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
             print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         else:
             _print_model_source_status(summary)
+        return 0
+    if args.subcommand == "init-root":
+        try:
+            summary = init_config_root(
+                config_dir=args.config_dir or None,
+                create_db=not bool(args.no_db),
+                allow_stable=bool(args.allow_stable),
+                command_name=command_name,
+            )
+        except mms_registry.RegistryValidationError as exc:
+            if args.json:
+                print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2, sort_keys=True))
+            else:
+                print(f"error={exc}")
+            return 2
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_init_config_root(summary)
         return 0
     if args.subcommand == "backup-db":
         summary = backup_registry_db(
@@ -1295,6 +1410,7 @@ __all__ = [
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
     "legacy_import_report",
+    "init_config_root",
     "model_source_status",
     "scheduled_refresh",
     "backup_registry_db",
