@@ -991,50 +991,51 @@ def _inject_rescue_launch_env(env):
 
 
 def _host_context_real_home():
-    try:
-        return _real_user_path()
-    except TypeError:
-        return _real_user_home()
+    from mms_launcher_export import host_context_real_home
+
+    return host_context_real_home(
+        real_user_path=_real_user_path,
+        real_user_home=_real_user_home,
+    )
 
 
 def _host_tool_context(session_home, env=None):
-    filtered_path = _real_home_wrapper_search_path(session_home, env)
-    tools = resolve_tool_bins(_SESSION_REAL_HOME_WRAPPER_COMMANDS, path=filtered_path)
-    wrapper_dir = os.path.join(str(session_home or "").strip(), ".mms", "bin")
-    for name, payload in tools.items():
-        payload["wrapper"] = os.path.join(wrapper_dir, name)
-    return tools
+    from mms_launcher_export import host_tool_context
+
+    return host_tool_context(
+        session_home,
+        env,
+        real_home_wrapper_search_path=_real_home_wrapper_search_path,
+        resolve_tool_bins=resolve_tool_bins,
+        wrapper_commands=_SESSION_REAL_HOME_WRAPPER_COMMANDS,
+    )
 
 
 def _inject_host_capability_hints(env):
-    if not isinstance(env, dict):
-        return env
-    try:
-        env.update(host_capability_env(real_home=_host_context_real_home()))
-    except Exception:
-        pass
-    return env
+    from mms_launcher_export import inject_host_capability_hints
+
+    return inject_host_capability_hints(
+        env,
+        host_capability_env=host_capability_env,
+        host_context_real_home=_host_context_real_home,
+    )
 
 
 def _install_host_context_env(env, *, cli, runtime=None, model_info=None, session_home=""):
-    if not isinstance(env, dict):
-        env = {}
-    session_home = str(session_home or "").strip()
-    if not session_home:
-        return {}
-    try:
-        host_env = write_host_context(
-            session_home,
-            real_home=_host_context_real_home(),
-            cli=cli,
-            model=_selected_model_name(model_info=model_info),
-            cwd=_safe_getcwd(),
-            tool_bins=_host_tool_context(session_home, env),
-        )
-    except Exception:
-        return {}
-    env.update(host_env)
-    return host_env
+    from mms_launcher_export import install_host_context_env
+
+    return install_host_context_env(
+        env,
+        cli=cli,
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+        host_context_real_home=_host_context_real_home,
+        selected_model_name=_selected_model_name,
+        safe_getcwd=_safe_getcwd,
+        host_tool_context=_host_tool_context,
+        write_host_context=write_host_context,
+    )
 
 
 def _set_session_home_hint(env, session_home):
@@ -1111,23 +1112,18 @@ def _install_session_packet_env(
     features=None,
     extra_paths=None,
 ):
-    session_home = str(session_home or "").strip()
-    if not session_home:
-        return {}
-    try:
-        packet_env = write_session_packet(
-            session_home,
-            cli=cli,
-            runtime=runtime,
-            model_info=model_info,
-            features=features,
-            extra_paths=extra_paths,
-        )
-    except Exception:
-        return {}
-    if isinstance(env, dict):
-        env.update(packet_env)
-    return packet_env
+    from mms_launcher_export import install_session_packet_env
+
+    return install_session_packet_env(
+        env,
+        cli=cli,
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+        features=features,
+        extra_paths=extra_paths,
+        write_session_packet=write_session_packet,
+    )
 
 
 def _session_guard_marker_path(session_home):

@@ -5,6 +5,103 @@ from __future__ import annotations
 import os
 
 
+def host_context_real_home(*, real_user_path, real_user_home):
+    """Resolve the real user home used in launcher host-context payloads."""
+    try:
+        return real_user_path()
+    except TypeError:
+        return real_user_home()
+
+
+def host_tool_context(
+    session_home,
+    env=None,
+    *,
+    real_home_wrapper_search_path,
+    resolve_tool_bins,
+    wrapper_commands,
+):
+    filtered_path = real_home_wrapper_search_path(session_home, env)
+    tools = resolve_tool_bins(wrapper_commands, path=filtered_path)
+    wrapper_dir = os.path.join(str(session_home or "").strip(), ".mms", "bin")
+    for name, payload in tools.items():
+        payload["wrapper"] = os.path.join(wrapper_dir, name)
+    return tools
+
+
+def inject_host_capability_hints(env, *, host_capability_env, host_context_real_home):
+    if not isinstance(env, dict):
+        return env
+    try:
+        env.update(host_capability_env(real_home=host_context_real_home()))
+    except Exception:
+        pass
+    return env
+
+
+def install_host_context_env(
+    env,
+    *,
+    cli,
+    runtime=None,
+    model_info=None,
+    session_home="",
+    host_context_real_home,
+    selected_model_name,
+    safe_getcwd,
+    host_tool_context,
+    write_host_context,
+):
+    if not isinstance(env, dict):
+        env = {}
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return {}
+    try:
+        host_env = write_host_context(
+            session_home,
+            real_home=host_context_real_home(),
+            cli=cli,
+            model=selected_model_name(model_info=model_info),
+            cwd=safe_getcwd(),
+            tool_bins=host_tool_context(session_home, env),
+        )
+    except Exception:
+        return {}
+    env.update(host_env)
+    return host_env
+
+
+def install_session_packet_env(
+    env,
+    *,
+    cli,
+    runtime,
+    model_info=None,
+    session_home="",
+    features=None,
+    extra_paths=None,
+    write_session_packet,
+):
+    session_home = str(session_home or "").strip()
+    if not session_home:
+        return {}
+    try:
+        packet_env = write_session_packet(
+            session_home,
+            cli=cli,
+            runtime=runtime,
+            model_info=model_info,
+            features=features,
+            extra_paths=extra_paths,
+        )
+    except Exception:
+        return {}
+    if isinstance(env, dict):
+        env.update(packet_env)
+    return packet_env
+
+
 def build_export_env(
     cli,
     runtime,
