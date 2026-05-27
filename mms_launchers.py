@@ -918,17 +918,15 @@ _SESSION_GUARD_LOCK_NAME = ".mms-session-guard.lock"
 
 
 def _inject_real_home_hints(env, *, include_xdg=False):
-    real_home = _real_user_home()
-    env["MMS_REAL_HOME"] = real_home
-    env["ORIGINAL_HOME"] = real_home
-    env["REAL_HOME"] = real_home
-    env["WEB_ACCESS_HOST_HOME"] = real_home
-    env["HOST_HOME"] = real_home
-    env["GH_CONFIG_DIR"] = _real_user_path(".config", "gh")
-    _inject_rescue_launch_env(env)
-    if include_xdg:
-        env["XDG_CONFIG_HOME"] = _real_user_path(".config")
-    return env
+    from mms_launcher_export import inject_real_home_hints
+
+    return inject_real_home_hints(
+        env,
+        include_xdg=include_xdg,
+        real_user_home=_real_user_home,
+        real_user_path=_real_user_path,
+        inject_rescue_launch_env=_inject_rescue_launch_env,
+    )
 
 
 def _truthy(value):

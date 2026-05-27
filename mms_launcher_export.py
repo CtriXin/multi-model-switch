@@ -128,6 +128,27 @@ def inject_rescue_launch_env(
     return env
 
 
+def inject_real_home_hints(
+    env,
+    *,
+    include_xdg=False,
+    real_user_home,
+    real_user_path,
+    inject_rescue_launch_env,
+):
+    real_home = real_user_home()
+    env["MMS_REAL_HOME"] = real_home
+    env["ORIGINAL_HOME"] = real_home
+    env["REAL_HOME"] = real_home
+    env["WEB_ACCESS_HOST_HOME"] = real_home
+    env["HOST_HOME"] = real_home
+    env["GH_CONFIG_DIR"] = real_user_path(".config", "gh")
+    inject_rescue_launch_env(env)
+    if include_xdg:
+        env["XDG_CONFIG_HOME"] = real_user_path(".config")
+    return env
+
+
 def install_host_context_env(
     env,
     *,
