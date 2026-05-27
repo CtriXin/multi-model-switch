@@ -144,6 +144,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert 'data-section="source"' in html
     assert "function renderSourceStatus()" in html
     assert "candidate routes" in html
+    assert "missing keys" in html
     assert "renderStatus();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html

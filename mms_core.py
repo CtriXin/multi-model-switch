@@ -5264,6 +5264,8 @@ def _model_source_status_rows(summary):
         (_L("Legacy 下一步", "legacy next action"), legacy.get("next_action") or "-"),
         (_L("Bundle 状态", "bundle status"), bundle.get("status") or "-"),
         (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle runtime", "bundle runtime"), bundle.get("runtime_ready_status") or "unknown"),
+        (_L("Router 缺失 key", "router missing keys"), bundle.get("router_missing_api_key_count", 0)),
     ]
 
 

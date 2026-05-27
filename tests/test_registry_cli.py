@@ -950,6 +950,7 @@ def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_pat
     )
     publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
     verified = mms_registry_cli.verify_approved_bundle(config_dir=config_dir)
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
     manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
     router_path = config_dir / "generated" / "model-routes.json"
     lineup_path = config_dir / "generated" / "model-routes.lineup.json"
@@ -963,6 +964,11 @@ def test_publish_preview_bundle_from_legacy_candidates_verifies_manifest(tmp_pat
     assert publish_summary["provider_route_count"] == 2
     assert publish_summary["runtime_ready"] is False
     assert verified["verified"] is True
+    assert status["generated_bundle"]["verified"] is True
+    assert status["generated_bundle"]["runtime_ready"] is False
+    assert status["generated_bundle"]["runtime_ready_status"] == "not_ready"
+    assert status["generated_bundle"]["router_missing_api_key_count"] == 2
+    assert status["generated_bundle"]["router_secret_ref_count"] == 2
     assert router["runtime_ready"] is False
     assert router["routes"]["shared-model"]["primary"]["provider_id"] == "primary-local"
     assert router["routes"]["shared-model"]["primary"]["api_key"] == ""

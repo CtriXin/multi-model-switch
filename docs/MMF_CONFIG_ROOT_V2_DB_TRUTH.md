@@ -407,6 +407,7 @@ Current preview publish implementation:
 - It writes generated Router/Lineup/Profile/Policy/Capabilities files, then writes and verifies a manifest-compatible latest-approved bundle.
 - It approves the imported route revision and generated component/bundle revisions inside the preview DB.
 - It is not runtime-ready yet because plaintext secrets are not stored in DB; generated Router entries carry `secret_ref` and `api_key=""`, with `runtime_ready=false`.
+- `mmf config source`, WebUI, and TUI surface this distinction as bundle `verified` versus bundle `runtime_ready`.
 - Missing legacy import candidates fail closed and do not create a generated manifest.
 
 ### Stage 4 - Write Path And Publish

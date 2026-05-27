@@ -387,7 +387,12 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
                 "candidates": {"status": "not_imported", "provider_route_count": 0},
                 "next_action": "review_conflicts_before_import",
             },
-            "generated_bundle": {"status": "missing", "verified": False},
+            "generated_bundle": {
+                "status": "missing",
+                "verified": False,
+                "runtime_ready_status": "unknown",
+                "router_missing_api_key_count": 0,
+            },
         }
     )
     report_title, rows, note = mms_core._model_source_status_report_payload(
@@ -399,7 +404,12 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
                 "candidates": {"status": "not_imported", "provider_route_count": 0},
                 "next_action": "review_conflicts_before_import",
             },
-            "generated_bundle": {"status": "missing", "verified": False},
+            "generated_bundle": {
+                "status": "missing",
+                "verified": False,
+                "runtime_ready_status": "unknown",
+                "router_missing_api_key_count": 0,
+            },
         }
     )
 
@@ -415,6 +425,8 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("Legacy 冲突", 2) in rows
     assert ("Legacy 候选状态", "not_imported") in rows
     assert ("Legacy 候选 routes", 0) in rows
+    assert ("Bundle runtime", "unknown") in rows
+    assert ("Router 缺失 key", 0) in rows
     assert "只读视图" in note
 
 

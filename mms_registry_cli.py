@@ -451,6 +451,7 @@ def _generated_bundle_summary(root: Path) -> dict[str, Any]:
             "error": f"{type(exc).__name__}: {exc}",
         }
     manifest = verified.get("manifest") if isinstance(verified.get("manifest"), dict) else {}
+    runtime_summary = _generated_router_runtime_summary(verified)
     return {
         "manifest_path": str(manifest_path),
         "exists": True,
@@ -458,6 +459,48 @@ def _generated_bundle_summary(root: Path) -> dict[str, Any]:
         "status": "ok",
         "bundle_revision": manifest.get("bundle_revision") or "",
         "file_count": len(verified.get("verified_files") or {}),
+        **runtime_summary,
+    }
+
+
+def _generated_router_runtime_summary(verified: dict[str, Any]) -> dict[str, Any]:
+    files = verified.get("verified_files") if isinstance(verified.get("verified_files"), dict) else {}
+    router = files.get("router") if isinstance(files.get("router"), dict) else {}
+    path = str(router.get("path") or "").strip()
+    if not path:
+        return {"runtime_ready": None, "runtime_ready_status": "unknown"}
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"runtime_ready": None, "runtime_ready_status": "unknown", "runtime_ready_error": f"{type(exc).__name__}: {exc}"}
+    routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
+    leaves = []
+    for route in routes.values():
+        if not isinstance(route, dict):
+            continue
+        primary = route.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        fallbacks = route.get("fallbacks") if isinstance(route.get("fallbacks"), list) else []
+        leaves.extend(item for item in fallbacks if isinstance(item, dict))
+    missing_api_key_count = sum(1 for item in leaves if not str(item.get("api_key") or "").strip())
+    secret_ref_count = sum(1 for item in leaves if str(item.get("secret_ref") or "").strip())
+    runtime_ready = payload.get("runtime_ready")
+    if isinstance(runtime_ready, bool):
+        ready_value: bool | None = runtime_ready
+    elif leaves:
+        ready_value = missing_api_key_count == 0
+    else:
+        ready_value = None
+    status = "ready" if ready_value is True else "not_ready" if ready_value is False else "unknown"
+    return {
+        "runtime_ready": ready_value,
+        "runtime_ready_status": status,
+        "runtime_ready_reason": str(payload.get("runtime_ready_reason") or ""),
+        "router_route_count": len(routes),
+        "router_leaf_count": len(leaves),
+        "router_missing_api_key_count": missing_api_key_count,
+        "router_secret_ref_count": secret_ref_count,
     }
 
 
@@ -1699,6 +1742,9 @@ def _print_model_source_status(summary: dict[str, Any]) -> None:
     print(f"bundle_manifest_path={bundle.get('manifest_path')}")
     print(f"bundle_status={bundle.get('status')}")
     print(f"bundle_verified={bundle.get('verified', False)}")
+    print(f"bundle_runtime_ready={bundle.get('runtime_ready')}")
+    print(f"bundle_runtime_ready_status={bundle.get('runtime_ready_status', 'unknown')}")
+    print(f"bundle_router_missing_api_key_count={bundle.get('router_missing_api_key_count', 0)}")
     print(f"read_only={summary.get('read_only', False)}")
 
 
