@@ -1972,6 +1972,7 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     verify_parser = subparsers.add_parser("verify", help="Verify latest-approved manifest hashes")
     verify_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     verify_parser.add_argument("--manifest", default="", help="Override manifest path")
+    verify_parser.add_argument("--json", action="store_true", help="Print verify summary as JSON")
     resolve_parser = subparsers.add_parser("resolve", help="Resolve one model through latest-approved capability facts")
     resolve_parser.add_argument("model")
     resolve_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
@@ -2125,7 +2126,10 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         return 0
     if args.subcommand == "verify":
         summary = verify_approved_bundle(config_dir=args.config_dir or None, manifest_path=args.manifest or None)
-        _print_verify(summary)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_verify(summary)
         return 0
     if args.subcommand == "resolve":
         caps = resolve_approved_model(args.model, config_dir=args.config_dir or None, manifest_path=args.manifest or None)

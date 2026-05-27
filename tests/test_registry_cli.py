@@ -1116,7 +1116,27 @@ def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path)
         stderr=subprocess.PIPE,
         check=True,
     )
+    verify = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "verify", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    status_result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "status", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
     payload = json.loads(publish.stdout)
+    verify_payload = json.loads(verify.stdout)
+    status_payload = json.loads(status_result.stdout)
     router = json.loads((target_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
     verified = mms_registry_cli.verify_approved_bundle(config_dir=target_dir)
     combined = publish.stdout + publish.stderr + json.dumps(router, ensure_ascii=False)
@@ -1124,6 +1144,9 @@ def test_mmf_preview_import_then_publish_wrapper_verifies_bundle(tmp_path: Path)
     assert payload["schema"] == "mms.preview_bundle_publish.v1"
     assert payload["route_count"] == 1
     assert payload["runtime_ready"] is False
+    assert verify_payload["verified"] is True
+    assert status_payload["generated_bundle"]["verified"] is True
+    assert status_payload["generated_bundle"]["runtime_ready"] is False
     assert verified["verified"] is True
     assert router["routes"]["wrapped-publish-model"]["primary"]["provider_id"] == "wrapped-publish"
     assert "sk-wrapped-publish-secret" not in combined
