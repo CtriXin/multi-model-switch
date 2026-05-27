@@ -37,6 +37,16 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"root", "root.status",
             print("Preview root: fail closed inside this root; no silent fallback to stable credentials/OAuth.")
     raise SystemExit(0)
 
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "model-source", "model-sources"}:
+    from mms_registry_cli import _print_model_source_status, model_source_status
+
+    status = model_source_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config source")
+    if "--json" in argv[2:]:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_model_source_status(status)
+    raise SystemExit(0)
+
 from mms_core import main
 
 if __name__ == "__main__":

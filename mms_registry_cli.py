@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 import mms_registry
 from mms_capability_resolver import resolve_model_capabilities
+from mms_state_io import mms_config_root_status, resolve_mms_config_dir
 
 
 ROOT = Path(__file__).resolve().parent
@@ -222,6 +223,85 @@ def legacy_import_report(
         "secret_refs": secret_refs,
         "plaintext_secret_in_db": False,
         "next_action": "review_conflicts_before_import" if conflicts else "ready_for_preview_import",
+    }
+
+
+def _read_only_registry_summary(db_path: Path) -> dict[str, Any]:
+    if not db_path.exists():
+        return {"path": str(db_path), "exists": False, "status": "missing", "counts": {}}
+    counts: dict[str, int] = {}
+    try:
+        db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            table_names = {
+                str(row[0])
+                for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            for table in (
+                "source_snapshot",
+                "source_check",
+                "candidate_change",
+                "model_identity",
+                "model_fact",
+                "registry_revision",
+                "export_snapshot",
+            ):
+                if table in table_names:
+                    counts[table] = int(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+        finally:
+            db.close()
+    except sqlite3.Error as exc:
+        return {"path": str(db_path), "exists": True, "status": "error", "counts": counts, "error": str(exc)}
+    return {"path": str(db_path), "exists": True, "status": "ok", "counts": counts}
+
+
+def _generated_bundle_summary(root: Path) -> dict[str, Any]:
+    manifest_path = root / "generated" / "model-registry.latest-approved.json"
+    if not manifest_path.exists():
+        return {"manifest_path": str(manifest_path), "exists": False, "verified": False, "status": "missing"}
+    try:
+        verified = mms_registry.verify_latest_approved_bundle(config_dir=root, manifest_path=manifest_path)
+    except Exception as exc:
+        return {
+            "manifest_path": str(manifest_path),
+            "exists": True,
+            "verified": False,
+            "status": "invalid",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    manifest = verified.get("manifest") if isinstance(verified.get("manifest"), dict) else {}
+    return {
+        "manifest_path": str(manifest_path),
+        "exists": True,
+        "verified": True,
+        "status": "ok",
+        "bundle_revision": manifest.get("bundle_revision") or "",
+        "file_count": len(verified.get("verified_files") or {}),
+    }
+
+
+def model_source_status(
+    *,
+    config_dir: str | Path | None = None,
+    command_name: str = "mms",
+) -> dict[str, Any]:
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    legacy = legacy_import_report(config_dir=root)
+    db_path = mms_registry.default_registry_db_path(config_dir=root)
+    return {
+        "schema": "mms.model_source_status.v1",
+        "root": mms_config_root_status(command=command_name.split()[0] if command_name else "mms", config_dir=root),
+        "registry_db": _read_only_registry_summary(db_path),
+        "legacy_import": {
+            "read_only": True,
+            "provider_count": legacy.get("provider_count", 0),
+            "conflict_count": legacy.get("conflict_count", 0),
+            "next_action": legacy.get("next_action", ""),
+            "files": legacy.get("files", {}),
+        },
+        "generated_bundle": _generated_bundle_summary(root),
+        "read_only": True,
     }
 
 
@@ -1004,6 +1084,29 @@ def _print_legacy_import_report(summary: dict[str, Any]) -> None:
         )
 
 
+def _print_model_source_status(summary: dict[str, Any]) -> None:
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    registry_db = summary.get("registry_db") if isinstance(summary.get("registry_db"), dict) else {}
+    legacy = summary.get("legacy_import") if isinstance(summary.get("legacy_import"), dict) else {}
+    bundle = summary.get("generated_bundle") if isinstance(summary.get("generated_bundle"), dict) else {}
+    counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
+    print("MMS Model Source Status")
+    print(f"command={root.get('command')}")
+    print(f"mode={root.get('mode')}")
+    print(f"config_root={root.get('config_root')}")
+    print(f"registry_db_path={registry_db.get('path')}")
+    print(f"registry_db_status={registry_db.get('status')}")
+    print(f"registry_source_snapshots={counts.get('source_snapshot', 0)}")
+    print(f"registry_model_facts={counts.get('model_fact', 0)}")
+    print(f"legacy_provider_count={legacy.get('provider_count', 0)}")
+    print(f"legacy_conflict_count={legacy.get('conflict_count', 0)}")
+    print(f"legacy_next_action={legacy.get('next_action', '')}")
+    print(f"bundle_manifest_path={bundle.get('manifest_path')}")
+    print(f"bundle_status={bundle.get('status')}")
+    print(f"bundle_verified={bundle.get('verified', False)}")
+    print(f"read_only={summary.get('read_only', False)}")
+
+
 def handle_registry_command(argv: list[str], *, command_name: str = "mms registry") -> int:
     parser = argparse.ArgumentParser(
         prog=command_name,
@@ -1014,6 +1117,9 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
 
     subparsers.add_parser("status", help="Show local registry DB status")
     subparsers.add_parser("doctor", help="Alias of status for now; does not change runtime truth")
+    source_status_parser = subparsers.add_parser("source-status", help="Read-only model source status summary")
+    source_status_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    source_status_parser.add_argument("--json", action="store_true", help="Print the full status as JSON")
     backup_parser = subparsers.add_parser("backup-db", help="Create a SQLite backup of the registry DB")
     backup_parser.add_argument("--config-dir", default="", help="Override MMS config dir")
     backup_parser.add_argument("--backup-dir", default="", help="Override backup output dir")
@@ -1085,6 +1191,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     db_path = args.db or None
     if args.subcommand in {None, "status", "doctor"}:
         _print_status(registry_status(db_path=db_path))
+        return 0
+    if args.subcommand == "source-status":
+        summary = model_source_status(config_dir=args.config_dir or None, command_name=command_name)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_model_source_status(summary)
         return 0
     if args.subcommand == "backup-db":
         summary = backup_registry_db(
@@ -1182,6 +1295,7 @@ __all__ = [
     "fetch_openrouter_catalog",
     "diff_openrouter_catalog",
     "legacy_import_report",
+    "model_source_status",
     "scheduled_refresh",
     "backup_registry_db",
     "publish_approved_bundle",

@@ -552,6 +552,49 @@ def test_mmf_config_root_does_not_bootstrap_config_migration(tmp_path: Path) -> 
     assert not (config_dir / "cache").exists()
 
 
+def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+    (config_dir / "credentials.sh").write_text(
+        "export MMS_API_BASE_URL='https://creds-default.example/v1'\nexport MMS_API_KEY='sk-creds-default-secret'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "source", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == "mms.model_source_status.v1"
+    assert payload["read_only"] is True
+    assert payload["root"]["command"] == "mmf"
+    assert payload["root"]["mode"] == "preview"
+    assert payload["legacy_import"]["conflict_count"] >= 1
+    assert payload["registry_db"]["status"] == "missing"
+    assert payload["registry_db"]["path"] == str(config_dir / "registry" / "model-registry.sqlite")
+    assert payload["generated_bundle"]["status"] == "missing"
+    assert "sk-config-default-secret" not in combined
+    assert "sk-creds-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+
 def _write_config_artifacts(config_dir: Path) -> None:
     generated_route = {
         "version": 1,

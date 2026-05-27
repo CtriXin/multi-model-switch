@@ -304,6 +304,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 
 ```text
 ./mmf config root --json
+./mmf config source --json
 ./mmf registry status
 ./mmf registry legacy-report --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json

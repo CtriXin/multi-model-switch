@@ -10951,6 +10951,9 @@ def handle_config(cfg, args_rest):
     if key_path in {"root", "root.status", "status.root"}:
         _display_config_root(json_output="--json" in args_rest[1:])
         return
+    if key_path in {"source", "sources", "model-source", "model-sources"}:
+        _display_model_source_status(json_output="--json" in args_rest[1:])
+        return
     if key_path == "validate":
         _handle_config_validate(cfg)
         return
@@ -11812,6 +11815,7 @@ def _display_config_help():
     console.print(f"  {command} config")
     console.print(f"  {command} config file")
     console.print(f"  {command} config root [--json]")
+    console.print(f"  {command} config source [--json]")
     console.print(f"  {command} config validate")
     console.print(f"  {command} config get <dot.path>")
     console.print(f"  {command} config set <dot.path> <value>")
@@ -11870,6 +11874,16 @@ def _display_config_root(json_output=False):
         console.print("[yellow]Preview root:[/yellow] fail closed inside this root; no silent fallback to stable credentials/OAuth.")
     else:
         console.print("[dim]Stable root: current default MMS behavior.[/dim]")
+
+
+def _display_model_source_status(json_output=False):
+    from mms_registry_cli import _print_model_source_status, model_source_status
+
+    status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
+    if json_output:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_model_source_status(status)
 
 
 def _display_preferences_path():
@@ -13256,6 +13270,12 @@ def _is_config_root_status_request(argv):
     return str(argv[1] or "").strip() in {"root", "root.status", "status.root"}
 
 
+def _is_config_model_source_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"source", "sources", "model-source", "model-sources"}
+
+
 def _is_session_prune_dry_run(argv):
     if len(argv) < 2:
         return False
@@ -13291,6 +13311,9 @@ def main():
         raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
     if _is_config_root_status_request(argv):
         _display_config_root(json_output="--json" in argv[2:])
+        return
+    if _is_config_model_source_status_request(argv):
+        _display_model_source_status(json_output="--json" in argv[2:])
         return
 
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
