@@ -9728,6 +9728,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             make_provider_options_loader=_make_provider_options_loader,
         )
 
+    def _refresh_runtime_state_after_config_change(updated_cfg):
+        import shutil as _shutil
+
+        return tui_flow.refresh_tui_runtime_state_after_config_change(
+            updated_cfg,
+            probe_cache=_PROBE_CACHE,
+            probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
+            rmtree=_shutil.rmtree,
+            ensure_provider_credentials=ensure_provider_credentials,
+            probe_models=_probe_models,
+            resolve_visible_clis=_resolve_visible_clis,
+        )
+
     families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
     _families_dirty = False
 
@@ -9765,23 +9778,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 接入通道 ──
         if action_type == "connect":
-            if cli == "agy":
-                current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
-            else:
-                current_cfg, changed = run_connect_wizard(current_cfg)
-            if changed:
-                import shutil as _shutil
-
-                current_provider, default_models, current_cli_names = tui_flow.refresh_tui_runtime_state_after_config_change(
-                    current_cfg,
-                    probe_cache=_PROBE_CACHE,
-                    probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
-                    rmtree=_shutil.rmtree,
-                    ensure_provider_credentials=ensure_provider_credentials,
-                    probe_models=_probe_models,
-                    resolve_visible_clis=_resolve_visible_clis,
-                )
-                _families_dirty = True
+            connect_result = tui_flow.handle_tui_connect_action(
+                current_cfg,
+                cli,
+                quick_connect_official=_quick_connect_official,
+                run_connect_wizard=run_connect_wizard,
+                refresh_runtime_state=_refresh_runtime_state_after_config_change,
+            )
+            current_cfg = connect_result["cfg"]
+            if connect_result["changed"]:
+                current_provider = connect_result["current_provider"]
+                default_models = connect_result["default_models"]
+                current_cli_names = connect_result["current_cli_names"]
+                _families_dirty = connect_result["families_dirty"]
             continue
 
         # ── Broker experiment ──
@@ -9808,20 +9817,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             # fall through to confirm
         if action_type == "profile" and cli == "agy":
             if action_data == _AGY_CONNECT_PROFILE_ID:
-                current_cfg, changed = _quick_connect_official(current_cfg, preset_cli="agy")
-                if changed:
-                    import shutil as _shutil
-
-                    current_provider, default_models, current_cli_names = tui_flow.refresh_tui_runtime_state_after_config_change(
-                        current_cfg,
-                        probe_cache=_PROBE_CACHE,
-                        probe_file_cache_dir=_PROBE_FILE_CACHE_DIR,
-                        rmtree=_shutil.rmtree,
-                        ensure_provider_credentials=ensure_provider_credentials,
-                        probe_models=_probe_models,
-                        resolve_visible_clis=_resolve_visible_clis,
-                    )
-                    _families_dirty = True
+                connect_result = tui_flow.handle_tui_connect_action(
+                    current_cfg,
+                    cli,
+                    quick_connect_official=_quick_connect_official,
+                    run_connect_wizard=run_connect_wizard,
+                    refresh_runtime_state=_refresh_runtime_state_after_config_change,
+                )
+                current_cfg = connect_result["cfg"]
+                if connect_result["changed"]:
+                    current_provider = connect_result["current_provider"]
+                    default_models = connect_result["default_models"]
+                    current_cli_names = connect_result["current_cli_names"]
+                    _families_dirty = connect_result["families_dirty"]
                 continue
 
             model_info, runtime_runtime = tui_flow.official_account_profile_context(

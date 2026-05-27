@@ -540,6 +540,38 @@ def refresh_tui_runtime_state_after_config_change(
     return current_provider, default_models, current_cli_names
 
 
+def handle_tui_connect_action(
+    cfg,
+    cli_name,
+    *,
+    quick_connect_official,
+    run_connect_wizard,
+    refresh_runtime_state,
+):
+    if cli_name == "agy":
+        cfg, changed = quick_connect_official(cfg, preset_cli="agy")
+    else:
+        cfg, changed = run_connect_wizard(cfg)
+    if not changed:
+        return {
+            "cfg": cfg,
+            "changed": False,
+            "current_provider": None,
+            "default_models": None,
+            "current_cli_names": None,
+            "families_dirty": False,
+        }
+    current_provider, default_models, current_cli_names = refresh_runtime_state(cfg)
+    return {
+        "cfg": cfg,
+        "changed": True,
+        "current_provider": current_provider,
+        "default_models": default_models,
+        "current_cli_names": current_cli_names,
+        "families_dirty": True,
+    }
+
+
 def apply_tui_priority_changes(
     cfg,
     priority_changes,

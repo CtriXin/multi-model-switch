@@ -7,6 +7,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    handle_tui_connect_action,
     last_used_model_info,
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
@@ -592,6 +593,90 @@ def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> 
         ("ensure", {"cfg": True}),
         ("probe", {"id": "provider"}, False),
         ("visible", {"cfg": True}, {"id": "provider"}, ["gpt-5.4"]),
+    ]
+
+
+def test_handle_tui_connect_action_uses_agy_quick_connect() -> None:
+    calls = []
+
+    def quick_connect(cfg, *, preset_cli):
+        calls.append(("quick", cfg, preset_cli))
+        return {"cfg": "updated"}, False
+
+    result = handle_tui_connect_action(
+        {"cfg": "initial"},
+        "agy",
+        quick_connect_official=quick_connect,
+        run_connect_wizard=lambda _cfg: (_ for _ in ()).throw(AssertionError("unused")),
+        refresh_runtime_state=lambda _cfg: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result == {
+        "cfg": {"cfg": "updated"},
+        "changed": False,
+        "current_provider": None,
+        "default_models": None,
+        "current_cli_names": None,
+        "families_dirty": False,
+    }
+    assert calls == [("quick", {"cfg": "initial"}, "agy")]
+
+
+def test_handle_tui_connect_action_uses_wizard_for_non_agy() -> None:
+    calls = []
+
+    def run_wizard(cfg):
+        calls.append(("wizard", cfg))
+        return {"cfg": "wizard"}, False
+
+    result = handle_tui_connect_action(
+        {"cfg": "initial"},
+        "codex",
+        quick_connect_official=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        run_connect_wizard=run_wizard,
+        refresh_runtime_state=lambda _cfg: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert result["cfg"] == {"cfg": "wizard"}
+    assert result["changed"] is False
+    assert result["families_dirty"] is False
+    assert calls == [("wizard", {"cfg": "initial"})]
+
+
+def test_handle_tui_connect_action_refreshes_changed_state() -> None:
+    calls = []
+    updated_cfg = {"cfg": "updated"}
+    provider = {"id": "provider"}
+    models = ["gpt-5.4"]
+    clis = ["codex", "agy"]
+
+    def run_wizard(cfg):
+        calls.append(("wizard", cfg))
+        return updated_cfg, True
+
+    def refresh(cfg):
+        calls.append(("refresh", cfg))
+        return provider, models, clis
+
+    result = handle_tui_connect_action(
+        {"cfg": "initial"},
+        "codex",
+        quick_connect_official=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        run_connect_wizard=run_wizard,
+        refresh_runtime_state=refresh,
+    )
+
+    assert result == {
+        "cfg": updated_cfg,
+        "changed": True,
+        "current_provider": provider,
+        "default_models": models,
+        "current_cli_names": clis,
+        "families_dirty": True,
+    }
+    assert calls == [
+        ("wizard", {"cfg": "initial"}),
+        ("refresh", updated_cfg),
     ]
 
 
