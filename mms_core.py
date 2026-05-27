@@ -9915,50 +9915,30 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if lb_result is None:
                 continue
             slot_provider_ids = load_balance_slot_provider_ids(lb_result)
-            model_info = dict(lb_result)
-            _trace_record(
-                "load balance",
-                cli=cli,
-                model=lb_result.get("model"),
-                lb_medium=lb_result.get("lb_medium"),
-                lb_light=lb_result.get("lb_light"),
-                profile=lb_result.get("lb_profile"),
+            from mms_tui_launcher_flow import resolve_load_balance_launch_context
+
+            model_info, runtime_runtime, cli, lb_error = resolve_load_balance_launch_context(
+                current_cfg,
+                cli,
+                lb_result,
+                current_provider,
+                default_models,
+                slot_provider_ids,
+                account_id=account_id,
+                provider_id=provider_id,
+                trace_record=_trace_record,
+                save_lb_history=save_lb_history,
+                resolve_lb_slot_provider=_resolve_lb_slot_provider,
+                resolve_best_provider=_resolve_best_provider,
+                choose_runtime_source=_choose_runtime_source,
+                trace_runtime_choice=_trace_runtime_choice,
             )
-            save_lb_history(
-                lb_result["model"],
-                lb_result.get("lb_medium", ""),
-                lb_result.get("lb_light", ""),
-                slot_providers=slot_provider_ids,
-                label=lb_result.get("lb_label"),
-            )
-            # 用 heavy model 的 best provider 作为 runtime
-            runtime_runtime = None
-            runtime_from_best_provider = False
-            heavy_provider_id = slot_provider_ids.get("heavy")
-            if heavy_provider_id:
-                runtime_runtime, slot_error = _resolve_lb_slot_provider(
-                    current_cfg, cli, lb_result["model"], heavy_provider_id
-                )
-                if slot_error:
-                    console.print(f"[yellow]{slot_error}[/yellow]")
-                    continue
-                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=f"profile provider:{heavy_provider_id}")
-            else:
-                runtime_runtime, _ = _resolve_best_provider(
-                    current_cfg, lb_result["model"], current_provider, default_models, cli_name=cli
-                )
-                runtime_from_best_provider = runtime_runtime is not None
-            if runtime_runtime is None:
-                runtime_runtime, _, cli = _choose_runtime_source(
-                    current_cfg, cli, current_provider, default_models,
-                    account_id=account_id, provider_id=provider_id,
-                    model_info=model_info, allow_selected_model_accounts=True,
-                )
+            if lb_error:
+                console.print(f"[yellow]{lb_error}[/yellow]")
+                continue
             if runtime_runtime is None:
                 console.print(f"[yellow]{cli} 没有可用 provider 承载负载模式[/yellow]")
                 continue
-            if runtime_from_best_provider:
-                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
 
             # 止血：暂时禁用跨 provider slot 切换，避免展示层和执行层 provider 漂移。
             # fall through to confirm below

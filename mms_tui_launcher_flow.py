@@ -315,6 +315,75 @@ def load_balance_slot_provider_ids(lb_result):
     }
 
 
+def resolve_load_balance_launch_context(
+    cfg,
+    cli_name,
+    lb_result,
+    current_provider,
+    default_models,
+    slot_provider_ids,
+    *,
+    account_id=None,
+    provider_id=None,
+    trace_record,
+    save_lb_history,
+    resolve_lb_slot_provider,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_runtime_choice,
+):
+    model_info = dict(lb_result)
+    trace_record(
+        "load balance",
+        cli=cli_name,
+        model=lb_result.get("model"),
+        lb_medium=lb_result.get("lb_medium"),
+        lb_light=lb_result.get("lb_light"),
+        profile=lb_result.get("lb_profile"),
+    )
+    save_lb_history(
+        lb_result["model"],
+        lb_result.get("lb_medium", ""),
+        lb_result.get("lb_light", ""),
+        slot_providers=slot_provider_ids,
+        label=lb_result.get("lb_label"),
+    )
+    runtime = None
+    runtime_from_best_provider = False
+    heavy_provider_id = slot_provider_ids.get("heavy")
+    if heavy_provider_id:
+        runtime, slot_error = resolve_lb_slot_provider(
+            cfg, cli_name, lb_result["model"], heavy_provider_id
+        )
+        if slot_error:
+            return model_info, None, cli_name, slot_error
+        trace_runtime_choice(
+            "runtime resolve",
+            runtime,
+            launch_cli=cli_name,
+            choice=f"profile provider:{heavy_provider_id}",
+        )
+    else:
+        runtime, _ = resolve_best_provider(
+            cfg, lb_result["model"], current_provider, default_models, cli_name=cli_name
+        )
+        runtime_from_best_provider = runtime is not None
+    if runtime is None:
+        runtime, _, cli_name = choose_runtime_source(
+            cfg,
+            cli_name,
+            current_provider,
+            default_models,
+            account_id=account_id,
+            provider_id=provider_id,
+            model_info=model_info,
+            allow_selected_model_accounts=True,
+        )
+    if runtime_from_best_provider:
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice="best provider")
+    return model_info, runtime, cli_name, ""
+
+
 def last_used_model_info(action_data):
     return (
         action_data.get("model_info")

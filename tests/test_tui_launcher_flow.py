@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
+    resolve_load_balance_launch_context,
     resolve_last_used_launch_context,
     safe_tui_call,
     selected_model_launch_context,
@@ -189,6 +190,127 @@ def test_load_balance_slot_provider_ids_drops_empty_slots() -> None:
             }
         }
     ) == {"heavy": "provider-heavy"}
+
+
+def test_resolve_load_balance_launch_context_uses_heavy_slot_provider() -> None:
+    trace_records = []
+    trace_choices = []
+    history_calls = []
+    runtime = {"id": "heavy-provider"}
+
+    model_info, selected_runtime, cli_name, error = resolve_load_balance_launch_context(
+        {},
+        "codex",
+        {"model": "gpt-5.4", "lb_medium": "qwen3", "lb_light": "gpt-5-mini", "lb_label": "balanced"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        {"heavy": "provider-heavy"},
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        save_lb_history=lambda *args, **kwargs: history_calls.append((args, kwargs)),
+        resolve_lb_slot_provider=lambda *_args: (runtime, ""),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert model_info["model"] == "gpt-5.4"
+    assert selected_runtime is runtime
+    assert cli_name == "codex"
+    assert error == ""
+    assert trace_records == [
+        (
+            ("load balance",),
+            {
+                "cli": "codex",
+                "model": "gpt-5.4",
+                "lb_medium": "qwen3",
+                "lb_light": "gpt-5-mini",
+                "profile": None,
+            },
+        )
+    ]
+    assert history_calls == [
+        (
+            ("gpt-5.4", "qwen3", "gpt-5-mini"),
+            {"slot_providers": {"heavy": "provider-heavy"}, "label": "balanced"},
+        )
+    ]
+    assert trace_choices == [
+        (("runtime resolve", runtime), {"launch_cli": "codex", "choice": "profile provider:provider-heavy"})
+    ]
+
+
+def test_resolve_load_balance_launch_context_returns_slot_error() -> None:
+    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
+        {},
+        "codex",
+        {"model": "gpt-5.4"},
+        {},
+        [],
+        {"heavy": "missing"},
+        trace_record=lambda *_args, **_kwargs: None,
+        save_lb_history=lambda *_args, **_kwargs: None,
+        resolve_lb_slot_provider=lambda *_args: (None, "missing provider"),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime is None
+    assert cli_name == "codex"
+    assert error == "missing provider"
+
+
+def test_resolve_load_balance_launch_context_uses_best_provider_or_picker() -> None:
+    best_runtime = {"id": "best"}
+    trace_choices = []
+
+    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
+        {"cfg": True},
+        "claude",
+        {"model": "claude-sonnet-4.5"},
+        {"id": "current"},
+        ["claude-sonnet-4.5"],
+        {},
+        trace_record=lambda *_args, **_kwargs: None,
+        save_lb_history=lambda *_args, **_kwargs: None,
+        resolve_lb_slot_provider=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_best_provider=lambda *_args, **_kwargs: (best_runtime, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "claude-sonnet-4.5"}
+    assert runtime is best_runtime
+    assert cli_name == "claude"
+    assert error == ""
+    assert trace_choices == [
+        (("runtime resolve", best_runtime), {"launch_cli": "claude", "choice": "best provider"})
+    ]
+
+    chosen_runtime = {"id": "chosen"}
+    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
+        {},
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        {},
+        account_id="acct",
+        provider_id="prov",
+        trace_record=lambda *_args, **_kwargs: None,
+        save_lb_history=lambda *_args, **_kwargs: None,
+        resolve_lb_slot_provider=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (chosen_runtime, ["gpt-5.4"], "opencode"),
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime is chosen_runtime
+    assert cli_name == "opencode"
+    assert error == ""
 
 
 def test_last_used_model_info_preserves_dict_model_info() -> None:
