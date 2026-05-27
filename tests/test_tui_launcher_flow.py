@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mms_tui_launcher_flow import (
+    last_used_model_info,
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
     provider_browse_options,
@@ -132,3 +133,12 @@ def test_load_balance_slot_provider_ids_drops_empty_slots() -> None:
             }
         }
     ) == {"heavy": "provider-heavy"}
+
+
+def test_last_used_model_info_preserves_dict_model_info() -> None:
+    model_info = {"model": "gpt-5.4", "provider": "p1"}
+    assert last_used_model_info({"model": "fallback", "model_info": model_info}) is model_info
+
+
+def test_last_used_model_info_falls_back_to_model_name() -> None:
+    assert last_used_model_info({"model": "gpt-5.4", "model_info": "bad"}) == {"model": "gpt-5.4"}

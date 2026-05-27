@@ -292,3 +292,11 @@ def load_balance_slot_provider_ids(lb_result):
         for slot, provider_id in (lb_result.get("lb_slot_providers") or {}).items()
         if provider_id
     }
+
+
+def last_used_model_info(action_data):
+    return (
+        action_data.get("model_info")
+        if isinstance(action_data.get("model_info"), dict)
+        else {"model": action_data["model"]}
+    )

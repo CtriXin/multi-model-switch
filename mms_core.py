@@ -10358,7 +10358,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 上次使用 ──
         elif action_type == "last":
-            model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
+            from mms_tui_launcher_flow import last_used_model_info
+
+            model_info = last_used_model_info(action_data)
             _trace_record("last used", cli=cli, model=action_data.get("model"))
             runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
                 current_cfg, cli, action_data, default_models
@@ -10444,7 +10446,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 action_data = last_by_cli.get(cli) or {}
                 if not action_data.get("model"):
                     continue
-                model_info = action_data.get("model_info") if isinstance(action_data.get("model_info"), dict) else {"model": action_data["model"]}
+                from mms_tui_launcher_flow import last_used_model_info
+
+                model_info = last_used_model_info(action_data)
                 _trace_record("last used", cli=cli, model=action_data.get("model"))
                 runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
                     current_cfg, cli, action_data, default_models
