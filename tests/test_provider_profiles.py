@@ -68,7 +68,7 @@ def test_mimo_openai_profile_uses_official_token_parameter(monkeypatch, tmp_path
         thinking_enabled=True,
     )
 
-    assert profile_id == "mimo"
+    assert profile_id == "mimo-openai"
     assert payload["thinking"] == {"type": "enabled"}
     assert payload["max_completion_tokens"] == 4096
     assert "max_tokens" not in payload
@@ -158,12 +158,39 @@ def test_profile_context_window_and_references(monkeypatch, tmp_path):
         provider_id="mimo",
         base_url="https://api.xiaomimimo.com/anthropic",
     ) == 1_000_000
+    assert profiles.profile_context_window(
+        "mimo-v2.5[1m]",
+        provider_id="mimo",
+        base_url="https://api.xiaomimimo.com/anthropic",
+    ) == 1_000_000
+    assert profiles.profile_context_window(
+        "mimo-v2.5",
+        provider_id="mimo-direct-openai",
+        base_url="https://api.xiaomimimo.com/v1",
+    ) == 1_048_576
+    assert profiles.profile_context_window(
+        "mimo-v2.5-pro",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == 1_048_576
     assert profiles.profile_model_alias(
         "mimo-v2.5-pro[1m]",
         protocol="anthropic_messages",
         provider_id="mimo-direct-anthropic",
         base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
     ) == "mimo-v2.5-pro"
+    assert profiles.profile_model_alias(
+        "mimo-v2.5[1m]",
+        protocol="anthropic_messages",
+        provider_id="mimo-direct-anthropic",
+        base_url="https://token-plan-cn.xiaomimimo.com/anthropic",
+    ) == "mimo-v2.5"
+    assert profiles.profile_model_alias(
+        "mimo-v2.5",
+        protocol="openai_chat",
+        provider_id="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+    ) == "xiaomi/mimo-v2.5"
     assert profiles.profile_model_alias(
         "mimo-v2.5-pro",
         protocol="anthropic_messages",

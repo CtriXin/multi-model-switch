@@ -340,12 +340,25 @@ _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _ONE_M_SUFFIX_CONTEXT_WINDOWS = {
     # MiMo documents [1m] as an opt-in long-context suffix for Claude Code.
     "mimo-v2.5-pro": 1_000_000,
+    "mimo-v2.5": 1_000_000,
 }
 _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS = {
     # The base wire model can support 1M in some surfaces, but Claude Code must
     # opt in with the selector suffix before MMS advertises that large window.
     "mimo-v2.5-pro": 262_144,
+    "mimo-v2.5": 262_144,
 }
+_MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS = {
+    "mimo-v2.5-pro": 1_048_576,
+    "mimo-v2.5": 1_048_576,
+}
+_MIMO_PLAIN_ONE_M_PROVIDER_HINTS = (
+    "openrouter",
+    "mimo-openai",
+    "mimo-direct-openai",
+    "xiaomi-openai",
+    "openai-mimo",
+)
 
 
 
@@ -375,6 +388,11 @@ def _coerce_context_window(value):
     except Exception:
         return None
     return window if window > 0 else None
+
+
+def _provider_advertises_plain_mimo_1m(provider_id):
+    provider = str(provider_id or "").strip().lower()
+    return bool(provider and any(token in provider for token in _MIMO_PLAIN_ONE_M_PROVIDER_HINTS))
 
 
 def _load_model_context_overrides():
@@ -481,9 +499,14 @@ def _lookup_context_window(model_name, provider_id=None):
         if suffixed_window is not None:
             return suffixed_window
     else:
-        safe_base_window = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get(lower)
-        if safe_base_window is not None:
-            return safe_base_window
+        if _provider_advertises_plain_mimo_1m(provider_key):
+            plain_one_m_window = _MIMO_PLAIN_ONE_M_CONTEXT_WINDOWS.get(lower)
+            if plain_one_m_window is not None:
+                return plain_one_m_window
+        else:
+            safe_base_window = _ONE_M_SUFFIX_BASE_SAFE_CONTEXT_WINDOWS.get(lower)
+            if safe_base_window is not None:
+                return safe_base_window
 
     if provider_key:
         provider_clean = _provider_override_lookup(clean, lower)
@@ -3579,9 +3602,11 @@ def _is_mms_managed_hook_command(command_text):
         "xmem-session-start-hook.sh",
         "xmem-session-end-hook.sh",
         "xmem-gateway-hook.sh",
+        "claude-map-auto-index.sh",
         "nsr-claude-hook.sh",
         "nsr-codex-hook.sh",
         "nsr-builtin-hook.py",
+        "scmp_hook.py --host codex",
         "caveman-activate.js",
         "caveman-mode-tracker.js",
         "everything-claude-code",
@@ -4257,8 +4282,13 @@ def _normalize_codex_hook_trust_toml_layout(config_text):
         text,
     )
     text = re.sub(
-        r'(?m)^(?P<header>\[hooks\.state\."(?:\\.|[^"\\])*"\])(?=\s*trusted_hash\s*=)',
+        r'(?m)^(?P<header>\[hooks\.state\."(?:\\.|[^"\\])*"\])(?=[ \t]*trusted_hash\s*=)',
         r'\g<header>' + "\n",
+        text,
+    )
+    text = re.sub(
+        r'(?m)^(?P<header>\[hooks\.state\."(?:\\.|[^"\\])*"\]\n)(?:[ \t]*\n)+(?P<hash>[ \t]*trusted_hash\s*=)',
+        r'\g<header>\g<hash>',
         text,
     )
     return text
@@ -4304,6 +4334,223 @@ def _replace_codex_hook_trust_hashes(config_text, trusted_hashes_by_key):
         )
         text = text[:match.end()] + block + text[block_end:]
     return _normalize_codex_hook_trust_toml_layout(text)
+
+
+def _append_codex_exact_hook_trust_hashes(config_text, trusted_hashes_by_key):
+    text = _normalize_codex_hook_trust_toml_layout(config_text)
+    replacements = {
+        str(key): str(value)
+        for key, value in (trusted_hashes_by_key or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    if not replacements:
+        return text
+
+    existing_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(text)
+    }
+    updates = {
+        key: trusted_hash
+        for key, trusted_hash in replacements.items()
+        if key in existing_hashes and existing_hashes.get(key) != trusted_hash
+    }
+    if updates:
+        text = _replace_codex_hook_trust_hashes(text, updates)
+
+    missing = [
+        (key, trusted_hash)
+        for key, trusted_hash in replacements.items()
+        if key not in existing_hashes
+    ]
+    if not missing:
+        return _normalize_codex_hook_trust_toml_layout(text)
+
+    if text and not text.endswith("\n"):
+        text += "\n"
+    for key, trusted_hash in missing:
+        if text and not text.endswith("\n\n"):
+            text += "\n"
+        text += f"[hooks.state.{_toml_quote(key)}]\n"
+        text += f"trusted_hash = {_toml_quote(trusted_hash)}\n"
+    return _normalize_codex_hook_trust_toml_layout(text)
+
+
+def _codex_hook_trust_refresh_enabled():
+    raw = str(os.environ.get("MMS_CODEX_HOOK_TRUST_REFRESH", "1") or "").strip().lower()
+    return raw not in {"0", "false", "no", "off", "disable", "disabled"}
+
+
+def _codex_app_server_hooks_list(codex_home, *, cwds=None, timeout=4.0):
+    import select
+
+    codex_home = str(codex_home or "").strip()
+    if not codex_home:
+        return []
+    codex_bin = shutil.which("codex")
+    if not codex_bin and os.path.isfile("/opt/homebrew/bin/codex"):
+        codex_bin = "/opt/homebrew/bin/codex"
+    if not codex_bin:
+        return []
+
+    env = os.environ.copy()
+    env["CODEX_HOME"] = codex_home
+    env["HOME"] = _real_user_home()
+    env.setdefault("LANG", "zh_CN.UTF-8")
+    env.setdefault("LC_ALL", "zh_CN.UTF-8")
+    cwds = [str(cwd) for cwd in (cwds or []) if str(cwd or "").strip()]
+    if not cwds:
+        cwds = [_safe_getcwd()]
+
+    proc = None
+
+    def _send(method, *, request_id=None, params=None):
+        message = {"method": method}
+        if request_id is not None:
+            message["id"] = request_id
+        if params is not None:
+            message["params"] = params
+        proc.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+        proc.stdin.flush()
+
+    def _recv(request_id, deadline):
+        while True:
+            time_left = deadline - perf_counter()
+            if time_left <= 0:
+                break
+            ready, _, _ = select.select([proc.stdout], [], [], min(0.25, max(0.01, time_left)))
+            if not ready:
+                continue
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                message = json.loads(line)
+            except Exception:
+                continue
+            if message.get("id") == request_id:
+                return message
+        return {}
+
+    try:
+        proc = subprocess.Popen(
+            [codex_bin, "app-server", "--listen", "stdio://"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        deadline = perf_counter() + max(1.0, float(timeout or 4.0))
+        _send(
+            "initialize",
+            request_id=1,
+            params={"clientInfo": {"name": "mms-hook-trust", "version": "1"}, "capabilities": {}},
+        )
+        _recv(1, deadline)
+        _send("initialized")
+        _send("hooks/list", request_id=2, params={"cwds": cwds})
+        response = _recv(2, deadline)
+        data = ((response.get("result") or {}).get("data") or []) if isinstance(response, dict) else []
+        hooks = []
+        for entry in data:
+            if isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
+                hooks.extend(entry.get("hooks") or [])
+        return hooks
+    except Exception:
+        return []
+    finally:
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=1)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+
+def _refresh_codex_current_hook_trust_cache(
+    target_codex_dir,
+    *,
+    cwds=None,
+    managed_only=False,
+    timeout=4.0,
+    allow_non_real_home=False,
+):
+    """Use the installed Codex app-server as source of truth for hook hashes."""
+    if not _codex_hook_trust_refresh_enabled():
+        return {"status": "disabled"}
+
+    target_codex_dir = str(target_codex_dir or "").strip()
+    if not target_codex_dir:
+        return {}
+    if not allow_non_real_home:
+        try:
+            real_home = os.path.realpath(_real_user_home())
+            target_real = os.path.realpath(target_codex_dir)
+            if real_home and not (target_real == real_home or target_real.startswith(real_home + os.sep)):
+                return {"status": "skipped-non-real-home"}
+        except OSError:
+            return {"status": "skipped-non-real-home"}
+    target_hooks_path = os.path.join(target_codex_dir, "hooks.json")
+    target_config_path = os.path.join(target_codex_dir, "config.toml")
+    if not os.path.isfile(target_hooks_path):
+        return {}
+
+    try:
+        target_hooks_real = os.path.realpath(target_hooks_path)
+    except OSError:
+        target_hooks_real = target_hooks_path
+
+    exact_hashes = {}
+    for hook in _codex_app_server_hooks_list(target_codex_dir, cwds=cwds, timeout=timeout):
+        if not isinstance(hook, dict):
+            continue
+        try:
+            source_real = os.path.realpath(str(hook.get("sourcePath") or ""))
+        except OSError:
+            source_real = str(hook.get("sourcePath") or "")
+        if source_real != target_hooks_real:
+            continue
+        command = str(hook.get("command") or "")
+        if managed_only and not _is_mms_managed_hook_command(command):
+            continue
+        key = str(hook.get("key") or "").strip()
+        current_hash = str(hook.get("currentHash") or "").strip()
+        if key and current_hash:
+            exact_hashes[key] = current_hash
+
+    if not exact_hashes:
+        return {"status": "no-current-hashes"}
+
+    try:
+        with open(target_config_path, "r", encoding="utf-8") as handle:
+            config_text = handle.read()
+    except Exception:
+        config_text = ""
+    rendered = _append_codex_exact_hook_trust_hashes(config_text, exact_hashes)
+    if rendered == _normalize_codex_hook_trust_toml_layout(config_text):
+        return {"status": "fresh", "trusted_entries": len(exact_hashes)}
+    try:
+        atomic_write_text(target_config_path, rendered, mode=0o600)
+    except Exception:
+        return {"status": "write-failed"}
+    before_hashes = {
+        record["key"]: record["trusted_hash"]
+        for record in _codex_hook_trust_records_from_config(config_text)
+    }
+    return {
+        "status": "refreshed",
+        "trusted_entries": len(exact_hashes),
+        "updated_entries": sum(1 for key, value in exact_hashes.items() if before_hashes.get(key) != value),
+        "scope": "mms-managed" if managed_only else "all-target-hooks",
+    }
 
 
 def _collect_codex_hook_trust_seed_sources(codex_roots):
@@ -6616,6 +6863,18 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 def _materialize_codex_session_entry(entry, src, dst):
     if os.path.exists(dst) or os.path.islink(dst):
+        if entry == "skills" and os.path.isdir(src) and os.path.isdir(os.path.realpath(dst)):
+            merged_dir = os.path.realpath(dst)
+            try:
+                if os.path.samefile(src, merged_dir):
+                    return
+            except Exception:
+                pass
+            for item in os.listdir(src):
+                link = os.path.join(merged_dir, item)
+                if os.path.exists(link) or os.path.islink(link):
+                    continue
+                os.symlink(os.path.join(src, item), link)
         return
     if entry in _CODEX_COPY_INTO_SESSION_FILES and os.path.isfile(src):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -8098,7 +8357,10 @@ def _is_mimo_one_m_context_selector(model_name):
     normalized = _normalized_model_name(model_name).lower()
     if "/" in normalized:
         normalized = normalized.rsplit("/", 1)[-1]
-    return normalized == f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}"
+    return normalized in {
+        f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}",
+        f"mimo-v2.5{_ONE_M_CONTEXT_SUFFIX}",
+    }
 
 
 def _claude_visible_model_name(model_name, *, fallback_model=""):
@@ -8738,8 +9000,6 @@ def _codex_gateway_env(runtime, base_url, model_info=None):
     from mms_codex_env import build_codex_gateway_env
 
     return build_codex_gateway_env(runtime, base_url, model_info=model_info)
-
-
 
 def _is_gpt_model(model_name):
     """Check if a model name is a GPT/OpenAI model (supports Responses API natively)."""

@@ -39,10 +39,14 @@ The patch engine intentionally supports only data-driven field patches. It does 
 | Kimi Code | `https://api.kimi.com/coding/v1` + `/chat/completions` | `https://api.kimi.com/coding/` + `/v1/messages` | Thinking toggle metadata only; preserve normal client headers |
 | GLM / Z.ai | `https://api.z.ai/api/paas/v4/` + `/chat/completions` | `https://api.z.ai/api/anthropic` + `/v1/messages` | `thinking.type` enabled/disabled |
 
-MiMo long context is opt-in by model suffix. Keep ordinary `mimo-v2.5-pro`
-at 262144 tokens; expose `mimo-v2.5-pro[1m]` only on direct MiMo routes. The
-Token Plan Anthropic endpoint rejects the literal suffixed API model, so MMS
-keeps `[1m]` as a local selector and forwards `mimo-v2.5-pro` with the
+MiMo context is route-scoped. Direct MiMo OpenAI-compatible `/v1` and
+OpenRouter `xiaomi/mimo-v2.5*` routes advertise 1048576 context for plain
+`mimo-v2.5-pro` and `mimo-v2.5`. Direct MiMo Claude/Anthropic routes keep the
+ordinary plain model at 262144 tokens unless the local `[1m]` selector is used.
+
+For direct MiMo Claude/Anthropic routes, MMS exposes `mimo-v2.5-pro[1m]` and
+`mimo-v2.5[1m]` as local selectors. The Token Plan Anthropic endpoint rejects
+literal suffixed API models, so MMS forwards the base model and adds the
 `context-1m-2025-08-07` Anthropic beta header.
 
 MiMo's OpenCode integration is separate from Claude Code: direct MiMo OpenCode
@@ -61,6 +65,7 @@ documented 1048576 context / 131072 output limits for `mimo-v2.5-pro` and
 - MiMo OpenAI API: https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md
 - MiMo OpenCode integration: https://platform.xiaomimimo.com/static/docs/integration/opencode.md
 - MiMo Claude Code integration: https://platform.xiaomimimo.com/static/docs/integration/claudecode.md
+- OpenRouter models API: https://openrouter.ai/api/v1/models
 - MiniMax Anthropic API: https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 - MiniMax OpenAI API: https://platform.minimaxi.com/docs/api-reference/text-openai-api
 - DeepSeek Chat Completion: https://api-docs.deepseek.com/api/create-chat-completion

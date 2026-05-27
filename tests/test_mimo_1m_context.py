@@ -29,6 +29,20 @@ def test_mimo_pro_1m_suffix_uses_one_m_context(monkeypatch):
     )
 
 
+def test_mimo_non_pro_1m_suffix_uses_one_m_context(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+
+    assert (
+        mms_launchers._lookup_context_window(
+            "mimo-v2.5[1m]",
+            provider_id="mimo-direct-anthropic",
+        )
+        == 1_000_000
+    )
+
+
 def test_mimo_pro_without_1m_suffix_keeps_safe_context(monkeypatch):
     import mms_launchers
 
@@ -41,6 +55,92 @@ def test_mimo_pro_without_1m_suffix_keeps_safe_context(monkeypatch):
         )
         == 262_144
     )
+
+
+def test_mimo_without_1m_suffix_keeps_safe_context_on_anthropic(monkeypatch):
+    import mms_launchers
+
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+
+    assert (
+        mms_launchers._lookup_context_window(
+            "mimo-v2.5",
+            provider_id="mimo-direct-anthropic",
+        )
+        == 262_144
+    )
+
+
+def test_mimo_plain_model_uses_one_m_on_openrouter_and_openai_routes(monkeypatch, tmp_path):
+    import mms_launchers
+    import mms_provider_profiles
+
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(mms_launchers, "_load_model_context_overrides", _empty_context_overrides)
+    mms_provider_profiles.load_provider_profiles.cache_clear()
+
+    assert mms_launchers._lookup_context_window("mimo-v2.5", provider_id="openrouter") == 1_048_576
+    assert mms_launchers._lookup_context_window("mimo-v2.5-pro", provider_id="openrouter") == 1_048_576
+    assert mms_launchers._lookup_context_window("mimo-v2.5", provider_id="mimo-direct-openai") == 1_048_576
+    assert mms_launchers._lookup_context_window("mimo-v2.5-pro", provider_id="mimo-direct-openai") == 1_048_576
+
+
+def test_direct_mimo_anthropic_model_patch_exposes_non_pro_selector():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "direct-mimo",
+            "anthropic_base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" in patched["models"]
+    assert "mimo-v2.5-pro[1m]" in patched["models"]
+    assert patched["model_sources"]["mimo-v2.5[1m]"] == "derived_alias"
+
+
+def test_direct_mimo_base_url_anthropic_model_patch_exposes_non_pro_selector():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "direct-mimo",
+            "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" in patched["models"]
+    assert "mimo-v2.5-pro[1m]" in patched["models"]
+
+
+def test_openrouter_mimo_model_patch_does_not_expose_selector_alias():
+    import mms_core
+
+    patched = mms_core._apply_provider_model_patch(
+        {
+            "id": "openrouter",
+            "openai_base_url": "https://openrouter.ai/api/v1",
+        },
+        {
+            "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "raw_models": ["mimo-v2.5", "mimo-v2.5-pro"],
+            "base_source": "remote",
+        },
+    )
+
+    assert "mimo-v2.5[1m]" not in patched["models"]
+    assert "mimo-v2.5-pro[1m]" not in patched["models"]
 
 
 def test_exact_1m_context_override_wins_before_suffix_stripping(monkeypatch):
@@ -79,6 +179,23 @@ def test_mimo_1m_selector_is_not_exported_as_claude_selected_model():
     assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "mimo-v2.5-pro"
     assert env["ANTHROPIC_REASONING_MODEL"] == "mimo-v2.5-pro"
     assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "mimo-v2.5-pro"
+
+
+def test_mimo_non_pro_1m_selector_is_not_exported_as_claude_selected_model():
+    import mms_launchers
+
+    env = {}
+    mms_launchers._apply_claude_model_overrides(
+        env,
+        "mimo-v2.5[1m]",
+        enable_1m=True,
+    )
+
+    assert env["ANTHROPIC_MODEL"] == "mimo-v2.5"
+    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "mimo-v2.5"
+    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "mimo-v2.5"
+    assert env["ANTHROPIC_REASONING_MODEL"] == "mimo-v2.5"
+    assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "mimo-v2.5"
 
 
 def test_non_mimo_1m_selector_is_not_stripped_by_mimo_guard():

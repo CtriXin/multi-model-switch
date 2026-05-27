@@ -251,6 +251,154 @@
         }
       }
     },
+    "mimo-openai": {
+      "label": "Xiaomi MiMo OpenAI-compatible",
+      "match": {
+        "provider_id_contains": [
+          "mimo-openai",
+          "mimo-direct-openai",
+          "xiaomi-openai",
+          "openai-mimo"
+        ],
+        "base_url_contains": [
+          "api.xiaomimimo.com/v1",
+          "token-plan-cn.xiaomimimo.com/v1"
+        ],
+        "model_prefixes": [
+          "mimo"
+        ]
+      },
+      "references": [
+        "https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md",
+        "https://platform.xiaomimimo.com/static/docs/integration/opencode.md",
+        "https://platform.xiaomimimo.com/static/docs/integration/codex.md"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://api.xiaomimimo.com/v1",
+        "token_plan_openai_base_url": "https://token-plan-cn.xiaomimimo.com/v1"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "api-key",
+          "authorization_bearer"
+        ]
+      },
+      "thinking": {
+        "supported": true,
+        "ui": "thinking_toggle",
+        "default_enabled": true,
+        "roundtrip": "reasoning_content"
+      },
+      "body_patches": {
+        "openai_chat": {
+          "thinking_on": {
+            "thinking.type": "enabled"
+          },
+          "thinking_off": {
+            "thinking.type": "disabled"
+          },
+          "classify": {
+            "thinking.type": "disabled"
+          }
+        }
+      },
+      "parameter_aliases": {
+        "openai_chat": {
+          "max_tokens": "max_completion_tokens"
+        }
+      },
+      "context_windows": {
+        "mimo-v2.5-pro[1m]": 1048576,
+        "mimo-v2.5[1m]": 1048576,
+        "mimo-v2.5-pro": 1048576,
+        "mimo-v2.5": 1048576
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://api.xiaomimimo.com/v1",
+          "request_path": "/chat/completions"
+        },
+        "token_plan_openai_chat": {
+          "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+          "request_path": "/chat/completions"
+        }
+      },
+      "model_aliases": {
+        "openai_chat": {
+          "mimo-v2.5-pro[1m]": {
+            "target": "mimo-v2.5-pro",
+            "match_target": false
+          },
+          "mimo-v2.5[1m]": {
+            "target": "mimo-v2.5",
+            "match_target": false
+          }
+        }
+      },
+      "max_output_tokens": {
+        "mimo-v2.5-pro[1m]": 131072,
+        "mimo-v2.5[1m]": 131072,
+        "mimo-v2.5-pro": 131072,
+        "mimo-v2.5": 131072
+      }
+    },
+    "openrouter-xiaomi-mimo": {
+      "label": "OpenRouter Xiaomi MiMo",
+      "match": {
+        "provider_id_contains": [
+          "openrouter"
+        ],
+        "base_url_contains": [
+          "openrouter.ai"
+        ],
+        "model_prefixes": [
+          "mimo"
+        ]
+      },
+      "references": [
+        "https://openrouter.ai/api/v1/models",
+        "https://openrouter.ai/xiaomi/mimo-v2.5",
+        "https://openrouter.ai/xiaomi/mimo-v2.5-pro"
+      ],
+      "endpoints": {
+        "openai_base_url": "https://openrouter.ai/api/v1"
+      },
+      "auth_headers": {
+        "openai_chat": [
+          "authorization_bearer"
+        ]
+      },
+      "context_windows": {
+        "mimo-v2.5-pro[1m]": 1048576,
+        "mimo-v2.5[1m]": 1048576,
+        "mimo-v2.5-pro": 1048576,
+        "mimo-v2.5": 1048576
+      },
+      "api_formats": {
+        "openai_chat": {
+          "base_url": "https://openrouter.ai/api/v1",
+          "request_path": "/chat/completions"
+        }
+      },
+      "model_aliases": {
+        "openai_chat": {
+          "mimo-v2.5-pro[1m]": {
+            "target": "xiaomi/mimo-v2.5-pro",
+            "match_target": false
+          },
+          "mimo-v2.5[1m]": {
+            "target": "xiaomi/mimo-v2.5",
+            "match_target": false
+          },
+          "mimo-v2.5-pro": {
+            "target": "xiaomi/mimo-v2.5-pro"
+          },
+          "mimo-v2.5": {
+            "target": "xiaomi/mimo-v2.5"
+          }
+        }
+      }
+    },
     "mimo": {
       "label": "Xiaomi MiMo",
       "match": {
@@ -327,6 +475,7 @@
       },
       "context_windows": {
         "mimo-v2.5-pro[1m]": 1000000,
+        "mimo-v2.5[1m]": 1000000,
         "mimo-v2.5-pro": 262144,
         "mimo-v2.5": 262144,
         "mimo-v2-pro": 262144,
@@ -356,11 +505,16 @@
           "mimo-v2.5-pro[1m]": {
             "target": "mimo-v2.5-pro",
             "match_target": false
+          },
+          "mimo-v2.5[1m]": {
+            "target": "mimo-v2.5",
+            "match_target": false
           }
         }
       },
       "max_output_tokens": {
         "mimo-v2.5-pro[1m]": 131072,
+        "mimo-v2.5[1m]": 131072,
         "mimo-v2.5-pro": 131072,
         "mimo-v2.5": 131072
       }

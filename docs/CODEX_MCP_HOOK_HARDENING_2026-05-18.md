@@ -83,6 +83,8 @@ This is now a hard MMS contract:
 - In runtime `bypass` mode, MMS Codex must append both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`; removing the second flag reintroduces startup review popups.
 - Trust imported from real `~/.codex/hooks.json` is authoritative for matching hooks. Sibling `codex-gateway/s/<pid>/.codex/config.toml` entries may seed missing trust only; they must not override real-home trust for the same command/fingerprint.
 - Do not treat an old per-PID session config as the durable source of truth for hook trust. The durable source is the stable gateway `.codex/config.toml`, refreshed from real-home trust with sibling sessions as fallback.
+- Codex upgrades can change hook hash normalization. MMS must refresh stable gateway hook trust from the current Codex `app-server` `hooks/list` `currentHash` before launch.
+- Real `~/.codex/config.toml` may only be auto-refreshed for MMS-managed hook trust hashes, so app-server children that use real `CODEX_HOME` do not reintroduce the prompt. Do not auto-trust arbitrary project/user hooks.
 
 Regression coverage:
 
@@ -92,7 +94,8 @@ Regression coverage:
 
 ## Safety Rules Preserved
 
-- No direct write to real `~/.claude.json` or real `~/.codex/config.toml` was required.
+- No direct write to real `~/.claude.json` is required.
+- After the Codex 0.134 upgrade, the only allowed real `~/.codex/config.toml` write is a scoped MMS-managed hook trust hash refresh from current Codex `hooks/list`; no auth, account, model, or provider state is copied from real HOME.
 - Missing optional MCP binaries are dropped from generated session config instead of blocking launch.
 - `disabled_session_surfaces.mcp` still wins before normalization.
 - Real HOME command resolution reuses existing MMS real-home/NVM/Homebrew discovery without switching the user's default Node.

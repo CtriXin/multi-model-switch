@@ -50,6 +50,7 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
         _resolve_web_access_root,
         _resolve_weber_root,
         _resolve_xmem_root,
+        _refresh_codex_current_hook_trust_cache,
         _runtime_caveman_enabled,
         _runtime_nsr_enabled,
         _safe_getcwd,
@@ -371,6 +372,18 @@ def build_codex_gateway_env(runtime, base_url, model_info=None):
             source_hook_payloads_by_path=launch_trust_payloads,
         )
         atomic_write_json(hooks_path, session_hooks, mode=0o600)
+        # Codex upgrades can change hook hash normalization. Refresh from the
+        # current app-server instead of trusting stale hashes copied from cache.
+        _refresh_codex_current_hook_trust_cache(
+            gateway_codex_dir,
+            cwds=[_safe_getcwd()],
+            managed_only=False,
+        )
+        _refresh_codex_current_hook_trust_cache(
+            real_codex_dir,
+            cwds=[_safe_getcwd()],
+            managed_only=True,
+        )
 
     # symlink 真实 ~/.codex 下的其余子项（skills、memories 等），
     # but materialize resume/history entries locally with hard bounds below.

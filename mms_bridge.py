@@ -149,10 +149,14 @@ _CLAUDE_HEADER_PREFIX_PASSTHROUGH = (
 
 _ONE_M_CONTEXT_SUFFIX = "[1m]"
 _MIMO_1M_CONTEXT_BETA = "context-1m-2025-08-07"
+_MIMO_1M_CONTEXT_SELECTORS = {
+    f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}",
+    f"mimo-v2.5{_ONE_M_CONTEXT_SUFFIX}",
+}
 
 
 def _requests_mimo_1m_context(model_name):
-    return _normalize_model_name(model_name) == f"mimo-v2.5-pro{_ONE_M_CONTEXT_SUFFIX}"
+    return _normalize_model_name(model_name) in _MIMO_1M_CONTEXT_SELECTORS
 
 
 def _merge_header_token(headers, header_name, token):
