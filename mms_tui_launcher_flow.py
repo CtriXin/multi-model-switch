@@ -70,3 +70,64 @@ def opencode_profile_menu_options(
             "badge": option.get("badge", ""),
         })
     return options
+
+
+def official_account_menu_options(
+    cfg,
+    cli_name,
+    *,
+    accounts_for_cli,
+    account_label,
+    localize,
+    default_priority,
+    agy_connect_profile_id,
+):
+    accounts = list(accounts_for_cli(cfg, cli_name))
+    defaults = cfg.get("account", {}).get("defaults", {}) if isinstance(cfg, dict) else {}
+
+    def _sort_key(account):
+        account_id = str(account.get("id") or "")
+        is_default = account_id == defaults.get(cli_name)
+        return (
+            0 if is_default else 1,
+            -int(account.get("priority", default_priority) or default_priority),
+            account_label(account),
+            account_id,
+        )
+
+    options = []
+    for account in sorted(accounts, key=_sort_key):
+        account_id = str(account.get("id") or "").strip()
+        if not account_id:
+            continue
+        is_default = account_id == defaults.get(cli_name)
+        summary_parts = [localize("官方 OAuth", "Official OAuth"), account_id]
+        if is_default:
+            summary_parts.append(localize("默认", "default"))
+        options.append({
+            "id": account_id,
+            "label": account_label(account),
+            "summary": " / ".join(summary_parts),
+            "badge": "*" if is_default else "OAuth",
+        })
+
+    if options or cli_name != "agy":
+        return options
+
+    legacy_gemini_count = len(accounts_for_cli(cfg, "gemini"))
+    if legacy_gemini_count:
+        summary = localize(
+            "检测到 Gemini CLI 旧账号；Antigravity 需要独立 agy OAuth，按 Enter 或 O 接入。",
+            "Legacy Gemini CLI accounts detected; Antigravity needs a separate agy OAuth account. Press Enter or O to connect.",
+        )
+    else:
+        summary = localize(
+            "还没有 Antigravity OAuth account，按 Enter 或 O 接入。",
+            "No Antigravity OAuth account yet. Press Enter or O to connect.",
+        )
+    return [{
+        "id": agy_connect_profile_id,
+        "label": localize("接入 Antigravity OAuth", "Connect Antigravity OAuth"),
+        "summary": summary,
+        "badge": "O",
+    }]

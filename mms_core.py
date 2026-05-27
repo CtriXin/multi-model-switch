@@ -9121,55 +9121,17 @@ _AGY_CONNECT_PROFILE_ID = "__connect_agy_oauth__"
 
 
 def _official_account_menu_options(cfg, cli_name):
-    accounts = list(_accounts_for_cli(cfg, cli_name))
-    defaults = cfg.get("account", {}).get("defaults", {}) if isinstance(cfg, dict) else {}
+    from mms_tui_launcher_flow import official_account_menu_options
 
-    def _sort_key(account):
-        account_id = str(account.get("id") or "")
-        is_default = account_id == defaults.get(cli_name)
-        return (
-            0 if is_default else 1,
-            -int(account.get("priority", DEFAULT_PRIORITY) or DEFAULT_PRIORITY),
-            _account_label(account),
-            account_id,
-        )
-
-    options = []
-    for account in sorted(accounts, key=_sort_key):
-        account_id = str(account.get("id") or "").strip()
-        if not account_id:
-            continue
-        is_default = account_id == defaults.get(cli_name)
-        summary_parts = [_L("官方 OAuth", "Official OAuth"), account_id]
-        if is_default:
-            summary_parts.append(_L("默认", "default"))
-        options.append({
-            "id": account_id,
-            "label": _account_label(account),
-            "summary": " / ".join(summary_parts),
-            "badge": "*" if is_default else "OAuth",
-        })
-
-    if options or cli_name != "agy":
-        return options
-
-    legacy_gemini_count = len(_accounts_for_cli(cfg, "gemini"))
-    if legacy_gemini_count:
-        summary = _L(
-            "检测到 Gemini CLI 旧账号；Antigravity 需要独立 agy OAuth，按 Enter 或 O 接入。",
-            "Legacy Gemini CLI accounts detected; Antigravity needs a separate agy OAuth account. Press Enter or O to connect.",
-        )
-    else:
-        summary = _L(
-            "还没有 Antigravity OAuth account，按 Enter 或 O 接入。",
-            "No Antigravity OAuth account yet. Press Enter or O to connect.",
-        )
-    return [{
-        "id": _AGY_CONNECT_PROFILE_ID,
-        "label": _L("接入 Antigravity OAuth", "Connect Antigravity OAuth"),
-        "summary": summary,
-        "badge": "O",
-    }]
+    return official_account_menu_options(
+        cfg,
+        cli_name,
+        accounts_for_cli=_accounts_for_cli,
+        account_label=_account_label,
+        localize=_L,
+        default_priority=DEFAULT_PRIORITY,
+        agy_connect_profile_id=_AGY_CONNECT_PROFILE_ID,
+    )
 
 
 def _select_opencode_profile(use_tui=False):
