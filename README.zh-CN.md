@@ -37,7 +37,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 - Codex 在隔离的 MMS-managed launch 之间做 bounded resume write-back
 - OpenCode modes：`Agent`、`OMO`、`Raw`，并写入 repo-local health feedback
 - OpenCode Agent contract lane：`mobius-spec-writer` 写 OpenSpec/SpecBridge-style task contract，`mobius-spec-compliance-reviewer` 在 release-gate review 前对照 diff + validation 逐条验收
-- OpenCode Agent work split：GPT-5.5 做协调/最终 review，GPT-5.4 做长跑 implementation，国产模型保持 read-only，用于 explore、bug-hunt、vision/context checks
+- OpenCode Agent work split：GPT 做协调/最终 review 与稳定 fallback，DeepSeek 默认做长跑 implementation/fix，MiMo 可做规格/视觉/补充审查，Qwen/GLM/Kimi 保持 read-only explore、bug-hunt、context checks
 - OpenCode Agent mixed routes：GPT 走 OpenAI-compatible Responses/Chat，direct MiMo 走 OpenAI-compatible `/v1`，其他国产模型走 Anthropic `/v1/messages`
 - OpenCode 默认开启 bypass：通过 permission `allow` 生效，subagent 里的 `ask` 会自动放行但保留显式 `deny` 边界；可选的 `opencode run` preflight 会使用 `--dangerously-skip-permissions`
 - fallback 顺序：同模型第二通道、同 role peer、stable GPT fallback

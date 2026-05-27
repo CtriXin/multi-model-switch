@@ -11,7 +11,7 @@ OPENCODE_PROFILE_OPTIONS = [
         "profile_id": OPENCODE_AGENT_PROFILE_ID,
         "label": "Agent",
         "badge": "默认",
-        "summary": "默认推荐：session-local agent roster；5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt/vision 只读辅助。",
+        "summary": "默认推荐：session-local agent roster；GPT 总控/终审；DeepSeek 长跑执行/修复；MiMo 规格/视觉/补充审查；国产 explore/bug-hunt 只读辅助。",
     },
     {
         "id": "omo",
@@ -41,7 +41,7 @@ OPENCODE_DEFAULT_MODEL_PREFERENCES = (
 OPENCODE_LITE_PRO_SPECS = (
     {"key": "builder_primary", "agent": "mobius-builder-pro", "models": ("gpt-5.5", "gpt-5.4")},
     {"key": "builder_fallback", "agent": "mobius-builder-stable", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
-    {"key": "spec_writer", "agent": "mobius-spec-writer", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
+    {"key": "spec_writer", "agent": "mobius-spec-writer", "models": ("mimo-v2.5-pro", "mimo-v2.5", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
     {"key": "spec_compliance", "agent": "mobius-spec-compliance-reviewer", "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex")},
     {"key": "explore_primary", "agent": "mobius-explore-glm", "models": ("glm-5-turbo", "glm-5.1", "glm-5")},
     {"key": "explore_fallback", "agent": "mobius-explore-kimi", "models": ("kimi-for-coding", "kimi-k2.5")},
@@ -53,12 +53,14 @@ OPENCODE_LITE_PRO_SPECS = (
     {"key": "reviewer_mimo", "agent": "mobius-reviewer-mimo", "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"), "route_policy": "mimo_direct", "gpt_fallback": False},
     {"key": "bughunt_deepseek", "agent": "mobius-bughunt-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash")},
     {"key": "bughunt_glm", "agent": "mobius-bughunt-glm", "models": ("glm-5.1", "glm-5-turbo", "glm-5")},
+    {"key": "fixer_deepseek", "agent": "mobius-fixer-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash"), "gpt_fallback": False},
     {"key": "fixer_gpt54", "agent": "mobius-fixer-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
 )
 
 OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
     {"key": "explore_qwen", "agent": "mobius-explore-qwen", "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash")},
     {"key": "bughunt_qwen", "agent": "mobius-bughunt-qwen", "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3-coder-plus")},
+    {"key": "executor_deepseek", "agent": "mobius-executor-deepseek", "models": ("deepseek-v4-pro", "deepseek-v4-flash"), "gpt_fallback": False},
     {"key": "executor_gpt54", "agent": "mobius-executor-gpt54", "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex")},
 )
 

@@ -37,7 +37,7 @@ Key changes in this generation:
 - Codex resume write-back across isolated MMS-managed launches
 - OpenCode modes: `Agent`, `OMO`, and `Raw` with repo-local health feedback
 - OpenCode Agent contract lane: `mobius-spec-writer` writes an OpenSpec/SpecBridge-style task contract, and `mobius-spec-compliance-reviewer` checks diff + validation against it before release-gate review
-- OpenCode Agent work split: GPT-5.5 coordinates/final-reviews, GPT-5.4 handles long-running implementation, and domestic models stay read-only for exploration, bug-hunt, and vision/context checks
+- OpenCode Agent work split: GPT coordinates/final-reviews and stays as stable fallback, DeepSeek defaults to long-running implementation/fix work, MiMo can handle spec/vision/supplemental critique, and Qwen/GLM/Kimi stay read-only for exploration, bug-hunt, and context checks
 - OpenCode Agent mixed routes: GPT via OpenAI-compatible Responses/Chat, direct MiMo via OpenAI-compatible `/v1`, other domestic models via Anthropic `/v1/messages`
 - OpenCode bypass is enabled by default through permission `allow`; subagent `ask` permissions are auto-approved while explicit `deny` boundaries stay intact, and optional `opencode run` preflight uses `--dangerously-skip-permissions`
 - model fallback order: same-model second channel, same-role peer, then stable GPT fallback

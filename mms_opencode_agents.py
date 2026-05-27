@@ -203,6 +203,7 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
         "mobius-reviewer-mimo": "ask",
+        "mobius-fixer-deepseek": "ask",
         "mobius-fixer-gpt54": "ask",
     }
     orchestrator_task_permission = {
@@ -218,10 +219,12 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
         "mobius-vision-mimo": "ask",
         "mobius-vision-kimi": "ask",
         "mobius-vision-qwen": "ask",
+        "mobius-executor-deepseek": "allow",
         "mobius-executor-gpt54": "allow",
         "mobius-reviewer-gpt55": "ask",
         "mobius-reviewer-gpt54": "ask",
         "mobius-reviewer-mimo": "ask",
+        "mobius-fixer-deepseek": "ask",
         "mobius-fixer-gpt54": "ask",
     }
     read_only_permission = {
@@ -271,11 +274,14 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
         "read-only counterexamples, missing tests, and risk discovery. If images are "
         "present, delegate visual inspection to mobius-vision-mimo, mobius-vision-kimi, "
         "or mobius-vision-qwen before implementation. Then delegate implementation to "
-        "mobius-executor-gpt54 with a bounded packet containing target files, exact "
+        "mobius-executor-deepseek with a bounded packet containing target files, exact "
         "acceptance criteria, validation commands, and blockers. Do not split normal "
-        "implementation across domestic executor chains. Inspect the actual git diff and "
+        "implementation across multiple executor chains. Use mobius-executor-gpt54 only "
+        "when the DeepSeek executor is unavailable, unstable, or fails the packet. "
+        "Inspect the actual git diff and "
         "validation evidence, not only executor summaries. If acceptance fails or "
-        "confidence is low, send one focused failure packet to mobius-fixer-gpt54; if the "
+        "confidence is low, send one focused failure packet to mobius-fixer-deepseek "
+        "when available; use mobius-fixer-gpt54 only as the stable fallback. If the "
         "architecture itself is suspect, escalate back to the user instead of cycling "
         "agents. Before release-gate review, call mobius-spec-compliance-reviewer to "
         "check implementation against the contract item by item. Use "
@@ -293,8 +299,9 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
         "mobius-vision-mimo, mobius-vision-kimi, or mobius-vision-qwen for a structured "
         "visual read. Before claiming done, ask mobius-spec-compliance-reviewer to check "
         "the implementation against the contract, then review with mobius-reviewer-gpt55. "
-        "Use mobius-fixer-gpt54 for focused fixes when needed. Keep GPT as the final "
-        "release gate. Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
+        "Use mobius-fixer-deepseek for focused fixes when available, with "
+        "mobius-fixer-gpt54 as the stable fallback. Keep GPT as the final release gate. "
+        "Use mobius-reviewer-gpt54 only for reviewer-route outage. Use "
         "mobius-builder-stable only when the primary model/channel is suspect or the "
         "final result remains unstable. Record which contract, fallback, and validation "
         "were used."
@@ -409,8 +416,8 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
             "permission": read_only_permission,
             "prompt": (
                 "Fallback reviewer for primary reviewer outage. Focus on findings missed by "
-                "the release gate and validation gaps. If mobius-executor-gpt54 made the "
-                "edits, prefer the gpt-5.5 reviewer when available. No edits."
+                "the release gate and validation gaps. If a fallback GPT executor made "
+                "the edits, prefer the gpt-5.5 reviewer when available. No edits."
             ),
         },
         "mobius-bughunt-deepseek": {
@@ -435,15 +442,25 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
             "prompt": "Fallback read-only bug hunt. Re-check defects and counterexamples. No edits.",
         },
         "mobius-fixer-gpt54": {
-            "description": "Lite Pro GPT focused fixer",
+            "description": "Lite Pro stable GPT fallback fixer",
             "mode": "subagent",
             "model": _agent_model("mobius-fixer-gpt54", _agent_model("mobius-builder-stable")),
             "variant": "high",
             "temperature": 0.2,
             "permission": fix_permission,
-            "prompt": "Focused GPT fixer. Fix only the named failure. Keep scope tight, validate, and report exact diff risk.",
+            "prompt": "Stable GPT fallback fixer. Use only when the primary fixer is unavailable, unstable, or failed. Fix only the named failure, validate, and report exact diff risk.",
         },
     }
+    if "mobius-fixer-deepseek" in agent_models:
+        agents["mobius-fixer-deepseek"] = {
+            "description": "Lite Pro primary DeepSeek focused fixer",
+            "mode": "subagent",
+            "model": _agent_model("mobius-fixer-deepseek"),
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": fix_permission,
+            "prompt": "Primary DeepSeek fixer. Fix only the named failure, keep scope tight, validate, and report exact diff risk.",
+        }
     if not orchestrated:
         agents.pop("mobius-explore-qwen", None)
     optional_vision_agents = {
@@ -505,17 +522,25 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
             "Keep going until the acceptance criteria pass or a real blocker is reached. "
             "Return changed files, commands, results, risks, and any blocker."
         )
-        agents.update({
-            "mobius-executor-gpt54": {
-                "description": "Lite Pro long-running GPT implementation executor",
+        if "mobius-executor-deepseek" in agent_models:
+            agents["mobius-executor-deepseek"] = {
+                "description": "Lite Pro primary DeepSeek implementation executor",
                 "mode": "subagent",
-                "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
+                "model": _agent_model("mobius-executor-deepseek"),
                 "variant": "high",
                 "temperature": 0.2,
                 "permission": fix_permission,
-                "prompt": "Primary implementation executor. " + executor_prompt,
-            },
-        })
+                "prompt": "Primary DeepSeek implementation executor. " + executor_prompt,
+            }
+        agents["mobius-executor-gpt54"] = {
+            "description": "Lite Pro stable GPT implementation fallback",
+            "mode": "subagent",
+            "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": fix_permission,
+            "prompt": "Stable GPT fallback implementation executor. Use only when the primary executor is unavailable, unstable, or failed. " + executor_prompt,
+        }
 
     custom_prompt_by_preset = {
         "vision": "Custom vision helper. Read attached images/screenshots only. Return structured observations, visible text, UI risks, and uncertainties. No edits.",

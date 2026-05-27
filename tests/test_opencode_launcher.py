@@ -756,12 +756,13 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-builder-pro"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-builder-stable"]["mode"] == "primary"
     assert payload["agent"]["mobius-builder-stable"]["model"].endswith("/gpt-5.4")
-    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/mimo-v2.5-pro")
     assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
     assert payload["agent"]["mobius-builder-pro"]["permission"]["task"]["mobius-spec-writer"] == "allow"
     assert payload["agent"]["mobius-builder-pro"]["permission"]["task"]["mobius-spec-compliance-reviewer"] == "allow"
     spec_route = next(route for route in runtime["opencode_routes"] if route["id"] == "spec_writer")
-    assert spec_route["protocol"] == "openai_responses"
+    assert spec_route["protocol"] == "openai_chat_completions"
+    assert spec_route["provider_id"] == "mimo-direct-anthropic"
     assert payload["agent"]["mobius-explore-glm"]["model"].endswith("/glm-5-turbo")
     assert payload["agent"]["mobius-explore-kimi"]["model"].endswith("/kimi-for-coding")
     assert payload["agent"]["mobius-vision-mimo"]["model"].endswith("/mimo-v2.5")
@@ -779,7 +780,10 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-bughunt-deepseek"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-bughunt-glm"]["permission"]["edit"] == "deny"
+    assert payload["agent"]["mobius-fixer-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert payload["agent"]["mobius-fixer-deepseek"]["description"] == "Lite Pro primary DeepSeek focused fixer"
     assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-fixer-gpt54"]["description"] == "Lite Pro stable GPT fallback fixer"
     assert "steps" not in payload["agent"]["mobius-fixer-gpt54"]
     assert len(payload["provider"]) >= 7
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
@@ -852,16 +856,20 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
     assert builder["permission"]["task"]["mobius-spec-writer"] == "allow"
     assert builder["permission"]["task"]["mobius-spec-compliance-reviewer"] == "allow"
     assert builder["permission"]["task"]["mobius-explore-qwen"] == "allow"
+    assert builder["permission"]["task"]["mobius-executor-deepseek"] == "allow"
     assert builder["permission"]["task"]["mobius-executor-gpt54"] == "allow"
     assert builder["permission"]["task"]["mobius-bughunt-qwen"] == "allow"
     assert "Do not edit files directly" in builder["prompt"]
     assert "OpenSpec/SpecBridge-style contract" in builder["prompt"]
     assert payload["agent"]["mobius-builder-stable"]["permission"]["edit"] == "deny"
-    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-spec-writer"]["model"].endswith("/mimo-v2.5-pro")
     assert payload["agent"]["mobius-spec-compliance-reviewer"]["model"].endswith("/gpt-5.5")
+    assert payload["agent"]["mobius-executor-deepseek"]["model"].endswith("/deepseek-v4-pro")
+    assert "steps" not in payload["agent"]["mobius-executor-deepseek"]
+    assert "do not reinterpret the architecture" in payload["agent"]["mobius-executor-deepseek"]["prompt"]
     assert payload["agent"]["mobius-executor-gpt54"]["model"].endswith("/gpt-5.4")
     assert "steps" not in payload["agent"]["mobius-executor-gpt54"]
-    assert "do not reinterpret the architecture" in payload["agent"]["mobius-executor-gpt54"]["prompt"]
+    assert "Stable GPT fallback implementation executor" in payload["agent"]["mobius-executor-gpt54"]["prompt"]
     assert payload["agent"]["mobius-bughunt-deepseek"]["model"].endswith("/deepseek-v4-pro")
     assert payload["agent"]["mobius-bughunt-deepseek"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
@@ -879,7 +887,7 @@ def test_core_opencode_lite_pro_orchestrated_delegates_to_executor_chain(monkeyp
         for name in payload["agent"]
         if name.startswith("mobius-executor-")
     }
-    assert executor_models == {"gpt-5.4"}
+    assert executor_models == {"deepseek-v4-pro", "gpt-5.4"}
     assert payload["agent"]["mobius-reviewer-gpt55"]["model"].rsplit("/", 1)[-1] not in executor_models
     qwen_route = next(route for route in runtime["opencode_routes"] if route["id"] == "bughunt_qwen")
     assert qwen_route["protocol"] == "anthropic_messages"
@@ -1772,6 +1780,6 @@ def test_core_opencode_profile_menu_includes_lite_pro_health_summary(monkeypatch
     assert [option["id"] for option in options] == ["agent", "omo", "raw"]
     assert agent["label"] == "Agent"
     assert agent["badge"] == "默认"
-    assert "health: 1/18 healthy" in agent["summary"]
+    assert "health: 1/20 healthy" in agent["summary"]
     assert "1 degraded" in agent["summary"]
-    assert "16 untested" in agent["summary"]
+    assert "18 untested" in agent["summary"]
