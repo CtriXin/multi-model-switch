@@ -11,6 +11,7 @@ from mms_tui_launcher_flow import (
     provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
+    resolve_last_used_launch_context,
     safe_tui_call,
 )
 
@@ -194,6 +195,91 @@ def test_last_used_model_info_preserves_dict_model_info() -> None:
 
 def test_last_used_model_info_falls_back_to_model_name() -> None:
     assert last_used_model_info({"model": "gpt-5.4", "model_info": "bad"}) == {"model": "gpt-5.4"}
+
+
+def test_resolve_last_used_launch_context_uses_restored_runtime() -> None:
+    trace_calls = []
+    restored_runtime = {"id": "restored"}
+
+    model_info, runtime, cli_name = resolve_last_used_launch_context(
+        {"cfg": True},
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        resolve_last_used_runtime=lambda *_args: (restored_runtime, ["gpt-5.4"], "last used provider:p1"),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime is restored_runtime
+    assert cli_name == "codex"
+    assert trace_calls == [
+        (("runtime resolve", restored_runtime), {"launch_cli": "codex", "choice": "last used provider:p1"})
+    ]
+
+
+def test_resolve_last_used_launch_context_uses_best_provider_before_picker() -> None:
+    trace_calls = []
+    best_runtime = {"id": "best"}
+
+    model_info, runtime, cli_name = resolve_last_used_launch_context(
+        {},
+        "claude",
+        {"model": "claude-sonnet-4.5", "model_info": {"model": "claude-sonnet-4.5", "source": "last"}},
+        {"id": "current"},
+        ["claude-sonnet-4.5"],
+        resolve_last_used_runtime=lambda *_args: (None, [], ""),
+        resolve_best_provider=lambda *_args, **_kwargs: (best_runtime, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_calls.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "claude-sonnet-4.5", "source": "last"}
+    assert runtime is best_runtime
+    assert cli_name == "claude"
+    assert trace_calls == [
+        (("runtime resolve", best_runtime), {"launch_cli": "claude", "choice": "best provider"})
+    ]
+
+
+def test_resolve_last_used_launch_context_falls_back_to_runtime_picker() -> None:
+    choose_calls = []
+
+    def choose_runtime_source(*args, **kwargs):
+        choose_calls.append((args, kwargs))
+        return {"id": "chosen"}, ["gpt-5.4"], "opencode"
+
+    model_info, runtime, cli_name = resolve_last_used_launch_context(
+        {"cfg": True},
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        account_id="acct",
+        provider_id="prov",
+        resolve_last_used_runtime=lambda *_args: (None, [], ""),
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        choose_runtime_source=choose_runtime_source,
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert runtime == {"id": "chosen"}
+    assert cli_name == "opencode"
+    assert choose_calls == [
+        (
+            ({"cfg": True}, "codex", {"id": "current"}, ["gpt-5.4"]),
+            {
+                "account_id": "acct",
+                "provider_id": "prov",
+                "model_info": {"model": "gpt-5.4"},
+                "allow_selected_model_accounts": True,
+            },
+        )
+    ]
 
 
 def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> None:

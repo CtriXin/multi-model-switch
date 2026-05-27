@@ -10370,32 +10370,25 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 上次使用 ──
         elif action_type == "last":
-            from mms_tui_launcher_flow import last_used_model_info
+            from mms_tui_launcher_flow import resolve_last_used_launch_context
 
-            model_info = last_used_model_info(action_data)
             _trace_record("last used", cli=cli, model=action_data.get("model"))
-            runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
-                current_cfg, cli, action_data, default_models
+            model_info, runtime_runtime, cli = resolve_last_used_launch_context(
+                current_cfg,
+                cli,
+                action_data,
+                current_provider,
+                default_models,
+                account_id=account_id,
+                provider_id=provider_id,
+                resolve_last_used_runtime=_resolve_last_used_runtime,
+                resolve_best_provider=_resolve_best_provider,
+                choose_runtime_source=_choose_runtime_source,
+                trace_runtime_choice=_trace_runtime_choice,
             )
-            runtime_from_best_provider = False
-            if runtime_runtime is not None:
-                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=restored_choice)
-            else:
-                runtime_runtime, _ = _resolve_best_provider(
-                    current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
-                )
-                runtime_from_best_provider = runtime_runtime is not None
-            if runtime_runtime is None:
-                runtime_runtime, _, cli = _choose_runtime_source(
-                    current_cfg, cli, current_provider, default_models,
-                    account_id=account_id, provider_id=provider_id,
-                    model_info=model_info, allow_selected_model_accounts=True,
-                )
             if runtime_runtime is None:
                 console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
                 continue
-            if runtime_from_best_provider:
-                _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             # fall through to confirm
 
         # ── 品类选择 → 子模型 ──
@@ -10458,32 +10451,25 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 action_data = last_by_cli.get(cli) or {}
                 if not action_data.get("model"):
                     continue
-                from mms_tui_launcher_flow import last_used_model_info
+                from mms_tui_launcher_flow import resolve_last_used_launch_context
 
-                model_info = last_used_model_info(action_data)
                 _trace_record("last used", cli=cli, model=action_data.get("model"))
-                runtime_runtime, _restored_models, restored_choice = _resolve_last_used_runtime(
-                    current_cfg, cli, action_data, default_models
+                model_info, runtime_runtime, cli = resolve_last_used_launch_context(
+                    current_cfg,
+                    cli,
+                    action_data,
+                    current_provider,
+                    default_models,
+                    account_id=account_id,
+                    provider_id=provider_id,
+                    resolve_last_used_runtime=_resolve_last_used_runtime,
+                    resolve_best_provider=_resolve_best_provider,
+                    choose_runtime_source=_choose_runtime_source,
+                    trace_runtime_choice=_trace_runtime_choice,
                 )
-                runtime_from_best_provider = False
-                if runtime_runtime is not None:
-                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice=restored_choice)
-                else:
-                    runtime_runtime, _ = _resolve_best_provider(
-                        current_cfg, action_data["model"], current_provider, default_models, cli_name=cli
-                    )
-                    runtime_from_best_provider = runtime_runtime is not None
-                if runtime_runtime is None:
-                    runtime_runtime, _, cli = _choose_runtime_source(
-                        current_cfg, cli, current_provider, default_models,
-                        account_id=account_id, provider_id=provider_id,
-                        model_info=model_info, allow_selected_model_accounts=True,
-                    )
                 if runtime_runtime is None:
                     console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
                     continue
-                if runtime_from_best_provider:
-                    _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="best provider")
             else:
                 # 持久化 priority 变更
                 pri_changes = selected.pop("priority_changes", None)

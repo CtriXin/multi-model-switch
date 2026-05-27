@@ -323,6 +323,50 @@ def last_used_model_info(action_data):
     )
 
 
+def resolve_last_used_launch_context(
+    cfg,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    account_id=None,
+    provider_id=None,
+    resolve_last_used_runtime,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_runtime_choice,
+):
+    model_info = last_used_model_info(action_data)
+    runtime = None
+    restored_choice = ""
+    runtime, _restored_models, restored_choice = resolve_last_used_runtime(
+        cfg, cli_name, action_data, default_models
+    )
+    runtime_from_best_provider = False
+    if runtime is not None:
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice=restored_choice)
+    else:
+        runtime, _ = resolve_best_provider(
+            cfg, action_data["model"], current_provider, default_models, cli_name=cli_name
+        )
+        runtime_from_best_provider = runtime is not None
+    if runtime is None:
+        runtime, _, cli_name = choose_runtime_source(
+            cfg,
+            cli_name,
+            current_provider,
+            default_models,
+            account_id=account_id,
+            provider_id=provider_id,
+            model_info=model_info,
+            allow_selected_model_accounts=True,
+        )
+    if runtime_from_best_provider:
+        trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice="best provider")
+    return model_info, runtime, cli_name
+
+
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,
