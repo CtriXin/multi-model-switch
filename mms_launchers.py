@@ -938,32 +938,21 @@ def _truthy(value):
 
 
 def _rescue_default_fallback_config():
-    env_model = str(os.environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
-    env_cli = str(os.environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
-    env_hot = os.environ.get("MMS_RESCUE_HOT_FALLBACK")
-    if env_model:
-        return {"model": env_model, "cli": env_cli, "hot_fallback_enabled": _truthy(env_hot)}
-    try:
-        cfg = load_config() or {}
-    except Exception:
-        cfg = {}
-    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
-    model = str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip()
-    cli = str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip()
-    hot = rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback", False))
-    return {"model": model, "cli": cli, "hot_fallback_enabled": _truthy(hot)}
+    from mms_launcher_export import rescue_default_fallback_config
+
+    return rescue_default_fallback_config(
+        environ=os.environ,
+        load_config=load_config,
+        truthy=_truthy,
+    )
 
 
 def _rescue_bridge_kwargs():
-    fallback = _rescue_default_fallback_config()
-    model = str(fallback.get("model") or "").strip()
-    if not model:
-        return {}
-    return {
-        "rescue_fallback_model": model,
-        "rescue_fallback_cli": str(fallback.get("cli") or "").strip(),
-        "rescue_hot_fallback_enabled": bool(fallback.get("hot_fallback_enabled")),
-    }
+    from mms_launcher_export import rescue_bridge_kwargs
+
+    return rescue_bridge_kwargs(
+        rescue_default_fallback_config=_rescue_default_fallback_config,
+    )
 
 
 def _inject_rescue_launch_env(env):

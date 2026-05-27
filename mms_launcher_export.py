@@ -100,6 +100,35 @@ def set_codex_soft_home(
     return env
 
 
+def rescue_default_fallback_config(*, environ, load_config, truthy):
+    env_model = str(environ.get("MMS_RESCUE_FALLBACK_MODEL") or "").strip()
+    env_cli = str(environ.get("MMS_RESCUE_FALLBACK_CLI") or "").strip()
+    env_hot = environ.get("MMS_RESCUE_HOT_FALLBACK")
+    if env_model:
+        return {"model": env_model, "cli": env_cli, "hot_fallback_enabled": truthy(env_hot)}
+    try:
+        cfg = load_config() or {}
+    except Exception:
+        cfg = {}
+    rescue_cfg = cfg.get("rescue") if isinstance(cfg, dict) and isinstance(cfg.get("rescue"), dict) else {}
+    model = str(rescue_cfg.get("fallback_model") or rescue_cfg.get("default_fallback_model") or "").strip()
+    cli = str(rescue_cfg.get("fallback_cli") or rescue_cfg.get("default_fallback_cli") or "").strip()
+    hot = rescue_cfg.get("hot_fallback_enabled", rescue_cfg.get("enable_hot_fallback", False))
+    return {"model": model, "cli": cli, "hot_fallback_enabled": truthy(hot)}
+
+
+def rescue_bridge_kwargs(*, rescue_default_fallback_config):
+    fallback = rescue_default_fallback_config()
+    model = str(fallback.get("model") or "").strip()
+    if not model:
+        return {}
+    return {
+        "rescue_fallback_model": model,
+        "rescue_fallback_cli": str(fallback.get("cli") or "").strip(),
+        "rescue_hot_fallback_enabled": bool(fallback.get("hot_fallback_enabled")),
+    }
+
+
 def inject_rescue_launch_env(
     env,
     *,
