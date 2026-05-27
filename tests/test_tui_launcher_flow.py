@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mms_tui_launcher_flow import (
+    apply_confirm_runtime_preferences,
     confirm_agent_pack,
     last_used_model_info,
     load_balance_slot_provider_ids,
@@ -246,3 +247,66 @@ def test_normalize_confirm_result_supports_legacy_tuple_shapes() -> None:
     }
     assert normalize_confirm_result(("b", False, True), "low")["caveman_enabled"] is False
     assert normalize_confirm_result("q", "medium")["action"] == "q"
+
+
+def test_apply_confirm_runtime_preferences_sets_claude_modes() -> None:
+    runtime = {"disabled_session_surfaces": {"old": True}}
+    apply_confirm_runtime_preferences(
+        runtime,
+        "claude",
+        claude_1m_enabled=True,
+        caveman_enabled=True,
+        agent_pack="omc",
+        thinking_enabled=False,
+        reasoning_effort="LOW",
+        disabled_session_surfaces={"xmem": True},
+        nsr_enabled=True,
+        has_nsr=True,
+        confirm_returned_surfaces=True,
+        merge_disabled_session_surfaces=lambda *_args: {"unexpected": True},
+    )
+
+    assert runtime == {
+        "claude_1m_mode": "enable",
+        "agent_pack": "omc",
+        "ecc_mode": "disable",
+        "omc_mode": "enable",
+        "caveman_mode": "enable",
+        "nsr_mode": "enable",
+        "disabled_session_surfaces": {"xmem": True},
+        "thinking_mode": "disable",
+        "reasoning_effort": "low",
+    }
+
+
+def test_apply_confirm_runtime_preferences_merges_legacy_surfaces() -> None:
+    runtime = {"disabled_session_surfaces": {"context": True}}
+    merge_calls = []
+
+    def merge_disabled_session_surfaces(existing, incoming):
+        merge_calls.append((existing, incoming))
+        return {"context": True, "toon": True}
+
+    apply_confirm_runtime_preferences(
+        runtime,
+        "codex",
+        claude_1m_enabled=False,
+        caveman_enabled=False,
+        agent_pack="ecc",
+        thinking_enabled=True,
+        reasoning_effort="",
+        disabled_session_surfaces={"toon": True},
+        nsr_enabled=True,
+        has_nsr=False,
+        confirm_returned_surfaces=False,
+        merge_disabled_session_surfaces=merge_disabled_session_surfaces,
+    )
+
+    assert runtime == {
+        "disabled_session_surfaces": {"context": True, "toon": True},
+        "caveman_mode": "disable",
+        "nsr_mode": "disable",
+        "thinking_mode": "enable",
+        "reasoning_effort": "high",
+    }
+    assert merge_calls == [({"context": True}, {"toon": True})]

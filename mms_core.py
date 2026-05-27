@@ -10622,26 +10622,22 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     runtime_runtime,
                     require_proxy=_claude_bypass_requires_proxy(runtime_runtime),
                 )
-        if cli == "claude":
-            runtime_runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
-            runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
-            runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
-            runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-        if cli in {"claude", "codex", "opencode", "agy"}:
-            runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
-            runtime_runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
-            if confirm_returned_surfaces:
-                runtime_runtime["disabled_session_surfaces"] = (
-                    disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
-                )
-            else:
-                runtime_runtime["disabled_session_surfaces"] = _merge_disabled_session_surfaces(
-                    runtime_runtime.get("disabled_session_surfaces"),
-                    disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {},
-                )
-        if cli in {"claude", "codex"}:
-            runtime_runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
-            runtime_runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
+        from mms_tui_launcher_flow import apply_confirm_runtime_preferences
+
+        apply_confirm_runtime_preferences(
+            runtime_runtime,
+            cli,
+            claude_1m_enabled=claude_1m_enabled,
+            caveman_enabled=caveman_enabled,
+            agent_pack=agent_pack,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+            disabled_session_surfaces=disabled_session_surfaces,
+            nsr_enabled=nsr_enabled,
+            has_nsr=has_nsr,
+            confirm_returned_surfaces=confirm_returned_surfaces,
+            merge_disabled_session_surfaces=_merge_disabled_session_surfaces,
+        )
         _launch_with_tracking(cli, clean_model_info, runtime_runtime, once=once)
         return True
 

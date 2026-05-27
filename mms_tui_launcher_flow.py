@@ -415,3 +415,40 @@ def normalize_confirm_result(result, default_reasoning_effort):
         "nsr_enabled": nsr_enabled,
         "confirm_returned_surfaces": confirm_returned_surfaces,
     }
+
+
+def apply_confirm_runtime_preferences(
+    runtime,
+    cli_name,
+    *,
+    claude_1m_enabled,
+    caveman_enabled,
+    agent_pack,
+    thinking_enabled,
+    reasoning_effort,
+    disabled_session_surfaces,
+    nsr_enabled,
+    has_nsr,
+    confirm_returned_surfaces,
+    merge_disabled_session_surfaces,
+):
+    if cli_name == "claude":
+        runtime["claude_1m_mode"] = "enable" if claude_1m_enabled else "disable"
+        runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
+        runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
+        runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
+    if cli_name in {"claude", "codex", "opencode", "agy"}:
+        runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
+        runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
+        if confirm_returned_surfaces:
+            runtime["disabled_session_surfaces"] = (
+                disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {}
+            )
+        else:
+            runtime["disabled_session_surfaces"] = merge_disabled_session_surfaces(
+                runtime.get("disabled_session_surfaces"),
+                disabled_session_surfaces if isinstance(disabled_session_surfaces, dict) else {},
+            )
+    if cli_name in {"claude", "codex"}:
+        runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
+        runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
