@@ -416,6 +416,14 @@ Current preview publish implementation:
 - `mmf config source`, WebUI, and TUI surface this distinction as bundle `verified` versus bundle `runtime_ready`.
 - Missing legacy import candidates fail closed and do not create a generated manifest.
 
+Current watchdog consumer implementation:
+
+- `scripts/mms_health_watchdog.py` respects `MMS_CONFIG_ROOT` when selecting its config root.
+- It prefers a verified `<config_root>/generated/model-registry.latest-approved.json` bundle over root legacy `model-routes.json` / `model-policy.json`.
+- If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
+- If the manifest is missing, default behavior remains legacy-compatible; `--require-bundle` or `MMS_WATCHDOG_REQUIRE_BUNDLE=1` fails closed for preview/v2 operation.
+- Watchdog remains read-only with respect to DB and does not run route export or publish.
+
 ### Stage 4 - Write Path And Publish
 
 - WebUI Save writes DB + secret backend.

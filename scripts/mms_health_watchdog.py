@@ -93,6 +93,9 @@ def real_home() -> Path:
 
 
 def default_config_dir() -> Path:
+    explicit = os.environ.get("MMS_CONFIG_ROOT", "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
     return real_home() / ".config" / "mms"
 
 
@@ -127,6 +130,79 @@ def read_toml(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
+    manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
+    if not manifest_path.exists():
+        return {
+            "status": "missing",
+            "manifest_path": str(manifest_path),
+            "detail": "latest-approved manifest is missing",
+            "payloads": {},
+        }
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": f"manifest read failed: {type(exc).__name__}: {exc}",
+            "payloads": {},
+        }
+    files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    payloads: dict[str, Any] = {}
+    verified_files: dict[str, str] = {}
+    for name, entry in files.items():
+        if not isinstance(entry, dict):
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"invalid manifest file entry: {name}",
+                "payloads": {},
+            }
+        canonical = str(entry.get("canonical_path") or "").strip()
+        expected = str(entry.get("sha256") or "").strip()
+        if not canonical or not expected:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"manifest file entry missing path/hash: {name}",
+                "payloads": {},
+            }
+        path = config_dir / canonical
+        if not path.exists():
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"manifest file missing: {path}",
+                "payloads": {},
+            }
+        actual = sha256_file(path)
+        if actual != expected:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"manifest hash mismatch for {name}: {path}",
+                "payloads": {},
+            }
+        verified_files[name] = str(path)
+        try:
+            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            payloads[name] = {}
+    return {
+        "status": "ok",
+        "manifest_path": str(manifest_path),
+        "detail": f"verified latest-approved bundle: {manifest.get('bundle_revision') or ''}",
+        "manifest": manifest,
+        "payloads": payloads,
+        "verified_files": verified_files,
+    }
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -419,12 +495,36 @@ def model_presence_checks(
     return [CheckResult("model_presence", "policy_models", "info", "ok", f"checked {checked} route entries with model lists")]
 
 
-def build_report(config_dir: Path, timeout: int) -> dict[str, Any]:
-    routes_payload = read_json(config_dir / "model-routes.json")
-    policy_payload = read_json(config_dir / "model-policy.json")
+def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -> dict[str, Any]:
+    bundle = load_verified_latest_bundle(config_dir)
+    results: list[CheckResult] = []
+    if bundle.get("status") == "ok":
+        payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
+        routes_payload = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
+        policy_payload = payloads.get("policy") if isinstance(payloads.get("policy"), dict) else {}
+        results.append(CheckResult("bundle", "latest_approved", "info", "ok", str(bundle.get("detail") or "")))
+        route_source = "latest-approved"
+    elif bundle.get("status") != "missing" or require_bundle:
+        routes_payload = {}
+        policy_payload = {}
+        results.append(
+            CheckResult(
+                "bundle",
+                "latest_approved",
+                "critical",
+                "fail",
+                "stale_or_invalid_bundle: " + str(bundle.get("detail") or "unknown bundle error"),
+            )
+        )
+        route_source = "invalid_latest-approved"
+    else:
+        routes_payload = read_json(config_dir / "model-routes.json")
+        policy_payload = read_json(config_dir / "model-policy.json")
+        results.append(CheckResult("bundle", "latest_approved", "info", "ok", "latest-approved missing; using legacy root artifacts"))
+        route_source = "legacy-root"
     config_payload = read_toml(config_dir / "config.toml")
     providers = provider_config_map(config_payload)
-    results = route_source_checks(config_dir, routes_payload, policy_payload)
+    results.extend(route_source_checks(config_dir, routes_payload, policy_payload))
     endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout)
     results.extend(endpoint_results)
     results.extend(model_presence_checks(routes_payload, providers, model_sets, policy_payload))
@@ -438,6 +538,12 @@ def build_report(config_dir: Path, timeout: int) -> dict[str, Any]:
         "checked_at": iso_now(),
         "status": status,
         "config_dir": str(config_dir),
+        "route_source": route_source,
+        "bundle": {
+            "status": bundle.get("status"),
+            "manifest_path": bundle.get("manifest_path"),
+            "detail": bundle.get("detail"),
+        },
         "summary": {
             "checks": len(results),
             "critical": len(critical),
@@ -640,6 +746,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--notify-always", action="store_true", help="Send a notification regardless of status/dedup")
     parser.add_argument("--print-json", action="store_true", help="Print full report JSON")
     parser.add_argument("--strict-exit", action="store_true", help="Return non-zero when status is warning/critical")
+    parser.add_argument("--require-bundle", action="store_true", help="Fail closed when latest-approved bundle is missing")
     return parser.parse_args(argv)
 
 
@@ -650,7 +757,8 @@ def main(argv: list[str]) -> int:
     env_file = Path(args.env_file).expanduser() if args.env_file else config_dir / ENV_FILE_NAME
     load_env_file(env_file)
 
-    report = build_report(config_dir, max(1, int(args.timeout_sec)))
+    require_bundle = bool(args.require_bundle or os.environ.get("MMS_WATCHDOG_REQUIRE_BUNDLE") == "1")
+    report = build_report(config_dir, max(1, int(args.timeout_sec)), require_bundle=require_bundle)
     latest_path = watchdog_dir / LATEST_FILE_NAME
     state_path = watchdog_dir / STATE_FILE_NAME
     log_path = config_dir / "logs" / LOG_FILE_NAME
