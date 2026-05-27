@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 
+def safe_tui_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except KeyboardInterrupt:
+        return "__interrupt__"
+
+
 def opencode_lite_pro_health_summary_text(
     repo_root=None,
     profile_id="agent",

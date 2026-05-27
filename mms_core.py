@@ -9697,6 +9697,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
+    from mms_tui_launcher_flow import safe_tui_call
     from mms_launchers import (
         _caveman_available_for_cli,
         _ecc_available_for_claude,
@@ -9705,12 +9706,6 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         launch_cli,
         get_export_env,
     )
-
-    def _safe_tui_call(fn, *args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except KeyboardInterrupt:
-            return "__interrupt__"
 
     current_cfg = cfg
     current_provider = provider
@@ -9746,7 +9741,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
         last_by_cli, _ = _get_scene_usage()
 
-        result = _safe_tui_call(
+        result = safe_tui_call(
             select_family_tui,
             families_by_cli,
             current_cli_names,
@@ -9851,7 +9846,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if not browse_providers:
                 console.print("[yellow]没有可用的 Provider[/yellow]")
                 continue
-            prov_result = _safe_tui_call(select_provider_browse_tui, browse_providers)
+            prov_result = safe_tui_call(select_provider_browse_tui, browse_providers)
             if prov_result is None or prov_result == "__interrupt__":
                 continue
             selected_pid, selected_pname = prov_result
@@ -9862,7 +9857,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if not prov_models:
                 console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
                 continue
-            model_result = _safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
+            model_result = safe_tui_call(select_provider_models_tui, selected_pname, prov_models)
             if model_result is None:
                 continue  # B 返回 provider 列表
             if model_result == "__exit__":
@@ -9887,7 +9882,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 default_load_balance_profile_name=_default_load_balance_profile_name,
                 build_provider_options_map=_build_provider_options_map,
             )
-            lb_result = _safe_tui_call(
+            lb_result = safe_tui_call(
                 select_load_balance_tui,
                 available_models=all_models or None,
                 families_detail=cli_families,
@@ -9957,14 +9952,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 select_settings_tui,
                 select_provider_mgmt_tui,
             )
-            settings_action = _safe_tui_call(select_settings_tui)
+            settings_action = safe_tui_call(select_settings_tui)
             if settings_action == "__interrupt__":
                 return True
             if settings_action is None:
                 continue
             if settings_action == "provider_mgmt":
                 providers_raw = current_cfg.get("providers", [])
-                result_providers = _safe_tui_call(select_provider_mgmt_tui, providers_raw)
+                result_providers = safe_tui_call(select_provider_mgmt_tui, providers_raw)
                 if result_providers == "__interrupt__":
                     return True
                 if result_providers is not None:
@@ -9988,7 +9983,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     except Exception:
                         pass
             elif settings_action == "language":
-                chosen_lang = _safe_tui_call(select_language_tui)
+                chosen_lang = safe_tui_call(select_language_tui)
                 if chosen_lang == "__interrupt__":
                     return True
                 if chosen_lang in {"zh", "en"}:
@@ -10008,7 +10003,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
                 status = registry_status()
                 registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
-                registry_action = _safe_tui_call(
+                registry_action = safe_tui_call(
                     select_channel_action_tui,
                     registry_title,
                     registry_info,
@@ -10083,7 +10078,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 while True:
                     about_snapshot = _about_status_snapshot(force_update=False)
                     about_title, about_lines, about_actions = _about_tui_payload(about_snapshot)
-                    about_action = _safe_tui_call(
+                    about_action = safe_tui_call(
                         select_channel_action_tui,
                         about_title,
                         about_lines,
@@ -10108,7 +10103,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         continue
             elif settings_action == "guard":
                 guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()
-                guard_action = _safe_tui_call(
+                guard_action = safe_tui_call(
                     select_channel_action_tui,
                     guard_title,
                     guard_info,
@@ -10142,7 +10137,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     _latest_rescue_hot_fallback_event(),
                     hot_fallback_enabled,
                 )
-                landing_action = _safe_tui_call(
+                landing_action = safe_tui_call(
                     select_channel_action_tui,
                     "Rescue / Current-session Fallback",
                     landing_info,
@@ -10171,7 +10166,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if landing_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = _safe_tui_call(
+                    fallback_model = safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择全局默认 fallback model",
@@ -10221,7 +10216,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     )
                     _pause_after_tui_report("按 Enter 返回设置")
                     continue
-                selected_rescue = _safe_tui_call(select_rescue_event_tui, rescue_events)
+                selected_rescue = safe_tui_call(select_rescue_event_tui, rescue_events)
                 if selected_rescue == "__interrupt__":
                     return True
                 if not selected_rescue:
@@ -10248,7 +10243,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     (f"default::{model}", f"设为全局默认 fallback -> {model}")
                     for model in fallback_candidates
                 ]
-                rescue_action = _safe_tui_call(
+                rescue_action = safe_tui_call(
                     select_channel_action_tui,
                     "Rescue Packet",
                     info_lines,
@@ -10300,7 +10295,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_handover":
                     from mms_tui import select_model_tui
 
-                    fallback_model = _safe_tui_call(
+                    fallback_model = safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择 fallback handover model",
@@ -10334,7 +10329,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 elif rescue_action == "choose_route_default":
                     from mms_tui import select_model_tui
 
-                    fallback_model = _safe_tui_call(
+                    fallback_model = safe_tui_call(
                         select_model_tui,
                         route_fallback_candidates,
                         title="选择全局默认 fallback model",
@@ -10431,7 +10426,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
             provider_options = provider_options_by_cli.get(cli, {})
 
-            selected = _safe_tui_call(
+            selected = safe_tui_call(
                 select_submodel_tui,
                 family_name,
                 models,
@@ -10567,7 +10562,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             has_ecc=has_ecc,
             has_omc=has_omc,
         )
-        result = _safe_tui_call(
+        result = safe_tui_call(
             confirm_tui,
             cli,
             clean_model_info,

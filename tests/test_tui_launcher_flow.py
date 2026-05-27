@@ -5,6 +5,7 @@ from mms_tui_launcher_flow import (
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
     provider_browse_options,
+    safe_tui_call,
 )
 
 
@@ -66,6 +67,17 @@ def test_provider_browse_options_filters_and_dedupes_candidates() -> None:
         {"id": "p1", "name": "Provider One", "role": "primary", "priority": 300},
         {"id": "default", "name": "Default Provider", "role": "auto", "priority": 100},
     ]
+
+
+def test_safe_tui_call_normalizes_keyboard_interrupt() -> None:
+    def raises_keyboard_interrupt():
+        raise KeyboardInterrupt
+
+    assert safe_tui_call(raises_keyboard_interrupt) == "__interrupt__"
+
+
+def test_safe_tui_call_returns_function_result() -> None:
+    assert safe_tui_call(lambda left, right=None: (left, right), "a", right="b") == ("a", "b")
 
 
 def test_load_balance_tui_payload_preserves_models_and_provider_options() -> None:
