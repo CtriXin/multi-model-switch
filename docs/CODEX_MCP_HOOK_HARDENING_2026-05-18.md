@@ -72,6 +72,24 @@ Follow-up changes:
 - The exit write-back path still persists current-session trust after `Trust all and continue`, but the next launch can now recover from sibling trust even if the previous durable cache was incomplete.
 - Follow-up hardening: MMS gateway Codex launches now keep the per-PID `MMS_SESSION_HOME` for wrappers/tmp files but point `CODEX_HOME` at stable `~/.config/mms/codex-gateway/.codex`, so Codex sees the same `hooks.json` trust key across isolated launches instead of treating every PID as a brand-new hook source.
 
+## 2026-05-27 No-Popup Contract
+
+Repeated review prompts recurred because old per-PID isolated sessions contained stale `hooks.state` entries for MMS-managed `scmp_hook.py` hooks. During gateway config regeneration those stale sibling entries could overwrite the current real-home trust, so Codex showed `modified` even though the canonical `~/.codex/hooks.json` hook was already trusted.
+
+This is now a hard MMS contract:
+
+- `CODEX_HOME` for MMS gateway Codex must remain stable at `~/.config/mms/codex-gateway/.codex`.
+- `MMS_SESSION_HOME` may remain per-PID for wrappers/tmp/session packet state, but it must not become the trust identity for Codex hooks.
+- In runtime `bypass` mode, MMS Codex must append both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`; removing the second flag reintroduces startup review popups.
+- Trust imported from real `~/.codex/hooks.json` is authoritative for matching hooks. Sibling `codex-gateway/s/<pid>/.codex/config.toml` entries may seed missing trust only; they must not override real-home trust for the same command/fingerprint.
+- Do not treat an old per-PID session config as the durable source of truth for hook trust. The durable source is the stable gateway `.codex/config.toml`, refreshed from real-home trust with sibling sessions as fallback.
+
+Regression coverage:
+
+- `tests/test_codex_hook_trust_contract.py`
+- `tests/test_codex_reasoning_effort_launch.py::test_launch_codex_bypass_mode_skips_hook_review_prompt`
+- Codex hook trust tests in `tests/test_claude_hardening_regressions.py`
+
 ## Safety Rules Preserved
 
 - No direct write to real `~/.claude.json` or real `~/.codex/config.toml` was required.

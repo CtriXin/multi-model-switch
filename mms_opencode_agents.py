@@ -505,17 +505,15 @@ def opencode_lite_pro_agent_configs(agent_models, *, orchestrated=False, roster_
             "Keep going until the acceptance criteria pass or a real blocker is reached. "
             "Return changed files, commands, results, risks, and any blocker."
         )
-        agents.update({
-            "mobius-executor-gpt54": {
-                "description": "Lite Pro long-running GPT implementation executor",
-                "mode": "subagent",
-                "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
-                "variant": "high",
-                "temperature": 0.2,
-                "permission": fix_permission,
-                "prompt": "Primary implementation executor. " + executor_prompt,
-            },
-        })
+        agents["mobius-executor-gpt54"] = {
+            "description": "Lite Pro long-running GPT implementation executor",
+            "mode": "subagent",
+            "model": _agent_model("mobius-executor-gpt54", _agent_model("mobius-builder-stable")),
+            "variant": "high",
+            "temperature": 0.2,
+            "permission": fix_permission,
+            "prompt": "Primary implementation executor. " + executor_prompt,
+        }
 
     custom_prompt_by_preset = {
         "vision": "Custom vision helper. Read attached images/screenshots only. Return structured observations, visible text, UI risks, and uncertainties. No edits.",

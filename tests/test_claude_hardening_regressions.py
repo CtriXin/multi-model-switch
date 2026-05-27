@@ -1485,6 +1485,57 @@ def test_append_codex_session_hook_trust_states_replaces_stale_target_hash(tmp_p
     assert "sha256:stale" not in rendered
 
 
+def test_append_codex_session_hook_trust_prefers_real_home_over_stale_sibling(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_hooks_path = str(real_home / ".codex" / "hooks.json")
+    sibling_hooks_path = str(tmp_path / "gateway" / "s" / "old" / ".codex" / "hooks.json")
+    target_hooks_path = str(tmp_path / "gateway" / ".codex" / "hooks.json")
+    real_hooks = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "/tmp/nsr.sh"}]},
+                {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "/tmp/scmp.py"}]},
+            ]
+        }
+    }
+    target_hooks = {
+        "hooks": {
+            "PreToolUse": [
+                {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "/tmp/scmp.py"}]},
+                {"matcher": "*", "hooks": [{"type": "command", "command": "/tmp/nsr.sh"}]},
+            ]
+        }
+    }
+    real_config = (
+        f'[hooks.state."{real_hooks_path}:pre_tool_use:1:0"]\n'
+        'trusted_hash = "sha256:fresh-real"\n'
+    )
+    stale_sibling_config = (
+        f'[hooks.state."{sibling_hooks_path}:pre_tool_use:1:0"]\n'
+        'trusted_hash = "sha256:stale-sibling"\n'
+    )
+
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+
+    rendered = mms_launchers._append_codex_session_hook_trust_states(
+        f'[hooks.state."{target_hooks_path}:pre_tool_use:0:0"]\ntrusted_hash = "sha256:old-target"\n',
+        target_hooks_path=target_hooks_path,
+        target_hooks=target_hooks,
+        trust_config_texts=[stale_sibling_config, real_config],
+        source_hook_payloads_by_path={
+            real_hooks_path: real_hooks,
+            sibling_hooks_path: real_hooks,
+        },
+    )
+
+    assert f'[hooks.state."{target_hooks_path}:pre_tool_use:0:0"]' in rendered
+    assert 'trusted_hash = "sha256:fresh-real"' in rendered
+    assert "sha256:stale-sibling" not in rendered
+    assert "sha256:old-target" not in rendered
+
+
 def test_append_codex_session_hook_trust_states_repairs_inline_trust_headers(tmp_path):
     import tomllib
 

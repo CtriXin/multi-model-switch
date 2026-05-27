@@ -11,7 +11,7 @@ OPENCODE_PROFILE_OPTIONS = [
         "profile_id": OPENCODE_AGENT_PROFILE_ID,
         "label": "Agent",
         "badge": "默认",
-        "summary": "默认推荐：session-local agent roster；5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt/vision 只读辅助。",
+        "summary": "默认推荐：session-local agent roster；GPT 总控/规格/执行/修复/终审；国产模型只做 explore、bug-hunt、vision/context checks 等轻量只读辅助。",
     },
     {
         "id": "omo",

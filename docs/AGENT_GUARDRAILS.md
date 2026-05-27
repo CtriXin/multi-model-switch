@@ -153,6 +153,16 @@
 - 如果确实要继承 global 的非认证状态，必须走 schema/allowlist，并明确排除 token、account identity、owner fingerprint、account 选择提示和请求 credential
 - 任何可能把隔离 session auth state 回写到 real/global HOME 的设计都默认禁止；除非任务明确要求一次性人工导入，而且边界和验证都写清楚
 
+## Codex Hook Trust No-Popup Contract
+
+MMS-managed Codex launch must not repeatedly stop on `Hooks need review` in isolated sessions.
+
+- Gateway Codex `CODEX_HOME` must stay stable at `~/.config/mms/codex-gateway/.codex`; per-PID `MMS_SESSION_HOME` is allowed only for wrappers/tmp/session packet state.
+- Do not revert Codex gateway back to `CODEX_HOME=$MMS_SESSION_HOME/.codex`.
+- Runtime `bypass` mode must pass both `--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`.
+- Real `~/.codex/hooks.json` trust wins over stale sibling sessions. Sibling `codex-gateway/s/<pid>/.codex/config.toml` trust can backfill missing entries, but cannot overwrite matching real-home trust.
+- Any change to Codex hook generation, hook order, `CODEX_HOME`, or hook trust copy/write-back must run `tests/test_codex_hook_trust_contract.py` plus the targeted Codex hook trust tests.
+
 ## User Preferences And Human Gate
 
 `~/.config/mms/preferences.toml` 是用户偏好 allowlist 覆盖层，不是 agent 可随手写的配置文件。

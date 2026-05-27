@@ -780,6 +780,7 @@ def test_core_opencode_lite_pro_builds_multi_model_roster(monkeypatch):
     assert payload["agent"]["mobius-bughunt-glm"]["model"].endswith("/glm-5.1")
     assert payload["agent"]["mobius-bughunt-glm"]["permission"]["edit"] == "deny"
     assert payload["agent"]["mobius-fixer-gpt54"]["model"].endswith("/gpt-5.4")
+    assert payload["agent"]["mobius-fixer-gpt54"]["description"] == "Lite Pro GPT focused fixer"
     assert "steps" not in payload["agent"]["mobius-fixer-gpt54"]
     assert len(payload["provider"]) >= 7
     assert payload["provider"]["mms-explore_primary"]["npm"] == "@ai-sdk/anthropic"
