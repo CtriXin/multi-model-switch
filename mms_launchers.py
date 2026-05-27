@@ -1072,34 +1072,21 @@ def _set_opencode_soft_home(env, session_home):
 
 
 def _model_name_from_info(model_info):
-    if isinstance(model_info, str):
-        return model_info.strip()
-    if not isinstance(model_info, dict):
-        return ""
-    for key in ("model", "sonnet", "opus", "haiku"):
-        value = str(model_info.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    from mms_launcher_export import model_name_from_info
+
+    return model_name_from_info(model_info)
 
 
 def _selected_model_name(*candidates, model_info=None):
-    for candidate in candidates:
-        value = str(candidate or "").strip()
-        if value:
-            return value
-    return _model_name_from_info(model_info)
+    from mms_launcher_export import selected_model_name
+
+    return selected_model_name(*candidates, model_info=model_info)
 
 
 def _inject_selected_model_name(env, *candidates, model_info=None):
-    if not isinstance(env, dict):
-        return env
-    model_name = _selected_model_name(*candidates, model_info=model_info)
-    if model_name:
-        env["MMS_MODEL_NAME"] = model_name
-    else:
-        env.pop("MMS_MODEL_NAME", None)
-    return env
+    from mms_launcher_export import inject_selected_model_name
+
+    return inject_selected_model_name(env, *candidates, model_info=model_info)
 
 
 def _install_session_packet_env(

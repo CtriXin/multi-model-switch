@@ -39,6 +39,37 @@ def inject_host_capability_hints(env, *, host_capability_env, host_context_real_
     return env
 
 
+def model_name_from_info(model_info):
+    if isinstance(model_info, str):
+        return model_info.strip()
+    if not isinstance(model_info, dict):
+        return ""
+    for key in ("model", "sonnet", "opus", "haiku"):
+        value = str(model_info.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def selected_model_name(*candidates, model_info=None):
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return model_name_from_info(model_info)
+
+
+def inject_selected_model_name(env, *candidates, model_info=None):
+    if not isinstance(env, dict):
+        return env
+    model_name = selected_model_name(*candidates, model_info=model_info)
+    if model_name:
+        env["MMS_MODEL_NAME"] = model_name
+    else:
+        env.pop("MMS_MODEL_NAME", None)
+    return env
+
+
 def install_host_context_env(
     env,
     *,
