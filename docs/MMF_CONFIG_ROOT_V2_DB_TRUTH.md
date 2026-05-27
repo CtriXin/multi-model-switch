@@ -164,6 +164,21 @@ audit_log
   actor, action, before/after metadata, backup pointer, revision pointer
 ```
 
+## Watchdog And Stale Route Export Rule
+
+Current behavior to fix: `scripts/mms_health_watchdog.py` reads root `model-routes.json`, `model-policy.json`, and `config.toml` directly. If a newly configured model such as `qwen3.7-max` is present in config but the last Router export predates the model, watchdog can report stale route state until someone manually runs `mms routes export`.
+
+Target behavior:
+
+- WebUI/TUI/`mms config` model changes trigger backup, publish, and verify automatically.
+- Watchdog is a consumer, not a writer. It must not mutate DB truth or run surprise route export from launchd/background context.
+- Watchdog should first read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify hashes, then consume generated Router/Policy/Profile/Lineup.
+- If the bundle is missing, invalid, hash-mismatched, or older than the approved DB revision, watchdog should report `stale_or_invalid_bundle` with a clear remediation hint.
+- Upstream `/models` newly exposing a model should enter candidate/source evidence first; it should not silently become approved route truth unless a later safe auto-promote policy explicitly allows it.
+- User-approved WebUI model additions should make the model visible to watchdog on the next run without manual `mms routes export`.
+
+This requirement belongs in the `mmf` preview work because it proves the new config root removes one more manual command from the user workflow.
+
 ## Downstream Contract
 
 Hive, Pilot, Ant, Mobius, and future consumers should have one unified read path:
