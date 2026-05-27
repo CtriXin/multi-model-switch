@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 
@@ -212,6 +213,139 @@ def xmem_cli_path(*, environ, real_user_path, which):
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     return ""
+
+
+def install_session_command_wrappers(
+    session_home,
+    env,
+    *,
+    real_user_home,
+    real_user_path,
+    real_home_wrapper_search_path,
+    real_home_wrapper_scrub_lines,
+    write_real_home_script,
+    install_chrome_host_wrapper,
+    wrapper_commands,
+    mms_toon_script_path,
+    mms_context_script_path,
+    token_saver_script_path,
+    xmem_cli_path,
+):
+    """Install wrappers for tools that must run against the real HOME."""
+    wrapper_dir = os.path.join(session_home, ".mms", "bin")
+    os.makedirs(wrapper_dir, exist_ok=True)
+
+    real_home = real_user_home()
+    current_path = real_home_wrapper_search_path(session_home, env)
+    wrapper_path_env = json.dumps(current_path or os.defpath)
+    xdg_config_home = json.dumps(real_user_path(".config"))
+    xdg_cache_home = json.dumps(real_user_path(".cache"))
+    xdg_data_home = json.dumps(real_user_path(".local", "share"))
+    xdg_state_home = json.dumps(real_user_path(".local", "state"))
+    for command_name in wrapper_commands:
+        wrapper_path = os.path.join(wrapper_dir, command_name)
+        extra_exports = []
+        if command_name == "gh":
+            extra_exports.append(f'export GH_CONFIG_DIR={json.dumps(real_user_path(".config", "gh"))}')
+        if command_name == "pm2":
+            extra_exports.append(f'export PM2_HOME={json.dumps(real_user_path(".pm2"))}')
+        wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f'export HOME={json.dumps(real_home)}',
+                f'export MMS_REAL_HOME={json.dumps(real_home)}',
+                f'export REAL_HOME={json.dumps(real_home)}',
+                f'export ORIGINAL_HOME={json.dumps(real_home)}',
+                f"export PATH={wrapper_path_env}",
+                f"export XDG_CONFIG_HOME={xdg_config_home}",
+                f"export XDG_CACHE_HOME={xdg_cache_home}",
+                f"export XDG_DATA_HOME={xdg_data_home}",
+                f"export XDG_STATE_HOME={xdg_state_home}",
+                *real_home_wrapper_scrub_lines(),
+                *extra_exports,
+                f'real_bin="$(command -v {json.dumps(command_name)} 2>/dev/null || true)"',
+                'if [ -z "$real_bin" ]; then',
+                f'  printf "%s\\n" "mms: command {command_name} not found in real HOME PATH" >&2',
+                "  exit 127",
+                "fi",
+                'exec "$real_bin" "$@"',
+                "",
+            ]
+        )
+        write_real_home_script(wrapper_path, wrapper.splitlines())
+
+    install_chrome_host_wrapper(wrapper_dir, env, wrapper_path_env)
+
+    toon_script = mms_toon_script_path()
+    if toon_script:
+        toon_wrapper_path = os.path.join(wrapper_dir, "mms-toon")
+        toon_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(toon_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(toon_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(toon_wrapper)
+        os.chmod(toon_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["MMS_TOON_BIN"] = toon_wrapper_path
+
+    context_script = mms_context_script_path()
+    if context_script:
+        context_wrapper_path = os.path.join(wrapper_dir, "mms-context")
+        context_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(context_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(context_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(context_wrapper)
+        os.chmod(context_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["MMS_CONTEXT_BIN"] = context_wrapper_path
+            env["MMS_CONTEXT_DIR"] = os.path.join(session_home, ".mms", "context-store")
+
+    token_saver_script = token_saver_script_path()
+    if token_saver_script:
+        token_saver_wrapper_path = os.path.join(wrapper_dir, "token-saver")
+        token_saver_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(token_saver_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(token_saver_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(token_saver_wrapper)
+        os.chmod(token_saver_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["TOKEN_SAVER_BIN"] = token_saver_wrapper_path
+            env["MMS_TOKEN_SAVER_BIN"] = token_saver_wrapper_path
+            env.setdefault("MMS_CONTEXT_DIR", os.path.join(session_home, ".mms", "context-store"))
+
+    xmem_script = xmem_cli_path()
+    if xmem_script:
+        xmem_wrapper_path = os.path.join(wrapper_dir, "xmem")
+        xmem_wrapper = "\n".join(
+            [
+                "#!/bin/sh",
+                f"exec {json.dumps(xmem_script)} \"$@\"",
+                "",
+            ]
+        )
+        with open(xmem_wrapper_path, "w", encoding="utf-8") as handle:
+            handle.write(xmem_wrapper)
+        os.chmod(xmem_wrapper_path, 0o755)
+        if isinstance(env, dict):
+            env["XMEM_BIN"] = xmem_wrapper_path
+            env["MMS_XMEM_BIN"] = xmem_wrapper_path
+
+    session_path = env.get("PATH") or current_path
+    env["PATH"] = wrapper_dir + os.pathsep + session_path if session_path else wrapper_dir
 
 
 def install_host_context_env(
