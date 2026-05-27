@@ -29,18 +29,13 @@ def test_default_mms_keeps_openrouter_claude_visible():
     ]
 
 
-def test_builtin_scene_catalog_keeps_claude_cli_with_claude_and_bridge_variants():
+def test_builtin_scene_catalog_is_removed_from_launcher_surface():
     import mms_core
 
-    catalog = mms_core._builtin_scene_catalog()
-
-    assert "主力编码" in catalog
-    assert catalog["主力编码"]["cli"] == "claude"
-    variants = mms_core._scene_visible_variants(catalog["主力编码"])
-    models = [variant["model_info"]["model"] for variant in variants]
-    assert "claude-sonnet-4-6" in models
-    assert "gpt-5.3-codex" in models
-    assert "glm-5" in models
+    assert not hasattr(mms_core, "SCENES")
+    assert not hasattr(mms_core, "show_scenes")
+    assert not hasattr(mms_core, "select_scene_fallback")
+    assert not hasattr(mms_core, "_builtin_scene_catalog")
 
 
 def test_preset_visibility_keeps_claude_only_preset():

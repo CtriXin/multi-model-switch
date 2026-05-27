@@ -542,8 +542,6 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     calls: list[str] = []
     cfg = {"user": {}, "recommend": {}}
     provider = {"id": "default-provider"}
-    scenes = {"Code": {"cli": "claude", "emoji": ">", "desc": "Code"}}
-
     monkeypatch.setattr(sys, "argv", ["mms"])
     monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
     monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
@@ -553,22 +551,46 @@ def test_mms_default_path_still_uses_tui_launcher_handler(monkeypatch) -> None:
     monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, {"models": []}))
     monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["claude"])
-    monkeypatch.setattr(mms_core, "_filter_scenes_by_visible_clis", lambda _clis: scenes)
     monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
     monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
     monkeypatch.setattr(mms_core, "_use_tui", lambda: True)
     monkeypatch.setattr(mms_core, "setup_wizard", lambda *_args, **_kwargs: pytest.fail("setup_wizard should not run"))
-    monkeypatch.setattr(mms_core, "select_scene_fallback", lambda *_args, **_kwargs: pytest.fail("fallback should not run"))
 
     def fake_tui_handler(*_args, **_kwargs):
         calls.append("tui")
         return True
 
-    monkeypatch.setattr(mms_core, "_handle_tui_scene_selection", fake_tui_handler)
+    monkeypatch.setattr(mms_core, "_handle_tui_launcher_selection", fake_tui_handler)
 
     mms_core.main()
 
     assert calls == ["tui"]
+
+
+def test_mms_numeric_target_no_longer_launches_builtin_scene(monkeypatch, capsys) -> None:
+    import mms_core
+
+    cfg = {"user": {}, "recommend": {}}
+    provider = {"id": "default-provider"}
+
+    monkeypatch.setattr(sys, "argv", ["mms", "1"])
+    monkeypatch.setattr(mms_core, "load_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_load_command_config", lambda: cfg)
+    monkeypatch.setattr(mms_core, "_ensure_startup_snapshot_guard", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "apply_local_overrides", lambda value: value)
+    monkeypatch.setattr(mms_core, "_refresh_routes_export_for_hive", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "ensure_provider_credentials", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(mms_core, "ensure_models_ready", lambda _cfg, _provider: (provider, {"models": []}))
+    monkeypatch.setattr(mms_core, "_warm_probe_cache_async", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_core, "_resolve_visible_clis", lambda *_args, **_kwargs: ["claude"])
+    monkeypatch.setattr(mms_core, "_update_notice", lambda: None)
+    monkeypatch.setattr(mms_core, "_start_async_update_check", lambda: None)
+    monkeypatch.setattr(mms_core, "_launch_with_tracking", lambda *_args, **_kwargs: pytest.fail("numeric scene should not launch"))
+
+    mms_core.main()
+
+    out = capsys.readouterr().out
+    assert "未知目标: 1" in out
 
 
 def test_review_launch_is_not_legacy_cleanup_target() -> None:

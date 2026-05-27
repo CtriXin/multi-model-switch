@@ -44,6 +44,27 @@ cli = "codex"
 provider = "default"
 model = "gpt-5.4"
 
+# OpenCode Agent 可选覆盖；默认留空走自动路线。
+# 这些只影响 MMS 生成的 session-local opencode.json，不写全局 OpenCode config。
+#[opencode]
+#default_profile = "agent"
+#
+#[opencode.agent_models.mobius-explore-glm]
+#provider_id = "default"
+#model = "glm-5-turbo"
+#
+#[opencode.agent_roster.mobius-vision-mimo]
+#enabled = false
+#preset = "vision"
+#
+#[opencode.agent_roster.mobius-vision-custom-1]
+#enabled = true
+#custom = true
+#preset = "vision"
+#provider_id = "default"
+#model = "qwen3.6-plus"
+#description = "Custom Qwen vision helper"
+
 [[broker_profiles]]
 id = "official-broker-personal"
 name = "Official Broker Personal"

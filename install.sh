@@ -4364,8 +4364,8 @@ if [ -x "$BIN_DIR/mms" ]; then
     fi
     echo ""
     echo "  $(t "常用命令:" "Common commands:")"
-    echo "    mms              $(t "交互选择场景" "open the interactive launcher")"
-    echo "    mms 1            $(t "快速启动场景 1" "launch scene 1 quickly")"
+    echo "    mms              $(t "打开交互启动器" "open the interactive launcher")"
+    echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
     echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
     echo "    mms --export claude  $(t "导出环境变量" "export env vars")"

@@ -97,7 +97,7 @@ def build_config_snapshot(
     vision_sidecar = cfg.get("vision_sidecar") if isinstance(cfg.get("vision_sidecar"), dict) else {}
     rescue = cfg.get("rescue") if isinstance(cfg.get("rescue"), dict) else {}
     opencode = {
-        "recommended_profile": "lite_pro_orchestrated",
+        "recommended_profile": "agent",
         "vision_agents": ["mobius-vision-mimo", "mobius-vision-kimi", "mobius-vision-qwen"],
         "executor": "mobius-executor-gpt54",
         "release_gate": "mobius-reviewer-gpt55",
@@ -158,9 +158,10 @@ fallback_cli = \"codex\"
 hot_fallback_enabled = false
 """.strip()
     opencode = """# Launch examples
-mms opencode --profile lite_pro_orchestrated
-mms opencode --profile lite_pro_orchestrated_backend
-mms opencode-smoke --profile lite_pro_orchestrated --health-summary
+mms opencode --profile agent
+mms opencode --profile omo
+mms opencode --profile raw
+mms opencode-smoke --profile agent --health-summary
 """.strip()
     policy = """// Manual model-policy.json shape: hide/show and capability overrides
 {

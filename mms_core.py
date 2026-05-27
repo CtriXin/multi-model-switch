@@ -104,6 +104,55 @@ from mms_fake_upstream import (
     tail_log as _fake_upstream_tail_log,
 )
 from mms_i18n import normalize_language, set_language, pick as _L
+from mms_opencode_health import (
+    OPENCODE_HEALTH_REL_PATH as _OPENCODE_HEALTH_REL_PATH,
+    OPENCODE_HEALTH_STATUS_RANK as _OPENCODE_HEALTH_STATUS_RANK,
+    OPENCODE_HEALTH_UNHEALTHY_TTL_SEC as _OPENCODE_HEALTH_UNHEALTHY_TTL_SEC,
+    load_opencode_route_health_latest as _load_opencode_route_health_latest,
+    opencode_health_latest_path as _opencode_health_latest_path,
+    opencode_health_repo_root as _opencode_health_repo_root,
+    opencode_parse_health_timestamp as _opencode_parse_health_timestamp,
+    opencode_route_health_allows_route as _opencode_route_health_allows_route_impl,
+    opencode_route_health_for_route as _opencode_route_health_for_route,
+    opencode_route_health_is_fresh as _opencode_route_health_is_fresh,
+    opencode_route_health_key as _opencode_route_health_key,
+    opencode_route_health_sort_key as _opencode_route_health_sort_key,
+)
+from mms_opencode_profiles import (
+    OPENCODE_AGENT_PROFILE_ID as _OPENCODE_AGENT_PROFILE_ID,
+    OPENCODE_BASE_PROFILE_OPTIONS as _OPENCODE_BASE_PROFILE_OPTIONS,
+    OPENCODE_DEFAULT_MODEL_PREFERENCES as _OPENCODE_DEFAULT_MODEL_PREFERENCES,
+    OPENCODE_DEFAULT_PROFILE_ID as _OPENCODE_DEFAULT_PROFILE_ID,
+    OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS as _OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS,
+    OPENCODE_LITE_PRO_SPECS as _OPENCODE_LITE_PRO_SPECS,
+    OPENCODE_PROFILE_OPTIONS as _OPENCODE_PROFILE_OPTIONS,
+    apply_opencode_entrypoint as _apply_opencode_entrypoint,
+    apply_opencode_profile as _apply_opencode_profile,
+    normalize_opencode_entrypoint as _normalize_opencode_entrypoint,
+    normalize_opencode_profile_id as _normalize_opencode_profile_id,
+    opencode_lite_pro_specs as _opencode_lite_pro_specs,
+    opencode_profile_label as _opencode_profile_label,
+    opencode_profile_selection as _opencode_profile_selection,
+    opencode_profile_selection_ids as _opencode_profile_selection_ids,
+)
+from mms_opencode_routes import (
+    opencode_default_model_rank as _opencode_default_model_rank_impl,
+    opencode_is_mimo_direct_route as _opencode_is_mimo_direct_route_impl,
+    opencode_mimo_openai_base_from_anthropic as _opencode_mimo_openai_base_from_anthropic,
+    opencode_normalized_anthropic_base_url as _opencode_normalized_anthropic_base_url_impl,
+    opencode_normalized_openai_base_url as _opencode_normalized_openai_base_url_impl,
+    opencode_provider_matches_route_policy as _opencode_provider_matches_route_policy_impl,
+    opencode_provider_protocols as _opencode_provider_protocols,
+    opencode_route_candidate_score as _opencode_route_candidate_score_impl,
+    opencode_route_transport as _opencode_route_transport_impl,
+    opencode_route_transport_candidates as _opencode_route_transport_candidates_impl,
+)
+from mms_opencode_resolver import (
+    OpenCodeResolverDeps as _OpenCodeResolverDeps,
+    find_opencode_model_route as _find_opencode_model_route_impl,
+    resolve_opencode_lite_pro_runtime as _resolve_opencode_lite_pro_runtime_impl,
+    resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
+)
 from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
@@ -690,145 +739,12 @@ def _model_info_has_visible_models(model_info):
     return not found_model
 
 
-def _scene_visible_variants(scene):
-    variants = scene.get("variants")
-    if not isinstance(variants, list):
-        return []
-    return [variant for variant in variants if _model_info_has_visible_models((variant or {}).get("model_info", {}))]
-
-
-def _scene_has_visible_model_options(scene):
-    variants = scene.get("variants")
-    if isinstance(variants, list):
-        return bool(_scene_visible_variants(scene))
-    return _model_info_has_visible_models(_scene_model_info(scene))
-
-
 def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
-SCENES = {
-    "常规任务": {
-        "emoji": "⚡",
-        "desc": "简单问答、日常杂活",
-        "cli": "claude",
-        "model": "qwen3-max-2026-01-23",
-    },
-    "主力编码": {
-        "emoji": "💻",
-        "desc": "日常开发、代码重构",
-        "cli": "claude",
-        "default_tier": "high",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "GLM",
-                "desc": "中杯",
-                "model_info": {"model": "glm-5"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "默认",
-                "model_info": {"model": "gpt-5.3-codex"},
-            },
-            {
-                "tier": "xhigh",
-                "name": "Sonnet",
-                "desc": "超大杯",
-                "model_info": {"model": "claude-sonnet-4-6"},
-            },
-        ],
-    },
-    "深度思考": {
-        "emoji": "🧠",
-        "desc": "复杂推理、架构设计",
-        "cli": "claude",
-        "default_tier": "high",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Sonnet",
-                "desc": "中杯",
-                "model_info": {"model": "claude-sonnet-4-6"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "默认",
-                "model_info": {"model": "gpt-5.4"},
-            },
-            {
-                "tier": "xhigh",
-                "name": "Opus",
-                "desc": "超大杯",
-                "model_info": {"model": "claude-opus-4-6"},
-            },
-        ],
-    },
-    "中文主力": {
-        "emoji": "🇨🇳",
-        "desc": "中文内容、国内业务",
-        "cli": "claude",
-        "model": "kimi-k2.5",
-    },
-    "文字产出": {
-        "emoji": "🇺🇸",
-        "desc": "长文撰写、内容输出",
-        "cli": "codex",
-        "default_tier": "med",
-        "variants": [
-            {
-                "tier": "med",
-                "name": "Gemini",
-                "desc": "默认英文",
-                "model_info": {"model": "gemini-3.1-pro-preview"},
-            },
-            {
-                "tier": "high",
-                "name": "GPT",
-                "desc": "更稳一点",
-                "model_info": {"model": "gpt-5.4"},
-            },
-        ],
-    },
-    "负载模式": {
-        "emoji": "⚖️",
-        "desc": "自动按任务轻重切换模型",
-        "cli": "claude",
-        "load_balance": True,
-    },
-    "视觉内容": {
-        "emoji": "🎨",
-        "desc": "图片理解、UI分析",
-        "cli": "claude",
-        "default_tier": "med",
-        "variants": [
-            {
-                "tier": "xhigh",
-                "name": "Gemini",
-                "desc": "排第一",
-                "model_info": {"model": "gemini-3.1-pro-preview"},
-            },
-            {
-                "tier": "high",
-                "name": "Kimi",
-                "desc": "排第二",
-                "model_info": {"model": "kimi-k2.5"},
-            },
-            {
-                "tier": "med",
-                "name": "MiniMax",
-                "desc": "也能用",
-                "model_info": {"model": "MiniMax-M2.5"},
-            },
-        ],
-    },
-}
 
 CLI_NAMES = ["claude", "codex", "opencode", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
-SCENE_META_KEYS = {"emoji", "desc", "cli", "variants", "default_tier", "load_balance"}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
@@ -3700,7 +3616,7 @@ def _record_usage(runtime, cli_name, model_info):
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):
-    """记录场景级启动统计（用于 TUI 启动次数排名）"""
+    """记录 legacy 场景级启动统计，保留旧 usage.json 兼容。"""
     if not scene_name or scene_name.startswith("__"):
         return
     def _mutate(stats):
@@ -3721,7 +3637,7 @@ def _record_scene_usage(scene_name, cli_name, model_info):
 
 
 def _get_scene_usage():
-    """获取上次使用信息（按 CLI 分桶）+ 场景启动次数，返回 (last_by_cli, scene_counts)"""
+    """获取上次使用信息（按 CLI 分桶）+ legacy scene counts。"""
     stats = _load_usage_stats()
     scene_counts = {}
     for name, entry in stats.get("scenes", {}).items():
@@ -7099,7 +7015,7 @@ def _model_validation_findings(provider, probe):
         findings.append({
             "severity": "low",
             "title": "可以跳过校验继续",
-            "summary": "场景和预设仍然可以继续使用，但模型浏览会受限。",
+            "summary": "预设和直接 CLI 启动仍然可以继续使用，但模型浏览会受限。",
         })
     return findings
 
@@ -7136,7 +7052,7 @@ def _build_model_recovery_actions(cfg, provider, probe):
         {
             "id": "continue_without_validation",
             "title": "跳过校验并继续",
-            "summary": "继续使用场景或预设，但不会有模型浏览列表。",
+            "summary": "继续使用预设或直接 CLI 启动，但不会有模型浏览列表。",
             "priority": 30,
             "recommended": False,
         },
@@ -7248,7 +7164,7 @@ def _run_recovery_action(cfg, provider, probe, action_id):
         selected = _select_provider_interactive(cfg, provider.get("id"))
         return (selected or provider), False
     if action_id == "continue_without_validation":
-        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但场景和预设仍可继续。[/yellow]")
+        console.print("[yellow]已跳过模型校验。模型浏览将暂时不可用，但预设和直接 CLI 启动仍可继续。[/yellow]")
         return provider, True
     return provider, False
 
@@ -7582,7 +7498,7 @@ def _select_custom_model(models, cli_name, role=MODE_ALL, recommend=None, use_tu
 def _ensure_models_cache_available(models_cache):
     if models_cache:
         return True
-    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用场景 / 预设启动。[/yellow]")
+    console.print("[yellow]当前没有可用的模型列表。请先修复 provider 校验，或先使用预设 / 直接 CLI 启动。[/yellow]")
     return False
 
 
@@ -8223,72 +8139,6 @@ def _choose_runtime_source(
         console.print(f"[red]请输入 1-{len(options)} 的编号[/red]")
 
 
-class _LazySourceChoices(dict):
-    """惰性 source choices：key 首次被访问时才计算，避免预计算所有 scene/variant 的 provider 源。"""
-
-    def __init__(self, cfg, scenes, cli_names, default_provider, default_models):
-        super().__init__()
-        self._cfg = cfg
-        self._scenes = scenes
-        self._cli_names = cli_names
-        self._default_provider = default_provider
-        self._default_models = default_models
-
-    def _compute(self, key):
-        # 解析 key = "cli_name|model_or___default__"
-        parts = key.split("|", 1)
-        cli_name = parts[0]
-        model_key = parts[1] if len(parts) > 1 else "__default__"
-
-        if model_key == "__default__":
-            options, default_index = _list_runtime_sources(
-                self._cfg, cli_name, self._default_provider, self._default_models)
-        else:
-            # 从 scenes 中找到对应的 model_info
-            model_info = self._find_model_info(cli_name, key)
-            options, default_index = _list_runtime_sources(
-                self._cfg, cli_name, self._default_provider, self._default_models,
-                model_info=model_info, allow_selected_model_accounts=True)
-        result = {"options": options, "default_index": default_index or 0}
-        self[key] = result
-        return result
-
-    def _find_model_info(self, cli_name, key):
-        for scene in self._scenes.values():
-            if scene.get("cli") != cli_name:
-                continue
-            if scene.get("variants"):
-                for variant in scene["variants"]:
-                    mi = dict(variant.get("model_info", {}))
-                    if _source_choice_key(cli_name, mi) == key:
-                        return mi
-            else:
-                mi = _scene_model_info(scene)
-                if _source_choice_key(cli_name, mi) == key:
-                    return mi
-        return {}
-
-    def get(self, key, default=None):
-        if key in self:
-            return super().__getitem__(key)
-        try:
-            return self._compute(key)
-        except Exception:
-            return default
-
-    def __getitem__(self, key):
-        if key not in self:
-            return self._compute(key)
-        return super().__getitem__(key)
-
-    def __contains__(self, key):
-        return super().__contains__(key)
-
-
-def _source_choices_for_tui(cfg, scenes, cli_names, default_provider, default_models):
-    return _LazySourceChoices(cfg, scenes, cli_names, default_provider, default_models)
-
-
 def _resolve_visible_clis(cfg, default_provider, default_models):
     visible = []
 
@@ -8316,21 +8166,10 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
     return visible
 
 
-def _filter_scenes_by_visible_clis(cli_names):
-    visible = set(cli_names)
-    return {
-        name: scene for name, scene in SCENES.items()
-        if scene.get("cli") in visible
-        and scene.get("cli") not in DIRECT_CLI_MODES
-        and _scene_has_visible_model_options(scene)
-    }
-
-
-def _builtin_scene_catalog():
-    return {
-        name: scene for name, scene in SCENES.items()
-        if scene.get("cli") not in DIRECT_CLI_MODES and _scene_has_visible_model_options(scene)
-    }
+def _clean_model_info(model_info):
+    if not isinstance(model_info, dict):
+        return model_info
+    return {k: v for k, v in model_info.items() if k != "provider"}
 
 
 def select_model_interactive(models_list):
@@ -8343,100 +8182,6 @@ def select_model_interactive(models_list):
         except KeyboardInterrupt:
             sys.exit(0)
 
-
-def _scene_model_info(scene):
-    return {k: v for k, v in scene.items() if k not in SCENE_META_KEYS}
-
-
-def _clean_model_info(model_info):
-    if not isinstance(model_info, dict):
-        return model_info
-    return {k: v for k, v in model_info.items() if k != "provider"}
-
-
-def _source_choice_key(cli_name, model_info=None):
-    if not model_info:
-        return f"{cli_name}|__default__"
-    if isinstance(model_info, dict):
-        cleaned = _clean_model_info(model_info)
-        if not cleaned:
-            return f"{cli_name}|__default__"
-        payload = json.dumps(cleaned, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        return f"{cli_name}|{payload}"
-    return f"{cli_name}|{str(model_info).strip()}"
-
-
-def _tier_label(tier):
-    return {
-        "med": "中杯",
-        "high": "大杯",
-        "xhigh": "超大杯",
-    }.get(tier, tier)
-
-
-def _variant_line(variant):
-    model = variant.get("model_info", {}).get("model", "")
-    tier = _tier_label(variant.get("tier", ""))
-    return f"{tier:<6}  {model}"
-
-
-def _select_scene_model_info(scene_name, scene, use_tui=False):
-    variants = _scene_visible_variants(scene)
-    if not variants:
-        model_info = _scene_model_info(scene)
-        return model_info if _model_info_has_visible_models(model_info) else None
-
-    option_lines = [_variant_line(variant) for variant in variants]
-    if use_tui:
-        from mms_tui import select_model_tui
-        selected = select_model_tui(option_lines, title=f"{scene_name}：选择档位")
-        if selected is None:
-            return None
-        return dict(variants[option_lines.index(selected)]["model_info"])
-
-    console.print(f"\n[bold]{scene_name}：选择档位[/bold]")
-    for i, line in enumerate(option_lines, 1):
-        console.print(f"  {i}. {line}")
-
-    while True:
-        try:
-            choice = IntPrompt.ask("选择档位编号")
-            if 1 <= choice <= len(variants):
-                return dict(variants[choice - 1]["model_info"])
-            console.print(f"[red]请输入 1-{len(variants)}[/red]")
-        except KeyboardInterrupt:
-            sys.exit(0)
-
-
-# ── Scene Selection (fallback for non-TTY) ─────────────
-
-def show_scenes(scenes):
-    scene_list = list(scenes.keys())
-    lines = []
-    for i, name in enumerate(scene_list, 1):
-        s = scenes[name]
-        lines.append(f"  {i}. {s['emoji']} {name}  {s['desc']}")
-    lines.append("  ─" * 20)
-    lines.append(f"  {len(scene_list) + 1}. 🔧 自定义    手动选 CLI + 模型")
-
-    console.print(Panel("\n".join(lines), title=f"{display_title()} — 选择场景"))
-    return scene_list
-
-
-def select_scene_fallback(scenes):
-    """非 TTY 环境的 fallback：数字选择"""
-    scene_list = show_scenes(scenes)
-    total = len(scene_list) + 1
-    while True:
-        try:
-            choice = IntPrompt.ask("选择场景编号")
-            if 1 <= choice <= total:
-                if choice == total:
-                    return None  # custom
-                return scene_list[choice - 1]
-            console.print(f"[red]请输入 1-{total}[/red]")
-        except KeyboardInterrupt:
-            sys.exit(0)
 
 
 # ── Confirmation ────────────────────────────────────────
@@ -9320,278 +9065,8 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
     return choice
 
 
-_OPENCODE_DEFAULT_PROFILE_ID = "lite_pro_orchestrated"
-
-_OPENCODE_BASE_PROFILE_OPTIONS = [
-    {
-        "id": _OPENCODE_DEFAULT_PROFILE_ID,
-        "label": "OpenSpec Multi",
-        "badge": "默认",
-        "summary": "默认推荐：5.5 总控/终审；5.4 长跑执行；国产 explore/bug-hunt 只读找茬。",
-    },
-    {
-        "id": "lite_pro",
-        "label": "Pro Solo",
-        "summary": "5.5 主写；5.4 兜底执行；国产 explore/bug-hunt 只读辅助；session-local。",
-    },
-    {
-        "id": "heavy_omo",
-        "label": "OMO Global",
-        "summary": "读取 global OpenCode + OMO；MMS 不写全局配置。",
-    },
-    {
-        "id": "raw",
-        "label": "Raw Pure",
-        "summary": "纯 OpenCode；session-local；无 OMO/agents。",
-    },
-]
-
-_OPENCODE_PROFILE_OPTIONS = [
-    _OPENCODE_BASE_PROFILE_OPTIONS[0],
-    {
-        "id": "lite_pro_orchestrated_backend",
-        "profile_id": "lite_pro_orchestrated",
-        "entrypoint": "serve",
-        "label": "Backend Multi",
-        "badge": "后台",
-        "summary": "OpenSpec Multi-Agent + opencode serve；给 SDK/WebUI/headless client 连接。",
-    },
-    {
-        "id": "lite_pro_orchestrated_acp",
-        "profile_id": "lite_pro_orchestrated",
-        "entrypoint": "acp",
-        "label": "ACP Multi",
-        "badge": "编辑器",
-        "summary": "OpenSpec Multi-Agent + opencode acp；给 ACP-compatible editor/client 连接。",
-    },
-    *_OPENCODE_BASE_PROFILE_OPTIONS[1:],
-]
-
-def _normalize_opencode_profile_id(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    normalized = raw.lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "pro": "lite_pro",
-        "pro_solo": "lite_pro",
-        "litepro": "lite_pro",
-        "lite_pro": "lite_pro",
-        "5_5_pro": "lite_pro",
-        "orchestrated": "lite_pro_orchestrated",
-        "multi_agent": "lite_pro_orchestrated",
-        "5_5_multi_agent": "lite_pro_orchestrated",
-        "openspec_multi": "lite_pro_orchestrated",
-        "lite_multi_agent": "lite_pro_orchestrated",
-        "lite_pro_orchestrated": "lite_pro_orchestrated",
-        "omo": "heavy_omo",
-        "heavy": "heavy_omo",
-        "heavy_omo": "heavy_omo",
-        "raw": "raw",
-        "lite": "lite",
-    }
-    return aliases.get(normalized, "")
-
-
-def _opencode_profile_selection(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return "", ""
-    normalized = raw.lower().replace("-", "_").replace(" ", "_")
-    for option in _OPENCODE_PROFILE_OPTIONS:
-        option_id = str(option.get("id") or "").strip()
-        if normalized != option_id.lower().replace("-", "_").replace(" ", "_"):
-            continue
-        profile_id = _normalize_opencode_profile_id(option.get("profile_id") or option_id)
-        entrypoint = _normalize_opencode_entrypoint(option.get("entrypoint") or "")
-        return profile_id, entrypoint
-    aliases = {
-        "backend_multi": ("lite_pro_orchestrated", "serve"),
-        "multi_backend": ("lite_pro_orchestrated", "serve"),
-        "multi_agent_backend": ("lite_pro_orchestrated", "serve"),
-        "openspec_multi_backend": ("lite_pro_orchestrated", "serve"),
-        "lite_pro_orchestrated_backend": ("lite_pro_orchestrated", "serve"),
-        "acp_multi": ("lite_pro_orchestrated", "acp"),
-        "multi_acp": ("lite_pro_orchestrated", "acp"),
-        "multi_agent_acp": ("lite_pro_orchestrated", "acp"),
-        "openspec_multi_acp": ("lite_pro_orchestrated", "acp"),
-        "lite_pro_orchestrated_acp": ("lite_pro_orchestrated", "acp"),
-    }
-    if normalized in aliases:
-        return aliases[normalized]
-    return _normalize_opencode_profile_id(value), ""
-
-
-def _opencode_profile_selection_ids():
-    ids = ["lite"] + [str(option.get("id") or "").strip() for option in _OPENCODE_PROFILE_OPTIONS]
-    return [item for item in ids if item]
-
-
-def _normalize_opencode_entrypoint(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    normalized = raw.lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "tui": "tui",
-        "interactive": "tui",
-        "ui": "tui",
-        "backend": "serve",
-        "backend_agent": "serve",
-        "headless": "serve",
-        "server": "serve",
-        "serve": "serve",
-        "acp": "acp",
-        "editor": "acp",
-        "agent_client_protocol": "acp",
-    }
-    return aliases.get(normalized, "")
-
-
-def _apply_opencode_entrypoint(runtime, entrypoint):
-    runtime = dict(runtime or {})
-    normalized = _normalize_opencode_entrypoint(entrypoint)
-    if not normalized:
-        return runtime
-    runtime["opencode_entrypoint"] = normalized
-    return runtime
-
-
-_OPENCODE_DEFAULT_MODEL_PREFERENCES = (
-    "gpt-5.4",
-    "gpt-5.5",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex",
-    "gpt-5.2-codex",
-)
-
-_OPENCODE_LITE_PRO_SPECS = (
-    {
-        "key": "builder_primary",
-        "agent": "mobius-builder-pro",
-        "models": ("gpt-5.5", "gpt-5.4"),
-    },
-    {
-        "key": "builder_fallback",
-        "agent": "mobius-builder-stable",
-        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
-    },
-    {
-        "key": "spec_writer",
-        "agent": "mobius-spec-writer",
-        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
-    },
-    {
-        "key": "spec_compliance",
-        "agent": "mobius-spec-compliance-reviewer",
-        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
-    },
-    {
-        "key": "explore_primary",
-        "agent": "mobius-explore-glm",
-        "models": ("glm-5-turbo", "glm-5.1", "glm-5"),
-    },
-    {
-        "key": "explore_fallback",
-        "agent": "mobius-explore-kimi",
-        "models": ("kimi-for-coding", "kimi-k2.5"),
-    },
-    {
-        "key": "vision_primary",
-        "agent": "mobius-vision-mimo",
-        "models": ("mimo-v2.5", "mimo-v2-omni"),
-        "route_policy": "mimo_direct",
-        "gpt_fallback": False,
-    },
-    {
-        "key": "vision_kimi",
-        "agent": "mobius-vision-kimi",
-        "models": ("kimi-k2.5", "K2.6", "kimi-k2.6"),
-        "gpt_fallback": False,
-    },
-    {
-        "key": "vision_qwen",
-        "agent": "mobius-vision-qwen",
-        "models": ("qwen3.6-plus", "qwen3.6-flash"),
-        "gpt_fallback": False,
-    },
-    {
-        "key": "reviewer_primary",
-        "agent": "mobius-reviewer-gpt55",
-        "models": ("gpt-5.5", "gpt-5.4", "gpt-5.3-codex"),
-    },
-    {
-        "key": "reviewer_fallback",
-        "agent": "mobius-reviewer-gpt54",
-        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
-    },
-    {
-        "key": "reviewer_mimo",
-        "agent": "mobius-reviewer-mimo",
-        "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro"),
-        "route_policy": "mimo_direct",
-        "gpt_fallback": False,
-    },
-    {
-        "key": "bughunt_deepseek",
-        "agent": "mobius-bughunt-deepseek",
-        "models": ("deepseek-v4-pro", "deepseek-v4-flash"),
-    },
-    {
-        "key": "bughunt_glm",
-        "agent": "mobius-bughunt-glm",
-        "models": ("glm-5.1", "glm-5-turbo", "glm-5"),
-    },
-    {
-        "key": "fixer_gpt54",
-        "agent": "mobius-fixer-gpt54",
-        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
-    },
-)
-
-
-_OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS = (
-    {
-        "key": "explore_qwen",
-        "agent": "mobius-explore-qwen",
-        "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash"),
-    },
-    {
-        "key": "bughunt_qwen",
-        "agent": "mobius-bughunt-qwen",
-        "models": ("qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3-coder-plus"),
-    },
-    {
-        "key": "executor_gpt54",
-        "agent": "mobius-executor-gpt54",
-        "models": ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
-    },
-)
-
-
-def _opencode_lite_pro_specs(profile_id="lite_pro"):
-    specs = list(_OPENCODE_LITE_PRO_SPECS)
-    if _normalize_opencode_profile_id(profile_id) == "lite_pro_orchestrated":
-        insert_at = next(
-            (index + 1 for index, spec in enumerate(specs) if spec.get("key") == "explore_fallback"),
-            len(specs),
-        )
-        specs[insert_at:insert_at] = list(_OPENCODE_LITE_PRO_ORCHESTRATED_EXTRA_SPECS)
-    return tuple(specs)
-
-
-def _opencode_profile_label(profile_id):
-    profile_id = _normalize_opencode_profile_id(profile_id) or str(profile_id or "").strip()
-    if profile_id == "lite":
-        return "Lite"
-    for option in _OPENCODE_PROFILE_OPTIONS:
-        if option["id"] == profile_id:
-            return option["label"]
-    return profile_id or "Raw"
-
-
-def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="lite_pro"):
-    profile_id = _normalize_opencode_profile_id(profile_id) or "lite_pro"
+def _opencode_lite_pro_health_summary_text(repo_root=None, profile_id="agent"):
+    profile_id = _normalize_opencode_profile_id(profile_id) or _OPENCODE_AGENT_PROFILE_ID
     latest = _load_opencode_route_health_latest(repo_root)
     expected_roles = {str(spec.get("key") or "").strip() for spec in _opencode_lite_pro_specs(profile_id)}
     expected = len(expected_roles)
@@ -9630,7 +9105,7 @@ def _opencode_profile_menu_options():
     for option in _OPENCODE_PROFILE_OPTIONS:
         profile_id = _normalize_opencode_profile_id(option.get("profile_id") or option["id"])
         summary = option["summary"]
-        if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
+        if profile_id == _OPENCODE_AGENT_PROFILE_ID:
             lite_pro_health = _opencode_lite_pro_health_summary_text(profile_id=profile_id)
         else:
             lite_pro_health = ""
@@ -9732,303 +9207,112 @@ def _select_opencode_profile(use_tui=False):
             return None
 
 
-def _apply_opencode_profile(runtime, profile_id):
-    runtime = dict(runtime or {})
-    profile_id, selection_entrypoint = _opencode_profile_selection(profile_id)
-    profile_id = profile_id or "lite"
-    runtime["opencode_profile"] = profile_id
-    runtime["opencode_profile_label"] = _opencode_profile_label(profile_id)
-    if profile_id == "heavy_omo":
-        runtime["opencode_use_global_config"] = True
-        runtime["opencode_pure"] = False
-        runtime["opencode_lite_agents"] = False
-        runtime["opencode_agent"] = ""
-    elif profile_id == "raw":
-        runtime["opencode_use_global_config"] = False
-        runtime["opencode_pure"] = True
-        runtime["opencode_lite_agents"] = False
-        runtime["opencode_agent"] = ""
-    elif profile_id in {"lite_pro", "lite_pro_orchestrated"}:
-        runtime["opencode_use_global_config"] = False
-        runtime["opencode_pure"] = True
-        runtime["opencode_lite_agents"] = True
-        runtime["opencode_agent"] = "mobius-builder-pro"
-        runtime["opencode_default_agent"] = "mobius-builder-pro"
-        runtime["opencode_roster"] = profile_id
-        runtime["opencode_contract_workflow"] = "openspec"
-        runtime["opencode_backend_agent_capable"] = True
-        runtime["opencode_acp_capable"] = True
-        runtime["opencode_launch_preflight"] = False
-        runtime["opencode_launch_fallback_route_keys"] = ["builder_primary", "builder_fallback"]
-        runtime["opencode_launch_fallback_agents"] = {
-            "builder_primary": "mobius-builder-pro",
-            "builder_fallback": "mobius-builder-stable",
-        }
-    else:
-        runtime["opencode_use_global_config"] = False
-        runtime["opencode_pure"] = True
-        runtime["opencode_lite_agents"] = True
-        runtime["opencode_agent"] = "mobius-builder"
-    if selection_entrypoint:
-        runtime = _apply_opencode_entrypoint(runtime, selection_entrypoint)
-    return runtime
+def _opencode_default_profile_from_config(cfg):
+    opencode = cfg.get("opencode") if isinstance(cfg, dict) and isinstance(cfg.get("opencode"), dict) else {}
+    return _opencode_profile_selection(opencode.get("default_profile") or opencode.get("profile"))
 
 
 def _opencode_default_model_rank(model_name):
-    normalized = str(model_name or "").strip().lower()
-    for idx, preferred in enumerate(_OPENCODE_DEFAULT_MODEL_PREFERENCES):
-        if normalized == preferred:
-            return idx
-    family, _ = _infer_model_family(normalized)
-    if family == "GPT":
-        return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES)
-    return len(_OPENCODE_DEFAULT_MODEL_PREFERENCES) + 100
-
-
-def _opencode_provider_protocols(provider):
-    protocols = provider.get("protocols", [])
-    if isinstance(protocols, str):
-        protocols = [protocols]
-    return [str(item).strip() for item in protocols if str(item).strip()]
+    return _opencode_default_model_rank_impl(
+        model_name,
+        default_model_preferences=_OPENCODE_DEFAULT_MODEL_PREFERENCES,
+        infer_model_family=_infer_model_family,
+    )
 
 
 def _opencode_normalized_openai_base_url(provider):
-    base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
-    if not base_url:
-        return ""
-    path = urlparse(base_url).path.rstrip("/")
-    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
-    if last_segment != "v1":
-        return f"{base_url}/v1"
-    return base_url
+    return _opencode_normalized_openai_base_url_impl(
+        provider,
+        provider_openai_base_url=_provider_openai_base_url,
+    )
 
 
 def _opencode_normalized_anthropic_base_url(provider):
-    base_url = str(_provider_anthropic_base_url(provider) or "").strip().rstrip("/")
-    if not base_url and "anthropic_messages" in _opencode_provider_protocols(provider):
-        base_url = str(_provider_openai_base_url(provider) or "").strip().rstrip("/")
-    if not base_url:
-        return ""
-    path = urlparse(base_url).path.rstrip("/")
-    last_segment = path.rsplit("/", 1)[-1].lower() if path else ""
-    if last_segment != "v1":
-        return f"{base_url}/v1"
-    return base_url
+    return _opencode_normalized_anthropic_base_url_impl(
+        provider,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+    )
 
 
 def _opencode_is_mimo_direct_route(provider, model_name=""):
-    provider_identity = " ".join(
-        str(value or "").strip().lower()
-        for value in (
-            provider.get("id"),
-            _provider_label(provider),
-            provider.get("base_url"),
-            provider.get("openai_base_url"),
-            provider.get("anthropic_base_url"),
-        )
+    return _opencode_is_mimo_direct_route_impl(
+        provider,
+        model_name,
+        provider_label=_provider_label,
     )
-    return "mimo" in provider_identity or "xiaomimimo.com" in provider_identity
-
-
-def _opencode_mimo_openai_base_from_anthropic(anthropic_base_url):
-    """Derive MiMo's official OpenCode/OpenAI-compatible base from Anthropic base.
-
-    MiMo documents OpenCode with `@ai-sdk/openai-compatible` and `/v1`.
-    Token Plan credentials show Anthropic as `/anthropic[/v1]`, while the
-    matching OpenAI-compatible base is the same host with `/v1`.
-    """
-    base_url = str(anthropic_base_url or "").strip().rstrip("/")
-    if not base_url or "xiaomimimo.com" not in base_url.lower():
-        return ""
-    parsed = urlparse(base_url)
-    path = parsed.path.rstrip("/")
-    if path.endswith("/anthropic/v1"):
-        path = path[: -len("/anthropic/v1")] + "/v1"
-    elif path.endswith("/anthropic"):
-        path = path[: -len("/anthropic")] + "/v1"
-    else:
-        return ""
-    return parsed._replace(path=path or "/v1", params="", query="", fragment="").geturl().rstrip("/")
 
 
 def _opencode_route_transport(provider, model_name):
-    candidates = _opencode_route_transport_candidates(provider, model_name)
-    if not candidates:
-        openai_base_url = _opencode_normalized_openai_base_url(provider)
-        anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
-        return "", openai_base_url, anthropic_base_url
-    return candidates[0]
+    return _opencode_route_transport_impl(
+        provider,
+        model_name,
+        infer_model_family=_infer_model_family,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        provider_label=_provider_label,
+    )
 
 
 def _opencode_route_transport_candidates(provider, model_name):
-    protocols = _opencode_provider_protocols(provider)
-    family, _ = _infer_model_family(model_name)
-    openai_base_url = _opencode_normalized_openai_base_url(provider)
-    anthropic_base_url = _opencode_normalized_anthropic_base_url(provider)
-    candidates = []
-    if family == "GPT":
-        if openai_base_url:
-            candidates.append(("openai_responses", openai_base_url, anthropic_base_url))
-        if "openai_chat_completions" in protocols and openai_base_url:
-            candidates.append(("openai_chat_completions", openai_base_url, anthropic_base_url))
-        return candidates
-    if _opencode_is_mimo_direct_route(provider, model_name):
-        mimo_openai_base_url = openai_base_url or _opencode_mimo_openai_base_from_anthropic(anthropic_base_url)
-        if mimo_openai_base_url:
-            # Official MiMo OpenCode guidance uses the OpenAI-compatible
-            # provider. Do not add Anthropic as a fallback: OpenCode can miss
-            # MiMo reasoning_content there during tool-result loops.
-            candidates.append(("openai_chat_completions", mimo_openai_base_url, anthropic_base_url))
-            return candidates
-    if "anthropic_messages" in protocols and anthropic_base_url:
-        candidates.append(("anthropic_messages", openai_base_url, anthropic_base_url))
-    return candidates
+    return _opencode_route_transport_candidates_impl(
+        provider,
+        model_name,
+        infer_model_family=_infer_model_family,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        provider_label=_provider_label,
+    )
 
 
 def _opencode_route_candidate_score(provider, model_name, sequence):
-    role = _normalize_role(provider.get("role", "auto"))
-    priority = _runtime_priority_for_model(provider, model_name)
-    return (
-        ROLE_WEIGHTS.get(role, 1),
-        -int(priority or DEFAULT_PRIORITY),
-        str(_provider_label(provider)),
-        int(sequence),
+    return _opencode_route_candidate_score_impl(
+        provider,
+        model_name,
+        sequence,
+        normalize_role=_normalize_role,
+        runtime_priority_for_model=_runtime_priority_for_model,
+        provider_label=_provider_label,
+        role_weights=ROLE_WEIGHTS,
+        default_priority=DEFAULT_PRIORITY,
     )
 
 
 def _opencode_provider_matches_route_policy(provider, route_policy):
-    policy = str(route_policy or "").strip()
-    if not policy:
-        return True
-    provider_id = str(provider.get("id") or "").strip().lower()
-    provider_name = str(_provider_label(provider) or "").strip().lower()
-    base_urls = " ".join(
-        str(value or "").strip().lower()
-        for value in (
-            provider.get("base_url"),
-            provider.get("openai_base_url"),
-            provider.get("anthropic_base_url"),
-        )
+    return _opencode_provider_matches_route_policy_impl(
+        provider,
+        route_policy,
+        provider_label=_provider_label,
     )
-    identity = f"{provider_id} {provider_name}"
-    if policy == "mimo_direct":
-        return "xiaomimimo.com" in base_urls or "mimo-direct" in identity or "xiaomi-direct" in identity
-    return False
-
-
-_OPENCODE_HEALTH_REL_PATH = os.path.join(".ai", "opencode-health", "latest.json")
-_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC = 15 * 60
-_OPENCODE_HEALTH_STATUS_RANK = {
-    "live_healthy": 0,
-    "degraded": 1,
-    "untested": 2,
-    "unhealthy": 3,
-    "blocked": 4,
-}
-
-
-def _opencode_health_repo_root(repo_root=None):
-    root = str(repo_root or os.environ.get("MMS_TARGET_REPO") or os.path.dirname(os.path.abspath(__file__))).strip()
-    return os.path.abspath(os.path.expanduser(root))
-
-
-def _opencode_health_latest_path(repo_root=None):
-    return os.path.join(_opencode_health_repo_root(repo_root), _OPENCODE_HEALTH_REL_PATH)
-
-
-def _opencode_route_health_key(profile, role, model, provider_id, protocol):
-    return "|".join(str(item or "") for item in (profile, role, model, provider_id, protocol))
-
-
-def _load_opencode_route_health_latest(repo_root=None):
-    path = _opencode_health_latest_path(repo_root)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    routes = payload.get("routes")
-    if not isinstance(routes, dict):
-        return {}
-    latest = {}
-    for key, row in routes.items():
-        if isinstance(row, dict):
-            latest[str(key)] = dict(row)
-    return latest
-
-
-def _opencode_parse_health_timestamp(value):
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def _opencode_route_health_for_route(latest_health, profile, role, route):
-    if not isinstance(route, dict):
-        return None
-    key = _opencode_route_health_key(
-        profile,
-        role or route.get("id"),
-        route.get("model"),
-        route.get("provider_id"),
-        route.get("protocol"),
-    )
-    row = latest_health.get(key) if isinstance(latest_health, dict) else None
-    if not isinstance(row, dict):
-        return None
-    model = str(route.get("model") or "").strip().lower()
-    protocol = str(route.get("protocol") or "").strip()
-    if (
-        model.startswith("mimo-")
-        and protocol == "openai_chat_completions"
-        and row.get("error_class") == "cache_sensitive_wrong_protocol"
-    ):
-        # Older smoke policy incorrectly marked direct MiMo OpenAI-compatible
-        # routes as "wrong protocol". The current MiMo OpenCode docs make this
-        # the official protocol, so ignore stale rows until the next smoke run.
-        return None
-    return row
-
-
-def _opencode_route_health_is_fresh(row, *, now=None, ttl_sec=_OPENCODE_HEALTH_UNHEALTHY_TTL_SEC):
-    finished_at = _opencode_parse_health_timestamp(row.get("finished_at") if isinstance(row, dict) else None)
-    if finished_at is None:
-        return False
-    current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    age = (current - finished_at).total_seconds()
-    return age >= 0 and age <= ttl_sec
 
 
 def _opencode_route_health_allows_route(row, *, now=None):
-    if not row:
-        return True
-    status = str(row.get("status") or "untested")
-    if status == "blocked":
-        return False
-    if status == "unhealthy" and _opencode_route_health_is_fresh(row, now=now):
-        return False
-    return True
+    return _opencode_route_health_allows_route_impl(row, now=now, is_fresh=_opencode_route_health_is_fresh)
 
 
-def _opencode_route_health_sort_key(row):
-    status = str((row or {}).get("status") or "untested")
-    return (
-        _OPENCODE_HEALTH_STATUS_RANK.get(status, _OPENCODE_HEALTH_STATUS_RANK["untested"]),
-        -int((row or {}).get("health_score") or 0),
-        str((row or {}).get("finished_at") or ""),
+def _opencode_resolver_deps():
+    return _OpenCodeResolverDeps(
+        provider_candidates=_provider_candidates,
+        provider_effective_models=_provider_effective_models,
+        provider_supports_cli_name=_provider_supports_cli_name,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        provider_label=_provider_label,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        infer_model_family=_infer_model_family,
+        normalize_role=_normalize_role,
+        runtime_priority_for_model=_runtime_priority_for_model,
+        runtime_with_priority=_runtime_with_priority,
+        mms_model_visible=_mms_model_visible,
+        load_route_health_latest=_load_opencode_route_health_latest,
+        route_health_for_route=_opencode_route_health_for_route,
+        route_health_allows_route=_opencode_route_health_allows_route,
+        route_health_sort_key=_opencode_route_health_sort_key,
+        apply_profile=_apply_opencode_profile,
+        apply_entrypoint=_apply_opencode_entrypoint,
+        role_weights=ROLE_WEIGHTS,
+        default_priority=DEFAULT_PRIORITY,
+        default_provider_id=DEFAULT_PROVIDER_ID,
     )
 
 
@@ -10040,210 +9324,40 @@ def _find_opencode_model_route(
     *,
     route_key="route",
     route_policy="",
-    profile_id="lite_pro",
+    profile_id=_OPENCODE_AGENT_PROFILE_ID,
+    provider_id="",
 ):
-    wanted = [str(item or "").strip() for item in model_names if str(item or "").strip()]
-    if not wanted:
-        return None
-    wanted_lower = [item.lower() for item in wanted]
-    latest_health = _load_opencode_route_health_latest()
-    scored = []
-    for provider_seq, (provider, cached_models) in enumerate(_provider_candidates(cfg, default_provider, default_models)):
-        if not provider.get("enabled", True):
-            continue
-        if not _opencode_provider_matches_route_policy(provider, route_policy):
-            continue
-        if not provider.get("api_key"):
-            continue
-        if not _provider_supports_cli_name(provider, "opencode"):
-            continue
-        models = _provider_effective_models(provider, cached_models, cfg)
-        by_lower = {str(model or "").strip().lower(): str(model or "").strip() for model in models if str(model or "").strip()}
-        for model_rank, wanted_model in enumerate(wanted_lower):
-            actual_model = by_lower.get(wanted_model)
-            if not actual_model:
-                continue
-            if not _provider_supports_model_for_cli(provider, "opencode", actual_model):
-                continue
-            for protocol, openai_base_url, anthropic_base_url in _opencode_route_transport_candidates(provider, actual_model):
-                if _opencode_is_mimo_direct_route(provider, actual_model):
-                    # MiMo's official OpenCode path is OpenAI-compatible.
-                    # Rank it ahead of any legacy/stale route metadata.
-                    protocol_rank = 0 if protocol == "openai_chat_completions" else 2
-                else:
-                    protocol_rank = 0 if protocol in {"openai_responses", "anthropic_messages"} else 1
-                route = {
-                    "id": route_key,
-                    "model": actual_model,
-                    "provider_id": provider.get("id", DEFAULT_PROVIDER_ID),
-                    "provider_name": _provider_label(provider),
-                    "protocol": protocol,
-                    "openai_base_url": openai_base_url,
-                    "anthropic_base_url": anthropic_base_url if protocol == "anthropic_messages" else "",
-                    "api_key": provider.get("openai_api_key") or provider.get("api_key", ""),
-                    "protocols": _opencode_provider_protocols(provider),
-                }
-                health_row = _opencode_route_health_for_route(latest_health, profile_id, route_key, route)
-                if not _opencode_route_health_allows_route(health_row):
-                    continue
-                health_rank = _opencode_route_health_sort_key(health_row)
-                score = (model_rank, protocol_rank, health_rank, *_opencode_route_candidate_score(provider, actual_model, provider_seq))
-                if health_row:
-                    route["health_status"] = health_row.get("status")
-                    route["health_score"] = health_row.get("health_score")
-                scored.append((score, route))
-    if not scored:
-        return None
-    scored.sort(key=lambda item: item[0])
-    return scored[0][1]
-
-
-def _append_unique_opencode_route(routes, route):
-    if not route:
-        return None
-    key = (route.get("id"), route.get("provider_id"), route.get("openai_base_url"), route.get("model"))
-    for existing in routes:
-        existing_key = (existing.get("id"), existing.get("provider_id"), existing.get("openai_base_url"), existing.get("model"))
-        if existing_key == key:
-            return existing
-    routes.append(route)
-    return route
-
-
-def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id="lite_pro"):
-    routes = []
-    agent_models = {}
-    gpt_fallback = _find_opencode_model_route(
+    return _find_opencode_model_route_impl(
         cfg,
         default_provider,
         default_models,
-        ("gpt-5.4", "gpt-5.3-codex", "gpt-5.2-codex"),
-        route_key="gpt_fallback",
+        model_names,
+        deps=_opencode_resolver_deps(),
+        route_key=route_key,
+        route_policy=route_policy,
         profile_id=profile_id,
+        provider_id=provider_id,
     )
 
-    for spec in _opencode_lite_pro_specs(profile_id):
-        route = _find_opencode_model_route(
-            cfg,
-            default_provider,
-            default_models,
-            spec["models"],
-            route_key=spec["key"],
-            route_policy=spec.get("route_policy", ""),
-            profile_id=profile_id,
-        )
-        if route is None and spec["key"] != "builder_primary" and spec.get("gpt_fallback", True) is not False:
-            route = gpt_fallback
-        route = _append_unique_opencode_route(routes, dict(route, id=spec["key"]) if route else None)
-        if route:
-            agent_models[spec["agent"]] = spec["key"]
 
-    builder_route = next((route for route in routes if route.get("id") == "builder_primary"), None)
-    if builder_route is None:
-        builder_route = gpt_fallback
-        builder_route = _append_unique_opencode_route(routes, dict(builder_route, id="builder_primary") if builder_route else None)
-        if builder_route:
-            agent_models["mobius-builder-pro"] = "builder_primary"
-    if builder_route is None:
-        return None, None
-
-    runtime = dict(builder_route)
-    runtime["id"] = str(builder_route.get("provider_id") or "opencode-lite-pro")
-    runtime["name"] = f"OpenCode {_opencode_profile_label(profile_id)}"
-    runtime["auth_mode"] = "api_key"
-    runtime["runtime_kind"] = "provider"
-    runtime["model"] = builder_route["model"]
-    runtime["api_key"] = builder_route.get("api_key", "")
-    runtime["openai_base_url"] = builder_route.get("openai_base_url", "")
-    runtime["protocols"] = ["openai_chat_completions"]
-    runtime["supported_clis"] = ["opencode"]
-    runtime["opencode_routes"] = routes
-    runtime["opencode_agent_model_keys"] = agent_models
-    runtime["opencode_default_route_key"] = "builder_primary"
-    runtime["opencode_builder_fallback_agent"] = "mobius-builder-stable"
-    model_info = {"model": builder_route["model"], "profile": profile_id}
-    return model_info, _apply_opencode_profile(runtime, profile_id)
+def _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=_OPENCODE_AGENT_PROFILE_ID):
+    return _resolve_opencode_lite_pro_runtime_impl(
+        cfg,
+        default_provider,
+        default_models,
+        profile_id=profile_id,
+        deps=_opencode_resolver_deps(),
+    )
 
 
 def _resolve_opencode_profile_runtime(cfg, default_provider, default_models, profile_id):
-    """Resolve fixed OpenCode profile runtime without asking for a model/channel."""
-    profile_id, selection_entrypoint = _opencode_profile_selection(profile_id)
-    profile_id = profile_id or "lite"
-    if profile_id == "heavy_omo":
-        runtime = {
-            "id": "global-opencode-omo",
-            "name": "Global OpenCode / OMO",
-            "runtime_kind": "opencode_profile",
-            "auth_mode": "global_config",
-        }
-        runtime = _apply_opencode_profile(runtime, profile_id)
-        return {"model": "global-omo"}, _apply_opencode_entrypoint(runtime, selection_entrypoint)
-    if profile_id in {"lite_pro", "lite_pro_orchestrated"}:
-        model_info, runtime = _resolve_opencode_lite_pro_runtime(cfg, default_provider, default_models, profile_id=profile_id)
-        if runtime is None:
-            return model_info, runtime
-        return model_info, _apply_opencode_entrypoint(runtime, selection_entrypoint)
-
-    candidates = []
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        if not provider.get("enabled", True):
-            continue
-        if not provider.get("api_key"):
-            continue
-        protocols = provider.get("protocols", [])
-        if isinstance(protocols, str):
-            protocols = [protocols]
-        if "openai_chat_completions" not in protocols:
-            continue
-        if not _provider_openai_base_url(provider):
-            continue
-        if not _provider_supports_cli_name(provider, "opencode"):
-            continue
-
-        models = _provider_effective_models(provider, cached_models, cfg)
-        if not models:
-            continue
-        role = _normalize_role(provider.get("role", "auto"))
-        provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
-        provider_name = _provider_label(provider)
-        openai_only = "anthropic_messages" not in protocols
-
-        for model_name in models:
-            normalized = str(model_name or "").strip()
-            if not normalized or not _mms_model_visible(normalized):
-                continue
-            if not _provider_supports_model_for_cli(provider, "opencode", normalized):
-                continue
-            family, _ = _infer_model_family(normalized)
-            # Lite/Raw must not inherit cache-sensitive dual-protocol domestic models
-            # such as K2.6, because OpenCode drives this lane through chat/completions.
-            if family != "GPT" and not openai_only:
-                continue
-            model_rank = _opencode_default_model_rank(normalized)
-            family_rank = 0 if family == "GPT" else 1
-            priority = _runtime_priority_for_model(provider, normalized)
-            candidates.append((
-                family_rank,
-                model_rank,
-                ROLE_WEIGHTS.get(role, 1),
-                -int(priority or DEFAULT_PRIORITY),
-                provider_name,
-                normalized,
-                provider_id,
-                len(candidates),
-                provider,
-                family,
-            ))
-
-    if not candidates:
-        return None, None
-
-    candidates.sort()
-    _family_rank, _model_rank, _role, _priority, _pname, model_name, _pid, _seq, provider, family = candidates[0]
-    runtime = _runtime_with_priority(provider, model_name=model_name, family_name=family)
-    runtime["model"] = model_name
-    runtime = _apply_opencode_profile(runtime, profile_id)
-    return {"model": model_name}, _apply_opencode_entrypoint(runtime, selection_entrypoint)
+    return _resolve_opencode_profile_runtime_impl(
+        cfg,
+        default_provider,
+        default_models,
+        profile_id,
+        deps=_opencode_resolver_deps(),
+    )
 
 
 def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
@@ -10639,7 +9753,7 @@ def _apply_runtime_priority_changes(cfg, pri_changes):
     return changed
 
 
-def _handle_tui_scene_selection(cfg, scenes, provider, once, cli_names, account_id=None, provider_id=None):
+def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
     from mms_tui import select_load_balance_tui, save_lb_history
@@ -14272,9 +13386,9 @@ def main():
             f"  {current_command()} test ...        最小闭环 smoke 测试 channel URL + key + bridge\n"
             f"  {current_command()} smoke ...       等同于 test\n"
             f"  {current_command()} opencode-smoke ... 测试 OpenCode profile config；--live 才真实请求模型\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated  直接启动默认 OpenSpec Multi mode\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated_backend  启动 OpenSpec Multi backend server\n"
-            f"  {current_command()} opencode --profile lite_pro_orchestrated_acp  启动 OpenSpec Multi ACP server\n"
+            f"  {current_command()} opencode --profile agent  启动默认 Agent mode\n"
+            f"  {current_command()} opencode --profile omo    启动 global OMO mode\n"
+            f"  {current_command()} opencode --profile raw    启动纯 OpenCode mode\n"
             f"  {current_command()} logs ...        显示常用 logs 路径与查看命令\n"
             f"  {current_command()} fake-upstream ... 开发期 fake upstream 开关与日志\n"
             f"  {current_command()} review-launch ... 非交互 multi-review reviewer launcher 握手\n"
@@ -14288,12 +13402,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="场景编号(1-6) 或 CLI 名称(claude/codex/opencode/agy)")
+                        help="CLI 名称(claude/codex/opencode/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
-                        help="一次性会话模式（可附带场景编号）")
+                        help="一次性会话模式（可附带 CLI 名称）")
     parser.add_argument("--list", action="store_true", help="列出 API 可用模型")
-    parser.add_argument("--presets", action="store_true", help="列出已保存预设和场景")
+    parser.add_argument("--presets", action="store_true", help="列出已保存预设")
     parser.add_argument("--install", metavar="CLI", help="安装指定 CLI")
     parser.add_argument("--custom", action="store_true", help="强制手动选 CLI + 模型模式")
     parser.add_argument("--export", nargs="?", const="claude", metavar="CLI",
@@ -14302,14 +13416,14 @@ def main():
                         help="配合 --export 使用，写入 ~/.config/mms/env/<cli>.sh")
     parser.add_argument("--account", help="临时使用指定官方账号档案启动")
     parser.add_argument("--provider", help="临时使用指定模型源启动")
-    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 lite_pro_orchestrated / lite_pro_orchestrated_backend / lite_pro_orchestrated_acp / lite_pro / omo / raw")
+    parser.add_argument("--profile", dest="opencode_profile", help="直接指定 OpenCode mode，例如 agent / omo / raw")
     parser.add_argument(
         "--opencode-entrypoint",
         choices=["tui", "backend", "backend-agent", "serve", "headless", "acp"],
-        help="OpenCode 专用入口：tui 默认交互；backend/serve=headless server；acp=Agent Client Protocol server",
+        help=argparse.SUPPRESS,
     )
-    parser.add_argument("--backend-agent", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint backend")
-    parser.add_argument("--acp", action="store_true", help="OpenCode 专用：等同 --opencode-entrypoint acp")
+    parser.add_argument("--backend-agent", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--acp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--lang", choices=["zh", "en"], help="临时指定 UI 语言")
     parser.add_argument("--trace", action="store_true",
                         help="启动前打印选择链路追踪信息（输出到 stderr）")
@@ -14414,9 +13528,6 @@ def main():
                 auth = _infer_preset_auth_mode(p) or "—"
                 table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str), desc, auth)
             console.print(table)
-        console.print("\n[bold]内置场景:[/bold]")
-        for i, (name, s) in enumerate(_builtin_scene_catalog().items(), 1):
-            console.print(f"  {i}. {s['emoji']} {name} — {s['desc']}")
         return
 
     # --export
@@ -14427,8 +13538,6 @@ def main():
     default_provider, models_cache = ensure_models_ready(cfg, default_provider)
     _warm_probe_cache_async(cfg, default_provider)
     visible_clis = _resolve_visible_clis(cfg, default_provider, models_cache)
-    visible_scenes = _filter_scenes_by_visible_clis(visible_clis)
-
     # --list
     if args.list:
         if not _ensure_models_cache_available(models_cache):
@@ -14476,57 +13585,19 @@ def main():
         if target is None:
             target = "opencode"
         elif target != "opencode":
-            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile lite_pro_orchestrated_backend")
+            parser.error("--profile / OpenCode entrypoint 仅支持 target=opencode，例如：mms opencode --profile agent")
 
     if target:
-        # Is it a scene number?
-        scene_list = list(visible_scenes.keys())
-        try:
-            idx = int(target)
-            if 1 <= idx <= len(scene_list):
-                scene_name = scene_list[idx - 1]
-                scene = visible_scenes[scene_name]
-                cli = scene["cli"]
-                model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
-                _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
-                if args.account or args.provider:
-                    _trace_record("CLI flags", account=args.account, provider=args.provider)
-                runtime, _, cli = _choose_runtime_source(
-                    cfg,
-                    cli,
-                    default_provider,
-                    models_cache,
-                    account_id=args.account,
-                    provider_id=args.provider,
-                    model_info=model_info,
-                    allow_selected_model_accounts=True,
-                )
-                if runtime is None:
-                    console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
-                    return
-                if not check_cli_installed(cli):
-                    from mms_installer import check_and_offer_install
-                    if not check_and_offer_install(cli):
-                        return
-                console.print(f"[cyan]场景: {scene['emoji']} {scene_name}[/cyan]")
-                if cli == "opencode":
-                    runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
-                    if runtime is None:
-                        return
-                    runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
-                action = confirm_launch(cli, model_info, once, runtime=runtime)
-                if action == "q":
-                    return
-                if action == "s":
-                    save_preset_interactive(user_cfg, cli, model_info)
-                _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
-                return
-        except ValueError:
-            pass
+        profile_to_launch = requested_opencode_profile
+        entrypoint_to_launch = requested_opencode_entrypoint
+        if target == "opencode" and not profile_to_launch:
+            profile_to_launch, configured_entrypoint = _opencode_default_profile_from_config(cfg)
+            if not entrypoint_to_launch:
+                entrypoint_to_launch = configured_entrypoint
 
-        if target == "opencode" and requested_opencode_profile:
+        if target == "opencode" and profile_to_launch:
             cli = "opencode"
-            _trace_record("OpenCode profile target", profile=requested_opencode_profile)
+            _trace_record("OpenCode profile target", profile=profile_to_launch)
             profile_provider = ensure_provider_credentials(cfg, args.provider) if args.provider else default_provider
             profile_models = models_cache
             if args.provider:
@@ -14535,12 +13606,12 @@ def main():
                 cfg,
                 profile_provider,
                 profile_models,
-                requested_opencode_profile,
+                profile_to_launch,
             )
             if runtime is None:
-                console.print(f"[red]opencode profile {requested_opencode_profile} 当前没有可用运行来源[/red]")
+                console.print(f"[red]opencode profile {profile_to_launch} 当前没有可用运行来源[/red]")
                 return
-            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
+            runtime = _apply_opencode_entrypoint(runtime, entrypoint_to_launch)
             _trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice="opencode profile")
             if not check_cli_installed(cli):
                 from mms_installer import check_and_offer_install
@@ -14682,83 +13753,41 @@ def main():
         _launch_with_tracking(cli, {"model": model}, runtime, once=once)
         return
 
-    # Default: TUI scene selection (with fallback)
+    # Default: modern TUI launcher selection, no legacy numbered scene menu.
     if _use_tui():
-        handled = _handle_tui_scene_selection(
-            cfg, visible_scenes, default_provider, once, visible_clis, account_id=args.account, provider_id=args.provider
+        handled = _handle_tui_launcher_selection(
+            cfg, default_provider, once, visible_clis, account_id=args.account, provider_id=args.provider
         )
         if handled:
             return
         # fallback if curses failed
 
-    # Fallback: number-based selection
-    scene_name = select_scene_fallback(visible_scenes)
-
-    if scene_name is None:
-        # Custom mode
-        cli = select_cli(visible_clis)
-        _trace_record("custom mode", cli=cli)
-        if args.account or args.provider:
-            _trace_record("CLI flags", account=args.account, provider=args.provider)
-        aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
-        if not _ensure_models_cache_available(aggregated):
-            return
-        model, custom_provider_id = _select_custom_model(
-            aggregated,
-            cli,
-            role=role,
-            recommend=recommend,
-            use_tui=False,
-        )
-        if model is None:
-            return
-        runtime, cli_models, cli = _choose_runtime_source(
-            cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
-            model_info={"model": model}
-        )
-        if runtime is None:
-            console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
-            return
-        _trace_record("manual select", model=model, provider=custom_provider_id)
-        model_info = model
-        if cli == "opencode":
-            runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
-            if runtime is None:
-                return
-            runtime = _apply_opencode_entrypoint(runtime, requested_opencode_entrypoint)
-        action = confirm_launch(cli, model_info, once, runtime=runtime)
-        if action == "q":
-            return
-        if action == "s":
-            save_preset_interactive(user_cfg, cli, model_info)
-        _launch_with_tracking(cli, {"model": model}, runtime, once=once)
-        return
-
-    scene = visible_scenes[scene_name]
-    cli = scene["cli"]
-    model_info = _select_scene_model_info(scene_name, scene, use_tui=False)
-    _trace_record(f'scene "{scene_name}"', cli=cli, model=model_info.get("model") if isinstance(model_info, dict) else model_info)
+    # Fallback: direct CLI + model selection. The legacy numbered scene menu is retired.
+    cli = select_cli(visible_clis)
+    _trace_record("custom mode", cli=cli)
     if args.account or args.provider:
         _trace_record("CLI flags", account=args.account, provider=args.provider)
-    runtime, _, cli = _choose_runtime_source(
-        cfg,
+    aggregated = _aggregate_provider_models(cfg, cli, default_provider, models_cache)
+    if not _ensure_models_cache_available(aggregated):
+        return
+    model, custom_provider_id = _select_custom_model(
+        aggregated,
         cli,
-        default_provider,
-        models_cache,
-        account_id=args.account,
-        provider_id=args.provider,
-        model_info=model_info,
-        allow_selected_model_accounts=True,
+        role=role,
+        recommend=recommend,
+        use_tui=False,
+    )
+    if model is None:
+        return
+    runtime, _, cli = _choose_runtime_source(
+        cfg, cli, default_provider, models_cache, account_id=args.account, provider_id=custom_provider_id or args.provider,
+        model_info={"model": model}
     )
     if runtime is None:
-        console.print(f"[red]{cli} 当前没有可用运行来源[/red]")
+        console.print(f"[red]{cli} 当前没有可承载模型 {model} 的使用入口[/red]")
         return
-
-    if not check_cli_installed(cli):
-        from mms_installer import check_and_offer_install
-        if not check_and_offer_install(cli):
-            return
-
+    _trace_record("manual select", model=model, provider=custom_provider_id)
+    model_info = model
     if cli == "opencode":
         runtime = _select_and_apply_opencode_profile(runtime, use_tui=False)
         if runtime is None:
@@ -14769,4 +13798,4 @@ def main():
         return
     if action == "s":
         save_preset_interactive(user_cfg, cli, model_info)
-    _launch_with_tracking(cli, _clean_model_info(model_info), runtime, once=once)
+    _launch_with_tracking(cli, {"model": model}, runtime, once=once)

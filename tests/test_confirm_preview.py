@@ -313,7 +313,7 @@ def test_build_confirm_preview_catalog_collects_opencode_assets(monkeypatch, tmp
 
     preview = mms_core._build_confirm_preview_catalog(
         "opencode",
-        {"opencode_profile": "lite_pro"},
+        {"opencode_profile": "agent"},
         has_caveman=True,
     )
 
