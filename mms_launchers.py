@@ -4382,18 +4382,31 @@ def _append_codex_session_hook_trust_states(
     pending_updates = {}
     pending_quality = {}
 
+    real_hooks_path = os.path.realpath(_real_user_path(".codex", "hooks.json"))
+
+    def _trust_source_quality(hooks_path, match_quality):
+        quality = int(match_quality) * 10
+        try:
+            if os.path.realpath(str(hooks_path or "")) == real_hooks_path:
+                quality += 2
+            elif str(hooks_path or "").strip() == target_hooks_path:
+                quality += 1
+        except OSError:
+            pass
+        return quality
+
     def _remember(target_key, trusted_hash, quality):
         if not target_key or not trusted_hash:
             return
         if target_key in existing_hashes:
             if existing_hashes[target_key] != trusted_hash:
                 previous_quality = pending_quality.get(target_key, -1)
-                if quality > previous_quality:
+                if quality >= previous_quality:
                     pending_updates[target_key] = trusted_hash
                     pending_quality[target_key] = quality
             return
         previous_quality = pending_quality.get(target_key, -1)
-        if target_key not in pending or quality > previous_quality:
+        if target_key not in pending or quality >= previous_quality:
             pending[target_key] = trusted_hash
             pending_quality[target_key] = quality
 
@@ -4431,7 +4444,11 @@ def _append_codex_session_hook_trust_states(
                 # is not evidence that its hash is still valid after hooks changed.
                 if trust_record["hooks_path"] == target_hooks_path and trust_record["key"] == target_key:
                     continue
-                _remember(target_key, trust_record["trusted_hash"], match_quality)
+                _remember(
+                    target_key,
+                    trust_record["trusted_hash"],
+                    _trust_source_quality(trust_record["hooks_path"], match_quality),
+                )
 
     if pending_updates:
         text = _replace_codex_hook_trust_hashes(text, pending_updates)
