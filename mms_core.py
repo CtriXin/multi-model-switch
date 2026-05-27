@@ -9721,47 +9721,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
     # 预构建品类数据（仅在配置变更时重建）
     def _rebuild_families():
-        fbc = {}
-        fd = {}
-        pbc = {}
-        pol = {}
-        for cli_name in current_cli_names:
-            raw = _build_model_families_for_cli(
-                current_cfg, cli_name, current_provider, default_models
-            )
-            fam_list = []
-            preferred_family = _CLI_DEFAULT_FAMILY_FIRST.get(cli_name)
-            for f in raw:
-                model_entries = [m for m in f["models"] if isinstance(m, dict)]
-                total_use = sum(int(m.get("use_count", 0) or 0) for m in model_entries)
-                family_last_used_at = max(
-                    (str(m.get("last_used_at") or "").strip() for m in model_entries),
-                    default="",
-                )
-                fam_list.append({
-                    "family": f["family"],
-                    "count": len(f["models"]),
-                    "use_count": total_use,
-                    "last_used_at": family_last_used_at,
-                    "is_cold": _family_is_cold_for_tui(
-                        f["family"],
-                        total_use,
-                        family_last_used_at,
-                        preferred_family=preferred_family,
-                    ),
-                })
-            # 最近使用的 family 优先；没有 recency 时再保留当前 CLI 默认主族群兜底置顶。
-            fam_list = _sort_family_entries_for_tui(
-                fam_list,
-                preferred_family=preferred_family,
-            )
-            fbc[cli_name] = fam_list
-            fd[cli_name] = {f["family"]: f["models"] for f in raw}
-            pbc[cli_name] = {}
-            pol[cli_name] = _make_provider_options_loader(
-                current_cfg, cli_name, current_provider, default_models
-            )
-        return fbc, fd, pbc, pol
+        from mms_tui_launcher_flow import build_tui_family_payloads
+
+        return build_tui_family_payloads(
+            current_cfg,
+            current_cli_names,
+            current_provider,
+            default_models,
+            build_model_families_for_cli=_build_model_families_for_cli,
+            cli_default_family_first=_CLI_DEFAULT_FAMILY_FIRST,
+            family_is_cold_for_tui=_family_is_cold_for_tui,
+            sort_family_entries_for_tui=_sort_family_entries_for_tui,
+            make_provider_options_loader=_make_provider_options_loader,
+        )
 
     families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
     _families_dirty = False

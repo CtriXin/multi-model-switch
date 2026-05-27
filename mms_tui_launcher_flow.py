@@ -171,3 +171,56 @@ def select_opencode_profile(
             console.print(f"[red]请输入 1-{len(options)}[/red]")
         except KeyboardInterrupt:
             return None
+
+
+def build_tui_family_payloads(
+    cfg,
+    cli_names,
+    current_provider,
+    default_models,
+    *,
+    build_model_families_for_cli,
+    cli_default_family_first,
+    family_is_cold_for_tui,
+    sort_family_entries_for_tui,
+    make_provider_options_loader,
+):
+    families_by_cli = {}
+    families_detail = {}
+    provider_options_by_cli = {}
+    provider_options_loader_by_cli = {}
+    for cli_name in cli_names:
+        raw = build_model_families_for_cli(
+            cfg, cli_name, current_provider, default_models
+        )
+        family_entries = []
+        preferred_family = cli_default_family_first.get(cli_name)
+        for family in raw:
+            model_entries = [model for model in family["models"] if isinstance(model, dict)]
+            total_use = sum(int(model.get("use_count", 0) or 0) for model in model_entries)
+            family_last_used_at = max(
+                (str(model.get("last_used_at") or "").strip() for model in model_entries),
+                default="",
+            )
+            family_entries.append({
+                "family": family["family"],
+                "count": len(family["models"]),
+                "use_count": total_use,
+                "last_used_at": family_last_used_at,
+                "is_cold": family_is_cold_for_tui(
+                    family["family"],
+                    total_use,
+                    family_last_used_at,
+                    preferred_family=preferred_family,
+                ),
+            })
+        families_by_cli[cli_name] = sort_family_entries_for_tui(
+            family_entries,
+            preferred_family=preferred_family,
+        )
+        families_detail[cli_name] = {family["family"]: family["models"] for family in raw}
+        provider_options_by_cli[cli_name] = {}
+        provider_options_loader_by_cli[cli_name] = make_provider_options_loader(
+            cfg, cli_name, current_provider, default_models
+        )
+    return families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli

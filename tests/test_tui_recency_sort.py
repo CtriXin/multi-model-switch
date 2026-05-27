@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from mms_tui import _sort_cli_names_by_last_used, _sort_model_entries_for_tui
 from mms_core import _sort_family_entries_for_tui
+from mms_tui_launcher_flow import build_tui_family_payloads
 
 
 NOW = datetime(2026, 5, 22, 12, 0, 0, tzinfo=timezone.utc)
@@ -90,6 +91,81 @@ def test_family_sort_keeps_cli_default_first_when_no_recency() -> None:
     ]
 
     assert sorted_names == ["GPT", "Claude", "Qwen"]
+
+
+def test_build_tui_family_payloads_preserves_family_metadata() -> None:
+    provider = {"id": "p1"}
+    default_models = ["gpt-5.4"]
+    cold_calls = []
+
+    def build_model_families_for_cli(cfg, cli_name, current_provider, models):
+        assert cfg == {"cfg": True}
+        assert cli_name == "codex"
+        assert current_provider is provider
+        assert models is default_models
+        return [
+            {
+                "family": "GPT",
+                "models": [
+                    {"model": "gpt-5.4", "use_count": 2, "last_used_at": "2026-05-20T10:00:00Z"},
+                    {"model": "gpt-5.5", "use_count": "3", "last_used_at": "2026-05-21T10:00:00Z"},
+                ],
+            },
+            {
+                "family": "Qwen",
+                "models": [
+                    {"model": "qwen3"},
+                    "raw-model-entry",
+                ],
+            },
+        ]
+
+    def family_is_cold_for_tui(family, total_use, last_used_at, *, preferred_family):
+        cold_calls.append((family, total_use, last_used_at, preferred_family))
+        return family == "Qwen"
+
+    def sort_family_entries_for_tui(families, *, preferred_family):
+        assert preferred_family == "GPT"
+        return sorted(families, key=lambda item: item["family"])
+
+    def make_provider_options_loader(cfg, cli_name, current_provider, models):
+        return lambda model_name: [cfg, cli_name, current_provider, models, model_name]
+
+    families_by_cli, families_detail, provider_options_by_cli, loaders = build_tui_family_payloads(
+        {"cfg": True},
+        ["codex"],
+        provider,
+        default_models,
+        build_model_families_for_cli=build_model_families_for_cli,
+        cli_default_family_first={"codex": "GPT"},
+        family_is_cold_for_tui=family_is_cold_for_tui,
+        sort_family_entries_for_tui=sort_family_entries_for_tui,
+        make_provider_options_loader=make_provider_options_loader,
+    )
+
+    assert families_by_cli["codex"] == [
+        {
+            "family": "GPT",
+            "count": 2,
+            "use_count": 5,
+            "last_used_at": "2026-05-21T10:00:00Z",
+            "is_cold": False,
+        },
+        {
+            "family": "Qwen",
+            "count": 2,
+            "use_count": 0,
+            "last_used_at": "",
+            "is_cold": True,
+        },
+    ]
+    assert families_detail["codex"]["Qwen"] == [{"model": "qwen3"}, "raw-model-entry"]
+    assert provider_options_by_cli == {"codex": {}}
+    assert loaders["codex"]("gpt-5.4")[-1] == "gpt-5.4"
+    assert cold_calls == [
+        ("GPT", 5, "2026-05-21T10:00:00Z", "GPT"),
+        ("Qwen", 0, "", "GPT"),
+    ]
 
 
 def test_family_sort_ignores_use_count_when_no_recency_or_default() -> None:
