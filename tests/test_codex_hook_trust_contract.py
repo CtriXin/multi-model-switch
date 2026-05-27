@@ -85,6 +85,7 @@ def test_contract_codex_gateway_keeps_stable_codex_home(monkeypatch, tmp_path):
     }
 
     pid = {"value": 111}
+    refresh_calls = []
     monkeypatch.chdir(repo_dir)
     monkeypatch.setattr(mms_launchers.os, "getpid", lambda: pid["value"])
     monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *args, **kwargs: None)
@@ -98,6 +99,11 @@ def test_contract_codex_gateway_keeps_stable_codex_home(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda *args, **kwargs: None)
     monkeypatch.setattr(mms_launchers, "_build_codex_session_hooks", lambda *args, **kwargs: hooks_payload)
     monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(
+        mms_launchers,
+        "_refresh_codex_current_hook_trust_cache",
+        lambda target, **kwargs: refresh_calls.append((Path(target), kwargs.get("managed_only"))) or {},
+    )
 
     env1 = mms_launchers._codex_gateway_env(
         {"id": "relay-a", "api_key": "sk-runtime", "nsr_mode": "disable"},
@@ -118,3 +124,78 @@ def test_contract_codex_gateway_keeps_stable_codex_home(monkeypatch, tmp_path):
     assert (Path(env1["MMS_SESSION_HOME"]) / ".codex").resolve() == gateway_codex
     assert (Path(env2["MMS_SESSION_HOME"]) / ".codex").resolve() == gateway_codex
     assert json.loads((gateway_codex / "hooks.json").read_text(encoding="utf-8")) == hooks_payload
+    assert (gateway_codex, False) in refresh_calls
+    assert (real_codex, True) in refresh_calls
+
+
+def test_contract_codex_upgrade_refreshes_current_hook_hashes(monkeypatch, tmp_path):
+    import mms_launchers
+
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    hooks_path = codex_home / "hooks.json"
+    config_path = codex_home / "config.toml"
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Edit|Write|apply_patch",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "/usr/bin/python3 /Users/xin/scmp-ops/scripts/scmp_hook.py --host codex --event PreToolUse",
+                                }
+                            ],
+                        }
+                    ],
+                    "SessionStart": [
+                        {"hooks": [{"type": "command", "command": "/tmp/user-owned-hook.sh"}]}
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    managed_key = f"{hooks_path}:pre_tool_use:0:0"
+    user_key = f"{hooks_path}:session_start:0:0"
+    config_path.write_text(
+        f'[hooks.state."{managed_key}"]\n'
+        'trusted_hash = "sha256:stale-managed"\n\n'
+        f'[hooks.state."{user_key}"]\n'
+        'trusted_hash = "sha256:stale-user"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mms_launchers,
+        "_codex_app_server_hooks_list",
+        lambda *args, **kwargs: [
+            {
+                "sourcePath": str(hooks_path),
+                "key": managed_key,
+                "currentHash": "sha256:fresh-managed",
+                "command": "/usr/bin/python3 /Users/xin/scmp-ops/scripts/scmp_hook.py --host codex --event PreToolUse",
+            },
+            {
+                "sourcePath": str(hooks_path),
+                "key": user_key,
+                "currentHash": "sha256:fresh-user",
+                "command": "/tmp/user-owned-hook.sh",
+            },
+        ],
+    )
+
+    result = mms_launchers._refresh_codex_current_hook_trust_cache(
+        str(codex_home),
+        managed_only=True,
+        allow_non_real_home=True,
+    )
+
+    rendered = config_path.read_text(encoding="utf-8")
+    assert result["status"] == "refreshed"
+    assert result["scope"] == "mms-managed"
+    assert 'trusted_hash = "sha256:fresh-managed"' in rendered
+    assert 'trusted_hash = "sha256:stale-user"' in rendered
+    assert "sha256:stale-managed" not in rendered
+    assert "sha256:fresh-user" not in rendered
