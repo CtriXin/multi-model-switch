@@ -9795,23 +9795,20 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── OpenCode profile ──
         if action_type == "profile" and cli == "opencode":
-            model_info, runtime_runtime = _resolve_opencode_profile_runtime(
+            from mms_tui_launcher_flow import opencode_profile_launch_context
+
+            model_info, runtime_runtime = opencode_profile_launch_context(
                 current_cfg,
                 current_provider,
                 default_models,
                 action_data,
+                resolve_opencode_profile_runtime=_resolve_opencode_profile_runtime,
+                trace_record=_trace_record,
+                trace_runtime_choice=_trace_runtime_choice,
             )
             if runtime_runtime is None:
                 console.print("[yellow]OpenCode Lite/Raw 未找到安全的 OpenAI-compatible GPT provider；请用 Heavy/OMO 或先配置 GPT provider。[/yellow]")
                 continue
-            _trace_record(
-                "opencode profile",
-                cli=cli,
-                profile=runtime_runtime.get("opencode_profile"),
-                model=model_info.get("model") if isinstance(model_info, dict) else model_info,
-                provider=runtime_runtime.get("id"),
-            )
-            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="opencode profile")
             # fall through to confirm
         if action_type == "profile" and cli == "agy":
             if action_data == _AGY_CONNECT_PROFILE_ID:
@@ -9831,13 +9828,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     )
                     _families_dirty = True
                 continue
-            runtime_runtime = resolve_account_context(current_cfg, account_id=action_data, cli_name=cli)
-            if runtime_runtime is None or runtime_runtime.get("cli") != cli:
+            from mms_tui_launcher_flow import official_account_profile_context
+
+            model_info, runtime_runtime = official_account_profile_context(
+                current_cfg,
+                cli,
+                action_data,
+                resolve_account_context=resolve_account_context,
+                trace_record=_trace_record,
+                trace_runtime_choice=_trace_runtime_choice,
+            )
+            if runtime_runtime is None:
                 console.print(f"[yellow]未找到 {cli} 官方账号: {action_data}[/yellow]")
                 continue
-            model_info = {}
-            _trace_record("official account", cli=cli, account=runtime_runtime.get("id"))
-            _trace_runtime_choice("runtime resolve", runtime_runtime, launch_cli=cli, choice="official account")
             # fall through to confirm
 
         # ── Provider 浏览 ──

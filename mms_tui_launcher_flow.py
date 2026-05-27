@@ -390,6 +390,53 @@ def selected_model_launch_context(
     return model_info, runtime
 
 
+def opencode_profile_launch_context(
+    cfg,
+    current_provider,
+    default_models,
+    profile_id,
+    *,
+    resolve_opencode_profile_runtime,
+    trace_record,
+    trace_runtime_choice,
+):
+    model_info, runtime = resolve_opencode_profile_runtime(
+        cfg,
+        current_provider,
+        default_models,
+        profile_id,
+    )
+    if runtime is None:
+        return model_info, runtime
+    trace_record(
+        "opencode profile",
+        cli="opencode",
+        profile=runtime.get("opencode_profile"),
+        model=model_info.get("model") if isinstance(model_info, dict) else model_info,
+        provider=runtime.get("id"),
+    )
+    trace_runtime_choice("runtime resolve", runtime, launch_cli="opencode", choice="opencode profile")
+    return model_info, runtime
+
+
+def official_account_profile_context(
+    cfg,
+    cli_name,
+    account_id,
+    *,
+    resolve_account_context,
+    trace_record,
+    trace_runtime_choice,
+):
+    runtime = resolve_account_context(cfg, account_id=account_id, cli_name=cli_name)
+    if runtime is None or runtime.get("cli") != cli_name:
+        return {}, None
+    model_info = {}
+    trace_record("official account", cli=cli_name, account=runtime.get("id"))
+    trace_runtime_choice("runtime resolve", runtime, launch_cli=cli_name, choice="official account")
+    return model_info, runtime
+
+
 def refresh_tui_runtime_state_after_config_change(
     cfg,
     *,

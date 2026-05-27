@@ -8,6 +8,8 @@ from mms_tui_launcher_flow import (
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
     normalize_confirm_result,
+    official_account_profile_context,
+    opencode_profile_launch_context,
     provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
@@ -323,6 +325,83 @@ def test_selected_model_launch_context_falls_back_to_best_provider() -> None:
     assert trace_calls == [
         (("runtime resolve", best_provider), {"launch_cli": "claude", "choice": "best provider"})
     ]
+
+
+def test_opencode_profile_launch_context_traces_resolved_runtime() -> None:
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "provider", "opencode_profile": "agent"}
+
+    model_info, selected_runtime = opencode_profile_launch_context(
+        {"cfg": True},
+        {"id": "current"},
+        ["gpt-5.4"],
+        "agent",
+        resolve_opencode_profile_runtime=lambda *_args: ({"model": "gpt-5.4"}, runtime),
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert model_info == {"model": "gpt-5.4"}
+    assert selected_runtime is runtime
+    assert trace_records == [
+        (
+            ("opencode profile",),
+            {"cli": "opencode", "profile": "agent", "model": "gpt-5.4", "provider": "provider"},
+        )
+    ]
+    assert trace_choices == [
+        (("runtime resolve", runtime), {"launch_cli": "opencode", "choice": "opencode profile"})
+    ]
+
+
+def test_opencode_profile_launch_context_keeps_unresolved_result_untraced() -> None:
+    model_info, runtime = opencode_profile_launch_context(
+        {},
+        {},
+        [],
+        "raw",
+        resolve_opencode_profile_runtime=lambda *_args: (None, None),
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert model_info is None
+    assert runtime is None
+
+
+def test_official_account_profile_context_traces_matching_account() -> None:
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "agy-main", "cli": "agy"}
+
+    model_info, selected_runtime = official_account_profile_context(
+        {},
+        "agy",
+        "agy-main",
+        resolve_account_context=lambda *_args, **_kwargs: runtime,
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert model_info == {}
+    assert selected_runtime is runtime
+    assert trace_records == [(("official account",), {"cli": "agy", "account": "agy-main"})]
+    assert trace_choices == [(("runtime resolve", runtime), {"launch_cli": "agy", "choice": "official account"})]
+
+
+def test_official_account_profile_context_rejects_wrong_cli() -> None:
+    model_info, runtime = official_account_profile_context(
+        {},
+        "agy",
+        "wrong",
+        resolve_account_context=lambda *_args, **_kwargs: {"id": "gemini-old", "cli": "gemini"},
+        trace_record=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+    )
+
+    assert model_info == {}
+    assert runtime is None
 
 
 def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> None:
