@@ -8104,6 +8104,7 @@ def _choose_runtime_source(
         _trace_runtime_choice("runtime resolve", runtime, launch_cli=launch_cli, choice="default(no-tty)")
         return runtime, chosen["models"], launch_cli
 
+    _ensure_rich()
     table = Table(title=f"{cli_name} 使用入口", show_lines=True)
     table.add_column("#", style="cyan", width=4)
     table.add_column("来源", style="green")

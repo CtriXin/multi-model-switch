@@ -111,3 +111,54 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
     assert tables[0].rows[0][0][0] == "claude"
     assert tables[0].rows[0][0][1] == "999999"
     assert stale.exists()
+
+
+def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
+    import mms_core
+
+    class _TTY:
+        def isatty(self):
+            return True
+
+    class _FakePrompt:
+        @staticmethod
+        def ask(*args, **kwargs):
+            return "1"
+
+    def _fake_ensure_rich():
+        mms_core.Table = _FakeTable
+        mms_core.Prompt = _FakePrompt
+
+    options = [
+        {
+            "runtime": {"id": "provider-a", "name": "Provider A", "auth_mode": "api_key"},
+            "models": ["gpt-5.4"],
+            "launch_cli": "codex",
+            "desc": "provider",
+        },
+        {
+            "runtime": {"id": "account-a", "name": "Account A", "auth_mode": "oauth"},
+            "models": ["gpt-5.4"],
+            "launch_cli": "codex",
+            "desc": "account",
+        },
+    ]
+
+    monkeypatch.setattr(mms_core, "Table", None)
+    monkeypatch.setattr(mms_core, "Prompt", None)
+    monkeypatch.setattr(mms_core, "_ensure_rich", _fake_ensure_rich)
+    monkeypatch.setattr(mms_core, "console", _FakeConsole())
+    monkeypatch.setattr(mms_core.sys, "stdin", _TTY())
+    monkeypatch.setattr(mms_core, "_list_runtime_sources", lambda *args, **kwargs: (options, 0))
+
+    runtime, models, cli = mms_core._choose_runtime_source(
+        {},
+        "codex",
+        {},
+        ["gpt-5.4"],
+    )
+
+    assert mms_core.Table is _FakeTable
+    assert runtime["id"] == "provider-a"
+    assert models == ["gpt-5.4"]
+    assert cli == "codex"
