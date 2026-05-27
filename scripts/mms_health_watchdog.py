@@ -233,6 +233,15 @@ def provider_config_map(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def provider_profile_map(profile_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), dict) else {}
+    result: dict[str, dict[str, Any]] = {}
+    for provider_id, profile in profiles.items():
+        if isinstance(provider_id, str) and provider_id.strip() and isinstance(profile, dict):
+            result[provider_id.strip()] = profile
+    return result
+
+
 def model_policy_allowed(policy: dict[str, Any]) -> set[str]:
     projects = policy.get("projects") if isinstance(policy.get("projects"), dict) else {}
     models: set[str] = set()
@@ -498,8 +507,8 @@ def model_presence_checks(
 def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -> dict[str, Any]:
     bundle = load_verified_latest_bundle(config_dir)
     results: list[CheckResult] = []
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
     if bundle.get("status") == "ok":
-        payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
         routes_payload = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
         policy_payload = payloads.get("policy") if isinstance(payloads.get("policy"), dict) else {}
         results.append(CheckResult("bundle", "latest_approved", "info", "ok", str(bundle.get("detail") or "")))
@@ -524,6 +533,9 @@ def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -
         route_source = "legacy-root"
     config_payload = read_toml(config_dir / "config.toml")
     providers = provider_config_map(config_payload)
+    if bundle.get("status") == "ok":
+        for provider_id, profile in provider_profile_map(payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {}).items():
+            providers.setdefault(provider_id, profile)
     results.extend(route_source_checks(config_dir, routes_payload, policy_payload))
     endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout)
     results.extend(endpoint_results)

@@ -38,7 +38,18 @@ def _write_latest_bundle(config_dir: Path, routes: dict) -> None:
             },
         },
     )
-    mms_registry.write_json_atomic(profile, {"schema_version": 1, "profiles": {}})
+    provider_ids = {
+        route["primary"]["provider_id"]
+        for route in routes.values()
+        if isinstance(route.get("primary"), dict) and route["primary"].get("provider_id")
+    }
+    mms_registry.write_json_atomic(
+        profile,
+        {
+            "schema_version": 1,
+            "profiles": {provider_id: {"models_endpoint": "manual"} for provider_id in provider_ids},
+        },
+    )
     mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
     mms_registry.export_latest_approved_bundle_manifest(
         generated / "model-registry.latest-approved.json",
@@ -90,6 +101,7 @@ def test_watchdog_prefers_verified_latest_bundle_over_stale_root_routes(tmp_path
     report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
 
     assert report["route_source"] == "latest-approved"
+    assert report["status"] == "ok"
     assert report["bundle"]["status"] == "ok"
     assert not any(item["name"] == "http://82.156.121.141:4001" for item in report["failures"])
 
