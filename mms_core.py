@@ -9862,10 +9862,15 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if prov_result is None or prov_result == "__interrupt__":
                 continue
             selected_pid, selected_pname = prov_result
-            # 获取该 provider 的完整上下文和模型列表
-            selected_prov = resolve_provider_context(current_cfg, selected_pid)
-            selected_probe = _probe_models(selected_prov, emit_output=False)
-            prov_models = _filter_visible_models(selected_probe.get("models") or [])
+            from mms_tui_launcher_flow import provider_browse_model_options
+
+            selected_prov, prov_models = provider_browse_model_options(
+                current_cfg,
+                selected_pid,
+                resolve_provider_context=resolve_provider_context,
+                probe_models=_probe_models,
+                filter_visible_models=_filter_visible_models,
+            )
             if not prov_models:
                 console.print(f"[yellow]{selected_pname} 没有可用模型[/yellow]")
                 continue

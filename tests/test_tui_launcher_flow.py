@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
     normalize_confirm_result,
+    provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
     safe_tui_call,
@@ -71,6 +72,40 @@ def test_provider_browse_options_filters_and_dedupes_candidates() -> None:
     assert result == [
         {"id": "p1", "name": "Provider One", "role": "primary", "priority": 300},
         {"id": "default", "name": "Default Provider", "role": "auto", "priority": 100},
+    ]
+
+
+def test_provider_browse_model_options_resolves_and_filters_models() -> None:
+    cfg = {"cfg": True}
+    provider = {"id": "p1"}
+    calls = []
+
+    def resolve_provider_context(arg_cfg, provider_id):
+        calls.append(("resolve", arg_cfg, provider_id))
+        return provider
+
+    def probe_models(arg_provider, *, emit_output):
+        calls.append(("probe", arg_provider, emit_output))
+        return {"models": ["gpt-5.4", "hidden-model"]}
+
+    def filter_visible_models(models):
+        calls.append(("filter", models))
+        return [model for model in models if model != "hidden-model"]
+
+    selected_provider, models = provider_browse_model_options(
+        cfg,
+        "p1",
+        resolve_provider_context=resolve_provider_context,
+        probe_models=probe_models,
+        filter_visible_models=filter_visible_models,
+    )
+
+    assert selected_provider is provider
+    assert models == ["gpt-5.4"]
+    assert calls == [
+        ("resolve", cfg, "p1"),
+        ("probe", provider, False),
+        ("filter", ["gpt-5.4", "hidden-model"]),
     ]
 
 

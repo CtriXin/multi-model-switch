@@ -266,6 +266,20 @@ def provider_browse_options(
     return browse_providers
 
 
+def provider_browse_model_options(
+    cfg,
+    selected_provider_id,
+    *,
+    resolve_provider_context,
+    probe_models,
+    filter_visible_models,
+):
+    selected_provider = resolve_provider_context(cfg, selected_provider_id)
+    selected_probe = probe_models(selected_provider, emit_output=False)
+    provider_models = filter_visible_models(selected_probe.get("models") or [])
+    return selected_provider, provider_models
+
+
 def load_balance_tui_payload(
     cfg,
     cli_name,
