@@ -186,6 +186,34 @@ def inject_real_home_hints(
     return env
 
 
+def launcher_script_path(module_file, script_name):
+    script_path = os.path.join(os.path.dirname(os.path.abspath(module_file)), "scripts", script_name)
+    return script_path if os.path.isfile(script_path) else ""
+
+
+def xmem_cli_path(*, environ, real_user_path, which):
+    candidates = []
+    for key in ("MMS_XMEM_BIN", "XMEM_BIN"):
+        explicit = str(environ.get(key) or "").strip()
+        if explicit:
+            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
+    candidates.extend([
+        real_user_path(".local", "bin", "xmem"),
+        real_user_path("auto-skills", "CtriXin-repo", "xmem", "bin", "xmem"),
+    ])
+    found = which("xmem")
+    if found:
+        candidates.append(found)
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return ""
+
+
 def install_host_context_env(
     env,
     *,

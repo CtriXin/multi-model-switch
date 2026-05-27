@@ -3406,26 +3406,13 @@ def _resolve_xmem_root():
 
 
 def _xmem_cli_path():
-    candidates = []
-    for key in ("MMS_XMEM_BIN", "XMEM_BIN"):
-        explicit = str(os.environ.get(key) or "").strip()
-        if explicit:
-            candidates.append(os.path.abspath(os.path.expanduser(explicit)))
-    candidates.extend([
-        _real_user_path(".local", "bin", "xmem"),
-        _real_user_path("auto-skills", "CtriXin-repo", "xmem", "bin", "xmem"),
-    ])
-    found = shutil.which("xmem")
-    if found:
-        candidates.append(found)
-    seen = set()
-    for candidate in candidates:
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return ""
+    from mms_launcher_export import xmem_cli_path
+
+    return xmem_cli_path(
+        environ=os.environ,
+        real_user_path=_real_user_path,
+        which=shutil.which,
+    )
 
 
 def _resolve_auto_github_contributor_root():
@@ -3453,18 +3440,21 @@ def _resolve_auto_github_contributor_root():
 
 
 def _mms_toon_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-toon")
-    return script_path if os.path.isfile(script_path) else ""
+    from mms_launcher_export import launcher_script_path
+
+    return launcher_script_path(__file__, "mms-toon")
 
 
 def _mms_context_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "mms-context")
-    return script_path if os.path.isfile(script_path) else ""
+    from mms_launcher_export import launcher_script_path
+
+    return launcher_script_path(__file__, "mms-context")
 
 
 def _token_saver_script_path():
-    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "token-saver")
-    return script_path if os.path.isfile(script_path) else ""
+    from mms_launcher_export import launcher_script_path
+
+    return launcher_script_path(__file__, "token-saver")
 
 
 def _is_caveman_hook_command(command_text):
