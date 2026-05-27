@@ -4382,6 +4382,8 @@ def _append_codex_session_hook_trust_states(
     pending_updates = {}
     pending_quality = {}
 
+    # Contract: sibling per-PID sessions may seed missing trust, but they must
+    # never override the user's real ~/.codex/hooks.json trust for the same hook.
     real_hooks_path = os.path.realpath(_real_user_path(".codex", "hooks.json"))
 
     def _trust_source_quality(hooks_path, match_quality):
@@ -9894,6 +9896,7 @@ def _codex_provider_base_url(base_url):
 
 def _append_codex_bypass_flags(cmd, runtime):
     """In MMS bypass mode, skip Codex approval and hook-review prompts together."""
+    # Contract: isolated MMS/Codex sessions must not stop at startup hook review.
     if not (runtime or {}).get("bypass"):
         return
     for flag in (
