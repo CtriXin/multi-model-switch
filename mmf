@@ -20,6 +20,33 @@ if not str(os.environ.get("MMS_CONFIG_ROOT") or "").strip():
     os.environ["MMS_CONFIG_ROOT"] = os.path.join(resolve_real_user_home(os.environ), ".config", "mms-next")
 
 argv = sys.argv[1:]
+if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h", "--help"}):
+    print(
+        "\n".join(
+            [
+                "MMF preview commands",
+                f"config_root={os.environ['MMS_CONFIG_ROOT']}",
+                "",
+                "Read-only:",
+                "  mmf preview doctor [--json]       show current state and one next action",
+                "  mmf preview status [--json]       show full model source status",
+                "  mmf preview verify [--json]       verify latest-approved bundle hashes",
+                "",
+                "Prepare preview root:",
+                "  mmf preview prepare --from ~/.config/mms --json",
+                "  mmf preview prepare --from ~/.config/mms --include-secrets --json",
+                "",
+                "Manual steps, if needed:",
+                "  mmf preview init --json",
+                "  mmf preview import-legacy --from ~/.config/mms --apply --json",
+                "  mmf preview publish --json",
+                "",
+                "Safety: preview writes stay under MMS_CONFIG_ROOT; source roots are read-only.",
+            ]
+        )
+    )
+    raise SystemExit(0)
+
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "init":
     from mms_registry_cli import handle_registry_command
 

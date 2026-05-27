@@ -305,6 +305,7 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ```text
 ./mmf config root --json
 ./mmf config source --json
+./mmf preview --help
 ./mmf preview init --json
 ./mmf preview prepare --from ~/.config/mms --json
 ./mmf preview prepare --from ~/.config/mms --include-secrets --json
