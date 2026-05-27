@@ -10380,14 +10380,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             family_name = selected.pop("_family_name", "模型")
 
             pri_changes = selected.pop("priority_changes", None)
-            if _apply_runtime_priority_changes(current_cfg, pri_changes):
-                save_config(current_cfg)
+            from mms_tui_launcher_flow import apply_tui_priority_changes
+
+            if apply_tui_priority_changes(
+                current_cfg,
+                pri_changes,
+                apply_runtime_priority_changes=_apply_runtime_priority_changes,
+                save_config=save_config,
+                export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+            ):
                 _families_dirty = True
-                try:
-                    from mms_router import export_model_routes
-                    export_model_routes(current_cfg, force=True)
-                except Exception:
-                    pass
 
             from mms_tui_launcher_flow import selected_model_launch_context
 
@@ -10457,15 +10459,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             else:
                 # 持久化 priority 变更
                 pri_changes = selected.pop("priority_changes", None)
-                if _apply_runtime_priority_changes(current_cfg, pri_changes):
-                    save_config(current_cfg)
+                from mms_tui_launcher_flow import apply_tui_priority_changes
+
+                if apply_tui_priority_changes(
+                    current_cfg,
+                    pri_changes,
+                    apply_runtime_priority_changes=_apply_runtime_priority_changes,
+                    save_config=save_config,
+                    export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+                ):
                     _families_dirty = True
-                    # 静默重新生成 routes
-                    try:
-                        from mms_router import export_model_routes
-                        export_model_routes(current_cfg, force=True)
-                    except Exception:
-                        pass
 
                 from mms_tui_launcher_flow import selected_model_launch_context
 

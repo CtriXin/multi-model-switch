@@ -524,6 +524,24 @@ def refresh_tui_runtime_state_after_config_change(
     return current_provider, default_models, current_cli_names
 
 
+def apply_tui_priority_changes(
+    cfg,
+    priority_changes,
+    *,
+    apply_runtime_priority_changes,
+    save_config,
+    export_model_routes_loader,
+):
+    if not apply_runtime_priority_changes(cfg, priority_changes):
+        return False
+    save_config(cfg)
+    try:
+        export_model_routes_loader()(cfg, force=True)
+    except Exception:
+        pass
+    return True
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

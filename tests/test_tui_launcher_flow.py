@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mms_tui_launcher_flow import (
+    apply_tui_priority_changes,
     apply_confirm_runtime_preferences,
     build_confirm_capability_context,
     confirm_agent_pack,
@@ -568,6 +569,61 @@ def test_refresh_tui_runtime_state_after_config_change_clears_and_rebuilds() -> 
         ("probe", {"id": "provider"}, False),
         ("visible", {"cfg": True}, {"id": "provider"}, ["gpt-5.4"]),
     ]
+
+
+def test_apply_tui_priority_changes_saves_then_exports() -> None:
+    calls = []
+
+    def export_model_routes(cfg, *, force):
+        calls.append(("export", cfg, force))
+
+    changed = apply_tui_priority_changes(
+        {"cfg": True},
+        [{"id": "p1"}],
+        apply_runtime_priority_changes=lambda cfg, changes: calls.append(("apply", cfg, changes)) or True,
+        save_config=lambda cfg: calls.append(("save", cfg)),
+        export_model_routes_loader=lambda: export_model_routes,
+    )
+
+    assert changed is True
+    assert calls == [
+        ("apply", {"cfg": True}, [{"id": "p1"}]),
+        ("save", {"cfg": True}),
+        ("export", {"cfg": True}, True),
+    ]
+
+
+def test_apply_tui_priority_changes_ignores_export_failure() -> None:
+    calls = []
+
+    def load_export_model_routes():
+        raise RuntimeError("export unavailable")
+
+    changed = apply_tui_priority_changes(
+        {},
+        ["change"],
+        apply_runtime_priority_changes=lambda *_args: True,
+        save_config=lambda cfg: calls.append(("save", cfg)),
+        export_model_routes_loader=load_export_model_routes,
+    )
+
+    assert changed is True
+    assert calls == [("save", {})]
+
+
+def test_apply_tui_priority_changes_skips_save_without_changes() -> None:
+    calls = []
+
+    changed = apply_tui_priority_changes(
+        {},
+        None,
+        apply_runtime_priority_changes=lambda *_args: False,
+        save_config=lambda cfg: calls.append(("save", cfg)),
+        export_model_routes_loader=lambda: calls.append(("load_export",)),
+    )
+
+    assert changed is False
+    assert calls == []
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:
