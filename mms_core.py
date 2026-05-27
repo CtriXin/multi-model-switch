@@ -9875,15 +9875,18 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── 负载模式 ──
         if action_type == "load_balance":
-            all_models = []
-            cli_families = families_detail.get(cli, {})
-            for fam_models in cli_families.values():
-                all_models.extend(m["model"] for m in fam_models)
-            lb_profiles = _load_balance_profiles(current_cfg)
-            lb_default_profile = _default_load_balance_profile_name(current_cfg)
-            lb_prov_opts = _build_provider_options_map(
-                current_cfg, cli, current_provider, default_models, all_models
-            ) if all_models else None
+            from mms_tui_launcher_flow import load_balance_slot_provider_ids, load_balance_tui_payload
+
+            all_models, cli_families, lb_profiles, lb_default_profile, lb_prov_opts = load_balance_tui_payload(
+                current_cfg,
+                cli,
+                current_provider,
+                default_models,
+                families_detail,
+                load_balance_profiles=_load_balance_profiles,
+                default_load_balance_profile_name=_default_load_balance_profile_name,
+                build_provider_options_map=_build_provider_options_map,
+            )
             lb_result = _safe_tui_call(
                 select_load_balance_tui,
                 available_models=all_models or None,
@@ -9896,11 +9899,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 return True
             if lb_result is None:
                 continue
-            slot_provider_ids = {
-                slot: provider_id
-                for slot, provider_id in (lb_result.get("lb_slot_providers") or {}).items()
-                if provider_id
-            }
+            slot_provider_ids = load_balance_slot_provider_ids(lb_result)
             model_info = dict(lb_result)
             _trace_record(
                 "load balance",

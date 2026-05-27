@@ -257,3 +257,38 @@ def provider_browse_options(
             "priority": provider.get("priority", 100),
         })
     return browse_providers
+
+
+def load_balance_tui_payload(
+    cfg,
+    cli_name,
+    current_provider,
+    default_models,
+    families_detail,
+    *,
+    load_balance_profiles,
+    default_load_balance_profile_name,
+    build_provider_options_map,
+):
+    all_models = []
+    cli_families = families_detail.get(cli_name, {})
+    for family_models in cli_families.values():
+        all_models.extend(model["model"] for model in family_models)
+    lb_profiles = load_balance_profiles(cfg)
+    lb_default_profile = default_load_balance_profile_name(cfg)
+    lb_provider_options = (
+        build_provider_options_map(
+            cfg, cli_name, current_provider, default_models, all_models
+        )
+        if all_models
+        else None
+    )
+    return all_models, cli_families, lb_profiles, lb_default_profile, lb_provider_options
+
+
+def load_balance_slot_provider_ids(lb_result):
+    return {
+        slot: provider_id
+        for slot, provider_id in (lb_result.get("lb_slot_providers") or {}).items()
+        if provider_id
+    }
