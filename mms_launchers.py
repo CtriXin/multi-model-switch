@@ -9316,55 +9316,26 @@ def _opencode_provider_export_env(runtime, model):
 
 def get_export_env(cli, runtime):
     """返回指定 CLI 需要的 export 环境变量字典。"""
-    runtime = runtime if isinstance(runtime, dict) else {}
-    if _is_opencode_global_profile_runtime(cli, runtime):
-        return _opencode_global_export_env(runtime)
+    from mms_launcher_export import build_export_env
 
-    if runtime.get("auth_mode") == "broker_profile":
-        return {}
-    if runtime.get("auth_mode") == "oauth_bridge":
-        return {}
-    if runtime.get("auth_mode") == "oauth":
-        validate_account_for_cli(runtime.get("cli", cli), runtime)
-        return {}
-
-    validate_provider_for_cli(cli, runtime)
-    api_key = runtime["api_key"]
-    exports = {}
-    if cli == "claude":
-        exports["ANTHROPIC_BASE_URL"] = _anthropic_base_url(runtime)
-        exports["ANTHROPIC_AUTH_TOKEN"] = api_key
-        exports["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-        exports["API_TIMEOUT_MS"] = "3000000"
-    elif cli == "codex":
-        exports["OPENAI_API_KEY"] = api_key
-        exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
-    elif cli == "opencode":
-        model = _resolve_model(runtime)
-        exports.update(_opencode_provider_export_env(runtime, model))
-    if cli in {"claude", "codex"}:
-        _inject_host_capability_hints(exports)
-    toon_script = _mms_toon_script_path()
-    context_script = _mms_context_script_path()
-    token_saver_script = _token_saver_script_path()
-    xmem_script = _xmem_cli_path()
-    if cli in {"claude", "codex", "opencode"}:
-        if toon_script:
-            exports["MMS_TOON_BIN"] = toon_script
-        if context_script:
-            exports["MMS_CONTEXT_BIN"] = context_script
-            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
-        if token_saver_script:
-            exports["TOKEN_SAVER_BIN"] = token_saver_script
-            exports["MMS_TOKEN_SAVER_BIN"] = token_saver_script
-            exports.setdefault("MMS_CONTEXT_DIR", os.path.join(_safe_getcwd(), ".mms", "context-store"))
-        if xmem_script:
-            exports["XMEM_BIN"] = xmem_script
-            exports["MMS_XMEM_BIN"] = xmem_script
-        first_script = toon_script or context_script or token_saver_script or xmem_script
-        if first_script:
-            exports["PATH"] = f"{os.path.dirname(first_script)}:$PATH"
-    return exports
+    return build_export_env(
+        cli,
+        runtime,
+        is_opencode_global_profile_runtime=_is_opencode_global_profile_runtime,
+        opencode_global_export_env=_opencode_global_export_env,
+        validate_account_for_cli=validate_account_for_cli,
+        validate_provider_for_cli=validate_provider_for_cli,
+        anthropic_base_url=_anthropic_base_url,
+        openai_base_url=_openai_base_url,
+        resolve_model=_resolve_model,
+        opencode_provider_export_env=_opencode_provider_export_env,
+        inject_host_capability_hints=_inject_host_capability_hints,
+        mms_toon_script_path=_mms_toon_script_path,
+        mms_context_script_path=_mms_context_script_path,
+        token_saver_script_path=_token_saver_script_path,
+        xmem_cli_path=_xmem_cli_path,
+        safe_getcwd=_safe_getcwd,
+    )
 
 
 def _show_launch_info(cli, runtime, auth_mode):
