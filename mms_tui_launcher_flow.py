@@ -718,3 +718,40 @@ def build_confirm_capability_context(
         "default_reasoning_effort": default_reasoning_effort,
         "preview_catalog": preview_catalog,
     }
+
+
+def confirm_tui_options(
+    *,
+    env_vars,
+    once,
+    context_lines,
+    has_caveman,
+    has_nsr,
+    has_ecc,
+    has_omc,
+    runtime,
+    default_reasoning_effort,
+    preview_catalog,
+):
+    return {
+        "env_vars": env_vars,
+        "once": once,
+        "context_lines": context_lines,
+        "has_caveman": has_caveman,
+        "caveman_enabled_default": str(runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
+        "has_nsr": has_nsr,
+        "nsr_enabled_default": str(runtime.get("nsr_mode", "enable")).strip().lower() == "enable",
+        "has_ecc": has_ecc,
+        "ecc_enabled_default": False,
+        "has_omc": has_omc,
+        "agent_pack_default": str(runtime.get("agent_pack") or "none"),
+        "thinking_enabled_default": str(runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
+        "reasoning_effort_default": default_reasoning_effort,
+        "preview_catalog": preview_catalog,
+        "runtime": runtime,
+    }
+
+
+def apply_confirm_bypass_flag(runtime, cli_name, bypass):
+    if cli_name in {"claude", "codex", "opencode", "agy"}:
+        runtime["bypass"] = bool(bypass)

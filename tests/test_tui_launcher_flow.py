@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from mms_tui_launcher_flow import (
-    apply_tui_priority_changes,
+    apply_confirm_bypass_flag,
     apply_confirm_runtime_preferences,
+    apply_tui_priority_changes,
     build_confirm_capability_context,
     confirm_agent_pack,
+    confirm_tui_options,
     last_used_model_info,
     load_balance_slot_provider_ids,
     load_balance_tui_payload,
@@ -795,3 +797,51 @@ def test_build_confirm_capability_context_blocks_non_claude_addons() -> None:
     assert context["has_omc"] is False
     assert context["has_nsr"] is True
     assert context["default_reasoning_effort"] == "medium"
+
+
+def test_confirm_tui_options_preserves_confirm_defaults() -> None:
+    runtime = {
+        "caveman_mode": "disable",
+        "nsr_mode": "enable",
+        "agent_pack": "omc",
+        "thinking_mode": "disable",
+    }
+
+    assert confirm_tui_options(
+        env_vars={"A": "B"},
+        once=True,
+        context_lines=["ctx"],
+        has_caveman=True,
+        has_nsr=True,
+        has_ecc=False,
+        has_omc=True,
+        runtime=runtime,
+        default_reasoning_effort="medium",
+        preview_catalog={"preview": True},
+    ) == {
+        "env_vars": {"A": "B"},
+        "once": True,
+        "context_lines": ["ctx"],
+        "has_caveman": True,
+        "caveman_enabled_default": False,
+        "has_nsr": True,
+        "nsr_enabled_default": True,
+        "has_ecc": False,
+        "ecc_enabled_default": False,
+        "has_omc": True,
+        "agent_pack_default": "omc",
+        "thinking_enabled_default": False,
+        "reasoning_effort_default": "medium",
+        "preview_catalog": {"preview": True},
+        "runtime": runtime,
+    }
+
+
+def test_apply_confirm_bypass_flag_only_for_launch_clis() -> None:
+    runtime = {}
+    apply_confirm_bypass_flag(runtime, "codex", True)
+    assert runtime == {"bypass": True}
+
+    runtime = {}
+    apply_confirm_bypass_flag(runtime, "chat", True)
+    assert runtime == {}

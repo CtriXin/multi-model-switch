@@ -10550,25 +10550,24 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         has_omc = confirm_context["has_omc"]
         default_reasoning_effort = confirm_context["default_reasoning_effort"]
         preview_catalog = confirm_context["preview_catalog"]
+        from mms_tui_launcher_flow import confirm_tui_options
+
         result = safe_tui_call(
             confirm_tui,
             cli,
             clean_model_info,
-            env_vars=env_vars,
-            once=once,
-            context_lines=context_lines,
-            has_caveman=has_caveman,
-            caveman_enabled_default=str(runtime_runtime.get("caveman_mode", "enable")).strip().lower() != "disable",
-            has_nsr=has_nsr,
-            nsr_enabled_default=str(runtime_runtime.get("nsr_mode", "enable")).strip().lower() == "enable",
-            has_ecc=has_ecc,
-            ecc_enabled_default=False,
-            has_omc=has_omc,
-            agent_pack_default=str(runtime_runtime.get("agent_pack") or "none"),
-            thinking_enabled_default=str(runtime_runtime.get("thinking_mode", "enable")).strip().lower() != "disable",
-            reasoning_effort_default=default_reasoning_effort,
-            preview_catalog=preview_catalog,
-            runtime=runtime_runtime,
+            **confirm_tui_options(
+                env_vars=env_vars,
+                once=once,
+                context_lines=context_lines,
+                has_caveman=has_caveman,
+                has_nsr=has_nsr,
+                has_ecc=has_ecc,
+                has_omc=has_omc,
+                runtime=runtime_runtime,
+                default_reasoning_effort=default_reasoning_effort,
+                preview_catalog=preview_catalog,
+            ),
         )
         if result == "__interrupt__":
             return True
@@ -10589,8 +10588,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
-        if cli in {"claude", "codex", "opencode", "agy"}:
-            runtime_runtime["bypass"] = bool(bypass)
+        from mms_tui_launcher_flow import apply_confirm_bypass_flag
+
+        apply_confirm_bypass_flag(runtime_runtime, cli, bypass)
         if bypass:
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
                 from mms_launchers import _enforce_claude_network_guard_or_exit, _claude_bypass_requires_proxy
