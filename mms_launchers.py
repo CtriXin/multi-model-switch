@@ -1039,27 +1039,28 @@ def _install_host_context_env(env, *, cli, runtime=None, model_info=None, sessio
 
 
 def _set_session_home_hint(env, session_home):
-    if session_home:
-        env["MMS_SESSION_HOME"] = session_home
-    return env
+    from mms_launcher_export import set_session_home_hint
+
+    return set_session_home_hint(env, session_home)
 
 
 def _set_codex_home_hint(env, session_home):
-    if session_home:
-        env["CODEX_HOME"] = os.path.join(session_home, ".codex")
-    return env
+    from mms_launcher_export import set_codex_home_hint
+
+    return set_codex_home_hint(env, session_home)
 
 
 def _set_codex_soft_home(env, session_home):
     """Keep real HOME for tools; isolate Codex config/auth in CODEX_HOME."""
-    real_home = _real_user_path()
-    env["HOME"] = real_home
-    env["XDG_CONFIG_HOME"] = _real_user_path(".config")
-    env["MMS_HOME_ISOLATION_MODE"] = "soft"
-    env["MMS_SOFT_HOME"] = "1"
-    _set_session_home_hint(env, session_home)
-    _set_codex_home_hint(env, session_home)
-    return env
+    from mms_launcher_export import set_codex_soft_home
+
+    return set_codex_soft_home(
+        env,
+        session_home,
+        real_user_path=_real_user_path,
+        set_session_home_hint=_set_session_home_hint,
+        set_codex_home_hint=_set_codex_home_hint,
+    )
 
 
 def _set_opencode_soft_home(env, session_home):

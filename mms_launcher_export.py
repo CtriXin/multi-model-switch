@@ -70,6 +70,36 @@ def inject_selected_model_name(env, *candidates, model_info=None):
     return env
 
 
+def set_session_home_hint(env, session_home):
+    if session_home:
+        env["MMS_SESSION_HOME"] = session_home
+    return env
+
+
+def set_codex_home_hint(env, session_home):
+    if session_home:
+        env["CODEX_HOME"] = os.path.join(session_home, ".codex")
+    return env
+
+
+def set_codex_soft_home(
+    env,
+    session_home,
+    *,
+    real_user_path,
+    set_session_home_hint,
+    set_codex_home_hint,
+):
+    real_home = real_user_path()
+    env["HOME"] = real_home
+    env["XDG_CONFIG_HOME"] = real_user_path(".config")
+    env["MMS_HOME_ISOLATION_MODE"] = "soft"
+    env["MMS_SOFT_HOME"] = "1"
+    set_session_home_hint(env, session_home)
+    set_codex_home_hint(env, session_home)
+    return env
+
+
 def install_host_context_env(
     env,
     *,
