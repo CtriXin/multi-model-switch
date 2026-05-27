@@ -452,3 +452,54 @@ def apply_confirm_runtime_preferences(
     if cli_name in {"claude", "codex"}:
         runtime["thinking_mode"] = "enable" if thinking_enabled else "disable"
         runtime["reasoning_effort"] = str(reasoning_effort or "high").strip().lower() or "high"
+
+
+def build_confirm_capability_context(
+    cli_name,
+    runtime,
+    clean_model_info,
+    *,
+    confirm_context_lines,
+    caveman_available_for_cli,
+    nsr_available_for_cli,
+    ecc_available_for_claude,
+    omc_available_for_claude,
+    model_info_looks_domestic,
+    default_reasoning_effort_for_model_info,
+    build_confirm_preview_catalog,
+):
+    context_lines = confirm_context_lines(cli_name, runtime)
+    has_caveman = caveman_available_for_cli(cli_name)
+    has_nsr = nsr_available_for_cli(cli_name)
+    looks_domestic = model_info_looks_domestic(clean_model_info)
+    has_ecc = (
+        cli_name == "claude"
+        and ecc_available_for_claude()
+        and looks_domestic
+    )
+    has_omc = (
+        cli_name == "claude"
+        and omc_available_for_claude()
+        and looks_domestic
+    )
+    default_reasoning_effort = (
+        str(runtime.get("reasoning_effort", "")).strip().lower()
+        or default_reasoning_effort_for_model_info(clean_model_info)
+    )
+    preview_catalog = build_confirm_preview_catalog(
+        cli_name,
+        runtime,
+        has_caveman=has_caveman,
+        has_nsr=has_nsr,
+        has_ecc=has_ecc,
+        has_omc=has_omc,
+    )
+    return {
+        "context_lines": context_lines,
+        "has_caveman": has_caveman,
+        "has_nsr": has_nsr,
+        "has_ecc": has_ecc,
+        "has_omc": has_omc,
+        "default_reasoning_effort": default_reasoning_effort,
+        "preview_catalog": preview_catalog,
+    }

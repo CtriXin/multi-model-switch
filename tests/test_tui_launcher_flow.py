@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mms_tui_launcher_flow import (
     apply_confirm_runtime_preferences,
+    build_confirm_capability_context,
     confirm_agent_pack,
     last_used_model_info,
     load_balance_slot_provider_ids,
@@ -310,3 +311,66 @@ def test_apply_confirm_runtime_preferences_merges_legacy_surfaces() -> None:
         "reasoning_effort": "high",
     }
     assert merge_calls == [({"context": True}, {"toon": True})]
+
+
+def test_build_confirm_capability_context_enables_domestic_claude_addons() -> None:
+    runtime = {"reasoning_effort": "LOW"}
+    clean_model_info = {"model": "qwen3-max"}
+    preview_calls = []
+
+    def build_preview(cli_name, runtime_arg, **kwargs):
+        preview_calls.append((cli_name, runtime_arg, kwargs))
+        return {"preview": kwargs}
+
+    context = build_confirm_capability_context(
+        "claude",
+        runtime,
+        clean_model_info,
+        confirm_context_lines=lambda cli_name, runtime_arg: [cli_name, runtime_arg["reasoning_effort"]],
+        caveman_available_for_cli=lambda cli_name: cli_name == "claude",
+        nsr_available_for_cli=lambda cli_name: cli_name == "claude",
+        ecc_available_for_claude=lambda: True,
+        omc_available_for_claude=lambda: True,
+        model_info_looks_domestic=lambda model_info: model_info is clean_model_info,
+        default_reasoning_effort_for_model_info=lambda _model_info: "high",
+        build_confirm_preview_catalog=build_preview,
+    )
+
+    assert context == {
+        "context_lines": ["claude", "LOW"],
+        "has_caveman": True,
+        "has_nsr": True,
+        "has_ecc": True,
+        "has_omc": True,
+        "default_reasoning_effort": "low",
+        "preview_catalog": {
+            "preview": {
+                "has_caveman": True,
+                "has_nsr": True,
+                "has_ecc": True,
+                "has_omc": True,
+            }
+        },
+    }
+    assert preview_calls[0][1] is runtime
+
+
+def test_build_confirm_capability_context_blocks_non_claude_addons() -> None:
+    context = build_confirm_capability_context(
+        "codex",
+        {},
+        {"model": "gpt-5.4"},
+        confirm_context_lines=lambda *_args: [],
+        caveman_available_for_cli=lambda _cli_name: False,
+        nsr_available_for_cli=lambda _cli_name: True,
+        ecc_available_for_claude=lambda: True,
+        omc_available_for_claude=lambda: True,
+        model_info_looks_domestic=lambda _model_info: True,
+        default_reasoning_effort_for_model_info=lambda _model_info: "medium",
+        build_confirm_preview_catalog=lambda *_args, **kwargs: kwargs,
+    )
+
+    assert context["has_ecc"] is False
+    assert context["has_omc"] is False
+    assert context["has_nsr"] is True
+    assert context["default_reasoning_effort"] == "medium"

@@ -10549,31 +10549,28 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     "targets": [],
                     "no_proxy_conflicts": [],
                 }
-        context_lines = _confirm_context_lines(cli, runtime_runtime)
-        has_caveman = _caveman_available_for_cli(cli)
-        has_nsr = _nsr_available_for_cli(cli)
-        has_ecc = (
-            cli == "claude"
-            and _ecc_available_for_claude()
-            and _model_info_looks_domestic(clean_model_info)
-        )
-        has_omc = (
-            cli == "claude"
-            and _omc_available_for_claude()
-            and _model_info_looks_domestic(clean_model_info)
-        )
-        default_reasoning_effort = (
-            str(runtime_runtime.get("reasoning_effort", "")).strip().lower()
-            or _default_reasoning_effort_for_model_info(clean_model_info)
-        )
-        preview_catalog = _build_confirm_preview_catalog(
+        from mms_tui_launcher_flow import build_confirm_capability_context
+
+        confirm_context = build_confirm_capability_context(
             cli,
             runtime_runtime,
-            has_caveman=has_caveman,
-            has_nsr=has_nsr,
-            has_ecc=has_ecc,
-            has_omc=has_omc,
+            clean_model_info,
+            confirm_context_lines=_confirm_context_lines,
+            caveman_available_for_cli=_caveman_available_for_cli,
+            nsr_available_for_cli=_nsr_available_for_cli,
+            ecc_available_for_claude=_ecc_available_for_claude,
+            omc_available_for_claude=_omc_available_for_claude,
+            model_info_looks_domestic=_model_info_looks_domestic,
+            default_reasoning_effort_for_model_info=_default_reasoning_effort_for_model_info,
+            build_confirm_preview_catalog=_build_confirm_preview_catalog,
         )
+        context_lines = confirm_context["context_lines"]
+        has_caveman = confirm_context["has_caveman"]
+        has_nsr = confirm_context["has_nsr"]
+        has_ecc = confirm_context["has_ecc"]
+        has_omc = confirm_context["has_omc"]
+        default_reasoning_effort = confirm_context["default_reasoning_effort"]
+        preview_catalog = confirm_context["preview_catalog"]
         result = safe_tui_call(
             confirm_tui,
             cli,
