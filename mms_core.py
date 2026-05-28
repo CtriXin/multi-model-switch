@@ -752,7 +752,7 @@ def _preset_has_visible_model_options(preset):
     return _model_info_has_visible_models(_preset_model_info(preset))
 
 
-CLI_NAMES = ["claude", "codex", "opencode", "agy"]
+CLI_NAMES = ["claude", "codex", "opencode", "pi", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
 LB_SLOT_NAMES = ("heavy", "medium", "light")
 
@@ -7804,10 +7804,17 @@ def _provider_supports_cli_name(provider, cli_name):
     supported_clis = provider.get("supported_clis", [])
     if isinstance(supported_clis, str):
         supported_clis = [supported_clis]
+    protocols = provider.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    if cli_name == "pi" and "pi" not in supported_clis:
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "opencode", "claude")
+        ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     if cli_name == "opencode" and "opencode" not in supported_clis:
-        protocols = provider.get("protocols", [])
-        if isinstance(protocols, str):
-            protocols = [protocols]
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "claude")
         ):
@@ -8575,7 +8582,7 @@ def _build_confirm_preview_catalog(cli, runtime, *, has_caveman=False, has_nsr=F
         "hooks": {"always": [], "caveman": [], "nsr": [], "ecc": [], "omc": []},
     }
 
-    if cli not in {"claude", "codex", "opencode", "agy"}:
+    if cli not in {"claude", "codex", "opencode", "pi", "agy"}:
         return preview
 
     try:
@@ -9302,7 +9309,7 @@ def confirm_launch(cli, model_info, once=False, runtime=None):
         model_display = model_info or "官方默认"
 
     mode_str = "一次性命令" if once else "交互会话"
-    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "agy") else "无需额外注入"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "pi", "agy") else "无需额外注入"
     source_line = ""
     if runtime:
         source_kind = _runtime_source_kind_label(runtime)
@@ -10908,7 +10915,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime = _runtime_with_vision_sidecar(current_cfg, runtime_runtime)
 
         clean_model_info = _clean_model_info(model_info)
-        env_vars = get_export_env(cli, runtime_runtime)
+        env_vars = get_export_env(cli, runtime_runtime, model_info=clean_model_info)
         if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
             try:
                 from mms_launchers import get_claude_network_guard_preview, _claude_bypass_requires_proxy
@@ -11023,7 +11030,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             return True
         if action == "b":
             continue
-        if cli in {"claude", "codex", "opencode", "agy"}:
+        if cli in {"claude", "codex", "opencode", "pi", "agy"}:
             runtime_runtime["bypass"] = bool(bypass)
         if bypass:
             if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
@@ -11037,7 +11044,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime["agent_pack"] = agent_pack if agent_pack in {"ecc", "omc"} else "none"
             runtime_runtime["ecc_mode"] = "enable" if agent_pack == "ecc" else "disable"
             runtime_runtime["omc_mode"] = "enable" if agent_pack == "omc" else "disable"
-        if cli in {"claude", "codex", "opencode", "agy"}:
+        if cli in {"claude", "codex", "opencode", "pi", "agy"}:
             runtime_runtime["caveman_mode"] = "enable" if caveman_enabled else "disable"
             runtime_runtime["nsr_mode"] = "enable" if (has_nsr and nsr_enabled) else "disable"
             if confirm_returned_surfaces:
@@ -11067,7 +11074,13 @@ def handle_export(cli_name, provider, apply=False):
         console.print(f"支持: {', '.join(CLI_NAMES)}")
         return
 
-    exports = get_export_env(cli_name, provider)
+    try:
+        exports = get_export_env(cli_name, provider)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        if cli_name == "pi":
+            console.print("[dim]Pi 的 export 需要先确定 model；请改用带 model 的 preset/env，或在启动前先选定模型。[/dim]")
+        return
     if not exports:
         console.print(f"[yellow]{cli_name} 无需 export；启动时会按 CLI 自己的参数或登录方式处理[/yellow]")
         return
@@ -11128,7 +11141,12 @@ def _resolve_preset_export_runtime(cfg, preset, provider_override=None, *, stder
         _emit_preset_error(str(exc), stderr_only=stderr_only)
         return None
 
-    exports = get_export_env(cli, runtime)
+    model_info = _preset_model_info(preset)
+    try:
+        exports = get_export_env(cli, runtime, model_info=model_info)
+    except RuntimeError as exc:
+        _emit_preset_error(str(exc), stderr_only=stderr_only)
+        return None
     if not exports:
         _emit_preset_error(f"{cli} 无需 export；启动时会按 CLI 自己的参数或登录方式处理", stderr_only=stderr_only)
         return None
@@ -13906,7 +13924,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("target", nargs="?", default=None,
-                        help="CLI 名称(claude/codex/opencode/agy)")
+                        help="CLI 名称(claude/codex/opencode/pi/agy)")
     parser.add_argument("--preset", help="使用指定预设直接启动")
     parser.add_argument("--once", nargs="?", const=True, default=False,
                         help="一次性会话模式（可附带 CLI 名称）")

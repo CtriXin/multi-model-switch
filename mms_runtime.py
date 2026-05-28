@@ -12,6 +12,20 @@ MIN_PYTHON = (3, 11)
 NODE_CLI_NAMES = {"claude", "agy"}
 
 
+def _repo_cli_wrapper(command_name):
+    name = str(command_name or "").strip().lower()
+    if name != "pi":
+        return ""
+    wrapper_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts",
+        "pi-cli-wrapper.sh",
+    )
+    if os.path.isfile(wrapper_path) and os.access(wrapper_path, os.X_OK):
+        return wrapper_path
+    return ""
+
+
 def _dedupe(values):
     seen = set()
     result = []
@@ -84,7 +98,10 @@ def resolve_cli_binary(command_name, env=None, real_home=None):
         return ""
     source = env if isinstance(env, dict) else os.environ
     override = str(source.get(f"MMS_{name.upper()}_BIN") or "").strip()
+    repo_wrapper = _repo_cli_wrapper(name)
     candidates = [override] if override else []
+    if repo_wrapper:
+        candidates.append(repo_wrapper)
     search_path = os.pathsep.join(cli_search_dirs(source, real_home=real_home))
     found = shutil.which(name, path=search_path)
     if found:

@@ -6567,6 +6567,13 @@ def _provider_supports_cli(provider, cli):
             continue
         normalized.add(name)
     supported_clis = normalized
+    if cli == "pi" and "pi" not in supported_clis:
+        if "openai_chat_completions" in protocols and any(
+            item in supported_clis for item in ("codex", "opencode", "claude")
+        ):
+            return True
+        if "anthropic_messages" in protocols and "claude" in supported_clis:
+            return True
     if cli == "opencode" and "opencode" not in supported_clis:
         if "openai_chat_completions" in protocols and any(
             item in supported_clis for item in ("codex", "claude")
@@ -6616,6 +6623,9 @@ def validate_provider_for_cli(cli, provider):
         sys.exit(1)
     if cli in {"codex", "opencode"} and not _openai_base_url(provider):
         console.print(f"[red]provider '{provider_id}' 未配置 OpenAI 地址[/red]")
+        sys.exit(1)
+    if cli == "pi" and not _anthropic_base_url(provider) and not _openai_base_url(provider):
+        console.print(f"[red]provider '{provider_id}' 未配置任何可供 Pi 使用的 API 地址[/red]")
         sys.exit(1)
 
 
@@ -10611,6 +10621,174 @@ def _opencode_session_command(runtime, entrypoint, launch_model_ref, launch_agen
     )
 
 
+def _pi_wrapper_path():
+    wrapper_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts",
+        "pi-cli-wrapper.sh",
+    )
+    if os.path.isfile(wrapper_path) and os.access(wrapper_path, os.X_OK):
+        return wrapper_path
+    return ""
+
+
+def _pi_provider_ref(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    return f"mms-{_opencode_config_slug(runtime.get('id') or runtime.get('name'), 'provider')}"
+
+
+def _pi_selected_api(runtime):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    protocols = _provider_protocols(runtime)
+    anthropic_url = str(_anthropic_base_url(runtime) or "").strip()
+    openai_url = str(_openai_base_url(runtime) or "").strip()
+    if anthropic_url and "anthropic_messages" in protocols:
+        return "anthropic-messages", anthropic_url
+    if openai_url and "openai_chat_completions" in protocols:
+        return "openai-completions", openai_url
+    if anthropic_url:
+        return "anthropic-messages", anthropic_url
+    if openai_url:
+        return "openai-completions", openai_url
+    return "", ""
+
+
+def _pi_build_models_payload(runtime, model_name):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    api_kind, base_url = _pi_selected_api(runtime)
+    if not api_kind or not base_url:
+        raise RuntimeError("Pi runtime requires either an Anthropic or OpenAI base URL")
+    provider_ref = _pi_provider_ref(runtime)
+    model = str(model_name or _resolve_model(runtime) or "").strip()
+    if not model:
+        raise RuntimeError("Pi runtime requires a selected model")
+    provider_payload = {
+        "name": str(runtime.get("name") or runtime.get("id") or provider_ref).strip() or provider_ref,
+        "baseUrl": base_url,
+        "api": api_kind,
+        "apiKey": str(runtime.get("openai_api_key") or runtime.get("api_key") or "").strip(),
+        "models": [
+            {
+                "id": model,
+                "name": model,
+            }
+        ],
+    }
+    if api_kind == "openai-completions" and str(runtime.get("provider_profile") or runtime.get("profile") or "").strip():
+        # Pi defaults are usually fine, but some MMS routes rely on provider quirks.
+        # Keep the first smoke slice conservative and avoid guessing provider-specific compat flags here.
+        provider_payload.setdefault("compat", {})
+    return {"providers": {provider_ref: provider_payload}}
+
+
+def _write_pi_models_config(agent_dir, runtime, model_name):
+    payload = _pi_build_models_payload(runtime, model_name)
+    models_path = os.path.join(agent_dir, "models.json")
+    os.makedirs(agent_dir, exist_ok=True)
+    atomic_write_text(models_path, json.dumps(payload, indent=2) + "\n", mode=0o600)
+    return models_path
+
+
+def _pi_gateway_env(runtime, model_info=None):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    model = _resolve_model(model_info or runtime)
+    gateway_base = _real_user_path(".config", "mms", "pi-gateway")
+    os.makedirs(gateway_base, exist_ok=True)
+    sessions_dir = os.path.join(gateway_base, "s")
+    session_home = os.path.join(sessions_dir, str(os.getpid()))
+    os.makedirs(session_home, exist_ok=True)
+    _cleanup_stale_sessions(sessions_dir)
+
+    env = dict(os.environ)
+    _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
+    _inject_real_home_hints(env, include_xdg=True)
+    _inject_host_capability_hints(env)
+    _inject_selected_model_name(env, model, model_info=model_info)
+    _set_session_home_hint(env, session_home)
+    env["HOME"] = _real_user_path()
+    env["MMS_HOME_ISOLATION_MODE"] = "soft"
+    env["MMS_SOFT_HOME"] = "1"
+    env["MMS_PI_SOFT_HOME"] = "1"
+
+    agent_dir = os.path.join(session_home, ".pi", "agent")
+    session_dir = os.path.join(agent_dir, "sessions")
+    models_path = _write_pi_models_config(agent_dir, runtime, model)
+    os.makedirs(session_dir, exist_ok=True)
+    env["PI_CODING_AGENT_DIR"] = agent_dir
+    env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
+    env["PI_TELEMETRY"] = "0"
+    env["MMS_PI_MODELS_JSON"] = models_path
+    wrapper_path = _pi_wrapper_path()
+    if wrapper_path:
+        env["MMS_PI_BIN"] = wrapper_path
+
+    _apply_runtime_network_profile(env, runtime, validate_proxy=False)
+    _apply_runtime_locale_profile(env, runtime)
+    _apply_runtime_ip_stack_profile(env, runtime)
+    _install_session_command_wrappers(session_home, env)
+    _install_session_packet_env(
+        env,
+        cli="pi",
+        runtime=runtime,
+        model_info=model_info,
+        session_home=session_home,
+        features={
+            "web_access": bool(_resolve_web_access_root()),
+            "weber": bool(_resolve_weber_root()),
+            "toon": bool(_resolve_toon_root()),
+            "token_saver": bool(_resolve_token_saver_root()),
+            "xmem": bool(_resolve_xmem_root()),
+        },
+    )
+    return env
+
+
+def _pi_provider_export_env(runtime, model):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    provider_ref = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
+    model_ref = _opencode_config_slug(model or runtime.get("model"), "model")
+    agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
+    session_dir = os.path.join(agent_dir, "sessions")
+    models_path = _write_pi_models_config(agent_dir, runtime, model)
+    os.makedirs(session_dir, exist_ok=True)
+    exports = {
+        "PI_CODING_AGENT_DIR": agent_dir,
+        "PI_CODING_AGENT_SESSION_DIR": session_dir,
+        "PI_TELEMETRY": "0",
+        "MMS_PI_MODELS_JSON": models_path,
+    }
+    wrapper_path = _pi_wrapper_path()
+    if wrapper_path:
+        exports["MMS_PI_BIN"] = wrapper_path
+    return exports
+
+
+def launch_pi(model_info, runtime, once=False, extra_args=None):
+    """启动 Pi runner，当前走 MMS provider -> session-local models.json 适配层。"""
+    auth_mode = str(runtime.get("auth_mode") or "api_key").strip() or "api_key"
+    if auth_mode != "api_key":
+        console.print("[red]Pi 当前只支持模型源/API key 模式；官方 /login 请直接在 Pi 内使用[/red]")
+        sys.exit(1)
+
+    model = _resolve_model(model_info)
+    env = _pi_gateway_env(runtime, model_info=model_info)
+    provider_ref = _pi_provider_ref(runtime)
+    cmd = ["pi", "--provider", provider_ref]
+    if model:
+        cmd += ["--model", model]
+
+    thinking_mode = str(runtime.get("thinking_mode") or "").strip().lower()
+    reasoning_effort = str(runtime.get("reasoning_effort") or "").strip().lower()
+    if thinking_mode == "disable":
+        cmd += ["--thinking", "off"]
+    elif reasoning_effort in {"minimal", "low", "medium", "high", "xhigh"}:
+        cmd += ["--thinking", reasoning_effort]
+
+    if extra_args:
+        cmd += list(extra_args)
+    _exec_or_run(cmd, env, once)
+
+
 def launch_opencode(model_info, runtime, once=False):
     """启动 OpenCode，通过 OpenAI-compatible provider 注入 session-local config。"""
     return _opencode_launch_impl(
@@ -10671,6 +10849,7 @@ LAUNCHERS = {
     "claude": launch_claude,
     "codex": launch_codex,
     "opencode": launch_opencode,
+    "pi": launch_pi,
     "gemini": launch_gemini,
     "agy": launch_agy,
 }
@@ -10698,9 +10877,17 @@ def _opencode_provider_export_env(runtime, model):
     )
 
 
-def get_export_env(cli, runtime):
+def _runtime_with_export_model(runtime, model_info=None):
+    runtime = dict(runtime) if isinstance(runtime, dict) else {}
+    resolved_model = _resolve_model(model_info or runtime)
+    if resolved_model and not _resolve_model(runtime):
+        runtime["model"] = resolved_model
+    return runtime
+
+
+def get_export_env(cli, runtime, model_info=None):
     """返回指定 CLI 需要的 export 环境变量字典。"""
-    runtime = runtime if isinstance(runtime, dict) else {}
+    runtime = _runtime_with_export_model(runtime, model_info=model_info)
     if _is_opencode_global_profile_runtime(cli, runtime):
         return _opencode_global_export_env(runtime)
 
@@ -10724,15 +10911,18 @@ def get_export_env(cli, runtime):
         exports["OPENAI_API_KEY"] = api_key
         exports["OPENAI_BASE_URL"] = _openai_base_url(runtime)
     elif cli == "opencode":
-        model = _resolve_model(runtime)
+        model = _resolve_model(model_info or runtime)
         exports.update(_opencode_provider_export_env(runtime, model))
+    elif cli == "pi":
+        model = _resolve_model(model_info or runtime)
+        exports.update(_pi_provider_export_env(runtime, model))
     if cli in {"claude", "codex"}:
         _inject_host_capability_hints(exports)
     toon_script = _mms_toon_script_path()
     context_script = _mms_context_script_path()
     token_saver_script = _token_saver_script_path()
     xmem_script = _xmem_cli_path()
-    if cli in {"claude", "codex", "opencode"}:
+    if cli in {"claude", "codex", "opencode", "pi"}:
         if toon_script:
             exports["MMS_TOON_BIN"] = toon_script
         if context_script:
