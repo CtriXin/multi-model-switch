@@ -533,6 +533,115 @@ def test_cache_command_refresh_after_saves_normalized_config():
     assert saved["cache"]["probe_async_min_interval_sec"] == 42
 
 
+def test_guard_command_status_renders_drift(tmp_path):
+    import mms_command_tools
+
+    class Table:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.rows = []
+
+        def add_column(self, *_args, **_kwargs):
+            pass
+
+        def add_row(self, *args, **kwargs):
+            self.rows.append((args, kwargs))
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, *args, **_kwargs):
+            self.items.append(args[0] if args else "")
+
+    pending_path = tmp_path / "pending.json"
+    pending_path.write_text("{}", encoding="utf-8")
+    current_snapshot = {
+        "real_home": "/home/real",
+        "config_path": str(tmp_path / "config.toml"),
+        "accounts": [{"id": "claude-a"}],
+        "providers": [{"id": "relay"}],
+    }
+    paths = {
+        "latest.json": str(tmp_path / "latest.json"),
+        "accepted.json": str(tmp_path / "accepted.json"),
+        "pending.json": str(pending_path),
+    }
+    console = Console()
+
+    mms_command_tools.handle_guard_command(
+        ["status"],
+        command_name="mmg",
+        bootstrap_cfg={"providers": []},
+        load_config=lambda: {"should": "not-load"},
+        default_config=lambda: {"should": "not-default"},
+        config_write_target_path=lambda: str(tmp_path / "config.toml"),
+        build_config_guard_snapshot=lambda cfg, config_path: current_snapshot,
+        config_snapshot_path=lambda _kind, name, config_path: paths[name],
+        load_json_snapshot=lambda path: {"snapshot": {"old": True}} if path == paths["accepted.json"] else None,
+        snapshot_diff_lines=lambda accepted, current: ["account claude-a proxy changed"],
+        iso_now=lambda: "2026-05-28T00:00:00Z",
+        snapshot_digest=lambda snapshot: "digest",
+        write_json_snapshot=lambda _path, _payload: (_ for _ in ()).throw(AssertionError("status must not write")),
+        table_cls=Table,
+        console=console,
+    )
+
+    table = console.items[0]
+    rows = [row for row, _kwargs in table.rows]
+    assert table.kwargs["title"] == "MMS Snapshot Guard"
+    assert ("status", "drift") in rows
+    assert ("pending", str(pending_path)) in rows
+    assert any("account claude-a proxy changed" in str(item) for item in console.items)
+
+
+def test_guard_command_accept_writes_snapshot_and_clears_pending(tmp_path):
+    import mms_command_tools
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, *args, **_kwargs):
+            self.items.append(args[0] if args else "")
+
+    pending_path = tmp_path / "pending.json"
+    pending_path.write_text("{}", encoding="utf-8")
+    current_snapshot = {"real_home": "/home/real", "accounts": [], "providers": []}
+    paths = {
+        "latest.json": str(tmp_path / "latest.json"),
+        "accepted.json": str(tmp_path / "accepted.json"),
+        "pending.json": str(pending_path),
+    }
+    written = {}
+    console = Console()
+
+    mms_command_tools.handle_guard_command(
+        ["accept"],
+        command_name="mmg",
+        bootstrap_cfg=None,
+        load_config=lambda: None,
+        default_config=lambda: {"default": True},
+        config_write_target_path=lambda: str(tmp_path / "config.toml"),
+        build_config_guard_snapshot=lambda cfg, config_path: current_snapshot,
+        config_snapshot_path=lambda _kind, name, config_path: paths[name],
+        load_json_snapshot=lambda _path: None,
+        snapshot_diff_lines=lambda accepted, current: [],
+        iso_now=lambda: "2026-05-28T00:00:00Z",
+        snapshot_digest=lambda snapshot: "digest-1",
+        write_json_snapshot=lambda path, payload: written.update({path: payload}),
+        table_cls=object,
+        console=console,
+    )
+
+    assert set(written) == {paths["latest.json"], paths["accepted.json"]}
+    assert written[paths["accepted.json"]]["digest"] == "digest-1"
+    assert written[paths["accepted.json"]]["snapshot"] == current_snapshot
+    assert not pending_path.exists()
+    assert any("已接受当前快照" in str(item) for item in console.items)
+
+
 def test_exposure_command_renders_runtime_sections():
     import mms_command_tools
 

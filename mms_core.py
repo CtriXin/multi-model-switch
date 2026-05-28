@@ -11463,61 +11463,25 @@ def handle_cache_command(argv):
 
 def handle_guard_command(argv, bootstrap_cfg=None):
     _ensure_rich()
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} guard",
-        description="查看或接受 MMS 配置/关键文件快照",
+    from mms_command_tools import handle_guard_command as handle_guard_command_impl
+
+    return handle_guard_command_impl(
+        argv,
+        command_name=current_command(),
+        bootstrap_cfg=bootstrap_cfg,
+        load_config=load_config,
+        default_config=_default_config,
+        config_write_target_path=_config_write_target_path,
+        build_config_guard_snapshot=_build_config_guard_snapshot,
+        config_snapshot_path=_config_snapshot_path,
+        load_json_snapshot=_load_json_snapshot,
+        snapshot_diff_lines=_snapshot_diff_lines,
+        iso_now=_iso_now,
+        snapshot_digest=_snapshot_digest,
+        write_json_snapshot=_write_json_snapshot,
+        table_cls=Table,
+        console=console,
     )
-    subparsers = parser.add_subparsers(dest="subcommand")
-    subparsers.add_parser("status", help="查看当前快照状态")
-    subparsers.add_parser("accept", help="把当前状态设为新的已确认快照")
-
-    args = parser.parse_args(argv)
-    config_path = _config_write_target_path()
-    cfg = bootstrap_cfg if isinstance(bootstrap_cfg, dict) else (load_config() or _default_config())
-    current_snapshot = _build_config_guard_snapshot(cfg, config_path=config_path)
-    latest_path = _config_snapshot_path("startup", "latest.json", config_path=config_path)
-    accepted_path = _config_snapshot_path("startup", "accepted.json", config_path=config_path)
-    pending_path = _config_snapshot_path("startup", "pending.json", config_path=config_path)
-    accepted_payload = _load_json_snapshot(accepted_path) or {}
-    accepted_snapshot = accepted_payload.get("snapshot") if isinstance(accepted_payload, dict) else None
-    diff_lines = _snapshot_diff_lines(accepted_snapshot, current_snapshot) if accepted_snapshot else []
-
-    if args.subcommand == "accept":
-        payload = {
-            "kind": "startup",
-            "captured_at": _iso_now(),
-            "digest": _snapshot_digest(current_snapshot),
-            "snapshot": current_snapshot,
-        }
-        _write_json_snapshot(latest_path, payload)
-        _write_json_snapshot(accepted_path, payload)
-        if os.path.exists(pending_path):
-            try:
-                os.remove(pending_path)
-            except OSError:
-                pass
-        console.print(f"[green]✓ 已接受当前快照[/green]\n[dim]{accepted_path}[/dim]")
-        return
-
-    status = "missing" if not accepted_snapshot else ("drift" if diff_lines else "stable")
-    table = Table(title="MMS Snapshot Guard")
-    table.add_column("字段", style="cyan")
-    table.add_column("值", style="green")
-    table.add_row("status", status)
-    table.add_row("accepted", accepted_path)
-    table.add_row("latest", latest_path)
-    table.add_row("pending", pending_path if os.path.exists(pending_path) else "-")
-    table.add_row("real_home", current_snapshot.get("real_home", "-"))
-    table.add_row("config_path", current_snapshot.get("config_path", "-"))
-    table.add_row("accounts", str(len(current_snapshot.get("accounts", []))))
-    table.add_row("providers", str(len(current_snapshot.get("providers", []))))
-    console.print(table)
-    if diff_lines:
-        console.print("[red]检测到漂移：[/red]")
-        for item in diff_lines[:20]:
-            console.print(f"  - {item}")
-        if len(diff_lines) > 20:
-            console.print(f"[dim]... 还有 {len(diff_lines) - 20} 项[/dim]")
 
 
 def _confirm_guard_accept_from_tui(cfg):
