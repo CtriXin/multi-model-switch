@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
@@ -2726,6 +2727,76 @@ def apply_runtime_priority_changes(
                 changed = True
                 break
     return changed
+
+
+def parse_usage_timestamp(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def usage_recency_score(value, now=None, half_life_days=14, *, parse_usage_timestamp=parse_usage_timestamp):
+    parsed = parse_usage_timestamp(value)
+    if parsed is None:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if half_life_days <= 0:
+        return 1.0
+    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
+    return 0.5 ** (age_days / float(half_life_days))
+
+
+def sort_family_entries_for_tui(families, preferred_family="", now=None, *, usage_recency_score=usage_recency_score):
+    def _key(item):
+        family = str(item.get("family") or "") if isinstance(item, dict) else ""
+        last_at = str(item.get("last_used_at") or "").strip() if isinstance(item, dict) else ""
+        recency = usage_recency_score(last_at, now=now)
+        has_recent = 1 if recency > 0 else 0
+        preferred_rank = 0 if family == str(preferred_family or "").strip() else 1
+        return (-has_recent, -recency, preferred_rank, family.lower())
+
+    return sorted(list(families or []), key=_key)
+
+
+def family_is_cold_for_tui(
+    family_name,
+    total_use,
+    last_used_at="",
+    *,
+    preferred_family="",
+    known_model_family_names,
+    cold_max_use_count,
+    cold_idle_days,
+    parse_usage_timestamp=parse_usage_timestamp,
+    now=None,
+):
+    if str(family_name or "").strip() == str(preferred_family or "").strip():
+        return False
+    if str(family_name or "").strip() in known_model_family_names:
+        return False
+    if int(total_use or 0) > cold_max_use_count:
+        return False
+    parsed = parse_usage_timestamp(last_used_at)
+    if parsed is None:
+        return True
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    return parsed < (current - timedelta(days=cold_idle_days))
 
 
 def build_model_families_for_cli(

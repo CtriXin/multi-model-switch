@@ -147,6 +147,76 @@ def test_command_request_classifiers_preserve_help_and_safe_prune_semantics():
     assert mms_core._is_session_prune_dry_run(["session", "ls"]) is False
 
 
+def test_tui_usage_recency_helpers_preserve_sorting_and_cold_family_rules():
+    from datetime import datetime, timezone
+
+    import mms_command_tools
+
+    now = datetime(2026, 5, 28, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert mms_command_tools.parse_usage_timestamp("2026-05-28T10:00:00Z") == datetime(
+        2026,
+        5,
+        28,
+        10,
+        0,
+        0,
+        tzinfo=timezone.utc,
+    )
+    assert mms_command_tools.parse_usage_timestamp("not-a-date") is None
+    assert mms_command_tools.usage_recency_score(
+        "2026-05-20T12:00:00Z",
+        now=now,
+        half_life_days=0,
+    ) == 1.0
+
+    families = [
+        {"family": "GPT", "last_used_at": "2026-05-01T00:00:00Z"},
+        {"family": "Qwen", "last_used_at": "2026-05-28T11:30:00Z"},
+        {"family": "Claude"},
+    ]
+    assert [
+        item["family"]
+        for item in mms_command_tools.sort_family_entries_for_tui(families, preferred_family="GPT", now=now)
+    ] == ["Qwen", "GPT", "Claude"]
+    assert [
+        item["family"]
+        for item in mms_command_tools.sort_family_entries_for_tui(
+            [{"family": "Qwen"}, {"family": "GPT"}, {"family": "Claude"}],
+            preferred_family="GPT",
+            now=now,
+        )
+    ] == ["GPT", "Claude", "Qwen"]
+
+    cold_kwargs = {
+        "known_model_family_names": {"GPT", "Claude", "Qwen"},
+        "cold_max_use_count": 3,
+        "cold_idle_days": 21,
+        "now": now,
+    }
+    assert mms_command_tools.family_is_cold_for_tui("Unknown", 0, "", **cold_kwargs) is True
+    assert mms_command_tools.family_is_cold_for_tui(
+        "Unknown",
+        0,
+        "2026-04-01T00:00:00Z",
+        **cold_kwargs,
+    ) is True
+    assert mms_command_tools.family_is_cold_for_tui(
+        "Unknown",
+        0,
+        "2026-05-27T00:00:00Z",
+        **cold_kwargs,
+    ) is False
+    assert mms_command_tools.family_is_cold_for_tui("GPT", 0, "", **cold_kwargs) is False
+    assert mms_command_tools.family_is_cold_for_tui(
+        "Unknown",
+        0,
+        "",
+        preferred_family="Unknown",
+        **cold_kwargs,
+    ) is False
+
+
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
     import mms_command_tools
 

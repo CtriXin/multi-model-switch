@@ -6695,57 +6695,35 @@ _FAMILY_COLD_IDLE_DAYS = 21
 
 
 def _parse_usage_timestamp(value):
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    from mms_command_tools import parse_usage_timestamp
+
+    return parse_usage_timestamp(value)
 
 
 def _usage_recency_score(value, now=None, half_life_days=14):
-    parsed = _parse_usage_timestamp(value)
-    if parsed is None:
-        return 0.0
-    current = now or datetime.now(timezone.utc)
-    if current.tzinfo is None:
-        current = current.replace(tzinfo=timezone.utc)
-    else:
-        current = current.astimezone(timezone.utc)
-    if half_life_days <= 0:
-        return 1.0
-    age_days = max(0.0, (current - parsed).total_seconds()) / 86400.0
-    return 0.5 ** (age_days / float(half_life_days))
+    from mms_command_tools import usage_recency_score
+
+    return usage_recency_score(value, now=now, half_life_days=half_life_days)
 
 
 def _sort_family_entries_for_tui(families, preferred_family="", now=None):
-    def _key(item):
-        family = str(item.get("family") or "") if isinstance(item, dict) else ""
-        last_at = str(item.get("last_used_at") or "").strip() if isinstance(item, dict) else ""
-        recency = _usage_recency_score(last_at, now=now)
-        has_recent = 1 if recency > 0 else 0
-        preferred_rank = 0 if family == str(preferred_family or "").strip() else 1
-        return (-has_recent, -recency, preferred_rank, family.lower())
+    from mms_command_tools import sort_family_entries_for_tui
 
-    return sorted(list(families or []), key=_key)
+    return sort_family_entries_for_tui(families, preferred_family=preferred_family, now=now)
 
 
 def _family_is_cold_for_tui(family_name, total_use, last_used_at="", *, preferred_family=""):
-    if str(family_name or "").strip() == str(preferred_family or "").strip():
-        return False
-    if str(family_name or "").strip() in KNOWN_MODEL_FAMILY_NAMES:
-        return False
-    if int(total_use or 0) > _FAMILY_COLD_MAX_USE_COUNT:
-        return False
-    parsed = _parse_usage_timestamp(last_used_at)
-    if parsed is None:
-        return True
-    return parsed < (datetime.now(timezone.utc) - timedelta(days=_FAMILY_COLD_IDLE_DAYS))
+    from mms_command_tools import family_is_cold_for_tui
+
+    return family_is_cold_for_tui(
+        family_name,
+        total_use,
+        last_used_at,
+        preferred_family=preferred_family,
+        known_model_family_names=KNOWN_MODEL_FAMILY_NAMES,
+        cold_max_use_count=_FAMILY_COLD_MAX_USE_COUNT,
+        cold_idle_days=_FAMILY_COLD_IDLE_DAYS,
+    )
 
 
 def _build_provider_options_map(cfg, cli_name, default_provider, default_models, model_names):
