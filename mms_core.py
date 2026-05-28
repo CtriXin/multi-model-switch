@@ -10581,52 +10581,19 @@ def _list_stale_gateway_sessions(cli_name):
 
 def _handle_session_prune(cli_name, *, apply=False, yes=False):
     from mms_launchers import _finalize_claude_slot
+    from mms_command_tools import handle_session_prune
 
-    rows = _list_stale_gateway_sessions(cli_name)
-    if not rows:
-        console.print("[green]没有可清理的 stale MMS session[/green]")
-        return
-
-    table = Table(title="Stale MMS session dry-run" if not apply else "Stale MMS session prune")
-    table.add_column("CLI", style="cyan")
-    table.add_column("Session", style="green")
-    table.add_column("Size", style="yellow")
-    table.add_column("Modified", style="blue")
-    table.add_column("Path", style="white")
-    for item in rows:
-        table.add_row(
-            str(item["cli"]),
-            str(item["name"]),
-            _format_bytes(item["size"]),
-            str(item["mtime"]),
-            str(item["path"]),
-        )
-    console.print(table)
-
-    if not apply:
-        console.print(f"[dim]dry-run only：加 --apply --yes 才会删除 {len(rows)} 个 stale session[/dim]")
-        return
-    if not yes:
-        console.print("[red]拒绝删除：需要显式传 --yes[/red]")
-        return
-
-    removed = 0
-    for item in rows:
-        session_home = str(item.get("path") or "")
-        root = os.path.dirname(session_home)
-        try:
-            if os.path.commonpath([os.path.abspath(session_home), os.path.abspath(root)]) != os.path.abspath(root):
-                continue
-        except ValueError:
-            continue
-        if item.get("cli") == "claude":
-            try:
-                _finalize_claude_slot(session_home, stale_cleanup=True)
-            except Exception:
-                pass
-        shutil.rmtree(session_home, ignore_errors=True)
-        removed += 1
-    console.print(f"[green]已删除 {removed} 个 stale MMS session[/green]")
+    return handle_session_prune(
+        cli_name,
+        apply=apply,
+        yes=yes,
+        list_stale_gateway_sessions=_list_stale_gateway_sessions,
+        finalize_claude_slot=_finalize_claude_slot,
+        remove_tree=shutil.rmtree,
+        format_bytes=_format_bytes,
+        table_cls=Table,
+        console=console,
+    )
 
 
 def handle_session_command(argv):

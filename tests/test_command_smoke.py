@@ -963,6 +963,53 @@ def test_session_list_info_display_helpers():
     assert any("找不到 session: missing" in str(item) for item in console.items)
 
 
+def test_session_prune_handler_dry_run_and_apply_with_injected_remove():
+    import mms_command_tools
+
+    rows = [
+        {"cli": "claude", "name": "123", "size": 1024, "mtime": "2026-05-28", "path": "/tmp/mms/claude-gateway/s/123"},
+        {"cli": "codex", "name": "456", "size": 2048, "mtime": "2026-05-27", "path": "/tmp/mms/codex-gateway/s/456"},
+    ]
+    console = _CollectingConsole()
+    finalized = []
+    removed = []
+
+    mms_command_tools.handle_session_prune(
+        "all",
+        apply=False,
+        yes=False,
+        list_stale_gateway_sessions=lambda cli_name: rows,
+        finalize_claude_slot=lambda *args, **kwargs: finalized.append((args, kwargs)),
+        remove_tree=lambda *args, **kwargs: removed.append((args, kwargs)),
+        format_bytes=lambda size: f"{size}B",
+        table_cls=_FakeTable,
+        console=console,
+    )
+    table = next(item for item in console.items if isinstance(item, _FakeTable))
+    assert table.rows[0][0] == ("claude", "123", "1024B", "2026-05-28", "/tmp/mms/claude-gateway/s/123")
+    assert removed == []
+    assert any("dry-run only" in str(item) for item in console.items)
+
+    console.items.clear()
+    mms_command_tools.handle_session_prune(
+        "all",
+        apply=True,
+        yes=True,
+        list_stale_gateway_sessions=lambda cli_name: rows,
+        finalize_claude_slot=lambda *args, **kwargs: finalized.append((args, kwargs)),
+        remove_tree=lambda *args, **kwargs: removed.append((args, kwargs)),
+        format_bytes=lambda size: f"{size}B",
+        table_cls=_FakeTable,
+        console=console,
+    )
+    assert finalized == [(("/tmp/mms/claude-gateway/s/123",), {"stale_cleanup": True})]
+    assert removed == [
+        (("/tmp/mms/claude-gateway/s/123",), {"ignore_errors": True}),
+        (("/tmp/mms/codex-gateway/s/456",), {"ignore_errors": True}),
+    ]
+    assert any("已删除 2 个 stale MMS session" in str(item) for item in console.items)
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 
