@@ -449,26 +449,14 @@ def _detect_cli_version(command_name):
 
 
 def _fetch_npm_package_latest_version(package_name):
-    package = str(package_name or "").strip()
-    if not package:
-        return ""
-    npm_bin = shutil.which("npm")
-    if not npm_bin:
-        return ""
-    try:
-        result = subprocess.run(
-            [npm_bin, "view", package, "version", "--silent"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=6,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return _extract_semver_text(str(result.stdout or "").strip())
+    from mms_command_tools import fetch_npm_package_latest_version
+
+    return fetch_npm_package_latest_version(
+        package_name,
+        which=shutil.which,
+        subprocess_run=subprocess.run,
+        extract_semver_text=_extract_semver_text,
+    )
 
 
 def _installed_update_semver(version_meta):

@@ -2791,6 +2791,29 @@ def detect_cli_version(command_name, *, which, subprocess_run, extract_semver_te
     }
 
 
+def fetch_npm_package_latest_version(package_name, *, which, subprocess_run, extract_semver_text):
+    package = str(package_name or "").strip()
+    if not package:
+        return ""
+    npm_bin = which("npm")
+    if not npm_bin:
+        return ""
+    try:
+        result = subprocess_run(
+            [npm_bin, "view", package, "version", "--silent"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=6,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return extract_semver_text(str(result.stdout or "").strip())
+
+
 def semver_tag_gap(installed_version, known_tags, latest_tag=""):
     installed_version = str(installed_version or "").strip()
     tags = normalize_semver_tags(known_tags)

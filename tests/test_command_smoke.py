@@ -2086,6 +2086,49 @@ def test_detect_cli_version_preserves_missing_success_and_failure_paths():
     }
 
 
+def test_fetch_npm_package_latest_version_preserves_command_and_failures():
+    import mms_command_tools
+
+    class Result:
+        stdout = "0.133.0\n"
+        returncode = 0
+
+    calls = []
+    assert mms_command_tools.fetch_npm_package_latest_version(
+        "",
+        which=lambda command: (_ for _ in ()).throw(AssertionError("should not resolve")),
+        subprocess_run=lambda *args, **kwargs: Result(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+    ) == ""
+    assert mms_command_tools.fetch_npm_package_latest_version(
+        "@openai/codex",
+        which=lambda command: "",
+        subprocess_run=lambda *args, **kwargs: Result(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+    ) == ""
+
+    latest = mms_command_tools.fetch_npm_package_latest_version(
+        "@openai/codex",
+        which=lambda command: "/usr/local/bin/npm",
+        subprocess_run=lambda *args, **kwargs: calls.append((args, kwargs)) or Result(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+    )
+    assert latest == "0.133.0"
+    assert calls[0][0][0] == ["/usr/local/bin/npm", "view", "@openai/codex", "version", "--silent"]
+    assert calls[0][1]["stderr"] == mms_command_tools.subprocess.DEVNULL
+
+    class FailedResult:
+        stdout = "0.133.0\n"
+        returncode = 1
+
+    assert mms_command_tools.fetch_npm_package_latest_version(
+        "@openai/codex",
+        which=lambda command: "/usr/local/bin/npm",
+        subprocess_run=lambda *args, **kwargs: FailedResult(),
+        extract_semver_text=mms_command_tools.extract_semver_text,
+    ) == ""
+
+
 def test_update_status_helpers_preserve_install_and_about_status_semantics():
     import mms_command_tools
 
