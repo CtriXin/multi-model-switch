@@ -3686,18 +3686,18 @@ def _manage_provider_target(cfg, provider_id):
 
 
 def _prompt_account_rename(cfg, account_id):
-    _ensure_rich()
-    console.print(f"[cyan]准备重命名官方通道: {account_id}[/cyan]")
-    new_id = Prompt.ask("新的文件夹名", default=account_id).strip()
-    if not new_id or new_id == account_id:
-        console.print("[yellow]文件夹名未变化，已取消重命名[/yellow]")
-        return cfg, False
-    before_ids = set(_account_map(cfg).keys())
-    _handle_account_rename_config(cfg, [account_id, new_id])
-    updated_cfg = load_config()
-    after_ids = set(_account_map(updated_cfg).keys())
-    changed = new_id in after_ids and before_ids != after_ids
-    return updated_cfg, changed
+    from mms_command_tools import prompt_account_rename
+
+    return prompt_account_rename(
+        cfg,
+        account_id,
+        ensure_rich=_ensure_rich,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        account_map=_account_map,
+        handle_account_rename_config=_handle_account_rename_config,
+        load_config=load_config,
+        console=console,
+    )
 
 
 def _manage_account_target(cfg, account_id):

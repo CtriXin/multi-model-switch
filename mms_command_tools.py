@@ -2344,6 +2344,31 @@ def run_manage_channels(
         changed = changed or did_change
 
 
+def prompt_account_rename(
+    cfg,
+    account_id,
+    *,
+    ensure_rich,
+    prompt_ask,
+    account_map,
+    handle_account_rename_config,
+    load_config,
+    console,
+):
+    ensure_rich()
+    console.print(f"[cyan]准备重命名官方通道: {account_id}[/cyan]")
+    new_id = prompt_ask("新的文件夹名", default=account_id).strip()
+    if not new_id or new_id == account_id:
+        console.print("[yellow]文件夹名未变化，已取消重命名[/yellow]")
+        return cfg, False
+    before_ids = set(account_map(cfg).keys())
+    handle_account_rename_config(cfg, [account_id, new_id])
+    updated_cfg = load_config()
+    after_ids = set(account_map(updated_cfg).keys())
+    changed = new_id in after_ids and before_ids != after_ids
+    return updated_cfg, changed
+
+
 def format_rescue_hot_fallback_event(event):
     if not isinstance(event, dict) or not event:
         return "-"

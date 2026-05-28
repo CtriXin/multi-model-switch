@@ -3149,6 +3149,57 @@ def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
     ]
 
 
+def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {"accounts": [{"id": "codex-main"}]}
+    console = _CollectingConsole()
+    calls = []
+
+    assert mms_command_tools.prompt_account_rename(
+        cfg,
+        "codex-main",
+        ensure_rich=lambda: calls.append("rich"),
+        prompt_ask=lambda *args, **kwargs: "codex-main",
+        account_map=lambda current: {item["id"]: item for item in current["accounts"]},
+        handle_account_rename_config=lambda *_args: calls.append("unexpected-rename"),
+        load_config=lambda: (_ for _ in ()).throw(AssertionError("load not expected")),
+        console=console,
+    ) == (cfg, False)
+    assert calls == ["rich"]
+    assert console.items == [
+        "[cyan]准备重命名官方通道: codex-main[/cyan]",
+        "[yellow]文件夹名未变化，已取消重命名[/yellow]",
+    ]
+
+    updated_cfg = {"accounts": [{"id": "codex-work"}]}
+    calls.clear()
+    console.items.clear()
+    assert mms_command_tools.prompt_account_rename(
+        cfg,
+        "codex-main",
+        ensure_rich=lambda: calls.append("rich"),
+        prompt_ask=lambda *args, **kwargs: "codex-work",
+        account_map=lambda current: {item["id"]: item for item in current["accounts"]},
+        handle_account_rename_config=lambda current, args: calls.append(("rename", current, args)),
+        load_config=lambda: updated_cfg,
+        console=console,
+    ) == (updated_cfg, True)
+    assert calls == ["rich", ("rename", cfg, ["codex-main", "codex-work"])]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: calls.append("core-rich"))
+    monkeypatch.setattr(mms_core, "Prompt", type("Prompt", (), {"ask": staticmethod(lambda *args, **kwargs: "agy-main")}))
+    monkeypatch.setattr(mms_core, "_account_map", lambda current: {item["id"]: item for item in current["accounts"]})
+    monkeypatch.setattr(mms_core, "_handle_account_rename_config", lambda current, args: calls.append(("core-rename", current, args)))
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"accounts": [{"id": "agy-main"}]})
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+
+    assert mms_core._prompt_account_rename(cfg, "codex-main") == ({"accounts": [{"id": "agy-main"}]}, True)
+    assert calls == ["core-rich", ("core-rename", cfg, ["codex-main", "agy-main"])]
+
+
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     import mms_command_tools
 
