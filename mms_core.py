@@ -5062,81 +5062,41 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     console=console,
                 )
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+                def _registry_cli_loader():
+                    from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 
-                status = registry_status()
-                registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
-                registry_action = tui_flow.safe_tui_call(
-                    select_channel_action_tui,
-                    registry_title,
-                    registry_info,
-                    registry_actions,
+                    return {
+                        "diff_openrouter_catalog": diff_openrouter_catalog,
+                        "fetch_openrouter_catalog": fetch_openrouter_catalog,
+                        "publish_approved_bundle": publish_approved_bundle,
+                        "refresh_source_snapshots": refresh_source_snapshots,
+                        "registry_status": registry_status,
+                        "scheduled_refresh": scheduled_refresh,
+                        "source_freshness": source_freshness,
+                        "verify_approved_bundle": verify_approved_bundle,
+                    }
+
+                registry_result = tui_flow.handle_tui_registry_settings_action(
+                    registry_cli_loader=_registry_cli_loader,
+                    registry_truth_tui_payload=_registry_truth_tui_payload,
+                    select_channel_action_tui=select_channel_action_tui,
+                    print_settings_error_report=_print_settings_error_report,
+                    print_settings_result_report=_print_settings_result_report,
+                    registry_report_payloads={
+                        "source_staleness": _registry_source_staleness_report_payload,
+                        "refresh_sources": _registry_refresh_sources_report_payload,
+                        "scheduled_refresh": _registry_scheduled_refresh_report_payload,
+                        "openrouter_fetch": _registry_openrouter_fetch_report_payload,
+                        "openrouter_diff": _registry_openrouter_diff_report_payload,
+                        "publish_approved": _registry_publish_approved_report_payload,
+                        "verify_approved": _registry_verify_approved_report_payload,
+                        "doctor": _registry_doctor_report_payload,
+                    },
+                    pause_after_tui_report=_pause_after_tui_report,
+                    localize=_L,
                 )
-                if registry_action == "__interrupt__":
+                if registry_result["status"] == "interrupt":
                     return True
-                if registry_action == "check_staleness":
-                    try:
-                        summary = source_freshness()
-                    except Exception as exc:
-                        _print_settings_error_report(_L("检查 Source Staleness 失败", "Check Source Staleness failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_source_staleness_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action in {"refresh_sources", "refresh_due_sources"}:
-                    try:
-                        summary = refresh_source_snapshots(if_due=(registry_action == "refresh_due_sources"))
-                    except Exception as exc:
-                        _print_settings_error_report(_L("刷新 Sources 失败", "Refresh Sources failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_refresh_sources_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action in {"scheduled_dry_run", "scheduled_no_network"}:
-                    try:
-                        summary = scheduled_refresh(
-                            dry_run=(registry_action == "scheduled_dry_run"),
-                            no_network=True,
-                        )
-                    except Exception as exc:
-                        _print_settings_error_report(_L("定时刷新失败", "Scheduled Refresh failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_scheduled_refresh_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action == "fetch_openrouter":
-                    try:
-                        summary = fetch_openrouter_catalog()
-                    except Exception as exc:
-                        _print_settings_error_report(_L("拉取 OpenRouter Catalog 失败", "Fetch OpenRouter Catalog failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_openrouter_fetch_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action == "diff_openrouter":
-                    try:
-                        summary = diff_openrouter_catalog(limit=12)
-                    except Exception as exc:
-                        _print_settings_error_report(_L("OpenRouter Candidate Diff 失败", "OpenRouter Candidate Diff failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_openrouter_diff_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action == "publish_approved":
-                    try:
-                        summary = publish_approved_bundle()
-                    except Exception as exc:
-                        _print_settings_error_report(_L("发布 Approved Bundle 失败", "Publish Approved Bundle failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_publish_approved_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action == "verify_approved":
-                    try:
-                        summary = verify_approved_bundle()
-                    except Exception as exc:
-                        _print_settings_error_report(_L("验证 Approved Bundle 失败", "Verify Approved Bundle failed"), exc)
-                    else:
-                        _print_settings_result_report(*_registry_verify_approved_report_payload(summary))
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif registry_action == "doctor":
-                    status = registry_status()
-                    _print_settings_result_report(*_registry_doctor_report_payload(status))
-                    _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "about":
                 about_result = tui_flow.handle_tui_about_settings_action(
                     about_status_snapshot=_about_status_snapshot,

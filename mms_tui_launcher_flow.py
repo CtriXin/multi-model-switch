@@ -761,6 +761,102 @@ def handle_tui_routes_export_settings_action(
         return {"status": "continue", "success": False}
 
 
+def handle_tui_registry_settings_action(
+    *,
+    registry_cli_loader,
+    registry_truth_tui_payload,
+    select_channel_action_tui,
+    print_settings_error_report,
+    print_settings_result_report,
+    registry_report_payloads,
+    pause_after_tui_report,
+    localize,
+):
+    registry_cli = registry_cli_loader()
+    status = registry_cli["registry_status"]()
+    registry_title, registry_info, registry_actions = registry_truth_tui_payload(status)
+    registry_action = safe_tui_call(
+        select_channel_action_tui,
+        registry_title,
+        registry_info,
+        registry_actions,
+    )
+    if registry_action == "__interrupt__":
+        return {"status": "interrupt"}
+
+    registry_call_specs = {
+        "check_staleness": (
+            registry_cli["source_freshness"],
+            {},
+            localize("检查 Source Staleness 失败", "Check Source Staleness failed"),
+            registry_report_payloads["source_staleness"],
+        ),
+        "refresh_sources": (
+            registry_cli["refresh_source_snapshots"],
+            {"if_due": False},
+            localize("刷新 Sources 失败", "Refresh Sources failed"),
+            registry_report_payloads["refresh_sources"],
+        ),
+        "refresh_due_sources": (
+            registry_cli["refresh_source_snapshots"],
+            {"if_due": True},
+            localize("刷新 Sources 失败", "Refresh Sources failed"),
+            registry_report_payloads["refresh_sources"],
+        ),
+        "scheduled_dry_run": (
+            registry_cli["scheduled_refresh"],
+            {"dry_run": True, "no_network": True},
+            localize("定时刷新失败", "Scheduled Refresh failed"),
+            registry_report_payloads["scheduled_refresh"],
+        ),
+        "scheduled_no_network": (
+            registry_cli["scheduled_refresh"],
+            {"dry_run": False, "no_network": True},
+            localize("定时刷新失败", "Scheduled Refresh failed"),
+            registry_report_payloads["scheduled_refresh"],
+        ),
+        "fetch_openrouter": (
+            registry_cli["fetch_openrouter_catalog"],
+            {},
+            localize("拉取 OpenRouter Catalog 失败", "Fetch OpenRouter Catalog failed"),
+            registry_report_payloads["openrouter_fetch"],
+        ),
+        "diff_openrouter": (
+            registry_cli["diff_openrouter_catalog"],
+            {"limit": 12},
+            localize("OpenRouter Candidate Diff 失败", "OpenRouter Candidate Diff failed"),
+            registry_report_payloads["openrouter_diff"],
+        ),
+        "publish_approved": (
+            registry_cli["publish_approved_bundle"],
+            {},
+            localize("发布 Approved Bundle 失败", "Publish Approved Bundle failed"),
+            registry_report_payloads["publish_approved"],
+        ),
+        "verify_approved": (
+            registry_cli["verify_approved_bundle"],
+            {},
+            localize("验证 Approved Bundle 失败", "Verify Approved Bundle failed"),
+            registry_report_payloads["verify_approved"],
+        ),
+    }
+
+    if registry_action in registry_call_specs:
+        action_func, kwargs, error_title, payload_func = registry_call_specs[registry_action]
+        try:
+            summary = action_func(**kwargs)
+        except Exception as exc:
+            print_settings_error_report(error_title, exc)
+        else:
+            print_settings_result_report(*payload_func(summary))
+        pause_after_tui_report("按 Enter 返回设置")
+    elif registry_action == "doctor":
+        status = registry_cli["registry_status"]()
+        print_settings_result_report(*registry_report_payloads["doctor"](status))
+        pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue"}
+
+
 def handle_tui_guard_settings_action(
     cfg,
     *,

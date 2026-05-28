@@ -16,6 +16,7 @@ from mms_tui_launcher_flow import (
     handle_tui_provider_browse_action,
     handle_tui_provider_mgmt_settings_action,
     handle_tui_profile_action,
+    handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
     handle_tui_selected_model_action,
     last_used_model_info,
@@ -1087,6 +1088,121 @@ def test_handle_tui_routes_export_settings_action_reports_loader_or_export_failu
         "[red]导出失败: loader failed[/red]",
         "[red]导出失败: export failed[/red]",
     ]
+
+
+def test_handle_tui_registry_settings_action_runs_supported_actions() -> None:
+    calls = []
+    selected_actions = iter(["check_staleness", "refresh_due_sources", "scheduled_dry_run", "diff_openrouter", "doctor"])
+
+    def make_cli():
+        return {
+            "registry_status": lambda: calls.append(("status",)) or {"ok": True},
+            "source_freshness": lambda: calls.append(("freshness",)) or {"action": "freshness"},
+            "refresh_source_snapshots": lambda *, if_due: calls.append(("refresh", if_due)) or {"action": "refresh"},
+            "scheduled_refresh": lambda *, dry_run, no_network: calls.append(("scheduled", dry_run, no_network)) or {"action": "scheduled"},
+            "fetch_openrouter_catalog": lambda: calls.append(("fetch",)) or {"action": "fetch"},
+            "diff_openrouter_catalog": lambda *, limit: calls.append(("diff", limit)) or {"action": "diff"},
+            "publish_approved_bundle": lambda: calls.append(("publish",)) or {"action": "publish"},
+            "verify_approved_bundle": lambda: calls.append(("verify",)) or {"action": "verify"},
+        }
+
+    payloads = {
+        "source_staleness": lambda summary: ("fresh title", [summary]),
+        "refresh_sources": lambda summary: ("refresh title", [summary]),
+        "scheduled_refresh": lambda summary: ("scheduled title", [summary]),
+        "openrouter_fetch": lambda summary: ("fetch title", [summary]),
+        "openrouter_diff": lambda summary: ("diff title", [summary]),
+        "publish_approved": lambda summary: ("publish title", [summary]),
+        "verify_approved": lambda summary: ("verify title", [summary]),
+        "doctor": lambda status: ("doctor title", [status]),
+    }
+
+    for _ in range(5):
+        assert handle_tui_registry_settings_action(
+            registry_cli_loader=make_cli,
+            registry_truth_tui_payload=lambda status: calls.append(("payload", status)) or ("Registry", ["info"], []),
+            select_channel_action_tui=lambda title, info, actions: calls.append(("select", title, info, actions)) or next(selected_actions),
+            print_settings_error_report=lambda title, exc: calls.append(("error", title, str(exc))),
+            print_settings_result_report=lambda title, rows, *rest, **kwargs: calls.append(("report", title, rows, rest, kwargs)),
+            registry_report_payloads=payloads,
+            pause_after_tui_report=lambda message: calls.append(("pause", message)),
+            localize=lambda zh, en: zh,
+        ) == {"status": "continue"}
+
+    assert ("freshness",) in calls
+    assert ("refresh", True) in calls
+    assert ("scheduled", True, True) in calls
+    assert ("diff", 12) in calls
+    assert calls.count(("status",)) == 6
+    assert calls.count(("pause", "按 Enter 返回设置")) == 5
+    assert ("report", "fresh title", [{"action": "freshness"}], (), {}) in calls
+    assert ("report", "doctor title", [{"ok": True}], (), {}) in calls
+
+
+def test_handle_tui_registry_settings_action_handles_error_interrupt_and_back() -> None:
+    calls = []
+
+    def make_cli():
+        def fail_refresh(*, if_due):
+            calls.append(("refresh", if_due))
+            raise RuntimeError("refresh failed")
+
+        return {
+            "registry_status": lambda: calls.append(("status",)) or {},
+            "source_freshness": lambda: {},
+            "refresh_source_snapshots": fail_refresh,
+            "scheduled_refresh": lambda *, dry_run, no_network: {},
+            "fetch_openrouter_catalog": lambda: {},
+            "diff_openrouter_catalog": lambda *, limit: {},
+            "publish_approved_bundle": lambda: {},
+            "verify_approved_bundle": lambda: {},
+        }
+
+    payloads = {
+        "source_staleness": lambda summary: ("fresh title", [summary]),
+        "refresh_sources": lambda summary: ("refresh title", [summary]),
+        "scheduled_refresh": lambda summary: ("scheduled title", [summary]),
+        "openrouter_fetch": lambda summary: ("fetch title", [summary]),
+        "openrouter_diff": lambda summary: ("diff title", [summary]),
+        "publish_approved": lambda summary: ("publish title", [summary]),
+        "verify_approved": lambda summary: ("verify title", [summary]),
+        "doctor": lambda status: ("doctor title", [status]),
+    }
+
+    assert handle_tui_registry_settings_action(
+        registry_cli_loader=make_cli,
+        registry_truth_tui_payload=lambda status: ("Registry", [], []),
+        select_channel_action_tui=lambda *_args: "refresh_sources",
+        print_settings_error_report=lambda title, exc: calls.append(("error", title, str(exc))),
+        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
+        registry_report_payloads=payloads,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        localize=lambda zh, en: zh,
+    ) == {"status": "continue"}
+    assert ("error", "刷新 Sources 失败", "refresh failed") in calls
+    assert ("pause", "按 Enter 返回设置") in calls
+
+    assert handle_tui_registry_settings_action(
+        registry_cli_loader=make_cli,
+        registry_truth_tui_payload=lambda status: ("Registry", [], []),
+        select_channel_action_tui=lambda *_args: None,
+        print_settings_error_report=lambda *_args: calls.append(("error",)),
+        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
+        registry_report_payloads=payloads,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        localize=lambda zh, en: zh,
+    ) == {"status": "continue"}
+
+    assert handle_tui_registry_settings_action(
+        registry_cli_loader=make_cli,
+        registry_truth_tui_payload=lambda status: ("Registry", [], []),
+        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+        print_settings_error_report=lambda *_args: calls.append(("error",)),
+        print_settings_result_report=lambda *_args, **_kwargs: calls.append(("report",)),
+        registry_report_payloads=payloads,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        localize=lambda zh, en: zh,
+    ) == {"status": "interrupt"}
 
 
 def test_handle_tui_guard_settings_action_runs_status_or_cancelled_accept() -> None:
