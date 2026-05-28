@@ -705,47 +705,19 @@ def _refresh_update_cache_for_about(force_update=False):
 
 
 def _cli_version_status(force_update=False):
-    cache = _load_update_check_cache()
-    cached_latest = cache.get("cli_latest_versions") if isinstance(cache.get("cli_latest_versions"), dict) else {}
-    # Do not block About on npm/network checks unless the user explicitly refreshes.
-    should_fetch_latest = bool(force_update)
-    latest_versions = dict(cached_latest)
-    if should_fetch_latest:
-        latest_versions = {}
-        for cli_name, package_name in CLI_VERSION_PACKAGES.items():
-            latest_versions[cli_name] = _fetch_npm_package_latest_version(package_name)
-        cache["cli_latest_versions"] = latest_versions
-        cache["cli_latest_checked_at"] = time.time()
-        _save_update_check_cache(cache)
+    from mms_command_tools import cli_version_status
 
-    status = {}
-    for cli_name in ("codex", "claude"):
-        current = _detect_cli_version(cli_name)
-        latest = str(latest_versions.get(cli_name) or "").strip()
-        comparison = _compare_semver_text(current.get("version"), latest)
-        if not current.get("installed"):
-            label = _L("未安装", "not installed")
-            outdated = False
-        elif comparison == -1:
-            label = _L(f"有新版 {latest}", f"update available {latest}")
-            outdated = True
-        elif comparison == 0:
-            label = _L("最新", "latest")
-            outdated = False
-        elif latest:
-            label = _L(f"高于 latest {latest}", f"newer than latest {latest}")
-            outdated = False
-        else:
-            label = _L("未检查 latest", "latest not checked")
-            outdated = False
-        status[cli_name] = {
-            **current,
-            "latest": latest,
-            "status": label,
-            "outdated": outdated,
-            "package": CLI_VERSION_PACKAGES.get(cli_name, ""),
-        }
-    return status
+    return cli_version_status(
+        force_update=force_update,
+        load_update_check_cache=_load_update_check_cache,
+        save_update_check_cache=_save_update_check_cache,
+        cli_version_packages=CLI_VERSION_PACKAGES,
+        detect_cli_version=_detect_cli_version,
+        fetch_npm_package_latest_version=_fetch_npm_package_latest_version,
+        compare_semver_text=_compare_semver_text,
+        localize=_L,
+        now=time.time,
+    )
 
 
 def _mms_update_status(version_info, cache):

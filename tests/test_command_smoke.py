@@ -2115,6 +2115,52 @@ def test_release_version_info_preserves_installed_and_git_fallbacks():
     assert fallback["installed_version"] == ""
 
 
+def test_cli_version_status_preserves_cache_refresh_and_labels():
+    import mms_command_tools
+
+    packages = {"codex": "@openai/codex", "claude": "@anthropic-ai/claude-code"}
+    detected = {
+        "codex": {"installed": True, "version": "0.132.0", "label": "codex 0.132.0"},
+        "claude": {"installed": False, "version": "", "label": "missing"},
+    }
+    saved = []
+    fetched = []
+
+    cached_status = mms_command_tools.cli_version_status(
+        force_update=False,
+        load_update_check_cache=lambda: {"cli_latest_versions": {"codex": "0.133.0"}},
+        save_update_check_cache=saved.append,
+        cli_version_packages=packages,
+        detect_cli_version=lambda cli_name: detected[cli_name],
+        fetch_npm_package_latest_version=lambda package: (_ for _ in ()).throw(AssertionError("should not fetch")),
+        compare_semver_text=mms_command_tools.compare_semver_text,
+        localize=lambda zh, en: zh,
+        now=lambda: 123,
+    )
+    assert cached_status["codex"]["status"] == "有新版 0.133.0"
+    assert cached_status["codex"]["outdated"] is True
+    assert cached_status["codex"]["package"] == "@openai/codex"
+    assert cached_status["claude"]["status"] == "未安装"
+    assert saved == []
+
+    forced_status = mms_command_tools.cli_version_status(
+        force_update=True,
+        load_update_check_cache=lambda: {},
+        save_update_check_cache=saved.append,
+        cli_version_packages=packages,
+        detect_cli_version=lambda cli_name: {"installed": True, "version": "0.133.0", "label": cli_name},
+        fetch_npm_package_latest_version=lambda package: fetched.append(package) or "0.133.0",
+        compare_semver_text=mms_command_tools.compare_semver_text,
+        localize=lambda zh, en: zh,
+        now=lambda: 456,
+    )
+    assert forced_status["codex"]["status"] == "最新"
+    assert forced_status["claude"]["status"] == "最新"
+    assert fetched == ["@openai/codex", "@anthropic-ai/claude-code"]
+    assert saved[-1]["cli_latest_versions"] == {"codex": "0.133.0", "claude": "0.133.0"}
+    assert saved[-1]["cli_latest_checked_at"] == 456
+
+
 def test_about_status_snapshot_preserves_callback_flow():
     import mms_command_tools
 

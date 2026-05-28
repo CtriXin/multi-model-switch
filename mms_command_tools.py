@@ -2843,6 +2843,59 @@ def release_version_info(*, load_version_meta, git_output):
     }
 
 
+def cli_version_status(
+    *,
+    force_update=False,
+    load_update_check_cache,
+    save_update_check_cache,
+    cli_version_packages,
+    detect_cli_version,
+    fetch_npm_package_latest_version,
+    compare_semver_text,
+    localize,
+    now,
+):
+    cache = load_update_check_cache()
+    cached_latest = cache.get("cli_latest_versions") if isinstance(cache.get("cli_latest_versions"), dict) else {}
+    latest_versions = dict(cached_latest)
+    if force_update:
+        latest_versions = {}
+        for cli_name, package_name in cli_version_packages.items():
+            latest_versions[cli_name] = fetch_npm_package_latest_version(package_name)
+        cache["cli_latest_versions"] = latest_versions
+        cache["cli_latest_checked_at"] = now()
+        save_update_check_cache(cache)
+
+    status = {}
+    for cli_name in ("codex", "claude"):
+        current = detect_cli_version(cli_name)
+        latest = str(latest_versions.get(cli_name) or "").strip()
+        comparison = compare_semver_text(current.get("version"), latest)
+        if not current.get("installed"):
+            label = localize("未安装", "not installed")
+            outdated = False
+        elif comparison == -1:
+            label = localize(f"有新版 {latest}", f"update available {latest}")
+            outdated = True
+        elif comparison == 0:
+            label = localize("最新", "latest")
+            outdated = False
+        elif latest:
+            label = localize(f"高于 latest {latest}", f"newer than latest {latest}")
+            outdated = False
+        else:
+            label = localize("未检查 latest", "latest not checked")
+            outdated = False
+        status[cli_name] = {
+            **current,
+            "latest": latest,
+            "status": label,
+            "outdated": outdated,
+            "package": cli_version_packages.get(cli_name, ""),
+        }
+    return status
+
+
 def refresh_update_cache_for_about(*, force_update=False, load_update_check_cache, fetch_latest_semver_tags, save_update_check_cache, now):
     cache = load_update_check_cache()
     if not force_update:
