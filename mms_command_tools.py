@@ -2602,6 +2602,37 @@ def native_clis_for_model(model_name):
     return []
 
 
+def model_context_window(
+    model_name,
+    *,
+    resolve_model_capabilities,
+    model_context_windows,
+):
+    clean = str(model_name or "").replace("[1m]", "").strip()
+    if not clean:
+        return None
+    try:
+        caps = resolve_model_capabilities(clean)
+        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
+            window = int(caps.get("context_window_tokens"))
+            if window > 0:
+                return window
+    except Exception:
+        pass
+    try:
+        windows = model_context_windows()
+    except Exception:
+        return None
+    window = windows.get(clean)
+    if window is not None:
+        return window
+    lower = clean.lower()
+    for key, value in windows.items():
+        if key.lower() == lower:
+            return value
+    return None
+
+
 def model_matches_account_cli(cli_name, model_name):
     normalized = str(model_name or "").strip().lower()
     if not normalized:

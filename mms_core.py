@@ -1214,31 +1214,23 @@ def _provider_map(cfg):
 
 
 def _model_context_window(model_name):
-    clean = str(model_name or "").replace("[1m]", "").strip()
-    if not clean:
-        return None
-    try:
+    from mms_command_tools import model_context_window
+
+    def resolve_capabilities(clean):
         from mms_capability_resolver import resolve_model_capabilities
 
-        caps = resolve_model_capabilities(clean)
-        if caps.get("sources", {}).get("context_window_tokens") == "approved_facts":
-            window = int(caps.get("context_window_tokens"))
-            if window > 0:
-                return window
-    except Exception:
-        pass
-    try:
+        return resolve_model_capabilities(clean)
+
+    def load_context_windows():
         from mms_launchers import _MODEL_CONTEXT_WINDOWS
-    except Exception:
-        return None
-    window = _MODEL_CONTEXT_WINDOWS.get(clean)
-    if window is not None:
-        return window
-    lower = clean.lower()
-    for key, value in _MODEL_CONTEXT_WINDOWS.items():
-        if key.lower() == lower:
-            return value
-    return None
+
+        return _MODEL_CONTEXT_WINDOWS
+
+    return model_context_window(
+        model_name,
+        resolve_model_capabilities=resolve_capabilities,
+        model_context_windows=load_context_windows,
+    )
 
 
 def _native_clis_for_model(model_name):

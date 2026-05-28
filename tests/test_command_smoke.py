@@ -2647,6 +2647,34 @@ def test_model_capability_helpers_preserve_native_bridge_and_tags():
         model_matches_account_cli=mms_command_tools.model_matches_account_cli,
         default_gpt_reasoning_effort=lambda: "xhigh",
     ) == "high"
+    assert mms_command_tools.model_context_window(
+        "runtime-approved-model[1m]",
+        resolve_model_capabilities=lambda _model: {
+            "context_window_tokens": 555_000,
+            "sources": {"context_window_tokens": "approved_facts"},
+        },
+        model_context_windows=lambda: {"runtime-approved-model": 128_000},
+    ) == 555_000
+    assert mms_command_tools.model_context_window(
+        "gpt-5.5",
+        resolve_model_capabilities=lambda _model: (_ for _ in ()).throw(RuntimeError("resolver unavailable")),
+        model_context_windows=lambda: {"gpt-5.5": 400_000},
+    ) == 400_000
+    assert mms_command_tools.model_context_window(
+        "GPT-5.5",
+        resolve_model_capabilities=lambda _model: {},
+        model_context_windows=lambda: {"gpt-5.5": 400_000},
+    ) == 400_000
+    assert mms_command_tools.model_context_window(
+        "",
+        resolve_model_capabilities=lambda _model: {},
+        model_context_windows=lambda: {"gpt-5.5": 400_000},
+    ) is None
+    assert mms_command_tools.model_context_window(
+        "missing",
+        resolve_model_capabilities=lambda _model: {},
+        model_context_windows=lambda: (_ for _ in ()).throw(RuntimeError("windows unavailable")),
+    ) is None
     assert mms_command_tools.bridge_clis_for_model("qwen3.6-plus", infer_model_family=infer_family) == ["claude", "codex"]
     assert mms_command_tools.model_cli_modes("gpt-5.5", infer_model_family=infer_family) == {
         "claude": "bridge",
