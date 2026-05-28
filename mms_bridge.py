@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover
     import tomli as tomllib
 
 from mms_speed_stats import record_model_speed
-from mms_state_io import atomic_write_json, locked_state_file, resolve_mms_config_dir
+from mms_state_io import atomic_write_json, locked_state_file, mms_config_root_mode, resolve_mms_config_dir
 from mms_provider_profiles import apply_profile_auth_headers, apply_profile_body_patches, profile_model_alias
 from mms_i18n import get_language as _get_mms_language, normalize_language as _normalize_mms_language
 
@@ -1374,6 +1374,13 @@ def _rescue_config_root(server):
         return ""
 
 
+def _rescue_requires_latest_approved_bundle(config_root):
+    try:
+        return mms_config_root_mode(config_root) == "preview"
+    except Exception:
+        return False
+
+
 def _read_rescue_fallback_config(config_root):
     root = str(config_root or "").strip()
     if not root:
@@ -1542,6 +1549,8 @@ def _load_rescue_hot_fallback_routes(server, fallback_model):
             payload = {}
         if isinstance(payload, dict) and payload:
             return _rescue_routes_from_router_payload(payload, fallback_model, set())
+        return []
+    if _rescue_requires_latest_approved_bundle(config_root):
         return []
 
     candidates = [

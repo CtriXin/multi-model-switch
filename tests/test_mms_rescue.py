@@ -808,6 +808,40 @@ def test_rescue_hot_fallback_fails_closed_on_invalid_latest_approved_manifest(tm
     assert routes == []
 
 
+def test_rescue_hot_fallback_fails_closed_on_missing_preview_manifest(tmp_path):
+    import mms_bridge
+
+    config_root = tmp_path / "mms-next"
+    generated = config_root / "generated"
+    generated.mkdir(parents=True)
+    (generated / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {
+                            "provider_id": "stale-preview-route",
+                            "anthropic_base_url": "https://stale-preview.example",
+                            "api_key": "sk-stale-preview",
+                            "model_id": "deepseek-v4-flash",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    routes = mms_bridge._load_rescue_hot_fallback_routes(
+        types.SimpleNamespace(rescue_config_root=str(config_root)),
+        "deepseek-v4-flash",
+    )
+
+    assert routes == []
+
+
 def test_chatcompletions_fallback_retries_messages_when_gateway_requests_messages(monkeypatch, tmp_path):
     import mms_bridge
 

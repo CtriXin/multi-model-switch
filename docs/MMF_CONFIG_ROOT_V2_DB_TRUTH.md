@@ -475,7 +475,7 @@ Current bridge rescue consumer implementation:
 - Launcher route status path uses `<config_root>/route_status.json` when an explicit config root is selected; default stable launches keep the previous session-home route status path.
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
-- If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.
+- If the manifest is missing, preview/MMF roots fail closed instead of reading stale generated/root route files; default stable behavior remains legacy-compatible and reads generated/root route files in the previous order.
 - TUI Rescue routed fallback candidate lists use the same boundary: when a latest-approved manifest exists, candidates are read only from the verified Router payload; invalid manifests return no routed candidates instead of falling back to stale legacy files.
 - If selected-root resolution fails during bridge rescue fallback lookup, the bridge returns no config-root fallback instead of silently reading stable `~/.config/mms/config.toml`; explicit server/env fallback fields may still be used.
 
