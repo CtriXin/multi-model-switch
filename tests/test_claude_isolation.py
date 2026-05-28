@@ -232,6 +232,42 @@ def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
         importlib.reload(mms_core)
 
 
+def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(gateway_home / ".config"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    env: dict[str, str] = {}
+    mms_launchers._inject_rescue_launch_env(env)
+
+    assert env["MMS_RESCUE_CONFIG_ROOT"] == str(preview_root)
+    assert env["MMS_RESCUE_CONFIG_ROOT"] != str(stable_root)
+
+
+def test_rescue_launch_env_preserves_explicit_rescue_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    preview_root = tmp_path / "mms-next"
+    explicit_rescue_root = tmp_path / "explicit-rescue-root"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    env = {"MMS_RESCUE_CONFIG_ROOT": str(explicit_rescue_root)}
+    mms_launchers._inject_rescue_launch_env(env)
+
+    assert env["MMS_RESCUE_CONFIG_ROOT"] == str(explicit_rescue_root)
+
+
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     real_home = tmp_path / "real-home"

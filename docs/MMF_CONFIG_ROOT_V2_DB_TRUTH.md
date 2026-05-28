@@ -441,6 +441,7 @@ Current watchdog consumer implementation:
 
 Current bridge rescue consumer implementation:
 
+- Launcher-injected `MMS_RESCUE_CONFIG_ROOT` now defaults to the selected MMS config root, so `mmf` preview sessions do not silently route bridge rescue through stable `~/.config/mms`.
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
 - If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.

@@ -112,7 +112,7 @@ from mms_provider_profiles import profile_context_window
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
-from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
+from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file, resolve_mms_config_dir as _resolve_mms_config_dir
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
@@ -945,6 +945,16 @@ def _rescue_bridge_kwargs():
     }
 
 
+def _selected_mms_config_root(env):
+    merged_env = dict(os.environ)
+    if isinstance(env, dict):
+        merged_env.update({str(key): str(value) for key, value in env.items() if value is not None})
+    try:
+        return _resolve_mms_config_dir(merged_env)
+    except Exception:
+        return _real_user_path(".config", "mms")
+
+
 def _inject_rescue_launch_env(env):
     if not isinstance(env, dict):
         return env
@@ -955,7 +965,7 @@ def _inject_rescue_launch_env(env):
     if project_root:
         env["MMS_PROJECT_ROOT"] = project_root
         env["MMS_CWD"] = project_root
-    env.setdefault("MMS_RESCUE_CONFIG_ROOT", _real_user_path(".config", "mms"))
+    env.setdefault("MMS_RESCUE_CONFIG_ROOT", _selected_mms_config_root(env))
     fallback = _rescue_default_fallback_config()
     if fallback.get("model"):
         env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
