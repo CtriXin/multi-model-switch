@@ -151,6 +151,8 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "`stable_legacy_writes`",
         "`preview_v2_writes`",
         "same-`candidate_id` route/policy/profile revisions",
+        "The plan itself is read-only",
+        "writes require the preview-gated WebUI",
         "Preview usage writes no longer trigger the legacy background `model-routes.json` export",
         "Preview startup-safe route refresh also skips legacy `model-routes.json` export",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",
@@ -160,6 +162,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
     ]
 
     missing = [term for term in required_terms if term not in text]
+    assert "does not enable DB writes yet" not in text
     assert missing == []
 
 

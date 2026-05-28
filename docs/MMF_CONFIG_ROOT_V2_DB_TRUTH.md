@@ -394,7 +394,7 @@ Current Stage 3a implementation:
 - CLI: `mms config save-plan [--json]` / `mmf config save-plan [--json]` shows the same read-only v2 DB-truth save sequence without writing DB, secrets, generated bundle, or legacy files.
 - CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
-- WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the future DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. It is plan-only and does not enable DB writes yet.
+- WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. The plan itself is read-only; writes require the preview-gated WebUI `写入预览 DB + 发布` action or `mms/mmf config apply-plan --apply --confirm-preview-apply`.
 - TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes `查看 v2 Save Plan` plus read-only `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
 - Stable-root WebUI Save behavior is not changed; preview-root legacy save is blocked and users are directed to the DB-truth preview apply path.
 
