@@ -1367,11 +1367,14 @@ def _rescue_config_root(server):
     try:
         return resolve_mms_config_dir()
     except Exception:
-        return os.path.expanduser("~/.config/mms")
+        return ""
 
 
 def _read_rescue_fallback_config(config_root):
-    path = os.path.join(str(config_root or "").strip(), "config.toml")
+    root = str(config_root or "").strip()
+    if not root:
+        return {"model": "", "cli": ""}
+    path = os.path.join(root, "config.toml")
     try:
         with open(path, "rb") as handle:
             cfg = tomllib.load(handle)

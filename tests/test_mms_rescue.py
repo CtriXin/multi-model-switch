@@ -223,6 +223,37 @@ def test_rescue_config_root_prefers_real_home_env(tmp_path):
     }) == original / ".config" / "mms"
 
 
+def test_bridge_rescue_config_root_failure_does_not_fallback_to_stable(monkeypatch, tmp_path):
+    import mms_bridge
+
+    stable_root = tmp_path / "stable" / ".config" / "mms"
+    stable_root.mkdir(parents=True)
+    (stable_root / "config.toml").write_text(
+        """
+        [rescue]
+        fallback_model = "stable-fallback"
+        fallback_cli = "codex"
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path / "stable"))
+    monkeypatch.setattr(
+        mms_bridge,
+        "resolve_mms_config_dir",
+        lambda: (_ for _ in ()).throw(RuntimeError("resolver failed")),
+    )
+
+    server = types.SimpleNamespace(
+        rescue_config_root="",
+        rescue_fallback_model="env-fallback",
+        rescue_fallback_cli="codex",
+        rescue_hot_fallback_enabled=False,
+    )
+
+    assert mms_bridge._rescue_config_root(server) == ""
+    assert mms_bridge._current_rescue_fallback(server)["model"] == "env-fallback"
+
+
 def test_record_blocking_failure_redacts_secret_upstream_body(tmp_path):
     from mms_rescue import record_blocking_failure
 
