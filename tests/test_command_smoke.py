@@ -2543,6 +2543,44 @@ def test_api_credentials_helpers_preserve_default_provider_delegation():
     assert save_calls == [("default", "https://default.example/v1", "default-key")]
 
 
+def test_default_config_helper_preserves_baseline_shape_and_defaults():
+    import mms_command_tools
+
+    default_provider_calls = []
+    cfg = mms_command_tools.default_config(
+        "recommended",
+        normalize_user_role=lambda role: "recommended" if role == "recommended" else "all",
+        probe_async_refresh_after_sec=3.5,
+        probe_async_min_interval_sec=9.0,
+        default_provider_id="default",
+        default_provider=lambda: default_provider_calls.append("called") or {"id": "default", "name": "Default"},
+    )
+
+    assert default_provider_calls == ["called"]
+    assert cfg["ui"] == {"language": "zh"}
+    assert cfg["user"] == {"role": "recommended"}
+    assert cfg["cache"] == {
+        "probe_async_refresh_after_sec": 3.5,
+        "probe_async_min_interval_sec": 9.0,
+    }
+    assert cfg["provider"] == {"default": "default"}
+    assert cfg["providers"] == [{"id": "default", "name": "Default"}]
+    assert cfg["account"] == {"defaults": {}}
+    assert cfg["accounts"] == []
+    assert cfg["recommend"]["models"] == ["claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini"]
+    assert cfg["presets"] == {
+        "coding": {
+            "cli": "claude",
+            "opus": "claude-opus-4-6",
+            "sonnet": "claude-sonnet-4-6",
+            "haiku": "claude-haiku-4-5-20251001",
+            "subagent": "claude-sonnet-4-6",
+        },
+        "cheap": {"cli": "claude", "model": "qwen3-coder-plus"},
+        "codex-gpt": {"cli": "codex", "model": "gpt-5.4"},
+    }
+
+
 def test_runtime_context_resolvers_preserve_provider_credentials_and_account_home():
     import mms_command_tools
 

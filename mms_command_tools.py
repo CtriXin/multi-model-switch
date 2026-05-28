@@ -3583,6 +3583,43 @@ def save_api_credentials(base_url, api_key, *, default_provider_id, save_provide
     return save_provider_credentials(default_provider_id, base_url, api_key)
 
 
+def default_config(
+    role,
+    *,
+    normalize_user_role,
+    probe_async_refresh_after_sec,
+    probe_async_min_interval_sec,
+    default_provider_id,
+    default_provider,
+):
+    return {
+        "ui": {"language": "zh"},
+        "user": {"role": normalize_user_role(role)},
+        "cache": {
+            "probe_async_refresh_after_sec": probe_async_refresh_after_sec,
+            "probe_async_min_interval_sec": probe_async_min_interval_sec,
+        },
+        "provider": {"default": default_provider_id},
+        "providers": [default_provider()],
+        "account": {"defaults": {}},
+        "accounts": [],
+        "recommend": {"models": [
+            "claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini",
+        ]},
+        "presets": {
+            "coding": {
+                "cli": "claude",
+                "opus": "claude-opus-4-6",
+                "sonnet": "claude-sonnet-4-6",
+                "haiku": "claude-haiku-4-5-20251001",
+                "subagent": "claude-sonnet-4-6",
+            },
+            "cheap": {"cli": "claude", "model": "qwen3-coder-plus"},
+            "codex-gpt": {"cli": "codex", "model": "gpt-5.4"},
+        },
+    }
+
+
 def resolve_provider_context(
     cfg,
     provider_id=None,

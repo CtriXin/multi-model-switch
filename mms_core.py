@@ -2422,32 +2422,16 @@ def resolve_account_context(cfg, account_id=None, cli_name=None):
 
 
 def _default_config(role=MODE_ALL):
-    return {
-        "ui": {"language": "zh"},
-        "user": {"role": normalize_user_role(role)},
-        "cache": {
-            "probe_async_refresh_after_sec": _PROBE_ASYNC_REFRESH_AFTER,
-            "probe_async_min_interval_sec": _PROBE_ASYNC_MIN_INTERVAL,
-        },
-        "provider": {"default": DEFAULT_PROVIDER_ID},
-        "providers": [_default_provider()],
-        "account": {"defaults": {}},
-        "accounts": [],
-        "recommend": {"models": [
-            "claude-sonnet-4-6", "qwen3-coder-plus", "gpt-4o-mini",
-        ]},
-        "presets": {
-            "coding": {
-                "cli": "claude",
-                "opus": "claude-opus-4-6",
-                "sonnet": "claude-sonnet-4-6",
-                "haiku": "claude-haiku-4-5-20251001",
-                "subagent": "claude-sonnet-4-6",
-            },
-            "cheap": {"cli": "claude", "model": "qwen3-coder-plus"},
-            "codex-gpt": {"cli": "codex", "model": "gpt-5.4"},
-        },
-    }
+    from mms_command_tools import default_config
+
+    return default_config(
+        role,
+        normalize_user_role=normalize_user_role,
+        probe_async_refresh_after_sec=_PROBE_ASYNC_REFRESH_AFTER,
+        probe_async_min_interval_sec=_PROBE_ASYNC_MIN_INTERVAL,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        default_provider=_default_provider,
+    )
 
 
 def _migrate_legacy_api_config(cfg):
