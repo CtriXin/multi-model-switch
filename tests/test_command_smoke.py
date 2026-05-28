@@ -1787,6 +1787,38 @@ def test_usage_rename_and_target_home_helpers_preserve_keys_and_paths(tmp_path):
     ) == os.path.join(str(custom_parent), "new-account")
 
 
+def test_migrate_accounts_dirs_preserves_move_and_normalize_rules():
+    import mms_command_tools
+
+    made_dirs = []
+    moves = []
+
+    updated, changed = mms_command_tools.migrate_accounts_dirs(
+        {
+            "accounts": [
+                "ignored",
+                {"id": "same", "home_dir": "/accounts/same"},
+                {"id": "old", "home_dir": "/legacy/old"},
+                {"id": "occupied", "home_dir": "/legacy/occupied"},
+            ]
+        },
+        target_account_home=lambda home_dir, account_id: f"/accounts/{account_id}",
+        normalize_account=lambda account: {**account, "normalized": True},
+        path_exists=lambda path: path in {"/legacy/old", "/legacy/occupied", "/accounts/occupied"},
+        makedirs=lambda path, exist_ok=False: made_dirs.append((path, exist_ok)),
+        move=lambda old, new: moves.append((old, new)),
+    )
+
+    assert changed is True
+    assert updated == [
+        {"id": "same", "home_dir": "/accounts/same", "normalized": True},
+        {"id": "old", "home_dir": "/accounts/old", "normalized": True},
+        {"id": "occupied", "home_dir": "/accounts/occupied", "normalized": True},
+    ]
+    assert made_dirs == [("/accounts", True)]
+    assert moves == [("/legacy/old", "/accounts/old")]
+
+
 def test_resolve_last_used_runtime_helper_preserves_provider_and_account_paths():
     import mms_command_tools
 

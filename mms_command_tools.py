@@ -2940,6 +2940,34 @@ def target_account_home(old_home, new_id, *, accounts_dir, default_account_home)
     return os.path.join(os.path.dirname(expanded), new_id)
 
 
+def migrate_accounts_dirs(
+    cfg,
+    *,
+    target_account_home,
+    normalize_account,
+    path_exists=os.path.exists,
+    makedirs=os.makedirs,
+    move,
+):
+    changed = False
+    updated_accounts = []
+    for item in cfg.get("accounts", []):
+        if not isinstance(item, dict):
+            continue
+        account = dict(item)
+        home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
+        target_home = target_account_home(home_dir, account.get("id", "account"))
+        if os.path.realpath(home_dir) != os.path.realpath(target_home):
+            if path_exists(home_dir) and not path_exists(target_home):
+                makedirs(os.path.dirname(target_home), exist_ok=True)
+                move(home_dir, target_home)
+            account["home_dir"] = target_home
+            changed = True
+        updated_accounts.append(normalize_account(account))
+
+    return updated_accounts, changed
+
+
 def provider_looks_openrouter(provider):
     if not isinstance(provider, dict):
         return False

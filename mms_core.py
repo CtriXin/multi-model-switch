@@ -8308,23 +8308,14 @@ def _handle_account_rename_config(cfg, args_rest):
 
 
 def _migrate_accounts_dirs(cfg):
-    changed = False
-    updated_accounts = []
-    for item in cfg.get("accounts", []):
-        if not isinstance(item, dict):
-            continue
-        account = dict(item)
-        home_dir = os.path.expanduser(str(account.get("home_dir", "")).strip())
-        target_home = _target_account_home(home_dir, account.get("id", "account"))
-        if os.path.realpath(home_dir) != os.path.realpath(target_home):
-            if os.path.exists(home_dir) and not os.path.exists(target_home):
-                os.makedirs(os.path.dirname(target_home), exist_ok=True)
-                shutil.move(home_dir, target_home)
-            account["home_dir"] = target_home
-            changed = True
-        updated_accounts.append(_normalize_account(account))
+    from mms_command_tools import migrate_accounts_dirs
 
-    return updated_accounts, changed
+    return migrate_accounts_dirs(
+        cfg,
+        target_account_home=_target_account_home,
+        normalize_account=_normalize_account,
+        move=shutil.move,
+    )
 
 
 
