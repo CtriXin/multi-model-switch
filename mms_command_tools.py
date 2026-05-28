@@ -1183,6 +1183,92 @@ def display_runtime_usage(
         pause_after_tui_report("按 Enter 返回通道详情")
 
 
+def display_config(
+    cfg,
+    *,
+    prefix="",
+    depth=0,
+    resolve_provider_context,
+    provider_openai_base_url,
+    provider_anthropic_base_url,
+    mask_key,
+    active_credentials_path,
+    active_usage_path,
+    display_providers,
+    display_accounts,
+    probe_async_refresh_after,
+    probe_async_min_interval,
+    existing_override_paths,
+    override_paths,
+    existing_preferences_paths,
+    preference_paths,
+    command_name,
+    console,
+):
+    if depth == 0:
+        provider = resolve_provider_context(cfg)
+        console.print("[bold]模型源:[/bold]")
+        console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', 'default')}")
+        console.print(f"  [cyan]openai_base_url[/cyan] = {provider_openai_base_url(provider) or '(未设置)'}")
+        console.print(f"  [cyan]anthropic_base_url[/cyan] = {provider_anthropic_base_url(provider) or '(未设置)'}")
+        key_display = mask_key(provider.get("api_key", "")) if provider.get("api_key") else "(未设置)"
+        console.print(f"  [cyan]api_key[/cyan] = {key_display}")
+        console.print(f"  [cyan]credentials_file[/cyan] = {active_credentials_path()}")
+        console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
+        display_providers(cfg)
+        display_accounts(cfg)
+        console.print(f"  [cyan]usage_file[/cyan] = {active_usage_path()}")
+        console.print("  [dim]usage 只记录本地启动统计，不代表真实余额或官方剩余额度。[/dim]")
+        cache_cfg = cfg.get("cache", {})
+        if isinstance(cache_cfg, dict):
+            console.print(f"  [cyan]probe_async_refresh_after_sec[/cyan] = {cache_cfg.get('probe_async_refresh_after_sec', probe_async_refresh_after)}")
+            console.print(f"  [cyan]probe_async_min_interval_sec[/cyan] = {cache_cfg.get('probe_async_min_interval_sec', probe_async_min_interval)}")
+            console.print("  [dim]以上窗口控制模型列表异步刷新：首屏先读 cache，后台再 refresh。[/dim]")
+        active_overrides = existing_override_paths()
+        if active_overrides:
+            console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
+            console.print("  [dim]override 仅在运行时叠加，不会直接写回 config.toml。[/dim]")
+        else:
+            console.print(f"  [cyan]override_files[/cyan] = {override_paths}")
+            console.print("  [dim]如需团队共享默认值，可在以上路径创建 override.toml。[/dim]")
+        active_preferences = existing_preferences_paths()
+        console.print(f"  [cyan]preferences_files[/cyan] = {active_preferences or preference_paths}")
+        console.print(f"  [dim]用户偏好 allowlist: {command_name} config preferences.help；真实配置仍受 human-gate 保护。[/dim]")
+
+    for key, value in cfg.items():
+        if depth == 0 and key in {"providers", "provider", "accounts", "account", "_mms_preferences"}:
+            continue
+        full_key = f"{prefix}{key}" if not prefix else f"{prefix}.{key}"
+        if isinstance(value, dict):
+            console.print(f"{'  ' * depth}[bold]{key}:[/bold]")
+            display_config(
+                value,
+                prefix=full_key,
+                depth=depth + 1,
+                resolve_provider_context=resolve_provider_context,
+                provider_openai_base_url=provider_openai_base_url,
+                provider_anthropic_base_url=provider_anthropic_base_url,
+                mask_key=mask_key,
+                active_credentials_path=active_credentials_path,
+                active_usage_path=active_usage_path,
+                display_providers=display_providers,
+                display_accounts=display_accounts,
+                probe_async_refresh_after=probe_async_refresh_after,
+                probe_async_min_interval=probe_async_min_interval,
+                existing_override_paths=existing_override_paths,
+                override_paths=override_paths,
+                existing_preferences_paths=existing_preferences_paths,
+                preference_paths=preference_paths,
+                command_name=command_name,
+                console=console,
+            )
+        elif isinstance(value, list):
+            console.print(f"{'  ' * depth}[cyan]{key}[/cyan] = {value}")
+        else:
+            display = mask_key(str(value)) if "key" in key.lower() else str(value)
+            console.print(f"{'  ' * depth}[cyan]{key}[/cyan] = {display}")
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

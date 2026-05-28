@@ -691,6 +691,52 @@ def test_runtime_usage_display_handles_tui_empty_and_rows():
     assert table.rows[0][0] == ("codex", "3", "gpt-5.5", "2026-05-28")
 
 
+def test_config_display_renders_summary_and_masks_keys():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    provider_calls = []
+    account_calls = []
+    cfg = {
+        "provider": {"default": "relay"},
+        "providers": [{"id": "relay"}],
+        "account": {},
+        "accounts": [],
+        "cache": {"probe_async_refresh_after_sec": 10, "probe_async_min_interval_sec": 5},
+        "nested": {"api_key": "abcd1234efgh", "plain": "value"},
+    }
+
+    mms_command_tools.display_config(
+        cfg,
+        resolve_provider_context=lambda cfg_arg: {"api_key": "sk-1234567890", "openai_base_url": "https://relay.example/v1"},
+        provider_openai_base_url=lambda provider: provider.get("openai_base_url", ""),
+        provider_anthropic_base_url=lambda provider: provider.get("anthropic_base_url", ""),
+        mask_key=lambda value: "MASKED",
+        active_credentials_path=lambda: "/tmp/credentials.sh",
+        active_usage_path=lambda: "/tmp/usage.json",
+        display_providers=lambda cfg_arg: provider_calls.append(cfg_arg),
+        display_accounts=lambda cfg_arg: account_calls.append(cfg_arg),
+        probe_async_refresh_after=1800,
+        probe_async_min_interval=300,
+        existing_override_paths=lambda: [],
+        override_paths=["/tmp/override.toml"],
+        existing_preferences_paths=lambda: ["/tmp/preferences.toml"],
+        preference_paths=["/tmp/default-preferences.toml"],
+        command_name="mmg",
+        console=console,
+    )
+
+    text = "\n".join(str(item) for item in console.items)
+    assert provider_calls == [cfg]
+    assert account_calls == [cfg]
+    assert "openai_base_url" in text
+    assert "/tmp/credentials.sh" in text
+    assert "probe_async_refresh_after_sec" in text
+    assert "mmg config preferences.help" in text
+    assert "MASKED" in text
+    assert "plain" in text
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

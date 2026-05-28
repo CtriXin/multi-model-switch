@@ -10316,48 +10316,29 @@ def _display_preferences_help():
 
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
-    if depth == 0:
-        provider = resolve_provider_context(cfg)
-        console.print("[bold]模型源:[/bold]")
-        console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
-        console.print(f"  [cyan]openai_base_url[/cyan] = {_provider_openai_base_url(provider) or '(未设置)'}")
-        console.print(f"  [cyan]anthropic_base_url[/cyan] = {_provider_anthropic_base_url(provider) or '(未设置)'}")
-        key_display = _mask_key(provider.get("api_key", "")) if provider.get("api_key") else "(未设置)"
-        console.print(f"  [cyan]api_key[/cyan] = {key_display}")
-        console.print(f"  [cyan]credentials_file[/cyan] = {_active_credentials_path()}")
-        console.print("  [dim]api_key 为掩码显示；真实值请查看 credentials_file。[/dim]")
-        _display_providers(cfg)
-        _display_accounts(cfg)
-        console.print(f"  [cyan]usage_file[/cyan] = {_active_usage_path()}")
-        console.print("  [dim]usage 只记录本地启动统计，不代表真实余额或官方剩余额度。[/dim]")
-        cache_cfg = cfg.get("cache", {})
-        if isinstance(cache_cfg, dict):
-            console.print(f"  [cyan]probe_async_refresh_after_sec[/cyan] = {cache_cfg.get('probe_async_refresh_after_sec', _PROBE_ASYNC_REFRESH_AFTER)}")
-            console.print(f"  [cyan]probe_async_min_interval_sec[/cyan] = {cache_cfg.get('probe_async_min_interval_sec', _PROBE_ASYNC_MIN_INTERVAL)}")
-            console.print("  [dim]以上窗口控制模型列表异步刷新：首屏先读 cache，后台再 refresh。[/dim]")
-        active_overrides = _existing_override_paths()
-        if active_overrides:
-            console.print(f"  [cyan]override_files[/cyan] = {active_overrides}")
-            console.print("  [dim]override 仅在运行时叠加，不会直接写回 config.toml。[/dim]")
-        else:
-            console.print(f"  [cyan]override_files[/cyan] = {OVERRIDE_PATHS}")
-            console.print("  [dim]如需团队共享默认值，可在以上路径创建 override.toml。[/dim]")
-        active_preferences = _existing_preferences_paths()
-        console.print(f"  [cyan]preferences_files[/cyan] = {active_preferences or PREFERENCES_PATHS}")
-        console.print(f"  [dim]用户偏好 allowlist: {current_command()} config preferences.help；真实配置仍受 human-gate 保护。[/dim]")
+    from mms_command_tools import display_config
 
-    for k, v in cfg.items():
-        if depth == 0 and k in {"providers", "provider", "accounts", "account", "_mms_preferences"}:
-            continue
-        full_key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
-        if isinstance(v, dict):
-            console.print(f"{'  ' * depth}[bold]{k}:[/bold]")
-            _display_config(v, full_key, depth + 1)
-        elif isinstance(v, list):
-            console.print(f"{'  ' * depth}[cyan]{k}[/cyan] = {v}")
-        else:
-            display = _mask_key(str(v)) if "key" in k.lower() else str(v)
-            console.print(f"{'  ' * depth}[cyan]{k}[/cyan] = {display}")
+    return display_config(
+        cfg,
+        prefix=prefix,
+        depth=depth,
+        resolve_provider_context=resolve_provider_context,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        mask_key=_mask_key,
+        active_credentials_path=_active_credentials_path,
+        active_usage_path=_active_usage_path,
+        display_providers=_display_providers,
+        display_accounts=_display_accounts,
+        probe_async_refresh_after=_PROBE_ASYNC_REFRESH_AFTER,
+        probe_async_min_interval=_PROBE_ASYNC_MIN_INTERVAL,
+        existing_override_paths=_existing_override_paths,
+        override_paths=OVERRIDE_PATHS,
+        existing_preferences_paths=_existing_preferences_paths,
+        preference_paths=PREFERENCES_PATHS,
+        command_name=current_command(),
+        console=console,
+    )
 
 
 def _display_usage_stats():
