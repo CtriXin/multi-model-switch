@@ -126,6 +126,8 @@ def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeyp
 def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     import hashlib
     import json
+    import stat
+    from datetime import datetime
 
     import mms_command_tools
     import mms_core
@@ -207,6 +209,42 @@ def test_snapshot_payload_helpers_preserve_config_guard_normalization(tmp_path):
     assert entry["sha256"] == hashlib.sha256(b"payload").hexdigest()
     assert "normalized_kind" not in entry
     assert mms_core._snapshot_file_entry(str(tmp_path / "missing.json"))["exists"] is False
+
+    snapshot = {"b": 2, "a": "中文"}
+    assert mms_command_tools.snapshot_digest(snapshot) == mms_core._snapshot_digest({"a": "中文", "b": 2})
+    assert mms_command_tools.load_json_snapshot(str(tmp_path / "missing-snapshot.json")) is None
+    broken_snapshot = tmp_path / "broken-snapshot.json"
+    broken_snapshot.write_text("{bad", encoding="utf-8")
+    assert mms_command_tools.load_json_snapshot(str(broken_snapshot)) is None
+    written_snapshot = tmp_path / "snapshots" / "latest.json"
+    mms_command_tools.write_json_snapshot(str(written_snapshot), {"message": "中文"})
+    assert json.loads(written_snapshot.read_text(encoding="utf-8")) == {"message": "中文"}
+    assert stat.S_IMODE(written_snapshot.stat().st_mode) == 0o600
+
+    assert mms_command_tools.snapshot_period_bucket("daily", now_func=lambda: datetime(2026, 5, 28, 22, 0)) == "2026-05-28"
+    assert mms_command_tools.snapshot_period_bucket("weekly", now_func=lambda: datetime(2026, 5, 28, 22, 0)) == "2026-W22"
+    assert mms_command_tools.snapshot_period_bucket("startup", now_func=lambda: datetime(2026, 5, 28, 22, 5)) == "2026-05-28T22:05"
+
+    periodic = {}
+    mms_command_tools.update_periodic_snapshot(
+        "daily",
+        {"snapshot": True},
+        config_path="/tmp/config.toml",
+        config_snapshot_path=lambda period, filename, config_path=None: f"{config_path}:{period}:{filename}",
+        snapshot_period_bucket=lambda period: f"bucket:{period}",
+        iso_now=lambda: "now",
+        snapshot_digest=lambda payload: f"digest:{payload['snapshot']}",
+        write_json_snapshot=lambda path, payload: periodic.update({path: payload}),
+    )
+    assert periodic == {
+        "/tmp/config.toml:daily:latest.json": {
+            "period": "daily",
+            "bucket": "bucket:daily",
+            "captured_at": "now",
+            "digest": "digest:True",
+            "snapshot": {"snapshot": True},
+        }
+    }
 
 
 def test_usage_main_initializes_rich_before_render(monkeypatch):

@@ -1728,51 +1728,42 @@ def _build_config_guard_snapshot(cfg, *, config_path=None):
 
 
 def _snapshot_digest(snapshot_data):
-    payload = json.dumps(snapshot_data, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    from mms_command_tools import snapshot_digest
+
+    return snapshot_digest(snapshot_data)
 
 
 def _load_json_snapshot(path):
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
+    from mms_command_tools import load_json_snapshot
+
+    return load_json_snapshot(path)
 
 
 def _write_json_snapshot(path, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    from mms_command_tools import write_json_snapshot
+
+    return write_json_snapshot(path, payload)
 
 
 def _snapshot_period_bucket(period_name):
-    now = datetime.now()
-    if period_name == "daily":
-        return now.strftime("%Y-%m-%d")
-    if period_name == "weekly":
-        year, week, _ = now.isocalendar()
-        return f"{year}-W{week:02d}"
-    return now.strftime("%Y-%m-%dT%H:%M")
+    from mms_command_tools import snapshot_period_bucket
+
+    return snapshot_period_bucket(period_name)
 
 
 def _update_periodic_snapshot(period_name, snapshot_data, *, config_path=None):
-    path = _config_snapshot_path(period_name, "latest.json", config_path=config_path)
-    payload = {
-        "period": period_name,
-        "bucket": _snapshot_period_bucket(period_name),
-        "captured_at": _iso_now(),
-        "digest": _snapshot_digest(snapshot_data),
-        "snapshot": snapshot_data,
-    }
-    _write_json_snapshot(path, payload)
+    from mms_command_tools import update_periodic_snapshot
+
+    return update_periodic_snapshot(
+        period_name,
+        snapshot_data,
+        config_path=config_path,
+        config_snapshot_path=_config_snapshot_path,
+        snapshot_period_bucket=_snapshot_period_bucket,
+        iso_now=_iso_now,
+        snapshot_digest=_snapshot_digest,
+        write_json_snapshot=_write_json_snapshot,
+    )
 
 
 def _snapshot_diff_lines(previous_snapshot, current_snapshot):

@@ -211,6 +211,64 @@ def snapshot_file_entry(path, *, snapshot_file_content_bytes):
     return entry
 
 
+def snapshot_digest(snapshot_data):
+    payload = json.dumps(snapshot_data, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def load_json_snapshot(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def write_json_snapshot(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def snapshot_period_bucket(period_name, *, now_func=datetime.now):
+    now = now_func()
+    if period_name == "daily":
+        return now.strftime("%Y-%m-%d")
+    if period_name == "weekly":
+        year, week, _ = now.isocalendar()
+        return f"{year}-W{week:02d}"
+    return now.strftime("%Y-%m-%dT%H:%M")
+
+
+def update_periodic_snapshot(
+    period_name,
+    snapshot_data,
+    *,
+    config_path=None,
+    config_snapshot_path,
+    snapshot_period_bucket,
+    iso_now,
+    snapshot_digest,
+    write_json_snapshot,
+):
+    path = config_snapshot_path(period_name, "latest.json", config_path=config_path)
+    payload = {
+        "period": period_name,
+        "bucket": snapshot_period_bucket(period_name),
+        "captured_at": iso_now(),
+        "digest": snapshot_digest(snapshot_data),
+        "snapshot": snapshot_data,
+    }
+    write_json_snapshot(path, payload)
+
+
 def load_json_file(path, default):
     if not os.path.exists(path):
         return default
