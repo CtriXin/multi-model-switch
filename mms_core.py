@@ -3588,58 +3588,39 @@ def _migrate_legacy_api_config(cfg):
 
 
 def _provider_label(provider):
-    return provider.get("name", provider.get("id", DEFAULT_PROVIDER_ID))
+    from mms_command_tools import provider_label
+
+    return provider_label(provider, default_provider_id=DEFAULT_PROVIDER_ID)
 
 
 def _provider_openai_base_url(provider):
-    explicit = str(provider.get("openai_base_url", "")).strip().rstrip("/")
-    if explicit:
-        return explicit
-    base_url = str(provider.get("base_url", "")).strip().rstrip("/")
-    if not base_url:
-        return ""
-    if base_url.endswith("/v1"):
-        return base_url
-    return f"{base_url}/v1"
+    from mms_command_tools import provider_openai_base_url
+
+    return provider_openai_base_url(provider)
 
 
 def _provider_anthropic_base_url(provider):
-    explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
-    if explicit:
-        return explicit
-    protocols = provider.get("protocols", [])
-    if isinstance(protocols, str):
-        protocols = [protocols]
-    if "anthropic_messages" not in protocols:
-        return ""
-    return str(provider.get("base_url", "")).strip().rstrip("/")
+    from mms_command_tools import provider_anthropic_base_url
+
+    return provider_anthropic_base_url(provider)
 
 
 def _provider_has_configured_base_url(provider):
-    return bool(
-        _provider_openai_base_url(provider)
-        or _provider_anthropic_base_url(provider)
-        or str(provider.get("base_url", "")).strip().rstrip("/")
-    )
+    from mms_command_tools import provider_has_configured_base_url
+
+    return provider_has_configured_base_url(provider)
 
 
 def _provider_id_variants(provider_id):
-    raw = str(provider_id or "").strip()
-    if not raw:
-        return []
-    variants = [raw]
-    for candidate in (raw.replace("_", "-"), raw.replace("-", "_")):
-        if candidate and candidate not in variants:
-            variants.append(candidate)
-    return variants
+    from mms_command_tools import provider_id_variants
+
+    return provider_id_variants(provider_id)
 
 
 def _resolve_config_provider_id(provider_defs, provider_id):
-    provider_defs = provider_defs or {}
-    for candidate in _provider_id_variants(provider_id):
-        if candidate in provider_defs:
-            return candidate
-    return ""
+    from mms_command_tools import resolve_config_provider_id
+
+    return resolve_config_provider_id(provider_defs, provider_id)
 
 
 def _config_truthy(value, default=False):

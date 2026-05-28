@@ -798,6 +798,61 @@ def provider_map(cfg):
     return {provider["id"]: provider for provider in providers if isinstance(provider, dict) and provider.get("id")}
 
 
+def provider_label(provider, *, default_provider_id):
+    return provider.get("name", provider.get("id", default_provider_id))
+
+
+def provider_openai_base_url(provider):
+    explicit = str(provider.get("openai_base_url", "")).strip().rstrip("/")
+    if explicit:
+        return explicit
+    base_url = str(provider.get("base_url", "")).strip().rstrip("/")
+    if not base_url:
+        return ""
+    if base_url.endswith("/v1"):
+        return base_url
+    return f"{base_url}/v1"
+
+
+def provider_anthropic_base_url(provider):
+    explicit = str(provider.get("anthropic_base_url", "")).strip().rstrip("/")
+    if explicit:
+        return explicit
+    protocols = provider.get("protocols", [])
+    if isinstance(protocols, str):
+        protocols = [protocols]
+    if "anthropic_messages" not in protocols:
+        return ""
+    return str(provider.get("base_url", "")).strip().rstrip("/")
+
+
+def provider_has_configured_base_url(provider):
+    return bool(
+        provider_openai_base_url(provider)
+        or provider_anthropic_base_url(provider)
+        or str(provider.get("base_url", "")).strip().rstrip("/")
+    )
+
+
+def provider_id_variants(provider_id):
+    raw = str(provider_id or "").strip()
+    if not raw:
+        return []
+    variants = [raw]
+    for candidate in (raw.replace("_", "-"), raw.replace("-", "_")):
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def resolve_config_provider_id(provider_defs, provider_id):
+    provider_defs = provider_defs or {}
+    for candidate in provider_id_variants(provider_id):
+        if candidate in provider_defs:
+            return candidate
+    return ""
+
+
 def account_map(cfg):
     accounts = cfg.get("accounts", [])
     return {account["id"]: account for account in accounts if isinstance(account, dict) and account.get("id")}

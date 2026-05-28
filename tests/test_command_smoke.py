@@ -631,6 +631,29 @@ def test_runtime_map_helpers_filter_invalid_and_disabled_entries():
     assert [item["id"] for item in mms_command_tools.accounts_for_cli(cfg, "codex")] == ["codex-main"]
 
 
+def test_provider_endpoint_helpers_preserve_config_resolution_semantics():
+    import mms_command_tools
+
+    assert mms_command_tools.provider_label({}, default_provider_id="default") == "default"
+    assert mms_command_tools.provider_label({"id": "relay", "name": "Relay"}, default_provider_id="default") == "Relay"
+    assert mms_command_tools.provider_openai_base_url({"base_url": "https://relay.example"}) == "https://relay.example/v1"
+    assert mms_command_tools.provider_openai_base_url({"base_url": "https://relay.example/v1/"}) == "https://relay.example/v1"
+    assert mms_command_tools.provider_openai_base_url({"openai_base_url": "https://openai.example/v1/"}) == "https://openai.example/v1"
+    assert mms_command_tools.provider_anthropic_base_url({"base_url": "https://anthropic.example", "protocols": "anthropic_messages"}) == "https://anthropic.example"
+    assert mms_command_tools.provider_anthropic_base_url({"base_url": "https://relay.example", "protocols": ["openai_chat_completions"]}) == ""
+    assert mms_command_tools.provider_has_configured_base_url({"base_url": "https://relay.example"}) is True
+    assert mms_command_tools.provider_has_configured_base_url({}) is False
+    assert mms_command_tools.provider_id_variants("crs_oracle-gpt") == ["crs_oracle-gpt", "crs-oracle-gpt", "crs_oracle_gpt"]
+    assert mms_command_tools.provider_id_variants("") == []
+    assert (
+        mms_command_tools.resolve_config_provider_id(
+            {"crs-oracle-gpt": {}, "backup": {}},
+            "crs_oracle_gpt",
+        )
+        == "crs-oracle-gpt"
+    )
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
