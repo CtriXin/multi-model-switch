@@ -3200,6 +3200,112 @@ def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
     assert calls == ["core-rich", ("core-rename", cfg, ["codex-main", "agy-main"])]
 
 
+def test_manage_account_target_helper_and_wrapper_preserve_actions(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    cfg = {"account": {"defaults": {}}, "accounts": [{"id": "codex-main"}]}
+    account = {
+        "id": "codex-main",
+        "cli": "codex",
+        "name": "Codex Main",
+        "proxy": "http://proxy",
+        "timezone": "UTC",
+    }
+    loaded_cfg = {"loaded": True}
+    choices = iter(["1", "3"])
+    calls = []
+    console = _CollectingConsole()
+
+    assert mms_command_tools.manage_account_target(
+        cfg,
+        "codex-main",
+        resolve_account_context=lambda current, **kwargs: calls.append(("resolve", current, kwargs)) or account,
+        probe_account_status=lambda current: calls.append(("probe", current["id"])) or {"summary": "logged in"},
+        use_tui=lambda: False,
+        select_channel_action_tui=lambda *_args: calls.append("unexpected-tui"),
+        ensure_rich=lambda: calls.append("rich"),
+        panel_cls=FakePanel,
+        prompt_ask=lambda label, **kwargs: calls.append(("prompt", label, kwargs)) or next(choices),
+        display_runtime_usage=lambda *args: calls.append(("usage", args)),
+        run_account_login=lambda current: calls.append(("login", current)),
+        save_config=lambda current: calls.append(("save", current.copy())),
+        load_config=lambda: loaded_cfg,
+        prompt_account_rename=lambda *_args: calls.append("unexpected-rename"),
+        handle_account_edit_config=lambda *_args: calls.append("unexpected-edit"),
+        handle_account_remove_config=lambda *_args: calls.append("unexpected-remove"),
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        console=console,
+    ) == (loaded_cfg, True)
+    assert cfg["account"]["defaults"] == {"codex": "codex-main"}
+    assert ("usage", ("account", "codex-main", "Codex Main")) in calls
+    assert any(item == "[green]✓ codex 默认官方通道已更新为 codex-main[/green]" for item in console.items)
+
+    calls.clear()
+    assert mms_command_tools.manage_account_target(
+        cfg,
+        "codex-main",
+        resolve_account_context=lambda current, **kwargs: account,
+        probe_account_status=lambda current: {"state": "ok"},
+        use_tui=lambda: True,
+        select_channel_action_tui=lambda title, info, actions: calls.append((title, info, actions)) or "2",
+        ensure_rich=lambda: calls.append("unexpected-rich"),
+        panel_cls=FakePanel,
+        prompt_ask=lambda *_args, **_kwargs: "7",
+        display_runtime_usage=lambda *_args: calls.append("unexpected-usage"),
+        run_account_login=lambda current: calls.append(("login", current)),
+        save_config=lambda current: calls.append("unexpected-save"),
+        load_config=lambda: loaded_cfg,
+        prompt_account_rename=lambda *_args: calls.append("unexpected-rename"),
+        handle_account_edit_config=lambda *_args: calls.append("unexpected-edit"),
+        handle_account_remove_config=lambda *_args: calls.append("unexpected-remove"),
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        console=console,
+    ) == (loaded_cfg, True)
+    assert calls[0][0] == "官方 · Codex Main"
+    assert calls[-1] == ("login", account)
+
+    calls.clear()
+    renamed_cfg = {"renamed": True}
+    assert mms_command_tools.manage_account_target(
+        cfg,
+        "codex-main",
+        resolve_account_context=lambda current, **kwargs: account,
+        probe_account_status=lambda current: {"state": "ok"},
+        use_tui=lambda: False,
+        select_channel_action_tui=lambda *_args: None,
+        ensure_rich=lambda: None,
+        panel_cls=FakePanel,
+        prompt_ask=lambda *_args, **_kwargs: "4",
+        display_runtime_usage=lambda *_args: None,
+        run_account_login=lambda current: None,
+        save_config=lambda current: None,
+        load_config=lambda: loaded_cfg,
+        prompt_account_rename=lambda current, account_id: calls.append(("rename", current, account_id)) or (renamed_cfg, True),
+        handle_account_edit_config=lambda *_args: None,
+        handle_account_remove_config=lambda *_args: None,
+        account_map=lambda current: {item["id"]: item for item in current.get("accounts", [])},
+        console=console,
+    ) == (renamed_cfg, True)
+    assert calls == [("rename", cfg, "codex-main")]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "resolve_account_context", lambda current, account_id=None: account)
+    monkeypatch.setattr(mms_core, "_probe_account_status", lambda current: {"summary": "ok"})
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: False)
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: None)
+    monkeypatch.setattr(mms_core, "Panel", FakePanel)
+    monkeypatch.setattr(mms_core, "Prompt", type("Prompt", (), {"ask": staticmethod(lambda *args, **kwargs: "7")}))
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+
+    assert mms_core._manage_account_target(cfg, "codex-main") == (cfg, False)
+
+
 def test_run_account_mgmt_tui_helper_and_wrapper_preserve_flow(monkeypatch):
     import mms_command_tools
     import mms_core

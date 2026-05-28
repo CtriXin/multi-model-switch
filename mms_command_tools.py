@@ -2369,6 +2369,93 @@ def prompt_account_rename(
     return updated_cfg, changed
 
 
+def manage_account_target(
+    cfg,
+    account_id,
+    *,
+    resolve_account_context,
+    probe_account_status,
+    use_tui,
+    select_channel_action_tui,
+    ensure_rich,
+    panel_cls,
+    prompt_ask,
+    display_runtime_usage,
+    run_account_login,
+    save_config,
+    load_config,
+    prompt_account_rename,
+    handle_account_edit_config,
+    handle_account_remove_config,
+    account_map,
+    console,
+):
+    account = resolve_account_context(cfg, account_id=account_id)
+    while True:
+        login_state = probe_account_status(account)
+        default_tag = "是" if cfg.get("account", {}).get("defaults", {}).get(account.get("cli")) == account_id else "否"
+
+        info_lines = [
+            ("名称", account.get("name", account_id)),
+            ("文件夹", account_id),
+            ("CLI", account.get("cli", "").upper()),
+            ("默认", f"{default_tag}（{account.get('cli', '').upper()}）"),
+            ("登录", login_state.get("summary") or login_state.get("state", "")),
+            ("Proxy", account.get("proxy", "") or "-"),
+            ("Timezone", account.get("timezone", "") or "-"),
+        ]
+        actions = [
+            ("1", "查看本地统计"),
+            ("2", "重新登录"),
+            ("3", "设为默认官方通道"),
+            ("4", "重命名"),
+            ("5", "编辑通道"),
+            ("6", "删除通道"),
+            ("7", "返回"),
+        ]
+
+        choice = None
+        if use_tui():
+            try:
+                choice = select_channel_action_tui(f"官方 · {account.get('name', account_id)}", info_lines, actions)
+            except (ImportError, Exception):
+                pass
+        if choice is None and not use_tui():
+            ensure_rich()
+            console.print(panel_cls(
+                "\n".join(f"[bold]{label}:[/bold]  {value}" for label, value in info_lines),
+                title="通道详情", border_style="cyan",
+            ))
+            for action_id, action_label in actions:
+                console.print(f"  {action_id}. {action_label}")
+            choice = prompt_ask("选择操作", choices=[action[0] for action in actions], default="7")
+        if choice is None:
+            return cfg, False
+        if choice == "1":
+            display_runtime_usage("account", account_id, account.get("name", account_id))
+            continue
+        if choice == "2":
+            run_account_login(account)
+            return load_config(), True
+        if choice == "3":
+            cfg.setdefault("account", {}).setdefault("defaults", {})
+            cfg["account"]["defaults"][account.get("cli")] = account_id
+            save_config(cfg)
+            console.print(f"[green]✓ {account.get('cli')} 默认官方通道已更新为 {account_id}[/green]")
+            return load_config(), True
+        if choice == "4":
+            return prompt_account_rename(cfg, account_id)
+        if choice == "5":
+            handle_account_edit_config(cfg, [account_id])
+            return load_config(), True
+        if choice == "6":
+            before = set(account_map(cfg).keys())
+            handle_account_remove_config(cfg, [account_id])
+            after_cfg = load_config()
+            return after_cfg, set(account_map(after_cfg).keys()) != before
+        return cfg, False
+
+
 def run_account_mgmt_tui(
     cfg,
     *,
