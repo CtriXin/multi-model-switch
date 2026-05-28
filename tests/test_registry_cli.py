@@ -1535,7 +1535,7 @@ def test_preview_include_secrets_without_route_url_is_not_runtime_ready(tmp_path
     doctor = mms_registry_cli.preview_doctor(config_dir=config_dir, command_name="mmf config doctor")
     assert doctor["counts"]["missing_api_keys"] == 0
     assert doctor["counts"]["missing_base_urls"] == 1
-    assert doctor["next_actions"][0]["command"] == "./mmf config source --json"
+    assert doctor["next_actions"][0]["command"] == "./mmf preview import-legacy --from ~/.config/mms --apply --json && ./mmf preview publish --json && ./mmf preview verify --json"
 
 
 def test_legacy_import_backfills_route_urls_from_legacy_route_artifact(tmp_path: Path) -> None:
