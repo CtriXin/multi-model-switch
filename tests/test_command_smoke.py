@@ -1625,6 +1625,89 @@ def test_build_model_families_helper_preserves_best_provider_and_usage_shape():
     assert all(item["model"] != "hidden-model" for family in families for item in family["models"])
 
 
+def test_resolve_best_provider_helper_preserves_role_priority_and_filters():
+    import mms_command_tools
+
+    providers = [
+        {
+            "id": "auto-high",
+            "name": "Auto High",
+            "enabled": True,
+            "api_key": "sk-auto",
+            "role": "auto",
+            "priority": 999,
+            "protocols": ["anthropic_messages"],
+            "models": ["gpt-5.5"],
+            "supported_clis": ["claude"],
+        },
+        {
+            "id": "primary-low",
+            "name": "Primary Low",
+            "enabled": True,
+            "api_key": "sk-primary",
+            "role": "primary",
+            "priority": 1,
+            "protocols": ["anthropic_messages"],
+            "models": ["gpt-5.5"],
+            "supported_clis": ["claude"],
+        },
+        {
+            "id": "wrong-protocol",
+            "name": "Wrong Protocol",
+            "enabled": True,
+            "api_key": "sk-wrong",
+            "role": "primary",
+            "priority": 1000,
+            "protocols": ["openai_chat_completions"],
+            "models": ["gpt-5.5"],
+            "supported_clis": ["claude"],
+        },
+    ]
+
+    runtime, label = mms_command_tools.resolve_best_provider(
+        {"providers": providers},
+        "GPT-5.5",
+        {},
+        [],
+        cli_name="claude",
+        protocol="anthropic_messages",
+        provider_candidates=lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        provider_supports_model_for_cli=lambda provider, cli_name, _model_name: cli_name in provider["supported_clis"],
+        provider_has_configured_base_url=lambda _provider: True,
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        normalize_role=lambda role: role if role in {"primary", "auto", "fallback"} else "auto",
+        runtime_priority_for_model=lambda provider, _model_name: provider.get("priority", 100),
+        provider_label=lambda provider: provider["name"],
+        runtime_with_priority=lambda provider, model_name="": {**provider, "runtime_model": model_name},
+        role_weights={"primary": 0, "auto": 1, "fallback": 2},
+    )
+
+    assert runtime["id"] == "primary-low"
+    assert runtime["runtime_model"] == "GPT-5.5"
+    assert label == "Primary Low"
+
+    missing, missing_label = mms_command_tools.resolve_best_provider(
+        {"providers": providers},
+        "missing-model",
+        {},
+        [],
+        provider_candidates=lambda cfg, _default_provider, _default_models: [
+            (provider, provider["models"]) for provider in cfg["providers"]
+        ],
+        provider_supports_model_for_cli=lambda *_args: True,
+        provider_has_configured_base_url=lambda _provider: True,
+        provider_effective_models=lambda _provider, cached_models, _cfg: list(cached_models or []),
+        normalize_role=lambda role: role,
+        runtime_priority_for_model=lambda provider, _model_name: provider.get("priority", 100),
+        provider_label=lambda provider: provider["name"],
+        runtime_with_priority=lambda provider, model_name="": provider,
+        role_weights={"primary": 0, "auto": 1, "fallback": 2},
+    )
+    assert (missing, missing_label) == (None, None)
+
+
 def test_provider_options_helper_preserves_selected_model_filtering():
     import mms_command_tools
 

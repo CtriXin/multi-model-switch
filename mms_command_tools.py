@@ -2575,6 +2575,59 @@ def build_model_families_for_cli(
     return [{"family": family, "models": family_map[family]} for family in family_order]
 
 
+def resolve_best_provider(
+    cfg,
+    model_name,
+    default_provider,
+    default_models,
+    *,
+    cli_name=None,
+    protocol=None,
+    provider_candidates,
+    provider_supports_model_for_cli,
+    provider_has_configured_base_url,
+    provider_effective_models,
+    normalize_role,
+    runtime_priority_for_model,
+    provider_label,
+    runtime_with_priority,
+    role_weights,
+):
+    model_lower = str(model_name or "").strip().lower()
+    if not model_lower:
+        return None, None
+
+    scored = []
+    for provider, cached_models in provider_candidates(cfg, default_provider, default_models):
+        if not provider.get("enabled", True):
+            continue
+        if cli_name and not provider_supports_model_for_cli(provider, cli_name, model_name):
+            continue
+        if not provider_has_configured_base_url(provider):
+            continue
+        if not provider.get("api_key"):
+            continue
+        if protocol:
+            protocols = provider.get("protocols", [])
+            if protocol not in protocols:
+                continue
+
+        models = provider_effective_models(provider, cached_models, cfg)
+        model_names_lower = [str(item or "").strip().lower() for item in models]
+        if model_lower not in model_names_lower:
+            continue
+
+        role = normalize_role(provider.get("role", "auto"))
+        priority = runtime_priority_for_model(provider, model_name)
+        scored.append((role_weights.get(role, 1), -priority, provider, provider_label(provider)))
+
+    if not scored:
+        return None, None
+
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return runtime_with_priority(scored[0][2], model_name=model_name), scored[0][3]
+
+
 def provider_options_for_model(
     cfg,
     cli_name,

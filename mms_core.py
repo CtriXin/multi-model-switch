@@ -5946,48 +5946,25 @@ def _aggregate_provider_models(cfg, cli_name, default_provider, default_models):
 
 def _resolve_best_provider(cfg, model_name, default_provider, default_models,
                            cli_name=None, protocol=None):
-    """给定模型名，返回最优 (provider_ctx, provider_name) — primary > auto > fallback × priority 高到低。
+    from mms_command_tools import resolve_best_provider
 
-    如果指定了 protocol（如 "anthropic_messages"），只考虑支持该协议的 provider。
-    如果指定了 cli_name，只考虑支持该 CLI 的 provider。
-    返回 None 表示没有可用 provider。
-    """
-    model_lower = str(model_name or "").strip().lower()
-    if not model_lower:
-        return None, None
-
-    scored = []  # [(role_weight, -priority, provider_ctx, provider_name)]
-    for provider, cached_models in _provider_candidates(cfg, default_provider, default_models):
-        if not provider.get("enabled", True):
-            continue
-        if cli_name and not _provider_supports_model_for_cli(provider, cli_name, model_name):
-            continue
-        if not _provider_has_configured_base_url(provider):
-            continue
-        if not provider.get("api_key"):
-            continue
-        if protocol:
-            protocols = provider.get("protocols", [])
-            if protocol not in protocols:
-                continue
-
-        models = _provider_effective_models(provider, cached_models, cfg)
-
-        # Check if this provider has the model
-        model_names_lower = [str(m or "").strip().lower() for m in models]
-        if model_lower not in model_names_lower:
-            continue
-
-        role = _normalize_role(provider.get("role", "auto"))
-        priority = _runtime_priority_for_model(provider, model_name)
-        pname = _provider_label(provider)
-        scored.append((ROLE_WEIGHTS.get(role, 1), -priority, provider, pname))
-
-    if not scored:
-        return None, None
-
-    scored.sort(key=lambda x: (x[0], x[1]))
-    return _runtime_with_priority(scored[0][2], model_name=model_name), scored[0][3]
+    return resolve_best_provider(
+        cfg,
+        model_name,
+        default_provider,
+        default_models,
+        cli_name=cli_name,
+        protocol=protocol,
+        provider_candidates=_provider_candidates,
+        provider_supports_model_for_cli=_provider_supports_model_for_cli,
+        provider_has_configured_base_url=_provider_has_configured_base_url,
+        provider_effective_models=_provider_effective_models,
+        normalize_role=_normalize_role,
+        runtime_priority_for_model=_runtime_priority_for_model,
+        provider_label=_provider_label,
+        runtime_with_priority=_runtime_with_priority,
+        role_weights=ROLE_WEIGHTS,
+    )
 
 
 
