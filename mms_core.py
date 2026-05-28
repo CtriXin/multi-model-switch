@@ -5422,6 +5422,11 @@ def _config_v2_promotion_plan_report_payload(summary):
     stable_root = stable.get("root") if isinstance(stable.get("root"), dict) else {}
     preview_check_summary = preview.get("check") if isinstance(preview.get("check"), dict) else {}
     bundle = preview.get("bundle") if isinstance(preview.get("bundle"), dict) else {}
+    safety = summary.get("promotion_safety") if isinstance(summary.get("promotion_safety"), dict) else {}
+    backup_plan = summary.get("stable_backup_plan") if isinstance(summary.get("stable_backup_plan"), dict) else {}
+    comparison = summary.get("bundle_comparison") if isinstance(summary.get("bundle_comparison"), dict) else {}
+    comparison_preview = comparison.get("preview") if isinstance(comparison.get("preview"), dict) else {}
+    comparison_stable = comparison.get("stable") if isinstance(comparison.get("stable"), dict) else {}
     next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
     rows = [
         (_L("结果", "result"), summary.get("result") or "-"),
@@ -5432,6 +5437,13 @@ def _config_v2_promotion_plan_report_payload(summary):
         (_L("Preview check", "Preview check"), preview_check_summary.get("result") or "-"),
         (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
         (_L("Bundle 入口", "bundle entrypoint"), bundle.get("entrypoint") or "-"),
+        (_L("Stable 写策略", "stable write policy"), safety.get("stable_write_policy") or "human_only"),
+        (_L("Apply 启用", "apply enabled"), "yes" if summary.get("apply_enabled") or safety.get("apply_enabled") else "no"),
+        (_L("必须备份", "backup required"), "yes" if backup_plan.get("requires_backup_before_apply") or safety.get("requires_backup") else "no"),
+        (_L("本命令创建备份", "backup created by this command"), "yes" if backup_plan.get("would_create_backup") else "no"),
+        (_L("Bundle 对比", "bundle comparison"), comparison.get("comparison_status") or "-"),
+        (_L("Preview bundle", "preview bundle"), comparison_preview.get("bundle_revision") or comparison_preview.get("status") or "-"),
+        (_L("Stable bundle", "stable bundle"), comparison_stable.get("bundle_revision") or comparison_stable.get("status") or "-"),
         (_L("阻塞原因", "blocked reasons"), ", ".join(str(item) for item in (summary.get("blocked_reasons") or [])) or "-"),
         (_L("下一步", "next action"), next_action.get("label") or "-"),
         (_L("建议命令", "suggested command"), next_action.get("command") or "-"),

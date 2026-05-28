@@ -661,6 +661,20 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
                 },
             },
             "stable": {"root": {"config_root": "/tmp/mms"}},
+            "promotion_safety": {
+                "stable_write_policy": "human_only",
+                "apply_enabled": False,
+                "requires_backup": True,
+            },
+            "stable_backup_plan": {
+                "requires_backup_before_apply": True,
+                "would_create_backup": False,
+            },
+            "bundle_comparison": {
+                "comparison_status": "stable_bundle_missing",
+                "preview": {"bundle_revision": "bundle_preview"},
+                "stable": {"status": "missing"},
+            },
             "blocked_reasons": ["stable_root_human_only", "promotion_apply_not_implemented"],
             "next_action": {"label": "Human gate: review promotion plan", "command": "./mmf promote --json"},
         }
@@ -673,6 +687,13 @@ def test_model_source_status_tui_payload_is_read_only_chinese_first() -> None:
     assert ("Preview root", "/tmp/mms-next") in promotion_rows
     assert ("Stable root", "/tmp/mms") in promotion_rows
     assert ("Bundle 校验", "yes") in promotion_rows
+    assert ("Stable 写策略", "human_only") in promotion_rows
+    assert ("Apply 启用", "no") in promotion_rows
+    assert ("必须备份", "yes") in promotion_rows
+    assert ("本命令创建备份", "no") in promotion_rows
+    assert ("Bundle 对比", "stable_bundle_missing") in promotion_rows
+    assert ("Preview bundle", "bundle_preview") in promotion_rows
+    assert ("Stable bundle", "missing") in promotion_rows
     assert ("阻塞原因", "stable_root_human_only, promotion_apply_not_implemented") in promotion_rows
     assert ("下一步", "Human gate: review promotion plan") in promotion_rows
     assert "human gate" in promotion_note
