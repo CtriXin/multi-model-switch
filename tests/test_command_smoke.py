@@ -181,6 +181,24 @@ def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     ) == str(tmp_path / "plain" / "snapshots" / "startup" / "accepted.json")
 
 
+def test_toml_and_existing_path_helpers_preserve_read_and_filtering(tmp_path):
+    import tomllib
+
+    import mms_command_tools
+    import mms_core
+
+    toml_path = tmp_path / "prefs.toml"
+    toml_path.write_text('message = "中文"\n[launch.defaults]\nbypass = true\n', encoding="utf-8")
+    assert mms_command_tools.load_toml_file(str(toml_path), toml_loads=tomllib.loads) == {
+        "message": "中文",
+        "launch": {"defaults": {"bypass": True}},
+    }
+    assert mms_core._load_toml_file(str(toml_path))["message"] == "中文"
+
+    paths = [str(tmp_path / "missing.toml"), str(toml_path), str(tmp_path / "other.toml")]
+    assert mms_command_tools.existing_paths(paths, path_exists=lambda path: path.endswith("prefs.toml")) == [str(toml_path)]
+
+
 def test_config_guard_file_helper_preserves_bootstrap_backup_and_mode(tmp_path):
     import stat
 

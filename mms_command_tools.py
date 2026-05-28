@@ -673,6 +673,15 @@ def ensure_startup_snapshot_guard(
     exit_func(config_guard_exit_code)
 
 
+def load_toml_file(path, *, toml_loads):
+    with open(path, "rb") as handle:
+        return toml_loads(handle.read().decode("utf-8"))
+
+
+def existing_paths(paths, *, path_exists=os.path.exists):
+    return [path for path in paths if path_exists(path)]
+
+
 def confirm_guard_accept_from_tui(
     cfg,
     *,

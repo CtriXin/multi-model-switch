@@ -1919,16 +1919,21 @@ def save_config(cfg, *, reason=None):
 
 
 def _load_toml_file(path):
-    with open(path, "rb") as f:
-        return tomllib.loads(f.read().decode("utf-8"))
+    from mms_command_tools import load_toml_file
+
+    return load_toml_file(path, toml_loads=tomllib.loads)
 
 
 def _existing_override_paths():
-    return [path for path in OVERRIDE_PATHS if os.path.exists(path)]
+    from mms_command_tools import existing_paths
+
+    return existing_paths(OVERRIDE_PATHS)
 
 
 def _existing_preferences_paths():
-    return [path for path in PREFERENCES_PATHS if os.path.exists(path)]
+    from mms_command_tools import existing_paths
+
+    return existing_paths(PREFERENCES_PATHS)
 
 
 def _merge_dicts(base, override):
