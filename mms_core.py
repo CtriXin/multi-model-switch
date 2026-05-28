@@ -11719,25 +11719,16 @@ def main():
     # --presets
     if args.presets:
         _ensure_rich()
-        presets = cfg.get("presets", {})
-        visible_presets = {
-            name: p for name, p in presets.items()
-            if _preset_has_visible_model_options(p)
-        }
-        if visible_presets:
-            table = Table(title="已保存预设")
-            table.add_column("名称", style="cyan")
-            table.add_column("CLI", style="green")
-            table.add_column("Provider", style="magenta")
-            table.add_column("模型", style="yellow")
-            table.add_column("描述", style="dim")
-            table.add_column("模式", style="blue")
-            for name, p in visible_presets.items():
-                model_str = p.get("model", f"opus={p.get('opus','')}, sonnet={p.get('sonnet','')}")
-                desc = p.get("description", "")
-                auth = _infer_preset_auth_mode(p) or "—"
-                table.add_row(name, p.get("cli", "?"), p.get("provider", DEFAULT_PROVIDER_ID), str(model_str), desc, auth)
-            console.print(table)
+        from mms_command_tools import handle_presets_command
+
+        handle_presets_command(
+            cfg,
+            preset_has_visible_model_options=_preset_has_visible_model_options,
+            infer_preset_auth_mode=_infer_preset_auth_mode,
+            default_provider_id=DEFAULT_PROVIDER_ID,
+            table_cls=Table,
+            console=console,
+        )
         return
 
     # --export

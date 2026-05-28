@@ -821,6 +821,43 @@ def resolve_preset_export_runtime(
     return cli, exports, runtime
 
 
+def handle_presets_command(
+    cfg,
+    *,
+    preset_has_visible_model_options,
+    infer_preset_auth_mode,
+    default_provider_id,
+    table_cls,
+    console,
+):
+    presets = cfg.get("presets", {})
+    visible_presets = {
+        name: preset for name, preset in presets.items()
+        if preset_has_visible_model_options(preset)
+    }
+    if visible_presets:
+        table = table_cls(title="已保存预设")
+        table.add_column("名称", style="cyan")
+        table.add_column("CLI", style="green")
+        table.add_column("Provider", style="magenta")
+        table.add_column("模型", style="yellow")
+        table.add_column("描述", style="dim")
+        table.add_column("模式", style="blue")
+        for name, preset in visible_presets.items():
+            model_str = preset.get("model", f"opus={preset.get('opus','')}, sonnet={preset.get('sonnet','')}")
+            desc = preset.get("description", "")
+            auth = infer_preset_auth_mode(preset) or "—"
+            table.add_row(
+                name,
+                preset.get("cli", "?"),
+                preset.get("provider", default_provider_id),
+                str(model_str),
+                desc,
+                auth,
+            )
+        console.print(table)
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

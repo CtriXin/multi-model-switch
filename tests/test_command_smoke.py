@@ -261,6 +261,36 @@ def test_preset_export_runtime_rejects_oauth_without_resolving_provider():
     assert messages == [("此预设使用 oauth 模式，不支持 env export", False)]
 
 
+def test_presets_command_renders_only_visible_presets():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    cfg = {
+        "presets": {
+            "visible": {
+                "cli": "claude",
+                "provider": "relay",
+                "model": "sonnet",
+                "description": "daily",
+            },
+            "hidden": {"cli": "claude", "account": "official"},
+        }
+    }
+
+    mms_command_tools.handle_presets_command(
+        cfg,
+        preset_has_visible_model_options=lambda preset: "model" in preset,
+        infer_preset_auth_mode=mms_command_tools.infer_preset_auth_mode,
+        default_provider_id="default",
+        table_cls=_FakeTable,
+        console=console,
+    )
+
+    tables = [item for item in console.items if isinstance(item, _FakeTable)]
+    assert len(tables) == 1
+    assert tables[0].rows == [(("visible", "claude", "relay", "sonnet", "daily", "api_key"), {})]
+
+
 def test_models_command_dispatches_selected_provider():
     import mms_command_tools
 
