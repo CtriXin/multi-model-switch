@@ -5165,24 +5165,17 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                         _pause_after_tui_report("按 Enter 返回关于")
                         continue
             elif settings_action == "guard":
-                guard_title, guard_info, guard_actions = _snapshot_guard_tui_payload()
-                guard_action = tui_flow.safe_tui_call(
-                    select_channel_action_tui,
-                    guard_title,
-                    guard_info,
-                    guard_actions,
+                guard_result = tui_flow.handle_tui_guard_settings_action(
+                    current_cfg,
+                    snapshot_guard_tui_payload=_snapshot_guard_tui_payload,
+                    select_channel_action_tui=select_channel_action_tui,
+                    handle_guard_command=handle_guard_command,
+                    confirm_guard_accept_from_tui=_confirm_guard_accept_from_tui,
+                    pause_after_tui_report=_pause_after_tui_report,
+                    console=console,
                 )
-                if guard_action == "__interrupt__":
+                if guard_result["status"] == "interrupt":
                     return True
-                if guard_action == "status":
-                    handle_guard_command(["status"], bootstrap_cfg=current_cfg)
-                    _pause_after_tui_report("按 Enter 返回设置")
-                elif guard_action == "accept":
-                    if _confirm_guard_accept_from_tui(current_cfg):
-                        handle_guard_command(["accept"], bootstrap_cfg=current_cfg)
-                    else:
-                        console.print("[yellow]已取消接受当前快照。[/yellow]")
-                    _pause_after_tui_report("按 Enter 返回设置")
             elif settings_action == "account_mgmt":
                 _run_account_mgmt_tui(current_cfg)
             elif settings_action == "rescue":

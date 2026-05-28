@@ -761,6 +761,37 @@ def handle_tui_routes_export_settings_action(
         return {"status": "continue", "success": False}
 
 
+def handle_tui_guard_settings_action(
+    cfg,
+    *,
+    snapshot_guard_tui_payload,
+    select_channel_action_tui,
+    handle_guard_command,
+    confirm_guard_accept_from_tui,
+    pause_after_tui_report,
+    console,
+):
+    guard_title, guard_info, guard_actions = snapshot_guard_tui_payload()
+    guard_action = safe_tui_call(
+        select_channel_action_tui,
+        guard_title,
+        guard_info,
+        guard_actions,
+    )
+    if guard_action == "__interrupt__":
+        return {"status": "interrupt"}
+    if guard_action == "status":
+        handle_guard_command(["status"], bootstrap_cfg=cfg)
+        pause_after_tui_report("按 Enter 返回设置")
+    elif guard_action == "accept":
+        if confirm_guard_accept_from_tui(cfg):
+            handle_guard_command(["accept"], bootstrap_cfg=cfg)
+        else:
+            console.print("[yellow]已取消接受当前快照。[/yellow]")
+        pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue"}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     confirm_agent_pack,
     confirm_tui_options,
     handle_tui_connect_action,
+    handle_tui_guard_settings_action,
     handle_tui_last_used_action,
     handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
@@ -1084,6 +1085,94 @@ def test_handle_tui_routes_export_settings_action_reports_loader_or_export_failu
         "[red]导出失败: loader failed[/red]",
         "[red]导出失败: export failed[/red]",
     ]
+
+
+def test_handle_tui_guard_settings_action_runs_status_or_cancelled_accept() -> None:
+    calls = []
+    cfg = {"cfg": True}
+
+    class Console:
+        @staticmethod
+        def print(message):
+            calls.append(("print", message))
+
+    result = handle_tui_guard_settings_action(
+        cfg,
+        snapshot_guard_tui_payload=lambda: ("Guard", ["info"], [{"id": "status"}]),
+        select_channel_action_tui=lambda title, info, actions: calls.append(("select", title, info, actions)) or "status",
+        handle_guard_command=lambda args, *, bootstrap_cfg: calls.append(("guard", args, bootstrap_cfg)),
+        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)) or False,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=Console(),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("select", "Guard", ["info"], [{"id": "status"}]),
+        ("guard", ["status"], cfg),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+    calls.clear()
+    result = handle_tui_guard_settings_action(
+        cfg,
+        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
+        select_channel_action_tui=lambda *_args: "accept",
+        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
+        confirm_guard_accept_from_tui=lambda cfg_arg: calls.append(("confirm", cfg_arg)) or False,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=Console(),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [
+        ("confirm", cfg),
+        ("print", "[yellow]已取消接受当前快照。[/yellow]"),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_handle_tui_guard_settings_action_handles_accept_interrupt_and_back() -> None:
+    calls = []
+    cfg = {}
+
+    assert handle_tui_guard_settings_action(
+        cfg,
+        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
+        select_channel_action_tui=lambda *_args: "accept",
+        handle_guard_command=lambda args, *, bootstrap_cfg: calls.append(("guard", args, bootstrap_cfg)),
+        confirm_guard_accept_from_tui=lambda cfg_arg: calls.append(("confirm", cfg_arg)) or True,
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
+    ) == {"status": "continue"}
+
+    assert calls == [
+        ("confirm", cfg),
+        ("guard", ["accept"], cfg),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+    calls.clear()
+    assert handle_tui_guard_settings_action(
+        cfg,
+        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
+        select_channel_action_tui=lambda *_args: None,
+        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
+        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
+    ) == {"status": "continue"}
+    assert calls == []
+
+    assert handle_tui_guard_settings_action(
+        cfg,
+        snapshot_guard_tui_payload=lambda: ("Guard", [], []),
+        select_channel_action_tui=lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt),
+        handle_guard_command=lambda *_args, **_kwargs: calls.append(("guard",)),
+        confirm_guard_accept_from_tui=lambda _cfg: calls.append(("confirm",)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
+    ) == {"status": "interrupt"}
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:
