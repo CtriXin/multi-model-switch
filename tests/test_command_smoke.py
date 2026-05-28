@@ -3106,6 +3106,49 @@ def test_select_manage_target_wrapper_preserves_core_callbacks(monkeypatch):
     assert any(isinstance(item, _FakeTable) for item in console.items)
 
 
+def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {"version": 1}
+    calls = []
+    targets = iter([
+        {"kind": "provider", "id": "relay"},
+        {"kind": "account", "id": "codex-main"},
+        None,
+    ])
+
+    result = mms_command_tools.run_manage_channels(
+        cfg,
+        ensure_interactive_terminal=lambda label: calls.append(("interactive", label)),
+        select_manage_target=lambda current: calls.append(("select", current.copy())) or next(targets),
+        manage_provider_target=lambda current, provider_id: calls.append(("provider", current.copy(), provider_id)) or ({"version": 2}, True),
+        manage_account_target=lambda current, account_id: calls.append(("account", current.copy(), account_id)) or ({"version": 3}, False),
+    )
+
+    assert result == ({"version": 3}, True)
+    assert calls == [
+        ("interactive", "通道管理"),
+        ("select", {"version": 1}),
+        ("provider", {"version": 1}, "relay"),
+        ("select", {"version": 2}),
+        ("account", {"version": 2}, "codex-main"),
+        ("select", {"version": 3}),
+    ]
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_ensure_interactive_terminal", lambda label: calls.append(("core-interactive", label)))
+    monkeypatch.setattr(mms_core, "_select_manage_target", lambda current: calls.append(("core-select", current.copy())) or None)
+    monkeypatch.setattr(mms_core, "_manage_provider_target", lambda *_args: calls.append("unexpected-provider"))
+    monkeypatch.setattr(mms_core, "_manage_account_target", lambda *_args: calls.append("unexpected-account"))
+
+    assert mms_core.run_manage_channels({"version": 1}) == ({"version": 1}, False)
+    assert calls == [
+        ("core-interactive", "通道管理"),
+        ("core-select", {"version": 1}),
+    ]
+
+
 def test_rescue_and_registry_tui_payload_helpers_preserve_actions():
     import mms_command_tools
 

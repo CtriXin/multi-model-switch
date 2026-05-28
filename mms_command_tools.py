@@ -2322,6 +2322,28 @@ def select_manage_target(
     return select_manage_target_fallback(targets)
 
 
+def run_manage_channels(
+    cfg,
+    *,
+    ensure_interactive_terminal,
+    select_manage_target,
+    manage_provider_target,
+    manage_account_target,
+):
+    ensure_interactive_terminal("通道管理")
+    changed = False
+    current_cfg = cfg
+    while True:
+        target = select_manage_target(current_cfg)
+        if target is None:
+            return current_cfg, changed
+        if target.get("kind") == "provider":
+            current_cfg, did_change = manage_provider_target(current_cfg, target["id"])
+        else:
+            current_cfg, did_change = manage_account_target(current_cfg, target["id"])
+        changed = changed or did_change
+
+
 def format_rescue_hot_fallback_event(event):
     if not isinstance(event, dict) or not event:
         return "-"

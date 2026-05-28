@@ -3868,18 +3868,15 @@ def _run_recommend_mgmt_tui(cfg):
 
 
 def run_manage_channels(cfg):
-    _ensure_interactive_terminal("通道管理")
-    changed = False
-    current_cfg = cfg
-    while True:
-        target = _select_manage_target(current_cfg)
-        if target is None:
-            return current_cfg, changed
-        if target.get("kind") == "provider":
-            current_cfg, did_change = _manage_provider_target(current_cfg, target["id"])
-        else:
-            current_cfg, did_change = _manage_account_target(current_cfg, target["id"])
-        changed = changed or did_change
+    from mms_command_tools import run_manage_channels as run_manage_channels_impl
+
+    return run_manage_channels_impl(
+        cfg,
+        ensure_interactive_terminal=_ensure_interactive_terminal,
+        select_manage_target=_select_manage_target,
+        manage_provider_target=_manage_provider_target,
+        manage_account_target=_manage_account_target,
+    )
 
 
 def run_connect_wizard(cfg):
