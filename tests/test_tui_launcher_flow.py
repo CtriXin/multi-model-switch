@@ -9,6 +9,7 @@ from mms_tui_launcher_flow import (
     confirm_tui_options,
     handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
+    handle_tui_broker_action,
     handle_tui_connect_action,
     handle_tui_guard_settings_action,
     handle_tui_last_used_action,
@@ -62,6 +63,26 @@ def test_config_help_omits_load_balance_commands(monkeypatch) -> None:
     help_text = "\n".join(messages)
     assert "load-balance" not in help_text
     assert "Load Balance" not in help_text
+
+
+def test_handle_tui_broker_action_delegates_and_maps_status() -> None:
+    calls = []
+    cfg = {"cfg": True}
+
+    assert handle_tui_broker_action(
+        cfg,
+        "codex",
+        launch_broker_experiment_interactive=lambda cfg_arg, cli: calls.append((cfg_arg, cli, False)) or False,
+    ) == {"status": "continue"}
+    assert handle_tui_broker_action(
+        cfg,
+        "claude",
+        launch_broker_experiment_interactive=lambda cfg_arg, cli: calls.append((cfg_arg, cli, True)) or True,
+    ) == {"status": "exit"}
+    assert calls == [
+        (cfg, "codex", False),
+        (cfg, "claude", True),
+    ]
 
 
 def test_provider_browse_options_filters_and_dedupes_candidates() -> None:

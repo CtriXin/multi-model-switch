@@ -4944,7 +4944,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         # ── Broker experiment ──
         if action_type == "broker":
-            if _launch_broker_experiment_interactive(current_cfg, cli):
+            broker_result = tui_flow.handle_tui_broker_action(
+                current_cfg,
+                cli,
+                launch_broker_experiment_interactive=_launch_broker_experiment_interactive,
+            )
+            if broker_result["status"] == "exit":
                 return True
             continue
 

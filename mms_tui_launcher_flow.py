@@ -668,6 +668,12 @@ def handle_tui_connect_action(
     }
 
 
+def handle_tui_broker_action(cfg, cli_name, *, launch_broker_experiment_interactive):
+    if launch_broker_experiment_interactive(cfg, cli_name):
+        return {"status": "exit"}
+    return {"status": "continue"}
+
+
 def apply_tui_priority_changes(
     cfg,
     priority_changes,
