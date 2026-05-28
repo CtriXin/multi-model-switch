@@ -3776,6 +3776,81 @@ def runtime_httpx_kwargs(
     return transport_kwargs
 
 
+def validate_proxy_url(proxy_url, *, supported_proxy_schemes):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return None
+    try:
+        parsed = urlparse(proxy_url)
+    except Exception:
+        return "代理地址解析失败"
+    if parsed.scheme.lower() not in supported_proxy_schemes:
+        return "代理协议仅支持 http / https / socks5 / socks5h"
+    if not parsed.hostname:
+        return "代理地址缺少 host"
+    if parsed.port is None:
+        return "代理地址缺少 port"
+    return None
+
+
+def test_proxy_connectivity(
+    proxy_url,
+    no_proxy="",
+    target_url="https://api.anthropic.com",
+    force_ipv4=True,
+    *,
+    fake_upstream_enabled,
+    fake_proxy_probe,
+    http_status_is_success,
+    which=shutil.which,
+    run_command=subprocess.run,
+):
+    proxy_url = str(proxy_url or "").strip()
+    if not proxy_url:
+        return True, "未配置代理，跳过检测"
+    if fake_upstream_enabled():
+        probe = fake_proxy_probe(
+            target_url,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
+            force_ipv4=force_ipv4,
+            resolve_ip=False,
+        )
+        return bool(probe.get("ok")), str(probe.get("detail") or probe.get("http_code") or "fake upstream")
+    curl_bin = which("curl")
+    if not curl_bin:
+        return False, "当前系统没有 curl，无法测试代理连通性"
+    cmd = [
+        curl_bin,
+        *(["-4"] if force_ipv4 else []),
+        "--silent",
+        "--show-error",
+        "--head",
+        "--location",
+        "--max-time",
+        "8",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
+        "--proxy",
+        proxy_url,
+        target_url,
+    ]
+    if str(no_proxy or "").strip():
+        cmd.extend(["--noproxy", str(no_proxy).strip()])
+    result = run_command(cmd, capture_output=True, text=True)
+    http_code = str(result.stdout or "").strip()
+    if result.returncode == 0 and http_status_is_success(http_code):
+        return True, f"代理连通性测试通过：{target_url} (HTTP {http_code})"
+    detail = (result.stderr or "").strip()
+    if http_code and http_code not in {"000"}:
+        detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
+    if len(detail) > 200:
+        detail = detail[:200] + "..."
+    return False, detail or f"代理连通性测试失败：{target_url}"
+
+
 def parse_semver_tag(tag):
     value = str(tag or "").strip()
     if not value.startswith("v"):

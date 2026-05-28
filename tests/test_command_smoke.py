@@ -2813,6 +2813,8 @@ def test_provider_normalization_helpers_preserve_default_and_cleanup_semantics()
 
 
 def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
+    from types import SimpleNamespace
+
     import mms_command_tools
 
     valid_modes = {"auto", "enable", "disable"}
@@ -2866,6 +2868,73 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
         target_url="https://relay.example/v1",
         official_hosts=official_hosts,
     ) == {}
+    proxy_schemes = {"http", "https", "socks5", "socks5h"}
+    assert mms_command_tools.validate_proxy_url("", supported_proxy_schemes=proxy_schemes) is None
+    assert mms_command_tools.validate_proxy_url(
+        "http://user:pass@198.51.100.24:6394",
+        supported_proxy_schemes=proxy_schemes,
+    ) is None
+    assert mms_command_tools.validate_proxy_url(
+        "socks5h://127.0.0.1:7890",
+        supported_proxy_schemes=proxy_schemes,
+    ) is None
+    assert mms_command_tools.validate_proxy_url(
+        "socket5://127.0.0.1:7890",
+        supported_proxy_schemes=proxy_schemes,
+    ) == "代理协议仅支持 http / https / socks5 / socks5h"
+    assert mms_command_tools.validate_proxy_url(
+        "http://",
+        supported_proxy_schemes=proxy_schemes,
+    ) == "代理地址缺少 host"
+    assert mms_command_tools.test_proxy_connectivity(
+        "",
+        fake_upstream_enabled=lambda: False,
+        fake_proxy_probe=lambda *args, **kwargs: {},
+        http_status_is_success=lambda value: value.startswith("2"),
+    ) == (True, "未配置代理，跳过检测")
+    assert mms_command_tools.test_proxy_connectivity(
+        "http://127.0.0.1:7890",
+        no_proxy="localhost",
+        target_url="https://api.anthropic.com",
+        force_ipv4=False,
+        fake_upstream_enabled=lambda: True,
+        fake_proxy_probe=lambda target_url, **kwargs: {"ok": True, "detail": f"{target_url}:{kwargs['no_proxy']}"},
+        http_status_is_success=lambda value: value.startswith("2"),
+    ) == (True, "https://api.anthropic.com:localhost")
+    assert mms_command_tools.test_proxy_connectivity(
+        "http://127.0.0.1:7890",
+        fake_upstream_enabled=lambda: False,
+        fake_proxy_probe=lambda *args, **kwargs: {},
+        http_status_is_success=lambda value: value.startswith("2"),
+        which=lambda _name: None,
+    ) == (False, "当前系统没有 curl，无法测试代理连通性")
+
+    run_calls = []
+    ok, detail = mms_command_tools.test_proxy_connectivity(
+        "http://127.0.0.1:7890",
+        no_proxy="localhost",
+        target_url="https://api.anthropic.com",
+        force_ipv4=True,
+        fake_upstream_enabled=lambda: False,
+        fake_proxy_probe=lambda *args, **kwargs: {},
+        http_status_is_success=lambda value: value.startswith("2"),
+        which=lambda _name: "/usr/bin/curl",
+        run_command=lambda cmd, **kwargs: run_calls.append((cmd, kwargs)) or SimpleNamespace(returncode=0, stdout="204", stderr=""),
+    )
+    assert ok is True
+    assert detail == "代理连通性测试通过：https://api.anthropic.com (HTTP 204)"
+    assert "-4" in run_calls[0][0]
+    assert run_calls[0][0][-2:] == ["--noproxy", "localhost"]
+    ok, detail = mms_command_tools.test_proxy_connectivity(
+        "http://127.0.0.1:7890",
+        fake_upstream_enabled=lambda: False,
+        fake_proxy_probe=lambda *args, **kwargs: {},
+        http_status_is_success=lambda value: value.startswith("2"),
+        which=lambda _name: "/usr/bin/curl",
+        run_command=lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="404", stderr=""),
+    )
+    assert ok is False
+    assert detail == "HTTP 404"
 
 
 def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):

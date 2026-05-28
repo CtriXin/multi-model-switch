@@ -953,67 +953,25 @@ _SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5", "socks5h"}
 
 
 def _validate_proxy_url(proxy_url):
-    proxy_url = str(proxy_url or "").strip()
-    if not proxy_url:
-        return None
-    try:
-        parsed = urlparse(proxy_url)
-    except Exception:
-        return "代理地址解析失败"
-    if parsed.scheme.lower() not in _SUPPORTED_PROXY_SCHEMES:
-        return "代理协议仅支持 http / https / socks5 / socks5h"
-    if not parsed.hostname:
-        return "代理地址缺少 host"
-    if parsed.port is None:
-        return "代理地址缺少 port"
-    return None
+    from mms_command_tools import validate_proxy_url
+
+    return validate_proxy_url(proxy_url, supported_proxy_schemes=_SUPPORTED_PROXY_SCHEMES)
 
 
 def _test_proxy_connectivity(proxy_url, no_proxy="", target_url="https://api.anthropic.com", force_ipv4=True):
-    proxy_url = str(proxy_url or "").strip()
-    if not proxy_url:
-        return True, "未配置代理，跳过检测"
-    if _fake_upstream_enabled():
-        probe = _fake_proxy_probe(
-            target_url,
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-            force_ipv4=force_ipv4,
-            resolve_ip=False,
-        )
-        return bool(probe.get("ok")), str(probe.get("detail") or probe.get("http_code") or "fake upstream")
-    curl_bin = shutil.which("curl")
-    if not curl_bin:
-        return False, "当前系统没有 curl，无法测试代理连通性"
-    cmd = [
-        curl_bin,
-        *(["-4"] if force_ipv4 else []),
-        "--silent",
-        "--show-error",
-        "--head",
-        "--location",
-        "--max-time",
-        "8",
-        "--output",
-        "/dev/null",
-        "--write-out",
-        "%{http_code}",
-        "--proxy",
+    from mms_command_tools import test_proxy_connectivity
+
+    return test_proxy_connectivity(
         proxy_url,
-        target_url,
-    ]
-    if str(no_proxy or "").strip():
-        cmd.extend(["--noproxy", str(no_proxy).strip()])
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    http_code = str(result.stdout or "").strip()
-    if result.returncode == 0 and _http_status_is_success(http_code):
-        return True, f"代理连通性测试通过：{target_url} (HTTP {http_code})"
-    detail = (result.stderr or "").strip()
-    if http_code and http_code not in {"000"}:
-        detail = f"HTTP {http_code}" + (f" · {detail}" if detail else "")
-    if len(detail) > 200:
-        detail = detail[:200] + "..."
-    return False, detail or f"代理连通性测试失败：{target_url}"
+        no_proxy=no_proxy,
+        target_url=target_url,
+        force_ipv4=force_ipv4,
+        fake_upstream_enabled=_fake_upstream_enabled,
+        fake_proxy_probe=_fake_proxy_probe,
+        http_status_is_success=_http_status_is_success,
+        which=shutil.which,
+        run_command=subprocess.run,
+    )
 
 
 def _prompt_validated_proxy_fields(current_proxy="", current_no_proxy="", *, wizard=False, target_url="https://api.anthropic.com"):
