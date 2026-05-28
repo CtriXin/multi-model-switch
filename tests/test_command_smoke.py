@@ -1759,6 +1759,70 @@ def test_resolve_interactive_launch_model_wrapper_preserves_core_callbacks(monke
     ]
 
 
+def test_save_preset_interactive_helper_and_wrapper_preserve_prompt_save_flow(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    prompts = iter(["daily", "main preset"])
+    saved = []
+    console = _CollectingConsole()
+    cfg = {}
+    mms_command_tools.save_preset_interactive(
+        cfg,
+        "codex",
+        {"model": "gpt-5.5", "provider": "relay"},
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        normalize_preset_entry=lambda name, preset: {"name": name, **preset},
+        save_config=lambda current: saved.append(current.copy()),
+        console=console,
+    )
+    assert cfg == {
+        "presets": {
+            "daily": {
+                "name": "daily",
+                "cli": "codex",
+                "model": "gpt-5.5",
+                "provider": "relay",
+                "description": "main preset",
+            }
+        }
+    }
+    assert saved == [cfg]
+    assert console.items == ["[green]✓ 预设 'daily' 已保存[/green]"]
+
+    prompts = iter(["cheap", ""])
+    saved.clear()
+    cfg = {"presets": {}}
+    mms_command_tools.save_preset_interactive(
+        cfg,
+        "claude",
+        "qwen3-coder-plus",
+        prompt_ask=lambda *args, **kwargs: next(prompts),
+        normalize_preset_entry=lambda name, preset: {"name": name, **preset},
+        save_config=lambda current: saved.append(current.copy()),
+        console=console,
+    )
+    assert cfg == {"presets": {"cheap": {"name": "cheap", "cli": "claude", "model": "qwen3-coder-plus"}}}
+
+    prompts = iter(["wrapped", "wrapped desc"])
+    monkeypatch.setattr(mms_core, "Prompt", type("Prompt", (), {"ask": staticmethod(lambda *args, **kwargs: next(prompts))}))
+    monkeypatch.setattr(mms_core, "_normalize_preset_entry", lambda name, preset: {"name": name, **preset})
+    monkeypatch.setattr(mms_core, "save_config", lambda current: saved.append(current.copy()))
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+    cfg = {}
+    mms_core.save_preset_interactive(cfg, "codex", "gpt-5.5")
+    assert cfg == {
+        "presets": {
+            "wrapped": {
+                "name": "wrapped",
+                "cli": "codex",
+                "model": "gpt-5.5",
+                "description": "wrapped desc",
+            }
+        }
+    }
+
+
 def test_broker_and_opencode_profile_helpers_preserve_disabled_default_and_config_precedence():
     import mms_command_tools
 

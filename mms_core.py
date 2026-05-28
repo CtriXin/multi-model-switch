@@ -5367,20 +5367,17 @@ def _select_and_apply_opencode_profile(runtime, *, use_tui=False):
 
 
 def save_preset_interactive(cfg, cli, model_info):
-    name = Prompt.ask("预设名称")
-    description = Prompt.ask("预设描述（可留空）", default="").strip()
-    preset = {"cli": cli}
-    if isinstance(model_info, dict):
-        preset.update(model_info)
-    else:
-        preset["model"] = model_info
-    if "presets" not in cfg:
-        cfg["presets"] = {}
-    if description:
-        preset["description"] = description
-    cfg["presets"][name] = _normalize_preset_entry(name, preset)
-    save_config(cfg)
-    console.print(f"[green]✓ 预设 '{name}' 已保存[/green]")
+    from mms_command_tools import save_preset_interactive as save_preset_interactive_helper
+
+    return save_preset_interactive_helper(
+        cfg,
+        cli,
+        model_info,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        normalize_preset_entry=_normalize_preset_entry,
+        save_config=save_config,
+        console=console,
+    )
 
 
 def _uses_native_account_entry(runtime, cli):

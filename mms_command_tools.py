@@ -6482,6 +6482,32 @@ def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "ac
     return {key: value for key, value in preset.items() if key not in excluded_keys}
 
 
+def save_preset_interactive(
+    cfg,
+    cli,
+    model_info,
+    *,
+    prompt_ask,
+    normalize_preset_entry,
+    save_config,
+    console,
+):
+    name = prompt_ask("预设名称")
+    description = prompt_ask("预设描述（可留空）", default="").strip()
+    preset = {"cli": cli}
+    if isinstance(model_info, dict):
+        preset.update(model_info)
+    else:
+        preset["model"] = model_info
+    if "presets" not in cfg:
+        cfg["presets"] = {}
+    if description:
+        preset["description"] = description
+    cfg["presets"][name] = normalize_preset_entry(name, preset)
+    save_config(cfg)
+    console.print(f"[green]✓ 预设 '{name}' 已保存[/green]")
+
+
 def available_broker_profiles_for_cli(_cfg, _cli_name):
     return []
 
