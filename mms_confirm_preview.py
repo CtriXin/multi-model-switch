@@ -133,6 +133,55 @@ def confirm_context_lines(
     return lines[:12]
 
 
+def confirm_launch(
+    cli,
+    model_info,
+    once=False,
+    runtime=None,
+    *,
+    console,
+    panel_cls,
+    prompt_cls,
+    runtime_source_kind_label,
+    normalize_opencode_entrypoint,
+):
+    if isinstance(model_info, dict):
+        model_items = [f"{k}={v}" for k, v in model_info.items() if k != "subagent" and v]
+        model_display = ", ".join(model_items) if model_items else "官方默认"
+    else:
+        model_display = model_info or "官方默认"
+
+    mode_str = "一次性命令" if once else "交互会话"
+    env_str = "临时注入，仅当前 CLI 进程可见" if cli in ("claude", "codex", "opencode", "agy") else "无需额外注入"
+    source_line = ""
+    if runtime:
+        source_kind = runtime_source_kind_label(runtime)
+        source_label = runtime.get("name", runtime.get("id", "default"))
+        source_line = f"[bold]来源:[/bold]   {source_kind} / {source_label}\n"
+    profile_line = ""
+    if cli == "opencode" and runtime:
+        profile_label = str(runtime.get("opencode_profile_label") or runtime.get("opencode_profile") or "").strip()
+        if profile_label:
+            profile_line = f"[bold]Profile:[/bold] {profile_label}\n"
+        entrypoint = normalize_opencode_entrypoint(runtime.get("opencode_entrypoint")) or "tui"
+        if entrypoint != "tui":
+            profile_line += f"[bold]Entry:[/bold]   {entrypoint}\n"
+    panel_text = (
+        f"[bold]CLI:[/bold]    {cli}\n"
+        f"[bold]模型:[/bold]   {model_display}\n"
+        f"{source_line}"
+        f"{profile_line}"
+        f"[bold]启动:[/bold]   {mode_str}\n"
+        f"[bold]环境:[/bold]   {env_str}\n"
+        f"\n"
+        f"[dim]Enter=启动  S=保存为预设  Q=取消[/dim]"
+    )
+    console.print(panel_cls(panel_text, title="确认启动", border_style="green"))
+
+    choice = prompt_cls.ask("操作", choices=["", "s", "q"], default="")
+    return choice
+
+
 def build_confirm_preview_catalog(
     cli,
     runtime,

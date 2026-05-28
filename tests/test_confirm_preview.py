@@ -38,6 +38,50 @@ def test_build_confirm_preview_catalog_collects_nsr_hooks_for_codex():
     assert "NSR 持续运行" in nsr_titles
 
 
+def test_confirm_launch_wrapper_renders_opencode_profile(monkeypatch):
+    printed = []
+
+    class FakeConsole:
+        def print(self, value):
+            printed.append(value)
+
+    class FakePrompt:
+        @staticmethod
+        def ask(*_args, **_kwargs):
+            return "s"
+
+    def fake_panel(text, **kwargs):
+        return {"text": text, "kwargs": kwargs}
+
+    monkeypatch.setattr(mms_core, "console", FakeConsole())
+    monkeypatch.setattr(mms_core, "Panel", fake_panel)
+    monkeypatch.setattr(mms_core, "Prompt", FakePrompt)
+
+    choice = mms_core.confirm_launch(
+        "opencode",
+        {"model": "deepseek-chat", "subagent": "hidden"},
+        once=True,
+        runtime={
+            "id": "provider-a",
+            "name": "Provider A",
+            "runtime_kind": "opencode_profile",
+            "opencode_profile_label": "Agent",
+            "opencode_entrypoint": "backend-agent",
+        },
+    )
+
+    assert choice == "s"
+    assert printed
+    panel = printed[0]
+    assert panel["kwargs"] == {"title": "确认启动", "border_style": "green"}
+    assert "deepseek-chat" in panel["text"]
+    assert "subagent" not in panel["text"]
+    assert "OpenCode / Provider A" in panel["text"]
+    assert "Profile:[/bold] Agent" in panel["text"]
+    assert "Entry:[/bold]   serve" in panel["text"]
+    assert "一次性命令" in panel["text"]
+
+
 def test_build_confirm_preview_catalog_collects_preview_sections(monkeypatch, tmp_path):
     base_hook = tmp_path / "rtk-rewrite.sh"
     base_hook.write_text("#!/bin/sh\n", encoding="utf-8")
