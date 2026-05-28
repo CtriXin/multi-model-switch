@@ -625,7 +625,7 @@ def route_model(user_message: str, heavy_model: str, light_model: str,
     return heavy_model
 
 
-# ── Model Routes Export（供 Hive MCP / 外部消费） ──────────────────
+# ── Model Routes Legacy Export（generated bundle / compatibility） ───────────
 
 import stat
 
@@ -1145,7 +1145,7 @@ def _persist_routes_export(routes):
 
 
 def export_model_routes(cfg=None, force=False, startup_safe=False):
-    """导出 Hive 可直接消费的最小路由契约，并做 snapshot 去重。"""
+    """导出 legacy route-export 兼容契约，并做 snapshot 去重。"""
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _probe_models, _probe_models_for_startup, _normalize_priority, _normalize_role,
@@ -1254,7 +1254,7 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
         "claude-haiku-4-5-20251001",
     }
     # Model-CLI compatibility: keep the coarse family filter aligned with current
-    # runtime routing, but do not expose executor metadata to Hive.
+    # runtime routing, but do not expose executor metadata to route-export consumers.
     def _model_cli_compatible(model_name, supported_clis):
         if not supported_clis:
             return True  # no restriction

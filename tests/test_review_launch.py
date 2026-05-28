@@ -650,6 +650,7 @@ def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkey
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["transport_evidence"][0]["usage"] == usage
+    assert payload["transport_evidence"][0]["route_source"] == "mms:legacy-provider-config"
     assert payload["dispatch_attempts"][0]["usage"] == usage
     assert payload["cache_transport_evidence"] == payload["transport_evidence"]
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()

@@ -1238,7 +1238,7 @@ def _transport_evidence_for_selection(
         "protocol": protocol,
         "request_url": str(selected_attempt.get("request_url") or ""),
         "request_path": str(selected_attempt.get("request_path") or ""),
-        "route_source": str(provider.get("route_source") or "mms:model-routes.json"),
+        "route_source": str(provider.get("route_source") or "mms:legacy-provider-config"),
         "provider_profile": _default_provider_profile(provider, protocol),
         "fallback_used": bool(fallback_reason),
         "fallback_reason": fallback_reason,
