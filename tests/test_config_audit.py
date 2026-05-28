@@ -442,3 +442,99 @@ def test_script_subcommand_sets_display_prog(monkeypatch, tmp_path):
     assert code == 7
     assert captured["cmd"] == [sys.executable, str(script_path), "--dry-run"]
     assert captured["env"]["MMS_SUBCOMMAND_PROG"] == "mmg smoke"
+
+
+def test_exposure_command_renders_runtime_sections():
+    import mms_command_tools
+
+    class Table:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+            self.columns = []
+            self.rows = []
+
+        def add_column(self, *args, **kwargs):
+            self.columns.append((args, kwargs))
+
+        def add_row(self, *args, **kwargs):
+            self.rows.append((args, kwargs))
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, *args, **_kwargs):
+            self.items.append(args[0] if args else "")
+
+    captured = {}
+    console = Console()
+    cfg = {"providers": []}
+    provider = {"id": "relay"}
+    models = {"models": ["gpt-5.5"]}
+    runtime = {"id": "relay-runtime"}
+
+    def choose_runtime_source(cfg_arg, cli, default_provider, models_cache, account_id=None, provider_id=None):
+        captured["choose"] = {
+            "cfg": cfg_arg,
+            "cli": cli,
+            "provider": default_provider,
+            "models": models_cache,
+            "account_id": account_id,
+            "provider_id": provider_id,
+        }
+        return runtime, ["gpt-5.5"], "codex"
+
+    def inspect_runtime_exposure(cli, runtime_arg):
+        captured["inspect"] = (cli, runtime_arg)
+        return {
+            "cli": cli,
+            "runtime_id": runtime_arg["id"],
+            "auth_mode": "api_key",
+            "network": {
+                "proxy_mode": "direct",
+                "dns_mode": "direct",
+                "proxy_fingerprint": "direct",
+                "timezone": "Asia/Singapore",
+                "locale": "zh_CN.UTF-8",
+                "fake_upstream": True,
+                "force_ipv4": True,
+            },
+            "home": {
+                "real_home": "/home/real",
+                "account_home": "/home/account",
+                "session_home": "/home/session",
+                "settings_path": "/home/session/settings.json",
+            },
+            "process_env": [{"key": "MMS_MODEL_NAME", "value": "gpt-5.5"}],
+            "settings": {"statusline": True, "hook_events": ["SessionStart"], "env_keys": ["ANTHROPIC_BASE_URL"]},
+            "notes": ["safe"],
+        }
+
+    mms_command_tools.handle_exposure_command(
+        ["codex", "--provider", "relay"],
+        command_name="mmg",
+        cli_names=["claude", "codex"],
+        load_command_config=lambda: cfg,
+        ensure_provider_credentials=lambda cfg_arg: provider,
+        ensure_models_ready=lambda cfg_arg, provider_arg: (provider_arg, models),
+        choose_runtime_source=choose_runtime_source,
+        inspect_runtime_exposure=inspect_runtime_exposure,
+        table_cls=Table,
+        console=console,
+    )
+
+    assert captured["choose"]["cli"] == "codex"
+    assert captured["choose"]["provider_id"] == "relay"
+    assert captured["inspect"] == ("codex", runtime)
+    titles = [item.kwargs.get("title") for item in console.items if isinstance(item, Table)]
+    assert titles == [
+        "MMS Exposure Audit",
+        "Session Home / Settings",
+        "Process Env Exposed To CLI",
+        "Session Settings Exposure",
+    ]
+    summary = console.items[0]
+    assert ("cli", "codex") in [row for row, _kwargs in summary.rows]
+    assert ("fake_upstream", "on") in [row for row, _kwargs in summary.rows]
+    assert any("safe" in str(item) for item in console.items)

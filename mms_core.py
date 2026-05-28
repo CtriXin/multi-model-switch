@@ -11634,81 +11634,21 @@ def handle_doctor_command(argv):
 
 def handle_exposure_command(argv):
     _ensure_rich()
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} exposure",
-        description="审计当前 runtime 会向 CLI 暴露哪些 env / settings / HOME 信息",
-    )
-    parser.add_argument("cli", nargs="?", default="claude", choices=CLI_NAMES, help="目标 CLI")
-    parser.add_argument("--account", help="指定账号 id")
-    parser.add_argument("--provider", help="指定 provider id")
-    args = parser.parse_args(argv)
-
+    from mms_command_tools import handle_exposure_command as handle_exposure_command_impl
     from mms_launchers import inspect_runtime_exposure
 
-    cfg = _load_command_config()
-    default_provider = ensure_provider_credentials(cfg)
-    default_provider, models_cache = ensure_models_ready(cfg, default_provider)
-    runtime, _models, launch_cli = _choose_runtime_source(
-        cfg,
-        args.cli,
-        default_provider,
-        models_cache,
-        account_id=args.account,
-        provider_id=args.provider,
+    return handle_exposure_command_impl(
+        argv,
+        command_name=current_command(),
+        cli_names=CLI_NAMES,
+        load_command_config=_load_command_config,
+        ensure_provider_credentials=ensure_provider_credentials,
+        ensure_models_ready=ensure_models_ready,
+        choose_runtime_source=_choose_runtime_source,
+        inspect_runtime_exposure=inspect_runtime_exposure,
+        table_cls=Table,
+        console=console,
     )
-    if runtime is None:
-        console.print(f"[red]{args.cli} 当前没有可用运行来源[/red]")
-        return
-
-    payload = inspect_runtime_exposure(launch_cli, runtime)
-
-    summary = Table(title="MMS Exposure Audit")
-    summary.add_column("字段", style="cyan")
-    summary.add_column("值", style="green")
-    summary.add_row("cli", str(payload.get("cli") or "-"))
-    summary.add_row("runtime", str(payload.get("runtime_name") or payload.get("runtime_id") or "-"))
-    summary.add_row("auth_mode", str(payload.get("auth_mode") or "-"))
-    network = payload.get("network") or {}
-    summary.add_row("net", str(network.get("proxy_mode") or "-"))
-    summary.add_row("dns", str(network.get("dns_mode") or "-"))
-    summary.add_row("proxy", str(network.get("proxy_fingerprint") or "-"))
-    summary.add_row("timezone", str(network.get("timezone") or "-"))
-    summary.add_row("locale", str(network.get("locale") or "-"))
-    summary.add_row("fake_upstream", "on" if network.get("fake_upstream") else "off")
-    summary.add_row("ipv4", "on" if network.get("force_ipv4") else "off")
-    console.print(summary)
-
-    home = payload.get("home") or {}
-    home_table = Table(title="Session Home / Settings")
-    home_table.add_column("字段", style="cyan")
-    home_table.add_column("值", style="green")
-    home_table.add_row("real_home", str(home.get("real_home") or "-"))
-    home_table.add_row("account_home", str(home.get("account_home") or "-"))
-    home_table.add_row("session_home", str(home.get("session_home") or "-"))
-    home_table.add_row("settings_path", str(home.get("settings_path") or "-"))
-    console.print(home_table)
-
-    env_table = Table(title="Process Env Exposed To CLI")
-    env_table.add_column("Key", style="cyan")
-    env_table.add_column("Value", style="green")
-    for item in payload.get("process_env") or []:
-        env_table.add_row(str(item.get("key") or "-"), str(item.get("value") or "-"))
-    console.print(env_table)
-
-    settings = payload.get("settings") or {}
-    settings_table = Table(title="Session Settings Exposure")
-    settings_table.add_column("字段", style="cyan")
-    settings_table.add_column("值", style="green")
-    settings_table.add_row("statusLine", "on" if settings.get("statusline") else "off")
-    settings_table.add_row("hook_events", ", ".join(settings.get("hook_events") or []) or "-")
-    settings_table.add_row("env_keys", ", ".join(settings.get("env_keys") or []) or "-")
-    console.print(settings_table)
-
-    notes = payload.get("notes") or []
-    if notes:
-        console.print("[yellow]可观察性说明：[/yellow]")
-        for note in notes:
-            console.print(f"  - {note}")
 
 
 def handle_test_command(argv, subcommand_name="test"):
