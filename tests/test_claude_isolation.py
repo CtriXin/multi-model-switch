@@ -1123,7 +1123,6 @@ def test_load_config_does_not_persist_normalization_by_default(monkeypatch, tmp_
     monkeypatch.setattr(mms_core, "_normalize_presets_config", lambda cfg: (cfg, False))
     monkeypatch.setattr(mms_core, "_normalize_user_config", lambda cfg: (cfg, False))
     monkeypatch.setattr(mms_core, "_normalize_cache_config", lambda cfg: (cfg, False))
-    monkeypatch.setattr(mms_core, "_normalize_load_balance_config", lambda cfg: (cfg, False))
 
     saved = []
     monkeypatch.setattr(mms_core, "save_config", lambda cfg, reason=None: saved.append((cfg, reason)))
@@ -1150,7 +1149,6 @@ def test_load_config_persists_when_requested(monkeypatch, tmp_path):
     monkeypatch.setattr(mms_core, "_normalize_presets_config", lambda cfg: (cfg, False))
     monkeypatch.setattr(mms_core, "_normalize_user_config", lambda cfg: (cfg, False))
     monkeypatch.setattr(mms_core, "_normalize_cache_config", lambda cfg: (cfg, False))
-    monkeypatch.setattr(mms_core, "_normalize_load_balance_config", lambda cfg: (cfg, False))
 
     saved = []
     monkeypatch.setattr(mms_core, "save_config", lambda cfg, reason=None: saved.append((cfg, reason)))

@@ -9,11 +9,8 @@ from mms_tui_launcher_flow import (
     confirm_tui_options,
     handle_tui_connect_action,
     handle_tui_last_used_action,
-    handle_tui_load_balance_action,
     handle_tui_provider_browse_action,
     last_used_model_info,
-    load_balance_slot_provider_ids,
-    load_balance_tui_payload,
     normalize_confirm_result,
     official_account_profile_context,
     opencode_profile_launch_context,
@@ -21,11 +18,41 @@ from mms_tui_launcher_flow import (
     provider_browse_model_options,
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
-    resolve_load_balance_launch_context,
     resolve_last_used_launch_context,
     safe_tui_call,
     selected_model_launch_context,
 )
+
+
+def test_load_balance_entry_removed_from_launcher_tui() -> None:
+    import inspect
+    import mms_tui
+    import mms_tui_launcher_flow as flow
+
+    launcher_source = inspect.getsource(mms_tui.select_family_tui)
+
+    assert "load_balance" not in launcher_source
+    assert " 负载" not in launcher_source
+    assert not hasattr(flow, "handle_tui_load_balance_action")
+
+
+def test_config_help_omits_load_balance_commands(monkeypatch) -> None:
+    import mms_core
+
+    messages = []
+
+    class Console:
+        @staticmethod
+        def print(*args, **_kwargs):
+            messages.append(" ".join(str(arg) for arg in args))
+
+    monkeypatch.setattr(mms_core, "console", Console())
+
+    mms_core._display_config_help()
+
+    help_text = "\n".join(messages)
+    assert "load-balance" not in help_text
+    assert "Load Balance" not in help_text
 
 
 def test_provider_browse_options_filters_and_dedupes_candidates() -> None:
@@ -275,327 +302,6 @@ def test_safe_tui_call_normalizes_keyboard_interrupt() -> None:
 def test_safe_tui_call_returns_function_result() -> None:
     assert safe_tui_call(lambda left, right=None: (left, right), "a", right="b") == ("a", "b")
 
-
-def test_load_balance_tui_payload_preserves_models_and_provider_options() -> None:
-    cfg = {"load_balance": True}
-    provider = {"id": "p1"}
-    default_models = ["gpt-5.4"]
-    families_detail = {
-        "codex": {
-            "GPT": [{"model": "gpt-5.4"}, {"model": "gpt-5.5"}],
-            "Qwen": [{"model": "qwen3"}],
-        },
-        "claude": {"Claude": [{"model": "claude-sonnet-4.5"}]},
-    }
-
-    def build_provider_options_map(arg_cfg, cli_name, current_provider, models, all_models):
-        assert arg_cfg is cfg
-        assert cli_name == "codex"
-        assert current_provider is provider
-        assert models is default_models
-        return {"models": list(all_models)}
-
-    all_models, cli_families, profiles, default_profile, provider_options = load_balance_tui_payload(
-        cfg,
-        "codex",
-        provider,
-        default_models,
-        families_detail,
-        load_balance_profiles=lambda arg_cfg: {"balanced": {} if arg_cfg is cfg else {"wrong": True}},
-        default_load_balance_profile_name=lambda arg_cfg: "balanced" if arg_cfg is cfg else "wrong",
-        build_provider_options_map=build_provider_options_map,
-    )
-
-    assert all_models == ["gpt-5.4", "gpt-5.5", "qwen3"]
-    assert cli_families is families_detail["codex"]
-    assert profiles == {"balanced": {}}
-    assert default_profile == "balanced"
-    assert provider_options == {"models": ["gpt-5.4", "gpt-5.5", "qwen3"]}
-
-
-def test_load_balance_tui_payload_skips_provider_options_without_models() -> None:
-    calls = []
-
-    result = load_balance_tui_payload(
-        {},
-        "codex",
-        {},
-        [],
-        {"codex": {}},
-        load_balance_profiles=lambda _cfg: {},
-        default_load_balance_profile_name=lambda _cfg: "",
-        build_provider_options_map=lambda *_args: calls.append(True),
-    )
-
-    assert result == ([], {}, {}, "", None)
-    assert calls == []
-
-
-def test_load_balance_slot_provider_ids_drops_empty_slots() -> None:
-    assert load_balance_slot_provider_ids(
-        {
-            "lb_slot_providers": {
-                "heavy": "provider-heavy",
-                "medium": "",
-                "light": None,
-            }
-        }
-    ) == {"heavy": "provider-heavy"}
-
-
-def test_resolve_load_balance_launch_context_uses_heavy_slot_provider() -> None:
-    trace_records = []
-    trace_choices = []
-    history_calls = []
-    runtime = {"id": "heavy-provider"}
-
-    model_info, selected_runtime, cli_name, error = resolve_load_balance_launch_context(
-        {},
-        "codex",
-        {"model": "gpt-5.4", "lb_medium": "qwen3", "lb_light": "gpt-5-mini", "lb_label": "balanced"},
-        {"id": "current"},
-        ["gpt-5.4"],
-        {"heavy": "provider-heavy"},
-        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
-        save_lb_history=lambda *args, **kwargs: history_calls.append((args, kwargs)),
-        resolve_lb_slot_provider=lambda *_args: (runtime, ""),
-        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
-    )
-
-    assert model_info["model"] == "gpt-5.4"
-    assert selected_runtime is runtime
-    assert cli_name == "codex"
-    assert error == ""
-    assert trace_records == [
-        (
-            ("load balance",),
-            {
-                "cli": "codex",
-                "model": "gpt-5.4",
-                "lb_medium": "qwen3",
-                "lb_light": "gpt-5-mini",
-                "profile": None,
-            },
-        )
-    ]
-    assert history_calls == [
-        (
-            ("gpt-5.4", "qwen3", "gpt-5-mini"),
-            {"slot_providers": {"heavy": "provider-heavy"}, "label": "balanced"},
-        )
-    ]
-    assert trace_choices == [
-        (("runtime resolve", runtime), {"launch_cli": "codex", "choice": "profile provider:provider-heavy"})
-    ]
-
-
-def test_resolve_load_balance_launch_context_returns_slot_error() -> None:
-    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
-        {},
-        "codex",
-        {"model": "gpt-5.4"},
-        {},
-        [],
-        {"heavy": "missing"},
-        trace_record=lambda *_args, **_kwargs: None,
-        save_lb_history=lambda *_args, **_kwargs: None,
-        resolve_lb_slot_provider=lambda *_args: (None, "missing provider"),
-        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        trace_runtime_choice=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-    )
-
-    assert model_info == {"model": "gpt-5.4"}
-    assert runtime is None
-    assert cli_name == "codex"
-    assert error == "missing provider"
-
-
-def test_resolve_load_balance_launch_context_uses_best_provider_or_picker() -> None:
-    best_runtime = {"id": "best"}
-    trace_choices = []
-
-    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
-        {"cfg": True},
-        "claude",
-        {"model": "claude-sonnet-4.5"},
-        {"id": "current"},
-        ["claude-sonnet-4.5"],
-        {},
-        trace_record=lambda *_args, **_kwargs: None,
-        save_lb_history=lambda *_args, **_kwargs: None,
-        resolve_lb_slot_provider=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        resolve_best_provider=lambda *_args, **_kwargs: (best_runtime, None),
-        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
-    )
-
-    assert model_info == {"model": "claude-sonnet-4.5"}
-    assert runtime is best_runtime
-    assert cli_name == "claude"
-    assert error == ""
-    assert trace_choices == [
-        (("runtime resolve", best_runtime), {"launch_cli": "claude", "choice": "best provider"})
-    ]
-
-    chosen_runtime = {"id": "chosen"}
-    model_info, runtime, cli_name, error = resolve_load_balance_launch_context(
-        {},
-        "codex",
-        {"model": "gpt-5.4"},
-        {"id": "current"},
-        ["gpt-5.4"],
-        {},
-        account_id="acct",
-        provider_id="prov",
-        trace_record=lambda *_args, **_kwargs: None,
-        save_lb_history=lambda *_args, **_kwargs: None,
-        resolve_lb_slot_provider=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
-        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
-        choose_runtime_source=lambda *_args, **_kwargs: (chosen_runtime, ["gpt-5.4"], "opencode"),
-        trace_runtime_choice=lambda *_args, **_kwargs: None,
-    )
-
-    assert model_info == {"model": "gpt-5.4"}
-    assert runtime is chosen_runtime
-    assert cli_name == "opencode"
-    assert error == ""
-
-
-def test_handle_tui_load_balance_action_launches_selected_profile() -> None:
-    calls = []
-    trace_records = []
-    trace_choices = []
-    cfg = {"cfg": True}
-    current_provider = {"id": "current"}
-    default_models = ["gpt-5.4"]
-    families_detail = {
-        "codex": {
-            "GPT": [{"model": "gpt-5.4"}, {"model": "gpt-5.5"}],
-        }
-    }
-    runtime = {"id": "heavy-provider"}
-
-    def build_provider_options_map(arg_cfg, cli_name, provider, models, all_models):
-        calls.append(("provider_options", arg_cfg, cli_name, provider, models, all_models))
-        return {"gpt-5.4": [{"provider": "p1"}]}
-
-    def select_load_balance_tui(**kwargs):
-        calls.append(("select", kwargs))
-        return {
-            "model": "gpt-5.4",
-            "lb_medium": "gpt-5.5",
-            "lb_light": "gpt-5-mini",
-            "lb_label": "balanced",
-            "lb_slot_providers": {"heavy": "provider-heavy"},
-        }
-
-    result = handle_tui_load_balance_action(
-        cfg,
-        "codex",
-        current_provider,
-        default_models,
-        families_detail,
-        select_load_balance_tui=select_load_balance_tui,
-        load_balance_profiles=lambda arg_cfg: {"balanced": {} if arg_cfg is cfg else {"wrong": True}},
-        default_load_balance_profile_name=lambda arg_cfg: "balanced" if arg_cfg is cfg else "wrong",
-        build_provider_options_map=build_provider_options_map,
-        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
-        save_lb_history=lambda *args, **kwargs: calls.append(("history", args, kwargs)),
-        resolve_lb_slot_provider=lambda *_args: (runtime, ""),
-        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
-    )
-
-    assert result == {
-        "status": "launch",
-        "model_info": {
-            "model": "gpt-5.4",
-            "lb_medium": "gpt-5.5",
-            "lb_light": "gpt-5-mini",
-            "lb_label": "balanced",
-            "lb_slot_providers": {"heavy": "provider-heavy"},
-        },
-        "runtime": runtime,
-        "cli": "codex",
-    }
-    assert calls[0] == (
-        "provider_options",
-        cfg,
-        "codex",
-        current_provider,
-        default_models,
-        ["gpt-5.4", "gpt-5.5"],
-    )
-    assert calls[1] == (
-        "select",
-        {
-            "available_models": ["gpt-5.4", "gpt-5.5"],
-            "families_detail": families_detail["codex"],
-            "provider_options_map": {"gpt-5.4": [{"provider": "p1"}]},
-            "profiles": {"balanced": {}},
-            "default_profile": "balanced",
-        },
-    )
-    assert calls[2] == (
-        "history",
-        ("gpt-5.4", "gpt-5.5", "gpt-5-mini"),
-        {"slot_providers": {"heavy": "provider-heavy"}, "label": "balanced"},
-    )
-    assert trace_records == [
-        (
-            ("load balance",),
-            {
-                "cli": "codex",
-                "model": "gpt-5.4",
-                "lb_medium": "gpt-5.5",
-                "lb_light": "gpt-5-mini",
-                "profile": None,
-            },
-        )
-    ]
-    assert trace_choices == [
-        (("runtime resolve", runtime), {"launch_cli": "codex", "choice": "profile provider:provider-heavy"})
-    ]
-
-
-def test_handle_tui_load_balance_action_normalizes_interrupt_and_errors() -> None:
-    base_kwargs = {
-        "load_balance_profiles": lambda _cfg: {},
-        "default_load_balance_profile_name": lambda _cfg: "",
-        "build_provider_options_map": lambda *_args: None,
-        "trace_record": lambda *_args, **_kwargs: None,
-        "save_lb_history": lambda *_args, **_kwargs: None,
-        "resolve_lb_slot_provider": lambda *_args: (None, "missing provider"),
-        "resolve_best_provider": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        "choose_runtime_source": lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
-        "trace_runtime_choice": lambda *_args, **_kwargs: None,
-    }
-
-    interrupted = handle_tui_load_balance_action(
-        {},
-        "codex",
-        {},
-        [],
-        {"codex": {}},
-        select_load_balance_tui=lambda **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
-        **base_kwargs,
-    )
-    assert interrupted == {"status": "interrupt"}
-
-    errored = handle_tui_load_balance_action(
-        {},
-        "codex",
-        {},
-        [],
-        {"codex": {"GPT": [{"model": "gpt-5.4"}]}},
-        select_load_balance_tui=lambda **_kwargs: {"model": "gpt-5.4", "lb_slot_providers": {"heavy": "missing"}},
-        **base_kwargs,
-    )
-    assert errored == {"status": "continue", "message": "missing provider"}
 
 
 def test_last_used_model_info_preserves_dict_model_info() -> None:

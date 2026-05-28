@@ -727,7 +727,7 @@ def _model_info_has_visible_models(model_info):
         return _mms_model_visible(model_info)
     if not isinstance(model_info, dict):
         return True
-    model_like_keys = ("model", "opus", "sonnet", "haiku", "subagent", "lb_light", "lb_medium")
+    model_like_keys = ("model", "opus", "sonnet", "haiku", "subagent")
     found_model = False
     for key in model_like_keys:
         value = str(model_info.get(key) or "").strip()
@@ -745,7 +745,6 @@ def _preset_has_visible_model_options(preset):
 
 CLI_NAMES = ["claude", "codex", "opencode", "agy"]
 CLI_MODEL_FAMILY_HINTS = {}
-LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
@@ -1797,104 +1796,6 @@ def _normalize_presets_config(cfg):
     return updated, True
 
 
-def _normalize_load_balance_slot(slot):
-    if isinstance(slot, str):
-        model = slot.strip()
-        return {"model": model} if model else {}
-    if not isinstance(slot, dict):
-        return {}
-
-    normalized = {}
-    model = str(slot.get("model") or "").strip()
-    if model:
-        normalized["model"] = model
-    provider = str(slot.get("provider") or "").strip()
-    if provider:
-        normalized["provider"] = provider
-    for key, value in slot.items():
-        if key in {"model", "provider"}:
-            continue
-        normalized[key] = value
-    return normalized
-
-
-def _normalize_load_balance_profile(name, profile):
-    if not isinstance(profile, dict):
-        profile = {}
-
-    normalized = {}
-    label = str(profile.get("label") or name).strip()
-    if label:
-        normalized["label"] = label
-
-    raw_slots = profile.get("slots")
-    if isinstance(raw_slots, list):
-        slots = [str(item).strip() for item in raw_slots if str(item).strip()]
-        normalized["slots"] = slots or list(LB_SLOT_NAMES)
-    else:
-        normalized["slots"] = list(LB_SLOT_NAMES)
-
-    for slot_name in LB_SLOT_NAMES:
-        slot_value = _normalize_load_balance_slot(profile.get(slot_name))
-        if slot_value:
-            normalized[slot_name] = slot_value
-
-    for key, value in profile.items():
-        if key in {"label", "slots", *LB_SLOT_NAMES}:
-            continue
-        normalized[key] = value
-    return normalized
-
-
-def _normalize_load_balance_config(cfg):
-    raw = cfg.get("load_balance")
-    if raw is None:
-        return cfg, False
-    if not isinstance(raw, dict):
-        updated = dict(cfg)
-        updated["load_balance"] = {}
-        return updated, True
-
-    normalized_profiles = {}
-    raw_profiles = raw.get("profiles")
-    if isinstance(raw_profiles, dict):
-        for name, profile in raw_profiles.items():
-            normalized_name = str(name).strip()
-            if not normalized_name:
-                continue
-            normalized_profiles[normalized_name] = _normalize_load_balance_profile(normalized_name, profile)
-
-    default_name = str(raw.get("default") or "").strip()
-    if default_name not in normalized_profiles:
-        default_name = next(iter(normalized_profiles), "")
-
-    normalized = {k: v for k, v in raw.items() if k not in {"default", "profiles"}}
-    normalized["default"] = default_name
-    normalized["profiles"] = normalized_profiles
-
-    if normalized == raw:
-        return cfg, False
-
-    updated = dict(cfg)
-    updated["load_balance"] = normalized
-    return updated, True
-
-
-def _load_balance_profiles(cfg):
-    section = cfg.get("load_balance", {})
-    if not isinstance(section, dict):
-        return {}
-    profiles = section.get("profiles")
-    return profiles if isinstance(profiles, dict) else {}
-
-
-def _default_load_balance_profile_name(cfg):
-    section = cfg.get("load_balance", {})
-    if not isinstance(section, dict):
-        return ""
-    return str(section.get("default") or "").strip()
-
-
 def _normalize_config_sections(cfg):
     cfg, _ = _ensure_provider_config(cfg)
     cfg, _ = _ensure_account_config(cfg)
@@ -1903,162 +1804,7 @@ def _normalize_config_sections(cfg):
     cfg, _ = _normalize_presets_config(cfg)
     cfg, _ = _normalize_user_config(cfg)
     cfg, _ = _normalize_cache_config(cfg)
-    cfg, _ = _normalize_load_balance_config(cfg)
     return cfg
-
-
-def _format_load_balance_slot(slot):
-    if isinstance(slot, str):
-        return slot.strip()
-    if not isinstance(slot, dict):
-        return "-"
-    model = str(slot.get("model") or "").strip()
-    provider = str(slot.get("provider") or "").strip()
-    if model and provider:
-        return f"{model} @ {provider}"
-    return model or "-"
-
-
-def _display_load_balance_profiles(cfg):
-    profiles = _load_balance_profiles(cfg)
-    default_name = _default_load_balance_profile_name(cfg)
-    if not profiles:
-        console.print("[yellow]当前未配置 load_balance profiles[/yellow]")
-        console.print(
-            f"[dim]可用命令: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/dim]"
-        )
-        return
-
-    _ensure_rich()
-    table = Table(title="Load Balance Profiles", show_lines=True)
-    table.add_column("名称", style="cyan")
-    table.add_column("标签", style="green")
-    table.add_column("默认", style="yellow", width=6)
-    table.add_column("Heavy", style="magenta")
-    table.add_column("Medium", style="white")
-    table.add_column("Light", style="blue")
-    for name, profile in profiles.items():
-        table.add_row(
-            name,
-            str(profile.get("label") or name),
-            "yes" if name == default_name else "",
-            _format_load_balance_slot(profile.get("heavy")),
-            _format_load_balance_slot(profile.get("medium")),
-            _format_load_balance_slot(profile.get("light")),
-        )
-    console.print(table)
-
-
-def _handle_load_balance_show_config(cfg):
-    _display_load_balance_profiles(cfg)
-
-
-def _handle_load_balance_default_config(cfg, args_rest):
-    profiles = _load_balance_profiles(cfg)
-    if not args_rest:
-        default_name = _default_load_balance_profile_name(cfg)
-        if not default_name:
-            console.print("[yellow]当前未设置默认 load_balance profile[/yellow]")
-        else:
-            console.print(f"[cyan]load_balance.default[/cyan] = {default_name}")
-        return
-
-    profile_name = str(args_rest[0] or "").strip()
-    if not profile_name:
-        console.print(f"[red]用法: {current_command()} config load-balance.default <name>[/red]")
-        return
-    if profile_name not in profiles:
-        console.print(f"[red]未找到 load_balance profile: {profile_name}[/red]")
-        if profiles:
-            console.print(f"[dim]可用 profile: {', '.join(profiles.keys())}[/dim]")
-        return
-
-    updated_cfg = dict(cfg)
-    section = dict(updated_cfg.get("load_balance", {}))
-    section["default"] = profile_name
-    updated_cfg["load_balance"] = section
-    updated_cfg = _normalize_config_sections(updated_cfg)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ load_balance.default = {profile_name}[/green]")
-
-
-def _handle_load_balance_profile_add_config(cfg, args_rest):
-    if len(args_rest) < 2:
-        console.print(
-            f"[red]用法: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/red]"
-        )
-        return
-
-    profile_name = str(args_rest[0] or "").strip()
-    heavy = str(args_rest[1] or "").strip()
-    medium = str(args_rest[2] or "").strip() if len(args_rest) >= 3 else ""
-    light = str(args_rest[3] or "").strip() if len(args_rest) >= 4 else ""
-    if not profile_name or not heavy:
-        console.print(
-            f"[red]用法: {current_command()} config load-balance.profile.add <name> <heavy> [medium] [light][/red]"
-        )
-        return
-
-    updated_cfg = dict(cfg)
-    section = dict(updated_cfg.get("load_balance", {}))
-    profiles = dict(section.get("profiles", {}))
-    existing = profiles.get(profile_name, {})
-    profile = {
-        "label": str(existing.get("label") or profile_name),
-        "slots": list(LB_SLOT_NAMES),
-        "heavy": {"model": heavy},
-    }
-    if medium:
-        profile["medium"] = {"model": medium}
-    elif isinstance(existing, dict) and existing.get("medium"):
-        profile["medium"] = existing.get("medium")
-    if light:
-        profile["light"] = {"model": light}
-    elif isinstance(existing, dict) and existing.get("light"):
-        profile["light"] = existing.get("light")
-
-    for slot_name in LB_SLOT_NAMES:
-        existing_slot = existing.get(slot_name) if isinstance(existing, dict) else None
-        if isinstance(existing_slot, dict) and existing_slot.get("provider") and slot_name in profile:
-            slot = dict(profile[slot_name])
-            slot["provider"] = existing_slot.get("provider")
-            profile[slot_name] = slot
-
-    profiles[profile_name] = profile
-    section["profiles"] = profiles
-    if not str(section.get("default") or "").strip():
-        section["default"] = profile_name
-    updated_cfg["load_balance"] = section
-    updated_cfg = _normalize_config_sections(updated_cfg)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ 已保存 load_balance profile: {profile_name}[/green]")
-
-
-def _handle_load_balance_profile_remove_config(cfg, args_rest):
-    if not args_rest:
-        console.print(f"[red]用法: {current_command()} config load-balance.profile.remove <name>[/red]")
-        return
-
-    profile_name = str(args_rest[0] or "").strip()
-    profiles = _load_balance_profiles(cfg)
-    if profile_name not in profiles:
-        console.print(f"[red]未找到 load_balance profile: {profile_name}[/red]")
-        return
-
-    updated_cfg = dict(cfg)
-    section = dict(updated_cfg.get("load_balance", {}))
-    updated_profiles = dict(section.get("profiles", {}))
-    updated_profiles.pop(profile_name, None)
-    if updated_profiles:
-        section["profiles"] = updated_profiles
-        if str(section.get("default") or "").strip() == profile_name:
-            section["default"] = next(iter(updated_profiles))
-        updated_cfg["load_balance"] = section
-    else:
-        updated_cfg.pop("load_balance", None)
-    updated_cfg = _normalize_config_sections(updated_cfg)
-    save_config(updated_cfg)
-    console.print(f"[green]✓ 已删除 load_balance profile: {profile_name}[/green]")
 
 
 def _normalize_user_config(cfg):
@@ -2931,8 +2677,7 @@ def load_config(*, persist=False):
     cfg, preset_changed = _normalize_presets_config(cfg)
     cfg, role_changed = _normalize_user_config(cfg)
     cfg, cache_changed = _normalize_cache_config(cfg)
-    cfg, lb_changed = _normalize_load_balance_config(cfg)
-    changed = changed or gateway_broker_changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed or lb_changed
+    changed = changed or gateway_broker_changed or account_changed or broker_changed or preset_changed or role_changed or cache_changed
     if changed and persist:
         save_config(cfg, reason="auto:load_config_normalize")
     return cfg
@@ -7740,29 +7485,6 @@ def _resolve_best_provider(cfg, model_name, default_provider, default_models,
     return _runtime_with_priority(scored[0][2], model_name=model_name), scored[0][3]
 
 
-def _resolve_lb_slot_provider(cfg, cli_name, model_name, provider_id):
-    provider_def = _provider_map(cfg).get(provider_id)
-    if not provider_def:
-        return None, f"负载模式指定的 provider 不存在: {provider_id}"
-    if not provider_def.get("enabled", True):
-        return None, f"负载模式指定的 provider 已禁用: {provider_id}"
-
-    provider = resolve_provider_context(cfg, provider_id)
-    if not _provider_supports_cli_name(provider, cli_name):
-        return None, f"provider {provider_id} 不支持 {cli_name}"
-    if not provider.get("api_key"):
-        return None, f"provider {provider_id} 缺少 API key"
-    if not _provider_has_configured_base_url(provider):
-        return None, f"provider {provider_id} 缺少可用 base_url"
-
-    models = _probe_models(provider, emit_output=False).get("models")
-    models = _provider_effective_models(provider, models, cfg)
-    model_lower = str(model_name or "").strip().lower()
-    if model_lower not in {str(item or "").strip().lower() for item in models}:
-        return None, f"provider {provider_id} 不支持负载模式模型 {model_name}"
-
-    return provider, None
-
 
 def _build_model_families_for_cli(cfg, cli_name, default_provider, default_models):
     """聚合所有 provider 的模型，按 MODEL_FAMILIES 分组，每个模型附带最优 provider。
@@ -9700,7 +9422,6 @@ def _apply_runtime_priority_changes(cfg, pri_changes):
 def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=None, provider_id=None):
     """TUI 交互：品类 → 子模型 → 确认。返回 True 表示已处理，False 表示 fallback"""
     from mms_tui import select_family_tui, select_submodel_tui, confirm_tui
-    from mms_tui import select_load_balance_tui, save_lb_history
     import mms_tui_launcher_flow as tui_flow
     from mms_launchers import (
         _caveman_available_for_cli,
@@ -9880,43 +9601,8 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             runtime_runtime = browse_result["runtime"]
             # fall through to confirm
 
-        # ── 负载模式 ──
-        if action_type == "load_balance":
-
-            lb_action = tui_flow.handle_tui_load_balance_action(
-                current_cfg,
-                cli,
-                current_provider,
-                default_models,
-                families_detail,
-                account_id=account_id,
-                provider_id=provider_id,
-                select_load_balance_tui=select_load_balance_tui,
-                load_balance_profiles=_load_balance_profiles,
-                default_load_balance_profile_name=_default_load_balance_profile_name,
-                build_provider_options_map=_build_provider_options_map,
-                trace_record=_trace_record,
-                save_lb_history=save_lb_history,
-                resolve_lb_slot_provider=_resolve_lb_slot_provider,
-                resolve_best_provider=_resolve_best_provider,
-                choose_runtime_source=_choose_runtime_source,
-                trace_runtime_choice=_trace_runtime_choice,
-            )
-            if lb_action["status"] == "interrupt":
-                return True
-            if lb_action.get("message"):
-                console.print(f"[yellow]{lb_action['message']}[/yellow]")
-            if lb_action["status"] != "launch":
-                continue
-            model_info = lb_action["model_info"]
-            runtime_runtime = lb_action["runtime"]
-            cli = lb_action["cli"]
-
-            # 止血：暂时禁用跨 provider slot 切换，避免展示层和执行层 provider 漂移。
-            # fall through to confirm below
-
         # ── 设置 ──
-        elif action_type == "settings":
+        if action_type == "settings":
             from mms_tui import (
                 select_channel_action_tui,
                 select_language_tui,
@@ -10467,7 +10153,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             # fall through to confirm
         elif action_type == "profile" and cli not in {"opencode", "agy"}:
             continue
-        elif action_type not in ("profile", "provider_browse", "load_balance", "last", "family"):
+        elif action_type not in ("profile", "provider_browse", "last", "family"):
             continue
 
         # ── 公共：确认页 + 启动 ──
@@ -10781,18 +10467,6 @@ def handle_config(cfg, args_rest):
         ))
     if key_path in {"gates", "human-gate", "humangate", "human-gates"}:
         _display_human_gate_help()
-        return
-    if key_path == "load-balance.show":
-        _handle_load_balance_show_config(cfg)
-        return
-    if key_path == "load-balance.default":
-        _handle_load_balance_default_config(cfg, args_rest[1:])
-        return
-    if key_path == "load-balance.profile.add":
-        _handle_load_balance_profile_add_config(cfg, args_rest[1:])
-        return
-    if key_path == "load-balance.profile.remove":
-        _handle_load_balance_profile_remove_config(cfg, args_rest[1:])
         return
     if key_path == "get":
         _handle_config_get(cfg, args_rest[1:])
@@ -11623,12 +11297,6 @@ def _display_config_help():
     console.print(f"  {command} config preferences.help")
     console.print(f"  {command} config human-gate")
     console.print(f"  [dim]可调参数示例: cache.probe_async_refresh_after_sec / cache.probe_async_min_interval_sec[/dim]")
-    console.print("\n[bold]Load Balance:[/bold]")
-    console.print(f"  {command} config load-balance.show")
-    console.print(f"  {command} config load-balance.default [name]")
-    console.print(f"  {command} config load-balance.profile.add <name> <heavy> [medium] [light]")
-    console.print(f"  {command} config load-balance.profile.remove <name>")
-    console.print(f"  [dim]更细的 slot provider 可用 config set load_balance.profiles.<name>.<slot>.provider <id>[/dim]")
     console.print("\n[bold]Provider:[/bold]")
     console.print(f"  {command} config provider.list")
     console.print(f"  {command} config provider.default [id]")
@@ -11979,24 +11647,6 @@ def _validate_config(cfg):
     role = cfg.get("user", {}).get("role", MODE_ALL)
     if normalize_user_role(role) not in {MODE_ALL, MODE_RECOMMENDED}:
         errors.append(f"不支持的模型模式: {role}")
-
-    load_balance = cfg.get("load_balance")
-    if load_balance is not None:
-        if not isinstance(load_balance, dict):
-            errors.append("load_balance 必须是对象")
-        else:
-            profiles = load_balance.get("profiles")
-            if profiles is not None and not isinstance(profiles, dict):
-                errors.append("load_balance.profiles 必须是对象")
-            elif isinstance(profiles, dict):
-                for profile_name, profile in profiles.items():
-                    if not isinstance(profile, dict):
-                        errors.append(f"load_balance profile {profile_name} 必须是对象")
-                        continue
-                    for slot_name in LB_SLOT_NAMES:
-                        slot = profile.get(slot_name)
-                        if slot is not None and not isinstance(slot, (dict, str)):
-                            errors.append(f"load_balance profile {profile_name}.{slot_name} 必须是对象或字符串")
 
     return errors
 
