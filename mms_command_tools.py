@@ -2230,6 +2230,24 @@ def select_provider_template(preset_id=None, *, console):
     return "generic"
 
 
+def ensure_interactive_terminal(
+    action_hint,
+    *,
+    stdin,
+    ensure_rich,
+    console,
+    current_command,
+    exit_func=sys.exit,
+):
+    if stdin.isatty():
+        ensure_rich()
+        return
+    console.print(
+        f"[red]当前不是交互终端，无法执行 {action_hint}，请在终端里运行 {current_command()}[/red]"
+    )
+    exit_func(1)
+
+
 def parse_csv_values(raw_value, allowed_values=None, *, console=None):
     values = []
     for chunk in str(raw_value or "").split(","):
@@ -2244,6 +2262,27 @@ def parse_csv_values(raw_value, allowed_values=None, *, console=None):
             console.print(f"[red]不支持的值: {', '.join(invalid)}[/red]")
             console.print(f"[dim]可选值: {', '.join(allowed_values)}[/dim]")
         sys.exit(1)
+    return values
+
+
+def prompt_csv_values(
+    label,
+    default_values,
+    allowed_values,
+    *,
+    ensure_rich,
+    prompt_ask,
+    parse_csv_values,
+    console,
+    exit_func=sys.exit,
+):
+    ensure_rich()
+    default_text = ",".join(default_values)
+    raw_value = prompt_ask(label, default=default_text)
+    values = parse_csv_values(raw_value, allowed_values=allowed_values)
+    if not values:
+        console.print(f"[red]{label} 不能为空[/red]")
+        exit_func(1)
     return values
 
 

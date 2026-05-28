@@ -2610,13 +2610,16 @@ def _run_account_login(account):
 
 
 def _ensure_interactive_terminal(action_hint):
-    if sys.stdin.isatty():
-        _ensure_rich()
-        return
-    console.print(
-        f"[red]当前不是交互终端，无法执行 {action_hint}，请在终端里运行 {current_command()}[/red]"
+    from mms_command_tools import ensure_interactive_terminal
+
+    return ensure_interactive_terminal(
+        action_hint,
+        stdin=sys.stdin,
+        ensure_rich=_ensure_rich,
+        console=console,
+        current_command=current_command,
+        exit_func=sys.exit,
     )
-    sys.exit(1)
 
 
 def _parse_csv_values(raw_value, allowed_values=None):
@@ -2626,14 +2629,18 @@ def _parse_csv_values(raw_value, allowed_values=None):
 
 
 def _prompt_csv_values(label, default_values, allowed_values):
-    _ensure_rich()
-    default_text = ",".join(default_values)
-    raw_value = Prompt.ask(label, default=default_text)
-    values = _parse_csv_values(raw_value, allowed_values=allowed_values)
-    if not values:
-        console.print(f"[red]{label} 不能为空[/red]")
-        sys.exit(1)
-    return values
+    from mms_command_tools import prompt_csv_values
+
+    return prompt_csv_values(
+        label,
+        default_values,
+        allowed_values,
+        ensure_rich=_ensure_rich,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        parse_csv_values=_parse_csv_values,
+        console=console,
+        exit_func=sys.exit,
+    )
 
 
 def _upsert_provider(cfg, provider):

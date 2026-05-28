@@ -2566,6 +2566,76 @@ def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     ]
 
 
+def test_interactive_terminal_and_prompt_csv_helpers_preserve_exit_and_prompt_flow():
+    import pytest
+
+    import mms_command_tools
+
+    class FakeStdin:
+        def __init__(self, tty):
+            self.tty = tty
+
+        def isatty(self):
+            return self.tty
+
+    console = _CollectingConsole()
+    calls = []
+    mms_command_tools.ensure_interactive_terminal(
+        "模型源配置编辑",
+        stdin=FakeStdin(True),
+        ensure_rich=lambda: calls.append("rich"),
+        console=console,
+        current_command=lambda: "mms config provider.add",
+    )
+    assert calls == ["rich"]
+    assert console.items == []
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.ensure_interactive_terminal(
+            "模型源配置编辑",
+            stdin=FakeStdin(False),
+            ensure_rich=lambda: calls.append("unexpected"),
+            console=console,
+            current_command=lambda: "mms config provider.add",
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 1
+    assert console.items == [
+        "[red]当前不是交互终端，无法执行 模型源配置编辑，请在终端里运行 mms config provider.add[/red]"
+    ]
+
+    calls.clear()
+    values = mms_command_tools.prompt_csv_values(
+        "支持的 CLI（逗号分隔）",
+        ["codex", "claude"],
+        ["codex", "claude", "opencode"],
+        ensure_rich=lambda: calls.append("rich"),
+        prompt_ask=lambda label, default: calls.append(("prompt", label, default)) or "codex,opencode",
+        parse_csv_values=lambda raw, allowed_values=None: calls.append(("parse", raw, allowed_values)) or raw.split(","),
+        console=console,
+    )
+    assert values == ["codex", "opencode"]
+    assert calls == [
+        "rich",
+        ("prompt", "支持的 CLI（逗号分隔）", "codex,claude"),
+        ("parse", "codex,opencode", ["codex", "claude", "opencode"]),
+    ]
+
+    with pytest.raises(SystemExit) as exc_info:
+        mms_command_tools.prompt_csv_values(
+            "协议（逗号分隔）",
+            [],
+            ["openai_chat_completions"],
+            ensure_rich=lambda: None,
+            prompt_ask=lambda label, default: "",
+            parse_csv_values=lambda raw, allowed_values=None: [],
+            console=console,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc_info.value.code == 1
+    assert console.items[-1] == "[red]协议（逗号分隔） 不能为空[/red]"
+
+
 def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
     import mms_command_tools
 
