@@ -149,6 +149,7 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "applyV2Preview" in html
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
+    assert "Preview root 下 legacy 确认保存会被阻止" in html
     assert "renderStatus();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html
@@ -678,6 +679,30 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "config.toml.bak" for path in bak_paths)
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_legacy_save_blocks_preview_root(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    credentials_path = config_root / "credentials.sh"
+    payload = _draft_payload()
+    payload["confirm_save"] = True
+    payload["confirm_phrase"] = "保存配置"
+
+    result = mms_config_web.apply_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["root"]["mode"] == "preview"
+    assert "legacy /api/save" in result["errors"][0]
+    assert not config_path.exists()
+    assert not credentials_path.exists()
     assert "sk-super-secret-value" not in encoded
 
 

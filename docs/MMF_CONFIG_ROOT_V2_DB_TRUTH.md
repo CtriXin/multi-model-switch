@@ -456,7 +456,8 @@ Current Stage 4a implementation:
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` when matching preview secret values exist.
 - If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.
 - This WebUI preview action does not call legacy `/api/save` and does not write `config.toml` / `credentials.sh` / `model-policy.json`.
-- WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after more interactive/browser validation.
+- WebUI legacy `/api/save` is blocked while running against a preview root, so `mmf` users do not accidentally create legacy config files in `~/.config/mms-next`.
+- Stable-root WebUI `/api/save` is still not redirected to this path yet; that remains a later Stage 4 slice after more interactive/browser validation.
 
 ### Stage 5 - Router Export From DB
 
