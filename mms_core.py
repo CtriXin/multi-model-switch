@@ -153,7 +153,12 @@ from mms_opencode_resolver import (
     resolve_opencode_lite_pro_runtime as _resolve_opencode_lite_pro_runtime_impl,
     resolve_opencode_profile_runtime as _resolve_opencode_profile_runtime_impl,
 )
-from mms_state_io import resolve_mms_config_dir, resolve_real_user_home
+from mms_state_io import (
+    mms_config_root_is_explicit,
+    mms_config_root_status,
+    resolve_mms_config_dir,
+    resolve_real_user_home,
+)
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 # Provider 调试日志（写入文件，不影响 TUI 输出）
@@ -250,6 +255,8 @@ _GATEWAY_SESSION_MARKERS = (
 
 
 def _base_user_config_path_from_gateway(config_path):
+    if mms_config_root_is_explicit():
+        return ""
     normalized = os.path.normpath(str(config_path or ""))
     for marker in _GATEWAY_SESSION_MARKERS:
         idx = normalized.find(marker)
@@ -262,6 +269,8 @@ def _base_user_config_path_from_gateway(config_path):
 
 
 def _base_user_primary_dir_from_gateway(path):
+    if mms_config_root_is_explicit():
+        return ""
     normalized = os.path.normpath(str(path or ""))
     for marker in _GATEWAY_SESSION_MARKERS:
         idx = normalized.find(marker)
@@ -749,11 +758,17 @@ LB_SLOT_NAMES = ("heavy", "medium", "light")
 
 
 def current_command():
+    explicit = str(os.environ.get("MMS_COMMAND_NAME") or "").strip()
+    if explicit:
+        return explicit
+    invoked = os.path.basename(str(sys.argv[0] or "")).strip()
+    if invoked == "mmf":
+        return "mmf"
     return PRIMARY_COMMAND
 
 
 def display_title():
-    return "MMS"
+    return "MMF" if current_command() == "mmf" else "MMS"
 
 
 def _git_output(args):
@@ -3471,13 +3486,24 @@ _USAGE_ROUTES_EXPORT_LAST_STARTED_AT = 0.0
 _USAGE_ROUTES_EXPORT_MIN_INTERVAL_SEC = 15.0
 
 
+def _usage_routes_export_should_run():
+    """Keep legacy route-export refresh out of preview DB-truth roots."""
+    try:
+        return _config_root_status().get("mode") != "preview"
+    except Exception:
+        return True
+
+
 def _trigger_routes_export_after_usage_write():
     """Best-effort async routes export after usage changes.
 
-    This keeps model-routes.json reasonably fresh for file readers such as Hive
-    without blocking the foreground launch path on a full export.
+    Stable roots keep model-routes.json reasonably fresh for legacy file
+    readers. Preview roots use the verified latest-approved bundle instead.
     """
     global _USAGE_ROUTES_EXPORT_RUNNING, _USAGE_ROUTES_EXPORT_LAST_STARTED_AT
+
+    if not _usage_routes_export_should_run():
+        return
 
     now = time.monotonic()
     with _USAGE_ROUTES_EXPORT_LOCK:
@@ -3506,9 +3532,12 @@ def _trigger_routes_export_after_usage_write():
 
 
 def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startup_safe=False):
-    """Synchronously refresh the Hive-facing routes export from current config."""
+    """Synchronously refresh the legacy route export from current config."""
     try:
         from mms_router import export_model_routes
+
+        if startup_safe and not _usage_routes_export_should_run():
+            return True
 
         current_cfg = cfg
         if current_cfg is None:
@@ -3520,7 +3549,7 @@ def _refresh_routes_export_for_hive(cfg=None, *, force=True, quiet=False, startu
         return True
     except Exception as exc:
         if not quiet:
-            console.print(f"[yellow]⚠ Hive routes export 刷新失败: {exc}[/yellow]")
+            console.print(f"[yellow]⚠ Legacy routes export 刷新失败: {exc}[/yellow]")
         return False
 
 
@@ -4052,7 +4081,7 @@ def _migrate_legacy_api_config(cfg):
     if isinstance(api_cfg, dict):
         base_url = str(api_cfg.get("base_url", "")).strip()
         api_key = str(api_cfg.get("api_key", "")).strip()
-        file_base_url, file_api_key, _ = load_api_credentials()
+        file_base_url, file_api_key = load_api_credentials()
 
         if base_url and api_key and (not file_base_url or not file_api_key):
             try:
@@ -4971,10 +5000,6 @@ def _usage_summary_for_runtime(runtime_kind, runtime_id):
 def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="", limit=80):
     failed = str(failed_model or "").strip().lower()
     root = os.path.expanduser(str(config_dir or CONFIG_DIR))
-    paths = [
-        os.path.join(root, "generated", "model-routes.json"),
-        os.path.join(root, "model-routes.json"),
-    ]
     candidates = []
     seen = set()
 
@@ -4983,11 +5008,7 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
             return False
         return bool(str(route.get("openai_base_url") or "").strip() and str(route.get("api_key") or "").strip())
 
-    for path in paths:
-        try:
-            payload = json.loads(open(path, "r", encoding="utf-8").read())
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
+    def add_from_router_payload(payload):
         routes = payload.get("routes") if isinstance(payload.get("routes"), dict) else {}
         for model_name, entry in routes.items():
             name = str(model_name or "").strip()
@@ -5002,6 +5023,29 @@ def _rescue_route_fallback_model_candidates(config_dir=None, *, failed_model="",
                 continue
             seen.add(name.lower())
             candidates.append(name)
+
+    manifest_path = os.path.join(root, "generated", "model-registry.latest-approved.json")
+    if os.path.exists(manifest_path):
+        try:
+            import mms_registry
+
+            payload = mms_registry.try_load_latest_approved_payload("router", config_dir=root, include_secret=True)
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and payload:
+            add_from_router_payload(payload)
+        return candidates[: max(1, int(limit or 1))]
+
+    paths = [
+        os.path.join(root, "generated", "model-routes.json"),
+        os.path.join(root, "model-routes.json"),
+    ]
+    for path in paths:
+        try:
+            payload = json.loads(open(path, "r", encoding="utf-8").read())
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        add_from_router_payload(payload)
         if candidates:
             break
     return candidates[: max(1, int(limit or 1))]
@@ -5225,6 +5269,202 @@ def _registry_truth_tui_payload(status):
     return _L("模型真源 / Registry Truth", "Registry Truth"), info_lines, actions
 
 
+def _model_source_status_rows(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    registry_db = summary.get("registry_db") if isinstance(summary.get("registry_db"), dict) else {}
+    legacy = summary.get("legacy_import") if isinstance(summary.get("legacy_import"), dict) else {}
+    bundle = summary.get("generated_bundle") if isinstance(summary.get("generated_bundle"), dict) else {}
+    counts = registry_db.get("counts") if isinstance(registry_db.get("counts"), dict) else {}
+    candidates = legacy.get("candidates") if isinstance(legacy.get("candidates"), dict) else {}
+    if not candidates and isinstance(registry_db.get("legacy_import_candidates"), dict):
+        candidates = registry_db.get("legacy_import_candidates")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    return [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready", "Ready"), "yes" if summary.get("ready") else "no"),
+        (_L("一句话", "headline"), summary.get("headline") or "-"),
+        ("Root", root.get("config_root") or summary.get("config_root") or "-"),
+        ("Mode", root.get("mode") or "-"),
+        ("DB", registry_db.get("path") or "-"),
+        (_L("DB 状态", "DB status"), registry_db.get("status") or "-"),
+        (_L("来源快照", "source snapshots"), counts.get("source_snapshot", 0)),
+        (_L("模型事实", "model facts"), counts.get("model_fact", 0)),
+        (_L("Provider routes", "provider routes"), counts.get("provider_route", 0)),
+        (_L("Legacy 冲突", "legacy conflicts"), legacy.get("conflict_count", 0)),
+        (_L("Legacy 候选状态", "legacy candidate status"), candidates.get("status") or "not_imported"),
+        (_L("Legacy 候选 routes", "legacy candidate routes"), candidates.get("provider_route_count", 0)),
+        (_L("Legacy 下一步", "legacy next action"), legacy.get("next_action") or "-"),
+        (_L("Bundle 状态", "bundle status"), bundle.get("status") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle runtime", "bundle runtime"), bundle.get("runtime_ready_status") or "unknown"),
+        (_L("Router 缺失 key", "router missing keys"), bundle.get("router_missing_api_key_count", 0)),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+
+
+def _model_source_status_report_payload(summary):
+    return (
+        _L("Model Source Status", "Model Source Status"),
+        _model_source_status_rows(summary),
+        _L("只读视图：不写 DB、不发布 bundle、不改变 runtime defaults。", "Read-only view: no DB writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
+def _consumer_bundle_status_rows(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    root = summary.get("root") if isinstance(summary.get("root"), dict) else {}
+    revisions = summary.get("component_revisions") if isinstance(summary.get("component_revisions"), dict) else {}
+    files = summary.get("files") if isinstance(summary.get("files"), dict) else {}
+    rules = summary.get("consumer_rules") if isinstance(summary.get("consumer_rules"), list) else []
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    return [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if summary.get("verified") else "no"),
+        (_L("入口", "entrypoint"), summary.get("consumer_entrypoint") or summary.get("manifest_path") or "-"),
+        ("Root", root.get("config_root") or summary.get("config_root") or "-"),
+        (_L("Bundle revision", "bundle revision"), revisions.get("bundle") or "-"),
+        (_L("Route revision", "route revision"), revisions.get("route") or "-"),
+        (_L("Policy revision", "policy revision"), revisions.get("policy") or "-"),
+        (_L("Profile revision", "profile revision"), revisions.get("profile") or "-"),
+        (_L("文件数", "file count"), len(files)),
+        (_L("消费规则", "consumer rules"), " / ".join(str(item) for item in rules) or "-"),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+
+
+def _consumer_bundle_status_report_payload(summary):
+    return (
+        _L("Consumer Bundle Status", "Consumer Bundle Status"),
+        _consumer_bundle_status_rows(summary),
+        _L("只读视图：验证 latest-approved manifest/hash；不写 DB、不发布 bundle、不读取 SQLite。", "Read-only view: verifies latest-approved manifest/hashes; no DB writes, no bundle publish, no SQLite reads."),
+    )
+
+
+def _registry_v2_save_plan_rows(plan):
+    plan = plan if isinstance(plan, dict) else {}
+    root = plan.get("root") if isinstance(plan.get("root"), dict) else {}
+    db = plan.get("db") if isinstance(plan.get("db"), dict) else {}
+    would_write = plan.get("would_write") if isinstance(plan.get("would_write"), dict) else {}
+    legacy = would_write.get("legacy_compat_files") if isinstance(would_write.get("legacy_compat_files"), dict) else {}
+    plan_json = plan.get("plan_json") if isinstance(plan.get("plan_json"), dict) else {}
+    apply_plan = plan.get("apply_plan") if isinstance(plan.get("apply_plan"), dict) else {}
+    blocked = ", ".join(str(item) for item in (plan.get("blocked_reasons") or [])) or "-"
+    steps = " -> ".join(str(item) for item in (plan.get("ordered_steps") or [])) or "-"
+    return [
+        ("Root", root.get("config_root") or "-"),
+        ("Mode", root.get("mode") or "-"),
+        (_L("执行状态", "execution state"), plan.get("execution_state") or "-"),
+        (_L("实际保存启用", "actual save enabled"), "yes" if plan.get("actual_save_enabled") else "no"),
+        ("DB", db.get("path") or "-"),
+        (_L("DB 存在", "DB exists"), "yes" if db.get("exists") else "no"),
+        (_L("DB 备份目录", "DB backup dir"), db.get("backup_dir") or "-"),
+        (_L("将备份 DB", "would backup DB"), "yes" if db.get("would_backup_existing_db") else "no"),
+        (_L("DB candidate revision", "DB candidate revision"), "yes" if would_write.get("db_candidate_revision") else "no"),
+        (_L("Secret backend", "secret backend"), "yes" if would_write.get("secret_backend") else "no"),
+        (_L("Generated bundle", "generated bundle"), "yes" if would_write.get("generated_latest_approved_bundle") else "no"),
+        (_L("Legacy config.toml", "legacy config.toml"), "yes" if legacy.get("config_toml") else "no"),
+        (_L("Legacy model-policy.json", "legacy model-policy.json"), "yes" if legacy.get("model_policy_json") else "no"),
+        (_L("Legacy credentials.sh", "legacy credentials.sh"), "yes" if legacy.get("credentials_sh") else "no"),
+        (_L("阻塞原因", "blocked reasons"), blocked),
+        (_L("Plan JSON", "Plan JSON"), plan_json.get("name") or "-"),
+        (_L("Plan JSON 密钥", "Plan JSON secrets"), "redacted" if plan_json.get("redacted") else ("included" if plan_json.get("secrets_included") else "-")),
+        (_L("WebUI 写入", "WebUI apply"), apply_plan.get("webui_button") or "-"),
+        (_L("CLI 写入命令", "CLI apply command"), apply_plan.get("cli_apply_command") or "-"),
+        (_L("步骤", "steps"), steps),
+        (_L("下一步", "next step"), plan.get("next_implementation_step") or "-"),
+    ]
+
+
+def _registry_v2_save_plan_report_payload(plan):
+    return (
+        _L("Registry v2 Save Plan", "Registry v2 Save Plan"),
+        _registry_v2_save_plan_rows(plan),
+        _L("只读计划：不写 DB、不写 secret backend、不发布 bundle、不改变 runtime defaults。", "Read-only plan: no DB writes, no secret backend writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
+def _preview_doctor_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    bundle = summary.get("bundle") if isinstance(summary.get("bundle"), dict) else {}
+    next_actions = [item for item in (summary.get("next_actions") or []) if isinstance(item, dict)]
+    next_action = next_actions[0] if next_actions else {}
+    rows = [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready", "ready"), "yes" if summary.get("ready") else "no"),
+        ("Root", summary.get("config_root") or "-"),
+        (_L("候选 routes", "candidate routes"), counts.get("candidate_provider_routes", 0)),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle runtime", "bundle runtime"), bundle.get("runtime_ready_status") or "unknown"),
+        (_L("Router 缺失 key", "router missing keys"), counts.get("missing_api_keys", 0)),
+        (_L("Preview secrets", "preview secrets"), counts.get("preview_secret_count", 0)),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+    return (
+        _L("Preview Doctor", "Preview Doctor"),
+        rows,
+        _L("只读检查：不写 DB、不发布 bundle、不改变 runtime defaults。", "Read-only check: no DB writes, no bundle publish, runtime defaults unchanged."),
+    )
+
+
+def _config_v2_promotion_plan_report_payload(summary):
+    summary = summary if isinstance(summary, dict) else {}
+    preview = summary.get("preview") if isinstance(summary.get("preview"), dict) else {}
+    stable = summary.get("stable") if isinstance(summary.get("stable"), dict) else {}
+    preview_root = preview.get("root") if isinstance(preview.get("root"), dict) else {}
+    stable_root = stable.get("root") if isinstance(stable.get("root"), dict) else {}
+    preview_check_summary = preview.get("check") if isinstance(preview.get("check"), dict) else {}
+    bundle = preview.get("bundle") if isinstance(preview.get("bundle"), dict) else {}
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    rows = [
+        (_L("结果", "result"), summary.get("result") or "-"),
+        (_L("状态", "status"), summary.get("status") or "-"),
+        (_L("Ready for review", "Ready for review"), "yes" if summary.get("ready_for_human_review") else "no"),
+        (_L("Preview root", "Preview root"), preview_root.get("config_root") or "-"),
+        (_L("Stable root", "Stable root"), stable_root.get("config_root") or "-"),
+        (_L("Preview check", "Preview check"), preview_check_summary.get("result") or "-"),
+        (_L("Bundle 校验", "bundle verified"), "yes" if bundle.get("verified") else "no"),
+        (_L("Bundle 入口", "bundle entrypoint"), bundle.get("entrypoint") or "-"),
+        (_L("阻塞原因", "blocked reasons"), ", ".join(str(item) for item in (summary.get("blocked_reasons") or [])) or "-"),
+        (_L("下一步", "next action"), next_action.get("label") or "-"),
+        (_L("建议命令", "suggested command"), next_action.get("command") or "-"),
+    ]
+    return (
+        _L("Config v2 Promote Plan", "Config v2 Promote Plan"),
+        rows,
+        _L("只读计划：停止在 human gate；不写 stable root、不改 Claude config、不发布 stable bundle。", "Read-only plan: stops at the human gate; no stable-root writes, no Claude config writes, no stable bundle publish."),
+    )
+
+
+def _model_source_status_tui_payload(summary):
+    actions = [
+        ("model_source_status", _L("查看 Model Source Status", "View Model Source Status")),
+        ("consumer_bundle_status", _L("查看 Consumer Bundle", "View Consumer Bundle")),
+        ("registry_v2_save_plan", _L("查看 v2 Save Plan", "View v2 Save Plan")),
+        ("config_v2_promotion_plan", _L("查看 Promote Plan", "View Promote Plan")),
+        ("preview_doctor", _L("运行 Preview Doctor", "Run Preview Doctor")),
+        ("check_staleness", _L("检查 Source Staleness", "Check Source Staleness")),
+        ("refresh_due_sources", _L("刷新到期 Sources", "Refresh Due Sources")),
+        ("scheduled_dry_run", _L("定时刷新 Dry Run", "Scheduled Refresh Dry Run")),
+        ("scheduled_no_network", _L("定时刷新 No Network", "Scheduled Refresh No Network")),
+        ("refresh_sources", _L("刷新全部 Sources", "Refresh Sources")),
+        ("fetch_openrouter", _L("拉取 OpenRouter Catalog", "Fetch OpenRouter Catalog")),
+        ("diff_openrouter", _L("对比 OpenRouter Candidate", "OpenRouter Candidate Diff")),
+        ("publish_approved", _L("发布 Approved Bundle", "Publish Approved Bundle")),
+        ("verify_approved", _L("验证 Approved Bundle", "Verify Approved Bundle")),
+        ("doctor", _L("Registry Doctor / 状态", "Registry Doctor / Status")),
+        ("back", _L("返回", "Back")),
+    ]
+    return _L("模型真源 / Registry Truth", "Registry Truth"), _model_source_status_rows(summary), actions
+
+
 def _compact_tui_report_value(value, max_len=96):
     text = str(value if value is not None else "-").replace("\n", " ").strip()
     if len(text) <= max_len:
@@ -5315,7 +5555,7 @@ def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallbac
             ("Model", model or "-"),
             ("Hot fallback", _L("开启", "on") if hot_fallback_enabled else _L("关闭", "off")),
             (_L("保存位置", "saved at"), "[rescue].fallback_model"),
-            (_L("生效方式", "applies"), "bridge failure -> model-routes.json"),
+            (_L("生效方式", "applies"), "bridge failure -> latest-approved Router"),
             (_L("安全边界", "safety"), "no global OAuth"),
         ],
         (
@@ -10128,10 +10368,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 except Exception as e:
                     console.print(f"[red]导出失败: {e}[/red]")
             elif settings_action == "registry":
-                from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
+                from mms_registry_cli import config_v2_promotion_plan, consumer_bundle_status, diff_openrouter_catalog, fetch_openrouter_catalog, model_source_status, preview_doctor, publish_approved_bundle, refresh_source_snapshots, registry_status, registry_v2_save_plan, scheduled_refresh, source_freshness, verify_approved_bundle
 
-                status = registry_status()
-                registry_title, registry_info, registry_actions = _registry_truth_tui_payload(status)
+                source_status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
+                registry_title, registry_info, registry_actions = _model_source_status_tui_payload(source_status)
                 registry_action = _safe_tui_call(
                     select_channel_action_tui,
                     registry_title,
@@ -10140,7 +10380,30 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 )
                 if registry_action == "__interrupt__":
                     return True
-                if registry_action == "check_staleness":
+                if registry_action == "model_source_status":
+                    _print_settings_result_report(*_model_source_status_report_payload(source_status))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "consumer_bundle_status":
+                    summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
+                    _print_settings_result_report(*_consumer_bundle_status_report_payload(summary))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "registry_v2_save_plan":
+                    plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
+                    _print_settings_result_report(*_registry_v2_save_plan_report_payload(plan))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "config_v2_promotion_plan":
+                    plan = config_v2_promotion_plan(preview_config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config promote-plan")
+                    _print_settings_result_report(*_config_v2_promotion_plan_report_payload(plan))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "preview_doctor":
+                    try:
+                        summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} preview doctor")
+                    except Exception as exc:
+                        _print_settings_error_report(_L("Preview Doctor 失败", "Preview Doctor failed"), exc)
+                    else:
+                        _print_settings_result_report(*_preview_doctor_report_payload(summary))
+                    _pause_after_tui_report("按 Enter 返回设置")
+                elif registry_action == "check_staleness":
                     try:
                         summary = source_freshness()
                     except Exception as exc:
@@ -10959,6 +11222,12 @@ def handle_config(cfg, args_rest):
         return
     if key_path == "file":
         _handle_config_file()
+        return
+    if key_path in {"root", "root.status", "status.root"}:
+        _display_config_root(json_output="--json" in args_rest[1:])
+        return
+    if key_path in {"source", "sources", "model-source", "model-sources"}:
+        _display_model_source_status(json_output="--json" in args_rest[1:])
         return
     if key_path == "validate":
         _handle_config_validate(cfg)
@@ -11820,6 +12089,15 @@ def _display_config_help():
     console.print("\n[bold]常用子命令:[/bold]")
     console.print(f"  {command} config")
     console.print(f"  {command} config file")
+    console.print(f"  {command} config root [--json]")
+    console.print(f"  {command} config source [--json]")
+    console.print(f"  {command} config check [--json]")
+    console.print(f"  {command} config bundle [--json]")
+    console.print(f"  {command} config save-plan [--json]")
+    console.print(f"  {command} config promote-plan [--json]")
+    console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
+    console.print(f"  {command} config doctor [--json]")
+    console.print(f"  {command} config doctor --strict-exit")
     console.print(f"  {command} config validate")
     console.print(f"  {command} config get <dot.path>")
     console.print(f"  {command} config set <dot.path> <value>")
@@ -11855,6 +12133,93 @@ def _display_config_help():
     console.print("\n[bold]其他:[/bold]")
     console.print(f"  {command} config stats")
     console.print(f"  {command} config api.edit")
+
+
+def _config_root_status():
+    return mms_config_root_status(command=current_command(), config_dir=PRIMARY_CONFIG_DIR)
+
+
+def _display_config_root(json_output=False):
+    status = _config_root_status()
+    if json_output:
+        print(json.dumps(status, ensure_ascii=False, sort_keys=True))
+        return
+    console.print("[bold]MMS config root[/bold]")
+    console.print(f"  [cyan]command[/cyan] = {status['command']}")
+    console.print(f"  [cyan]mode[/cyan] = {status['mode']}")
+    console.print(f"  [cyan]root_source[/cyan] = {status['root_source']}")
+    console.print(f"  [cyan]config_root[/cyan] = {status['config_root']}")
+    console.print(f"  [cyan]config_path[/cyan] = {status['config_path']}")
+    console.print(f"  [cyan]credentials_path[/cyan] = {status['credentials_path']}")
+    console.print(f"  [cyan]usage_path[/cyan] = {status['usage_path']}")
+    if status["mode"] == "preview":
+        console.print("[yellow]Preview root:[/yellow] fail closed inside this root; no silent fallback to stable credentials/OAuth.")
+    else:
+        console.print("[dim]Stable root: current default MMS behavior.[/dim]")
+
+
+def _display_model_source_status(json_output=False):
+    from mms_registry_cli import _print_model_source_status, model_source_status
+
+    status = model_source_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config source")
+    if json_output:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_model_source_status(status)
+
+
+def _display_consumer_bundle_status(json_output=False, strict_exit=True):
+    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+
+    summary = consumer_bundle_status(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config bundle")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_consumer_bundle_status(summary)
+    return 0 if not strict_exit or summary.get("verified") is True else 2
+
+
+def _display_registry_v2_save_plan(json_output=False):
+    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+
+    plan = registry_v2_save_plan(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config save-plan")
+    if json_output:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_registry_v2_save_plan(plan)
+
+
+def _display_preview_doctor(json_output=False, strict_exit=False):
+    from mms_registry_cli import _print_preview_doctor, preview_doctor
+
+    summary = preview_doctor(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config doctor")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_doctor(summary)
+    return 0 if not strict_exit or summary.get("ready") is True else 2
+
+
+def _display_preview_check(json_output=False, strict_exit=True):
+    from mms_registry_cli import _print_preview_check, preview_check
+
+    summary = preview_check(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config check")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_check(summary)
+    return 0 if not strict_exit or summary.get("ready") is True else 2
+
+
+def _display_config_v2_promotion_plan(json_output=False, strict_exit=False):
+    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+
+    summary = config_v2_promotion_plan(preview_config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config promote-plan")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_config_v2_promotion_plan(summary)
+    return 0 if not strict_exit or summary.get("ready_for_human_review") is True else 2
 
 
 def _display_preferences_path():
@@ -11908,6 +12273,12 @@ def _display_preferences_help():
 def _display_config(cfg, prefix="", depth=0):
     """递归显示配置，遮蔽敏感值"""
     if depth == 0:
+        status = _config_root_status()
+        console.print("[bold]配置根:[/bold]")
+        console.print(f"  [cyan]command[/cyan] = {status['command']}")
+        console.print(f"  [cyan]mode[/cyan] = {status['mode']}")
+        console.print(f"  [cyan]root_source[/cyan] = {status['root_source']}")
+        console.print(f"  [cyan]config_root[/cyan] = {status['config_root']}")
         provider = resolve_provider_context(cfg)
         console.print("[bold]模型源:[/bold]")
         console.print(f"  [cyan]default[/cyan] = {cfg.get('provider', {}).get('default', DEFAULT_PROVIDER_ID)}")
@@ -13215,6 +13586,28 @@ def _is_config_help_request(args_rest):
         "preference.example",
         "preferences.doc",
         "preference.doc",
+        "root",
+        "root.status",
+        "status.root",
+        "check",
+        "preview-check",
+        "preview.check",
+        "v2-check",
+        "bundle",
+        "consumer-bundle",
+        "manifest",
+        "save-plan",
+        "save.plan",
+        "v2-save-plan",
+        "apply-plan",
+        "apply.plan",
+        "preview-apply",
+        "apply-preview",
+        "registry-apply-plan",
+        "doctor",
+        "preview-doctor",
+        "preview.doctor",
+        "v2-doctor",
         "web",
         "webui",
         "setup.web",
@@ -13224,6 +13617,54 @@ def _is_config_help_request(args_rest):
         "humangate",
         "human-gates",
     }
+
+
+def _is_config_root_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"root", "root.status", "status.root"}
+
+
+def _is_config_model_source_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"source", "sources", "model-source", "model-sources"}
+
+
+def _is_config_consumer_bundle_status_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"bundle", "consumer-bundle", "manifest"}
+
+
+def _is_config_registry_v2_save_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
+
+
+def _is_config_preview_check_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"check", "preview-check", "preview.check", "v2-check"}
+
+
+def _is_config_v2_promotion_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"promote-plan", "promotion-plan", "promote.check", "promote"}
+
+
+def _is_config_registry_v2_apply_plan_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"apply-plan", "apply.plan", "preview-apply", "apply-preview", "registry-apply-plan"}
+
+
+def _is_config_preview_doctor_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}
 
 
 def _is_session_prune_dry_run(argv):
@@ -13254,6 +13695,46 @@ def _handle_disabled_legacy_chat_discuss(command):
 
 def main():
     argv, lang_override = _extract_global_lang(sys.argv[1:])
+    if len(argv) >= 1 and argv[0] == "registry":
+        set_language(_resolve_ui_language(None, lang_override))
+        from mms_registry_cli import handle_registry_command
+
+        raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
+    if _is_config_root_status_request(argv):
+        _display_config_root(json_output="--json" in argv[2:])
+        return
+    if _is_config_model_source_status_request(argv):
+        _display_model_source_status(json_output="--json" in argv[2:])
+        return
+    if _is_config_consumer_bundle_status_request(argv):
+        code = _display_consumer_bundle_status(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_registry_v2_save_plan_request(argv):
+        _display_registry_v2_save_plan(json_output="--json" in argv[2:])
+        return
+    if _is_config_preview_check_request(argv):
+        code = _display_preview_check(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_v2_promotion_plan_request(argv):
+        code = _display_config_v2_promotion_plan(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+    if _is_config_registry_v2_apply_plan_request(argv):
+        from mms_registry_cli import handle_registry_command
+
+        registry_args = ["apply-plan", "--config-dir", PRIMARY_CONFIG_DIR] + list(argv[2:])
+        raise SystemExit(handle_registry_command(registry_args, command_name=f"{current_command()} config"))
+    if _is_config_preview_doctor_request(argv):
+        code = _display_preview_doctor(json_output="--json" in argv[2:], strict_exit="--strict-exit" in argv[2:])
+        if code:
+            raise SystemExit(code)
+        return
+
     help_request = _is_help_request(argv) or _is_setup_web_request(argv)
     bootstrap_cfg = load_config()
     set_language(_resolve_ui_language(bootstrap_cfg, lang_override))
@@ -13276,10 +13757,6 @@ def main():
         if command == "exposure":
             handle_exposure_command(argv[1:])
             return
-        if command == "registry":
-            from mms_registry_cli import handle_registry_command
-
-            raise SystemExit(handle_registry_command(argv[1:], command_name=f"{current_command()} registry"))
         if _is_session_prune_dry_run(argv):
             handle_session_command(argv[1:])
             return

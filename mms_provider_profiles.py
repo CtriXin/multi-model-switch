@@ -45,24 +45,31 @@ def _deep_merge(base: Any, override: Any) -> Any:
     return copy.deepcopy(override)
 
 
-def _load_latest_approved_profiles(config_dir: str) -> dict[str, Any]:
+def _load_latest_approved_profiles(config_dir: str) -> tuple[dict[str, Any], bool]:
+    manifest_path = os.path.join(config_dir, "generated", "model-registry.latest-approved.json")
+    if not os.path.exists(manifest_path):
+        return {}, False
     try:
         import mms_registry
     except Exception:
-        return {}
-    payload = mms_registry.try_load_latest_approved_payload("profile", config_dir=config_dir)
-    return payload if isinstance(payload, dict) else {}
+        return {}, True
+    try:
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=config_dir)
+    except Exception:
+        return {}, True
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
+    payload = payloads.get("profile")
+    return (payload if isinstance(payload, dict) else {}), True
 
 
-@lru_cache(maxsize=1)
-def load_provider_profiles() -> dict[str, Any]:
-    """Load built-in profiles plus verified latest-approved or legacy overlays."""
+@lru_cache(maxsize=8)
+def _load_provider_profiles_for_config(config_dir: str) -> dict[str, Any]:
     loaded = _read_json(_BUILTIN_PROFILE_PATH)
     profiles = loaded if loaded else {"schema_version": 1, "profiles": {}}
-    config_dir = resolve_mms_config_dir()
-    approved_payload = _load_latest_approved_profiles(config_dir)
-    if approved_payload:
-        profiles = _deep_merge(profiles, approved_payload)
+    approved_payload, has_latest_approved = _load_latest_approved_profiles(config_dir)
+    if has_latest_approved:
+        if approved_payload:
+            profiles = _deep_merge(profiles, approved_payload)
         if not isinstance(profiles.get("profiles"), dict):
             profiles["profiles"] = {}
         return profiles
@@ -73,6 +80,14 @@ def load_provider_profiles() -> dict[str, Any]:
     if not isinstance(profiles.get("profiles"), dict):
         profiles["profiles"] = {}
     return profiles
+
+
+def load_provider_profiles() -> dict[str, Any]:
+    """Load built-in profiles plus verified latest-approved or legacy overlays."""
+    return _load_provider_profiles_for_config(resolve_mms_config_dir())
+
+
+load_provider_profiles.cache_clear = _load_provider_profiles_for_config.cache_clear  # type: ignore[attr-defined]
 
 
 def _clean(value: Any) -> str:

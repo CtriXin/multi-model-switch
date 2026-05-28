@@ -57,6 +57,39 @@ def test_config_web_snapshot_redacts_secrets_and_summarizes_provider():
     assert snapshot["save_contract"]["requires_confirm_save"] is True
 
 
+def test_config_web_snapshot_includes_read_only_model_source_status(tmp_path):
+    config_root = tmp_path / "mms-next"
+    snapshot = mms_config_web.build_config_snapshot(
+        {"providers": []},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+    status = snapshot["model_source_status"]
+
+    assert status["schema"] == "mms.model_source_status.v1"
+    assert status["read_only"] is True
+    assert status["result"] == "NOT_READY"
+    assert status["ready"] is False
+    assert status["status"] == "needs_init"
+    assert "registry DB initialization" in status["headline"]
+    assert status["root"]["command"] == "mmf"
+    assert status["root"]["mode"] == "preview"
+    assert status["root"]["config_root"] == str(config_root)
+    assert status["registry_db"]["status"] == "missing"
+    assert status["registry_db"]["path"] == str(config_root / "registry" / "model-registry.sqlite")
+    assert status["legacy_import"]["candidates"]["status"] == "not_imported"
+    assert status["legacy_import"]["candidates"]["provider_route_count"] == 0
+    assert status["generated_bundle"]["status"] == "missing"
+    consumer = snapshot["consumer_bundle_status"]
+    assert consumer["schema"] == "mms.consumer_bundle_status.v1"
+    assert consumer["read_only"] is True
+    assert consumer["verified"] is False
+    assert consumer["status"] == "missing"
+    assert consumer["consumer_entrypoint"] == str(config_root / "generated" / "model-registry.latest-approved.json")
+    assert "do not query SQLite directly" in consumer["consumer_rules"]
+    assert not (config_root / "registry").exists()
+
+
 def test_config_web_snapshot_separates_stale_hidden_models():
     cfg = {
         "providers": [
@@ -93,6 +126,15 @@ def test_config_web_print_summary_exits_without_server(capsys):
     assert payload["schema"] == "mms.setup_web.snapshot.v2"
     assert payload["paths"]["config"] == "/tmp/config.toml"
     assert payload["paths"]["model_policy"] == "/tmp/model-policy.json"
+    save_contract = payload["save_contract"]
+    assert save_contract["stable_legacy_writes"] == [
+        "config.toml",
+        "credentials.sh(仅当输入新 key 并勾选更新凭据)",
+        "model-policy.json",
+    ]
+    assert "registry/model-registry.sqlite(candidate revisions)" in save_contract["preview_v2_writes"]
+    assert "generated/model-registry.latest-approved.json" in save_contract["preview_v2_writes"]
+    assert save_contract["preview_confirm_phrase"] == "写入预览DB"
     assert payload["recommendations"]
 
 
@@ -118,6 +160,36 @@ def test_config_web_markdown_contains_manual_snippets(capsys):
 def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     html = mms_config_web._HTML_PAGE
 
+    assert "['source','真源状态','DB / legacy / bundle']" in html
+    assert 'data-section="source"' in html
+    assert "function renderSourceStatus()" in html
+    assert "status.headline" in html
+    assert "consumer_bundle_status" in html
+    assert "Consumer Bundle" in html
+    assert "不读 SQLite" in html
+    assert "mmf config bundle --json" in html
+    assert "candidate routes" in html
+    assert "missing keys" in html
+    assert "registry_v2_save_plan" in html
+    assert "applyV2Preview" in html
+    assert "downloadPlanJson" in html
+    assert "copyApplyCommand" in html
+    assert "WebUI plan JSON = “生成保存预览”的 redacted review artifact" in html
+    assert "function planJsonHint(plan)" in html
+    assert "currentApplyCommand()" in html
+    assert "/api/registry-v2/apply" in html
+    assert "写入预览DB" in html
+    assert "Preview root 下 legacy 确认保存会被阻止" in html
+    assert "stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish" in html
+    assert "stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]" in html
+    assert "preview root 写 DB candidate、preview secret backend 和 generated bundle" in html
+    assert "stable 写 credentials.sh；preview 写 secret backend" in html
+    assert "这里会写入 config.toml 的 [rescue]" not in html
+    assert "保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）" not in html
+    assert "function renderSaveControls()" in html
+    assert "saveBtn').disabled=preview" in html
+    assert "applyV2Preview').disabled=!preview" in html
+    assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html
     assert "function providerEntries()" in html
@@ -368,12 +440,75 @@ def test_config_web_plan_builds_diff_without_echoing_credentials(tmp_path):
     assert plan["config"]["opencode"]["agent_models"]["mobius-reviewer-gpt55"] == {"model": "gpt-5.5"}
     assert plan["model_policy"]["models"]["qwen3.6-plus"]["capabilities"]["vision"] is True
     assert "Demo Gateway" in plan["diffs"]["config_toml"]
-    assert "credentials.sh: update provider demo" in plan["diffs"]["credentials"]
+    assert "credential update: provider demo" in plan["diffs"]["credentials"]
+    assert "preview secret backend" in plan["diffs"]["credentials"]
     assert plan["review_summary"]["schema"] == "mms.setup_web.review_summary.v1"
     assert any(item["kind"] == "provider_url" for item in plan["review_summary"]["items"])
-    assert any(item["kind"] == "credentials" for item in plan["review_summary"]["items"])
-    assert any(risk["id"] == "credential_update" for risk in plan["review_summary"]["risks"])
+    credentials_item = next(item for item in plan["review_summary"]["items"] if item["kind"] == "credentials")
+    credential_risk = next(risk for risk in plan["review_summary"]["risks"] if risk["id"] == "credential_update")
+    assert "stable legacy 写 credentials.sh；preview 写 secret backend" in credentials_item["detail"]
+    assert "preview 目标是 secret backend" in credential_risk["detail"]
+    assert "将更新 credentials.sh" not in json.dumps(plan["review_summary"], ensure_ascii=False)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_plan_includes_read_only_registry_v2_save_plan(tmp_path):
+    config_root = tmp_path / "mms-next"
+    registry_dir = config_root / "registry"
+    registry_dir.mkdir(parents=True)
+    db_path = registry_dir / "model-registry.sqlite"
+    db_path.write_bytes(b"not-a-real-db")
+    cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
+    payload = _draft_payload()
+
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+    v2_plan = plan["registry_v2_save_plan"]
+    encoded = json.dumps(v2_plan, ensure_ascii=False)
+
+    assert v2_plan["schema"] == "mms.setup_web.registry_v2_save_plan.v1"
+    assert v2_plan["read_only"] is True
+    assert v2_plan["execution_state"] == "plan_only"
+    assert v2_plan["actual_save_enabled"] is False
+    assert v2_plan["root"]["mode"] == "preview"
+    assert v2_plan["db"]["path"] == str(db_path)
+    assert v2_plan["db"]["would_backup_existing_db"] is True
+    assert v2_plan["would_write"]["db_candidate_revision"] is True
+    assert v2_plan["would_write"]["secret_backend"] is True
+    assert v2_plan["would_write"]["generated_latest_approved_bundle"] is True
+    assert v2_plan["blocked_reasons"] == []
+    assert "rollback" in " ".join(v2_plan["ordered_steps"])
+    assert v2_plan["plan_json"]["name"] == "webui-plan.json"
+    assert v2_plan["plan_json"]["redacted"] is True
+    assert v2_plan["plan_json"]["secrets_included"] is False
+    assert v2_plan["apply_plan"]["webui_endpoint"] == "/api/registry-v2/apply"
+    assert v2_plan["apply_plan"]["confirm_phrase"] == "写入预览DB"
+    assert "--confirm-preview-apply" in v2_plan["apply_plan"]["cli_apply_command"]
+    assert "credential updates should be applied through WebUI" in v2_plan["apply_plan"]["credential_note"]
+    assert "WebUI and mms config apply-plan are wired" in v2_plan["next_implementation_step"]
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_save_plan_blocks_stable_root(tmp_path):
+    config_root = tmp_path / "mms"
+    cfg = {"provider": {"default": "demo"}, "providers": [{"id": "demo", "name": "Old"}]}
+    payload = _draft_payload()
+
+    plan = mms_config_web.build_config_plan(
+        cfg,
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+    v2_plan = plan["registry_v2_save_plan"]
+
+    assert v2_plan["root"]["mode"] == "stable"
+    assert v2_plan["would_write"]["db_candidate_revision"] is False
+    assert v2_plan["would_write"]["secret_backend"] is False
+    assert v2_plan["would_write"]["generated_latest_approved_bundle"] is False
+    assert "stable_root_human_only" in v2_plan["blocked_reasons"]
 
 
 def test_config_web_plan_clears_empty_opencode_agent_overrides(tmp_path):
@@ -596,6 +731,150 @@ def test_config_web_save_uses_audited_writers(monkeypatch, tmp_path):
     assert any(path.name == "credentials.sh.bak" for path in bak_paths)
     assert any(path.name == "model-policy.json.bak" for path in bak_paths)
     assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_legacy_save_blocks_preview_root(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    credentials_path = config_root / "credentials.sh"
+    payload = _draft_payload()
+    payload["confirm_save"] = True
+    payload["confirm_phrase"] = "保存配置"
+
+    result = mms_config_web.apply_config_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["root"]["mode"] == "preview"
+    assert "legacy /api/save" in result["errors"][0]
+    assert not config_path.exists()
+    assert not credentials_path.exists()
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_blocks_stable_root(tmp_path):
+    config_root = tmp_path / "mms"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_root / "config.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "stable_root_human_only" in result["errors"]
+    assert not config_root.exists()
+
+
+def test_config_web_registry_v2_apply_writes_preview_candidates_and_bundle(tmp_path):
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    credentials_path = config_root / "credentials.sh"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    router_path = config_root / "generated" / "model-routes.json"
+    manifest_path = config_root / "generated" / "model-registry.latest-approved.json"
+    secret_path = config_root / "secrets" / "webui-secrets.json"
+    router = json.loads(router_path.read_text(encoding="utf-8"))
+
+    assert result["ok"] is True
+    assert result["schema"] == "mms.setup_web.registry_v2_apply_result.v1"
+    assert result["status"] == "verified"
+    assert result["candidate"]["route_candidates"]["provider_route_count"] == 2
+    assert result["credential_backend"]["count"] == 1
+    assert result["publish"]["preview_source"] == "registry-v2-save-candidate"
+    assert result["publish"]["runtime_ready"] is True
+    assert result["verify"]["verified"] is True
+    assert router["source"] == "registry-preview-v2-save-candidate"
+    assert router["routes"]["gpt-5.5"]["primary"]["secret_ref"] == "pending-webui:demo:api_key"
+    assert router["routes"]["gpt-5.5"]["primary"]["api_key"] == "sk-super-secret-value"
+    assert manifest_path.exists()
+    assert secret_path.exists()
+    assert "sk-super-secret-value" in secret_path.read_text(encoding="utf-8")
+    assert not config_path.exists()
+    assert not credentials_path.exists()
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_updates_in_memory_snapshot(tmp_path):
+    config_root = tmp_path / "mms-next"
+    app = mms_config_web.ConfigWebApp(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        config_path=str(config_root / "config.toml"),
+        command_name="mmf",
+    )
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+
+    result = app.registry_v2_apply(payload)
+    snapshot = app.snapshot()
+    encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is True
+    assert snapshot["providers"][0]["name"] == "Demo Gateway"
+    assert snapshot["providers"][0]["hidden_models"] == ["noisy-model"]
+    assert snapshot["mode"] == "interactive_audited_save"
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_rolls_back_on_verify_failure(monkeypatch, tmp_path):
+    import mms_registry_cli
+
+    config_root = tmp_path / "mms-next"
+    config_path = config_root / "config.toml"
+    payload = _draft_payload()
+    payload["confirm_v2_preview"] = True
+    payload["confirm_phrase"] = "写入预览DB"
+    monkeypatch.setattr(mms_registry_cli, "verify_approved_bundle", lambda **kwargs: {"verified": False, "errors": ["forced verify failure"]})
+
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        payload,
+        config_path=str(config_path),
+    )
+    encoded = json.dumps(result, ensure_ascii=False, sort_keys=True)
+
+    assert result["ok"] is False
+    assert result["status"] == "failed_verify"
+    assert result["rollback"]["db"]["removed_new_db"] is True
+    assert result["rollback"]["credential_backend"]["removed_new_file"] is True
+    assert "model-registry.latest-approved.json" in result["rollback"]["generated"]["removed"]
+    assert not (config_root / "registry" / "model-registry.sqlite").exists()
+    assert not (config_root / "secrets" / "webui-secrets.json").exists()
+    assert not (config_root / "generated" / "model-registry.latest-approved.json").exists()
+    assert "sk-super-secret-value" not in encoded
+
+
+def test_config_web_registry_v2_apply_requires_explicit_preview_confirmation(tmp_path):
+    config_root = tmp_path / "mms-next"
+    result = mms_config_web.apply_registry_v2_preview_plan(
+        {"providers": [{"id": "demo", "name": "Old"}], "provider": {"default": "demo"}},
+        _draft_payload(),
+        config_path=str(config_root / "config.toml"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert "确认" in result["errors"][0]
+    assert not config_root.exists()
 
 
 def test_config_web_provider_model_fetch_can_be_stubbed(monkeypatch):

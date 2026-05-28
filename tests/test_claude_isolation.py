@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import subprocess
+import sys
 import types
 from contextlib import contextmanager
 from datetime import datetime
@@ -113,6 +116,7 @@ def test_load_project_scoped_resume_uses_real_home_index_under_gateway_home(monk
     gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "16593"
     gateway_home.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(real_home / ".config"))
     monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
     monkeypatch.setenv("REAL_HOME", str(real_home))
     monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
@@ -181,6 +185,656 @@ def test_mms_config_paths_resolve_real_home_under_gateway_shell(monkeypatch, tmp
         monkeypatch.delenv("ORIGINAL_HOME", raising=False)
         importlib.reload(mms_router)
         importlib.reload(mms_core)
+
+
+def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
+    import mms_core
+    import mms_registry
+    import mms_router
+
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
+    preview_root = tmp_path / "preview-root"
+    gateway_home.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(gateway_home / ".config"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setenv("MMS_PREVIEW_MODE", "mmf")
+
+    reloaded_core = importlib.reload(mms_core)
+    reloaded_router = importlib.reload(mms_router)
+    try:
+        stable_root = real_home / ".config" / "mms"
+        assert reloaded_core.CONFIG_PATH == str(preview_root / "config.toml")
+        assert reloaded_core.CREDENTIALS_PATH == str(preview_root / "credentials.sh")
+        assert reloaded_core._active_config_path() == str(preview_root / "config.toml")
+        assert reloaded_core._active_credentials_path() == str(preview_root / "credentials.sh")
+        assert reloaded_core._active_usage_path() == str(preview_root / "usage.json")
+        assert reloaded_core._config_root_status()["mode"] == "preview"
+        assert reloaded_core._config_root_status()["command"] == "mmf"
+        assert reloaded_router.MODEL_ROUTES_PATH == str(preview_root / "model-routes.json")
+        assert mms_registry.default_registry_db_path(env=os.environ) == preview_root / "registry" / "model-registry.sqlite"
+        assert not str(reloaded_core.CONFIG_PATH).startswith(str(stable_root))
+    finally:
+        monkeypatch.delenv("HOME", raising=False)
+        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+        monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+        importlib.reload(mms_router)
+        importlib.reload(mms_core)
+
+
+def test_preview_usage_write_skips_legacy_routes_export(monkeypatch, tmp_path):
+    import mms_core
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    preview_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setenv("MMS_COMMAND_NAME", "mmf")
+    monkeypatch.setenv("MMS_PREVIEW_MODE", "mmf")
+
+    reloaded = importlib.reload(mms_core)
+    try:
+        calls = []
+        monkeypatch.setattr(reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: calls.append(kwargs))
+
+        def fail_thread(*_args, **_kwargs):
+            raise AssertionError("preview usage writes must not start legacy route export thread")
+
+        monkeypatch.setattr(reloaded.threading, "Thread", fail_thread)
+        reloaded._trigger_routes_export_after_usage_write()
+
+        assert calls == []
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+        monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_core)
+
+
+def test_stable_usage_write_keeps_legacy_routes_export(monkeypatch, tmp_path):
+    import mms_core
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_COMMAND_NAME", raising=False)
+    monkeypatch.delenv("MMS_PREVIEW_MODE", raising=False)
+
+    reloaded = importlib.reload(mms_core)
+    try:
+        calls = []
+        monkeypatch.setattr(reloaded, "_refresh_routes_export_for_hive", lambda *args, **kwargs: calls.append(kwargs))
+
+        class ImmediateThread:
+            def __init__(self, *, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        monkeypatch.setattr(reloaded.threading, "Thread", ImmediateThread)
+        reloaded._trigger_routes_export_after_usage_write()
+
+        assert calls == [{"force": True, "quiet": True}]
+    finally:
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_core)
+
+
+def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_project_store
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_project_store.get_primary_config_dir() == preview_root
+    assert mms_project_store.get_projects_dir() == preview_root / "projects"
+
+
+def test_launcher_runtime_aux_paths_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_launchers)
+    try:
+        assert reloaded.RUNTIME_DIR == str(preview_root / "runtime")
+        assert reloaded.HEALTH_CHECK_PATH == str(preview_root / "health_check.json")
+        assert reloaded.ANTHROPIC_URL_CACHE_PATH == str(preview_root / "cache" / "anthropic_base_urls.json")
+        assert reloaded._selected_config_path("usage.json") == str(preview_root / "usage.json")
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_launchers)
+
+
+def test_usage_local_stats_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_usage
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "usage.json").write_text('{"sources":{"stable":{}}}', encoding="utf-8")
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_usage)
+    try:
+        assert reloaded._active_usage_path() is None
+        (preview_root / "usage.json").write_text('{"sources":{"preview":{}}}', encoding="utf-8")
+        assert reloaded._active_usage_path() == str(preview_root / "usage.json")
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_usage)
+
+
+def test_speed_stats_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_speed_stats
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_speed_stats)
+    try:
+        reloaded.record_model_speed(
+            "preview-model",
+            ttfb_ms=123,
+            provider={"id": "preview-provider", "base_url": "https://preview.example/v1"},
+        )
+        assert (preview_root / "speed-stats.json").exists()
+        assert not (stable_root / "speed-stats.json").exists()
+        assert reloaded._speed_stats_path() == preview_root / "speed-stats.json"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_speed_stats)
+
+
+def test_health_cache_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_health_cache
+    import mms_speed_stats
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (preview_root / "speed-stats.json").write_text(
+        json.dumps(
+            {
+                "preview-model": {
+                    "ttfb_avg_ms": 800,
+                    "samples": 3,
+                    "last_updated": datetime.now().astimezone().isoformat(),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded_speed = importlib.reload(mms_speed_stats)
+    reloaded_health = importlib.reload(mms_health_cache)
+    try:
+        reloaded_health.refresh_health_cache()
+        assert (preview_root / "health-cache.json").exists()
+        assert not (stable_root / "health-cache.json").exists()
+        assert reloaded_health._speed_stats_path() == preview_root / "speed-stats.json"
+        assert reloaded_speed._speed_stats_path() == preview_root / "speed-stats.json"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_speed_stats)
+        importlib.reload(mms_health_cache)
+
+
+def test_runtime_events_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_events
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+    monkeypatch.setitem(
+        sys.modules,
+        "gbrain_memory_hook",
+        SimpleNamespace(ingest_mms_event=lambda _event: None),
+    )
+
+    reloaded = importlib.reload(mms_events)
+    try:
+        reloaded.emit_event("started", "preview-model")
+        assert (preview_root / "events" / "latest.json").exists()
+        assert not (stable_root / "events" / "latest.json").exists()
+        assert reloaded.get_latest_event()["model"] == "preview-model"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        importlib.reload(mms_events)
+
+
+def test_broker_credentials_and_cache_use_selected_config_root(monkeypatch, tmp_path):
+    import mms_broker
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "credentials.sh").write_text(
+        "export MMS_TEST_BROKER_DEVICE_KEY='stable-secret'\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("MMS_TEST_BROKER_DEVICE_KEY", raising=False)
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    reloaded = importlib.reload(mms_broker)
+    profile = {
+        "id": "broker-a",
+        "broker_base_url": "http://127.0.0.1:17777",
+        "device_key_env": "MMS_TEST_BROKER_DEVICE_KEY",
+    }
+    try:
+        env = reloaded._build_broker_env(profile, workspace_root=str(tmp_path))
+        assert env["CC_BROKER_DEVICE_KEY"] == ""
+        assert reloaded._broker_credentials_path() == str(preview_root / "credentials.sh")
+        assert reloaded._broker_cache_dir() == str(preview_root / "cache" / "broker")
+
+        (preview_root / "credentials.sh").write_text(
+            "export MMS_TEST_BROKER_DEVICE_KEY='preview-secret'\n",
+            encoding="utf-8",
+        )
+        reloaded._load_env_file.cache_clear()
+        env = reloaded._build_broker_env(profile, workspace_root=str(tmp_path))
+        assert env["CC_BROKER_DEVICE_KEY"] == "preview-secret"
+    finally:
+        monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+        monkeypatch.delenv("MMS_REAL_HOME", raising=False)
+        monkeypatch.delenv("REAL_HOME", raising=False)
+        monkeypatch.delenv("ORIGINAL_HOME", raising=False)
+        reloaded._load_env_file.cache_clear()
+        importlib.reload(mms_broker)
+
+
+def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "statusline-command.sh"
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "mms-next"
+    gateway_home = stable_root / "claude-gateway" / "s" / "12345"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    gateway_home.mkdir(parents=True)
+    (stable_root / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-stable-20260101"}),
+        encoding="utf-8",
+    )
+    (gateway_home / ".config" / "mms").mkdir(parents=True)
+    (gateway_home / ".config" / "mms" / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-session-stable-20260101"}),
+        encoding="utf-8",
+    )
+    (preview_root / "route_status.json").write_text(
+        json.dumps({"tier": "light", "model": "claude-preview-20260101"}),
+        encoding="utf-8",
+    )
+    (preview_root / "health-cache.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "claude-preview-20260101": {
+                        "status": "ok",
+                        "checked_at": datetime.now().astimezone().isoformat(),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = {
+        "model": {"display_name": "Sonnet"},
+        "workspace": {"current_dir": str(tmp_path)},
+        "context_window": {
+            "used_percentage": 1,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 2000,
+            "context_window_size": 200000,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+    }
+    env = {
+        **os.environ,
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(real_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "MMS_CONFIG_ROOT": str(preview_root),
+        "TMPDIR": str(tmp_path) + os.sep,
+    }
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "preview" in result.stdout
+    assert "stable" not in result.stdout
+    assert "●" in result.stdout
+
+
+def test_statusline_strips_gateway_xdg_without_explicit_root(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "statusline-command.sh"
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "claude-gateway" / "s" / "12345"
+    stable_root.mkdir(parents=True)
+    gateway_home.mkdir(parents=True)
+    (stable_root / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-stable-20260101"}),
+        encoding="utf-8",
+    )
+    (stable_root / "health-cache.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "claude-stable-20260101": {
+                        "status": "ok",
+                        "checked_at": datetime.now().astimezone().isoformat(),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = {
+        "model": {"display_name": "Sonnet"},
+        "workspace": {"current_dir": str(tmp_path)},
+        "context_window": {
+            "used_percentage": 1,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 2000,
+            "context_window_size": 200000,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+    }
+    env = {
+        **os.environ,
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "TMPDIR": str(tmp_path) + os.sep,
+    }
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "stable" in result.stdout
+    assert "●" in result.stdout
+
+
+def test_claude_route_status_path_uses_selected_root_when_explicit(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_launchers._claude_route_status_paths() == [str(preview_root / "route_status.json")]
+
+
+def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(gateway_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(gateway_home / ".config"))
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    env: dict[str, str] = {}
+    mms_launchers._inject_rescue_launch_env(env)
+
+    assert env["MMS_RESCUE_CONFIG_ROOT"] == str(preview_root)
+    assert env["MMS_RESCUE_CONFIG_ROOT"] != str(stable_root)
+
+
+def test_rescue_launch_env_preserves_explicit_rescue_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    preview_root = tmp_path / "mms-next"
+    explicit_rescue_root = tmp_path / "explicit-rescue-root"
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    env = {"MMS_RESCUE_CONFIG_ROOT": str(explicit_rescue_root)}
+    mms_launchers._inject_rescue_launch_env(env)
+
+    assert env["MMS_RESCUE_CONFIG_ROOT"] == str(explicit_rescue_root)
+
+
+def test_home_context_reports_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = tmp_path / "outside-preview-root"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+
+    env = {
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "MMS_CONFIG_ROOT": str(preview_root),
+    }
+
+    context = mms_launchers._build_home_context(env, {"auth_mode": "api_key"}, "codex")
+    validated = mms_launchers._validate_home_context_or_exit(context)
+
+    assert context["config_root"] == str(preview_root)
+    assert context["config_root_explicit"] is True
+    assert validated["config_root"] == str(preview_root)
+    assert context["config_root"] != str(stable_root)
+
+
+def test_home_context_defaults_to_stable_root_without_explicit_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+
+    context = mms_launchers._build_home_context(
+        {
+            "HOME": str(gateway_home),
+            "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        },
+        {"auth_mode": "api_key"},
+        "codex",
+    )
+
+    assert context["config_root"] == str(stable_root)
+    assert context["config_root_explicit"] is False
+
+
+def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = real_home / ".config" / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "model-context-overrides.json").write_text(
+        json.dumps({"models": {"root-selected-model": 111_000}}),
+        encoding="utf-8",
+    )
+    (preview_root / "model-context-overrides.json").write_text(
+        json.dumps({"models": {"root-selected-model": 222_000}}),
+        encoding="utf-8",
+    )
+    mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE.update({"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}})
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
+    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+
+
+def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    real_home = tmp_path / "real-home"
+    gateway_home = real_home / ".config" / "mms" / "codex-gateway" / "s" / "4174"
+    gateway_home.mkdir(parents=True)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(gateway_home),
+            "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+            "MMS_REAL_HOME": str(real_home),
+            "REAL_HOME": str(real_home),
+            "ORIGINAL_HOME": str(real_home),
+        }
+    )
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    env.pop("MMS_COMMAND_NAME", None)
+
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "mmf"), "config", "root", "--json"],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+
+    status = json.loads(result.stdout.strip())
+    expected_preview_root = real_home / ".config" / "mms-next"
+    assert status["command"] == "mmf"
+    assert status["mode"] == "preview"
+    assert status["root_source"] == "MMS_CONFIG_ROOT"
+    assert status["config_root"] == str(expected_preview_root)
+    assert status["config_path"] == str(expected_preview_root / "config.toml")
+    stable_root = real_home / ".config" / "mms"
+    assert not (stable_root / "config.toml").exists()
+    assert not (stable_root / "credentials.sh").exists()
+    assert not (stable_root / "cache").exists()
 
 
 def test_sync_claude_session_state_back_to_account(tmp_path):

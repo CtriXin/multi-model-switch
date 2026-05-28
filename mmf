@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""MMF preview entrypoint for the next MMS config root."""
+
+import os
+import sys
+import json
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
+
+from mms_runtime import ensure_supported_python
+
+ensure_supported_python("MMF")
+
+from mms_state_io import mms_config_root_status, resolve_real_user_home
+
+os.environ.setdefault("MMS_COMMAND_NAME", "mmf")
+os.environ.setdefault("MMS_PREVIEW_MODE", "mmf")
+if not str(os.environ.get("MMS_CONFIG_ROOT") or "").strip():
+    os.environ["MMS_CONFIG_ROOT"] = os.path.join(resolve_real_user_home(os.environ), ".config", "mms-next")
+
+argv = sys.argv[1:]
+if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h", "--help"}):
+    print(
+        "\n".join(
+            [
+                "MMF preview commands",
+                f"config_root={os.environ['MMS_CONFIG_ROOT']}",
+                "",
+                "Read-only:",
+                "  mmf preview check [--json]        one command readiness check; strict exit by default",
+                "  mmf preview bundle [--json]       verify downstream latest-approved bundle",
+                "  mmf preview doctor [--json]       show current state and one next action",
+                "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
+                "  mmf preview status [--json]       show full model source status",
+                "  mmf preview verify [--json]       verify latest-approved bundle hashes",
+                "  mmf promote [--json]              show human-gated stable promotion plan",
+                "  mmf config save-plan [--json]     show future DB-truth save sequence",
+                "  mmf config promote-plan [--json]  show same promotion plan",
+                "  mmf config doctor [--json]        show preview readiness and one next action",
+                "  mmf config doctor --strict-exit   return non-zero unless runtime-ready",
+                "",
+                "Prepare preview root:",
+                "  mmf preview prepare --from ~/.config/mms --json",
+                "  mmf preview prepare --from ~/.config/mms --include-secrets --json",
+                "",
+                "Manual steps, if needed:",
+                "  mmf preview init --json",
+                "  mmf preview import-legacy --from ~/.config/mms --apply --json",
+                "  mmf preview publish --json",
+                "  mmf registry v2-save-candidate --plan-json <plan.json> --apply --json",
+                "",
+                "Safety: preview writes stay under MMS_CONFIG_ROOT; source roots are read-only.",
+            ]
+        )
+    )
+    raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "init":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["init-root", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "import-legacy":
+    from mms_registry_cli import handle_registry_command
+
+    source_default = os.path.join(resolve_real_user_home(os.environ), ".config", "mms")
+    translated = []
+    has_source = False
+    i = 2
+    while i < len(argv):
+        item = argv[i]
+        if item == "--from":
+            translated.append("--source-config-dir")
+            if i + 1 < len(argv):
+                translated.append(argv[i + 1])
+                i += 2
+            else:
+                i += 1
+            has_source = True
+            continue
+        if item.startswith("--from="):
+            translated.append("--source-config-dir=" + item.split("=", 1)[1])
+            has_source = True
+            i += 1
+            continue
+        if item == "--source-config-dir" or item.startswith("--source-config-dir="):
+            has_source = True
+        translated.append(item)
+        i += 1
+    if not has_source:
+        translated.extend(["--source-config-dir", source_default])
+    forwarded = ["legacy-import", *translated, "--config-dir", os.environ["MMS_CONFIG_ROOT"]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "prepare":
+    from mms_registry_cli import handle_registry_command
+
+    source_default = os.path.join(resolve_real_user_home(os.environ), ".config", "mms")
+    translated = []
+    has_source = False
+    i = 2
+    while i < len(argv):
+        item = argv[i]
+        if item == "--from":
+            translated.append("--source-config-dir")
+            if i + 1 < len(argv):
+                translated.append(argv[i + 1])
+                i += 2
+            else:
+                i += 1
+            has_source = True
+            continue
+        if item.startswith("--from="):
+            translated.append("--source-config-dir=" + item.split("=", 1)[1])
+            has_source = True
+            i += 1
+            continue
+        if item == "--source-config-dir" or item.startswith("--source-config-dir="):
+            has_source = True
+        translated.append(item)
+        i += 1
+    if not has_source:
+        translated.extend(["--source-config-dir", source_default])
+    forwarded = ["preview-prepare", *translated, "--config-dir", os.environ["MMS_CONFIG_ROOT"]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "publish":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["publish-preview", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "verify":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["verify", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"status", "source"}:
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["source-status", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["consumer-bundle", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"check", "ready", "smoke"}:
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["preview-check", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "doctor":
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["preview-doctor", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
+if argv and argv[0] == "promote":
+    from mms_registry_cli import handle_registry_command
+
+    translated = argv[1:]
+    if translated and translated[0] in {"plan", "check", "status"}:
+        translated = translated[1:]
+    forwarded = ["promotion-plan", "--preview-config-dir", os.environ["MMS_CONFIG_ROOT"], *translated]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf promote"))
+
+if argv and argv[0] == "registry":
+    from mms_registry_cli import handle_registry_command
+
+    raise SystemExit(handle_registry_command(argv[1:], command_name="mmf registry"))
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"root", "root.status", "status.root"}:
+    status = mms_config_root_status(command="mmf", env=os.environ)
+    if "--json" in argv[2:]:
+        print(json.dumps(status, ensure_ascii=False, sort_keys=True))
+    else:
+        print("MMS config root")
+        for key in ("command", "mode", "root_source", "config_root", "config_path", "credentials_path", "usage_path"):
+            print(f"{key}={status[key]}")
+        if status["mode"] == "preview":
+            print("Preview root: fail closed inside this root; no silent fallback to stable credentials/OAuth.")
+    raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"source", "sources", "model-source", "model-sources"}:
+    from mms_registry_cli import _print_model_source_status, model_source_status
+
+    status = model_source_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config source")
+    if "--json" in argv[2:]:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_model_source_status(status)
+    raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"bundle", "consumer-bundle", "manifest"}:
+    from mms_registry_cli import _print_consumer_bundle_status, consumer_bundle_status
+
+    summary = consumer_bundle_status(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config bundle")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_consumer_bundle_status(summary)
+    raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("verified") is True else 2)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}:
+    from mms_registry_cli import _print_registry_v2_save_plan, registry_v2_save_plan
+
+    plan = registry_v2_save_plan(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config save-plan")
+    if "--json" in argv[2:]:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_registry_v2_save_plan(plan)
+    raise SystemExit(0)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"doctor", "preview-doctor", "preview.doctor", "v2-doctor"}:
+    from mms_registry_cli import _print_preview_doctor, preview_doctor
+
+    summary = preview_doctor(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config doctor")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_doctor(summary)
+    raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready") is True else 2)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"check", "preview-check", "preview.check", "v2-check"}:
+    from mms_registry_cli import _print_preview_check, preview_check
+
+    summary = preview_check(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config check")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_check(summary)
+    raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("ready") is True else 2)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"promote-plan", "promotion-plan", "promote.check", "promote"}:
+    from mms_registry_cli import _print_config_v2_promotion_plan, config_v2_promotion_plan
+
+    summary = config_v2_promotion_plan(preview_config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config promote-plan")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_config_v2_promotion_plan(summary)
+    raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready_for_human_review") is True else 2)
+
+from mms_core import main
+
+if __name__ == "__main__":
+    main()

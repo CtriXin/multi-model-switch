@@ -625,7 +625,7 @@ def route_model(user_message: str, heavy_model: str, light_model: str,
     return heavy_model
 
 
-# ── Model Routes Export（供 Hive MCP / 外部消费） ──────────────────
+# ── Model Routes Legacy Export（generated bundle / compatibility） ───────────
 
 import stat
 
@@ -943,11 +943,23 @@ def _read_json_file_or_empty(path):
 
 
 def _latest_approved_model_config_bundle():
+    config_dir = resolve_mms_config_dir()
+    manifest_path = os.path.join(config_dir, "generated", "model-registry.latest-approved.json")
     try:
         import mms_registry
 
-        bundle = mms_registry.load_latest_approved_bundle(include_secret=True)
-    except Exception:
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=config_dir, include_secret=True)
+    except Exception as exc:
+        if os.path.exists(manifest_path):
+            return {
+                "invalid_latest_approved": True,
+                "error": f"{type(exc).__name__}: {exc}",
+                "routes_payload": {},
+                "lineup_payload": {},
+                "policy_payload": {},
+                "manifest_path": manifest_path,
+                "verified_files": {},
+            }
         return {}
     payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
     routes_payload = payloads.get("router")
@@ -1003,16 +1015,20 @@ def _append_model_config_audit(event):
 
 
 def validate_model_config_bundle(routes_payload=None, lineup_payload=None, policy_payload=None):
+    bundle_error = ""
     if routes_payload is None and lineup_payload is None and policy_payload is None:
         current = _current_model_config_payloads()
         routes_payload = current["routes_payload"]
         lineup_payload = current["lineup_payload"]
         policy_payload = current["policy_payload"]
+        bundle_error = str(current.get("error") or "") if current.get("invalid_latest_approved") else ""
     else:
         routes_payload = routes_payload or _read_json_file_or_empty(MODEL_ROUTES_PATH)
         lineup_payload = lineup_payload or _read_json_file_or_empty(MODEL_ROUTES_LINEUP_PATH)
         policy_payload = policy_payload or _read_json_file_or_empty(MODEL_POLICY_PATH)
     issues = []
+    if bundle_error:
+        issues.append({"level": "error", "code": "latest_approved_invalid", "detail": bundle_error})
 
     routes = routes_payload.get("routes") if isinstance(routes_payload.get("routes"), dict) else {}
     lineup_routes = lineup_payload.get("routes") if isinstance(lineup_payload.get("routes"), dict) else {}
@@ -1129,7 +1145,7 @@ def _persist_routes_export(routes):
 
 
 def export_model_routes(cfg=None, force=False, startup_safe=False):
-    """导出 Hive 可直接消费的最小路由契约，并做 snapshot 去重。"""
+    """导出 legacy route-export 兼容契约，并做 snapshot 去重。"""
     from mms_core import (
         load_config, apply_local_overrides, resolve_provider_context,
         _probe_models, _probe_models_for_startup, _normalize_priority, _normalize_role,
@@ -1148,6 +1164,8 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
     if not force:
         approved = _latest_approved_model_config_bundle()
         if approved:
+            if approved.get("invalid_latest_approved"):
+                return {}
             issues = validate_model_config_bundle(
                 approved["routes_payload"],
                 approved["lineup_payload"],
@@ -1236,7 +1254,7 @@ def export_model_routes(cfg=None, force=False, startup_safe=False):
         "claude-haiku-4-5-20251001",
     }
     # Model-CLI compatibility: keep the coarse family filter aligned with current
-    # runtime routing, but do not expose executor metadata to Hive.
+    # runtime routing, but do not expose executor metadata to route-export consumers.
     def _model_cli_compatible(model_name, supported_clis):
         if not supported_clis:
             return True  # no restriction

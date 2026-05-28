@@ -64,11 +64,11 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
-- 把 `mms`、`mmslogs` 链接到 `~/.local/bin`
+- 把 `mms`、preview-root `mmf`、`mmslogs` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
 - 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
-- legacy `ccs` / `mmc` shim 已下线；新安装暴露 `mms` / `mmslogs`，不再暴露 `ccs` / `mmc`
+- legacy `ccs` / `mmc` shim 已下线；新安装暴露 `mms` / `mmf` / `mmslogs`，不再暴露 `ccs` / `mmc`
 - 安装可选包或缺失 CLI 前会询问
 - 不会静默改写真实 provider/account 配置
 
@@ -83,7 +83,7 @@ Shell 支持：
 - Bash/Zsh：`--write-shell-rc` 会把 `~/.local/bin` 写入当前 shell rc。
 - Fish：`--write-shell-rc` 会写入 `~/.config/fish/conf.d/mms.fish`。
 - Ghostty/iTerm/Terminal：安装后重开 tab，或执行 `exec $SHELL -l`。
-- 如果不写 shell rc，马上可执行 `~/.local/bin/mms`；PATH 加载后可直接输入 `mms`。
+- 如果不写 shell rc，马上可执行 `~/.local/bin/mms` 或 `~/.local/bin/mmf`；PATH 加载后可直接输入 `mms` / `mmf`。
 
 安装时指定 UI 语言：
 
@@ -216,7 +216,10 @@ MMS 的默认策略是：在当前选择的 runtime 内 fail closed。
 - context window metadata
 - 便于后续核验的官方 reference URL
 
-用户自己的 overlay 可以作为只读 profile 输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
+本地修改优先走 Registry v2：TUI / `mms config` / WebUI 先创建 DB candidate，再发布并校验
+`generated/model-registry.latest-approved.json` bundle。只要该 manifest 存在，它引用的 generated Profile 就是 runtime boundary。
+
+legacy 用户 overlay 仍可作为手动 import/export 兼容输入放在 MMS config 目录。MMS 不应该因为一次 probe 就自动改写真实 `config.toml`。
 
 ## 用户偏好
 

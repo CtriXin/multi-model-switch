@@ -10,6 +10,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mms_state_io import resolve_mms_config_dir
+
 DEFAULT_PRIMARY_CONFIG_DIR = Path(os.path.expanduser("~/.config/mms"))
 PRIMARY_CONFIG_DIR = DEFAULT_PRIMARY_CONFIG_DIR
 DEFAULT_PROJECTS_DIR = DEFAULT_PRIMARY_CONFIG_DIR / "projects"
@@ -44,7 +46,7 @@ def _real_user_home() -> Path:
 def get_primary_config_dir() -> Path:
     if PRIMARY_CONFIG_DIR != DEFAULT_PRIMARY_CONFIG_DIR:
         return PRIMARY_CONFIG_DIR
-    return _real_user_home() / ".config" / "mms"
+    return Path(resolve_mms_config_dir())
 
 
 def get_projects_dir() -> Path:

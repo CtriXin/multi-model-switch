@@ -253,8 +253,59 @@ def test_validate_model_config_bundle_uses_verified_latest_approved_or_legacy_fa
 
     (tmp_path / "generated" / "model-routes.json").write_text(json.dumps({"version": 1, "routes": {}}), encoding="utf-8")
     error_codes = {item["code"] for item in mms_router.validate_model_config_bundle() if item.get("level") == "error"}
+    assert "latest_approved_invalid" in error_codes
     assert "route_missing_primary_provider" not in error_codes
-    assert "route_missing_api_key" in error_codes
+    assert "route_missing_api_key" not in error_codes
+
+
+def test_export_model_routes_fails_closed_on_invalid_latest_approved_bundle(monkeypatch, tmp_path):
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(tmp_path))
+    import mms_router
+
+    _patch_export_paths(monkeypatch, tmp_path)
+    stale_root = {
+        "version": 1,
+        "routes": {
+            "stale-root": {
+                "primary": {
+                    "provider_id": "stale-root",
+                    "openai_base_url": "https://stale.example/v1",
+                    "api_key": "sk-stale",
+                },
+                "fallbacks": [],
+            }
+        },
+    }
+    (tmp_path / "model-routes.json").write_text(json.dumps(stale_root), encoding="utf-8")
+    (tmp_path / "model-routes.lineup.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "source_routes_hash": mms_router._content_hash({"version": 1, "routes": stale_root["routes"]}),
+                "routes": {"stale-root": {"primary": {"provider_id": "stale-root"}, "fallbacks": []}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "model-policy.json").write_text(json.dumps({"version": 1, "models": {}}), encoding="utf-8")
+    approved_routes = {
+        "approved-model": {
+            "primary": {
+                "provider_id": "approved-provider",
+                "anthropic_base_url": "",
+                "openai_base_url": "https://approved.example/v1",
+                "api_key": "sk-approved",
+                "model_id": "approved-model",
+            },
+            "fallbacks": [],
+        }
+    }
+    _write_latest_approved_route_bundle(tmp_path, mms_router, routes=approved_routes)
+    (tmp_path / "generated" / "model-routes.json").write_text(json.dumps({"version": 1, "routes": {}}), encoding="utf-8")
+
+    routes = mms_router.export_model_routes({"providers": []}, force=False)
+
+    assert routes == {}
 
 
 def test_export_model_routes_reuses_snapshot_when_content_unchanged(monkeypatch, tmp_path):
@@ -916,6 +967,51 @@ def test_refresh_routes_export_for_hive_supports_startup_safe_probe(monkeypatch)
     assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
     assert calls == [
         ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, True)
+    ]
+
+
+def test_refresh_routes_export_for_hive_skips_startup_safe_probe_for_preview(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})
+    monkeypatch.setattr(
+        mms_core,
+        "load_config",
+        lambda: (_ for _ in ()).throw(AssertionError("preview startup route export must not load legacy config")),
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=True) is True
+    assert calls == []
+
+
+def test_refresh_routes_export_for_hive_allows_explicit_preview_legacy_export(monkeypatch):
+    import mms_core
+    import mms_router
+
+    calls = []
+    monkeypatch.setattr(mms_core, "_config_root_status", lambda: {"mode": "preview"})
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "demo"}, "providers": []})
+    monkeypatch.setattr(
+        mms_core,
+        "apply_local_overrides",
+        lambda cfg: {**cfg, "local_override_applied": True},
+    )
+    monkeypatch.setattr(
+        mms_router,
+        "export_model_routes",
+        lambda cfg, force=False, startup_safe=False: calls.append((cfg, force, startup_safe)) or {},
+    )
+
+    assert mms_core._refresh_routes_export_for_hive(force=True, quiet=True, startup_safe=False) is True
+    assert calls == [
+        ({"provider": {"default": "demo"}, "providers": [], "local_override_applied": True}, True, False)
     ]
 
 

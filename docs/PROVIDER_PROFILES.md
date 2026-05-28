@@ -2,14 +2,22 @@
 
 MMS uses `config/provider-profiles.json` as the built-in declarative reference for provider/model compatibility differences. The goal is to keep vendor-specific request details out of launcher, bridge, chat, discuss, and routing code.
 
-## Load Order
+## Load Order / Truth Boundary
 
-1. Built-in: `config/provider-profiles.json`
-2. Optional user overlay, read-only by MMS runtime:
+1. Built-in seed: `config/provider-profiles.json`
+2. Registry v2 selected root: when a verified
+   `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json` exists,
+   MMS treats the manifest-referenced generated Profile as the runtime
+   boundary.
+3. Legacy/no-bundle compatibility: optional user overlays, read-only by MMS
+   runtime:
    - `~/.config/mms/provider-profiles.json`
    - `~/.config/mms/model-profiles.json`
 
-Agents must not auto-write the real `~/.config/mms/**` files. User overlays are for manual human configuration.
+Agents must not auto-write the real `~/.config/mms/**` files. User overlays
+are manual legacy/import-export surfaces, not competing v2 truth. Local profile
+changes should normally enter through TUI / `mms config` / WebUI as DB
+candidates and then publish into the latest-approved bundle.
 
 ## What A Profile Can Describe
 

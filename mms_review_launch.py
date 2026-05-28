@@ -641,6 +641,119 @@ def _provider_ids_from_env(env: dict[str, str]) -> list[str]:
     return result
 
 
+def _selected_config_root_env(env: dict[str, str]) -> dict[str, str]:
+    merged = dict(os.environ)
+    merged.update({str(key): str(value) for key, value in (env or {}).items() if value is not None})
+    return merged
+
+
+def _review_launch_explicit_config_root(env: dict[str, str]) -> bool:
+    merged = _selected_config_root_env(env)
+    return bool(str(merged.get("MMS_CONFIG_ROOT") or merged.get("MMS_CONFIG_DIR") or "").strip())
+
+
+def _route_entry_for_model(routes: dict[str, Any], model_name: str) -> tuple[str, dict[str, Any]]:
+    requested = str(model_name or "").strip()
+    if requested in routes and isinstance(routes.get(requested), dict):
+        return requested, routes[requested]
+    requested_l = requested.lower()
+    for name, entry in routes.items():
+        if str(name or "").strip().lower() == requested_l and isinstance(entry, dict):
+            return str(name or "").strip(), entry
+    return "", {}
+
+
+def _provider_from_router_leaf(leaf: dict[str, Any], *, route_source: str) -> dict[str, Any]:
+    protocols: list[str] = []
+    if str(leaf.get("anthropic_base_url") or "").strip():
+        protocols.append(ANTHROPIC_MESSAGES_PROTOCOL)
+    if str(leaf.get("openai_base_url") or "").strip():
+        protocols.append(OPENAI_CHAT_PROTOCOL)
+    api_key = str(leaf.get("api_key") or "").strip()
+    return {
+        "id": str(leaf.get("provider_id") or ""),
+        "enabled": True,
+        "role": "auto",
+        "priority": 0,
+        "protocols": protocols,
+        "anthropic_base_url": str(leaf.get("anthropic_base_url") or "").strip(),
+        "openai_base_url": str(leaf.get("openai_base_url") or "").strip(),
+        "api_key": api_key,
+        "openai_api_key": api_key,
+        "route_source": route_source,
+        "model_id": str(leaf.get("model_id") or ""),
+    }
+
+
+def _latest_approved_route_source(bundle: dict[str, Any]) -> str:
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), dict) else {}
+    revision = str(manifest.get("bundle_revision") or "").strip()
+    return f"mms:latest-approved:{revision}" if revision else "mms:latest-approved"
+
+
+def _latest_approved_router_candidates(
+    *,
+    model_name: str,
+    env: dict[str, str],
+    provider_ids: list[str],
+    protocol_order: list[str],
+) -> tuple[list[dict[str, Any]], str, bool]:
+    if not _review_launch_explicit_config_root(env):
+        return [], "", False
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        config_root = resolve_mms_config_dir(_selected_config_root_env(env))
+    except Exception as exc:
+        return [], f"cannot resolve MMS_CONFIG_ROOT for latest-approved review-launch routing: {exc}", True
+
+    manifest_path = os.path.join(config_root, "generated", "model-registry.latest-approved.json")
+    if not os.path.exists(manifest_path):
+        return [], "", False
+    try:
+        import mms_registry
+
+        bundle = mms_registry.load_latest_approved_bundle(config_dir=config_root, include_secret=True)
+    except Exception as exc:
+        return [], f"latest-approved bundle invalid for review-launch routing: {exc}", True
+
+    payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
+    route_source = _latest_approved_route_source(bundle)
+    router = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
+    routes = router.get("routes") if isinstance(router.get("routes"), dict) else {}
+    canonical_model, entry = _route_entry_for_model(routes, model_name)
+    if not entry:
+        return [], f"no latest-approved route found for reviewer model {model_name}", True
+
+    leaves = [entry.get("primary")]
+    if isinstance(entry.get("fallbacks"), list):
+        leaves.extend(entry.get("fallbacks") or [])
+    allowed_provider_ids = {item for item in provider_ids if item}
+    candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for leaf in leaves:
+        if not isinstance(leaf, dict):
+            continue
+        provider = _provider_from_router_leaf(leaf, route_source=route_source)
+        provider_id = str(provider.get("id") or "")
+        if allowed_provider_ids and provider_id not in allowed_provider_ids:
+            continue
+        dispatch_model = str(leaf.get("model_id") or canonical_model or model_name).strip()
+        for protocol in protocol_order:
+            error = _provider_ready_for_protocol(provider, protocol)
+            if error:
+                errors.append(error)
+                continue
+            candidate_provider = dict(provider)
+            candidate_provider["review_launch_model_name"] = dispatch_model
+            candidates.append({"provider": candidate_provider, "protocol": protocol, "model_name": dispatch_model})
+
+    if candidates:
+        return candidates, "", True
+    detail = "; ".join(errors[:8]) or f"no usable latest-approved route for reviewer model {model_name}"
+    return [], detail, True
+
+
 def _candidates_for_explicit_providers(
     *,
     provider_ids: list[str],
@@ -679,6 +792,19 @@ def _candidates_for_explicit_providers(
 
 
 def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> tuple[list[dict[str, Any]], str]:
+    provider_ids = _provider_ids_from_env(env)
+    protocol_order = _protocol_order(env, model_name)
+    approved_candidates, approved_error, approved_checked = _latest_approved_router_candidates(
+        model_name=model_name,
+        env=env,
+        provider_ids=provider_ids,
+        protocol_order=protocol_order,
+    )
+    if approved_checked:
+        if approved_candidates:
+            return approved_candidates, ""
+        return [], approved_error
+
     try:
         from mms_core import (
             ROLE_WEIGHTS,
@@ -698,8 +824,6 @@ def _resolve_review_launch_candidates(model_name: str, env: dict[str, str]) -> t
 
     cfg = load_config() or _default_config()
     cfg = apply_local_overrides(cfg)
-    provider_ids = _provider_ids_from_env(env)
-    protocol_order = _protocol_order(env, model_name)
 
     if provider_ids:
         candidates, error = _candidates_for_explicit_providers(
@@ -1121,7 +1245,7 @@ def _transport_evidence_for_selection(
         "protocol": protocol,
         "request_url": str(selected_attempt.get("request_url") or ""),
         "request_path": str(selected_attempt.get("request_path") or ""),
-        "route_source": str(provider.get("route_source") or "mms:model-routes.json"),
+        "route_source": str(provider.get("route_source") or "mms:legacy-provider-config"),
         "provider_profile": _default_provider_profile(provider, protocol),
         "fallback_used": bool(fallback_reason),
         "fallback_reason": fallback_reason,

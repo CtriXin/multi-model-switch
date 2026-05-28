@@ -232,7 +232,7 @@ def test_install_script_uses_npm_first_cli_installs():
 
 
 def test_repo_entrypoints_use_env_python():
-    for entrypoint in ("mms", "mmslogs"):
+    for entrypoint in ("mms", "mmf", "mmslogs"):
         first_line = (ROOT_DIR / entrypoint).read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env python3"
 
@@ -297,6 +297,10 @@ def test_install_script_retires_mmc_entrypoint():
 def test_install_script_copies_mmslogs_entrypoint_before_linking():
     text = INSTALL_SCRIPT.read_text(encoding="utf-8")
 
+    assert '[ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"' in text
+    assert '[ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"' in text
+    assert '[ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"' in text
+    assert '[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"' in text
     assert '[ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"' in text
     assert '[ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"' in text
     assert '[ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"' in text
@@ -382,13 +386,13 @@ def test_install_check_omits_retired_ccs_status(tmp_path):
     assert "ccs" not in output.lower()
 
 
-def test_install_check_reports_mmslogs_and_warns_retired_mmc_link(tmp_path):
+def test_install_check_reports_mmf_mmslogs_and_warns_retired_mmc_link(tmp_path):
     home = tmp_path / "home"
     mms_home = home / ".mms"
     bin_dir = home / ".local" / "bin"
     mms_home.mkdir(parents=True)
     bin_dir.mkdir(parents=True)
-    for name in ("mms", "mmc", "mmslogs"):
+    for name in ("mms", "mmf", "mmc", "mmslogs"):
         target = mms_home / name
         target.write_text("#!/bin/sh\n", encoding="utf-8")
         (bin_dir / name).symlink_to(target)
@@ -396,6 +400,7 @@ def test_install_check_reports_mmslogs_and_warns_retired_mmc_link(tmp_path):
     output = _run_install_check(home=home)
 
     assert str(bin_dir / "mms") in output
+    assert str(bin_dir / "mmf") in output
     assert "retired mmc" in output
     assert str(bin_dir / "mmslogs") in output
 

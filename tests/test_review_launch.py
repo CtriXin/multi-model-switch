@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -10,6 +11,29 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    generated = config_root / "generated"
+    generated.mkdir(parents=True, exist_ok=True)
+    router_path = generated / "model-routes.json"
+    router_bytes = json.dumps(router_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    router_path.write_bytes(router_bytes)
+    manifest = {
+        "schema": "mms.model_registry.latest_approved.v1",
+        "bundle_revision": "bundle_review_test",
+        "files": {
+            "router": {
+                "canonical_path": "generated/model-routes.json",
+                "sha256": sha_override or hashlib.sha256(router_bytes).hexdigest(),
+                "sensitivity": "secret",
+            }
+        },
+    }
+    (generated / "model-registry.latest-approved.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def test_review_launch_help_is_real_subcommand(capsys):
@@ -441,6 +465,75 @@ def test_review_launch_uses_default_provider_cache_and_canonical_model_case(monk
     assert candidates[0]["model_name"] == "MiniMax-M2.7"
 
 
+def test_review_launch_uses_verified_latest_approved_router_with_explicit_root(tmp_path):
+    from mms_review_launch import ANTHROPIC_MESSAGES_PROTOCOL, _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "review-model": {
+                    "primary": {
+                        "provider_id": "verified-review-provider",
+                        "anthropic_base_url": "https://verified.example",
+                        "api_key": "sk-test-verified",
+                        "model_id": "Review-Model",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert error == ""
+    assert len(candidates) == 1
+    assert candidates[0]["provider"]["id"] == "verified-review-provider"
+    assert candidates[0]["provider"]["route_source"] == "mms:latest-approved:bundle_review_test"
+    assert candidates[0]["protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
+    assert candidates[0]["model_name"] == "Review-Model"
+
+
+def test_review_launch_latest_approved_router_fails_closed_on_invalid_manifest(monkeypatch, tmp_path):
+    import mms_core
+    from mms_review_launch import _resolve_review_launch_candidates
+
+    config_root = tmp_path / "mms-next"
+    _write_latest_approved_router_manifest(
+        config_root,
+        router_payload={
+            "version": 1,
+            "routes": {
+                "review-model": {
+                    "primary": {
+                        "provider_id": "untrusted-review-provider",
+                        "anthropic_base_url": "https://untrusted.example",
+                        "api_key": "sk-test-untrusted",
+                        "model_id": "review-model",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+        sha_override="0" * 64,
+    )
+    monkeypatch.setattr(mms_core, "load_config", lambda: {"provider": {"default": "legacy"}, "providers": []})
+
+    candidates, error = _resolve_review_launch_candidates(
+        "review-model",
+        {"MMS_CONFIG_ROOT": str(config_root)},
+    )
+
+    assert candidates == []
+    assert "latest-approved bundle invalid" in error
+
+
 def test_review_launch_gpt_auto_uses_openai_chat_on_dual_provider(monkeypatch):
     import mms_core
     from mms_review_launch import OPENAI_CHAT_PROTOCOL, _resolve_review_launch_candidates
@@ -558,6 +651,7 @@ def test_review_launch_transport_evidence_uses_model_call_usage(tmp_path, monkey
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["transport_evidence"][0]["usage"] == usage
+    assert payload["transport_evidence"][0]["route_source"] == "mms:legacy-provider-config"
     assert payload["dispatch_attempts"][0]["usage"] == usage
     assert payload["cache_transport_evidence"] == payload["transport_evidence"]
     assert Path(env["MOEBIUS_REVIEW_EXPECTED_OUTPUT"]).exists()

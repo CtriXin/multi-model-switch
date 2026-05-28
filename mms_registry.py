@@ -22,6 +22,7 @@ from mms_state_io import resolve_mms_config_dir
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 CALIBRATION_SOURCE_KIND = "model_capability_calibration"
 OPENROUTER_MODELS_SOURCE_KIND = "openrouter_models_api"
+REGISTRY_DB_BACKUP_SCHEMA = "mms.registry_db_backup.v1"
 
 _SECRET_FIELD_PARTS = (
     "api_key",
@@ -98,8 +99,168 @@ def _source_model_count(payload: Mapping[str, Any]) -> int:
 
 
 def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None) -> Path:
-    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(env))
+    source_env = env or os.environ
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(source_env))
+    root = root.expanduser()
+    explicit_root = str(source_env.get("MMS_CONFIG_ROOT") or "").strip()
+    explicit_path = Path(explicit_root).expanduser() if explicit_root else None
+    if root.name == "mms-next" or (explicit_path and explicit_path.absolute() == root.absolute()):
+        return root / "registry" / "model-registry.sqlite"
     return root / "model-registry.sqlite"
+
+
+def _registry_config_root(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+) -> Path:
+    if config_dir is not None:
+        return Path(config_dir).expanduser()
+    if db_path is not None:
+        return Path(db_path).expanduser().parent
+    return Path(resolve_mms_config_dir())
+
+
+def _timestamp_slug(value: str | None = None) -> str:
+    return re.sub(r"[^0-9]", "", value or utc_now())[:14] or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _sqlite_integrity(path: Path) -> str:
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        return str(db.execute("PRAGMA integrity_check").fetchone()[0])
+    finally:
+        db.close()
+
+
+def backup_registry_db(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    backup_dir: str | os.PathLike[str] | None = None,
+    reason: str = "manual",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Create a self-contained SQLite backup for the local registry DB."""
+    config_root = _registry_config_root(config_dir=config_dir, db_path=db_path)
+    source = Path(db_path) if db_path is not None else default_registry_db_path(config_root)
+    source = source.expanduser()
+    backup_root = Path(backup_dir).expanduser() if backup_dir is not None else config_root / "backups" / "db"
+    created_at = generated_at or utc_now()
+    if not source.exists():
+        return {
+            "schema": REGISTRY_DB_BACKUP_SCHEMA,
+            "skipped": True,
+            "reason": "missing_db",
+            "source_db_path": str(source),
+            "backup_dir": str(backup_root),
+            "created_at": created_at,
+        }
+
+    backup_root.mkdir(parents=True, exist_ok=True)
+    slug = _timestamp_slug(created_at)
+    fd, temp_name = tempfile.mkstemp(prefix=f"model-registry.{slug}.", suffix=".tmp.sqlite", dir=str(backup_root))
+    os.close(fd)
+    temp_path = Path(temp_name)
+    try:
+        src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(temp_path))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        integrity = _sqlite_integrity(temp_path)
+        if integrity.lower() != "ok":
+            raise RegistryValidationError(f"registry backup integrity check failed: {integrity}")
+        digest = sha256_hex(temp_path.read_bytes())
+        backup_path = backup_root / f"model-registry.{slug}.{digest[:12]}.sqlite"
+        os.replace(temp_path, backup_path)
+        os.chmod(backup_path, 0o600)
+        manifest_path = backup_path.with_name(f"{backup_path.name}.json")
+        manifest = {
+            "schema": REGISTRY_DB_BACKUP_SCHEMA,
+            "skipped": False,
+            "reason": str(reason or "manual"),
+            "created_at": created_at,
+            "source_db_path": str(source),
+            "backup_path": str(backup_path),
+            "sha256": digest,
+            "size_bytes": backup_path.stat().st_size,
+            "integrity_check": integrity,
+        }
+        write_json_atomic(manifest_path, manifest)
+        manifest["manifest_path"] = str(manifest_path)
+        return manifest
+    finally:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def restore_registry_db(
+    backup_path: str | os.PathLike[str],
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    apply: bool = False,
+    reason: str = "manual",
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Restore registry DB from a backup. Dry-run unless apply=True."""
+    backup = Path(backup_path).expanduser()
+    if not backup.exists():
+        raise RegistryValidationError(f"registry backup not found: {backup}")
+    config_root = _registry_config_root(config_dir=config_dir, db_path=db_path)
+    target = Path(db_path) if db_path is not None else default_registry_db_path(config_root)
+    target = target.expanduser()
+    if backup.resolve() == target.resolve():
+        raise RegistryValidationError("backup path and target DB path are identical")
+    integrity = _sqlite_integrity(backup)
+    if integrity.lower() != "ok":
+        raise RegistryValidationError(f"registry backup integrity check failed: {integrity}")
+    summary: dict[str, Any] = {
+        "schema": REGISTRY_DB_BACKUP_SCHEMA,
+        "apply": bool(apply),
+        "reason": str(reason or "manual"),
+        "created_at": generated_at or utc_now(),
+        "backup_path": str(backup),
+        "target_db_path": str(target),
+        "backup_sha256": sha256_hex(backup.read_bytes()),
+        "backup_size_bytes": backup.stat().st_size,
+        "integrity_check": integrity,
+    }
+    if not apply:
+        summary["skipped"] = True
+        summary["skip_reason"] = "dry_run_apply_required"
+        return summary
+
+    pre_restore = backup_registry_db(
+        config_dir=config_root,
+        db_path=target,
+        reason=f"pre-restore:{reason or 'manual'}",
+        generated_at=generated_at,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    copy_file_atomic(backup, target, mode=0o600)
+    for suffix in ("-wal", "-shm"):
+        sidecar = Path(f"{target}{suffix}")
+        if sidecar.exists():
+            sidecar.unlink()
+    restored_integrity = _sqlite_integrity(target)
+    if restored_integrity.lower() != "ok":
+        raise RegistryValidationError(f"restored registry integrity check failed: {restored_integrity}")
+    summary.update(
+        {
+            "skipped": False,
+            "pre_restore_backup": pre_restore,
+            "restored_integrity_check": restored_integrity,
+            "target_sha256": sha256_hex(target.read_bytes()),
+        }
+    )
+    return summary
 
 
 def connect_registry(db_path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
@@ -1082,6 +1243,476 @@ def _approve_if_candidate(db: sqlite3.Connection, revision_id: str, *, actor: st
     if str(row["status"]) == "approved":
         return
     approve_revision(db, revision_id, actor=actor)
+
+
+def _metadata_dict(value: Any) -> dict[str, Any]:
+    parsed = _json_loads_safe(str(value or "{}"))
+    return parsed if isinstance(parsed, dict) else {}
+
+
+_PREVIEW_ROUTE_SOURCE_LABELS = {
+    "legacy-import": "registry-preview-legacy-import",
+    "registry-v2-save-candidate": "registry-preview-v2-save-candidate",
+}
+
+
+def _latest_preview_route_revision(db: sqlite3.Connection) -> tuple[sqlite3.Row, str]:
+    rows = db.execute(
+        """
+        SELECT revision_id, status, metadata_json
+        FROM registry_revision
+        WHERE revision_class = 'route' AND status IN ('candidate', 'approved')
+        ORDER BY created_at DESC, revision_id DESC
+        """
+    ).fetchall()
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        source = str(metadata.get("source") or "")
+        if source in _PREVIEW_ROUTE_SOURCE_LABELS:
+            return row, source
+    raise RegistryValidationError("no preview route candidate found; run legacy-import --apply or v2-save-candidate --apply first")
+
+
+def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
+    row, source = _latest_preview_route_revision(db)
+    if source == "legacy-import":
+        return row
+    raise RegistryValidationError("latest preview route candidate is not a legacy import candidate")
+
+
+def _latest_revision_payload_for_source(
+    db: sqlite3.Connection,
+    revision_class: str,
+    source: str,
+    *,
+    candidate_id: str = "",
+) -> tuple[str, dict[str, Any]]:
+    rows = db.execute(
+        """
+        SELECT revision_id, metadata_json
+        FROM registry_revision
+        WHERE revision_class = ? AND status IN ('candidate', 'approved')
+        ORDER BY created_at DESC, revision_id DESC
+        """,
+        (revision_class,),
+    ).fetchall()
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        if str(metadata.get("source") or "") != source:
+            continue
+        if candidate_id and str(metadata.get("candidate_id") or "") != candidate_id:
+            continue
+        payload = metadata.get("payload") if isinstance(metadata.get("payload"), dict) else {}
+        if payload:
+            return str(row["revision_id"] or ""), payload
+    return "", {}
+
+
+def _legacy_route_role_rank(value: Any) -> int:
+    role = str(value or "auto").strip().lower()
+    return {"primary": 0, "auto": 1, "fallback": 2}.get(role, 1)
+
+
+def _route_leaf_from_provider_row(row: sqlite3.Row, secret_values: Mapping[str, str] | None = None) -> dict[str, Any]:
+    secrets = secret_values or {}
+    secret_ref = str(row["secret_ref"] or "").strip()
+    leaf = {
+        "provider_id": str(row["provider_id"] or ""),
+        "anthropic_base_url": str(row["anthropic_base_url"] or ""),
+        "openai_base_url": str(row["openai_base_url"] or ""),
+        "api_key": str(secrets.get(secret_ref) or ""),
+        "model_id": str(row["wire_model_id"] or row["logical_model"] or ""),
+    }
+    if secret_ref:
+        leaf["secret_ref"] = secret_ref
+    return leaf
+
+
+def _lineup_leaf_from_route_leaf(leaf: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "provider_id": str(leaf.get("provider_id") or ""),
+        "model_id": str(leaf.get("model_id") or ""),
+    }
+
+
+def _build_preview_bundle_payloads_from_route_revision(
+    db: sqlite3.Connection,
+    *,
+    route_revision_id: str,
+    generated_at: str,
+    secret_values: Mapping[str, str] | None = None,
+    source_label: str = "registry-preview-legacy-import",
+    policy_payload: Mapping[str, Any] | None = None,
+    profile_payload: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    rows = db.execute(
+        """
+        SELECT
+            rg.logical_model,
+            rg.display_name,
+            pr.route_id,
+            pr.provider_id,
+            pr.wire_model_id,
+            pr.priority,
+            pr.anthropic_base_url,
+            pr.openai_base_url,
+            pr.secret_ref,
+            pr.metadata_json
+        FROM provider_route pr
+        JOIN route_group rg ON rg.route_group_id = pr.route_group_id
+        WHERE pr.route_revision_id = ?
+        ORDER BY lower(rg.logical_model), pr.route_id
+        """,
+        (route_revision_id,),
+    ).fetchall()
+    if not rows:
+        raise RegistryValidationError(f"route revision has no provider routes: {route_revision_id}")
+
+    by_model: dict[str, list[tuple[tuple[Any, ...], dict[str, Any], dict[str, Any]]]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        metadata = _metadata_dict(row["metadata_json"])
+        model = str(row["logical_model"] or row["wire_model_id"] or "").strip()
+        if not model:
+            continue
+        leaf = _route_leaf_from_provider_row(row, secret_values)
+        sort_key = (
+            _legacy_route_role_rank(metadata.get("role")),
+            -int(row["priority"] or 0),
+            str(row["provider_id"] or ""),
+            str(row["route_id"] or ""),
+        )
+        by_model.setdefault(model, []).append((sort_key, leaf, metadata))
+        provider_id = str(row["provider_id"] or "").strip()
+        if provider_id and provider_id not in profiles:
+            protocols = metadata.get("protocols") if isinstance(metadata.get("protocols"), list) else []
+            profiles[provider_id] = {
+                "source": "registry-preview-legacy-import",
+                "protocols": [str(item) for item in protocols if str(item or "").strip()],
+                "models_endpoint": str(metadata.get("models_endpoint") or ""),
+            }
+
+    routes: dict[str, dict[str, Any]] = {}
+    lineup_routes: dict[str, dict[str, Any]] = {}
+    for model in sorted(by_model):
+        ordered = [item for _, item, _ in sorted(by_model[model], key=lambda value: value[0])]
+        routes[model] = {"primary": ordered[0], "fallbacks": ordered[1:]}
+        lineup_routes[model] = {
+            "primary": _lineup_leaf_from_route_leaf(ordered[0]),
+            "fallbacks": [_lineup_leaf_from_route_leaf(item) for item in ordered[1:]],
+        }
+
+    leaves = [info["primary"] for info in routes.values()]
+    for info in routes.values():
+        leaves.extend(info.get("fallbacks") or [])
+    missing_api_key_count = sum(1 for item in leaves if not str(item.get("api_key") or "").strip())
+    missing_base_url_count = sum(
+        1
+        for item in leaves
+        if not str(item.get("anthropic_base_url") or "").strip()
+        and not str(item.get("openai_base_url") or "").strip()
+    )
+    runtime_ready = bool(leaves) and missing_api_key_count == 0 and missing_base_url_count == 0
+    not_ready_reasons = []
+    if missing_api_key_count:
+        not_ready_reasons.append("missing plaintext secrets in preview secret backend")
+    if missing_base_url_count:
+        not_ready_reasons.append("missing route base URLs")
+    router_payload = {
+        "version": 1,
+        "generated_at": generated_at,
+        "source": source_label,
+        "route_revision": route_revision_id,
+        "runtime_ready": runtime_ready,
+        "runtime_ready_reason": "" if runtime_ready else "; ".join(not_ready_reasons),
+        "routes": routes,
+    }
+    lineup_payload = {
+        "version": 1,
+        "generated_at": generated_at,
+        "source": source_label,
+        "source_routes_hash": sha256_hex(_canonical_json_bytes({"version": 1, "routes": routes})),
+        "routes": lineup_routes,
+    }
+    if policy_payload:
+        effective_policy_payload = dict(policy_payload)
+        effective_policy_payload.setdefault("version", 1)
+        effective_policy_payload["generated_at"] = generated_at
+        effective_policy_payload["source"] = source_label
+    else:
+        effective_policy_payload = {
+            "version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "models": {model: {"visible": True, "source": source_label} for model in sorted(routes)},
+        }
+    if profile_payload:
+        raw_profiles = profile_payload.get("profiles") if isinstance(profile_payload.get("profiles"), Mapping) else {}
+        effective_profile_payload = {
+            "schema_version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "profiles": dict(raw_profiles),
+        }
+    else:
+        effective_profile_payload = {
+            "schema_version": 1,
+            "generated_at": generated_at,
+            "source": source_label,
+            "profiles": profiles,
+        }
+    validate_non_secret_payload(lineup_payload, context="preview_lineup")
+    validate_non_secret_payload(effective_policy_payload, context="preview_policy")
+    validate_non_secret_payload(effective_profile_payload, context="preview_profile")
+    return {
+        "router": router_payload,
+        "lineup": lineup_payload,
+        "policy": effective_policy_payload,
+        "profile": effective_profile_payload,
+        "route_count": len(routes),
+        "provider_route_count": len(rows),
+        "runtime_ready": runtime_ready,
+        "missing_api_key_count": missing_api_key_count,
+        "missing_base_url_count": missing_base_url_count,
+    }
+
+
+def _load_preview_secret_values(config_root: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for path in (config_root / "secrets" / "legacy-secrets.json", config_root / "secrets" / "webui-secrets.json"):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        items = payload.get("secrets") if isinstance(payload.get("secrets"), list) else []
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            ref = str(item.get("secret_ref") or "").strip()
+            value = str(item.get("value") or "").strip()
+            if ref and value:
+                values[ref] = value
+    return values
+
+
+def publish_latest_approved_bundle_from_legacy_candidates(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+    db_path: str | os.PathLike[str] | None = None,
+    generated_at: str | None = None,
+    actor: str = "agent",
+) -> dict[str, Any]:
+    """Publish a preview latest-approved bundle from DB preview candidates.
+
+    This is an explicit preview bridge toward DB truth. It does not read root
+    legacy artifacts and it resolves plaintext secrets only from the selected
+    preview secret backend; otherwise router entries carry `secret_ref`.
+    """
+    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    generated_dir = config_root / "generated"
+    generated = generated_at or utc_now()
+    db = open_registry(db_path or default_registry_db_path(config_root))
+    try:
+        route_revision_row, preview_source = _latest_preview_route_revision(db)
+        source_label = _PREVIEW_ROUTE_SOURCE_LABELS.get(preview_source, "registry-preview")
+        route_revision = str(route_revision_row["revision_id"] or "")
+        route_metadata = _metadata_dict(route_revision_row["metadata_json"])
+        candidate_id = str(route_metadata.get("candidate_id") or "")
+        policy_revision_override, policy_payload_override = _latest_revision_payload_for_source(
+            db,
+            "policy",
+            preview_source,
+            candidate_id=candidate_id,
+        )
+        profile_revision_override, profile_payload_override = _latest_revision_payload_for_source(
+            db,
+            "profile",
+            preview_source,
+            candidate_id=candidate_id,
+        )
+        if preview_source == "registry-v2-save-candidate" and candidate_id and (not policy_revision_override or not profile_revision_override):
+            raise RegistryValidationError(
+                f"registry v2 candidate {candidate_id} is missing matching policy/profile revisions"
+            )
+        payloads = _build_preview_bundle_payloads_from_route_revision(
+            db,
+            route_revision_id=route_revision,
+            generated_at=generated,
+            secret_values=_load_preview_secret_values(config_root),
+            source_label=source_label,
+            policy_payload=policy_payload_override,
+            profile_payload=profile_payload_override,
+        )
+        output_files = {
+            "router": generated_dir / "model-routes.json",
+            "lineup": generated_dir / "model-routes.lineup.json",
+            "profile": generated_dir / "provider-profiles.generated.json",
+            "policy": generated_dir / "model-policy.effective.json",
+            "capabilities": generated_dir / "model-capabilities.approved.json",
+        }
+        for name in ("router", "lineup", "profile", "policy"):
+            write_json_atomic(output_files[name], payloads[name])
+
+        capability_revision_seed = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "source": source_label,
+                    "preview_source": preview_source,
+                    "route_revision": route_revision,
+                    "route_count": payloads["route_count"],
+                    "generated_at": generated,
+                }
+            )
+        )
+        capability_revision = _revision_slug("cap", capability_revision_seed, generated_at=generated)
+        capabilities_payload = build_approved_capabilities_payload(
+            db,
+            capability_revision=capability_revision,
+            generated_at=generated,
+        )
+        write_json_atomic(output_files["capabilities"], capabilities_payload)
+
+        file_hashes = {name: sha256_hex(path.read_bytes()) for name, path in output_files.items()}
+        policy_revision = policy_revision_override or _revision_slug("policy", file_hashes["policy"], generated_at=generated)
+        profile_revision = profile_revision_override or _revision_slug("profile", file_hashes["profile"], generated_at=generated)
+        bundle_hash = sha256_hex(
+            _canonical_json_bytes(
+                {
+                    "source": source_label,
+                    "preview_source": preview_source,
+                    "capability_revision": capability_revision,
+                    "route_revision": route_revision,
+                    "policy_revision": policy_revision,
+                    "profile_revision": profile_revision,
+                    "file_hashes": file_hashes,
+                }
+            )
+        )
+        bundle_revision = _revision_slug("bundle", bundle_hash, generated_at=generated)
+
+        revisions_to_create = [(capability_revision, "capability", file_hashes["capabilities"])]
+        if not policy_revision_override:
+            revisions_to_create.append((policy_revision, "policy", file_hashes["policy"]))
+        if not profile_revision_override:
+            revisions_to_create.append((profile_revision, "profile", file_hashes["profile"]))
+        revisions_to_create.append((bundle_revision, "bundle", bundle_hash))
+        for revision_id, revision_class, revision_hash in revisions_to_create:
+            _create_revision_for_publish(
+                db,
+                revision_id,
+                revision_class,
+                revision_hash=revision_hash,
+                metadata={"source": source_label, "preview_source": preview_source, "publish_generated_at": generated},
+            )
+
+        for revision_id, revision_class in (
+            (capability_revision, "capability"),
+            (route_revision, "route"),
+            (policy_revision, "policy"),
+            (profile_revision, "profile"),
+        ):
+            add_revision_membership(
+                db,
+                bundle_revision,
+                revision_id,
+                revision_class,
+                metadata={"source": source_label, "preview_source": preview_source, "publish_generated_at": generated},
+            )
+
+        for revision_id in (capability_revision, route_revision, policy_revision, profile_revision, bundle_revision):
+            _approve_if_candidate(db, revision_id, actor=actor)
+
+        manifest_path = generated_dir / "model-registry.latest-approved.json"
+        manifest = export_latest_approved_bundle_manifest(
+            manifest_path,
+            bundle_revision=bundle_revision,
+            capability_revision=capability_revision,
+            route_revision=route_revision,
+            policy_revision=policy_revision,
+            profile_revision=profile_revision,
+            files={
+                "router": {
+                    "path": output_files["router"],
+                    "canonical_path": "generated/model-routes.json",
+                    "legacy_alias_path": "model-routes.json",
+                    "sensitivity": "secret",
+                    "legacy_alias_compat": True,
+                },
+                "lineup": {
+                    "path": output_files["lineup"],
+                    "canonical_path": "generated/model-routes.lineup.json",
+                    "legacy_alias_path": "model-routes.lineup.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "profile": {
+                    "path": output_files["profile"],
+                    "canonical_path": "generated/provider-profiles.generated.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+                "policy": {
+                    "path": output_files["policy"],
+                    "canonical_path": "generated/model-policy.effective.json",
+                    "legacy_alias_path": "model-policy.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": True,
+                },
+                "capabilities": {
+                    "path": output_files["capabilities"],
+                    "canonical_path": "generated/model-capabilities.approved.json",
+                    "sensitivity": "non-secret",
+                    "legacy_alias_compat": False,
+                },
+            },
+            generated_at=generated,
+            db=db,
+        )
+        with db:
+            db.execute(
+                """
+                INSERT INTO audit_log(event_type, actor, target_type, target_id, details_json)
+                VALUES ('preview_bundle.published', ?, 'registry_revision', ?, ?)
+                """,
+                (
+                    actor,
+                    bundle_revision,
+                    _json_text(
+                        {
+                            "manifest_path": str(manifest_path),
+                            "route_revision": route_revision,
+                            "preview_source": preview_source,
+                            "candidate_id": candidate_id,
+                            "runtime_ready": False,
+                        }
+                    ),
+                ),
+            )
+        return {
+            "schema": "mms.preview_bundle_publish.v1",
+            "source": source_label,
+            "preview_source": preview_source,
+            "candidate_id": candidate_id,
+            "manifest": manifest,
+            "manifest_path": str(manifest_path),
+            "generated_dir": str(generated_dir),
+            "bundle_revision": bundle_revision,
+            "capability_revision": capability_revision,
+            "route_revision": route_revision,
+            "policy_revision": policy_revision,
+            "profile_revision": profile_revision,
+            "route_count": payloads["route_count"],
+            "provider_route_count": payloads["provider_route_count"],
+            "runtime_ready": payloads["runtime_ready"],
+            "runtime_ready_reason": str((payloads.get("router") or {}).get("runtime_ready_reason") or ""),
+            "missing_api_key_count": payloads["missing_api_key_count"],
+            "missing_base_url_count": payloads["missing_base_url_count"],
+            "files": {name: str(path) for name, path in output_files.items()},
+        }
+    finally:
+        db.close()
 
 
 def publish_latest_approved_bundle(

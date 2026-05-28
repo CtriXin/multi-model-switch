@@ -112,7 +112,7 @@ from mms_provider_profiles import profile_context_window
 from mms_runtime import cli_search_dirs, prepare_cli_command
 from mms_session_index import finalize_claude_session, list_indexed_sessions, record_claude_session_start
 from mms_session_packet import write_session_packet
-from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file
+from mms_state_io import atomic_write_json, atomic_write_text, locked_state_file, resolve_mms_config_dir as _resolve_mms_config_dir
 from mms_state_io import resolve_current_workdir as _safe_getcwd
 
 _build_gateway_url = None
@@ -395,21 +395,31 @@ def _provider_advertises_plain_mimo_1m(provider_id):
     return bool(provider and any(token in provider for token in _MIMO_PLAIN_ONE_M_PROVIDER_HINTS))
 
 
-def _load_model_context_overrides():
+def _model_context_overrides_path():
     try:
-        mtime = os.path.getmtime(_MODEL_CONTEXT_OVERRIDES_PATH)
+        config_root = _resolve_mms_config_dir()
+    except Exception:
+        config_root = _real_user_path(".config", "mms")
+    return os.path.join(config_root, "model-context-overrides.json")
+
+
+def _load_model_context_overrides():
+    overrides_path = _model_context_overrides_path()
+    try:
+        mtime = os.path.getmtime(overrides_path)
     except OSError:
+        _MODEL_CONTEXT_OVERRIDES_CACHE["path"] = overrides_path
         _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = None
         _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {"models": {}, "provider_overrides": {}}
         return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
 
-    if _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] == mtime:
+    if _MODEL_CONTEXT_OVERRIDES_CACHE.get("path") == overrides_path and _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] == mtime:
         return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
 
     models = {}
     provider_overrides = {}
     try:
-        with open(_MODEL_CONTEXT_OVERRIDES_PATH, "r", encoding="utf-8") as f:
+        with open(overrides_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception:
         payload = {}
@@ -440,6 +450,7 @@ def _load_model_context_overrides():
                     if window:
                         provider_overrides[str(key).strip()] = window
 
+    _MODEL_CONTEXT_OVERRIDES_CACHE["path"] = overrides_path
     _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = mtime
     _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {
         "models": models,
@@ -909,8 +920,7 @@ def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=
         atomic_write_json(path, state, mode=0o600)
 
 
-_MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
-_MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
+_MODEL_CONTEXT_OVERRIDES_CACHE = {"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}}
 _CLAUDE_NETWORK_GUARD_CACHE: dict = {}
 _CLAUDE_NETWORK_GUARD_TTL_SEC = 20.0
 _SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
@@ -968,6 +978,32 @@ def _rescue_bridge_kwargs():
     }
 
 
+def _merged_config_root_env(env):
+    merged_env = dict(os.environ)
+    if isinstance(env, dict):
+        merged_env.update({str(key): str(value) for key, value in env.items() if value is not None})
+        if "XDG_CONFIG_HOME" not in env and any(key in env for key in ("HOME", "MMS_REAL_HOME", "REAL_HOME", "ORIGINAL_HOME")):
+            merged_env.pop("XDG_CONFIG_HOME", None)
+    return merged_env
+
+
+def _selected_mms_config_root(env):
+    merged_env = _merged_config_root_env(env)
+    try:
+        return _resolve_mms_config_dir(merged_env)
+    except Exception:
+        return _real_user_path(".config", "mms")
+
+
+def _config_root_is_explicit(env):
+    merged_env = _merged_config_root_env(env)
+    return bool(str(merged_env.get("MMS_CONFIG_ROOT") or merged_env.get("MMS_CONFIG_DIR") or "").strip())
+
+
+def _selected_config_path(*parts):
+    return os.path.join(_selected_mms_config_root({}), *parts)
+
+
 def _inject_rescue_launch_env(env):
     if not isinstance(env, dict):
         return env
@@ -978,7 +1014,7 @@ def _inject_rescue_launch_env(env):
     if project_root:
         env["MMS_PROJECT_ROOT"] = project_root
         env["MMS_CWD"] = project_root
-    env.setdefault("MMS_RESCUE_CONFIG_ROOT", _real_user_path(".config", "mms"))
+    env.setdefault("MMS_RESCUE_CONFIG_ROOT", _selected_mms_config_root(env))
     fallback = _rescue_default_fallback_config()
     if fallback.get("model"):
         env["MMS_RESCUE_FALLBACK_MODEL"] = str(fallback.get("model") or "")
@@ -1363,7 +1399,8 @@ def _build_home_context(env, runtime, cli_name):
     account_home = _normalize_path(runtime.get("home_dir") or "")
     xdg_config_home = _normalize_path(env.get("XDG_CONFIG_HOME") or "")
     gemini_cli_home = _normalize_path(env.get("GEMINI_CLI_HOME") or "")
-    config_root = os.path.join(real_home, ".config", "mms") if real_home else _real_user_path(".config", "mms")
+    config_root = _normalize_path(_selected_mms_config_root(env))
+    config_root_explicit = _config_root_is_explicit(env)
     expected_session_home = auth_mode == "oauth" and (
         cli_name == "claude"
         or (cli_name in {"codex", "agy"} and effective_home and effective_home != real_home)
@@ -1381,6 +1418,7 @@ def _build_home_context(env, runtime, cli_name):
         "gemini_cli_home": gemini_cli_home,
         "xdg_config_home": xdg_config_home,
         "config_root": config_root,
+        "config_root_explicit": config_root_explicit,
         "net_mode": _runtime_net_mode(runtime),
         "dns_mode": _runtime_dns_mode(runtime),
         "locale": locale_value,
@@ -1413,7 +1451,12 @@ def _validate_home_context_or_exit(context):
         _block("无法解析真实 HOME")
 
     if auth_mode != "oauth":
-        if effective_home and real_home and not _path_is_within(config_root, real_home):
+        if (
+            effective_home
+            and real_home
+            and not context.get("config_root_explicit")
+            and not _path_is_within(config_root, real_home)
+        ):
             _block(f"config_root 异常：{config_root}")
         return context
 
@@ -1960,9 +2003,9 @@ def _apply_runtime_ip_stack_profile(env, runtime):
     return env
 
 
-RUNTIME_DIR = _real_user_path(".config", "mms", "runtime")
-HEALTH_CHECK_PATH = _real_user_path(".config", "mms", "health_check.json")
-ANTHROPIC_URL_CACHE_PATH = _real_user_path(".config", "mms", "cache", "anthropic_base_urls.json")
+RUNTIME_DIR = _selected_config_path("runtime")
+HEALTH_CHECK_PATH = _selected_config_path("health_check.json")
+ANTHROPIC_URL_CACHE_PATH = _selected_config_path("cache", "anthropic_base_urls.json")
 
 # Anthropic URL 探测结果缓存（内存，TTL 1h）
 # key: provider_id → {"url": str, "ts": datetime}
@@ -2237,6 +2280,8 @@ def _claude_gateway_home():
 
 
 def _claude_route_status_paths():
+    if str(os.environ.get("MMS_CONFIG_ROOT") or os.environ.get("MMS_CONFIG_DIR") or "").strip():
+        return [os.path.join(_resolve_mms_config_dir(), "route_status.json")]
     gateway_home = _claude_gateway_home()
     return [os.path.join(gateway_home, ".config", "mms", "route_status.json")]
 
@@ -6801,6 +6846,15 @@ _CODEX_SESSION_LOCAL_ONLY_PREFIXES = (
 
 
 def _materialize_codex_session_entry(entry, src, dst):
+    if os.path.isdir(src) and os.path.isdir(dst):
+        os.makedirs(dst, exist_ok=True)
+        for child in os.listdir(src):
+            child_src = os.path.join(src, child)
+            child_dst = os.path.join(dst, child)
+            if os.path.exists(child_dst) or os.path.islink(child_dst):
+                continue
+            os.symlink(child_src, child_dst)
+        return
     if os.path.exists(dst) or os.path.islink(dst):
         return
     if entry in _CODEX_COPY_INTO_SESSION_FILES and os.path.isfile(src):
@@ -10588,7 +10642,7 @@ def _show_launch_info(cli, runtime, auth_mode):
 
     # ── 本地用量统计 ──
     try:
-        usage_path = _real_user_path(".config", "mms", "usage.json")
+        usage_path = _selected_config_path("usage.json")
         if os.path.exists(usage_path):
             with open(usage_path, "r", encoding="utf-8") as f:
                 stats = json.load(f)

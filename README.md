@@ -64,11 +64,11 @@ Default behavior:
 
 - installs the latest semver tag
 - creates an isolated MMS runtime under `~/.mms`
-- links `mms` and `mmslogs` into `~/.local/bin`
+- links `mms`, preview-root `mmf`, and `mmslogs` into `~/.local/bin`
 - creates `~/.mms/.venv` and uses Python 3.11+ without replacing the user's system Python
 - if Python 3.11+ is missing, prepares an MMS-managed Python via `uv` under `~/.mms`
 - discovers installed `claude` / `codex` / `opencode` / `agy` across PATH, Homebrew, and NVM versions
-- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmslogs`, not `ccs` / `mmc`
+- retires the legacy `ccs` and `mmc` shims; new installs expose `mms` / `mmf` / `mmslogs`, not `ccs` / `mmc`
 - asks before installing optional packs or missing frontend CLIs
 - does not silently rewrite your real provider/account configuration
 
@@ -83,7 +83,7 @@ Shell support:
 - Bash/Zsh: `--write-shell-rc` writes `~/.local/bin` into the active shell rc.
 - Fish: `--write-shell-rc` writes `~/.config/fish/conf.d/mms.fish`.
 - Ghostty/iTerm/Terminal: reopen the tab after install, or run `exec $SHELL -l`.
-- If you do not write shell rc, run `~/.local/bin/mms` immediately; direct `mms` works after PATH is loaded.
+- If you do not write shell rc, run `~/.local/bin/mms` or `~/.local/bin/mmf` immediately; direct `mms` / `mmf` works after PATH is loaded.
 
 Set the UI language during install:
 
@@ -218,7 +218,14 @@ Provider-specific behavior belongs in data, not in one-off launcher branches.
 - context window metadata
 - reference URLs for future verification
 
-User overlays can live in the MMS config directory as read-only profile inputs. MMS should not mutate your real `config.toml` just because a model was probed.
+Registry v2 is the preferred path for local changes: TUI / `mms config` / WebUI
+creates DB candidates, then publishes a verified
+`generated/model-registry.latest-approved.json` bundle. When that manifest is
+present, the generated Profile it references is the runtime boundary.
+
+Legacy user overlays can still live in the MMS config directory as manual
+import/export compatibility inputs. MMS should not mutate your real
+`config.toml` just because a model was probed.
 
 ## User Preferences
 

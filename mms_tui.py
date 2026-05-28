@@ -2251,7 +2251,7 @@ def _settings_menu():
         {"id": "guard", "label": _L("启动快照", "Snapshot Guard"), "desc": _L("查看/接受 config drift", "Inspect / accept config drift")},
         {"id": "rescue", "label": _L("中断/救援", "Interrupted / Rescue"), "desc": _L("设置 fallback / 最近失败", "Set fallback / recent failures")},
         {"id": "language", "label": _L("界面语言", "UI Language"), "desc": language_desc},
-        {"id": "routes_export", "label": _L("路由导出", "Export Routes"), "desc": _L("导出 model-routes.json", "Export model-routes.json")},
+        {"id": "routes_export", "label": _L("Legacy 路由导出", "Legacy Route Export"), "desc": _L("兼容导出 model-routes.json；v2 发布请进模型真源", "Compatibility export for model-routes.json; use Registry Truth for v2 publish")},
         {"id": "about", "label": _L("关于", "About"), "desc": _L("版本与环境信息", "Version and environment info")},
     ]
 

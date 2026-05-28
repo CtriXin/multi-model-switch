@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Local interactive WebUI for MMS setup, model policy, and audited config saves."""
 
 from __future__ import annotations
@@ -24,6 +25,14 @@ _ALLOWED_CLIS = ("claude", "codex", "opencode", "agy")
 _ALLOWED_ROLES = ("primary", "auto", "fallback")
 _OPENCODE_ROSTER_PRESETS = ("builder", "executor", "explore", "bughunt", "vision", "reviewer", "spec", "fixer")
 _OPENCODE_REQUIRED_BUILDER_AGENTS = {"mobius-builder-pro", "builder_primary"}
+_REGISTRY_V2_GENERATED_FILES = (
+    "model-routes.json",
+    "model-routes.lineup.json",
+    "provider-profiles.generated.json",
+    "model-policy.effective.json",
+    "model-capabilities.approved.json",
+    "model-registry.latest-approved.json",
+)
 
 _KNOWN_VISION_MODELS = {
     "gpt-5.3-codex",
@@ -156,6 +165,57 @@ def _policy_path_for_config(config_path: str = "") -> str:
         return str(getattr(mms_router, "MODEL_POLICY_PATH", ""))
     except Exception:
         return ""
+
+
+def _config_root_for_snapshot(config_path: str = "") -> str:
+    config_path = os.path.abspath(os.path.expanduser(str(config_path or ""))) if config_path else ""
+    if config_path:
+        return os.path.dirname(config_path)
+    try:
+        from mms_state_io import resolve_mms_config_dir
+
+        return resolve_mms_config_dir()
+    except Exception:
+        return ""
+
+
+def _model_source_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import model_source_status
+
+        return model_source_status(
+            config_dir=config_root or None,
+            command_name=f"{command_name} config source",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.model_source_status.v1",
+            "read_only": True,
+            "status": "error",
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
+def _consumer_bundle_status_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import consumer_bundle_status
+
+        return consumer_bundle_status(
+            config_dir=config_root or None,
+            command_name=f"{command_name} config bundle",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.consumer_bundle_status.v1",
+            "read_only": True,
+            "status": "error",
+            "verified": False,
+            "error": str(exc),
+            "config_root": config_root,
+        }
 
 
 def _load_json_file(path: str) -> dict[str, Any]:
@@ -579,6 +639,8 @@ def build_config_snapshot(
             "model_count": len((policy_payload.get("models") if isinstance(policy_payload.get("models"), dict) else {}) or {}),
             "project_count": len((policy_payload.get("projects") if isinstance(policy_payload.get("projects"), dict) else {}) or {}),
         },
+        "model_source_status": _model_source_status_for_snapshot(config_path, command_name=command_name),
+        "consumer_bundle_status": _consumer_bundle_status_for_snapshot(config_path, command_name=command_name),
         "references": build_reference_cards(),
         "recommendations": recommendations,
         "snippets": build_config_snippets(),
@@ -586,8 +648,18 @@ def build_config_snapshot(
             "requires_diff_preview": True,
             "requires_confirm_save": True,
             "confirm_phrase": "保存配置",
+            "preview_confirm_phrase": "写入预览DB",
             "writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
-            "safety": "保存走 lock + backup + audit；已存在的写入目标会额外生成 *.bak；页面不会回显真实 API Key。",
+            "stable_legacy_writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
+            "preview_v2_writes": [
+                "registry/model-registry.sqlite(candidate revisions)",
+                "secrets/webui-secrets.json(仅当输入新 key)",
+                "generated/model-registry.latest-approved.json",
+                "generated/model-routes.json",
+                "generated/model-policy.effective.json",
+                "generated/provider-profiles.generated.json",
+            ],
+            "safety": "stable legacy 保存走 lock + backup + audit；preview root 使用 DB candidate + generated bundle 发布并校验；页面不会回显真实 API Key。",
         },
     }
 
@@ -1173,8 +1245,18 @@ def _build_review_summary(
 
     if credential_updates:
         provider_ids = ", ".join(item["provider_id"] for item in credential_updates)
-        add_item("credentials", "凭据写入", f"将更新 credentials.sh：{provider_ids}", level="warn")
-        add_risk("credential_update", "凭据写入", "只有输入了新 API Key 且勾选更新凭据的通道会写 credentials.sh。", level="warn")
+        add_item(
+            "credentials",
+            "凭据写入",
+            f"stable legacy 写 credentials.sh；preview 写 secret backend：{provider_ids}",
+            level="warn",
+        )
+        add_risk(
+            "credential_update",
+            "凭据写入",
+            "只有输入了新 API Key 且勾选更新凭据的通道才会写入；stable legacy 目标是 credentials.sh，preview 目标是 secret backend。",
+            level="warn",
+        )
 
     policy_before_models = policy_before.get("models") if isinstance(policy_before.get("models"), dict) else {}
     policy_after_models = policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}
@@ -1203,6 +1285,23 @@ def _build_review_summary(
         "items": items,
         "risks": risks,
     }
+
+
+def _build_registry_v2_save_plan(
+    *,
+    config_path: str,
+    plan_summary: dict[str, Any],
+    credential_updates: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Describe the future DB-truth save path without writing anything."""
+    from mms_registry_cli import registry_v2_save_plan
+
+    return registry_v2_save_plan(
+        config_path=config_path,
+        command_name="mms-config-web",
+        plan_summary=plan_summary,
+        credential_updates=credential_updates,
+    )
 
 
 def build_config_plan(
@@ -1384,9 +1483,20 @@ def build_config_plan(
     diffs = {
         "config_toml": _diff_text(before_config_text, after_config_text, before_name="config.toml(before)", after_name="config.toml(after)"),
         "model_policy_json": _diff_text(before_policy_text, after_policy_text, before_name="model-policy.json(before)", after_name="model-policy.json(after)"),
-        "credentials": "\n".join(f"credentials.sh: update provider {item['provider_id']} (secret hidden)" for item in credential_updates),
+        "credentials": "\n".join(
+            f"credential update: provider {item['provider_id']} (secret hidden; stable credentials.sh / preview secret backend)"
+            for item in credential_updates
+        ),
     }
     review_summary = _build_review_summary(current_cfg, next_cfg, policy_before, policy_after, credential_updates)
+    summary = {
+        "providers": len(next_cfg.get("providers") or []),
+        "credential_updates": len(credential_updates),
+        "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
+        "will_write_config": bool(diffs["config_toml"]),
+        "will_write_policy": bool(diffs["model_policy_json"]),
+        "will_write_credentials": bool(credential_updates),
+    }
     return {
         "schema": "mms.setup_web.plan.v1",
         "ok": not errors,
@@ -1402,14 +1512,12 @@ def build_config_plan(
         "credential_updates": credential_updates,
         "diffs": diffs,
         "review_summary": review_summary,
-        "summary": {
-            "providers": len(next_cfg.get("providers") or []),
-            "credential_updates": len(credential_updates),
-            "policy_models": len((policy_after.get("models") if isinstance(policy_after.get("models"), dict) else {}) or {}),
-            "will_write_config": bool(diffs["config_toml"]),
-            "will_write_policy": bool(diffs["model_policy_json"]),
-            "will_write_credentials": bool(credential_updates),
-        },
+        "registry_v2_save_plan": _build_registry_v2_save_plan(
+            config_path=config_path,
+            plan_summary=summary,
+            credential_updates=credential_updates,
+        ),
+        "summary": summary,
     }
 
 
@@ -1450,6 +1558,167 @@ def _copy_backup_file(target_path: str, *, config_path: str, label: str) -> str:
 def _bak_path_for_backup(backup_path: str) -> str:
     bak_path = f"{backup_path}.bak" if backup_path else ""
     return bak_path if bak_path and os.path.exists(bak_path) else ""
+
+
+def _registry_v2_snapshot_generated_bundle(config_root: str) -> dict[str, Any]:
+    generated_dir = os.path.join(config_root, "generated")
+    summary: dict[str, Any] = {
+        "schema": "mms.setup_web.registry_v2_generated_snapshot.v1",
+        "generated_dir": generated_dir,
+        "file_names": list(_REGISTRY_V2_GENERATED_FILES),
+    }
+    if not os.path.isdir(generated_dir):
+        summary.update({"skipped": True, "reason": "missing_generated_dir", "files": []})
+        return summary
+    existing = [name for name in _REGISTRY_V2_GENERATED_FILES if os.path.isfile(os.path.join(generated_dir, name))]
+    if not existing:
+        summary.update({"skipped": True, "reason": "no_existing_bundle_files", "files": []})
+        return summary
+    slug = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_dir = os.path.join(config_root, "backups", "generated", f"webui-apply-{slug}")
+    os.makedirs(backup_dir, exist_ok=True)
+    for name in existing:
+        target = os.path.join(backup_dir, name)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(generated_dir, name), target)
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
+    manifest_path = os.path.join(backup_dir, "manifest.json")
+    with open(manifest_path, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "schema": "mms.setup_web.registry_v2_generated_snapshot_manifest.v1",
+                "created_at": _now_iso(),
+                "generated_dir": generated_dir,
+                "files": existing,
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    try:
+        os.chmod(manifest_path, 0o600)
+    except OSError:
+        pass
+    summary.update({"skipped": False, "backup_dir": backup_dir, "manifest_path": manifest_path, "files": existing})
+    return summary
+
+
+def _registry_v2_restore_generated_bundle(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(snapshot, dict):
+        return {"attempted": False, "reason": "missing_snapshot"}
+    generated_dir = str(snapshot.get("generated_dir") or "")
+    if not generated_dir:
+        return {"attempted": False, "reason": "missing_generated_dir"}
+    file_names = [str(name) for name in (snapshot.get("file_names") or _REGISTRY_V2_GENERATED_FILES)]
+    removed: list[str] = []
+    restored: list[str] = []
+    backup_dir = str(snapshot.get("backup_dir") or "")
+    if not os.path.isdir(generated_dir) and not backup_dir:
+        return {
+            "attempted": True,
+            "snapshot_skipped": bool(snapshot.get("skipped")),
+            "removed": removed,
+            "restored": restored,
+            "backup_dir": backup_dir,
+        }
+    os.makedirs(generated_dir, exist_ok=True)
+    for name in file_names:
+        target = os.path.join(generated_dir, name)
+        if os.path.exists(target):
+            os.remove(target)
+            removed.append(name)
+    for name in [str(item) for item in (snapshot.get("files") or [])]:
+        source = os.path.join(backup_dir, name)
+        target = os.path.join(generated_dir, name)
+        if backup_dir and os.path.isfile(source):
+            shutil.copy2(source, target)
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+            restored.append(name)
+    try:
+        if not os.listdir(generated_dir):
+            os.rmdir(generated_dir)
+    except OSError:
+        pass
+    return {
+        "attempted": True,
+        "snapshot_skipped": bool(snapshot.get("skipped")),
+        "removed": removed,
+        "restored": restored,
+        "backup_dir": backup_dir,
+    }
+
+
+def _registry_v2_restore_webui_credential_backend(secret_backend: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(secret_backend, dict) or bool(secret_backend.get("skipped")):
+        return {"attempted": False, "reason": "not_written"}
+    path = str(secret_backend.get("path") or "")
+    if not path:
+        return {"attempted": False, "reason": "missing_path"}
+    backup_path = str(secret_backend.get("backup_path") or "")
+    if backup_path and os.path.isfile(backup_path):
+        shutil.copy2(backup_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return {"attempted": True, "restored": True, "removed_new_file": False, "backup_path": backup_path}
+    if os.path.exists(path):
+        os.remove(path)
+        return {"attempted": True, "restored": False, "removed_new_file": True, "path": path}
+    return {"attempted": True, "restored": False, "removed_new_file": False, "path": path}
+
+
+def _registry_v2_restore_db_candidate(candidate: dict[str, Any] | None, *, config_root: str) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {"attempted": False, "reason": "missing_candidate"}
+    backup = candidate.get("backup") if isinstance(candidate.get("backup"), dict) else {}
+    backup_path = str(backup.get("backup_path") or "")
+    db_path = str(candidate.get("db_path") or backup.get("source_db_path") or "")
+    if backup_path:
+        from mms_registry_cli import restore_registry_db
+
+        restore = restore_registry_db(
+            backup_path,
+            config_dir=config_root,
+            db_path=db_path or None,
+            apply=True,
+            reason="webui-registry-v2-preview-apply-rollback",
+        )
+        return {"attempted": True, "restored": True, "removed_new_db": False, "restore": restore}
+    if backup.get("reason") == "new_db" and db_path:
+        removed: list[str] = []
+        for suffix in ("", "-wal", "-shm"):
+            target = f"{db_path}{suffix}"
+            if os.path.exists(target):
+                os.remove(target)
+                removed.append(target)
+        return {"attempted": True, "restored": False, "removed_new_db": bool(removed), "removed": removed}
+    return {"attempted": False, "reason": "no_candidate_backup", "db_path": db_path}
+
+
+def _rollback_registry_v2_preview_apply(
+    *,
+    config_root: str,
+    candidate: dict[str, Any] | None,
+    secret_backend: dict[str, Any] | None,
+    generated_snapshot: dict[str, Any] | None,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "attempted": True,
+        "reason": reason,
+        "generated": _registry_v2_restore_generated_bundle(generated_snapshot),
+        "credential_backend": _registry_v2_restore_webui_credential_backend(secret_backend),
+        "db": _registry_v2_restore_db_candidate(candidate, config_root=config_root),
+    }
 
 
 def _append_audit(*, config_path: str, target_path: str, backup_path: str, reason: str, before_sha1: str, after_sha1: str, function: str) -> None:
@@ -1536,6 +1805,21 @@ def apply_config_plan(
         return {"ok": False, "errors": ["保存前必须勾选确认保存。"], "status": "blocked"}
     if _safe_text(payload.get("confirm_phrase")) != "保存配置":
         return {"ok": False, "errors": ["确认文字必须输入：保存配置"], "status": "blocked"}
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_state_io import mms_config_root_status
+
+        root_status = mms_config_root_status(command="mms-config-web", config_dir=config_root or None)
+    except Exception:
+        root_status = {}
+    if root_status.get("mode") == "preview":
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.save_result.v1",
+            "status": "blocked",
+            "errors": ["preview root 已禁用 legacy /api/save；请使用“写入预览 DB + 发布”。"],
+            "root": root_status,
+        }
     plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True)
     if not plan.get("ok"):
         return {
@@ -1579,6 +1863,113 @@ def apply_config_plan(
         "paths": plan.get("paths") or {},
         "save_report": save_report,
         "audit_tail": _latest_audit_rows(target_config_path),
+    }
+
+
+def apply_registry_v2_preview_plan(
+    current_cfg: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+    *,
+    config_path: str = "",
+    preferences_path: str = "",
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    if not _truthy(payload.get("confirm_v2_preview"), False):
+        return {"ok": False, "errors": ["写入预览 DB 前必须勾选确认。"], "status": "blocked"}
+    if _safe_text(payload.get("confirm_phrase")) != "写入预览DB":
+        return {"ok": False, "errors": ["确认文字必须输入：写入预览DB"], "status": "blocked"}
+    plan = build_config_plan(current_cfg, payload, config_path=config_path, preferences_path=preferences_path, include_secrets=True)
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "errors": plan.get("errors") or [],
+            "warnings": plan.get("warnings") or [],
+            "status": "blocked",
+            "plan": _sanitize_for_output(plan),
+        }
+    v2_plan = plan.get("registry_v2_save_plan") if isinstance(plan.get("registry_v2_save_plan"), dict) else {}
+    blocked_reasons = [str(item) for item in (v2_plan.get("blocked_reasons") or []) if str(item or "").strip()]
+    if blocked_reasons:
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "blocked",
+            "errors": blocked_reasons,
+            "registry_v2_save_plan": v2_plan,
+        }
+
+    config_root = _config_root_for_snapshot(config_path)
+    candidate: dict[str, Any] | None = None
+    secret_backend: dict[str, Any] | None = None
+    generated_snapshot: dict[str, Any] | None = None
+    try:
+        from mms_registry_cli import apply_registry_v2_save_candidate, publish_preview_bundle, verify_approved_bundle, write_registry_v2_webui_secret_backend
+
+        credential_updates = [item for item in (plan.get("credential_updates") or []) if isinstance(item, dict)]
+        generated_snapshot = _registry_v2_snapshot_generated_bundle(config_root)
+        candidate = apply_registry_v2_save_candidate(
+            config_dir=config_root or None,
+            config_payload=plan.get("config") if isinstance(plan.get("config"), dict) else {},
+            policy_payload=plan.get("model_policy") if isinstance(plan.get("model_policy"), dict) else {},
+            credential_updates=credential_updates,
+            apply=True,
+            command_name="mms-config-web",
+        )
+        secret_backend = write_registry_v2_webui_secret_backend(
+            config_dir=config_root or None,
+            credential_updates=credential_updates,
+            command_name="mms-config-web",
+        )
+        publish = publish_preview_bundle(config_dir=config_root or None)
+        verify = verify_approved_bundle(config_dir=config_root or None)
+    except Exception as exc:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason=f"{type(exc).__name__}: {exc}",
+        )
+        return {
+            "ok": False,
+            "schema": "mms.setup_web.registry_v2_apply_result.v1",
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "registry_v2_save_plan": v2_plan,
+            "rollback": rollback,
+        }
+
+    verified = bool(verify.get("verified"))
+    credential_backend = {
+        "schema": secret_backend.get("schema"),
+        "skipped": bool(secret_backend.get("skipped")),
+        "path": secret_backend.get("path"),
+        "count": secret_backend.get("secret_count", 0),
+        "backup_path": secret_backend.get("backup_path", ""),
+        "plaintext_store": bool(secret_backend.get("plaintext_secret_store")),
+    }
+    rollback: dict[str, Any] = {}
+    if not verified:
+        rollback = _rollback_registry_v2_preview_apply(
+            config_root=config_root,
+            candidate=candidate,
+            secret_backend=secret_backend,
+            generated_snapshot=generated_snapshot,
+            reason="verify_failed",
+        )
+    return {
+        "ok": verified,
+        "schema": "mms.setup_web.registry_v2_apply_result.v1",
+        "status": "verified" if verified else "failed_verify",
+        "summary": plan.get("summary") or {},
+        "warnings": plan.get("warnings") or [],
+        "paths": plan.get("paths") or {},
+        "registry_v2_save_plan": v2_plan,
+        "candidate": _sanitize_for_output(candidate),
+        "credential_backend": credential_backend,
+        "publish": _sanitize_for_output(publish),
+        "verify": _sanitize_for_output(verify),
+        "rollback": rollback,
     }
 
 
@@ -1784,25 +2175,26 @@ _HTML_PAGE = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <div><h1>MMS 配置中心</h1><p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback，并在预览 diff 后直接走 backup + audit 保存。</p></div>
+  <div><h1>MMS 配置中心</h1><p class="lead">不是展示页：这里可以配置通道、拉取模型、隐藏/补充模型、标记能力、测试模型、设置 fallback。保存前先预览；stable legacy 走 backup + audit，preview root 走 DB candidate + latest-approved publish。</p></div>
   <div class="statusbar" id="statusbar"><span class="pill warn">加载中</span></div>
 </header>
 <div class="shell">
   <aside class="side" id="nav"></aside>
   <main class="content">
+    <section class="panel" data-section="source"><h2>真源状态</h2><p>只读汇总当前 config root、registry DB、legacy import 冲突和 latest-approved bundle 校验状态。</p><div class="grid" id="sourceStatus"></div></section>
     <section class="panel" data-section="channel"><h2>通道配置</h2><p>先建通道：内部 ID、显示名、OpenAI/Anthropic URL、API Key、协议和模型列表接口。Key 只会通过 POST 发送，不会回显。</p><div class="grid"><div class="card span4"><div class="provider-list" id="providerList"></div><div class="btns"><button id="addProvider" class="secondary">+ 添加通道</button><button id="duplicateProvider" class="ghost">复制当前</button></div></div><div class="card span8 provider-editor" id="providerForm"></div></div></section>
     <section class="panel" data-section="models"><h2>模型列表</h2><p>可拉取远端列表，也可像 NewAPI 一样手动补充；取消“显示”会写入 provider.hidden_models。拉取只更新缓存/当前表格，不会自动写入 fallback_models；需要固定保留的模型请用“手动补充模型”。</p><div class="grid"><div class="card span12"><div class="btns"><button id="fetchModels">拉取当前通道模型</button><button id="testList" class="secondary">测试 /models</button><input id="modelSearch" placeholder="搜索模型" style="max-width:260px"></div><label style="margin-top:14px">手动补充模型（逗号或换行分隔）</label><textarea id="manualModels" placeholder="例如：gpt-5.5, qwen3.6-plus, K2.6"></textarea><div class="btns"><button id="addManualModels" class="secondary">添加到列表</button><button id="clearHidden" class="ghost">取消当前通道全部隐藏</button><button id="clearAllStaleHidden" class="ghost">一键清理全部通道过期隐藏项</button></div><div id="modelChips" class="chips" style="margin-top:10px"></div></div><div class="card span12" id="staleHiddenBox"></div><div class="span12 table-wrap"><table id="modelTable"></table></div></div></section>
     <section class="panel" data-section="test"><h2>模型测试</h2><p>支持模型列表 smoke、指定模型 ping/pong 和简单 chat。结果会显示脱敏 request_url/request_path evidence。</p><div class="grid"><div class="card span5"><label>测试通道</label><select id="testProvider"></select><label>测试模型</label><select id="testModel"></select><label>协议</label><select id="testProtocol"><option value="auto">auto</option><option value="anthropic_messages">anthropic_messages</option><option value="openai_chat_completions">openai_chat_completions</option></select><label>Prompt</label><textarea id="testPrompt">只回复 pong</textarea><div class="btns"><button id="testModelBtn">Ping 模型</button><button id="chatTestBtn" class="secondary">Simple chat</button></div></div><div class="card span7"><div class="result" id="testResult">暂无测试结果</div></div></div></section>
-    <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>这里会写入 config.toml 的 [rescue] 和 [vision_sidecar]，用于失败交接和 text-only 模型的图片 sidecar。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
+    <section class="panel" data-section="fallback"><h2>Fallback 设置</h2><p>stable legacy 保存写入 config.toml 的 [rescue] / [vision_sidecar]；preview root 保存为 DB candidate 并随 latest-approved bundle 发布。</p><div class="grid"><div class="card span6"><h3>Rescue fallback</h3><label>fallback_model</label><input id="rescueModel" placeholder="deepseek-v4-flash"><label>fallback_cli</label><select id="rescueCli"><option value="">不指定</option><option>codex</option><option>claude</option><option>opencode</option><option>agy</option></select><div class="check" style="margin-top:10px"><input id="rescueHot" type="checkbox"><span>开启 hot_fallback_enabled</span></div></div><div class="card span6"><h3>Vision sidecar</h3><div class="check"><input id="visionEnabled" type="checkbox"><span>启用 vision sidecar</span></div><label>provider_id</label><select id="visionProvider"></select><label>model</label><select id="visionModel"></select><p class="muted">模型下拉优先显示当前通道中标记为 vision/multimodal 的模型；当前值不在列表时会保留为“当前配置值”。</p><label>候选列表</label><div id="visionCandidates" class="grid"></div><div class="btns"><button id="addVisionCandidate" class="secondary">+ 添加 vision 候选</button></div></div></div></section>
     <section class="panel" data-section="runtime"><h2>运行默认值</h2><p>Preferred CLI 会写入 presets.coding.cli；OpenCode profile 和 agent roster 会写入 [opencode]，launcher 会生成 session-local opencode.json；不会写全局 OpenCode 配置。</p><div class="grid"><div class="card span5"><label>preferred CLI</label><select id="preferredCli"><option>opencode</option><option>codex</option><option>claude</option><option>agy</option></select><label>coding preset model（可选）</label><input id="codingModel" placeholder="gpt-5.5"></div><div class="card span7"><label>OpenCode default profile</label><select id="opencodeProfile"><option>agent</option><option>omo</option><option>raw</option></select><p class="muted">推荐：5.5 总控/终审，5.4 长跑 executor，国产模型用于 explore / bug-hunt / vision。逐 agent 固定模型放在 Advanced，不作为默认必填项。</p></div><div class="card span12"><h3>OpenCode Agent Roster</h3><p class="muted">默认使用 Lite Pro 自动路线；这里管理哪些 agent 进入 session-local opencode.json。Order 是 priority/fallback order, not round-robin。</p><div class="oc-summary" id="opencodeOverrideSummary"></div><div class="oc-order-note">Lean 默认只开关键链路；Balanced 适合日常；Deep 再启用第二意见。国产模型适合 explore / bughunt / vision，不默认做最终裁决。</div><details class="oc-advanced" id="opencodeAdvanced"><summary>Advanced: OpenCode per-agent roster</summary><div class="filterbar" id="opencodeAgentFilters"></div><div class="table-wrap"><table id="opencodeAgents"></table></div></details></div></div></section>
-    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。真正写入时会使用 MMS audited writer：lock、backup、audit log。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="saveBtn" class="danger">确认保存</button></div><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意写入配置</span></div><label style="margin-top:12px">输入确认文字：保存配置</label><input id="confirmPhrase" placeholder="保存配置"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
+    <section class="panel" data-section="save"><h2>保存 / 审计</h2><p>保存前先生成 diff。stable legacy 使用 audited writer：lock、backup、audit log；preview root 写 DB candidate、preview secret backend 和 generated bundle。API Key 不会出现在 diff 或响应里。</p><div class="grid"><div class="card span5"><div class="btns"><button id="previewPlan">生成保存预览</button><button id="applyV2Preview" class="secondary">写入预览 DB + 发布</button><button id="downloadPlanJson" class="ghost">下载 plan JSON</button><button id="copyApplyCommand" class="ghost">复制 CLI apply 命令</button><button id="saveBtn" class="danger">确认保存</button></div><p class="muted">WebUI plan JSON = “生成保存预览”的 redacted review artifact；有 API Key 更新时请优先用本页“写入预览 DB + 发布”，下载 JSON 不含明文 key。</p><div class="check" style="margin-top:12px"><input id="confirmSave" type="checkbox"><span>我已检查摘要、风险和 diff，同意执行所选写入</span></div><label style="margin-top:12px">输入确认文字：保存配置 / 写入预览DB</label><input id="confirmPhrase" placeholder="保存配置 或 写入预览DB"><label>保存原因 / audit reason</label><input id="saveReason" value="setup-web-ui:interactive-save"><p class="muted">Preview root 下 legacy 确认保存会被阻止；请用“写入预览 DB + 发布”。Preview DB 按钮只写当前 MMS_CONFIG_ROOT 的 DB candidate + generated bundle；stable root 会被阻止。</p></div><div class="card span7"><div class="result" id="saveResult">尚未生成预览</div></div><div class="card span12"><h3>保存摘要</h3><div id="reviewSummary"><p class="muted">点击“生成保存预览”后，这里会先用人话列出 URL、隐藏模型、fallback、OpenCode 和风险变化。</p></div></div><div class="span12"><h3>Raw diff / 审计详情</h3><div class="diff" id="diffBox">点击“生成保存预览”</div></div></div></section>
     <section class="panel" data-section="refs"><h2>本地参考</h2><p>这些是当前配置页面使用的本地参考入口；联网查最新厂商文档应作为后续显式动作，不在保存时自动外连。</p><div class="grid" id="refsGrid"></div></section>
   </main>
 </div>
 <div class="toast" id="toast"></div>
 <script>
 const sections=[
-  ['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
+  ['source','真源状态','DB / legacy / bundle'],['channel','通道配置','URL / Key / 协议'],['models','模型列表','拉取 / 隐藏 / 补充'],['test','模型测试','ping / chat smoke'],['fallback','Fallback','rescue / vision'],['runtime','运行默认值','preferred CLI / OpenCode'],['save','保存审计','diff / backup / audit'],['refs','本地参考','配置契约 / docs']
 ];
 let state=null; let activeProvider=0; let lastPlan=null; let opencodeAgentFilter="all"; let opencodeOnlyOverridden=false;
 const $=id=>document.getElementById(id);
@@ -1810,15 +2202,17 @@ function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('sho
 async function api(path,body){const res=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});const data=await res.json();if(!res.ok){data.ok=false;data.http_status=res.status;data.error=data.error||res.statusText}return data}
 function current(){return state.providers[activeProvider]}
 function setSection(id){document.querySelectorAll('[data-section]').forEach(el=>el.classList.toggle('hide',el.dataset.section!==id));document.querySelectorAll('.navbtn').forEach(el=>el.classList.toggle('active',el.dataset.id===id))}
-function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('channel') }
-function renderStatus(){const providers=state.providers||[];$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
+function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button class="navbtn" data-id="${id}">${title}<small>${sub}</small></button>`).join(''); document.querySelectorAll('.navbtn').forEach(b=>b.onclick=()=>setSection(b.dataset.id)); setSection('source') }
+function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'Preview root 已禁用 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?'':'Stable root 不能写 preview DB，请用 mmf preview root'}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
+function renderSourceStatus(){const box=$('sourceStatus');if(!box)return;const status=state.model_source_status||{};const consumer=state.consumer_bundle_status||{};const root=status.root||consumer.root||{};const db=status.registry_db||{};const legacy=status.legacy_import||{};const candidates=legacy.candidates||db.legacy_import_candidates||{};const bundle=status.generated_bundle||{};const revisions=consumer.component_revisions||{};const rules=consumer.consumer_rules||[];const consumerFiles=consumer.files||{};const counts=db.counts||{};const okBundle=bundle.verified?'ok':'warn';const okConsumer=consumer.verified?'ok':'warn';const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer},null,2))}</div></div>`}
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
 function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>`<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>'}<span class="tag">${p.models?.length||0} models</span></div>`).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}
 function checks(name,values,allowed){values=values||[];return `<div class="checks">${allowed.map(v=>`<label class="check"><input type="checkbox" name="${name}" value="${v}" ${values.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}</div>`}
 function checkedValues(name){return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map(x=>x.value)}
-function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新 credentials.sh（需要填写 API Key；会 backup + audit）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div>`; bindProviderForm();}
+function renderProviderForm(){const p=current(); if(!p){$('providerForm').innerHTML='<p>暂无通道</p>';return} $('providerForm').innerHTML=`<div class="grid"><div class="span6"><label>内部 ID</label><input id="pId" value="${escapeHtml(p.id)}"></div><div class="span6"><label>显示名</label><input id="pName" value="${escapeHtml(p.name)}"></div><div class="span4"><label>状态</label><select id="pEnabled"><option value="true" ${p.enabled?'selected':''}>启用</option><option value="false" ${!p.enabled?'selected':''}>禁用</option></select></div><div class="span4"><label>role</label><select id="pRole">${['primary','auto','fallback'].map(v=>`<option ${p.role===v?'selected':''}>${v}</option>`).join('')}</select></div><div class="span4"><label>priority</label><input id="pPriority" type="number" value="${escapeHtml(p.priority||100)}"></div><div class="span6"><label>OpenAI base URL</label><input id="pOpenAI" value="${escapeHtml(p.openai_base_url||'')}" placeholder="https://.../v1"></div><div class="span6"><label>Anthropic base URL</label><input id="pAnthropic" value="${escapeHtml(p.anthropic_base_url||'')}" placeholder="https://.../v1 或 /anthropic"></div><div class="span6"><label>API Key（留空不更新）</label><input id="pKey" type="password" placeholder="${p.has_api_key?'已保存；输入新 key 才会覆盖':'sk-...'}"></div><div class="span6"><label>models_endpoint</label><input id="pModelsEndpoint" value="${escapeHtml(p.models_endpoint||'/models')}" placeholder="/models 或 manual"></div><div class="span12"><label>protocols</label>${checks('pProtocols',p.protocols,['anthropic_messages','openai_chat_completions'])}</div><div class="span12"><label>supported CLIs</label>${checks('pClis',p.supported_clis,['claude','codex','opencode','agy'])}</div><div class="span12 check"><input id="pUpdateCreds" type="checkbox"><span>保存时更新凭据（stable 写 credentials.sh；preview 写 secret backend；需要填写 API Key）</span></div><div class="span12 check"><input id="pDefault" type="checkbox" ${state.provider_default===p.id?'checked':''}><span>设为默认 provider</span></div></div>`; bindProviderForm();}
 function bindProviderForm(){['pId','pName','pEnabled','pRole','pPriority','pOpenAI','pAnthropic','pModelsEndpoint'].forEach(id=>$(id).oninput=syncProvider);$('pKey').oninput=syncProvider;$('pUpdateCreds').onchange=syncProvider;$('pDefault').onchange=()=>{syncProvider(); if($('pDefault').checked) state.provider_default=current().id; renderProviders();};document.querySelectorAll('input[name="pProtocols"],input[name="pClis"]').forEach(x=>x.onchange=syncProvider)}
 function syncProvider(){const p=current(); if(!p)return; const old=p.id;p.id=$('pId').value.trim()||p.id;p.name=$('pName').value.trim()||p.id;p.enabled=$('pEnabled').value==='true';p.role=$('pRole').value;p.priority=Number($('pPriority').value||100);p.openai_base_url=$('pOpenAI').value.trim();p.anthropic_base_url=$('pAnthropic').value.trim();p.models_endpoint=$('pModelsEndpoint').value.trim()||'/models';p.protocols=checkedValues('pProtocols');p.supported_clis=checkedValues('pClis');p.api_key=$('pKey').value;p.update_credentials=$('pUpdateCreds').checked;if(state.provider_default===old)state.provider_default=p.id;renderProviderList();renderTestSelectors();}
 function providerModels(p){p=p||{};const map=new Map();const baseRows=(p.models||[]).filter(r=>r&&r.id&&r.source!=='hidden');baseRows.forEach(r=>map.set(r.id,{...r,capabilities:{...(r.capabilities||{})}}));if(!baseRows.length){(p.fallback_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'fallback',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})})}(p.extra_models||[]).forEach(id=>{if(!map.has(id))map.set(id,{id,source:'extra',visible:!(p.hidden_models||[]).includes(id),favorite:false,capabilities:defaultCaps(id)})});(p.hidden_models||[]).forEach(id=>{if(map.has(id))map.get(id).visible=false});return [...map.values()].sort((a,b)=>a.id.localeCompare(b.id))}
@@ -1861,9 +2255,10 @@ function renderOpencodeAgents(){const table=$('opencodeAgents');if(!table)return
 function renderRuntime(){state.runtime=state.runtime||{};state.opencode=state.opencode||{};$('preferredCli').value=state.runtime.preferred_cli||'opencode';$('codingModel').value=state.runtime.coding_preset_model||'';$('opencodeProfile').value=state.opencode.default_profile||'agent';$('preferredCli').oninput=syncRuntime;$('codingModel').oninput=syncRuntime;$('opencodeProfile').oninput=()=>{syncRuntime();renderOpencodeSummary()};renderOpencodeAgents()}
 function renderRefs(){ $('refsGrid').innerHTML=(state.references||[]).map(r=>`<div class="card span6"><h3>${escapeHtml(r.title)}</h3><p>${escapeHtml(r.summary)}</p><p class="mono">${escapeHtml(r.path)}</p></div>`).join('') }
 function levelLabel(level){return level==='danger'?'高风险':(level==='warn'?'注意':'信息')}
-function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}`}
+function planJsonHint(plan){const v2=plan?.registry_v2_save_plan||{};const planJson=v2.plan_json||{};const apply=v2.apply_plan||{};if(!planJson.name&&!apply.cli_apply_command)return '';return `<h4>Plan JSON / apply-plan</h4><p class="muted">${escapeHtml(planJson.note||'Plan JSON 是保存预览的 review artifact。')}</p><p><span class="tag">${escapeHtml(planJson.name||'webui-plan.json')}</span> <span class="tag ${planJson.redacted?'off':''}">secrets ${planJson.redacted?'redacted':'included'}</span></p><p class="mono">${escapeHtml(apply.cli_apply_command||'')}</p>`}
+function renderReviewSummary(plan){const review=plan?.review_summary||{};const counts=review.counts||{};const risks=review.risks||[];const items=review.items||[];const riskHtml=risks.length?`<h4>风险提示</h4><div>${risks.map(r=>`<p><span class="tag ${r.level==='danger'?'off':''}">${escapeHtml(levelLabel(r.level))}</span> <strong>${escapeHtml(r.title)}</strong> ${escapeHtml(r.detail)}</p>`).join('')}</div>`:'<p><span class="tag">无高风险提示</span></p>';const itemHtml=items.length?items.map(item=>`<p><span class="tag ${item.level==='danger'?'off':''}">${escapeHtml(levelLabel(item.level))}</span> <strong>${escapeHtml(item.title)}</strong> ${escapeHtml(item.detail)}</p>`).join(''):'<p class="muted">没有检测到配置变化。</p>';$('reviewSummary').innerHTML=`<div class="chips"><span class="chip">变化 ${counts.items||0}</span><span class="chip">风险 ${counts.risks||0}</span><span class="chip">清理 hidden ${counts.hidden_removed||0}</span><span class="chip">凭据更新 ${counts.credential_updates||0}</span></div>${riskHtml}<h4>将要写入的变化</h4>${itemHtml}${planJsonHint(plan)}`}
 function draft(){syncProvider();syncFallback();syncRuntime();return JSON.parse(JSON.stringify({providers:state.providers,provider_default:state.provider_default,rescue:state.rescue,vision_sidecar:state.vision_sidecar,runtime:state.runtime,opencode:state.opencode}))}
-function renderAll(){renderStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
+function renderAll(){renderStatus();renderSaveControls();renderSourceStatus();renderProviders();renderFallback();renderRuntime();renderRefs()}
 async function load(){const res=await fetch('/api/state');state=await res.json();state.providers=state.providers||[];renderNav();renderAll();}
 $('addProvider').onclick=()=>{state.providers.push({id:`provider-${state.providers.length+1}`,original_id:'',name:'新通道',enabled:true,role:'auto',priority:100,models_endpoint:'/models',protocols:['anthropic_messages','openai_chat_completions'],supported_clis:['claude','codex','opencode'],openai_base_url:'',anthropic_base_url:'',api_key:'',update_credentials:false,fallback_models:[],extra_models:[],hidden_models:[],models:[]});activeProvider=state.providers.length-1;renderAll()}
 $('duplicateProvider').onclick=()=>{const p=JSON.parse(JSON.stringify(current()));p.id=p.id+'-copy';p.original_id='';p.name=p.name+' Copy';p.api_key='';p.has_api_key=false;state.providers.push(p);activeProvider=state.providers.length-1;renderAll()}
@@ -1872,7 +2267,11 @@ $('fetchModels').onclick=async()=>{syncProvider();const data=await api('/api/pro
 $('testList').onclick=async()=>{$('testResult').textContent=JSON.stringify(await api('/api/provider/test',{provider:current(),force_refresh:true}),null,2);setSection('test')}
 $('testModelBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/model/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
 $('chatTestBtn').onclick=async()=>{$('testResult').textContent='测试中...';const data=await api('/api/chat/test',{provider:state.providers[Number($('testProvider').value)],model:$('testModel').value,protocol:$('testProtocol').value,prompt:$('testPrompt').value});$('testResult').textContent=JSON.stringify(data,null,2)}
-$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+$('previewPlan').onclick=async()=>{const data=await api('/api/plan',{draft:draft()});lastPlan=data;renderSaveControls();renderReviewSummary(data);$('saveResult').textContent=JSON.stringify({ok:data.ok,summary:data.summary,registry_v2_save_plan:data.registry_v2_save_plan,warnings:data.warnings,errors:data.errors,risks:data.review_summary?.risks},null,2);$('diffBox').textContent=[data.diffs?.config_toml,data.diffs?.model_policy_json,data.diffs?.credentials].filter(Boolean).join('\n')||'没有配置变化';toast(data.ok?'预览已生成':'预览有错误')}
+function currentApplyCommand(){return lastPlan?.registry_v2_save_plan?.apply_plan?.cli_apply_command||'./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json'}
+$('downloadPlanJson').onclick=()=>{if(!lastPlan){toast('请先生成保存预览');return}const blob=new Blob([JSON.stringify(lastPlan,null,2)+'\n'],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=lastPlan?.registry_v2_save_plan?.plan_json?.name||'webui-plan.json';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('已下载 redacted plan JSON')}
+$('copyApplyCommand').onclick=async()=>{const cmd=currentApplyCommand();try{await navigator.clipboard.writeText(cmd);toast('已复制 CLI apply 命令')}catch(_err){$('saveResult').textContent=cmd;toast('无法访问剪贴板，命令已显示在结果框')}}
+$('applyV2Preview').onclick=async()=>{const data=await api('/api/registry-v2/apply',{draft:draft(),confirm_v2_preview:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'预览 DB 已写入并发布':'预览 DB 写入被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 $('saveBtn').onclick=async()=>{const data=await api('/api/save',{draft:draft(),confirm_save:$('confirmSave').checked,confirm_phrase:$('confirmPhrase').value,reason:$('saveReason').value});$('saveResult').textContent=JSON.stringify(data,null,2);toast(data.ok?'保存完成，已写入 audit':'保存被阻止'); if(data.ok){const res=await fetch('/api/state');state=await res.json();renderAll();}}
 load().catch(err=>{document.body.innerHTML='<pre style="padding:30px;color:#b42318">'+escapeHtml(err.stack||err.message)+'</pre>'})
 </script>
@@ -1903,6 +2302,14 @@ class ConfigWebApp:
     def save(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             result = apply_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+            if result.get("ok"):
+                plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
+                self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
+            return result
+
+    def registry_v2_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            result = apply_registry_v2_preview_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
             if result.get("ok"):
                 plan = build_config_plan(self.cfg, payload, config_path=self.config_path, preferences_path=self.preferences_path)
                 self.cfg = plan.get("config") if isinstance(plan.get("config"), dict) else self.cfg
@@ -1983,6 +2390,10 @@ class _SetupWebHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/save":
                 result = app.save(payload)
+                self._send(*_json_response(result, status=200 if result.get("ok") else 400))
+                return
+            if path == "/api/registry-v2/apply":
+                result = app.registry_v2_apply(payload)
                 self._send(*_json_response(result, status=200 if result.get("ok") else 400))
                 return
             self._send(404, b"not found\n", "text/plain; charset=utf-8")

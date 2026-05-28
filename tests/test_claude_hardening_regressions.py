@@ -2179,6 +2179,24 @@ def test_overlay_toon_session_entries_merges_existing_session_skills(monkeypatch
     assert (parent_dir / "skills" / "toon" / "SKILL.md").read_text(encoding="utf-8") == "# toon\n"
 
 
+def test_materialize_codex_session_entry_merges_existing_generated_skill_dir(tmp_path):
+    import mms_launchers
+
+    real_skills = tmp_path / "real" / "skills"
+    generated_skills = tmp_path / "gateway" / "skills"
+    (real_skills / "keep-skill").mkdir(parents=True)
+    (generated_skills / ".system").mkdir(parents=True)
+
+    mms_launchers._materialize_codex_session_entry(
+        "skills",
+        str(real_skills),
+        str(generated_skills),
+    )
+
+    assert (generated_skills / ".system").is_dir()
+    assert os.path.islink(generated_skills / "keep-skill")
+
+
 def test_codex_gateway_env_materializes_session_toon_skill_and_wrapper(monkeypatch, tmp_path):
     import mms_launchers
 

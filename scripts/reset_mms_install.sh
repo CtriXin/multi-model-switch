@@ -24,6 +24,7 @@ Behavior:
   - ~/.mms
   - ~/.config/mms
   - ~/.local/bin/mms
+  - ~/.local/bin/mmf
   - ~/.local/bin/mmc
   - ~/.local/bin/ccs
   - ~/.local/bin/mmslogs
@@ -134,6 +135,7 @@ collect_launcher_artifacts() {
 
     for candidate in \
         "$TARGET_HOME/.local/bin/mms" \
+        "$TARGET_HOME/.local/bin/mmf" \
         "$TARGET_HOME/.local/bin/mmc" \
         "$TARGET_HOME/.local/bin/ccs" \
         "$TARGET_HOME/.local/bin/mmslogs"
