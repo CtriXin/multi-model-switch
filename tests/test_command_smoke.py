@@ -735,6 +735,46 @@ def test_semver_and_http_status_helpers_preserve_update_semantics():
     assert mms_command_tools.http_status_is_success("bad") is False
 
 
+def test_update_status_helpers_preserve_install_and_about_status_semantics():
+    import mms_command_tools
+
+    update_sources = {"install.sh", "homebrew"}
+    localize = lambda zh, en: zh
+
+    assert mms_command_tools.installed_update_semver(
+        {"source": "install.sh", "installed_version": "v1.2.3"},
+        update_notice_sources=update_sources,
+    ) == ("v1.2.3", (1, 2, 3))
+    assert mms_command_tools.installed_update_semver(
+        {"install_channel": "latest-tag", "installed_version": "v1.2.3"},
+        update_notice_sources=update_sources,
+    ) == ("v1.2.3", (1, 2, 3))
+    assert mms_command_tools.installed_update_semver(
+        {"source": "manual", "installed_version": "v1.2.3"},
+        update_notice_sources=update_sources,
+    ) == (None, None)
+    assert mms_command_tools.installed_update_semver(
+        {"source": "install.sh", "installed_version": "dev"},
+        update_notice_sources=update_sources,
+    ) == (None, None)
+
+    outdated = mms_command_tools.mms_update_status(
+        {"installed_version": "v1.2.3"},
+        {"latest_tag": "v1.2.4", "last_error": "net"},
+        localize=localize,
+    )
+    assert outdated == {
+        "current": "v1.2.3",
+        "latest": "v1.2.4",
+        "status": "有新版 v1.2.4",
+        "outdated": True,
+        "last_error": "net",
+    }
+    assert mms_command_tools.mms_update_status({"release": "dev"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "开发版/无法判断"
+    assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {}, localize=localize)["status"] == "未检查 latest"
+    assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "最新"
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

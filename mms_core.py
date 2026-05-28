@@ -493,20 +493,9 @@ def _fetch_npm_package_latest_version(package_name):
 
 
 def _installed_update_semver(version_meta):
-    source = str(version_meta.get("source") or "").strip()
-    install_channel = str(version_meta.get("install_channel") or "").strip()
-    if source:
-        is_install_managed = source in UPDATE_NOTICE_SOURCES
-    else:
-        is_install_managed = bool(install_channel)
-    if not is_install_managed:
-        return None, None
+    from mms_command_tools import installed_update_semver
 
-    installed_version = str(version_meta.get("installed_version") or "").strip()
-    installed_semver = _parse_semver_tag(installed_version)
-    if installed_semver is None:
-        return None, None
-    return installed_version, installed_semver
+    return installed_update_semver(version_meta, update_notice_sources=UPDATE_NOTICE_SOURCES)
 
 
 def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
@@ -813,29 +802,9 @@ def _cli_version_status(force_update=False):
 
 
 def _mms_update_status(version_info, cache):
-    current = str(version_info.get("installed_version") or version_info.get("release") or "").strip()
-    latest = str(cache.get("latest_tag") or "").strip()
-    current_semver = _parse_semver_tag(current)
-    latest_semver = _parse_semver_tag(latest)
-    if current_semver is None:
-        status = _L("开发版/无法判断", "dev/unknown")
-        outdated = False
-    elif latest_semver is None:
-        status = _L("未检查 latest", "latest not checked")
-        outdated = False
-    elif current_semver < latest_semver:
-        status = _L(f"有新版 {latest}", f"update available {latest}")
-        outdated = True
-    else:
-        status = _L("最新", "latest")
-        outdated = False
-    return {
-        "current": current or "dev",
-        "latest": latest,
-        "status": status,
-        "outdated": outdated,
-        "last_error": str(cache.get("last_error") or "").strip(),
-    }
+    from mms_command_tools import mms_update_status
+
+    return mms_update_status(version_info, cache, localize=_L)
 
 
 def _about_status_snapshot(force_update=False):
