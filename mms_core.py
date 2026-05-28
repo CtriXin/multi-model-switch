@@ -4157,38 +4157,40 @@ def _base_probe_result_from_cache(provider_id, file_cached):
 
 
 def _ensure_probe_async_executor():
-    global _PROBE_ASYNC_EXECUTOR
-    if _PROBE_ASYNC_EXECUTOR is None:
+    from mms_command_tools import ensure_probe_async_executor
+
+    def set_executor(value):
+        global _PROBE_ASYNC_EXECUTOR
+        _PROBE_ASYNC_EXECUTOR = value
+
+    def executor_factory():
         from concurrent.futures import ThreadPoolExecutor
-        _PROBE_ASYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4)
-    return _PROBE_ASYNC_EXECUTOR
+
+        return ThreadPoolExecutor(max_workers=4)
+
+    return ensure_probe_async_executor(
+        _PROBE_ASYNC_EXECUTOR,
+        set_executor=set_executor,
+        executor_factory=executor_factory,
+    )
 
 
 def _schedule_probe_refresh(provider, cfg=None, *, reason="stale"):
-    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
-    import time as _time
-    min_interval = _probe_async_min_interval(cfg)
+    from mms_command_tools import schedule_probe_refresh
 
-    with _PROBE_ASYNC_LOCK:
-        if provider_id in _PROBE_ASYNC_INFLIGHT:
-            return False
-        last_at = _PROBE_ASYNC_LAST.get(provider_id, 0)
-        if _time.time() - last_at < min_interval:
-            return False
-        _PROBE_ASYNC_INFLIGHT.add(provider_id)
-        _PROBE_ASYNC_LAST[provider_id] = _time.time()
-
-    def _runner():
-        try:
-            _probe_models(provider, emit_output=False, skip_cache=True)
-        except Exception:
-            pass
-        finally:
-            with _PROBE_ASYNC_LOCK:
-                _PROBE_ASYNC_INFLIGHT.discard(provider_id)
-
-    _ensure_probe_async_executor().submit(_runner)
-    return True
+    return schedule_probe_refresh(
+        provider,
+        cfg,
+        reason=reason,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        probe_async_min_interval=_probe_async_min_interval,
+        lock=_PROBE_ASYNC_LOCK,
+        inflight=_PROBE_ASYNC_INFLIGHT,
+        last_started=_PROBE_ASYNC_LAST,
+        probe_models=_probe_models,
+        ensure_probe_async_executor=_ensure_probe_async_executor,
+        time_func=time.time,
+    )
 
 
 def _probe_models_for_startup(cfg, provider, emit_output=True):

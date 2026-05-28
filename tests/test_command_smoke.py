@@ -7855,6 +7855,90 @@ def test_probe_async_interval_helpers_preserve_defaults_and_normalization(monkey
     assert mms_core._probe_async_min_interval({"cache": {"probe_async_min_interval_sec": "bad"}}) == 300
 
 
+def test_probe_async_scheduler_helpers_preserve_inflight_throttle_and_cleanup(monkeypatch):
+    import threading
+
+    import mms_command_tools
+    import mms_core
+
+    class Executor:
+        def __init__(self):
+            self.tasks = []
+
+        def submit(self, fn):
+            self.tasks.append(fn)
+            return "submitted"
+
+    created = []
+    executor = mms_command_tools.ensure_probe_async_executor(
+        None,
+        set_executor=lambda value: created.append(value),
+        executor_factory=Executor,
+    )
+    assert isinstance(executor, Executor)
+    assert created == [executor]
+    assert mms_command_tools.ensure_probe_async_executor(
+        executor,
+        set_executor=lambda value: created.append(("unexpected", value)),
+        executor_factory=Executor,
+    ) is executor
+
+    lock = threading.Lock()
+    inflight = set()
+    last_started = {"relay": 100.0}
+    calls = []
+
+    assert mms_command_tools.schedule_probe_refresh(
+        {"id": "relay"},
+        {"cache": True},
+        default_provider_id="default",
+        probe_async_min_interval=lambda cfg: 50,
+        lock=lock,
+        inflight=inflight,
+        last_started=last_started,
+        probe_models=lambda provider, **kwargs: calls.append((provider["id"], kwargs)),
+        ensure_probe_async_executor=lambda: executor,
+        time_func=lambda: 120.0,
+    ) is False
+    assert executor.tasks == []
+    assert last_started == {"relay": 100.0}
+
+    times = iter([200.0, 201.0])
+    assert mms_command_tools.schedule_probe_refresh(
+        {"id": "relay"},
+        {"cache": True},
+        default_provider_id="default",
+        probe_async_min_interval=lambda cfg: 50,
+        lock=lock,
+        inflight=inflight,
+        last_started=last_started,
+        probe_models=lambda provider, **kwargs: calls.append((provider["id"], kwargs)),
+        ensure_probe_async_executor=lambda: executor,
+        time_func=lambda: next(times),
+    ) is True
+    assert inflight == {"relay"}
+    assert last_started["relay"] == 201.0
+    assert len(executor.tasks) == 1
+    executor.tasks[0]()
+    assert calls == [("relay", {"emit_output": False, "skip_cache": True})]
+    assert inflight == set()
+
+    core_executor = Executor()
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_EXECUTOR", core_executor)
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_INFLIGHT", set())
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_LAST", {})
+    monkeypatch.setattr(mms_core, "_PROBE_ASYNC_LOCK", threading.Lock())
+    monkeypatch.setattr(mms_core, "_probe_async_min_interval", lambda cfg: 0)
+    monkeypatch.setattr(mms_core, "_probe_models", lambda provider, **kwargs: calls.append(("core", provider["id"], kwargs)))
+    monkeypatch.setattr(mms_core.time, "time", lambda: 300.0)
+    assert mms_core._schedule_probe_refresh({"id": "core-relay"}, {"cache": True}) is True
+    assert mms_core._PROBE_ASYNC_LAST == {"core-relay": 300.0}
+    assert mms_core._PROBE_ASYNC_INFLIGHT == {"core-relay"}
+    core_executor.tasks[0]()
+    assert mms_core._PROBE_ASYNC_INFLIGHT == set()
+    assert calls[-1] == ("core", "core-relay", {"emit_output": False, "skip_cache": True})
+
+
 def test_snapshot_diff_lines_reports_guard_drift_without_ignored_files():
     import mms_command_tools
 
