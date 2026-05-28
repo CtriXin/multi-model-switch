@@ -3509,6 +3509,27 @@ def test_preserve_domestic_reasoning_roundtrip_supports_mimo():
     assert payload["messages"][0]["reasoning_content"] == "mimo step"
 
 
+def test_preserve_domestic_reasoning_roundtrip_rehydrates_missing_thinking_block_from_reasoning_content():
+    import mms_bridge
+
+    payload = {
+        "messages": [
+            {
+                "role": "assistant",
+                "reasoning_content": "hidden step",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_mimo", "name": "Read", "input": {"file": "x"}},
+                ],
+            }
+        ]
+    }
+
+    mms_bridge._preserve_domestic_reasoning_roundtrip(payload, "mimo-v2.5-pro")
+
+    assert payload["messages"][0]["content"][0] == {"type": "thinking", "thinking": "hidden step"}
+    assert payload["messages"][0]["reasoning_content"] == "hidden step"
+
+
 def test_responses_proxy_empty_body_fallback_does_not_cache(monkeypatch):
     import mms_bridge
 
