@@ -727,6 +727,24 @@ def handle_tui_provider_mgmt_settings_action(
     }
 
 
+def handle_tui_language_settings_action(
+    cfg,
+    *,
+    select_language_tui,
+    save_config,
+    set_language,
+):
+    chosen_lang = safe_tui_call(select_language_tui)
+    if chosen_lang == "__interrupt__":
+        return {"status": "interrupt", "changed": False}
+    if chosen_lang in {"zh", "en"}:
+        cfg.setdefault("ui", {})["language"] = chosen_lang
+        save_config(cfg)
+        set_language(chosen_lang)
+        return {"status": "continue", "changed": True}
+    return {"status": "continue", "changed": False}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

@@ -9,6 +9,7 @@ from mms_tui_launcher_flow import (
     confirm_tui_options,
     handle_tui_connect_action,
     handle_tui_last_used_action,
+    handle_tui_language_settings_action,
     handle_tui_provider_browse_action,
     handle_tui_provider_mgmt_settings_action,
     handle_tui_profile_action,
@@ -981,6 +982,53 @@ def test_handle_tui_provider_mgmt_settings_action_handles_cancel_interrupt_and_e
         export_model_routes_loader=lambda: (_ for _ in ()).throw(RuntimeError("export unavailable")),
     )
     assert result["changed"] is True
+
+
+def test_handle_tui_language_settings_action_saves_supported_language() -> None:
+    calls = []
+    cfg = {}
+
+    result = handle_tui_language_settings_action(
+        cfg,
+        select_language_tui=lambda: calls.append(("select",)) or "en",
+        save_config=lambda cfg_arg: calls.append(("save", cfg_arg.copy())),
+        set_language=lambda lang: calls.append(("set_language", lang)),
+    )
+
+    assert result == {"status": "continue", "changed": True}
+    assert cfg == {"ui": {"language": "en"}}
+    assert calls == [
+        ("select",),
+        ("save", {"ui": {"language": "en"}}),
+        ("set_language", "en"),
+    ]
+
+
+def test_handle_tui_language_settings_action_skips_cancel_invalid_and_interrupt() -> None:
+    calls = []
+
+    assert handle_tui_language_settings_action(
+        {"ui": {"language": "zh"}},
+        select_language_tui=lambda: None,
+        save_config=lambda *_args: calls.append(("save",)),
+        set_language=lambda *_args: calls.append(("set_language",)),
+    ) == {"status": "continue", "changed": False}
+
+    assert handle_tui_language_settings_action(
+        {"ui": {"language": "zh"}},
+        select_language_tui=lambda: "fr",
+        save_config=lambda *_args: calls.append(("save",)),
+        set_language=lambda *_args: calls.append(("set_language",)),
+    ) == {"status": "continue", "changed": False}
+
+    assert handle_tui_language_settings_action(
+        {"ui": {"language": "zh"}},
+        select_language_tui=lambda: (_ for _ in ()).throw(KeyboardInterrupt),
+        save_config=lambda *_args: calls.append(("save",)),
+        set_language=lambda *_args: calls.append(("set_language",)),
+    ) == {"status": "interrupt", "changed": False}
+
+    assert calls == []
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

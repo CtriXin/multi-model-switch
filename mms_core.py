@@ -5045,13 +5045,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     default_models = provider_mgmt_result["default_models"]
                     _families_dirty = provider_mgmt_result["families_dirty"]
             elif settings_action == "language":
-                chosen_lang = tui_flow.safe_tui_call(select_language_tui)
-                if chosen_lang == "__interrupt__":
+                language_result = tui_flow.handle_tui_language_settings_action(
+                    current_cfg,
+                    select_language_tui=select_language_tui,
+                    save_config=save_config,
+                    set_language=set_language,
+                )
+                if language_result["status"] == "interrupt":
                     return True
-                if chosen_lang in {"zh", "en"}:
-                    current_cfg.setdefault("ui", {})["language"] = chosen_lang
-                    save_config(current_cfg)
-                    set_language(chosen_lang)
             elif settings_action == "routes_export":
                 try:
                     from mms_router import MODEL_ROUTES_PATH, export_model_routes
