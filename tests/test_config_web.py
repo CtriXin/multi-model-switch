@@ -115,6 +115,15 @@ def test_config_web_print_summary_exits_without_server(capsys):
     assert payload["schema"] == "mms.setup_web.snapshot.v2"
     assert payload["paths"]["config"] == "/tmp/config.toml"
     assert payload["paths"]["model_policy"] == "/tmp/model-policy.json"
+    save_contract = payload["save_contract"]
+    assert save_contract["stable_legacy_writes"] == [
+        "config.toml",
+        "credentials.sh(仅当输入新 key 并勾选更新凭据)",
+        "model-policy.json",
+    ]
+    assert "registry/model-registry.sqlite(candidate revisions)" in save_contract["preview_v2_writes"]
+    assert "generated/model-registry.latest-approved.json" in save_contract["preview_v2_writes"]
+    assert save_contract["preview_confirm_phrase"] == "写入预览DB"
     assert payload["recommendations"]
 
 

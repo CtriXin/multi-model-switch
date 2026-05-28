@@ -626,8 +626,18 @@ def build_config_snapshot(
             "requires_diff_preview": True,
             "requires_confirm_save": True,
             "confirm_phrase": "保存配置",
+            "preview_confirm_phrase": "写入预览DB",
             "writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
-            "safety": "保存走 lock + backup + audit；已存在的写入目标会额外生成 *.bak；页面不会回显真实 API Key。",
+            "stable_legacy_writes": ["config.toml", "credentials.sh(仅当输入新 key 并勾选更新凭据)", "model-policy.json"],
+            "preview_v2_writes": [
+                "registry/model-registry.sqlite(candidate revisions)",
+                "secrets/webui-secrets.json(仅当输入新 key)",
+                "generated/model-registry.latest-approved.json",
+                "generated/model-routes.json",
+                "generated/model-policy.effective.json",
+                "generated/provider-profiles.generated.json",
+            ],
+            "safety": "stable legacy 保存走 lock + backup + audit；preview root 使用 DB candidate + generated bundle 发布并校验；页面不会回显真实 API Key。",
         },
     }
 
