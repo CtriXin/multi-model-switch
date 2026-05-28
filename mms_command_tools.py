@@ -945,6 +945,103 @@ def vision_sidecar_candidate_pairs(raw, provider_ids, *, explicit_model="", expl
     return pairs
 
 
+def native_clis_for_model(model_name):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return []
+    if normalized.startswith("claude-"):
+        return ["claude"]
+    if normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-")):
+        return ["codex"]
+    return []
+
+
+def bridge_clis_for_model(model_name, *, infer_model_family):
+    family, _ = infer_model_family(model_name)
+    if family == "Unknown":
+        return []
+    native = set(native_clis_for_model(model_name))
+    bridge = []
+    for cli_name in ("claude", "codex"):
+        if cli_name not in native:
+            bridge.append(cli_name)
+    return bridge
+
+
+def model_supports_vision(model_name, *, vision_capable_model_names, vision_capable_model_hints):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return False
+    model_id = normalized.rsplit("/", 1)[-1]
+    if model_id in vision_capable_model_names:
+        return True
+    return any(hint in model_id for hint in vision_capable_model_hints)
+
+
+def model_cli_modes(model_name, *, infer_model_family):
+    native = set(native_clis_for_model(model_name))
+    bridge = set(bridge_clis_for_model(model_name, infer_model_family=infer_model_family))
+    modes = {}
+    for cli_name in ("claude", "codex"):
+        if cli_name in native:
+            modes[cli_name] = "native"
+        elif cli_name in bridge:
+            modes[cli_name] = "bridge"
+        else:
+            modes[cli_name] = "unsupported"
+    return modes
+
+
+def model_cli_summary(model_name, *, infer_model_family):
+    modes = model_cli_modes(model_name, infer_model_family=infer_model_family)
+    parts = []
+    for cli_name in ("claude", "codex"):
+        mode = modes.get(cli_name)
+        if mode == "native":
+            parts.append(f"{cli_name}:native")
+        elif mode == "bridge":
+            parts.append(f"{cli_name}:bridge")
+    return ", ".join(parts) if parts else "-"
+
+
+def model_capability_tags(
+    model_name,
+    *,
+    infer_model_family,
+    model_context_window,
+    reasoning_model_hints,
+    tool_use_families,
+    vision_capable_model_names,
+    vision_capable_model_hints,
+):
+    normalized = str(model_name or "").strip().lower()
+    if not normalized:
+        return []
+    family, _ = infer_model_family(model_name)
+    tags = []
+    if model_supports_vision(
+        model_name,
+        vision_capable_model_names=vision_capable_model_names,
+        vision_capable_model_hints=vision_capable_model_hints,
+    ):
+        tags.append("vision")
+    if family in tool_use_families:
+        tags.append("tool_use")
+    if any(hint in normalized for hint in reasoning_model_hints):
+        tags.append("reasoning")
+    context_window = model_context_window(model_name)
+    if context_window and context_window >= 200_000:
+        tags.append("long_context")
+    if "claude" in bridge_clis_for_model(model_name, infer_model_family=infer_model_family):
+        tags.append("bridge_required")
+    return tags
+
+
+def model_capability_summary(model_name, *, model_capability_tags):
+    tags = model_capability_tags(model_name)
+    return ", ".join(tags) if tags else "-"
+
+
 def env_file_path(cli_name, *, env_dir):
     return os.path.join(env_dir, f"{cli_name}.sh")
 

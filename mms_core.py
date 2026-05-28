@@ -1718,14 +1718,9 @@ def _model_context_window(model_name):
 
 
 def _native_clis_for_model(model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
-        return []
-    if normalized.startswith("claude-"):
-        return ["claude"]
-    if normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-")):
-        return ["codex"]
-    return []
+    from mms_command_tools import native_clis_for_model
+
+    return native_clis_for_model(model_name)
 
 
 def _is_installed_mms_layout(module_path=None):
@@ -1757,76 +1752,51 @@ def _default_reasoning_effort_for_model_info(model_info):
 
 
 def _bridge_clis_for_model(model_name):
-    family, _ = _infer_model_family(model_name)
-    if family == "Unknown":
-        return []
-    native = set(_native_clis_for_model(model_name))
-    bridge = []
-    for cli_name in ("claude", "codex"):
-        if cli_name not in native:
-            bridge.append(cli_name)
-    return bridge
+    from mms_command_tools import bridge_clis_for_model
+
+    return bridge_clis_for_model(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_capability_tags(model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
-        return []
-    family, _ = _infer_model_family(model_name)
-    tags = []
-    if _model_supports_vision(model_name):
-        tags.append("vision")
-    if family in _TOOL_USE_FAMILIES:
-        tags.append("tool_use")
-    if any(hint in normalized for hint in _REASONING_MODEL_HINTS):
-        tags.append("reasoning")
-    context_window = _model_context_window(model_name)
-    if context_window and context_window >= 200_000:
-        tags.append("long_context")
-    if "claude" in _bridge_clis_for_model(model_name):
-        tags.append("bridge_required")
-    return tags
+    from mms_command_tools import model_capability_tags
+
+    return model_capability_tags(
+        model_name,
+        infer_model_family=_infer_model_family,
+        model_context_window=_model_context_window,
+        reasoning_model_hints=_REASONING_MODEL_HINTS,
+        tool_use_families=_TOOL_USE_FAMILIES,
+        vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
+        vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
+    )
 
 
 def _model_supports_vision(model_name):
-    normalized = str(model_name or "").strip().lower()
-    if not normalized:
-        return False
-    model_id = normalized.rsplit("/", 1)[-1]
-    if model_id in _VISION_CAPABLE_MODEL_NAMES:
-        return True
-    return any(hint in model_id for hint in _VISION_CAPABLE_MODEL_HINTS)
+    from mms_command_tools import model_supports_vision
+
+    return model_supports_vision(
+        model_name,
+        vision_capable_model_names=_VISION_CAPABLE_MODEL_NAMES,
+        vision_capable_model_hints=_VISION_CAPABLE_MODEL_HINTS,
+    )
 
 
 def _model_cli_modes(model_name):
-    native = set(_native_clis_for_model(model_name))
-    bridge = set(_bridge_clis_for_model(model_name))
-    modes = {}
-    for cli_name in ("claude", "codex"):
-        if cli_name in native:
-            modes[cli_name] = "native"
-        elif cli_name in bridge:
-            modes[cli_name] = "bridge"
-        else:
-            modes[cli_name] = "unsupported"
-    return modes
+    from mms_command_tools import model_cli_modes
+
+    return model_cli_modes(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_cli_summary(model_name):
-    modes = _model_cli_modes(model_name)
-    parts = []
-    for cli_name in ("claude", "codex"):
-        mode = modes.get(cli_name)
-        if mode == "native":
-            parts.append(f"{cli_name}:native")
-        elif mode == "bridge":
-            parts.append(f"{cli_name}:bridge")
-    return ", ".join(parts) if parts else "-"
+    from mms_command_tools import model_cli_summary
+
+    return model_cli_summary(model_name, infer_model_family=_infer_model_family)
 
 
 def _model_capability_summary(model_name):
-    tags = _model_capability_tags(model_name)
-    return ", ".join(tags) if tags else "-"
+    from mms_command_tools import model_capability_summary
+
+    return model_capability_summary(model_name, model_capability_tags=_model_capability_tags)
 
 
 def _account_map(cfg):

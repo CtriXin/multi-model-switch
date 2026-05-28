@@ -739,6 +739,48 @@ def test_vision_sidecar_candidate_helpers_preserve_order_and_overrides():
     ]
 
 
+def test_model_capability_helpers_preserve_native_bridge_and_tags():
+    import mms_command_tools
+
+    def infer_family(model_name):
+        normalized = str(model_name or "").lower()
+        if normalized.startswith("claude-"):
+            return "Claude", "Claude 系 ⭐"
+        if normalized.startswith(("gpt-", "o1-", "o3-", "o4-", "codex-")):
+            return "GPT", "GPT 系"
+        if "qwen" in normalized:
+            return "Qwen", "国产系"
+        return "其他", "其他"
+
+    assert mms_command_tools.native_clis_for_model("claude-sonnet-4.5") == ["claude"]
+    assert mms_command_tools.native_clis_for_model("gpt-5.5") == ["codex"]
+    assert mms_command_tools.native_clis_for_model("gemini-3.1-pro-preview") == []
+    assert mms_command_tools.bridge_clis_for_model("qwen3.6-plus", infer_model_family=infer_family) == ["claude", "codex"]
+    assert mms_command_tools.model_cli_modes("gpt-5.5", infer_model_family=infer_family) == {
+        "claude": "bridge",
+        "codex": "native",
+    }
+    assert mms_command_tools.model_cli_summary("claude-sonnet-4.5", infer_model_family=infer_family) == "claude:native, codex:bridge"
+
+    tags = mms_command_tools.model_capability_tags(
+        "qwen3.6-plus",
+        infer_model_family=infer_family,
+        model_context_window=lambda _model: 1_000_000,
+        reasoning_model_hints=("gpt-5",),
+        tool_use_families={"Claude", "GPT", "Qwen"},
+        vision_capable_model_names={"qwen3.6-plus"},
+        vision_capable_model_hints=("gemini-",),
+    )
+    assert tags == ["vision", "tool_use", "long_context", "bridge_required"]
+    assert (
+        mms_command_tools.model_capability_summary(
+            "qwen3.6-plus",
+            model_capability_tags=lambda model_id: tags if model_id == "qwen3.6-plus" else [],
+        )
+        == "vision, tool_use, long_context, bridge_required"
+    )
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
