@@ -174,6 +174,15 @@ def print_settings_result_report(
     return display_settings_result_report(title, rows, note, ok=ok, console=console)
 
 
+def print_settings_error_report(title, exc, *, print_settings_result_report, localize):
+    return print_settings_result_report(
+        title,
+        [(localize("错误", "Error"), exc)],
+        localize("操作未完成；没有改变 runtime defaults。", "Operation did not complete; runtime defaults unchanged."),
+        ok=False,
+    )
+
+
 def display_settings_result_report(title, rows, note="", *, ok=True, console):
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "

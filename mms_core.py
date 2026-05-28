@@ -3764,11 +3764,13 @@ def _print_settings_result_report(title, rows, note="", *, ok=True):
 
 
 def _print_settings_error_report(title, exc):
-    _print_settings_result_report(
+    from mms_command_tools import print_settings_error_report
+
+    return print_settings_error_report(
         title,
-        [(_L("错误", "Error"), exc)],
-        _L("操作未完成；没有改变 runtime defaults。", "Operation did not complete; runtime defaults unchanged."),
-        ok=False,
+        exc,
+        print_settings_result_report=_print_settings_result_report,
+        localize=_L,
     )
 
 

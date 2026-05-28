@@ -576,6 +576,30 @@ def test_print_settings_result_report_preserves_tui_and_fallback_flow():
     ]
 
 
+def test_print_settings_error_report_preserves_error_payload():
+    import mms_command_tools
+
+    calls = []
+    exc = RuntimeError("boom")
+
+    result = mms_command_tools.print_settings_error_report(
+        "failed",
+        exc,
+        print_settings_result_report=lambda title, rows, note, *, ok=True: calls.append((title, rows, note, ok)) or "reported",
+        localize=lambda zh, en: zh,
+    )
+
+    assert result == "reported"
+    assert calls == [
+        (
+            "failed",
+            [("错误", exc)],
+            "操作未完成；没有改变 runtime defaults。",
+            False,
+        )
+    ]
+
+
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     import mms_command_tools
 
