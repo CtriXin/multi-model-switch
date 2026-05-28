@@ -5161,7 +5161,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if guard_result["status"] == "interrupt":
                     return True
             elif settings_action == "account_mgmt":
-                _run_account_mgmt_tui(current_cfg)
+                tui_flow.handle_tui_account_mgmt_settings_action(
+                    current_cfg,
+                    run_account_mgmt_tui=_run_account_mgmt_tui,
+                )
             elif settings_action == "rescue":
                 from pathlib import Path
                 from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover

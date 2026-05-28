@@ -7,6 +7,7 @@ from mms_tui_launcher_flow import (
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
+    handle_tui_account_mgmt_settings_action,
     handle_tui_about_settings_action,
     handle_tui_connect_action,
     handle_tui_guard_settings_action,
@@ -1249,6 +1250,19 @@ def test_handle_tui_about_settings_action_handles_interrupt_and_none() -> None:
         pause_after_tui_report=lambda message: calls.append(("pause", message)),
         console=type("Console", (), {"print": staticmethod(lambda message: calls.append(("print", message)))})(),
     ) == {"status": "interrupt"}
+
+
+def test_handle_tui_account_mgmt_settings_action_delegates() -> None:
+    calls = []
+    cfg = {"cfg": True}
+
+    result = handle_tui_account_mgmt_settings_action(
+        cfg,
+        run_account_mgmt_tui=lambda cfg_arg: calls.append(("account_mgmt", cfg_arg)),
+    )
+
+    assert result == {"status": "continue"}
+    assert calls == [("account_mgmt", cfg)]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

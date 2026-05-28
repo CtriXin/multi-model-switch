@@ -829,6 +829,15 @@ def handle_tui_about_settings_action(
             continue
 
 
+def handle_tui_account_mgmt_settings_action(
+    cfg,
+    *,
+    run_account_mgmt_tui,
+):
+    run_account_mgmt_tui(cfg)
+    return {"status": "continue"}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:
