@@ -25,7 +25,7 @@ It helps you:
 
 ## Current Version
 
-Current tagged version: `v3.3.0`
+Current tagged version: `v3.4.0`
 
 Key changes in this generation:
 
@@ -60,10 +60,10 @@ MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
-Stable install pinned to `v3.3.0`:
+Stable install pinned to `v3.4.0`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 Default behavior:
@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 Pin a release when you need an exact version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 Verify the install:

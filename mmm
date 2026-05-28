@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
-ROOT="/Users/xin/auto-skills/CtriXin-repo/multi-model-switch"
+ROOT="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 exec "$ROOT/mms" "$@"

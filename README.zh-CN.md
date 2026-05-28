@@ -25,7 +25,7 @@ MMS 的主线是 launcher-first。`chat`、`discuss` 和高上下文 review help
 
 ## 当前版本
 
-当前 tagged version：`v3.3.0`
+当前 tagged version：`v3.4.0`
 
 这一代的重点：
 
@@ -60,10 +60,10 @@ MMS 会内建通用版 `xmem` skill 和静默 session closeout hook；默认不�
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
-稳定版安装（固定到 `v3.3.0`）：
+稳定版安装（固定到 `v3.4.0`）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 默认行为：
@@ -101,7 +101,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 需要固定版本时，直接 pin release tag：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.4.0/install.sh | bash -s --
 ```
 
 安装后自检：
