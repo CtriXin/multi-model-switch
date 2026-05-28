@@ -4194,31 +4194,23 @@ def _schedule_probe_refresh(provider, cfg=None, *, reason="stale"):
 
 
 def _probe_models_for_startup(cfg, provider, emit_output=True):
-    provider_id = provider.get("id", DEFAULT_PROVIDER_ID)
-    import time as _time
+    from mms_command_tools import probe_models_for_startup
 
-    cached = _PROBE_CACHE.get(provider_id)
-    if cached:
-        cached_at, cached_result = cached
-        if _time.time() - cached_at < _PROBE_CACHE_TTL:
-            return _apply_provider_model_patch(provider, cached_result)
-
-    fresh_file_cached = _load_probe_file_cache(provider_id)
-    if fresh_file_cached:
-        base_result = _base_probe_result_from_cache(provider_id, fresh_file_cached)
-        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
-        return _apply_provider_model_patch(provider, base_result)
-
-    stale_file_cached = _load_probe_file_cache(provider_id, allow_stale=True)
-    if stale_file_cached:
-        base_result = _base_probe_result_from_cache(provider_id, stale_file_cached)
-        _PROBE_CACHE[provider_id] = (_time.time(), base_result)
-        _schedule_probe_refresh(provider, cfg, reason="startup_stale")
-        if emit_output:
-            console.print("[dim]已使用本地模型缓存快速启动，后台正在刷新 provider 模型列表[/dim]")
-        return _apply_provider_model_patch(provider, base_result)
-
-    return _probe_models(provider, emit_output=emit_output)
+    return probe_models_for_startup(
+        cfg,
+        provider,
+        emit_output=emit_output,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        probe_cache=_PROBE_CACHE,
+        probe_cache_ttl=_PROBE_CACHE_TTL,
+        load_probe_file_cache=_load_probe_file_cache,
+        base_probe_result_from_cache=_base_probe_result_from_cache,
+        schedule_probe_refresh=_schedule_probe_refresh,
+        apply_provider_model_patch=_apply_provider_model_patch,
+        probe_models=_probe_models,
+        console=console,
+        time_func=time.time,
+    )
 
 
 def _provider_supports_mimo_anthropic_selectors(provider):

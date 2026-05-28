@@ -3231,6 +3231,48 @@ def base_probe_result_from_cache(provider_id, file_cached):
     }
 
 
+def probe_models_for_startup(
+    cfg,
+    provider,
+    *,
+    emit_output=True,
+    default_provider_id,
+    probe_cache,
+    probe_cache_ttl,
+    load_probe_file_cache,
+    base_probe_result_from_cache,
+    schedule_probe_refresh,
+    apply_provider_model_patch,
+    probe_models,
+    console,
+    time_func,
+):
+    provider_id = provider.get("id", default_provider_id)
+
+    cached = probe_cache.get(provider_id)
+    if cached:
+        cached_at, cached_result = cached
+        if time_func() - cached_at < probe_cache_ttl:
+            return apply_provider_model_patch(provider, cached_result)
+
+    fresh_file_cached = load_probe_file_cache(provider_id)
+    if fresh_file_cached:
+        base_result = base_probe_result_from_cache(provider_id, fresh_file_cached)
+        probe_cache[provider_id] = (time_func(), base_result)
+        return apply_provider_model_patch(provider, base_result)
+
+    stale_file_cached = load_probe_file_cache(provider_id, allow_stale=True)
+    if stale_file_cached:
+        base_result = base_probe_result_from_cache(provider_id, stale_file_cached)
+        probe_cache[provider_id] = (time_func(), base_result)
+        schedule_probe_refresh(provider, cfg, reason="startup_stale")
+        if emit_output:
+            console.print("[dim]已使用本地模型缓存快速启动，后台正在刷新 provider 模型列表[/dim]")
+        return apply_provider_model_patch(provider, base_result)
+
+    return probe_models(provider, emit_output=emit_output)
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(

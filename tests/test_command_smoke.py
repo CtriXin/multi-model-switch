@@ -4035,6 +4035,102 @@ def test_probe_file_cache_helpers_preserve_ttl_normalization_and_cleanup(tmp_pat
     assert not os.path.exists(cache_path("relay"))
 
 
+def test_probe_startup_helper_preserves_memory_file_stale_and_live_paths(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class Console:
+        def __init__(self):
+            self.items = []
+
+        def print(self, item):
+            self.items.append(item)
+
+    def patch(provider, result):
+        return {**result, "patched_for": provider["id"]}
+
+    provider = {"id": "relay"}
+    probe_cache = {"relay": (100.0, {"models": ["memory"], "base_source": "remote"})}
+    assert mms_command_tools.probe_models_for_startup(
+        {"cfg": True},
+        provider,
+        default_provider_id="default",
+        probe_cache=probe_cache,
+        probe_cache_ttl=300,
+        load_probe_file_cache=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("file cache not expected")),
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        schedule_probe_refresh=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("refresh not expected")),
+        apply_provider_model_patch=patch,
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live probe not expected")),
+        console=Console(),
+        time_func=lambda: 120.0,
+    )["models"] == ["memory"]
+
+    fresh_cache = {"raw_models": ["fresh"], "base_source": "remote"}
+    probe_cache = {}
+    assert mms_command_tools.probe_models_for_startup(
+        {},
+        provider,
+        default_provider_id="default",
+        probe_cache=probe_cache,
+        probe_cache_ttl=300,
+        load_probe_file_cache=lambda provider_id, allow_stale=False: fresh_cache if not allow_stale else None,
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        schedule_probe_refresh=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("refresh not expected")),
+        apply_provider_model_patch=patch,
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live probe not expected")),
+        console=Console(),
+        time_func=lambda: 200.0,
+    )["models"] == ["fresh"]
+    assert probe_cache["relay"][0] == 200.0
+
+    console = Console()
+    refresh_calls = []
+    stale_cache = {"raw_models": ["stale"], "base_source": "remote", "is_stale": True}
+    probe_cache = {}
+    assert mms_command_tools.probe_models_for_startup(
+        {"cfg": True},
+        provider,
+        emit_output=True,
+        default_provider_id="default",
+        probe_cache=probe_cache,
+        probe_cache_ttl=300,
+        load_probe_file_cache=lambda provider_id, allow_stale=False: stale_cache if allow_stale else None,
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        schedule_probe_refresh=lambda provider, cfg, reason: refresh_calls.append((provider["id"], cfg, reason)),
+        apply_provider_model_patch=patch,
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("live probe not expected")),
+        console=console,
+        time_func=lambda: 300.0,
+    )["models"] == ["stale"]
+    assert refresh_calls == [("relay", {"cfg": True}, "startup_stale")]
+    assert console.items == ["[dim]已使用本地模型缓存快速启动，后台正在刷新 provider 模型列表[/dim]"]
+
+    live_calls = []
+    assert mms_command_tools.probe_models_for_startup(
+        {},
+        {"id": "live"},
+        emit_output=False,
+        default_provider_id="default",
+        probe_cache={},
+        probe_cache_ttl=300,
+        load_probe_file_cache=lambda *_args, **_kwargs: None,
+        base_probe_result_from_cache=mms_command_tools.base_probe_result_from_cache,
+        schedule_probe_refresh=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("refresh not expected")),
+        apply_provider_model_patch=patch,
+        probe_models=lambda provider, **kwargs: live_calls.append((provider["id"], kwargs)) or {"models": ["live"]},
+        console=Console(),
+        time_func=lambda: 400.0,
+    ) == {"models": ["live"]}
+    assert live_calls == [("live", {"emit_output": False})]
+
+    monkeypatch.setattr(mms_core, "_PROBE_CACHE", {"relay": (100.0, {"models": ["wrapped"], "base_source": "remote"})})
+    monkeypatch.setattr(mms_core, "_PROBE_CACHE_TTL", 300)
+    monkeypatch.setattr(mms_core.time, "time", lambda: 120.0)
+    monkeypatch.setattr(mms_core, "_apply_provider_model_patch", patch)
+    assert mms_core._probe_models_for_startup({}, provider)["models"] == ["wrapped"]
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 
