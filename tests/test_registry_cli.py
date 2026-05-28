@@ -699,6 +699,8 @@ def test_registry_v2_save_plan_reports_preview_backup_sequence_without_secrets(t
     assert plan["would_write"]["legacy_compat_files"]["credentials_sh"] is True
     assert plan["blocked_reasons"] == []
     assert "rollback" in " ".join(plan["ordered_steps"])
+    assert "WebUI preview apply is wired" in plan["next_implementation_step"]
+    assert "wire WebUI" not in plan["next_implementation_step"]
     assert "sk-preview-secret" not in encoded
 
 

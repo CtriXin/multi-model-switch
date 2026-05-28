@@ -628,7 +628,7 @@ def registry_v2_save_plan(
     plan_summary: dict[str, Any] | None = None,
     credential_updates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Describe the future DB-truth save path without writing anything."""
+    """Describe the DB-truth save path without writing anything."""
     root = Path(config_dir).expanduser() if config_dir is not None else _config_root_from_config_path(config_path)
     if root is None:
         root = Path(resolve_mms_config_dir()).expanduser()
@@ -681,7 +681,7 @@ def registry_v2_save_plan(
             "rollback to backup on failure",
         ],
         "blocked_reasons": blocked_reasons,
-        "next_implementation_step": "wire WebUI/TUI/mms config save to DB writer after rollback tests pass",
+        "next_implementation_step": "WebUI preview apply is wired; next: TUI/mms config DB save and stable promotion after human-gated validation",
     }
 
 
