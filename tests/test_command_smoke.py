@@ -5683,6 +5683,84 @@ def test_provider_add_credentials_handlers_preserve_dispatch_and_validation():
     assert "[red]未找到模型源: missing[/red]" in console.items
 
 
+def test_update_provider_model_overrides_preserves_patch_normalize_and_cache_invalidation():
+    import mms_command_tools
+
+    cfg = {
+        "provider": {"default": "demo-a"},
+        "providers": [
+            {"id": "demo-a", "name": "Demo A", "extra_models": ["old-a"]},
+            {"id": "demo-b", "name": "Demo B", "hidden_models": ["old-hidden"]},
+        ],
+    }
+    saved = []
+    invalidated = []
+    normalized = []
+    load_calls = []
+
+    def normalize_provider(provider):
+        normalized.append(dict(provider))
+        return {**provider, "normalized": True}
+
+    result = mms_command_tools.update_provider_model_overrides(
+        cfg,
+        "demo-b",
+        extra_models="gpt-5.5, gpt-5.5, qwen3.6-plus",
+        hidden_models=[" hidden ", "hidden", ""],
+        models_endpoint="api/models",
+        normalize_provider=normalize_provider,
+        save_config=lambda updated: saved.append(updated),
+        invalidate_probe_cache=lambda provider_id: invalidated.append(provider_id),
+        load_config=lambda: load_calls.append("load") or {"loaded": True},
+    )
+
+    assert result == {"loaded": True}
+    assert normalized == [
+        {
+            "id": "demo-b",
+            "name": "Demo B",
+            "hidden_models": ["hidden"],
+            "extra_models": ["gpt-5.5", "qwen3.6-plus"],
+            "models_endpoint": "/api/models",
+        }
+    ]
+    assert saved == [
+        {
+            "provider": {"default": "demo-a"},
+            "providers": [
+                {"id": "demo-a", "name": "Demo A", "extra_models": ["old-a"]},
+                {
+                    "id": "demo-b",
+                    "name": "Demo B",
+                    "hidden_models": ["hidden"],
+                    "extra_models": ["gpt-5.5", "qwen3.6-plus"],
+                    "models_endpoint": "/api/models",
+                    "normalized": True,
+                },
+            ],
+        }
+    ]
+    assert invalidated == ["demo-b"]
+    assert load_calls == ["load"]
+    assert cfg["providers"][1] == {"id": "demo-b", "name": "Demo B", "hidden_models": ["old-hidden"]}
+
+    saved.clear()
+    invalidated.clear()
+    normalized.clear()
+    mms_command_tools.update_provider_model_overrides(
+        cfg,
+        "missing",
+        extra_models=["new"],
+        normalize_provider=normalize_provider,
+        save_config=lambda updated: saved.append(updated),
+        invalidate_probe_cache=lambda provider_id: invalidated.append(provider_id),
+        load_config=lambda: {"loaded": "missing"},
+    )
+    assert saved == [{"provider": {"default": "demo-a"}, "providers": cfg["providers"]}]
+    assert invalidated == ["missing"]
+    assert normalized == []
+
+
 def test_provider_edit_remove_handlers_preserve_validation_refresh_and_default_cleanup():
     import mms_command_tools
 

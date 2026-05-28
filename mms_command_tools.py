@@ -6558,6 +6558,40 @@ def handle_provider_add_config(
     quick_connect_gateway(cfg, preset_id=preset_id)
 
 
+def update_provider_model_overrides(
+    cfg,
+    provider_id,
+    *,
+    extra_models=None,
+    hidden_models=None,
+    models_endpoint=None,
+    normalize_model_id_list=normalize_model_id_list,
+    normalize_models_endpoint=normalize_models_endpoint,
+    normalize_provider,
+    save_config,
+    invalidate_probe_cache,
+    load_config,
+):
+    updated_cfg = dict(cfg)
+    providers = []
+    for item in cfg.get("providers", []):
+        if item.get("id") != provider_id:
+            providers.append(item)
+            continue
+        updated = dict(item)
+        if extra_models is not None:
+            updated["extra_models"] = normalize_model_id_list(extra_models)
+        if hidden_models is not None:
+            updated["hidden_models"] = normalize_model_id_list(hidden_models)
+        if models_endpoint is not None:
+            updated["models_endpoint"] = normalize_models_endpoint(models_endpoint)
+        providers.append(normalize_provider(updated))
+    updated_cfg["providers"] = providers
+    save_config(updated_cfg)
+    invalidate_probe_cache(provider_id)
+    return load_config()
+
+
 def handle_provider_edit_config(
     cfg,
     args_rest,
