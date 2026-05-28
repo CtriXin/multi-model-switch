@@ -27,6 +27,7 @@ def _write_latest_bundle(config_dir: Path, routes: dict) -> None:
     lineup = generated / "model-routes.lineup.json"
     profile = generated / "provider-profiles.generated.json"
     policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
     mms_registry.write_json_atomic(router, {"version": 1, "routes": routes})
     mms_registry.write_json_atomic(
         lineup,
@@ -51,6 +52,7 @@ def _write_latest_bundle(config_dir: Path, routes: dict) -> None:
         },
     )
     mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
     mms_registry.export_latest_approved_bundle_manifest(
         generated / "model-registry.latest-approved.json",
         bundle_revision="bundle_watchdog_test",
@@ -63,6 +65,7 @@ def _write_latest_bundle(config_dir: Path, routes: dict) -> None:
             "lineup": {"path": lineup, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
             "profile": {"path": profile, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
             "policy": {"path": policy, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
         },
     )
 
@@ -106,6 +109,44 @@ def test_watchdog_prefers_verified_latest_bundle_over_stale_root_routes(tmp_path
     assert not any(item["name"] == "http://82.156.121.141:4001" for item in report["failures"])
 
 
+def test_watchdog_verified_bundle_ignores_stale_root_provider_metadata(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    (tmp_path / "config.toml").write_text(
+        """
+[[providers]]
+id = "fresh"
+models_endpoint = "https://stale.example.invalid/models"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+
+    def fail_legacy_probe(*_args, **_kwargs):
+        raise AssertionError("verified bundle must not probe stale root config.toml provider metadata")
+
+    watchdog.tcp_tls_check = fail_legacy_probe
+    watchdog.http_get_json = fail_legacy_probe
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["route_source"] == "latest-approved"
+    assert report["status"] == "ok"
+    assert report["bundle"]["status"] == "ok"
+    assert not any(item.get("url") == "https://stale.example.invalid/models" for item in report["results"])
+
+
 def test_watchdog_fails_closed_on_invalid_latest_bundle(tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     _write_latest_bundle(
@@ -131,6 +172,245 @@ def test_watchdog_fails_closed_on_invalid_latest_bundle(tmp_path: Path) -> None:
     assert report["status"] == "critical"
     assert report["route_source"] == "invalid_latest-approved"
     assert any("stale_or_invalid_bundle" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_incomplete_latest_bundle_manifest(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].pop("capabilities")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("manifest files missing: capabilities" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_manifest_path_escape(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["canonical_path"] = "../model-routes.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("unexpected manifest canonical_path for router" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_missing_manifest_revision(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("route_revision")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("manifest revisions missing: route_revision" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_manifest_sensitivity_drift(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sensitivity"] = "non-secret"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("unexpected manifest sensitivity for router" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_manifest_canonical_path_drift(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["canonical_path"] = "model-routes.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("unexpected manifest canonical_path for router" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_non_object_bundle_payload(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    router_path = tmp_path / "generated" / "model-routes.json"
+    router_path.write_text("[]", encoding="utf-8")
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sha256"] = mms_registry.sha256_hex(router_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("manifest file must be a JSON object for router" in item["detail"] for item in report["failures"])
+
+
+def test_watchdog_fails_closed_on_non_secret_bundle_secret_leak(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    policy_path = tmp_path / "generated" / "model-policy.effective.json"
+    policy_path.write_text(
+        json.dumps({"version": 1, "models": {"fresh-model": {"api_key": "sk-leaked-secret-123456789"}}}),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["policy"]["sha256"] = mms_registry.sha256_hex(policy_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["status"] == "critical"
+    assert report["route_source"] == "invalid_latest-approved"
+    assert any("secret-looking field in non-secret data" in item["detail"] for item in report["failures"])
+    assert "sk-leaked-secret" not in json.dumps(report, ensure_ascii=False)
+
+
+def test_watchdog_allows_non_secret_profile_auth_header_schema(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    profile_path = tmp_path / "generated" / "provider-profiles.generated.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": {
+                    "fresh": {
+                        "models_endpoint": "manual",
+                        "auth_headers": ["Authorization"],
+                        "header_aliases": {"anthropic-beta": "anthropic-beta"},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["profile"]["sha256"] = mms_registry.sha256_hex(profile_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["route_source"] == "latest-approved"
+    assert report["status"] == "ok"
 
 
 def test_watchdog_requires_bundle_for_explicit_config_root(monkeypatch, tmp_path: Path) -> None:

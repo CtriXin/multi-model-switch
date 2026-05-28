@@ -218,6 +218,52 @@ def _consumer_bundle_status_for_snapshot(config_path: str = "", *, command_name:
         }
 
 
+def _config_v2_promotion_plan_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import config_v2_promotion_plan
+
+        return config_v2_promotion_plan(
+            preview_config_dir=config_root or None,
+            command_name=f"{command_name} config promote-plan",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.config_v2_promotion_plan.v1",
+            "read_only": True,
+            "apply_enabled": False,
+            "status": "error",
+            "ready_for_human_review": False,
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
+def _config_v2_release_readiness_for_snapshot(config_path: str = "", *, command_name: str = "mms") -> dict[str, Any]:
+    config_root = _config_root_for_snapshot(config_path)
+    try:
+        from mms_registry_cli import config_v2_release_readiness
+
+        return config_v2_release_readiness(
+            preview_config_dir=config_root or None,
+            command_name=f"{command_name} config release-readiness",
+        )
+    except Exception as exc:
+        return {
+            "schema": "mms.config_v2_release_readiness.v1",
+            "read_only": True,
+            "release_complete": False,
+            "status": "error",
+            "result": "NOT_READY",
+            "ready_for_human_gate": False,
+            "human_gate_required": True,
+            "completion_blocker": "release_readiness_error",
+            "blocked_requirements": ["release_readiness_error"],
+            "error": str(exc),
+            "config_root": config_root,
+        }
+
+
 def _load_json_file(path: str) -> dict[str, Any]:
     if not path or not os.path.exists(path):
         return {}
@@ -641,6 +687,8 @@ def build_config_snapshot(
         },
         "model_source_status": _model_source_status_for_snapshot(config_path, command_name=command_name),
         "consumer_bundle_status": _consumer_bundle_status_for_snapshot(config_path, command_name=command_name),
+        "config_v2_promotion_plan": _config_v2_promotion_plan_for_snapshot(config_path, command_name=command_name),
+        "config_v2_release_readiness": _config_v2_release_readiness_for_snapshot(config_path, command_name=command_name),
         "references": build_reference_cards(),
         "recommendations": recommendations,
         "snippets": build_config_snippets(),
@@ -3154,7 +3202,37 @@ function renderNav(){ $('nav').innerHTML=sections.map(([id,title,sub])=>`<button
 function renderStatus(){const providers=state.providers||[];const root=(state.model_source_status||{}).root||{};$('statusbar').innerHTML=`<span class="pill ok">${state.mode}</span><span class="pill">${escapeHtml(root.mode||'stable')}</span><span class="pill">通道 ${providers.length}</span><span class="pill">config: ${escapeHtml(state.paths.config||'-')}</span><span class="pill">policy: ${state.policy_summary.model_count} models</span>`}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function renderSaveControls(){const root=(state.model_source_status||{}).root||{};const preview=root.mode==='preview';const hasPlan=!!lastPlan;if($('saveBtn')){$('saveBtn').disabled=preview;$('saveBtn').title=preview?'Preview root 已禁用 legacy save，请使用写入预览 DB + 发布':''}if($('applyV2Preview')){$('applyV2Preview').disabled=!preview;$('applyV2Preview').title=preview?'':'Stable root 不能写 preview DB，请用 mmf preview root'}if($('downloadPlanJson')){$('downloadPlanJson').disabled=!hasPlan;$('downloadPlanJson').title=hasPlan?'下载 redacted plan JSON；不含明文 API Key':'请先生成保存预览'}if($('copyApplyCommand')){$('copyApplyCommand').disabled=!hasPlan;$('copyApplyCommand').title=hasPlan?'复制 mmf config apply-plan 命令':'请先生成保存预览'}}
-function renderSourceStatus(){const box=$('sourceStatus');if(!box)return;const status=state.model_source_status||{};const consumer=state.consumer_bundle_status||{};const root=status.root||consumer.root||{};const db=status.registry_db||{};const legacy=status.legacy_import||{};const candidates=legacy.candidates||db.legacy_import_candidates||{};const bundle=status.generated_bundle||{};const revisions=consumer.component_revisions||{};const rules=consumer.consumer_rules||[];const consumerFiles=consumer.files||{};const counts=db.counts||{};const okBundle=bundle.verified?'ok':'warn';const okConsumer=consumer.verified?'ok':'warn';const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer},null,2))}</div></div>`}
+function renderSourceStatus(){
+  const box=$('sourceStatus');if(!box)return;
+  const status=state.model_source_status||{};
+  const consumer=state.consumer_bundle_status||{};
+  const promotion=state.config_v2_promotion_plan||{};
+  const readiness=state.config_v2_release_readiness||{};
+  const root=status.root||consumer.root||{};
+  const db=status.registry_db||{};
+  const legacy=status.legacy_import||{};
+  const candidates=legacy.candidates||db.legacy_import_candidates||{};
+  const bundle=status.generated_bundle||{};
+  const revisions=consumer.component_revisions||{};
+  const rules=consumer.consumer_rules||[];
+  const consumerFiles=consumer.files||{};
+  const counts=db.counts||{};
+  const safety=promotion.promotion_safety||{};
+  const backup=promotion.stable_backup_plan||{};
+  const compare=promotion.bundle_comparison||{};
+  const comparePreview=compare.preview||{};
+  const compareStable=compare.stable||{};
+  const readinessNext=readiness.next_action||{};
+  const readinessBlocked=Array.isArray(readiness.blocked_requirements)?readiness.blocked_requirements:[];
+  const readinessReqs=Array.isArray(readiness.requirements)?readiness.requirements:[];
+  const readinessOk=readiness.ready_for_human_gate?'ok':'warn';
+  const okBundle=bundle.verified?'ok':'warn';
+  const okConsumer=consumer.verified?'ok':'warn';
+  const okPromotion=promotion.ready_for_human_review?'ok':'warn';
+  const ready=bundle.runtime_ready===true?'ready':bundle.runtime_ready===false?'not ready':'unknown';
+  const bundleCommand=(root.command||state.command||'mms')==='mmf'?'mmf config bundle --json':'mms config bundle --json';
+  box.innerHTML=`<div class="card span6"><h3>Root</h3><p class="mono">${escapeHtml(root.config_root||status.config_root||consumer.config_root||'-')}</p><p class="muted">${escapeHtml(status.headline||'-')}</p><span class="tag ${status.ready?'':'off'}">${escapeHtml(status.status||'unknown')}</span><span class="tag">${escapeHtml(root.command||state.command||'-')}</span><span class="tag">${escapeHtml(root.mode||'-')}</span><span class="tag">${escapeHtml(root.root_source||'-')}</span></div><div class="card span6"><h3>Registry DB</h3><p class="mono">${escapeHtml(db.path||'-')}</p><span class="tag ${db.status==='ok'?'':'off'}">${escapeHtml(db.status||'missing')}</span><span class="tag">sources ${counts.source_snapshot||0}</span><span class="tag">facts ${counts.model_fact||0}</span><span class="tag">routes ${counts.provider_route||0}</span></div><div class="card span6"><h3>Legacy Import</h3><p class="muted">${escapeHtml(legacy.next_action||'-')}</p><span class="tag">providers ${legacy.provider_count||0}</span><span class="tag ${legacy.conflict_count?'off':''}">conflicts ${legacy.conflict_count||0}</span><span class="tag ${candidates.status==='imported'?'':'off'}">candidates ${escapeHtml(candidates.status||'not_imported')}</span><span class="tag">candidate routes ${candidates.provider_route_count||0}</span></div><div class="card span6"><h3>Latest Approved Bundle</h3><p class="mono">${escapeHtml(bundle.manifest_path||'-')}</p><span class="tag ${okBundle==='ok'?'':'off'}">${escapeHtml(bundle.status||'missing')}</span><span class="tag">verified ${bundle.verified?'yes':'no'}</span><span class="tag ${bundle.runtime_ready===true?'':'off'}">runtime ${ready}</span><span class="tag">missing keys ${bundle.router_missing_api_key_count||0}</span><span class="tag">files ${bundle.file_count||0}</span></div><div class="card span12"><h3>Consumer Bundle</h3><p class="mono">${escapeHtml(consumer.consumer_entrypoint||bundle.manifest_path||'-')}</p><p class="muted">${escapeHtml((rules.length?rules.join(' · '):'下游只读 latest-approved manifest；不读 SQLite；不混合不同 revision。'))}</p><span class="tag ${okConsumer==='ok'?'':'off'}">${escapeHtml(consumer.status||'missing')}</span><span class="tag">verified ${consumer.verified?'yes':'no'}</span><span class="tag">bundle ${escapeHtml(revisions.bundle||'-')}</span><span class="tag">route ${escapeHtml(revisions.route||'-')}</span><span class="tag">policy ${escapeHtml(revisions.policy||'-')}</span><span class="tag">profile ${escapeHtml(revisions.profile||'-')}</span><span class="tag">files ${Object.keys(consumerFiles).length}</span><p class="muted">CLI: <span class="mono">${escapeHtml(bundleCommand)}</span></p></div><div class="card span12"><h3>Promotion Plan / Human Gate</h3><p class="muted">stable backup + bundle comparison 是只读审查；apply 仍停在 human gate。</p><span class="tag ${okPromotion==='ok'?'':'off'}">${escapeHtml(promotion.status||'not_ready')}</span><span class="tag">review ${promotion.ready_for_human_review?'ready':'not ready'}</span><span class="tag">apply ${promotion.apply_enabled?'enabled':'disabled'}</span><span class="tag">stable ${escapeHtml(safety.stable_write_policy||'human_only')}</span><span class="tag">backup ${backup.requires_backup_before_apply?'required':'unknown'}</span><span class="tag">would backup ${backup.would_create_backup?'yes':'no'}</span><span class="tag">bundle comparison ${escapeHtml(compare.comparison_status||'-')}</span><p class="muted">preview ${escapeHtml(comparePreview.bundle_revision||comparePreview.status||'-')} → stable ${escapeHtml(compareStable.bundle_revision||compareStable.status||'-')}</p></div><div class="card span12"><h3>4.0 Release Readiness</h3><p class="muted">只读 audit：证明自动检查已到 stable promotion human gate；release_complete 仍为 false。</p><span class="tag ${readinessOk==='ok'?'':'off'}">${escapeHtml(readiness.result||'NOT_READY')}</span><span class="tag">status ${escapeHtml(readiness.status||'not_ready')}</span><span class="tag">release complete ${readiness.release_complete?'yes':'no'}</span><span class="tag">human gate ${readiness.ready_for_human_gate?'ready':'not ready'}</span><span class="tag">blocked ${readinessBlocked.length}</span><span class="tag">requirements ${readinessReqs.filter(r=>r&&r.ok).length}/${readinessReqs.length}</span><span class="tag">blocker ${escapeHtml(readiness.completion_blocker||'-')}</span><p class="muted">blocked requirements: ${escapeHtml(readinessBlocked.length?readinessBlocked.join(', '):'-')}</p><p class="muted">next: <span class="mono">${escapeHtml(readinessNext.command||readinessNext.label||'-')}</span></p></div><div class="card span12"><h3>Raw Status</h3><div class="result">${escapeHtml(JSON.stringify({model_source_status:status,consumer_bundle_status:consumer,config_v2_promotion_plan:promotion,config_v2_release_readiness:readiness},null,2))}</div></div>`
+}
 function providerEntries(){return (state.providers||[]).map((p,i)=>({p,i})).sort((a,b)=>{if(!!a.p.enabled!==!!b.p.enabled)return a.p.enabled?-1:1;return a.i-b.i})}
 function renderProviderList(){const list=$('providerList');list.innerHTML=providerEntries().map(({p,i})=>`<div class="provider-item ${i===activeProvider?'active':''}" data-i="${i}"><strong>${escapeHtml(p.name||p.id)}</strong><span class="muted mono">${escapeHtml(p.id)}</span><br>${p.enabled?'<span class="tag">enabled</span>':'<span class="tag off">disabled</span>'}${p.has_api_key?'<span class="tag">key set</span>':'<span class="tag off">no key</span>'}<span class="tag">${p.models?.length||0} models</span></div>`).join('');document.querySelectorAll('.provider-item').forEach(el=>el.onclick=()=>{activeProvider=Number(el.dataset.i);renderAll()})}
 function renderProviders(){renderProviderList();renderProviderForm();renderTestSelectors();renderModelTable();}

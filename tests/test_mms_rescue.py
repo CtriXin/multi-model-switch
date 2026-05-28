@@ -729,22 +729,35 @@ def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_o
 
 
 def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    import mms_registry
+
     generated = config_root / "generated"
-    generated.mkdir(parents=True, exist_ok=True)
     router_path = generated / "model-routes.json"
-    router_bytes = json.dumps(router_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    router_path.write_bytes(router_bytes)
-    manifest = {
-        "schema": "mms.model_registry.latest_approved.v1",
-        "files": {
-            "router": {
-                "canonical_path": "generated/model-routes.json",
-                "sha256": sha_override or hashlib.sha256(router_bytes).hexdigest(),
-                "sensitivity": "secret",
-            }
+    lineup_path = generated / "model-routes.lineup.json"
+    profile_path = generated / "provider-profiles.generated.json"
+    policy_path = generated / "model-policy.effective.json"
+    capabilities_path = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(router_path, router_payload)
+    router_hash = hashlib.sha256(router_path.read_bytes()).hexdigest()
+    mms_registry.write_json_atomic(lineup_path, {"version": 1, "routes": {}})
+    mms_registry.write_json_atomic(profile_path, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy_path, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities_path, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_rescue_test",
+        capability_revision="cap_rescue_test",
+        route_revision="route_rescue_test",
+        policy_revision="policy_rescue_test",
+        profile_revision="profile_rescue_test",
+        files={
+            "router": {"path": router_path, "canonical_path": "generated/model-routes.json", "sha256": sha_override or router_hash, "sensitivity": "secret"},
+            "lineup": {"path": lineup_path, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile_path, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy_path, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities_path, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
         },
-    }
-    (generated / "model-registry.latest-approved.json").write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    )
 
 
 def test_rescue_hot_fallback_reads_verified_latest_approved_router(tmp_path):
@@ -804,6 +817,40 @@ def test_rescue_hot_fallback_fails_closed_on_invalid_latest_approved_manifest(tm
     _write_latest_approved_router_manifest(config_root, router_payload=router_payload, sha_override="0" * 64)
 
     routes = mms_bridge._load_rescue_hot_fallback_routes(types.SimpleNamespace(rescue_config_root=str(config_root)), "deepseek-v4-flash")
+
+    assert routes == []
+
+
+def test_rescue_hot_fallback_fails_closed_on_missing_preview_manifest(tmp_path):
+    import mms_bridge
+
+    config_root = tmp_path / "mms-next"
+    generated = config_root / "generated"
+    generated.mkdir(parents=True)
+    (generated / "model-routes.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "routes": {
+                    "deepseek-v4-flash": {
+                        "primary": {
+                            "provider_id": "stale-preview-route",
+                            "anthropic_base_url": "https://stale-preview.example",
+                            "api_key": "sk-stale-preview",
+                            "model_id": "deepseek-v4-flash",
+                        },
+                        "fallbacks": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    routes = mms_bridge._load_rescue_hot_fallback_routes(
+        types.SimpleNamespace(rescue_config_root=str(config_root)),
+        "deepseek-v4-flash",
+    )
 
     assert routes == []
 
@@ -1314,3 +1361,37 @@ def test_configure_bridge_rescue_reads_default_fallback_env(monkeypatch, tmp_pat
     assert server.rescue_fallback_model == "fallback-model"
     assert server.rescue_fallback_cli == "codex"
     assert server.rescue_hot_fallback_enabled is True
+
+
+def test_launcher_rescue_default_fallback_skips_legacy_config_for_preview_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
+    monkeypatch.delenv("MMS_RESCUE_FALLBACK_MODEL", raising=False)
+    monkeypatch.delenv("MMS_RESCUE_FALLBACK_CLI", raising=False)
+    load_called = {"value": False}
+
+    def fake_load_config():
+        load_called["value"] = True
+        return {"rescue": {"fallback_model": "legacy-fallback", "fallback_cli": "codex"}}
+
+    monkeypatch.setattr(mms_launchers, "load_config", fake_load_config)
+
+    fallback = mms_launchers._rescue_default_fallback_config()
+
+    assert fallback == {"model": "", "cli": "", "hot_fallback_enabled": False}
+    assert load_called["value"] is False
+
+
+def test_launcher_rescue_default_fallback_env_wins_for_preview_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path / "mms-next"))
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_MODEL", "explicit-fallback")
+    monkeypatch.setenv("MMS_RESCUE_FALLBACK_CLI", "codex")
+    monkeypatch.setenv("MMS_RESCUE_HOT_FALLBACK", "1")
+    monkeypatch.setattr(mms_launchers, "load_config", lambda: {"rescue": {"fallback_model": "legacy-fallback"}})
+
+    fallback = mms_launchers._rescue_default_fallback_config()
+
+    assert fallback == {"model": "explicit-fallback", "cli": "codex", "hot_fallback_enabled": True}

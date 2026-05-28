@@ -46,7 +46,7 @@ capability calibration snapshot lives at:
 These files are evidence inputs for registry import/refresh. They are not live
 runtime truth and should not be consumed directly by downstream projects.
 Runtime consumers should keep reading the approved Router / Lineup / Profile /
-Policy surfaces documented below.
+Policy / Capabilities surfaces documented below.
 
 ## Latest-Approved Bundle
 
@@ -110,7 +110,16 @@ Bundle rules:
   `bundle_revision` when their strict legacy shape allows it. If a legacy root
   file must stay shape-compatible, the manifest hash is the revision tie.
 - Consumers must verify per-file hashes and must not combine route, lineup,
-  profile, or policy files from different bundles.
+  profile, policy, or capability files from different bundles.
+- Consumers must fail closed when any required component revision id is missing;
+  `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`,
+  and `capability_revision` are part of the contract, not optional metadata.
+- Consumers must fail closed if a required manifest key points outside its exact
+  generated canonical path or uses the wrong sensitivity. Router is `secret`;
+  Lineup, Profile, Policy, and Capabilities are `non-secret`.
+- Consumers must rescan non-secret manifest files for secret-looking fields or
+  plaintext key patterns after hash verification; matching hashes do not make a
+  leaked non-secret payload acceptable.
 - Publishing uses atomic temp-file + rename: write canonical payloads first,
   refresh legacy aliases, then rename the manifest last.
 - `provider-profiles.generated.json` and `model-policy.effective.json` are

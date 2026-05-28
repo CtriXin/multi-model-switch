@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import socket
 import ssl
 import sys
@@ -43,6 +44,43 @@ STATE_FILE_NAME = "state.json"
 LATEST_FILE_NAME = "latest.json"
 LOG_FILE_NAME = "health-watchdog.log"
 ENV_FILE_NAME = "health-watchdog.env"
+EXPECTED_BUNDLE_FILES = {
+    "router": {"canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+    "lineup": {"canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+    "profile": {"canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+    "policy": {"canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+    "capabilities": {"canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+}
+REQUIRED_BUNDLE_FILES = tuple(EXPECTED_BUNDLE_FILES)
+REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
+_SECRET_FIELD_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "auth_header",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "oauth",
+    "password",
+    "passwd",
+    "credential",
+    "cookie",
+)
+_SECRET_REFERENCE_KEYS = {"secret_ref", "secret_refs", "secret_fingerprint", "secret_hash", "key_fingerprint"}
+_NON_SECRET_SCHEMA_KEYS = {"auth_headers", "auth_header_names", "required_auth_headers", "header_aliases"}
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bsk_live_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+)
 
 OLD_ROUTE_MARKERS = {
     "http://82.156.121.141:4001": "xin fallback should use https://apple.clawopen.online",
@@ -162,6 +200,61 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def looks_like_plaintext_secret(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="ignore")
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or text in {"<redacted>", "[redacted]", "***", "****"}:
+        return False
+    return any(pattern.search(text) for pattern in _SECRET_VALUE_PATTERNS)
+
+
+def validate_non_secret_payload(payload: Any, *, context: str) -> None:
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for raw_key, item in value.items():
+                key = str(raw_key)
+                normalized = key.lower().replace("-", "_")
+                child_path = f"{path}.{key}" if path else key
+                if normalized in _NON_SECRET_SCHEMA_KEYS:
+                    walk(item, child_path)
+                    continue
+                if normalized in _SECRET_REFERENCE_KEYS:
+                    if looks_like_plaintext_secret(item):
+                        raise ValueError(f"{child_path} contains a plaintext secret, not a reference")
+                    continue
+                if any(part in normalized for part in _SECRET_FIELD_PARTS) and item not in (None, "", [], {}):
+                    raise ValueError(f"{child_path} is a secret-looking field in non-secret data")
+                walk(item, child_path)
+            return
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(item, f"{path}[{index}]")
+            return
+        if looks_like_plaintext_secret(value):
+            raise ValueError(f"{path} contains a plaintext secret-looking value")
+
+    walk(payload, context)
+
+
+def manifest_file_path(config_dir: Path, canonical_path: str, *, name: str) -> Path:
+    relative = Path(str(canonical_path or "").strip())
+    if not str(canonical_path or "").strip():
+        raise ValueError(f"manifest file entry missing canonical_path: {name}")
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"manifest file entry escapes config root: {name}")
+    path = config_dir / relative
+    try:
+        path.expanduser().resolve().relative_to(config_dir.expanduser().resolve())
+    except Exception as exc:
+        raise ValueError(f"manifest file entry escapes config root: {name}") from exc
+    return path
+
+
 def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
     manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
     if not manifest_path.exists():
@@ -181,6 +274,30 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             "payloads": {},
         }
     files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    missing_files = [name for name in REQUIRED_BUNDLE_FILES if name not in files]
+    if missing_files:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "manifest files missing: " + ", ".join(missing_files),
+            "payloads": {},
+        }
+    unexpected_files = sorted(str(name) for name in files if name not in EXPECTED_BUNDLE_FILES)
+    if unexpected_files:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "unexpected manifest files: " + ", ".join(unexpected_files),
+            "payloads": {},
+        }
+    missing_revisions = [name for name in REQUIRED_REVISION_FIELDS if not str(manifest.get(name) or "").strip()]
+    if missing_revisions:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "manifest revisions missing: " + ", ".join(missing_revisions),
+            "payloads": {},
+        }
     payloads: dict[str, Any] = {}
     verified_files: dict[str, str] = {}
     for name, entry in files.items():
@@ -191,8 +308,31 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"invalid manifest file entry: {name}",
                 "payloads": {},
             }
+        expected_contract = EXPECTED_BUNDLE_FILES.get(str(name))
+        if expected_contract is None:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest file entry: {name}",
+                "payloads": {},
+            }
         canonical = str(entry.get("canonical_path") or "").strip()
         expected = str(entry.get("sha256") or "").strip()
+        if canonical != expected_contract["canonical_path"]:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest canonical_path for {name}: {canonical}",
+                "payloads": {},
+            }
+        sensitivity = str(entry.get("sensitivity") or "").strip()
+        if sensitivity != expected_contract["sensitivity"]:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest sensitivity for {name}: {sensitivity}",
+                "payloads": {},
+            }
         if not canonical or not expected:
             return {
                 "status": "invalid",
@@ -200,7 +340,15 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"manifest file entry missing path/hash: {name}",
                 "payloads": {},
             }
-        path = config_dir / canonical
+        try:
+            path = manifest_file_path(config_dir, canonical, name=str(name))
+        except ValueError as exc:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": str(exc),
+                "payloads": {},
+            }
         if not path.exists():
             return {
                 "status": "invalid",
@@ -208,7 +356,8 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"manifest file missing: {path}",
                 "payloads": {},
             }
-        actual = sha256_file(path)
+        raw = path.read_bytes()
+        actual = hashlib.sha256(raw).hexdigest()
         if actual != expected:
             return {
                 "status": "invalid",
@@ -218,7 +367,24 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             }
         verified_files[name] = str(path)
         try:
-            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
+            parsed_payload = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed_payload, dict):
+                return {
+                    "status": "invalid",
+                    "manifest_path": str(manifest_path),
+                    "detail": f"manifest file must be a JSON object for {name}: {path}",
+                    "payloads": {},
+                }
+            if sensitivity != "secret":
+                validate_non_secret_payload(parsed_payload, context=str(path))
+            payloads[name] = parsed_payload
+        except ValueError as exc:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": str(exc),
+                "payloads": {},
+            }
         except Exception:
             payloads[name] = {}
     return {
@@ -557,11 +723,12 @@ def build_report(config_dir: Path, timeout: int, require_bundle: bool = False) -
         policy_payload = read_json(config_dir / "model-policy.json")
         results.append(CheckResult("bundle", "latest_approved", "info", "ok", "latest-approved missing; using legacy root artifacts"))
         route_source = "legacy-root"
-    config_payload = read_toml(config_dir / "config.toml")
-    providers = provider_config_map(config_payload)
     if bundle.get("status") == "ok":
-        for provider_id, profile in provider_profile_map(payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {}).items():
-            providers.setdefault(provider_id, profile)
+        providers = provider_profile_map(payloads.get("profile") if isinstance(payloads.get("profile"), dict) else {})
+    elif route_source == "legacy-root":
+        providers = provider_config_map(read_toml(config_dir / "config.toml"))
+    else:
+        providers = {}
     results.extend(route_source_checks(config_dir, routes_payload, policy_payload))
     endpoint_results, model_sets = endpoint_checks(routes_payload, providers, timeout)
     results.extend(endpoint_results)

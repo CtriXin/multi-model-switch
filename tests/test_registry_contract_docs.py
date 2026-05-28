@@ -206,6 +206,10 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "`mmf promote [--json]`",
         "`mms config promote-plan [--json]`",
         "`mms registry promotion-plan [--json]`",
+        "`mms config release-readiness [--json]`",
+        "`READY_FOR_4_0_HUMAN_GATE`",
+        "`release_complete=false`",
+        "`completion_blocker=stable_promotion_human_gate`",
         "`READY_FOR_HUMAN_PROMOTION_REVIEW`",
         "`apply_enabled=false`",
         "`promotion_apply_not_implemented`",
@@ -215,6 +219,32 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
 
     missing = [term for term in required_terms if term not in text]
     assert "does not enable DB writes yet" not in text
+    assert missing == []
+
+
+def test_public_readmes_explain_config_v2_preview_gate() -> None:
+    text = _readme_text()
+
+    required_terms = [
+        "Config V2 Preview Root",
+        "mms -> ~/.config/mms",
+        "mmf -> ~/.config/mms-next",
+        "mmf preview doctor --json",
+        "mmf preview prepare --from ~/.config/mms --include-secrets --json",
+        "mmf config bundle --json",
+        "generated/model-registry.latest-approved.json",
+        "mms migrate config-v2 --json",
+        "mms config release-readiness --json",
+        "apply_enabled=false",
+        "READY_FOR_4_0_HUMAN_GATE",
+        "release_complete=false",
+        "stable_root_human_only",
+        "promotion_apply_not_implemented",
+        "silent fallback",
+        "Claude config",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
     assert missing == []
 
 

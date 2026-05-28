@@ -27,7 +27,7 @@ try:
 except ImportError:
     _httpx = None
 
-from mms_state_io import resolve_mms_config_dir
+from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
 from mms_provider_profiles import (
     apply_profile_auth_headers,
     apply_profile_body_patches,
@@ -942,6 +942,13 @@ def _read_json_file_or_empty(path):
     return payload if isinstance(payload, dict) else {}
 
 
+def _requires_latest_approved_bundle(config_dir):
+    try:
+        return mms_config_root_mode(config_dir) == "preview"
+    except Exception:
+        return False
+
+
 def _latest_approved_model_config_bundle():
     config_dir = resolve_mms_config_dir()
     manifest_path = os.path.join(config_dir, "generated", "model-registry.latest-approved.json")
@@ -954,6 +961,17 @@ def _latest_approved_model_config_bundle():
             return {
                 "invalid_latest_approved": True,
                 "error": f"{type(exc).__name__}: {exc}",
+                "routes_payload": {},
+                "lineup_payload": {},
+                "policy_payload": {},
+                "manifest_path": manifest_path,
+                "verified_files": {},
+            }
+        if _requires_latest_approved_bundle(config_dir):
+            return {
+                "invalid_latest_approved": True,
+                "missing_latest_approved": True,
+                "error": f"latest-approved manifest is required for preview config root: {manifest_path}",
                 "routes_payload": {},
                 "lineup_payload": {},
                 "policy_payload": {},

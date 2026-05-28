@@ -119,6 +119,50 @@ immediately while refreshing `/models` in the background; if a family is still
 missing on the same key, compare provider config/credentials and run
 `mms models` or `mms doctor full`.
 
+## Config V2 Preview Root
+
+Config v2 is available as a preview path before it becomes the stable default.
+Use `mms` for the current stable root and `mmf` for the isolated preview root:
+
+```text
+mms -> ~/.config/mms
+mmf -> ~/.config/mms-next
+```
+
+Recommended preview flow:
+
+```bash
+mmf config root --json
+mmf preview doctor --json
+mmf preview prepare --from ~/.config/mms --json
+mmf preview prepare --from ~/.config/mms --include-secrets --json
+mmf config check --json
+mmf config bundle --json
+mmf config web
+```
+
+In preview mode, the human-facing entrypoints are TUI / `mms config` / WebUI.
+Those surfaces write DB candidates, the preview secret backend, and a verified
+`generated/model-registry.latest-approved.json` bundle; they do not make
+`config.toml`, `credentials.sh`, route, policy, profile, or lineup files compete
+as separate truth sources.
+
+Stable promotion is still human-gated and read-only:
+
+```bash
+mmf promote --json
+mms migrate config-v2 --json
+mms config release-readiness --json
+```
+
+Even with `--apply`, `mms migrate config-v2` currently reports
+`apply_enabled=false` and stops at `stable_root_human_only` /
+`promotion_apply_not_implemented`. There is no silent fallback from the preview
+root into stable credentials, OAuth state, or Claude config. The release
+readiness audit can return `READY_FOR_4_0_HUMAN_GATE`, but it still reports
+`release_complete=false` until the human-gated stable promotion and post-promotion
+smoke are done.
+
 ## Quick Start
 
 Interactive launch:

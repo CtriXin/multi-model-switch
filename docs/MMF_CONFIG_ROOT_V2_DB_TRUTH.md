@@ -78,7 +78,8 @@ Rules:
 
 - `mms` continues reading `~/.config/mms` by default.
 - `mmf` sets `MMS_CONFIG_ROOT=~/.config/mms-next` and uses the same MMS code path.
-- `MMS_CONFIG_ROOT` is the v2 root selector. Existing `MMS_CONFIG_DIR` remains only as legacy/test compatibility below it.
+- `MMS_CONFIG_ROOT` is the v2 root selector. Existing `MMS_CONFIG_DIR` remains legacy/test compatibility below it, but once explicitly set it is still treated as a selected-root boundary for fail-closed consumers.
+- Explicit selected roots from either `MMS_CONFIG_ROOT` or `MMS_CONFIG_DIR` use `<config_root>/registry/model-registry.sqlite`; no-explicit stable compatibility roots may still use the old root-level DB path.
 - `mms-next` is a directory name, not a permanent architecture contract.
 - All paths must derive from `config_root`; business logic must not hardcode `mms-next`.
 - New root failures must fail closed inside the selected root. They must not silently fall back to old `~/.config/mms` credentials or account state.
@@ -173,7 +174,7 @@ Target behavior:
 
 - WebUI/TUI/`mms config` model changes trigger backup, publish, and verify automatically.
 - Watchdog is a consumer, not a writer. It must not mutate DB truth or run surprise route export from launchd/background context.
-- Watchdog should first read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify hashes, then consume generated Router/Policy/Profile/Lineup.
+- Watchdog should first read `<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json`, verify hashes, then consume generated Router/Lineup/Profile/Policy/Capabilities.
 - If the bundle is missing, invalid, hash-mismatched, or older than the approved DB revision, watchdog should report `stale_or_invalid_bundle` with a clear remediation hint.
 - Upstream `/models` newly exposing a model should enter candidate/source evidence first; it should not silently become approved route truth unless a later safe auto-promote policy explicitly allows it.
 - User-approved WebUI model additions should make the model visible to watchdog on the next run without manual `mms routes export`.
@@ -333,6 +334,8 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ./mmf promote --json
 ./mmf config promote-plan --json
 ./mms config promote-plan --json
+./mms migrate config-v2 --json
+./mms config release-readiness --json
 ./mmf registry publish-preview --config-dir "$MMS_CONFIG_ROOT" --json
 ./mmf registry verify --config-dir "$MMS_CONFIG_ROOT"
 ./mmf registry refresh-sources --path docs/reference/model-capability-calibration/2026-05-21-mms-model-capability-calibration.json
@@ -405,9 +408,10 @@ Current Stage 3a implementation:
 - CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.
 - WebUI: `/api/state` also includes `consumer_bundle_status`, and the first panel shows the downstream consumer entrypoint, component revisions, file count, and consumer rules so Hive/Pilot/Ant/Mobius cutover can verify one source without reading SQLite.
+- WebUI: `/api/state` also includes `config_v2_release_readiness`, and the first panel shows whether automated 4.0/config-v2 checks reached `READY_FOR_4_0_HUMAN_GATE`, while keeping `release_complete=false` until stable promotion is human-approved.
 - WebUI: `/api/plan` includes a read-only `registry_v2_save_plan` that shows the DB backup -> candidate revision -> secret backend -> publish -> verify -> rollback sequence. The plan itself is read-only; writes require the preview-gated WebUI `写入预览 DB + 发布` action or `mms/mmf config apply-plan --apply --confirm-preview-apply`.
 - WebUI: the save preview now labels `webui-plan.json` as a redacted review artifact and exposes download/copy helpers. Downloaded plan JSON does not include plaintext API keys; when a credential update is part of the draft, the preferred apply path is the WebUI button so the plaintext key stays inside the single POST and preview secret backend write path.
-- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes read-only `查看 Consumer Bundle`, `查看 v2 Save Plan`, and `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
+- TUI: Settings -> `模型真源 / Registry Truth` first shows the same Model Source status, including legacy candidate route counts, and includes read-only `查看 Consumer Bundle`, `查看 v2 Save Plan`, `查看 Promote Plan`, `查看 4.0 Readiness`, and `运行 Preview Doctor`; explicit refresh/publish actions remain separate.
 - Stable-root WebUI Save behavior is not changed; preview-root legacy save is blocked and users are directed to the DB-truth preview apply path.
 
 Current preview init implementation:
@@ -433,6 +437,7 @@ Current legacy import candidate implementation:
 Current preview publish implementation:
 
 - `mmf preview publish [--json]` / `mmf registry publish-preview --config-dir <preview-root> [--json]` publishes `<config_root>/generated/model-registry.latest-approved.json` from the latest DB preview route candidate. It supports both legacy import candidates and v2 save candidates.
+- `publish-approved` from root legacy artifacts is disabled for preview roots; preview publishing must go through `publish-preview` so generated latest-approved bundles are sourced from DB candidates, not stale root `model-routes.json` / `model-policy.json`.
 - `mmf preview verify [--json]` verifies manifest hashes for the active preview root; `mmf preview status [--json]` is a wrapper for Model Source status.
 - `mmf preview doctor [--json]` and `mmf config doctor [--json]` are read-only "what next?" commands for preview setup. They check preview root mode, registry DB, legacy import candidates, latest-approved bundle verification, runtime readiness, missing API keys, missing route base URLs, and then print one next action. Missing route URLs point to the single preview rebuild command `mmf preview prepare --from ~/.config/mms --json`; if keys are missing too, the command includes `--include-secrets`. Missing-key-only state points to explicit `--include-secrets` import. Ready-state watchdog hints use the concrete selected config root instead of `$MMS_CONFIG_ROOT`, so copied commands stay self-contained.
 - `mmf preview doctor --strict-exit`, `mmf config doctor --strict-exit`, and `mms config doctor --strict-exit` exit non-zero unless the selected preview root is runtime-ready. This avoids treating "printed something and did not crash" as success through either entry.
@@ -451,6 +456,7 @@ Current watchdog consumer implementation:
 - It prefers a verified `<config_root>/generated/model-registry.latest-approved.json` bundle over root legacy `model-routes.json` / `model-policy.json`.
 - When using a verified bundle, it reads generated Profile metadata such as `models_endpoint` for provider checks instead of requiring root `config.toml` provider metadata.
 - If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
+- Watchdog rejects incomplete latest-approved manifests, missing revision ids, sensitivity drift, and manifest paths that are not the exact generated bundle paths; it requires Router, Lineup, Profile, Policy, and Capabilities entries.
 - If the manifest is missing, explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle and fail closed by default; no-explicit-root stable watchdog behavior remains legacy-compatible.
 - `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
 - `--dry-run` is read-only for watchdog persistence: it prints JSON and skips `health-watchdog/latest.json`, `health-watchdog/state.json`, and `logs/health-watchdog.log` writes.
@@ -462,38 +468,42 @@ Current bridge rescue consumer implementation:
 - Launcher-injected `MMS_RESCUE_CONFIG_ROOT` now defaults to the selected MMS config root, so `mmf` preview sessions do not silently route bridge rescue through stable `~/.config/mms`.
 - Launcher HOME context reports the same selected config root; explicit `MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR` roots are treated as intentional instead of being rewritten to stable `~/.config/mms` in the context banner/guard.
 - Read-only `model-context-overrides.json` lookup follows the selected config root and keeps the cache keyed by path, so preview roots do not inherit stable root context overrides.
-- Provider profile lookup treats an existing latest-approved manifest as the bundle boundary: valid bundles use generated Profile, invalid/hash-mismatched bundles fall back only to built-in profiles instead of mixing root legacy profile overlays. The profile cache is keyed by selected config root to avoid stable/preview bleed.
-- `review-launch` uses verified latest-approved Router routes when an explicit config root is selected (`mmf` / `MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`); invalid manifests fail closed instead of falling through to legacy provider config. Without an explicit root, legacy `mms` review-launch behavior remains unchanged.
+- Provider profile lookup treats preview/MMF roots as a bundle boundary: valid bundles use generated Profile; missing, invalid, or hash-mismatched preview bundles fall back only to built-in profiles instead of mixing root legacy profile overlays. Default stable roots without a manifest keep legacy profile overlay compatibility. The profile cache is keyed by selected config root to avoid stable/preview bleed.
+- `review-launch` uses verified latest-approved Router routes when an explicit config root is selected (`mmf` / `MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`); missing or invalid selected-root manifests fail closed instead of falling through to legacy provider config. Without an explicit root, legacy `mms` review-launch behavior remains unchanged.
 - Project/session store helpers derive their default root from the selected MMS config root, so `mmf` preview sessions keep project state under `<MMS_CONFIG_ROOT>/projects` instead of stable `~/.config/mms/projects`.
 - Launcher runtime/cache/usage auxiliary paths derive from the selected config root, preventing preview sessions from reading or writing stable-root `runtime/`, `health_check.json`, `cache/anthropic_base_urls.json`, or `usage.json` by default.
 - Local runtime telemetry helpers now follow the selected config root for local `usage.json`, `speed-stats.json`, `health-cache.json`, and `events/`, so preview sessions do not bleed runtime state into stable root by default.
 - Preview usage writes no longer trigger the legacy background `model-routes.json` export; stable `mms` roots keep the legacy best-effort export for compatibility.
 - Preview startup-safe route refresh also skips legacy `model-routes.json` export; explicit legacy export commands remain available for compatibility.
+- Router read helpers now require a verified latest-approved manifest for preview/MMF roots. If a preview root is missing `generated/model-registry.latest-approved.json`, `export_model_routes(force=False)` and bundle validation fail closed instead of reading stale root `model-routes.json`; default stable `mms` roots keep legacy fallback compatibility.
 - Broker profile env resolution reads `credentials.sh` only from the selected config root, and local broker logs use `<config_root>/cache/broker`, so preview broker flows do not silently consume stable credentials/cache.
 - `statusline-command.sh` reads route status and health cache from the selected config root, so `mmf` gateway sessions display preview route/health state instead of stable-root state.
 - Launcher route status path uses `<config_root>/route_status.json` when an explicit config root is selected; default stable launches keep the previous session-home route status path.
 - Rescue hot fallback now checks `<config_root>/generated/model-registry.latest-approved.json` before reading generated/root `model-routes.json`.
 - If the manifest exists, rescue fallback only uses the verified Router payload; invalid or hash-mismatched manifests fail closed for that fallback lookup instead of silently using unverified generated routes.
-- If the manifest is missing, default behavior remains legacy-compatible and reads generated/root route files in the previous order.
-- TUI Rescue routed fallback candidate lists use the same boundary: when a latest-approved manifest exists, candidates are read only from the verified Router payload; invalid manifests return no routed candidates instead of falling back to stale legacy files.
+- If the manifest is missing, preview/MMF roots fail closed instead of reading stale generated/root route files; default stable behavior remains legacy-compatible and reads generated/root route files in the previous order.
+- TUI Rescue routed fallback candidate lists use the same boundary: when a latest-approved manifest exists, candidates are read only from the verified Router payload; missing or invalid preview/MMF manifests return no routed candidates instead of falling back to stale legacy files.
 - If selected-root resolution fails during bridge rescue fallback lookup, the bridge returns no config-root fallback instead of silently reading stable `~/.config/mms/config.toml`; explicit server/env fallback fields may still be used.
+- Launcher-injected rescue default fallback settings no longer read legacy `[rescue]` from `config.toml` for preview/MMF roots. Explicit `MMS_RESCUE_FALLBACK_MODEL` / `MMS_RESCUE_FALLBACK_CLI` env overrides still win when a human/runtime passes them intentionally.
+- Same-vendor native fallback discovery does not load legacy `config.toml` provider lists for preview/MMF roots. Until a bundle-backed native fallback resolver exists, preview roots fail closed for that automatic fallback path rather than mixing stale config truth into bridge retries.
 
 ### Stage 4 - Write Path And Publish
 
 - WebUI Save writes DB + secret backend.
-- Save triggers backup, publish-approved, verify.
+- Save triggers backup, latest-approved publish, verify.
 - Generated bundle becomes the only downstream preview output.
 
 Current Stage 4a implementation:
 
 - `mms registry v2-save-candidate` / `mmf registry v2-save-candidate` accepts a WebUI plan JSON (`config`, `model_policy`, `credential_updates`) or direct config/policy JSON and is dry-run unless `--apply`.
-- `mms config apply-plan` / `mmf config apply-plan` is the human-facing CLI wrapper for a reviewed WebUI plan JSON. It is dry-run unless both `--apply` and `--confirm-preview-apply` are present, refuses stable roots by default, writes preview DB candidates + preview secret backend, publishes latest-approved, verifies hashes, and rolls back DB/secret/generated files on failure.
-- `--apply` is preview-root guarded by default; stable roots require explicit `--allow-stable`.
+- `mms config apply-plan` / `mmf config apply-plan` is the human-facing CLI wrapper for a reviewed WebUI plan JSON. It is dry-run unless both `--apply` and `--confirm-preview-apply` are present, refuses stable-root writes, writes preview DB candidates + preview secret backend, publishes latest-approved, verifies hashes, and rolls back DB/secret/generated files on failure.
+- `--apply` is preview-root guarded; stable roots stop at `stable_root_human_only` + `stable_apply_not_implemented` even when `--allow-stable` is passed. Actual stable-root migration remains the future audited promotion flow after `mmf promote --json` review, backup, and human double-check.
 - The command initializes the selected preview root if needed, backs up an existing preview DB before writing, then writes candidate `route`, `policy`, and `profile` revisions into SQLite.
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB; legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
 - `registry-v2-save-candidate` route/policy/profile revisions share a `candidate_id`; `publish-preview` uses that id to avoid mixing a route revision from one candidate with policy/profile revisions from another candidate.
+- Latest-approved manifest generation and verification require the complete file set and revision ids: Router, Lineup, Profile, Policy, Capabilities, plus `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`, and `capability_revision`. Manifest `canonical_path` entries must be the exact generated paths, sensitivity is fixed, all referenced payloads must be valid JSON objects, and non-secret payloads are rescanned for secret-looking fields even when hashes match. Router is `secret`; Lineup/Profile/Policy/Capabilities are `non-secret`.
 - WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, writes `<preview-root>/secrets/webui-secrets.json` only when explicit plaintext credential updates are submitted, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` only when matching preview secret values exist and every route leaf has an `anthropic_base_url` or `openai_base_url`.
 - If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.
@@ -519,9 +529,17 @@ Current TUI/settings boundary:
 - Legacy `mms` remains unchanged.
 - Only after repeated smoke passes, propose promotion.
 
+Current Stage 6 guard:
+
+- When a preview root has a verified latest-approved Router bundle but no legacy `config.toml`, `mmf` can synthesize a transient in-memory provider config from the bundle for launcher/runtime selection without writing legacy files.
+- `mmf` / selected preview roots no longer create a legacy `config.toml` through the first-run setup wizard when no preview config exists; they stop with `config doctor`, `preview prepare`, and `config apply-plan` guidance.
+- Legacy `mms` first-run setup behavior is unchanged for the stable root.
+- Preview `mmf config` mutating legacy commands such as `provider.default`, `provider.add`, `account.*`, `api.*` writes, `set`, and `unset` are blocked from writing `config.toml` / `credentials.sh`; v2 writes must go through the DB-truth `config apply-plan` path.
+
 ### Stage 7 - Downstream Cutover
 
 - Hive/Pilot/Ant/Mobius read `MMS_CONFIG_ROOT` and latest-approved manifest.
+- The read-only consumer helper requires the complete latest-approved file set: Router, Lineup, Profile, Policy, and Capabilities. A hash-valid but incomplete manifest fails closed instead of letting downstream consumers fill gaps from legacy files.
 - Remove project-specific fixed `~/.config/mms` assumptions.
 - Keep strict evidence requirements.
 - Current cutover runbook lives at `docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md`; it defines the manifest/hash verifier, fail-closed cases, secret redaction rule, and artifact evidence checklist before touching external repos.
@@ -551,12 +569,28 @@ Stage 7 safety status:
 Current Stage 8a implementation:
 
 - `mmf promote [--json]` / `mmf promote plan [--json]` is a read-only stable promotion plan.
-- `mmf config promote-plan [--json]`, `mms config promote-plan [--json]`, and `mms registry promotion-plan [--json]` expose the same plan through the human-facing config/registry surfaces.
+- `mmf config promote-plan [--json]`, `mms config promote-plan [--json]`, `mms migrate config-v2 [--json]`, and `mms registry promotion-plan [--json]` expose the same plan through the human-facing config/registry surfaces.
+- `mms migrate config-v2 --apply` is reserved but still read-only in this slice; it reports `apply_enabled=false` and stops at the same human gate instead of writing stable root files.
 - The plan verifies preview readiness through `preview-check` plus the consumer bundle verifier, inspects the protected stable root paths, and reports `READY_FOR_HUMAN_PROMOTION_REVIEW` only when the selected preview root is runtime-ready.
 - It always reports `apply_enabled=false` and includes `stable_root_human_only` / `promotion_apply_not_implemented` in `blocked_reasons`; there is no command path that writes stable `~/.config/mms/**` in this slice.
 - Human gates listed by the plan: stable root write approval, stable backup, plaintext secret confirmation, Claude config human-only boundary, and rollback review.
 - Promotion preflight commands include `mmf config check`, `mmf config bundle`, and a read-only watchdog dry-run against the preview root.
 - Actual stable-root migration remains a future human-gated flow after merge/release planning, backup verification, smoke tests, and rollback instructions.
+
+Current Stage 8b public preview docs:
+
+- `README.md` and `README.zh-CN.md` now include a public Config v2 Preview Root quickstart covering `mms` stable root, `mmf` preview root, preview doctor/prepare/check/bundle/WebUI, and the read-only stable promotion human gate.
+- The installer completion output now prints the two high-signal next commands: `mmf preview doctor --json` and `mms migrate config-v2 --json`.
+- The public docs explicitly state that `mms migrate config-v2 --apply` remains non-mutating with `apply_enabled=false`, and that preview root must not silently fallback to stable credentials, OAuth state, or Claude config.
+
+Current Stage 8c release readiness audit:
+
+- `mms config release-readiness [--json]` / `mms registry release-readiness [--json]` is a read-only 4.0/config-v2 readiness audit.
+- It aggregates preview root mode, preview doctor/check runtime readiness, verified latest-approved consumer bundle, public README/runbook terms, and the stable promotion plan.
+- A successful audit returns `READY_FOR_4_0_HUMAN_GATE`, `ready_for_human_gate=true`, `release_complete=false`, `human_gate_required=true`, and `completion_blocker=stable_promotion_human_gate`.
+- The command intentionally does not prove final migration completion; it proves that automated checks reached the stable human gate without writing stable root, preview root, DB, generated bundle, secret backend, or Claude config.
+- WebUI now surfaces the same audit in `/api/state` and the Model Source panel as `4.0 Release Readiness`, including blocked requirements, next action, and the stable-promotion human gate.
+- TUI Settings -> `模型真源 / Registry Truth` now includes `查看 4.0 Readiness`, a read-only report for the same audit; it does not write stable root, DB, generated bundles, secret backend, or Claude config.
 
 ## Future LMs Must Not Forget
 

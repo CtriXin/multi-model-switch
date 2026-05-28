@@ -16,6 +16,7 @@ _STATE_FILE_PROCESS_LOCK = threading.RLock()
 _GATEWAY_SESSION_MARKERS = (
     os.path.join(".config", "mms", "codex-gateway", "s") + os.sep,
     os.path.join(".config", "mms", "claude-gateway", "s") + os.sep,
+    os.path.join(".config", "mms", "accounts") + os.sep,
 )
 
 
@@ -120,7 +121,7 @@ def mms_config_root_source(env=None):
 
 def mms_config_root_is_explicit(env=None):
     env = env or os.environ
-    return bool(str(env.get("MMS_CONFIG_ROOT") or "").strip())
+    return bool(str(env.get("MMS_CONFIG_ROOT") or env.get("MMS_CONFIG_DIR") or "").strip())
 
 
 def mms_config_root_mode(config_dir=None, env=None):

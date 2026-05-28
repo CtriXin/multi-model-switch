@@ -16,7 +16,7 @@ from mms_registry_schema import (
     REVISION_STATUSES,
     migrate as migrate_schema,
 )
-from mms_state_io import resolve_mms_config_dir
+from mms_state_io import mms_config_root_mode, resolve_mms_config_dir
 
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
@@ -63,8 +63,16 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 )
-_MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy")
-_OPTIONAL_MANIFEST_FILE_KEYS = ("capabilities",)
+_MANIFEST_FILE_CONTRACT = {
+    "router": {"canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+    "lineup": {"canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+    "profile": {"canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+    "policy": {"canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+    "capabilities": {"canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+}
+_MANIFEST_FILE_KEYS = tuple(_MANIFEST_FILE_CONTRACT)
+_OPTIONAL_MANIFEST_FILE_KEYS: tuple[str, ...] = ()
+_MANIFEST_REVISION_KEYS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 APPROVED_CAPABILITIES_SCHEMA = "mms.model_capabilities.approved.v1"
 
 
@@ -102,9 +110,12 @@ def default_registry_db_path(config_dir: str | os.PathLike[str] | None = None, *
     source_env = env or os.environ
     root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir(source_env))
     root = root.expanduser()
-    explicit_root = str(source_env.get("MMS_CONFIG_ROOT") or "").strip()
-    explicit_path = Path(explicit_root).expanduser() if explicit_root else None
-    if root.name == "mms-next" or (explicit_path and explicit_path.absolute() == root.absolute()):
+    explicit_paths = []
+    for key in ("MMS_CONFIG_ROOT", "MMS_CONFIG_DIR"):
+        raw = str(source_env.get(key) or "").strip()
+        if raw:
+            explicit_paths.append(Path(raw).expanduser())
+    if root.name == "mms-next" or any(path.absolute() == root.absolute() for path in explicit_paths):
         return root / "registry" / "model-registry.sqlite"
     return root / "model-registry.sqlite"
 
@@ -938,25 +949,42 @@ def record_candidate_changes(
     }
 
 
-def _read_file_hash(path: Path, *, sensitivity: str) -> str:
+def _parse_bundle_json_object(raw: bytes, *, path: Path, name: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RegistryValidationError(f"manifest file is not valid JSON for {name}: {path}") from exc
+    if not isinstance(payload, dict):
+        raise RegistryValidationError(f"manifest file must be a JSON object for {name}: {path}")
+    return payload
+
+
+def _read_file_hash(path: Path, *, sensitivity: str, name: str) -> str:
     raw = path.read_bytes()
+    payload = _parse_bundle_json_object(raw, path=path, name=name)
     if sensitivity != "secret":
-        try:
-            validate_non_secret_payload(json.loads(raw.decode("utf-8")), context=str(path))
-        except json.JSONDecodeError:
-            validate_non_secret_payload(raw.decode("utf-8", errors="replace"), context=str(path))
+        validate_non_secret_payload(payload, context=str(path))
     return sha256_hex(raw)
 
 
 def _manifest_file_entry(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     path = Path(spec["path"])
+    expected = _MANIFEST_FILE_CONTRACT.get(name)
+    if expected is None:
+        raise RegistryValidationError(f"unexpected manifest file entry: {name}")
     sensitivity = str(spec.get("sensitivity") or "non-secret")
     if sensitivity not in {"secret", "non-secret"}:
         raise RegistryValidationError(f"unknown sensitivity for {name}: {sensitivity}")
+    if sensitivity != expected["sensitivity"]:
+        raise RegistryValidationError(f"unexpected sensitivity for {name}: {sensitivity}")
+    canonical_path = str(spec.get("canonical_path") or f"generated/{path.name}")
+    if canonical_path != expected["canonical_path"]:
+        raise RegistryValidationError(f"unexpected canonical_path for {name}: {canonical_path}")
+    _validate_manifest_canonical_path(canonical_path, name=name)
     return {
-        "canonical_path": str(spec.get("canonical_path") or f"generated/{path.name}"),
+        "canonical_path": canonical_path,
         "legacy_alias_path": str(spec.get("legacy_alias_path") or ""),
-        "sha256": str(spec.get("sha256") or _read_file_hash(path, sensitivity=sensitivity)),
+        "sha256": str(spec.get("sha256") or _read_file_hash(path, sensitivity=sensitivity, name=name)),
         "sensitivity": sensitivity,
         "legacy_alias_compat": bool(spec.get("legacy_alias_compat", False)),
     }
@@ -975,6 +1003,19 @@ def build_latest_approved_bundle_manifest(
     missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    unexpected = sorted(str(key) for key in files if key not in _MANIFEST_FILE_CONTRACT)
+    if unexpected:
+        raise RegistryValidationError(f"unexpected manifest files: {', '.join(unexpected)}")
+    revisions = {
+        "bundle_revision": bundle_revision,
+        "capability_revision": capability_revision,
+        "route_revision": route_revision,
+        "policy_revision": policy_revision,
+        "profile_revision": profile_revision,
+    }
+    missing_revisions = [key for key, value in revisions.items() if not str(value or "").strip()]
+    if missing_revisions:
+        raise RegistryValidationError(f"manifest revisions missing: {', '.join(missing_revisions)}")
     manifest_files = {name: _manifest_file_entry(name, files[name]) for name in _MANIFEST_FILE_KEYS}
     for name in _OPTIONAL_MANIFEST_FILE_KEYS:
         if name in files:
@@ -1715,6 +1756,24 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         db.close()
 
 
+def assert_legacy_artifact_publish_allowed(
+    *,
+    config_dir: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Return config root or reject legacy-artifact publish for preview roots."""
+    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    try:
+        root_mode = mms_config_root_mode(config_root)
+    except Exception:
+        root_mode = "stable"
+    if root_mode == "preview":
+        raise RegistryValidationError(
+            "publish-approved from legacy root artifacts is disabled for preview config roots; "
+            "use publish-preview so the latest-approved bundle is generated from DB candidates"
+        )
+    return config_root
+
+
 def publish_latest_approved_bundle(
     *,
     config_dir: str | os.PathLike[str] | None = None,
@@ -1727,7 +1786,7 @@ def publish_latest_approved_bundle(
     This writes generated/* and the manifest only. It does not alter live root
     aliases such as model-routes.json, and it does not read/write credentials.
     """
-    config_root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    config_root = assert_legacy_artifact_publish_allowed(config_dir=config_dir)
     generated_dir = config_root / "generated"
     generated = generated_at or utc_now()
     db = open_registry(db_path or default_registry_db_path(config_root))
@@ -1901,6 +1960,28 @@ def _manifest_base_dir(manifest_path: Path, config_dir: str | os.PathLike[str] |
     return manifest_path.parent
 
 
+def _validate_manifest_canonical_path(canonical_path: str, *, name: str) -> Path:
+    relative = Path(canonical_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RegistryValidationError(f"manifest file entry escapes config root: {name}")
+    return relative
+
+
+def _manifest_file_path(base_dir: Path, canonical_path: Any, *, name: str) -> Path:
+    canonical = str(canonical_path or "").strip()
+    if not canonical:
+        raise RegistryValidationError(f"manifest file entry missing canonical_path: {name}")
+    relative = _validate_manifest_canonical_path(canonical, name=name)
+    path = base_dir / relative
+    try:
+        resolved_base = base_dir.expanduser().resolve()
+        resolved_path = path.expanduser().resolve()
+        resolved_path.relative_to(resolved_base)
+    except Exception as exc:
+        raise RegistryValidationError(f"manifest file entry escapes config root: {name}") from exc
+    return path
+
+
 def verify_latest_approved_bundle(
     *,
     config_dir: str | os.PathLike[str] | None = None,
@@ -1911,18 +1992,42 @@ def verify_latest_approved_bundle(
     if manifest.get("schema") != LATEST_APPROVED_SCHEMA:
         raise RegistryValidationError(f"unexpected latest-approved schema: {manifest.get('schema')}")
     base_dir = _manifest_base_dir(path, config_dir)
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        raise RegistryValidationError("latest-approved manifest has no files")
+    missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
+    if missing:
+        raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    unexpected = sorted(str(key) for key in files if key not in _MANIFEST_FILE_CONTRACT)
+    if unexpected:
+        raise RegistryValidationError(f"unexpected manifest files: {', '.join(unexpected)}")
+    missing_revisions = [key for key in _MANIFEST_REVISION_KEYS if not str(manifest.get(key) or "").strip()]
+    if missing_revisions:
+        raise RegistryValidationError(f"manifest revisions missing: {', '.join(missing_revisions)}")
     verified_files: dict[str, dict[str, Any]] = {}
-    for name, entry in (manifest.get("files") or {}).items():
+    for name, entry in files.items():
+        if not isinstance(entry, dict):
+            raise RegistryValidationError(f"invalid manifest file entry: {name}")
+        expected = _MANIFEST_FILE_CONTRACT.get(str(name))
+        if expected is None:
+            raise RegistryValidationError(f"unexpected manifest file entry: {name}")
         canonical = str(entry.get("canonical_path") or "").strip()
-        if not canonical:
-            raise RegistryValidationError(f"manifest file entry missing canonical_path: {name}")
-        file_path = base_dir / canonical
+        if canonical != expected["canonical_path"]:
+            raise RegistryValidationError(f"unexpected manifest canonical_path for {name}: {canonical}")
+        sensitivity = str(entry.get("sensitivity") or "").strip()
+        if sensitivity != expected["sensitivity"]:
+            raise RegistryValidationError(f"unexpected manifest sensitivity for {name}: {sensitivity}")
+        file_path = _manifest_file_path(base_dir, entry.get("canonical_path"), name=str(name))
         if not file_path.exists():
             raise RegistryValidationError(f"manifest file missing: {file_path}")
-        actual_hash = sha256_hex(file_path.read_bytes())
+        raw = file_path.read_bytes()
+        actual_hash = sha256_hex(raw)
         expected_hash = str(entry.get("sha256") or "")
         if actual_hash != expected_hash:
             raise RegistryValidationError(f"manifest hash mismatch for {name}: {file_path}")
+        payload = _parse_bundle_json_object(raw, path=file_path, name=str(name))
+        if sensitivity != "secret":
+            validate_non_secret_payload(payload, context=str(file_path))
         verified_files[name] = {
             "path": str(file_path),
             "sha256": actual_hash,
@@ -1949,10 +2054,7 @@ def load_latest_approved_bundle(
         if info.get("sensitivity") == "secret" and not include_secret:
             continue
         path = Path(info["path"])
-        try:
-            payloads[name] = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payloads[name] = path.read_text(encoding="utf-8", errors="replace")
+        payloads[name] = _parse_bundle_json_object(path.read_bytes(), path=path, name=str(name))
     result = dict(verified)
     result["payloads"] = payloads
     return result

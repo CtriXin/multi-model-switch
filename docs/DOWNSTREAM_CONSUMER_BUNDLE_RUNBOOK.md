@@ -50,9 +50,11 @@ Consumer algorithm:
    request URL/path when available, and set
    `route_source=mms:latest-approved:<bundle_revision>`.
 
-Fail closed when the manifest is missing, unreadable, has a wrong schema, points
-to missing files, or any hash mismatches. Do not silently fallback to stable
-`~/.config/mms` credentials, global OAuth state, or root legacy files.
+Fail closed when the manifest is missing, unreadable, has a wrong schema, lacks
+any required revision id, points to missing files, omits required
+Router/Lineup/Profile/Policy/Capabilities entries, uses an unexpected
+canonical path or sensitivity for a known file, or any hash mismatches. Do not silently fallback to stable `~/.config/mms` credentials, global OAuth state, or
+root legacy files.
 
 ## File Responsibilities
 
@@ -62,10 +64,16 @@ to missing files, or any hash mismatches. Do not silently fallback to stable
 | `lineup` | `generated/model-routes.lineup.json` | context/display/capability metadata |
 | `profile` | `generated/provider-profiles.generated.json` | protocol quirks, auth header rules, body/model aliases |
 | `policy` | `generated/model-policy.effective.json` | visibility, favorites, project allow/deny, downgrade/fallback policy |
-| `capabilities` | `generated/model-capabilities.approved.json` | approved capability facts when present |
+| `capabilities` | `generated/model-capabilities.approved.json` | required approved capability facts |
 
 `router` is local secret-bearing data. Do not copy it into public artifacts,
 logs, GitHub issues, or model-to-model prompts.
+The `router` manifest entry must be `sensitivity=secret`; all other required
+entries must be `sensitivity=non-secret`. Required canonical paths are exact:
+consumers must reject manifests that point these keys at root legacy aliases or
+other in-root files.
+Consumers must also reject secret-looking fields or plaintext key patterns in
+non-secret files, even when the manifest hash matches.
 
 ## Human / Script Checks
 

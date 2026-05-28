@@ -40,10 +40,21 @@ def test_preview_config_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: 
     assert mms_registry.default_registry_db_path(config_dir=preview_root) == preview_root / "registry" / "model-registry.sqlite"
 
 
+def test_config_dir_explicit_root_uses_registry_subdir_for_db(monkeypatch, tmp_path: Path) -> None:
+    selected_root = tmp_path / "selected-root"
+
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.setenv("MMS_CONFIG_DIR", str(selected_root))
+
+    assert mms_registry.default_registry_db_path() == selected_root / "registry" / "model-registry.sqlite"
+    assert mms_registry.default_registry_db_path(config_dir=selected_root) == selected_root / "registry" / "model-registry.sqlite"
+
+
 def test_legacy_config_dir_keeps_root_level_registry_db(monkeypatch, tmp_path: Path) -> None:
     legacy_root = tmp_path / "mms"
 
     monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
 
     assert mms_registry.default_registry_db_path(config_dir=legacy_root) == legacy_root / "model-registry.sqlite"
 
@@ -1160,6 +1171,45 @@ def test_mmf_config_apply_plan_blocks_apply_without_confirmation(tmp_path: Path)
     assert "confirm_preview_apply_required" in payload["blocked_reasons"]
     assert not (config_dir / "registry").exists()
     assert not (config_dir / "generated").exists()
+
+
+def test_registry_v2_apply_plan_stops_stable_even_with_allow_stable(capsys, tmp_path: Path) -> None:
+    stable_root = tmp_path / "mms"
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"config": _registry_v2_candidate_config()}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    rc = mms_registry_cli.handle_registry_command(
+        [
+            "apply-plan",
+            "--config-dir",
+            str(stable_root),
+            "--plan-json",
+            str(plan_path),
+            "--apply",
+            "--confirm-preview-apply",
+            "--allow-stable",
+            "--json",
+        ],
+        command_name="mms registry",
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 2
+    assert payload["schema"] == mms_registry_cli.REGISTRY_V2_APPLY_PLAN_SCHEMA
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["stable_apply_policy"]["allow_stable_requested"] is True
+    assert payload["stable_apply_policy"]["apply_enabled"] is False
+    assert payload["stable_apply_policy"]["human_gate_required"] is True
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "stable_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["writes"]["db_candidate_revision"] is False
+    assert payload["writes"]["secret_backend"] is False
+    assert payload["writes"]["generated_latest_approved_bundle"] is False
+    assert not stable_root.exists()
 
 
 def test_registry_v2_apply_plan_rolls_back_on_verify_failure(monkeypatch, tmp_path: Path) -> None:
@@ -2367,14 +2417,29 @@ def test_config_v2_promotion_plan_stops_at_human_gate_for_ready_preview(tmp_path
     assert summary["ready_for_human_review"] is True
     assert "stable_root_human_only" in summary["blocked_reasons"]
     assert "promotion_apply_not_implemented" in summary["blocked_reasons"]
+    assert summary["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert summary["promotion_safety"]["requires_backup"] is True
+    assert summary["promotion_safety"]["forbids_silent_preview_to_stable_fallback"] is True
     assert summary["would_write"]["stable_config_root"] is False
     assert summary["would_write"]["claude_config"] is False
     assert summary["preview"]["bundle"]["verified"] is True
     assert summary["stable"]["files"]["config_toml"]["exists"] is True
+    assert summary["stable_backup_plan"]["read_only"] is True
+    assert summary["stable_backup_plan"]["would_create_backup"] is False
+    assert summary["stable_backup_plan"]["requires_backup_before_apply"] is True
+    protected_names = {item["name"] for item in summary["stable_backup_plan"]["protected_items"]}
+    assert {"config_toml", "credentials_sh", "registry_db", "secret_backend"}.issubset(protected_names)
+    assert summary["bundle_comparison"]["read_only"] is True
+    assert summary["bundle_comparison"]["preview"]["verified"] is True
+    assert summary["bundle_comparison"]["preview"]["manifest_sha256"]
+    assert summary["bundle_comparison"]["stable"]["verified"] is False
+    assert summary["bundle_comparison"]["comparison_status"] == "stable_bundle_missing"
     assert summary["next_action"]["label"].startswith("Human gate")
     assert any("--dry-run --print-json" in item for item in summary["preflight_commands"])
+    assert any("./mms config bundle --json" in item for item in summary["post_promotion_verify_commands"])
     assert "sk-promote-plan-secret" not in combined
     assert not (stable_dir / "registry").exists()
+    assert not (stable_dir / "backups").exists()
 
 
 def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> None:
@@ -2408,8 +2473,226 @@ def test_mmf_promote_wrapper_is_read_only_and_human_gated(tmp_path: Path) -> Non
     assert payload["status"] == "human_gate"
     assert payload["stable"]["root"]["config_root"] == str(stable_dir)
     assert payload["would_write"]["stable_secret_backend"] is False
+    assert payload["promotion_safety"]["apply_enabled"] is False
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["preview"]["verified"] is True
     assert "human must approve any stable" in payload["human_gates"][0]
     assert "sk-promote-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_migrate_config_v2_is_read_only_and_human_gated(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-migrate-wrapper-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--apply",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["apply_enabled"] is False
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_review"] is True
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "stable_root_human_only" in payload["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert payload["would_write"]["stable_generated_bundle"] is False
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["stable_backup_plan"]["would_create_backup"] is False
+    assert payload["bundle_comparison"]["read_only"] is True
+    assert "sk-migrate-wrapper-secret" not in combined
+    assert not stable_dir.exists()
+
+
+def test_mms_migrate_config_v2_missing_preview_does_not_create_roots(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "migrate",
+            "config-v2",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_review"] is False
+    assert payload["apply_enabled"] is False
+    assert payload["preview"]["root"]["config_root"] == str(config_dir)
+    assert payload["stable"]["root"]["config_root"] == str(stable_dir)
+    assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["would_write"]["stable_config_root"] is False
+    assert not config_dir.exists()
+    assert not stable_dir.exists()
+
+
+def test_mms_config_release_readiness_reaches_human_gate_for_ready_preview(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    _write_preview_doctor_provider(config_dir, api_key="sk-release-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+    requirements = {item["id"]: item for item in payload["requirements"]}
+
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["release_complete"] is False
+    assert payload["result"] == "READY_FOR_4_0_HUMAN_GATE"
+    assert payload["status"] == "human_gate"
+    assert payload["ready_for_human_gate"] is True
+    assert payload["human_gate_required"] is True
+    assert payload["completion_blocker"] == "stable_promotion_human_gate"
+    assert payload["config_root"] == str(config_dir)
+    assert payload["stable_config_root"] == str(stable_dir)
+    assert payload["blocked_requirements"] == []
+    assert all(item["ok"] is True for item in requirements.values())
+    assert requirements["promotion_human_gate"]["ok"] is True
+    assert requirements["stable_no_write_plan"]["ok"] is True
+    assert requirements["no_silent_stable_fallback"]["ok"] is True
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert "stable_root_human_only" in payload["promotion_plan"]["blocked_reasons"]
+    assert "promotion_apply_not_implemented" in payload["promotion_plan"]["blocked_reasons"]
+    assert payload["next_action"]["command"] == "./mmf promote --json"
+    assert "sk-release-ready-secret" not in combined
+    assert not stable_dir.exists()
+
+    registry_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "registry",
+            "release-readiness",
+            "--preview-config-dir",
+            str(config_dir),
+            "--stable-config-dir",
+            str(stable_dir),
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    registry_payload = json.loads(registry_result.stdout)
+    assert registry_payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert registry_payload["ready_for_human_gate"] is True
+    assert registry_payload["release_complete"] is False
+    assert "sk-release-ready-secret" not in (registry_result.stdout + registry_result.stderr)
+    assert not stable_dir.exists()
+
+
+def test_mms_config_release_readiness_missing_preview_is_read_only(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    stable_dir = tmp_path / "mms"
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "mms"),
+            "config",
+            "release-readiness",
+            "--stable-config-dir",
+            str(stable_dir),
+            "--strict-exit",
+            "--json",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.CONFIG_V2_RELEASE_READINESS_SCHEMA
+    assert payload["status"] == "not_ready"
+    assert payload["ready_for_human_gate"] is False
+    assert payload["release_complete"] is False
+    assert "preview_runtime_ready" in payload["blocked_requirements"]
+    assert "consumer_bundle_verified" in payload["blocked_requirements"]
+    assert payload["promotion_plan"]["apply_enabled"] is False
+    assert not config_dir.exists()
     assert not stable_dir.exists()
 
 
@@ -2434,6 +2717,8 @@ def test_mms_config_promote_plan_strict_exit_fails_when_preview_not_ready(tmp_pa
     assert payload["schema"] == mms_registry_cli.CONFIG_V2_PROMOTION_PLAN_SCHEMA
     assert payload["ready_for_human_review"] is False
     assert "preview_not_runtime_ready" in payload["blocked_reasons"]
+    assert payload["promotion_safety"]["stable_write_policy"] == "human_only"
+    assert payload["bundle_comparison"]["preview"]["verified"] is False
     assert payload["would_write"]["stable_config_root"] is False
     assert not (config_dir / "registry").exists()
 
@@ -2804,6 +3089,49 @@ def test_publish_approved_bundle_verifies_and_resolves_model(tmp_path: Path) -> 
     assert caps["context_window_tokens"] == 1048576
     assert caps["supports_thinking"] is True
     assert caps["thinking_control"]["control_type"] == "thinkingLevel"
+
+
+def test_publish_approved_bundle_refuses_preview_root_legacy_artifacts(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+    mms_registry_cli.refresh_source_snapshots(db_path=db_path, paths=[REFERENCE_JSON])
+
+    try:
+        mms_registry_cli.publish_approved_bundle(config_dir=preview_root, db_path=db_path)
+    except mms_registry.RegistryValidationError as exc:
+        direct_error = str(exc)
+    else:  # pragma: no cover - assertion clarity
+        direct_error = ""
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root)],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert "publish-approved from legacy root artifacts is disabled" in direct_error
+    assert "publish-preview" in direct_error
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
+
+
+def test_publish_approved_preview_gate_runs_before_refresh_sources(capsys, tmp_path: Path) -> None:
+    preview_root = tmp_path / "mms-next"
+    db_path = tmp_path / "model-registry.sqlite"
+    _write_config_artifacts(preview_root)
+
+    rc = mms_registry_cli.handle_registry_command(
+        ["--db", str(db_path), "publish-approved", "--config-dir", str(preview_root), "--refresh-sources"],
+        command_name="mmf registry",
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 2
+    assert "publish-preview" in out
+    assert not db_path.exists()
+    assert not (preview_root / "generated" / "model-registry.latest-approved.json").exists()
 
 
 def test_registry_command_publish_verify_and_resolve(capsys, tmp_path: Path) -> None:

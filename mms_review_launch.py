@@ -709,7 +709,7 @@ def _latest_approved_router_candidates(
 
     manifest_path = os.path.join(config_root, "generated", "model-registry.latest-approved.json")
     if not os.path.exists(manifest_path):
-        return [], "", False
+        return [], f"latest-approved bundle missing for review-launch routing: {manifest_path}", True
     try:
         import mms_registry
 

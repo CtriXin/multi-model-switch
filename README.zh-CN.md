@@ -118,6 +118,49 @@ probe cache 时，MMS 会先显示已配置的 `fallback_models` / `extra_models
 同时后台刷新 `/models`；同一个 key 仍缺 family 时，优先对比 provider
 config/credentials，并跑 `mms models` 或 `mms doctor full`。
 
+## Config V2 Preview Root
+
+Config v2 先通过 preview root 提供，确认稳定后再进入 stable 默认路径。
+日常稳定使用继续走 `mms`，隔离预览走 `mmf`：
+
+```text
+mms -> ~/.config/mms
+mmf -> ~/.config/mms-next
+```
+
+推荐 preview 流程：
+
+```bash
+mmf config root --json
+mmf preview doctor --json
+mmf preview prepare --from ~/.config/mms --json
+mmf preview prepare --from ~/.config/mms --include-secrets --json
+mmf config check --json
+mmf config bundle --json
+mmf config web
+```
+
+preview 模式下，人需要看的入口仍然是 TUI / `mms config` / WebUI。这些入口写
+DB candidate、preview secret backend，并发布校验后的
+`generated/model-registry.latest-approved.json` bundle；不会再让
+`config.toml`、`credentials.sh`、route、policy、profile、lineup 文件互相竞争
+truth source。
+
+stable promotion 仍然停在 human gate，当前只读：
+
+```bash
+mmf promote --json
+mms migrate config-v2 --json
+mms config release-readiness --json
+```
+
+即使传 `--apply`，`mms migrate config-v2` 目前也只会报告
+`apply_enabled=false`，并停在 `stable_root_human_only` /
+`promotion_apply_not_implemented`；preview root 不会 silent fallback 到 stable
+credentials、OAuth state 或 Claude config。release readiness audit 可以返回
+`READY_FOR_4_0_HUMAN_GATE`，但在人工 stable promotion 和 post-promotion smoke
+完成前仍会报告 `release_complete=false`。
+
 ## 快速使用
 
 进入交互式启动器：
