@@ -64,7 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/ins
 
 - 安装最新 semver tag
 - 在 `~/.mms` 创建隔离 MMS runtime
-- 把 `mms`、`mmslogs` 链接到 `~/.local/bin`
+- 把 `mms`、preview-root `mmf`、`mmslogs` 链接到 `~/.local/bin`
 - 创建 `~/.mms/.venv`，使用 Python 3.11+，不替换用户系统 Python
 - 如果没有 Python 3.11+，会通过 `uv` 在 `~/.mms` 下准备 MMS-managed Python
 - 跨 PATH、Homebrew、NVM 版本发现已安装的 `claude` / `codex` / `opencode` / `agy`
@@ -83,7 +83,7 @@ Shell 支持：
 - Bash/Zsh：`--write-shell-rc` 会把 `~/.local/bin` 写入当前 shell rc。
 - Fish：`--write-shell-rc` 会写入 `~/.config/fish/conf.d/mms.fish`。
 - Ghostty/iTerm/Terminal：安装后重开 tab，或执行 `exec $SHELL -l`。
-- 如果不写 shell rc，马上可执行 `~/.local/bin/mms`；PATH 加载后可直接输入 `mms`。
+- 如果不写 shell rc，马上可执行 `~/.local/bin/mms` 或 `~/.local/bin/mmf`；PATH 加载后可直接输入 `mms` / `mmf`。
 
 安装时指定 UI 语言：
 

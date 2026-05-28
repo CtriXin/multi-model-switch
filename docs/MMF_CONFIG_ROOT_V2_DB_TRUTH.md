@@ -388,6 +388,7 @@ Required checks:
 
 Current Stage 3a implementation:
 
+- Installer: future installs copy/rewrite the `mmf` preview entrypoint and link it to `~/.local/bin/mmf`, so users do not need to remember `./mmf` from a source checkout after upgrading.
 - CLI: `mms config source [--json]` / `mmf config source [--json]`.
 - CLI: `mms config save-plan [--json]` / `mmf config save-plan [--json]` shows the same read-only v2 DB-truth save sequence without writing DB, secrets, generated bundle, or legacy files.
 - CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.

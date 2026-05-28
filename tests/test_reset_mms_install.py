@@ -31,6 +31,7 @@ def test_reset_mms_install_dry_run_reports_core_artifacts_without_removing(tmp_p
     (real_home / ".config" / "mms" / "codex-gateway" / "s" / "12345").mkdir(parents=True)
     (real_home / ".local" / "bin").mkdir(parents=True)
     (real_home / ".local" / "bin" / "mms").symlink_to(real_home / ".mms" / "mms")
+    (real_home / ".local" / "bin" / "mmf").symlink_to(real_home / ".mms" / "mmf")
     (real_home / ".local" / "bin" / "mmc").symlink_to(real_home / ".mms" / "mmc")
     (real_home / ".local" / "bin" / "ccs").symlink_to(
         real_home / ".config" / "mms" / "codex-gateway" / "s" / "12345" / "ccs"
@@ -42,6 +43,7 @@ def test_reset_mms_install_dry_run_reports_core_artifacts_without_removing(tmp_p
     assert str(real_home / ".mms") in completed.stdout
     assert str(real_home / ".config" / "mms") in completed.stdout
     assert str(real_home / ".local" / "bin" / "mms") in completed.stdout
+    assert str(real_home / ".local" / "bin" / "mmf") in completed.stdout
     assert str(real_home / ".local" / "bin" / "mmc") in completed.stdout
     assert (real_home / ".mms").exists()
     assert (real_home / ".config" / "mms").exists()
@@ -54,6 +56,7 @@ def test_reset_mms_install_apply_removes_only_mms_owned_artifacts(tmp_path):
     (real_home / ".config" / "mms" / "claude-gateway" / "s" / "67890").mkdir(parents=True)
     (real_home / ".local" / "bin").mkdir(parents=True)
     (real_home / ".local" / "bin" / "mms").symlink_to(real_home / ".mms" / "mms")
+    (real_home / ".local" / "bin" / "mmf").symlink_to(real_home / ".mms" / "mmf")
     (real_home / ".local" / "bin" / "mmc").symlink_to(real_home / ".mms" / "mmc")
     (real_home / ".local" / "bin" / "ccs").symlink_to(real_home / ".mms" / "ccs")
     (real_home / ".local" / "bin" / "mmslogs").symlink_to(real_home / ".mms" / "mmslogs")
@@ -66,6 +69,7 @@ def test_reset_mms_install_apply_removes_only_mms_owned_artifacts(tmp_path):
     assert not (real_home / ".mms").exists()
     assert not (real_home / ".config" / "mms").exists()
     assert not (real_home / ".local" / "bin" / "mms").exists()
+    assert not (real_home / ".local" / "bin" / "mmf").exists()
     assert not (real_home / ".local" / "bin" / "mmc").exists()
     assert not (real_home / ".local" / "bin" / "ccs").exists()
     assert not (real_home / ".local" / "bin" / "mmslogs").exists()

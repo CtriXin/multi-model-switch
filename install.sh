@@ -2142,6 +2142,11 @@ run_install_check() {
     else
         echo "• $(t "mms 命令链接尚未创建" "mms symlink not created yet"): $BIN_DIR/mms"
     fi
+    if [ -L "$BIN_DIR/mmf" ]; then
+        echo "✓ $(t "已存在 mmf preview 命令链接" "mmf preview symlink present"): $BIN_DIR/mmf"
+    else
+        echo "• $(t "mmf preview 命令链接尚未创建" "mmf preview symlink not created yet"): $BIN_DIR/mmf"
+    fi
     if [ -L "$BIN_DIR/mmc" ]; then
         echo "• $(t "检测到 retired mmc 命令链接；下次安装会移除 MMS-owned 链接" "Retired mmc command link detected; the next install removes MMS-owned links"): $BIN_DIR/mmc"
     fi
@@ -4226,6 +4231,7 @@ if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/mms_core.py" ]; then
 fi
 
 cp "$SOURCE_DIR"/mms "$MMS_HOME/mms"
+[ -f "$SOURCE_DIR/mmf" ] && cp "$SOURCE_DIR"/mmf "$MMS_HOME/"
 [ -f "$SOURCE_DIR/mmslogs" ] && cp "$SOURCE_DIR"/mmslogs "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_core.py "$MMS_HOME/"
 cp "$SOURCE_DIR"/mms_tui.py "$MMS_HOME/"
@@ -4254,6 +4260,7 @@ HANDOVER_CONTINUITY_INSTALL_STATUS="not_run"
 install_builtin_handover_continuity
 
 chmod +x "$MMS_HOME/mms"
+[ -f "$MMS_HOME/mmf" ] && chmod +x "$MMS_HOME/mmf"
 [ -f "$MMS_HOME/mmslogs" ] && chmod +x "$MMS_HOME/mmslogs"
 [ -f "$MMS_HOME/statusline-command.sh" ] && chmod +x "$MMS_HOME/statusline-command.sh"
 [ -d "$MMS_HOME/hooks" ] && find "$MMS_HOME/hooks" -type f -name '*.sh' -exec chmod +x {} +
@@ -4263,6 +4270,7 @@ chmod +x "$MMS_HOME/mms"
 # 确保 shebang 指向隔离环境中的 python3
 PYTHON_PATH="$VENV_DIR/bin/python"
 rewrite_shebang "$MMS_HOME/mms" "$PYTHON_PATH"
+[ -f "$MMS_HOME/mmf" ] && rewrite_shebang "$MMS_HOME/mmf" "$PYTHON_PATH"
 [ -f "$MMS_HOME/mmslogs" ] && rewrite_shebang "$MMS_HOME/mmslogs" "$PYTHON_PATH"
 
 # ── 4.5 可选安装：CLI / RTK ──
@@ -4305,8 +4313,9 @@ fi
 echo ""
 mkdir -p "$BIN_DIR"
 
-# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmslogs 入口。
+# 创建 primary symlink；legacy ccs / mmc 已下线，仅保留 mms / mmf / mmslogs 入口。
 ln -sf "$MMS_HOME/mms" "$BIN_DIR/mms"
+[ -f "$MMS_HOME/mmf" ] && ln -sf "$MMS_HOME/mmf" "$BIN_DIR/mmf"
 # Remove stale MMS-owned legacy ccs/mmc artifacts from previous installs without touching unrelated user commands.
 rm -f "$MMS_HOME/mmc"
 if [ -L "$BIN_DIR/mmc" ]; then
@@ -4337,7 +4346,11 @@ fi
 if [ -e "$MMS_HOME/mmslogs" ]; then
     ln -sf "$MMS_HOME/mmslogs" "$BIN_DIR/mmslogs"
 fi
-echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
+if [ -f "$MMS_HOME/mmf" ]; then
+    echo "✓ $(t "命令已链接到" "Commands linked to") $BIN_DIR/mms, $BIN_DIR/mmf"
+else
+    echo "✓ $(t "命令已链接到" "Command linked to") $BIN_DIR/mms"
+fi
 
 # 检查 PATH 是否包含 ~/.local/bin
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -4365,6 +4378,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo ""
     echo "  $(t "常用命令:" "Common commands:")"
     echo "    mms              $(t "打开交互启动器" "open the interactive launcher")"
+    echo "    mmf              $(t "打开 preview root 启动器" "open the preview-root launcher")"
     echo "    mms claude       $(t "直接启动 Claude 入口" "launch the Claude entrypoint")"
     echo "    mms --preset coding  $(t "使用预设" "launch a preset")"
     echo "    mms config       $(t "查看/修改配置" "view or edit config")"
@@ -4375,6 +4389,7 @@ if [ -x "$BIN_DIR/mms" ]; then
     echo "    mms test --provider <id> --cli claude  $(t "验证 Claude 实际链路" "verify the real Claude message path")"
     echo "    mms test --provider <id> --cli codex   $(t "验证 Codex 实际链路" "verify the real Codex message path")"
     echo "    mms ls                              $(t "查看可见模型" "list visible models")"
+    echo "    mmf config root                     $(t "确认 preview root" "confirm the preview root")"
     echo "    mms                                 $(t "打开主界面开始使用" "open the main launcher")"
     echo "    mms --help                          $(t "查看完整命令列表" "show the full command list")"
     echo ""
