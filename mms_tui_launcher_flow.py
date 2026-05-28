@@ -587,6 +587,45 @@ def resolve_last_used_launch_context(
     return model_info, runtime, cli_name
 
 
+def handle_tui_last_used_action(
+    cfg,
+    cli_name,
+    action_data,
+    current_provider,
+    default_models,
+    *,
+    account_id=None,
+    provider_id=None,
+    trace_record,
+    resolve_last_used_runtime,
+    resolve_best_provider,
+    choose_runtime_source,
+    trace_runtime_choice,
+):
+    trace_record("last used", cli=cli_name, model=action_data.get("model"))
+    model_info, runtime, selected_cli = resolve_last_used_launch_context(
+        cfg,
+        cli_name,
+        action_data,
+        current_provider,
+        default_models,
+        account_id=account_id,
+        provider_id=provider_id,
+        resolve_last_used_runtime=resolve_last_used_runtime,
+        resolve_best_provider=resolve_best_provider,
+        choose_runtime_source=choose_runtime_source,
+        trace_runtime_choice=trace_runtime_choice,
+    )
+    if runtime is None:
+        return {"status": "continue", "message": f"{selected_cli} 没有可用 provider"}
+    return {
+        "status": "launch",
+        "model_info": model_info,
+        "runtime": runtime,
+        "cli": selected_cli,
+    }
+
+
 def selected_model_launch_context(
     cfg,
     cli_name,

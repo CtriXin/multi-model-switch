@@ -10326,8 +10326,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # ── 上次使用 ──
         elif action_type == "last":
 
-            _trace_record("last used", cli=cli, model=action_data.get("model"))
-            model_info, runtime_runtime, cli = tui_flow.resolve_last_used_launch_context(
+            last_action = tui_flow.handle_tui_last_used_action(
                 current_cfg,
                 cli,
                 action_data,
@@ -10335,14 +10334,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 default_models,
                 account_id=account_id,
                 provider_id=provider_id,
+                trace_record=_trace_record,
                 resolve_last_used_runtime=_resolve_last_used_runtime,
                 resolve_best_provider=_resolve_best_provider,
                 choose_runtime_source=_choose_runtime_source,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if runtime_runtime is None:
-                console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
+            if last_action.get("message"):
+                console.print(f"[yellow]{last_action['message']}[/yellow]")
+            if last_action["status"] != "launch":
                 continue
+            model_info = last_action["model_info"]
+            runtime_runtime = last_action["runtime"]
+            cli = last_action["cli"]
             # fall through to confirm
 
         # ── 品类选择 → 子模型 ──
@@ -10407,8 +10411,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if not action_data.get("model"):
                     continue
 
-                _trace_record("last used", cli=cli, model=action_data.get("model"))
-                model_info, runtime_runtime, cli = tui_flow.resolve_last_used_launch_context(
+                last_action = tui_flow.handle_tui_last_used_action(
                     current_cfg,
                     cli,
                     action_data,
@@ -10416,14 +10419,19 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     default_models,
                     account_id=account_id,
                     provider_id=provider_id,
+                    trace_record=_trace_record,
                     resolve_last_used_runtime=_resolve_last_used_runtime,
                     resolve_best_provider=_resolve_best_provider,
                     choose_runtime_source=_choose_runtime_source,
                     trace_runtime_choice=_trace_runtime_choice,
                 )
-                if runtime_runtime is None:
-                    console.print(f"[yellow]{cli} 没有可用 provider[/yellow]")
+                if last_action.get("message"):
+                    console.print(f"[yellow]{last_action['message']}[/yellow]")
+                if last_action["status"] != "launch":
                     continue
+                model_info = last_action["model_info"]
+                runtime_runtime = last_action["runtime"]
+                cli = last_action["cli"]
             else:
                 # 持久化 priority 变更
                 pri_changes = selected.pop("priority_changes", None)

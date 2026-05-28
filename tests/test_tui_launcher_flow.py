@@ -8,6 +8,7 @@ from mms_tui_launcher_flow import (
     confirm_agent_pack,
     confirm_tui_options,
     handle_tui_connect_action,
+    handle_tui_last_used_action,
     handle_tui_load_balance_action,
     handle_tui_provider_browse_action,
     last_used_model_info,
@@ -689,6 +690,53 @@ def test_resolve_last_used_launch_context_falls_back_to_runtime_picker() -> None
             },
         )
     ]
+
+
+def test_handle_tui_last_used_action_launches_restored_runtime() -> None:
+    trace_records = []
+    trace_choices = []
+    runtime = {"id": "restored"}
+
+    result = handle_tui_last_used_action(
+        {"cfg": True},
+        "codex",
+        {"model": "gpt-5.4"},
+        {"id": "current"},
+        ["gpt-5.4"],
+        trace_record=lambda *args, **kwargs: trace_records.append((args, kwargs)),
+        resolve_last_used_runtime=lambda *_args: (runtime, ["gpt-5.4"], "last used provider:p1"),
+        resolve_best_provider=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        choose_runtime_source=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        trace_runtime_choice=lambda *args, **kwargs: trace_choices.append((args, kwargs)),
+    )
+
+    assert result == {
+        "status": "launch",
+        "model_info": {"model": "gpt-5.4"},
+        "runtime": runtime,
+        "cli": "codex",
+    }
+    assert trace_records == [(("last used",), {"cli": "codex", "model": "gpt-5.4"})]
+    assert trace_choices == [
+        (("runtime resolve", runtime), {"launch_cli": "codex", "choice": "last used provider:p1"})
+    ]
+
+
+def test_handle_tui_last_used_action_reports_missing_runtime() -> None:
+    result = handle_tui_last_used_action(
+        {},
+        "claude",
+        {"model": "claude-sonnet-4.5"},
+        {},
+        [],
+        trace_record=lambda *_args, **_kwargs: None,
+        resolve_last_used_runtime=lambda *_args: (None, [], ""),
+        resolve_best_provider=lambda *_args, **_kwargs: (None, None),
+        choose_runtime_source=lambda *_args, **_kwargs: (None, [], "claude"),
+        trace_runtime_choice=lambda *_args, **_kwargs: None,
+    )
+
+    assert result == {"status": "continue", "message": "claude 没有可用 provider"}
 
 
 def test_selected_model_launch_context_uses_embedded_provider_context() -> None:
