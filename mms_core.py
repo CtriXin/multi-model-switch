@@ -4901,11 +4901,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
         # 获取上次使用信息（按 CLI 分桶，TUI 内部按当前 tab 过滤）
         last_by_cli, _ = _get_scene_usage()
 
-        result = tui_flow.safe_tui_call(
-            select_family_tui,
-            families_by_cli,
-            current_cli_names,
-            last_used=last_by_cli,
+        family_selection = tui_flow.select_tui_launcher_family_action(
+            select_family_tui=select_family_tui,
+            families_by_cli=families_by_cli,
+            cli_names=current_cli_names,
+            last_by_cli=last_by_cli,
             families_detail=families_detail,
             provider_options_by_cli=provider_options_by_cli,
             provider_options_loader_by_cli=provider_options_loader_by_cli,
@@ -4916,14 +4916,14 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             },
         )
 
-        if result == "fallback":
+        if family_selection["status"] == "fallback":
             return False
-        if result == "__interrupt__":
-            return True
-        if result is None:
+        if family_selection["status"] == "exit":
             return True
 
-        action_type, cli, action_data = result
+        action_type = family_selection["action_type"]
+        cli = family_selection["cli"]
+        action_data = family_selection["action_data"]
 
         # ── 接入通道 ──
         if action_type == "connect":

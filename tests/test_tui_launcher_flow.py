@@ -61,6 +61,7 @@ from mms_tui_launcher_flow import (
     safe_tui_call,
     select_rescue_event_action,
     select_rescue_menu_action,
+    select_tui_launcher_family_action,
     select_tui_settings_action,
     selected_model_launch_context,
     select_rescue_route_fallback_model,
@@ -562,6 +563,77 @@ def test_handle_tui_provider_browse_action_exits_on_model_escape() -> None:
     )
 
     assert result == {"status": "exit"}
+
+
+def test_select_tui_launcher_family_action_normalizes_result_shapes() -> None:
+    calls = []
+    families_by_cli = {"claude": [{"family": "Claude"}]}
+    cli_names = ["claude"]
+    last_by_cli = {"claude": {"model": "sonnet"}}
+    families_detail = {"claude": {"Claude": [{"model": "sonnet"}]}}
+    provider_options_by_cli = {"claude": {}}
+    provider_options_loader_by_cli = {"claude": lambda: []}
+    broker_enabled_by_cli = {"claude": False}
+    profile_options_by_cli = {"agy": []}
+
+    def select_family(*args, **kwargs):
+        calls.append((args, kwargs))
+        return ("family", "claude", "Claude")
+
+    result = select_tui_launcher_family_action(
+        select_family_tui=select_family,
+        families_by_cli=families_by_cli,
+        cli_names=cli_names,
+        last_by_cli=last_by_cli,
+        families_detail=families_detail,
+        provider_options_by_cli=provider_options_by_cli,
+        provider_options_loader_by_cli=provider_options_loader_by_cli,
+        broker_enabled_by_cli=broker_enabled_by_cli,
+        profile_options_by_cli=profile_options_by_cli,
+    )
+
+    assert result == {
+        "status": "action",
+        "action_type": "family",
+        "cli": "claude",
+        "action_data": "Claude",
+    }
+    assert calls == [
+        (
+            (families_by_cli, cli_names),
+            {
+                "last_used": last_by_cli,
+                "families_detail": families_detail,
+                "provider_options_by_cli": provider_options_by_cli,
+                "provider_options_loader_by_cli": provider_options_loader_by_cli,
+                "broker_enabled_by_cli": broker_enabled_by_cli,
+                "profile_options_by_cli": profile_options_by_cli,
+            },
+        )
+    ]
+
+    common = {
+        "families_by_cli": families_by_cli,
+        "cli_names": cli_names,
+        "last_by_cli": last_by_cli,
+        "families_detail": families_detail,
+        "provider_options_by_cli": provider_options_by_cli,
+        "provider_options_loader_by_cli": provider_options_loader_by_cli,
+        "broker_enabled_by_cli": broker_enabled_by_cli,
+        "profile_options_by_cli": profile_options_by_cli,
+    }
+    assert select_tui_launcher_family_action(
+        select_family_tui=lambda *_args, **_kwargs: "fallback",
+        **common,
+    ) == {"status": "fallback"}
+    assert select_tui_launcher_family_action(
+        select_family_tui=lambda *_args, **_kwargs: None,
+        **common,
+    ) == {"status": "exit"}
+    assert select_tui_launcher_family_action(
+        select_family_tui=lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
+        **common,
+    ) == {"status": "exit"}
 
 
 def test_safe_tui_call_normalizes_keyboard_interrupt() -> None:

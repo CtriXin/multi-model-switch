@@ -359,6 +359,45 @@ def handle_tui_provider_browse_action(
     return {"status": "launch", "model_info": model_info, "runtime": runtime}
 
 
+def select_tui_launcher_family_action(
+    *,
+    select_family_tui,
+    families_by_cli,
+    cli_names,
+    last_by_cli,
+    families_detail,
+    provider_options_by_cli,
+    provider_options_loader_by_cli,
+    broker_enabled_by_cli,
+    profile_options_by_cli,
+):
+    result = safe_tui_call(
+        select_family_tui,
+        families_by_cli,
+        cli_names,
+        last_used=last_by_cli,
+        families_detail=families_detail,
+        provider_options_by_cli=provider_options_by_cli,
+        provider_options_loader_by_cli=provider_options_loader_by_cli,
+        broker_enabled_by_cli=broker_enabled_by_cli,
+        profile_options_by_cli=profile_options_by_cli,
+    )
+
+    if result == "fallback":
+        return {"status": "fallback"}
+    if result == "__interrupt__":
+        return {"status": "exit"}
+    if result is None:
+        return {"status": "exit"}
+    action_type, cli_name, action_data = result
+    return {
+        "status": "action",
+        "action_type": action_type,
+        "cli": cli_name,
+        "action_data": action_data,
+    }
+
+
 
 def last_used_model_info(action_data):
     return (
