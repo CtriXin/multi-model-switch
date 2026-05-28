@@ -280,6 +280,36 @@ def test_use_tui_preserves_tty_width_and_oserror_rules():
     assert mms_command_tools.use_tui(Stdin(True), raise_oserror) is False
 
 
+def test_launcher_entry_and_model_info_helpers_preserve_filtering_rules():
+    import mms_command_tools
+
+    assert mms_command_tools.clean_model_info({"model": "gpt-5.5", "provider": {"id": "relay"}}) == {
+        "model": "gpt-5.5",
+    }
+    assert mms_command_tools.clean_model_info("gpt-5.5") == "gpt-5.5"
+
+    oauth_clis = {"claude", "codex", "gemini", "agy"}
+    assert mms_command_tools.uses_native_account_entry({"auth_mode": "oauth"}, "claude", oauth_capable_clis=oauth_clis)
+    assert not mms_command_tools.uses_native_account_entry({"auth_mode": "api_key"}, "claude", oauth_capable_clis=oauth_clis)
+    assert not mms_command_tools.uses_native_account_entry({"auth_mode": "oauth"}, "opencode", oauth_capable_clis=oauth_clis)
+    assert mms_command_tools.uses_broker_entry({"runtime_kind": "broker"}, "claude")
+    assert not mms_command_tools.uses_broker_entry({"runtime_kind": "broker"}, "codex")
+    assert mms_command_tools.uses_managed_entry({"auth_mode": "oauth"}, "codex", oauth_capable_clis=oauth_clis)
+
+    assert mms_command_tools.preset_model_info(
+        {
+            "cli": "claude",
+            "provider": "relay",
+            "account": "claude-a",
+            "bridge": "http://bridge",
+            "description": "demo",
+            "model": "gpt-5.5",
+            "thinking": True,
+        }
+    ) == {"model": "gpt-5.5", "thinking": True}
+    assert mms_command_tools.preset_model_info(None) == {}
+
+
 def test_launch_trace_formatter_preserves_sources_and_override_chain():
     import mms_command_tools
 

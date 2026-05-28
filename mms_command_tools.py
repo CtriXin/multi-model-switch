@@ -2777,6 +2777,30 @@ def use_tui(stdin, get_terminal_size, *, min_columns=40):
         return False
 
 
+def clean_model_info(model_info):
+    if not isinstance(model_info, dict):
+        return model_info
+    return {key: value for key, value in model_info.items() if key != "provider"}
+
+
+def uses_native_account_entry(runtime, cli, *, oauth_capable_clis):
+    return bool(runtime and runtime.get("auth_mode") == "oauth" and cli in oauth_capable_clis)
+
+
+def uses_broker_entry(runtime, cli):
+    return bool(runtime and runtime.get("runtime_kind") == "broker" and cli == "claude")
+
+
+def uses_managed_entry(runtime, cli, *, oauth_capable_clis):
+    return uses_native_account_entry(runtime, cli, oauth_capable_clis=oauth_capable_clis)
+
+
+def preset_model_info(preset, *, excluded_keys=frozenset({"cli", "provider", "account", "description", "bridge"})):
+    if not isinstance(preset, dict):
+        return {}
+    return {key: value for key, value in preset.items() if key not in excluded_keys}
+
+
 def parse_usage_timestamp(value):
     raw = str(value or "").strip()
     if not raw:

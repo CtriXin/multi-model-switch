@@ -6162,9 +6162,9 @@ def _resolve_visible_clis(cfg, default_provider, default_models):
 
 
 def _clean_model_info(model_info):
-    if not isinstance(model_info, dict):
-        return model_info
-    return {k: v for k, v in model_info.items() if k != "provider"}
+    from mms_command_tools import clean_model_info
+
+    return clean_model_info(model_info)
 
 
 def select_model_interactive(models_list):
@@ -6491,15 +6491,21 @@ def save_preset_interactive(cfg, cli, model_info):
 
 
 def _uses_native_account_entry(runtime, cli):
-    return bool(runtime and runtime.get("auth_mode") == "oauth" and cli in OAUTH_CAPABLE_CLIS)
+    from mms_command_tools import uses_native_account_entry
+
+    return uses_native_account_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
 
 
 def _uses_broker_entry(runtime, cli):
-    return bool(runtime and runtime.get("runtime_kind") == "broker" and cli == "claude")
+    from mms_command_tools import uses_broker_entry
+
+    return uses_broker_entry(runtime, cli)
 
 
 def _uses_managed_entry(runtime, cli):
-    return _uses_native_account_entry(runtime, cli)
+    from mms_command_tools import uses_managed_entry
+
+    return uses_managed_entry(runtime, cli, oauth_capable_clis=OAUTH_CAPABLE_CLIS)
 
 
 def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, role, recommend):
@@ -6523,12 +6529,9 @@ def _resolve_interactive_launch_model(cli, runtime, cli_models, models_cache, ro
 
 
 def _preset_model_info(preset):
-    if not isinstance(preset, dict):
-        return {}
-    return {
-        key: value for key, value in preset.items()
-        if key not in {"cli", "provider", "account", "description", "bridge"}
-    }
+    from mms_command_tools import preset_model_info
+
+    return preset_model_info(preset)
 
 
 def _emit_preset_error(message, *, stderr_only=False):
