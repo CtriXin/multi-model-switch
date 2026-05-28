@@ -2627,39 +2627,18 @@ def _runtime_hint_from_runtime(runtime):
 
 
 def _record_usage(runtime, cli_name, model_info):
-    def _mutate(stats):
-        sources = stats.setdefault("sources", {})
-        key = _runtime_usage_key(runtime, cli_name)
-        model_name = _resolve_model_name(model_info)
-        now = _iso_now()
-        entry = sources.setdefault(key, {
-            "runtime_kind": runtime.get("runtime_kind", "provider"),
-            "id": runtime.get("id", "default"),
-            "name": runtime.get("name", runtime.get("id", "default")),
-            "cli": cli_name,
-            "launches": 0,
-            "last_used_at": "",
-            "last_model": "",
-            "models": {},
-            "model_last_used_at": {},
-        })
-        entry["launches"] += 1
-        entry["last_used_at"] = now
-        entry["last_model"] = model_name
-        models = entry.setdefault("models", {})
-        models[model_name] = int(models.get(model_name, 0)) + 1
-        model_last_used_at = entry.setdefault("model_last_used_at", {})
-        model_last_used_at[model_name] = now
-        last_by_cli = stats.setdefault("last_by_cli", {})
-        last_by_cli[cli_name] = {
-            "cli": cli_name,
-            "model": model_name,
-            "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
-            "runtime_hint": _runtime_hint_from_runtime(runtime),
-            "last_used_at": now,
-        }
+    from mms_command_tools import record_usage
 
-    _update_usage_stats(_mutate)
+    return record_usage(
+        runtime,
+        cli_name,
+        model_info,
+        update_usage_stats=_update_usage_stats,
+        iso_now=_iso_now,
+        runtime_usage_key=_runtime_usage_key,
+        resolve_model_name=_resolve_model_name,
+        runtime_hint_from_runtime=_runtime_hint_from_runtime,
+    )
 
 
 def _record_scene_usage(scene_name, cli_name, model_info):

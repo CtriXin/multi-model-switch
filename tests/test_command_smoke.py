@@ -1404,6 +1404,20 @@ def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
         "runtime_id": "claude-main",
     }
     assert mms_command_tools.runtime_hint_from_runtime(None, runtime_provider_id=lambda runtime: "", runtime_account_id=lambda runtime: "") == {}
+    recorded = {}
+    mms_command_tools.record_usage(
+        provider_runtime,
+        "codex",
+        {"model": "gpt-5.5"},
+        update_usage_stats=lambda mutator: mutator(recorded),
+        iso_now=lambda: "2026-05-28T10:00:00Z",
+        runtime_hint_from_runtime=lambda runtime: {"runtime_id": runtime["id"], "auth_mode": runtime["auth_mode"]},
+    )
+    assert recorded["sources"]["provider:codex:relay"]["launches"] == 1
+    assert recorded["sources"]["provider:codex:relay"]["model_last_used_at"] == {
+        "gpt-5.5": "2026-05-28T10:00:00Z"
+    }
+    assert recorded["last_by_cli"]["codex"]["runtime_hint"] == {"runtime_id": "relay", "auth_mode": "api_key"}
     stats = {
         "sources": {
             "old": {

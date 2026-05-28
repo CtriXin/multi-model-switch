@@ -2270,6 +2270,52 @@ def runtime_hint_from_runtime(runtime, *, runtime_provider_id, runtime_account_i
     return {k: v for k, v in hint.items() if v}
 
 
+def record_usage(
+    runtime,
+    cli_name,
+    model_info,
+    *,
+    update_usage_stats,
+    iso_now,
+    runtime_usage_key=runtime_usage_key,
+    resolve_model_name=resolve_model_name,
+    runtime_hint_from_runtime,
+):
+    def _mutate(stats):
+        sources = stats.setdefault("sources", {})
+        key = runtime_usage_key(runtime, cli_name)
+        model_name = resolve_model_name(model_info)
+        now = iso_now()
+        entry = sources.setdefault(key, {
+            "runtime_kind": runtime.get("runtime_kind", "provider"),
+            "id": runtime.get("id", "default"),
+            "name": runtime.get("name", runtime.get("id", "default")),
+            "cli": cli_name,
+            "launches": 0,
+            "last_used_at": "",
+            "last_model": "",
+            "models": {},
+            "model_last_used_at": {},
+        })
+        entry["launches"] += 1
+        entry["last_used_at"] = now
+        entry["last_model"] = model_name
+        models = entry.setdefault("models", {})
+        models[model_name] = int(models.get(model_name, 0)) + 1
+        model_last_used_at = entry.setdefault("model_last_used_at", {})
+        model_last_used_at[model_name] = now
+        last_by_cli = stats.setdefault("last_by_cli", {})
+        last_by_cli[cli_name] = {
+            "cli": cli_name,
+            "model": model_name,
+            "model_info": model_info if isinstance(model_info, dict) else {"model": str(model_info)},
+            "runtime_hint": runtime_hint_from_runtime(runtime),
+            "last_used_at": now,
+        }
+
+    update_usage_stats(_mutate)
+
+
 def infer_runtime_hint_from_usage_stats(stats, cli_name, model_name):
     latest_entry = None
     latest_at = ""
