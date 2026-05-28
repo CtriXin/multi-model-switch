@@ -3149,6 +3149,125 @@ def test_run_manage_channels_helper_and_wrapper_preserve_loop(monkeypatch):
     ]
 
 
+def test_manage_provider_target_helper_and_wrapper_preserve_actions(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    class FakePanel:
+        def __init__(self, body, **kwargs):
+            self.body = body
+            self.kwargs = kwargs
+
+    cfg = {"provider": {"default": "old"}, "providers": [{"id": "relay"}]}
+    provider = {
+        "id": "relay",
+        "name": "Relay",
+        "protocols": ["openai_chat_completions"],
+        "openai_base_url": "https://openai.example/v1",
+        "anthropic_base_url": "https://anthropic.example",
+        "extra_models": ["extra"],
+        "hidden_models": ["hidden"],
+        "proxy": "http://proxy",
+        "timezone": "UTC",
+    }
+    loaded_cfg = {"loaded": True}
+    choices = iter(["1", "3"])
+    calls = []
+    console = _CollectingConsole()
+
+    assert mms_command_tools.manage_provider_target(
+        cfg,
+        "relay",
+        resolve_provider_context=lambda current, provider_id: calls.append(("resolve", current, provider_id)) or provider,
+        provider_openai_base_url=lambda current: current.get("openai_base_url", ""),
+        provider_anthropic_base_url=lambda current: current.get("anthropic_base_url", ""),
+        use_tui=lambda: False,
+        select_channel_action_tui=lambda *_args: calls.append("unexpected-tui"),
+        ensure_rich=lambda: calls.append("rich"),
+        panel_cls=FakePanel,
+        prompt_ask=lambda label, **kwargs: calls.append(("prompt", label, kwargs)) or next(choices),
+        display_runtime_usage=lambda *args: calls.append(("usage", args)),
+        manage_provider_models=lambda *_args: calls.append("unexpected-models"),
+        default_provider_id="default",
+        save_config=lambda current: calls.append(("save", current.copy())),
+        load_config=lambda: loaded_cfg,
+        normalize_provider_id_input=lambda value: value.strip(),
+        handle_provider_rename_config=lambda *_args: calls.append("unexpected-rename"),
+        handle_provider_credentials_config=lambda *_args: calls.append("unexpected-creds"),
+        provider_map=lambda current: {item["id"]: item for item in current.get("providers", [])},
+        handle_provider_remove_config=lambda *_args: calls.append("unexpected-remove"),
+        console=console,
+    ) == (loaded_cfg, True)
+    assert cfg["provider"]["default"] == "relay"
+    assert ("usage", ("provider", "relay", "Relay")) in calls
+    assert any(item == "[green]✓ 默认网关已切换为 relay[/green]" for item in console.items)
+
+    calls.clear()
+    assert mms_command_tools.manage_provider_target(
+        cfg,
+        "relay",
+        resolve_provider_context=lambda current, provider_id: provider,
+        provider_openai_base_url=lambda current: current.get("openai_base_url", ""),
+        provider_anthropic_base_url=lambda current: current.get("anthropic_base_url", ""),
+        use_tui=lambda: True,
+        select_channel_action_tui=lambda title, info, actions: calls.append((title, info, actions)) or "2",
+        ensure_rich=lambda: calls.append("unexpected-rich"),
+        panel_cls=FakePanel,
+        prompt_ask=lambda *_args, **_kwargs: "7",
+        display_runtime_usage=lambda *_args: calls.append("unexpected-usage"),
+        manage_provider_models=lambda current, provider_id: calls.append(("models", current, provider_id)) or ({"models": True}, True),
+        default_provider_id="default",
+        save_config=lambda current: calls.append("unexpected-save"),
+        load_config=lambda: loaded_cfg,
+        normalize_provider_id_input=lambda value: value.strip(),
+        handle_provider_rename_config=lambda *_args: calls.append("unexpected-rename"),
+        handle_provider_credentials_config=lambda *_args: calls.append("unexpected-creds"),
+        provider_map=lambda current: {item["id"]: item for item in current.get("providers", [])},
+        handle_provider_remove_config=lambda *_args: calls.append("unexpected-remove"),
+        console=console,
+    ) == ({"models": True}, True)
+    assert calls[0][0] == "网关 · Relay"
+    assert calls[-1] == ("models", cfg, "relay")
+
+    calls.clear()
+    prompts = iter(["4", " relay-new ", "Relay New"])
+    assert mms_command_tools.manage_provider_target(
+        cfg,
+        "relay",
+        resolve_provider_context=lambda current, provider_id: provider,
+        provider_openai_base_url=lambda current: current.get("openai_base_url", ""),
+        provider_anthropic_base_url=lambda current: current.get("anthropic_base_url", ""),
+        use_tui=lambda: False,
+        select_channel_action_tui=lambda *_args: None,
+        ensure_rich=lambda: calls.append("rich"),
+        panel_cls=FakePanel,
+        prompt_ask=lambda *_args, **_kwargs: next(prompts),
+        display_runtime_usage=lambda *_args: None,
+        manage_provider_models=lambda *_args: None,
+        default_provider_id="default",
+        save_config=lambda current: None,
+        load_config=lambda: loaded_cfg,
+        normalize_provider_id_input=lambda value: value.strip(),
+        handle_provider_rename_config=lambda current, args: calls.append(("rename", current, args)),
+        handle_provider_credentials_config=lambda *_args: None,
+        provider_map=lambda current: {item["id"]: item for item in current.get("providers", [])},
+        handle_provider_remove_config=lambda *_args: None,
+        console=console,
+    ) == (loaded_cfg, True)
+    assert ("rename", cfg, ["relay", "relay-new", "Relay New"]) in calls
+
+    monkeypatch.setattr(mms_core, "resolve_provider_context", lambda current, provider_id: provider)
+    monkeypatch.setattr(mms_core, "_provider_openai_base_url", lambda current: current.get("openai_base_url", ""))
+    monkeypatch.setattr(mms_core, "_provider_anthropic_base_url", lambda current: current.get("anthropic_base_url", ""))
+    monkeypatch.setattr(mms_core, "_use_tui", lambda: False)
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: None)
+    monkeypatch.setattr(mms_core, "Panel", FakePanel)
+    monkeypatch.setattr(mms_core, "Prompt", type("Prompt", (), {"ask": staticmethod(lambda *args, **kwargs: "7")}))
+    monkeypatch.setattr(mms_core, "console", _CollectingConsole())
+
+    assert mms_core._manage_provider_target(cfg, "relay") == (cfg, False)
+
+
 def test_prompt_account_rename_helper_and_wrapper_preserve_flow(monkeypatch):
     import mms_command_tools
     import mms_core

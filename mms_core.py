@@ -3609,80 +3609,35 @@ def handle_models_command(cfg, argv):
 
 
 def _manage_provider_target(cfg, provider_id):
-    provider = resolve_provider_context(cfg, provider_id)
-    while True:
-        default_tag = "是" if cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID) == provider_id else "否"
-        extra_count = len(provider.get("extra_models", []) or [])
-        hidden_count = len(provider.get("hidden_models", []) or [])
+    from mms_command_tools import manage_provider_target
 
-        info_lines = [
-            ("名称", provider.get("name", provider_id)),
-            ("标识", provider_id),
-            ("默认", default_tag),
-            ("OpenAI", _provider_openai_base_url(provider) or "(未设置)"),
-            ("Anthropic", _provider_anthropic_base_url(provider) or "(未设置)"),
-            ("模型列表地址", provider.get("models_endpoint", "/models")),
-            ("模型补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
-            ("协议", ", ".join(provider.get("protocols", []))),
-            ("Proxy", provider.get("proxy", "") or "-"),
-            ("Timezone", provider.get("timezone", "") or "-"),
-        ]
-        actions = [
-            ("1", "查看本地统计"),
-            ("2", "模型管理"),
-            ("3", "设为默认网关"),
-            ("4", "重命名"),
-            ("5", "编辑地址和 Key"),
-            ("6", "删除通道"),
-            ("7", "返回"),
-        ]
+    def select_action_tui(title, info_lines, actions):
+        from mms_tui import select_channel_action_tui
+        return select_channel_action_tui(title, info_lines, actions)
 
-        choice = None
-        if _use_tui():
-            try:
-                from mms_tui import select_channel_action_tui
-                choice = select_channel_action_tui(f"网关 · {provider.get('name', provider_id)}", info_lines, actions)
-            except (ImportError, Exception):
-                pass
-        if choice is None and not _use_tui():
-            _ensure_rich()
-            console.print(Panel(
-                "\n".join(f"[bold]{l}:[/bold]  {v}" for l, v in info_lines),
-                title="通道详情", border_style="cyan",
-            ))
-            for aid, alabel in actions:
-                console.print(f"  {aid}. {alabel}")
-            choice = Prompt.ask("选择操作", choices=[a[0] for a in actions], default="7")
-        if choice is None:
-            return cfg, False
-        if choice == "1":
-            _display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
-            continue
-        if choice == "2":
-            return _manage_provider_models(cfg, provider_id)
-        if choice == "3":
-            cfg.setdefault("provider", {})["default"] = provider_id
-            save_config(cfg)
-            console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
-            return load_config(), True
-        if choice == "4":
-            _ensure_rich()
-            new_id = _normalize_provider_id_input(Prompt.ask("新的内部标识", default=provider_id).strip())
-            new_name = Prompt.ask("新的显示名", default=provider.get("name", provider_id)).strip() or new_id
-            if new_id == provider_id and new_name == provider.get("name", provider_id):
-                console.print("[yellow]名称和标识都未变化，已取消重命名[/yellow]")
-                return cfg, False
-            _handle_provider_rename_config(cfg, [provider_id, new_id, new_name])
-            return load_config(), True
-        if choice == "5":
-            _handle_provider_credentials_config(cfg, [provider_id])
-            return load_config(), True
-        if choice == "6":
-            before = set(_provider_map(cfg).keys())
-            _handle_provider_remove_config(cfg, [provider_id])
-            after_cfg = load_config()
-            return after_cfg, set(_provider_map(after_cfg).keys()) != before
-        return cfg, False
+    return manage_provider_target(
+        cfg,
+        provider_id,
+        resolve_provider_context=resolve_provider_context,
+        provider_openai_base_url=_provider_openai_base_url,
+        provider_anthropic_base_url=_provider_anthropic_base_url,
+        use_tui=_use_tui,
+        select_channel_action_tui=select_action_tui,
+        ensure_rich=_ensure_rich,
+        panel_cls=Panel,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        display_runtime_usage=_display_runtime_usage,
+        manage_provider_models=_manage_provider_models,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        save_config=save_config,
+        load_config=load_config,
+        normalize_provider_id_input=_normalize_provider_id_input,
+        handle_provider_rename_config=_handle_provider_rename_config,
+        handle_provider_credentials_config=_handle_provider_credentials_config,
+        provider_map=_provider_map,
+        handle_provider_remove_config=_handle_provider_remove_config,
+        console=console,
+    )
 
 
 def _prompt_account_rename(cfg, account_id):

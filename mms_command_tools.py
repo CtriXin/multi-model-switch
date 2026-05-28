@@ -2344,6 +2344,105 @@ def run_manage_channels(
         changed = changed or did_change
 
 
+def manage_provider_target(
+    cfg,
+    provider_id,
+    *,
+    resolve_provider_context,
+    provider_openai_base_url,
+    provider_anthropic_base_url,
+    use_tui,
+    select_channel_action_tui,
+    ensure_rich,
+    panel_cls,
+    prompt_ask,
+    display_runtime_usage,
+    manage_provider_models,
+    default_provider_id,
+    save_config,
+    load_config,
+    normalize_provider_id_input,
+    handle_provider_rename_config,
+    handle_provider_credentials_config,
+    provider_map,
+    handle_provider_remove_config,
+    console,
+):
+    provider = resolve_provider_context(cfg, provider_id)
+    while True:
+        default_tag = "是" if cfg.get("provider", {}).get("default", default_provider_id) == provider_id else "否"
+        extra_count = len(provider.get("extra_models", []) or [])
+        hidden_count = len(provider.get("hidden_models", []) or [])
+
+        info_lines = [
+            ("名称", provider.get("name", provider_id)),
+            ("标识", provider_id),
+            ("默认", default_tag),
+            ("OpenAI", provider_openai_base_url(provider) or "(未设置)"),
+            ("Anthropic", provider_anthropic_base_url(provider) or "(未设置)"),
+            ("模型列表地址", provider.get("models_endpoint", "/models")),
+            ("模型补丁", f"补充 {extra_count} / 隐藏 {hidden_count}"),
+            ("协议", ", ".join(provider.get("protocols", []))),
+            ("Proxy", provider.get("proxy", "") or "-"),
+            ("Timezone", provider.get("timezone", "") or "-"),
+        ]
+        actions = [
+            ("1", "查看本地统计"),
+            ("2", "模型管理"),
+            ("3", "设为默认网关"),
+            ("4", "重命名"),
+            ("5", "编辑地址和 Key"),
+            ("6", "删除通道"),
+            ("7", "返回"),
+        ]
+
+        choice = None
+        if use_tui():
+            try:
+                choice = select_channel_action_tui(f"网关 · {provider.get('name', provider_id)}", info_lines, actions)
+            except (ImportError, Exception):
+                pass
+        if choice is None and not use_tui():
+            ensure_rich()
+            console.print(panel_cls(
+                "\n".join(f"[bold]{label}:[/bold]  {value}" for label, value in info_lines),
+                title="通道详情", border_style="cyan",
+            ))
+            for action_id, action_label in actions:
+                console.print(f"  {action_id}. {action_label}")
+            choice = prompt_ask("选择操作", choices=[action[0] for action in actions], default="7")
+        if choice is None:
+            return cfg, False
+        if choice == "1":
+            display_runtime_usage("provider", provider_id, provider.get("name", provider_id))
+            continue
+        if choice == "2":
+            return manage_provider_models(cfg, provider_id)
+        if choice == "3":
+            cfg.setdefault("provider", {})["default"] = provider_id
+            save_config(cfg)
+            console.print(f"[green]✓ 默认网关已切换为 {provider_id}[/green]")
+            return load_config(), True
+        if choice == "4":
+            ensure_rich()
+            new_id = normalize_provider_id_input(prompt_ask("新的内部标识", default=provider_id).strip())
+            new_name = prompt_ask("新的显示名", default=provider.get("name", provider_id)).strip() or new_id
+            if new_id == provider_id and new_name == provider.get("name", provider_id):
+                console.print("[yellow]名称和标识都未变化，已取消重命名[/yellow]")
+                return cfg, False
+            handle_provider_rename_config(cfg, [provider_id, new_id, new_name])
+            return load_config(), True
+        if choice == "5":
+            handle_provider_credentials_config(cfg, [provider_id])
+            return load_config(), True
+        if choice == "6":
+            before = set(provider_map(cfg).keys())
+            handle_provider_remove_config(cfg, [provider_id])
+            after_cfg = load_config()
+            return after_cfg, set(provider_map(after_cfg).keys()) != before
+        return cfg, False
+
+
 def prompt_account_rename(
     cfg,
     account_id,
