@@ -54,6 +54,10 @@ def _bundle_file_specs(tmp_path: Path) -> dict[str, dict[str, object]]:
         tmp_path / "generated/model-policy.effective.json",
         {"version": 1, "models": {"kimi-k2.5": {"visible": True}}},
     )
+    capabilities = _write_json(
+        tmp_path / "generated/model-capabilities.approved.json",
+        {"schema": "mms.model_capabilities.approved.v1", "models": {"kimi-k2.5": {"families": ["Claude"]}}},
+    )
     return {
         "router": {
             "path": router,
@@ -82,6 +86,13 @@ def _bundle_file_specs(tmp_path: Path) -> dict[str, dict[str, object]]:
             "legacy_alias_path": "model-policy.json",
             "sensitivity": "non-secret",
             "legacy_alias_compat": True,
+        },
+        "capabilities": {
+            "path": capabilities,
+            "canonical_path": "generated/model-capabilities.approved.json",
+            "legacy_alias_path": "",
+            "sensitivity": "non-secret",
+            "legacy_alias_compat": False,
         },
     }
 
@@ -324,6 +335,33 @@ def test_latest_approved_bundle_manifest_includes_required_fields_and_hashes(tmp
     assert "sk-secret-value" not in json.dumps(manifest, sort_keys=True)
 
 
+def test_latest_approved_manifest_requires_complete_file_set_and_safe_paths(tmp_path: Path) -> None:
+    files = _bundle_file_specs(tmp_path)
+    incomplete = dict(files)
+    incomplete.pop("capabilities")
+    with pytest.raises(mms_registry.RegistryValidationError, match="manifest files missing: capabilities"):
+        mms_registry.build_latest_approved_bundle_manifest(
+            bundle_revision="bundle_20260522_001",
+            capability_revision="cap_20260522_001",
+            route_revision="route_20260522_001",
+            policy_revision="policy_20260522_001",
+            profile_revision="profile_20260522_001",
+            files=incomplete,
+        )
+
+    escaping = {key: dict(value) for key, value in files.items()}
+    escaping["router"]["canonical_path"] = "../model-routes.json"
+    with pytest.raises(mms_registry.RegistryValidationError, match="escapes config root: router"):
+        mms_registry.build_latest_approved_bundle_manifest(
+            bundle_revision="bundle_20260522_001",
+            capability_revision="cap_20260522_001",
+            route_revision="route_20260522_001",
+            policy_revision="policy_20260522_001",
+            profile_revision="profile_20260522_001",
+            files=escaping,
+        )
+
+
 def test_atomic_export_writes_manifest_and_export_snapshot_to_temp_path(tmp_path: Path) -> None:
     db = _open_temp_registry(tmp_path)
     try:
@@ -353,3 +391,28 @@ def test_atomic_export_writes_manifest_and_export_snapshot_to_temp_path(tmp_path
         )
     finally:
         db.close()
+
+
+def test_verify_latest_approved_bundle_rejects_incomplete_or_escaping_manifest(tmp_path: Path) -> None:
+    output_path = tmp_path / "generated/model-registry.latest-approved.json"
+    manifest = mms_registry.export_latest_approved_bundle_manifest(
+        output_path,
+        bundle_revision="bundle_20260522_002",
+        capability_revision="cap_20260522_002",
+        route_revision="route_20260522_002",
+        policy_revision="policy_20260522_002",
+        profile_revision="profile_20260522_002",
+        generated_at="2026-05-22T01:00:00.000Z",
+        files=_bundle_file_specs(tmp_path),
+    )
+
+    incomplete = json.loads(output_path.read_text(encoding="utf-8"))
+    incomplete["files"].pop("capabilities")
+    output_path.write_text(json.dumps(incomplete, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="manifest files missing: capabilities"):
+        mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
+
+    manifest["files"]["router"]["canonical_path"] = "../model-routes.json"
+    output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="escapes config root: router"):
+        mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)

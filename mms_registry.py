@@ -63,8 +63,8 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 )
-_MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy")
-_OPTIONAL_MANIFEST_FILE_KEYS = ("capabilities",)
+_MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy", "capabilities")
+_OPTIONAL_MANIFEST_FILE_KEYS: tuple[str, ...] = ()
 APPROVED_CAPABILITIES_SCHEMA = "mms.model_capabilities.approved.v1"
 
 
@@ -956,8 +956,10 @@ def _manifest_file_entry(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     sensitivity = str(spec.get("sensitivity") or "non-secret")
     if sensitivity not in {"secret", "non-secret"}:
         raise RegistryValidationError(f"unknown sensitivity for {name}: {sensitivity}")
+    canonical_path = str(spec.get("canonical_path") or f"generated/{path.name}")
+    _validate_manifest_canonical_path(canonical_path, name=name)
     return {
-        "canonical_path": str(spec.get("canonical_path") or f"generated/{path.name}"),
+        "canonical_path": canonical_path,
         "legacy_alias_path": str(spec.get("legacy_alias_path") or ""),
         "sha256": str(spec.get("sha256") or _read_file_hash(path, sensitivity=sensitivity)),
         "sensitivity": sensitivity,
@@ -1922,6 +1924,28 @@ def _manifest_base_dir(manifest_path: Path, config_dir: str | os.PathLike[str] |
     return manifest_path.parent
 
 
+def _validate_manifest_canonical_path(canonical_path: str, *, name: str) -> Path:
+    relative = Path(canonical_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RegistryValidationError(f"manifest file entry escapes config root: {name}")
+    return relative
+
+
+def _manifest_file_path(base_dir: Path, canonical_path: Any, *, name: str) -> Path:
+    canonical = str(canonical_path or "").strip()
+    if not canonical:
+        raise RegistryValidationError(f"manifest file entry missing canonical_path: {name}")
+    relative = _validate_manifest_canonical_path(canonical, name=name)
+    path = base_dir / relative
+    try:
+        resolved_base = base_dir.expanduser().resolve()
+        resolved_path = path.expanduser().resolve()
+        resolved_path.relative_to(resolved_base)
+    except Exception as exc:
+        raise RegistryValidationError(f"manifest file entry escapes config root: {name}") from exc
+    return path
+
+
 def verify_latest_approved_bundle(
     *,
     config_dir: str | os.PathLike[str] | None = None,
@@ -1932,12 +1956,17 @@ def verify_latest_approved_bundle(
     if manifest.get("schema") != LATEST_APPROVED_SCHEMA:
         raise RegistryValidationError(f"unexpected latest-approved schema: {manifest.get('schema')}")
     base_dir = _manifest_base_dir(path, config_dir)
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        raise RegistryValidationError("latest-approved manifest has no files")
+    missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
+    if missing:
+        raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
     verified_files: dict[str, dict[str, Any]] = {}
-    for name, entry in (manifest.get("files") or {}).items():
-        canonical = str(entry.get("canonical_path") or "").strip()
-        if not canonical:
-            raise RegistryValidationError(f"manifest file entry missing canonical_path: {name}")
-        file_path = base_dir / canonical
+    for name, entry in files.items():
+        if not isinstance(entry, dict):
+            raise RegistryValidationError(f"invalid manifest file entry: {name}")
+        file_path = _manifest_file_path(base_dir, entry.get("canonical_path"), name=str(name))
         if not file_path.exists():
             raise RegistryValidationError(f"manifest file missing: {file_path}")
         actual_hash = sha256_hex(file_path.read_bytes())

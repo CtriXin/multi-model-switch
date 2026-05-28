@@ -31,6 +31,14 @@ def _write_bundle(
         },
     )
     mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(
+        capabilities,
+        capabilities_payload
+        or {
+            "schema": "mms.model_capabilities.approved.v1",
+            "models": [],
+        },
+    )
     files = {
         "router": {
             "path": router,
@@ -59,15 +67,13 @@ def _write_bundle(
             "sensitivity": "non-secret",
             "legacy_alias_compat": True,
         },
-    }
-    if capabilities_payload is not None:
-        mms_registry.write_json_atomic(capabilities, capabilities_payload)
-        files["capabilities"] = {
+        "capabilities": {
             "path": capabilities,
             "canonical_path": "generated/model-capabilities.approved.json",
             "sensitivity": "non-secret",
             "legacy_alias_compat": False,
-        }
+        },
+    }
 
     manifest_path = generated / "model-registry.latest-approved.json"
     mms_registry.export_latest_approved_bundle_manifest(

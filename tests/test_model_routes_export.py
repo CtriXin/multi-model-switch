@@ -16,6 +16,7 @@ def _write_latest_approved_route_bundle(tmp_path, mms_router, *, routes):
     lineup = generated / "model-routes.lineup.json"
     profile = generated / "provider-profiles.generated.json"
     policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
     mms_registry.write_json_atomic(router, {"version": 1, "generated_at": "2026-05-23T00:00:00.000Z", "routes": routes})
     router_payload = json.loads(router.read_text(encoding="utf-8"))
     mms_registry.write_json_atomic(
@@ -32,6 +33,7 @@ def _write_latest_approved_route_bundle(tmp_path, mms_router, *, routes):
     )
     mms_registry.write_json_atomic(profile, {"schema_version": 1, "profiles": {}})
     mms_registry.write_json_atomic(policy, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities, {"schema": "mms.model_capabilities.approved.v1", "models": []})
     mms_registry.export_latest_approved_bundle_manifest(
         generated / "model-registry.latest-approved.json",
         bundle_revision="bundle_route_test_001",
@@ -67,6 +69,12 @@ def _write_latest_approved_route_bundle(tmp_path, mms_router, *, routes):
                 "legacy_alias_path": "model-policy.json",
                 "sensitivity": "non-secret",
                 "legacy_alias_compat": True,
+            },
+            "capabilities": {
+                "path": capabilities,
+                "canonical_path": "generated/model-capabilities.approved.json",
+                "sensitivity": "non-secret",
+                "legacy_alias_compat": False,
             },
         },
     )

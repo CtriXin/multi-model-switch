@@ -729,22 +729,35 @@ def test_responses_proxy_hot_fallback_uses_messages_for_cache_sensitive_openai_o
 
 
 def _write_latest_approved_router_manifest(config_root: Path, *, router_payload: dict, sha_override: str = "") -> None:
+    import mms_registry
+
     generated = config_root / "generated"
-    generated.mkdir(parents=True, exist_ok=True)
     router_path = generated / "model-routes.json"
-    router_bytes = json.dumps(router_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    router_path.write_bytes(router_bytes)
-    manifest = {
-        "schema": "mms.model_registry.latest_approved.v1",
-        "files": {
-            "router": {
-                "canonical_path": "generated/model-routes.json",
-                "sha256": sha_override or hashlib.sha256(router_bytes).hexdigest(),
-                "sensitivity": "secret",
-            }
+    lineup_path = generated / "model-routes.lineup.json"
+    profile_path = generated / "provider-profiles.generated.json"
+    policy_path = generated / "model-policy.effective.json"
+    capabilities_path = generated / "model-capabilities.approved.json"
+    mms_registry.write_json_atomic(router_path, router_payload)
+    router_hash = hashlib.sha256(router_path.read_bytes()).hexdigest()
+    mms_registry.write_json_atomic(lineup_path, {"version": 1, "routes": {}})
+    mms_registry.write_json_atomic(profile_path, {"schema_version": 1, "profiles": {}})
+    mms_registry.write_json_atomic(policy_path, {"version": 1, "models": {}})
+    mms_registry.write_json_atomic(capabilities_path, {"schema": "mms.model_capabilities.approved.v1", "models": []})
+    mms_registry.export_latest_approved_bundle_manifest(
+        generated / "model-registry.latest-approved.json",
+        bundle_revision="bundle_rescue_test",
+        capability_revision="cap_rescue_test",
+        route_revision="route_rescue_test",
+        policy_revision="policy_rescue_test",
+        profile_revision="profile_rescue_test",
+        files={
+            "router": {"path": router_path, "canonical_path": "generated/model-routes.json", "sha256": sha_override or router_hash, "sensitivity": "secret"},
+            "lineup": {"path": lineup_path, "canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+            "profile": {"path": profile_path, "canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+            "policy": {"path": policy_path, "canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+            "capabilities": {"path": capabilities_path, "canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
         },
-    }
-    (generated / "model-registry.latest-approved.json").write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    )
 
 
 def test_rescue_hot_fallback_reads_verified_latest_approved_router(tmp_path):
