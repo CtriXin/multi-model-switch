@@ -36,6 +36,14 @@ mms_config_root() {
         return
     fi
     if [ -n "$XDG_CONFIG_HOME" ]; then
+        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/claude-gateway/"* ]]; then
+            echo "${XDG_CONFIG_HOME%%/.config/mms/claude-gateway/*}/.config/mms"
+            return
+        fi
+        if [[ "$XDG_CONFIG_HOME" == *"/.config/mms/codex-gateway/"* ]]; then
+            echo "${XDG_CONFIG_HOME%%/.config/mms/codex-gateway/*}/.config/mms"
+            return
+        fi
         echo "$XDG_CONFIG_HOME/mms"
         return
     fi

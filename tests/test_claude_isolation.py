@@ -524,6 +524,66 @@ def test_statusline_reads_route_and_health_from_selected_config_root(tmp_path):
     assert "●" in result.stdout
 
 
+def test_statusline_strips_gateway_xdg_without_explicit_root(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "statusline-command.sh"
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    gateway_home = stable_root / "claude-gateway" / "s" / "12345"
+    stable_root.mkdir(parents=True)
+    gateway_home.mkdir(parents=True)
+    (stable_root / "route_status.json").write_text(
+        json.dumps({"tier": "heavy", "model": "claude-stable-20260101"}),
+        encoding="utf-8",
+    )
+    (stable_root / "health-cache.json").write_text(
+        json.dumps(
+            {
+                "records": {
+                    "claude-stable-20260101": {
+                        "status": "ok",
+                        "checked_at": datetime.now().astimezone().isoformat(),
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = {
+        "model": {"display_name": "Sonnet"},
+        "workspace": {"current_dir": str(tmp_path)},
+        "context_window": {
+            "used_percentage": 1,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 2000,
+            "context_window_size": 200000,
+        },
+        "cost": {"total_cost_usd": 0, "total_duration_ms": 0},
+    }
+    env = {
+        **os.environ,
+        "HOME": str(gateway_home),
+        "XDG_CONFIG_HOME": str(gateway_home / ".config"),
+        "MMS_REAL_HOME": str(real_home),
+        "REAL_HOME": str(real_home),
+        "ORIGINAL_HOME": str(real_home),
+        "TMPDIR": str(tmp_path) + os.sep,
+    }
+    env.pop("MMS_CONFIG_ROOT", None)
+    env.pop("MMS_CONFIG_DIR", None)
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps(payload),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert "stable" in result.stdout
+    assert "●" in result.stdout
+
+
 def test_claude_route_status_path_uses_selected_root_when_explicit(monkeypatch, tmp_path):
     import mms_launchers
 
