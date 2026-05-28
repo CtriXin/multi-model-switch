@@ -7,6 +7,7 @@ from mms_tui_launcher_flow import (
     apply_launch_runtime_preferences,
     apply_opencode_profile_for_launch,
     apply_rescue_default_fallback_action,
+    apply_rescue_demo_packet_action,
     apply_rescue_hot_fallback_toggle_action,
     apply_tui_priority_changes,
     build_confirm_capability_context,
@@ -1930,6 +1931,27 @@ def test_apply_rescue_hot_fallback_toggle_action_reports_blocked_without_save() 
     assert calls == [
         ("set", cfg, True),
         ("report", ("blocked", [("enabled", False), ("kwargs", {"has_default": False})]), {"ok": False}),
+        ("pause", "按 Enter 返回设置"),
+    ]
+
+
+def test_apply_rescue_demo_packet_action_writes_reports_and_pauses() -> None:
+    calls = []
+    payload = {"artifact": "demo"}
+
+    result = apply_rescue_demo_packet_action(
+        "/repo",
+        write_demo_rescue_packet=lambda *, repo_root: calls.append(("write", repo_root)) or payload,
+        rescue_demo_packet_report_payload=lambda payload_arg: calls.append(("payload", payload_arg)) or ("title", [("artifact", "demo")]),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+    )
+
+    assert result == {"status": "continue", "payload": payload}
+    assert calls == [
+        ("write", "/repo"),
+        ("payload", payload),
+        ("report", ("title", [("artifact", "demo")]), {}),
         ("pause", "按 Enter 返回设置"),
     ]
 

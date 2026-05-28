@@ -5203,9 +5203,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     current_cfg = _apply_rescue_default_action("", cleared=True)["cfg"]
                     continue
                 if landing_action == "create_demo":
-                    payload = write_demo_rescue_packet(repo_root=os.getcwd())
-                    _print_settings_result_report(*_rescue_demo_packet_report_payload(payload))
-                    _pause_after_tui_report("按 Enter 返回设置")
+                    tui_flow.apply_rescue_demo_packet_action(
+                        os.getcwd(),
+                        write_demo_rescue_packet=write_demo_rescue_packet,
+                        rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
+                        print_settings_result_report=_print_settings_result_report,
+                        pause_after_tui_report=_pause_after_tui_report,
+                    )
                     continue
                 if landing_action != "view_packets":
                     continue

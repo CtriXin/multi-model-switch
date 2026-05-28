@@ -1130,6 +1130,20 @@ def apply_rescue_hot_fallback_toggle_action(
     return {"status": "continue", "cfg": cfg, "applied": applied}
 
 
+def apply_rescue_demo_packet_action(
+    repo_root,
+    *,
+    write_demo_rescue_packet,
+    rescue_demo_packet_report_payload,
+    print_settings_result_report,
+    pause_after_tui_report,
+):
+    payload = write_demo_rescue_packet(repo_root=repo_root)
+    print_settings_result_report(*rescue_demo_packet_report_payload(payload))
+    pause_after_tui_report("按 Enter 返回设置")
+    return {"status": "continue", "payload": payload}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}
