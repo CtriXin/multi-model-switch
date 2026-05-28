@@ -423,6 +423,46 @@ def handle_guard_command(
             console.print(f"[dim]... 还有 {len(diff_lines) - 20} 项[/dim]")
 
 
+def handle_session_command(
+    argv,
+    *,
+    command_name,
+    handle_session_ls,
+    handle_session_info,
+    handle_session_prune,
+):
+    parser = argparse.ArgumentParser(
+        prog=f"{command_name} session",
+        description="查看 MMS 托管 CLI session",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    ls_parser = subparsers.add_parser("ls", help="列出已索引 session")
+    ls_parser.add_argument("--cli", default="claude", choices=["claude"])
+
+    info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
+    info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
+    info_parser.add_argument("--cli", default="claude", choices=["claude"])
+
+    prune_parser = subparsers.add_parser("prune", help="列出或删除 stale MMS gateway session")
+    prune_parser.add_argument("--cli", default="all", choices=["claude", "codex", "opencode", "all"])
+    prune_parser.add_argument("--dry-run", action="store_true", help="只列出候选项；默认行为")
+    prune_parser.add_argument("--apply", action="store_true", help="实际删除 stale session；默认只 dry-run")
+    prune_parser.add_argument("--yes", action="store_true", help="配合 --apply，确认删除")
+
+    args = parser.parse_args(argv)
+    if args.subcommand == "ls":
+        handle_session_ls(args.cli)
+        return
+    if args.subcommand == "info":
+        handle_session_info(args.session_id, args.cli)
+        return
+    if args.subcommand == "prune":
+        handle_session_prune(args.cli, apply=bool(args.apply), yes=bool(args.yes))
+        return
+    parser.print_help()
+
+
 def run_script_subcommand(script_name, argv, subcommand_name, *, script_dir, command_name, console):
     script_path = os.path.join(script_dir, script_name)
     if not os.path.exists(script_path):

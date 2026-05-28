@@ -113,6 +113,22 @@ def test_handle_session_prune_dry_run_lists_stale_gateway_sessions(monkeypatch, 
     assert stale.exists()
 
 
+def test_session_command_parser_dispatches_prune_args():
+    import mms_command_tools
+
+    calls = []
+
+    mms_command_tools.handle_session_command(
+        ["prune", "--cli", "opencode", "--apply", "--yes"],
+        command_name="mmg",
+        handle_session_ls=lambda cli: calls.append(("ls", cli)),
+        handle_session_info=lambda session_id, cli: calls.append(("info", session_id, cli)),
+        handle_session_prune=lambda cli, apply=False, yes=False: calls.append(("prune", cli, apply, yes)),
+    )
+
+    assert calls == [("prune", "opencode", True, True)]
+
+
 def test_choose_runtime_source_initializes_rich_before_interactive_source_table(monkeypatch):
     import mms_core
 

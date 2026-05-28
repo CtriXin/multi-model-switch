@@ -11117,36 +11117,15 @@ def _handle_session_prune(cli_name, *, apply=False, yes=False):
 
 def handle_session_command(argv):
     _ensure_rich()
-    parser = argparse.ArgumentParser(
-        prog=f"{current_command()} session",
-        description="查看 MMS 托管 CLI session",
+    from mms_command_tools import handle_session_command as handle_session_command_impl
+
+    return handle_session_command_impl(
+        argv,
+        command_name=current_command(),
+        handle_session_ls=_handle_session_ls,
+        handle_session_info=_handle_session_info,
+        handle_session_prune=_handle_session_prune,
     )
-    subparsers = parser.add_subparsers(dest="subcommand")
-
-    ls_parser = subparsers.add_parser("ls", help="列出已索引 session")
-    ls_parser.add_argument("--cli", default="claude", choices=["claude"])
-
-    info_parser = subparsers.add_parser("info", help="查看单个 session 详情")
-    info_parser.add_argument("session_id", help="session_id 或 pid-<pid>")
-    info_parser.add_argument("--cli", default="claude", choices=["claude"])
-
-    prune_parser = subparsers.add_parser("prune", help="列出或删除 stale MMS gateway session")
-    prune_parser.add_argument("--cli", default="all", choices=["claude", "codex", "opencode", "all"])
-    prune_parser.add_argument("--dry-run", action="store_true", help="只列出候选项；默认行为")
-    prune_parser.add_argument("--apply", action="store_true", help="实际删除 stale session；默认只 dry-run")
-    prune_parser.add_argument("--yes", action="store_true", help="配合 --apply，确认删除")
-
-    args = parser.parse_args(argv)
-    if args.subcommand == "ls":
-        _handle_session_ls(args.cli)
-        return
-    if args.subcommand == "info":
-        _handle_session_info(args.session_id, args.cli)
-        return
-    if args.subcommand == "prune":
-        _handle_session_prune(args.cli, apply=bool(args.apply), yes=bool(args.yes))
-        return
-    parser.print_help()
 
 
 def _split_cli_prefixed_resume_ref(session_ref):
