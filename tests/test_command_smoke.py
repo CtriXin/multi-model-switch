@@ -775,6 +775,52 @@ def test_update_status_helpers_preserve_install_and_about_status_semantics():
     assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "最新"
 
 
+def test_runtime_usage_model_and_hint_helpers_preserve_tracking_shape():
+    import mms_command_tools
+
+    provider_runtime = {
+        "runtime_kind": "provider",
+        "auth_mode": "api_key",
+        "id": "relay",
+        "provider_id": "relay",
+    }
+    account_runtime = {
+        "runtime_kind": "account",
+        "auth_mode": "oauth",
+        "id": "claude-main",
+        "account_id": "claude-main",
+    }
+
+    assert mms_command_tools.runtime_usage_key(provider_runtime, "codex") == "provider:codex:relay"
+    assert mms_command_tools.runtime_usage_key({}, "claude") == "provider:claude:default"
+    assert mms_command_tools.resolve_model_name({"model": "gpt-5.5", "sonnet": "claude-sonnet"}) == "gpt-5.5"
+    assert mms_command_tools.resolve_model_name({"sonnet": "claude-sonnet"}) == "claude-sonnet"
+    assert mms_command_tools.resolve_model_name({}) == "official-default"
+    assert mms_command_tools.resolve_model_name("") == "official-default"
+    assert mms_command_tools.resolve_model_name("gpt-5.4") == "gpt-5.4"
+    assert mms_command_tools.runtime_hint_from_runtime(
+        provider_runtime,
+        runtime_provider_id=lambda runtime: runtime.get("provider_id", ""),
+        runtime_account_id=lambda runtime: runtime.get("account_id", ""),
+    ) == {
+        "runtime_kind": "provider",
+        "auth_mode": "api_key",
+        "provider_id": "relay",
+        "runtime_id": "relay",
+    }
+    assert mms_command_tools.runtime_hint_from_runtime(
+        account_runtime,
+        runtime_provider_id=lambda runtime: runtime.get("provider_id", ""),
+        runtime_account_id=lambda runtime: runtime.get("account_id", ""),
+    ) == {
+        "runtime_kind": "account",
+        "auth_mode": "oauth",
+        "account_id": "claude-main",
+        "runtime_id": "claude-main",
+    }
+    assert mms_command_tools.runtime_hint_from_runtime(None, runtime_provider_id=lambda runtime: "", runtime_account_id=lambda runtime: "") == {}
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

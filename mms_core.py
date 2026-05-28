@@ -3105,38 +3105,25 @@ def _backup_config_tree(label):
 
 
 def _runtime_usage_key(runtime, cli_name):
-    kind = runtime.get("runtime_kind", "provider")
-    runtime_id = runtime.get("id", "default")
-    return f"{kind}:{cli_name}:{runtime_id}"
+    from mms_command_tools import runtime_usage_key
+
+    return runtime_usage_key(runtime, cli_name)
 
 
 def _resolve_model_name(model_info):
-    if isinstance(model_info, dict):
-        for key in ("model", "sonnet", "opus", "haiku"):
-            value = model_info.get(key)
-            if value:
-                return str(value)
-        return "official-default"
-    return str(model_info or "official-default")
+    from mms_command_tools import resolve_model_name
+
+    return resolve_model_name(model_info)
 
 
 def _runtime_hint_from_runtime(runtime):
-    if not isinstance(runtime, dict):
-        return {}
-    hint = {
-        "runtime_kind": str(runtime.get("runtime_kind", "")).strip(),
-        "auth_mode": str(runtime.get("auth_mode", "")).strip(),
-    }
-    provider_id = _trace_runtime_provider_id(runtime)
-    account_id = _trace_runtime_account_id(runtime)
-    runtime_id = str(runtime.get("id") or "").strip()
-    if provider_id:
-        hint["provider_id"] = provider_id
-    if account_id:
-        hint["account_id"] = account_id
-    if runtime_id:
-        hint["runtime_id"] = runtime_id
-    return {k: v for k, v in hint.items() if v}
+    from mms_command_tools import runtime_hint_from_runtime
+
+    return runtime_hint_from_runtime(
+        runtime,
+        runtime_provider_id=_trace_runtime_provider_id,
+        runtime_account_id=_trace_runtime_account_id,
+    )
 
 
 def _record_usage(runtime, cli_name, model_info):

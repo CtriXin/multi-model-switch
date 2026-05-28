@@ -1091,6 +1091,41 @@ def mms_update_status(version_info, cache, *, localize):
     }
 
 
+def runtime_usage_key(runtime, cli_name):
+    kind = runtime.get("runtime_kind", "provider")
+    runtime_id = runtime.get("id", "default")
+    return f"{kind}:{cli_name}:{runtime_id}"
+
+
+def resolve_model_name(model_info):
+    if isinstance(model_info, dict):
+        for key in ("model", "sonnet", "opus", "haiku"):
+            value = model_info.get(key)
+            if value:
+                return str(value)
+        return "official-default"
+    return str(model_info or "official-default")
+
+
+def runtime_hint_from_runtime(runtime, *, runtime_provider_id, runtime_account_id):
+    if not isinstance(runtime, dict):
+        return {}
+    hint = {
+        "runtime_kind": str(runtime.get("runtime_kind", "")).strip(),
+        "auth_mode": str(runtime.get("auth_mode", "")).strip(),
+    }
+    provider_id = runtime_provider_id(runtime)
+    account_id = runtime_account_id(runtime)
+    runtime_id = str(runtime.get("id") or "").strip()
+    if provider_id:
+        hint["provider_id"] = provider_id
+    if account_id:
+        hint["account_id"] = account_id
+    if runtime_id:
+        hint["runtime_id"] = runtime_id
+    return {k: v for k, v in hint.items() if v}
+
+
 def http_status_is_success(value):
     try:
         status_code = int(str(value or "").strip())
