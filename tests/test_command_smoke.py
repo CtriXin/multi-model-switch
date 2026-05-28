@@ -2085,6 +2085,17 @@ def test_fetch_latest_semver_tags_preserves_request_and_normalization():
     ) == ""
 
 
+def test_fetch_latest_semver_tag_returns_first_or_empty():
+    import mms_command_tools
+
+    assert mms_command_tools.fetch_latest_semver_tag(
+        fetch_latest_semver_tags=lambda: ["v1.2.4", "v1.2.3"],
+    ) == "v1.2.4"
+    assert mms_command_tools.fetch_latest_semver_tag(
+        fetch_latest_semver_tags=lambda: [],
+    ) == ""
+
+
 def test_detect_cli_version_preserves_missing_success_and_failure_paths():
     import mms_command_tools
 

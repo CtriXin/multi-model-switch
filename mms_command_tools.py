@@ -2753,6 +2753,11 @@ def fetch_latest_semver_tags(*, limit, request_cls, urlopen_func, json_load, nor
     return normalize_semver_tags(semver_tags)
 
 
+def fetch_latest_semver_tag(*, fetch_latest_semver_tags):
+    semver_tags = fetch_latest_semver_tags()
+    return semver_tags[0] if semver_tags else ""
+
+
 def extract_semver_text(value):
     match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?", str(value or ""))
     return match.group(0) if match else ""

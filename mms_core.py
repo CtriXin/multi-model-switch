@@ -403,8 +403,9 @@ def _fetch_latest_semver_tags(limit=UPDATE_CHECK_TAG_LIMIT):
 
 
 def _fetch_latest_semver_tag():
-    semver_tags = _fetch_latest_semver_tags()
-    return semver_tags[0] if semver_tags else ""
+    from mms_command_tools import fetch_latest_semver_tag
+
+    return fetch_latest_semver_tag(fetch_latest_semver_tags=_fetch_latest_semver_tags)
 
 
 def _extract_semver_text(value):
