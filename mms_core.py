@@ -1091,31 +1091,14 @@ def _default_provider():
 
 
 def _normalize_supported_clis(value, protocols=None):
-    if isinstance(value, str):
-        raw_items = [value]
-    else:
-        raw_items = list(value or [])
-    protocol_set = {str(item).strip() for item in (protocols or []) if str(item).strip()}
-    normalized = []
-    seen = set()
+    from mms_command_tools import normalize_supported_clis
 
-    def add(cli_name):
-        if cli_name in CLI_NAMES and cli_name not in seen:
-            normalized.append(cli_name)
-            seen.add(cli_name)
-
-    for item in raw_items:
-        cli_name = str(item or "").strip().lower()
-        if not cli_name:
-            continue
-        if cli_name in LEGACY_PROVIDER_CLI_ALIASES:
-            if "anthropic_messages" in protocol_set:
-                add("claude")
-            if "openai_chat_completions" in protocol_set:
-                add("codex")
-            continue
-        add(cli_name)
-    return normalized
+    return normalize_supported_clis(
+        value,
+        protocols=protocols,
+        cli_names=CLI_NAMES,
+        legacy_provider_cli_aliases=LEGACY_PROVIDER_CLI_ALIASES,
+    )
 
 
 def _default_account_home(account_id):
@@ -1123,33 +1106,25 @@ def _default_account_home(account_id):
 
 
 def _normalize_priority(value):
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return DEFAULT_PRIORITY
+    from mms_command_tools import normalize_priority
+
+    return normalize_priority(value, default_priority=DEFAULT_PRIORITY)
 
 
 def _canonical_model_family(value):
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return ""
-    for entry in MODEL_FAMILIES:
-        family = str(entry.get("family") or "").strip()
-        if family.lower() == raw:
-            return family
-    return ""
+    from mms_command_tools import canonical_model_family
+
+    return canonical_model_family(value, model_families=MODEL_FAMILIES)
 
 
 def _normalize_family_priority_overrides(value):
-    if not isinstance(value, dict):
-        return {}
-    normalized = {}
-    for family_name, priority in value.items():
-        canonical = _canonical_model_family(family_name)
-        if not canonical:
-            continue
-        normalized[canonical] = _normalize_priority(priority)
-    return normalized
+    from mms_command_tools import normalize_family_priority_overrides
+
+    return normalize_family_priority_overrides(
+        value,
+        model_families=MODEL_FAMILIES,
+        default_priority=DEFAULT_PRIORITY,
+    )
 
 
 def _runtime_priority_for_family(runtime, family_name):

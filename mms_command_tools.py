@@ -871,6 +871,64 @@ def provider_env_value(provider_id, field, *, default_provider_id, environ=None)
     return environ.get(provider_env_name(provider_id, field, default_provider_id=default_provider_id), "").strip()
 
 
+def normalize_supported_clis(value, *, protocols=None, cli_names, legacy_provider_cli_aliases):
+    if isinstance(value, str):
+        raw_items = [value]
+    else:
+        raw_items = list(value or [])
+    protocol_set = {str(item).strip() for item in (protocols or []) if str(item).strip()}
+    normalized = []
+    seen = set()
+
+    def add(cli_name):
+        if cli_name in cli_names and cli_name not in seen:
+            normalized.append(cli_name)
+            seen.add(cli_name)
+
+    for item in raw_items:
+        cli_name = str(item or "").strip().lower()
+        if not cli_name:
+            continue
+        if cli_name in legacy_provider_cli_aliases:
+            if "anthropic_messages" in protocol_set:
+                add("claude")
+            if "openai_chat_completions" in protocol_set:
+                add("codex")
+            continue
+        add(cli_name)
+    return normalized
+
+
+def normalize_priority(value, *, default_priority):
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default_priority
+
+
+def canonical_model_family(value, *, model_families):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    for entry in model_families:
+        family = str(entry.get("family") or "").strip()
+        if family.lower() == raw:
+            return family
+    return ""
+
+
+def normalize_family_priority_overrides(value, *, model_families, default_priority):
+    if not isinstance(value, dict):
+        return {}
+    normalized = {}
+    for family_name, priority in value.items():
+        canonical = canonical_model_family(family_name, model_families=model_families)
+        if not canonical:
+            continue
+        normalized[canonical] = normalize_priority(priority, default_priority=default_priority)
+    return normalized
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"

@@ -661,6 +661,38 @@ def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     )
 
 
+def test_runtime_priority_and_supported_cli_helpers_preserve_normalization():
+    import mms_command_tools
+
+    model_families = [{"family": "GPT"}, {"family": "Claude"}]
+    cli_names = ["claude", "codex", "opencode"]
+    legacy_aliases = {"provider", "gateway"}
+
+    assert mms_command_tools.normalize_supported_clis(
+        "provider",
+        protocols=["anthropic_messages", "openai_chat_completions"],
+        cli_names=cli_names,
+        legacy_provider_cli_aliases=legacy_aliases,
+    ) == ["claude", "codex"]
+    assert mms_command_tools.normalize_supported_clis(
+        ["codex", "unknown", "codex", "opencode"],
+        protocols=[],
+        cli_names=cli_names,
+        legacy_provider_cli_aliases=legacy_aliases,
+    ) == ["codex", "opencode"]
+    assert mms_command_tools.normalize_priority("7", default_priority=50) == 7
+    assert mms_command_tools.normalize_priority("0", default_priority=50) == 1
+    assert mms_command_tools.normalize_priority("bad", default_priority=50) == 50
+    assert mms_command_tools.canonical_model_family("gpt", model_families=model_families) == "GPT"
+    assert mms_command_tools.canonical_model_family("unknown", model_families=model_families) == ""
+    assert mms_command_tools.normalize_family_priority_overrides(
+        {"gpt": "9", "Claude": 0, "unknown": 99},
+        model_families=model_families,
+        default_priority=50,
+    ) == {"GPT": 9, "Claude": 1}
+    assert mms_command_tools.normalize_family_priority_overrides([], model_families=model_families, default_priority=50) == {}
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
