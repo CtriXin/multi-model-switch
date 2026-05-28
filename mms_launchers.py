@@ -10759,6 +10759,7 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
     "us-cpa-local-codex": {
         "gpt-5.3-codex": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
         "gpt-5.3-codex-spark": "2026-05-28 live Pi smoke returned 400 empty-body upstream error on this relay",
+        "gpt-5.4": "2026-05-28 current-surface rerun returned 401 token invalidated on this relay",
         "gpt-5.4-mini": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
         "gpt-5.5": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
     },
