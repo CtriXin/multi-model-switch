@@ -412,6 +412,7 @@ Current legacy import candidate implementation:
 - `--include-secrets` is explicit and copies legacy API keys into `<preview-root>/secrets/legacy-secrets.json` with `0600` mode; DB rows still store only `secret_ref`.
 - `--apply` initializes the preview layout if needed, writes a sanitized import report to `<config_root>/imports/`, stores a `legacy_config_import` source snapshot, imports model identity/facts from legacy model lists and generated route keys, and creates candidate route/provider rows for configured `fallback_models` / `extra_models`.
 - It does not store plaintext API keys in DB or import JSON; route candidates use `secret_ref` such as `legacy-config:*` / `legacy-env:*` plus fingerprints in the report.
+- If a provider model has no URL in `config.toml` / `credentials.sh`, importer may backfill only `anthropic_base_url` / `openai_base_url` from legacy `model-routes.json` matching `provider_id` + model; it must not import plaintext route-artifact API keys.
 - After import, `mmf config source --json` and WebUI/TUI Model Source status show read-only candidate counts from DB: legacy import snapshots, legacy route revisions, route groups, and provider routes.
 - Stable-root import is refused unless the lower-level command is explicitly passed `--allow-stable`.
 

@@ -1538,6 +1538,72 @@ def test_preview_include_secrets_without_route_url_is_not_runtime_ready(tmp_path
     assert doctor["next_actions"][0]["command"] == "./mmf config source --json"
 
 
+def test_legacy_import_backfills_route_urls_from_legacy_route_artifact(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [[providers]]
+        id = "artifact-url"
+        api_key = "sk-config-secret-value"
+        fallback_models = ["artifact-model"]
+        priority = 100
+        role = "primary"
+        """,
+        encoding="utf-8",
+    )
+    mms_registry.write_json_atomic(
+        config_dir / "model-routes.json",
+        {
+            "version": 1,
+            "routes": {
+                "artifact-model": {
+                    "primary": {
+                        "provider_id": "artifact-url",
+                        "model_id": "artifact-model",
+                        "openai_base_url": "https://artifact.example/v1",
+                        "api_key": "sk-route-artifact-secret",
+                    },
+                    "fallbacks": [],
+                }
+            },
+        },
+    )
+
+    import_summary = mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf registry",
+    )
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    router = json.loads((config_dir / "generated" / "model-routes.json").read_text(encoding="utf-8"))
+    status = mms_registry_cli.model_source_status(config_dir=config_dir, command_name="mmf config source")
+    combined = json.dumps(import_summary, ensure_ascii=False, sort_keys=True) + json.dumps(router, ensure_ascii=False, sort_keys=True)
+
+    assert publish_summary["runtime_ready"] is True
+    assert publish_summary["missing_api_key_count"] == 0
+    assert publish_summary["missing_base_url_count"] == 0
+    assert router["routes"]["artifact-model"]["primary"]["openai_base_url"] == "https://artifact.example/v1"
+    assert router["routes"]["artifact-model"]["primary"]["api_key"] == "sk-config-secret-value"
+    assert status["generated_bundle"]["router_missing_base_url_count"] == 0
+    assert status["generated_bundle"]["runtime_ready"] is True
+    assert "sk-route-artifact-secret" not in combined
+
+    db = sqlite3.connect(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        route = db.execute(
+            "SELECT openai_base_url FROM provider_route WHERE provider_id = 'artifact-url'"
+        ).fetchone()
+        leaked = db.execute(
+            "SELECT count(*) FROM provider_route WHERE secret_ref LIKE 'sk-%'"
+        ).fetchone()[0]
+        assert route[0] == "https://artifact.example/v1"
+        assert leaked == 0
+    finally:
+        db.close()
+
+
 def test_model_source_status_downgrades_stale_runtime_ready_when_route_url_missing(tmp_path: Path) -> None:
     config_dir = tmp_path / "mms-next"
     generated = config_dir / "generated"

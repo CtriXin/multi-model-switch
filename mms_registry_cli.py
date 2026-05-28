@@ -1359,8 +1359,38 @@ def _legacy_import_payload(report: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _legacy_route_artifact_url_map(root: Path) -> dict[tuple[str, str], dict[str, str]]:
+    routes = _load_json_mapping(root / "model-routes.json")
+    result: dict[tuple[str, str], dict[str, str]] = {}
+    for logical_model, entry in (routes.get("routes") if isinstance(routes.get("routes"), dict) else {}).items():
+        if not isinstance(entry, dict):
+            continue
+        leaves: list[dict[str, Any]] = []
+        primary = entry.get("primary")
+        if isinstance(primary, dict):
+            leaves.append(primary)
+        fallbacks = entry.get("fallbacks") if isinstance(entry.get("fallbacks"), list) else []
+        leaves.extend(item for item in fallbacks if isinstance(item, dict))
+        for leaf in leaves:
+            provider_id = str(leaf.get("provider_id") or "").strip()
+            if not provider_id:
+                continue
+            urls = {
+                "anthropic_base_url": str(leaf.get("anthropic_base_url") or "").strip().rstrip("/"),
+                "openai_base_url": str(leaf.get("openai_base_url") or "").strip().rstrip("/"),
+            }
+            if not urls["anthropic_base_url"] and not urls["openai_base_url"]:
+                continue
+            for model_key in {str(logical_model or "").strip(), str(leaf.get("model_id") or "").strip()}:
+                if model_key:
+                    result.setdefault((provider_id, model_key), urls)
+    return result
+
+
 def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, Any], *, actor: str) -> dict[str, Any]:
     route_entries: list[dict[str, Any]] = []
+    root = Path(report.get("config_root") or "").expanduser()
+    route_artifact_urls = _legacy_route_artifact_url_map(root)
     for provider in report.get("providers") or []:
         if not isinstance(provider, dict):
             continue
@@ -1374,19 +1404,26 @@ def _insert_legacy_route_candidates(db: sqlite3.Connection, report: dict[str, An
             if model in seen_models:
                 continue
             seen_models.add(model)
+            artifact_urls = route_artifact_urls.get((provider_id, model), {})
+            anthropic_base_url = fields.get("anthropic_base_url", "") or artifact_urls.get("anthropic_base_url", "")
+            openai_base_url = fields.get("openai_base_url", "") or artifact_urls.get("openai_base_url", "")
+            route_url_source = "legacy-route-artifact" if artifact_urls and (
+                artifact_urls.get("anthropic_base_url") or artifact_urls.get("openai_base_url")
+            ) else "legacy-provider-fields"
             route_entries.append(
                 {
                     "provider_id": provider_id,
                     "model": model,
                     "priority": int(provider.get("priority") or 0),
-                    "anthropic_base_url": fields.get("anthropic_base_url", ""),
-                    "openai_base_url": fields.get("openai_base_url", ""),
+                    "anthropic_base_url": anthropic_base_url,
+                    "openai_base_url": openai_base_url,
                     "secret_ref": _provider_secret_ref(report, provider_id),
                     "metadata": {
                         "role": provider.get("role") or "auto",
                         "models_endpoint": provider.get("models_endpoint") or "",
                         "protocols": _as_string_list(provider.get("protocols")),
                         "source": "legacy-import",
+                        "route_url_source": route_url_source,
                     },
                 }
             )

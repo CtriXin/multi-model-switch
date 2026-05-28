@@ -110,6 +110,8 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "respects `MMS_CONFIG_ROOT` and `MMS_CONFIG_DIR`",
         "explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle",
         "MMS_WATCHDOG_REQUIRE_BUNDLE=0",
+        "backfill only `anthropic_base_url` / `openai_base_url` from legacy `model-routes.json`",
+        "must not import plaintext route-artifact API keys",
         "missing route base URLs",
         "every route leaf has an `anthropic_base_url` or `openai_base_url`",
         "`stable_legacy_writes`",
