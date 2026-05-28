@@ -43,7 +43,14 @@ STATE_FILE_NAME = "state.json"
 LATEST_FILE_NAME = "latest.json"
 LOG_FILE_NAME = "health-watchdog.log"
 ENV_FILE_NAME = "health-watchdog.env"
-REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
+EXPECTED_BUNDLE_FILES = {
+    "router": {"canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+    "lineup": {"canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+    "profile": {"canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+    "policy": {"canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+    "capabilities": {"canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+}
+REQUIRED_BUNDLE_FILES = tuple(EXPECTED_BUNDLE_FILES)
 REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 
 OLD_ROUTE_MARKERS = {
@@ -205,6 +212,14 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             "detail": "manifest files missing: " + ", ".join(missing_files),
             "payloads": {},
         }
+    unexpected_files = sorted(str(name) for name in files if name not in EXPECTED_BUNDLE_FILES)
+    if unexpected_files:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "unexpected manifest files: " + ", ".join(unexpected_files),
+            "payloads": {},
+        }
     missing_revisions = [name for name in REQUIRED_REVISION_FIELDS if not str(manifest.get(name) or "").strip()]
     if missing_revisions:
         return {
@@ -223,8 +238,31 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"invalid manifest file entry: {name}",
                 "payloads": {},
             }
+        expected_contract = EXPECTED_BUNDLE_FILES.get(str(name))
+        if expected_contract is None:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest file entry: {name}",
+                "payloads": {},
+            }
         canonical = str(entry.get("canonical_path") or "").strip()
         expected = str(entry.get("sha256") or "").strip()
+        if canonical != expected_contract["canonical_path"]:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest canonical_path for {name}: {canonical}",
+                "payloads": {},
+            }
+        sensitivity = str(entry.get("sensitivity") or "").strip()
+        if sensitivity != expected_contract["sensitivity"]:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": f"unexpected manifest sensitivity for {name}: {sensitivity}",
+                "payloads": {},
+            }
         if not canonical or not expected:
             return {
                 "status": "invalid",

@@ -132,7 +132,7 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
 
     escaping = tmp_path / "escaping"
     _write_bundle(escaping, escape_path=True)
-    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="escapes config root"):
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="unexpected manifest canonical_path for router"):
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=escaping)
 
     incomplete = tmp_path / "incomplete"
@@ -150,3 +150,19 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
     paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="missing required revisions: route_revision"):
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=missing_revision)
+
+    wrong_sensitivity = tmp_path / "wrong-sensitivity"
+    paths = _write_bundle(wrong_sensitivity)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["files"]["router"]["sensitivity"] = "non-secret"
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="unexpected manifest sensitivity for router"):
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=wrong_sensitivity)
+
+    wrong_path = tmp_path / "wrong-path"
+    paths = _write_bundle(wrong_path)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["files"]["router"]["canonical_path"] = "model-routes.json"
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="unexpected manifest canonical_path for router"):
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=wrong_path)

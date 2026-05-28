@@ -351,7 +351,7 @@ def test_latest_approved_manifest_requires_complete_file_set_and_safe_paths(tmp_
 
     escaping = {key: dict(value) for key, value in files.items()}
     escaping["router"]["canonical_path"] = "../model-routes.json"
-    with pytest.raises(mms_registry.RegistryValidationError, match="escapes config root: router"):
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected canonical_path for router"):
         mms_registry.build_latest_approved_bundle_manifest(
             bundle_revision="bundle_20260522_001",
             capability_revision="cap_20260522_001",
@@ -369,6 +369,30 @@ def test_latest_approved_manifest_requires_complete_file_set_and_safe_paths(tmp_
             policy_revision="policy_20260522_001",
             profile_revision="profile_20260522_001",
             files=files,
+        )
+
+    wrong_sensitivity = {key: dict(value) for key, value in files.items()}
+    wrong_sensitivity["router"]["sensitivity"] = "non-secret"
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected sensitivity for router"):
+        mms_registry.build_latest_approved_bundle_manifest(
+            bundle_revision="bundle_20260522_001",
+            capability_revision="cap_20260522_001",
+            route_revision="route_20260522_001",
+            policy_revision="policy_20260522_001",
+            profile_revision="profile_20260522_001",
+            files=wrong_sensitivity,
+        )
+
+    wrong_canonical = {key: dict(value) for key, value in files.items()}
+    wrong_canonical["router"]["canonical_path"] = "model-routes.json"
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected canonical_path for router"):
+        mms_registry.build_latest_approved_bundle_manifest(
+            bundle_revision="bundle_20260522_001",
+            capability_revision="cap_20260522_001",
+            route_revision="route_20260522_001",
+            policy_revision="policy_20260522_001",
+            profile_revision="profile_20260522_001",
+            files=wrong_canonical,
         )
 
 
@@ -424,11 +448,23 @@ def test_verify_latest_approved_bundle_rejects_incomplete_or_escaping_manifest(t
 
     manifest["files"]["router"]["canonical_path"] = "../model-routes.json"
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    with pytest.raises(mms_registry.RegistryValidationError, match="escapes config root: router"):
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected manifest canonical_path for router"):
         mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
 
     manifest["files"]["router"]["canonical_path"] = "generated/model-routes.json"
     manifest.pop("route_revision")
     output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     with pytest.raises(mms_registry.RegistryValidationError, match="manifest revisions missing: route_revision"):
+        mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
+
+    manifest["route_revision"] = "route_20260522_002"
+    manifest["files"]["router"]["sensitivity"] = "non-secret"
+    output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected manifest sensitivity for router"):
+        mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)
+
+    manifest["files"]["router"]["sensitivity"] = "secret"
+    manifest["files"]["router"]["canonical_path"] = "model-routes.json"
+    output_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_registry.RegistryValidationError, match="unexpected manifest canonical_path for router"):
         mms_registry.verify_latest_approved_bundle(config_dir=tmp_path)

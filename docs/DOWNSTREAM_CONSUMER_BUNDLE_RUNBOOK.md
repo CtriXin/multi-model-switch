@@ -52,7 +52,9 @@ Consumer algorithm:
 
 Fail closed when the manifest is missing, unreadable, has a wrong schema, lacks
 any required revision id, points to missing files, omits required
-Router/Lineup/Profile/Policy/Capabilities entries, or any hash mismatches. Do not silently fallback to stable `~/.config/mms` credentials, global OAuth state, or root legacy files.
+Router/Lineup/Profile/Policy/Capabilities entries, uses an unexpected
+canonical path or sensitivity for a known file, or any hash mismatches. Do not silently fallback to stable `~/.config/mms` credentials, global OAuth state, or
+root legacy files.
 
 ## File Responsibilities
 
@@ -66,6 +68,10 @@ Router/Lineup/Profile/Policy/Capabilities entries, or any hash mismatches. Do no
 
 `router` is local secret-bearing data. Do not copy it into public artifacts,
 logs, GitHub issues, or model-to-model prompts.
+The `router` manifest entry must be `sensitivity=secret`; all other required
+entries must be `sensitivity=non-secret`. Required canonical paths are exact:
+consumers must reject manifests that point these keys at root legacy aliases or
+other in-root files.
 
 ## Human / Script Checks
 

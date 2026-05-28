@@ -16,7 +16,14 @@ from typing import Any, Mapping
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 DEFAULT_MANIFEST_RELATIVE_PATH = Path("generated") / "model-registry.latest-approved.json"
-REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
+EXPECTED_BUNDLE_FILES = {
+    "router": {"canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+    "lineup": {"canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+    "profile": {"canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+    "policy": {"canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+    "capabilities": {"canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+}
+REQUIRED_BUNDLE_FILES = tuple(EXPECTED_BUNDLE_FILES)
 REQUIRED_REVISION_FIELDS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 
 
@@ -82,6 +89,18 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _validate_manifest_file_contract(name: str, entry: Mapping[str, Any]) -> None:
+    expected = EXPECTED_BUNDLE_FILES.get(name)
+    if expected is None:
+        raise ConsumerBundleError(f"unexpected manifest file entry: {name}")
+    canonical = str(entry.get("canonical_path") or "").strip()
+    if canonical != expected["canonical_path"]:
+        raise ConsumerBundleError(f"unexpected manifest canonical_path for {name}: {canonical}")
+    sensitivity = str(entry.get("sensitivity") or "").strip()
+    if sensitivity != expected["sensitivity"]:
+        raise ConsumerBundleError(f"unexpected manifest sensitivity for {name}: {sensitivity}")
+
+
 def load_verified_consumer_bundle(
     *,
     config_root: str | os.PathLike[str] | None = None,
@@ -128,6 +147,7 @@ def load_verified_consumer_bundle(
         name_text = str(name or "")
         if not isinstance(entry, dict):
             raise ConsumerBundleError(f"invalid manifest file entry: {name_text}")
+        _validate_manifest_file_contract(name_text, entry)
         path = _safe_manifest_file_path(base_dir, entry.get("canonical_path"), name=name_text)
         if not path.exists():
             raise ConsumerBundleError(f"manifest file missing: {path}")
@@ -178,6 +198,7 @@ def load_verified_consumer_bundle(
 __all__ = [
     "ConsumerBundleError",
     "DEFAULT_MANIFEST_RELATIVE_PATH",
+    "EXPECTED_BUNDLE_FILES",
     "LATEST_APPROVED_SCHEMA",
     "REQUIRED_BUNDLE_FILES",
     "REQUIRED_REVISION_FIELDS",

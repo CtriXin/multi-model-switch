@@ -114,6 +114,9 @@ Bundle rules:
 - Consumers must fail closed when any required component revision id is missing;
   `bundle_revision`, `route_revision`, `policy_revision`, `profile_revision`,
   and `capability_revision` are part of the contract, not optional metadata.
+- Consumers must fail closed if a required manifest key points outside its exact
+  generated canonical path or uses the wrong sensitivity. Router is `secret`;
+  Lineup, Profile, Policy, and Capabilities are `non-secret`.
 - Publishing uses atomic temp-file + rename: write canonical payloads first,
   refresh legacy aliases, then rename the manifest last.
 - `provider-profiles.generated.json` and `model-policy.effective.json` are

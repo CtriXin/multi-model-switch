@@ -63,7 +63,14 @@ _SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
 )
-_MANIFEST_FILE_KEYS = ("router", "lineup", "profile", "policy", "capabilities")
+_MANIFEST_FILE_CONTRACT = {
+    "router": {"canonical_path": "generated/model-routes.json", "sensitivity": "secret"},
+    "lineup": {"canonical_path": "generated/model-routes.lineup.json", "sensitivity": "non-secret"},
+    "profile": {"canonical_path": "generated/provider-profiles.generated.json", "sensitivity": "non-secret"},
+    "policy": {"canonical_path": "generated/model-policy.effective.json", "sensitivity": "non-secret"},
+    "capabilities": {"canonical_path": "generated/model-capabilities.approved.json", "sensitivity": "non-secret"},
+}
+_MANIFEST_FILE_KEYS = tuple(_MANIFEST_FILE_CONTRACT)
 _OPTIONAL_MANIFEST_FILE_KEYS: tuple[str, ...] = ()
 _MANIFEST_REVISION_KEYS = ("bundle_revision", "capability_revision", "route_revision", "policy_revision", "profile_revision")
 APPROVED_CAPABILITIES_SCHEMA = "mms.model_capabilities.approved.v1"
@@ -954,10 +961,17 @@ def _read_file_hash(path: Path, *, sensitivity: str) -> str:
 
 def _manifest_file_entry(name: str, spec: Mapping[str, Any]) -> dict[str, Any]:
     path = Path(spec["path"])
+    expected = _MANIFEST_FILE_CONTRACT.get(name)
+    if expected is None:
+        raise RegistryValidationError(f"unexpected manifest file entry: {name}")
     sensitivity = str(spec.get("sensitivity") or "non-secret")
     if sensitivity not in {"secret", "non-secret"}:
         raise RegistryValidationError(f"unknown sensitivity for {name}: {sensitivity}")
+    if sensitivity != expected["sensitivity"]:
+        raise RegistryValidationError(f"unexpected sensitivity for {name}: {sensitivity}")
     canonical_path = str(spec.get("canonical_path") or f"generated/{path.name}")
+    if canonical_path != expected["canonical_path"]:
+        raise RegistryValidationError(f"unexpected canonical_path for {name}: {canonical_path}")
     _validate_manifest_canonical_path(canonical_path, name=name)
     return {
         "canonical_path": canonical_path,
@@ -981,6 +995,9 @@ def build_latest_approved_bundle_manifest(
     missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    unexpected = sorted(str(key) for key in files if key not in _MANIFEST_FILE_CONTRACT)
+    if unexpected:
+        raise RegistryValidationError(f"unexpected manifest files: {', '.join(unexpected)}")
     revisions = {
         "bundle_revision": bundle_revision,
         "capability_revision": capability_revision,
@@ -1973,6 +1990,9 @@ def verify_latest_approved_bundle(
     missing = [key for key in _MANIFEST_FILE_KEYS if key not in files]
     if missing:
         raise RegistryValidationError(f"manifest files missing: {', '.join(missing)}")
+    unexpected = sorted(str(key) for key in files if key not in _MANIFEST_FILE_CONTRACT)
+    if unexpected:
+        raise RegistryValidationError(f"unexpected manifest files: {', '.join(unexpected)}")
     missing_revisions = [key for key in _MANIFEST_REVISION_KEYS if not str(manifest.get(key) or "").strip()]
     if missing_revisions:
         raise RegistryValidationError(f"manifest revisions missing: {', '.join(missing_revisions)}")
@@ -1980,6 +2000,15 @@ def verify_latest_approved_bundle(
     for name, entry in files.items():
         if not isinstance(entry, dict):
             raise RegistryValidationError(f"invalid manifest file entry: {name}")
+        expected = _MANIFEST_FILE_CONTRACT.get(str(name))
+        if expected is None:
+            raise RegistryValidationError(f"unexpected manifest file entry: {name}")
+        canonical = str(entry.get("canonical_path") or "").strip()
+        if canonical != expected["canonical_path"]:
+            raise RegistryValidationError(f"unexpected manifest canonical_path for {name}: {canonical}")
+        sensitivity = str(entry.get("sensitivity") or "").strip()
+        if sensitivity != expected["sensitivity"]:
+            raise RegistryValidationError(f"unexpected manifest sensitivity for {name}: {sensitivity}")
         file_path = _manifest_file_path(base_dir, entry.get("canonical_path"), name=str(name))
         if not file_path.exists():
             raise RegistryValidationError(f"manifest file missing: {file_path}")
