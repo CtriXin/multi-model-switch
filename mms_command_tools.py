@@ -3725,6 +3725,57 @@ def runtime_force_ipv4(runtime):
     return False
 
 
+def url_matches_host_suffix(url, host_suffixes):
+    raw = str(url or "").strip()
+    if not raw:
+        return False
+    try:
+        host = (urlparse(raw).hostname or "").strip().lower()
+    except Exception:
+        host = ""
+    if not host:
+        return False
+    for suffix in host_suffixes:
+        normalized = str(suffix or "").strip().lower().lstrip(".")
+        if not normalized:
+            continue
+        if host == normalized or host.endswith("." + normalized):
+            return True
+    return False
+
+
+def runtime_should_disable_ambient_env(
+    runtime,
+    *,
+    target_url="",
+    official_hosts,
+    url_matches_host_suffix=url_matches_host_suffix,
+):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    if str(runtime.get("proxy") or "").strip():
+        return True
+    return url_matches_host_suffix(target_url, official_hosts)
+
+
+def runtime_httpx_kwargs(
+    runtime,
+    *,
+    target_url="",
+    official_hosts,
+    runtime_force_ipv4=runtime_force_ipv4,
+    runtime_should_disable_ambient_env=runtime_should_disable_ambient_env,
+):
+    transport_kwargs = {}
+    proxy_url = str((runtime or {}).get("proxy") or "").strip()
+    if proxy_url:
+        transport_kwargs["proxy"] = proxy_url
+    if runtime_should_disable_ambient_env(runtime, target_url=target_url, official_hosts=official_hosts):
+        transport_kwargs["trust_env"] = False
+    if runtime_force_ipv4(runtime):
+        transport_kwargs["local_address"] = "0.0.0.0"
+    return transport_kwargs
+
+
 def parse_semver_tag(tag):
     value = str(tag or "").strip()
     if not value.startswith("v"):

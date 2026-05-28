@@ -2831,6 +2831,41 @@ def test_account_mode_timezone_and_ipv4_helpers_preserve_normalization():
     assert mms_command_tools.runtime_force_ipv4({"force_ipv4": "off"}) is False
     assert mms_command_tools.runtime_force_ipv4({"force_ipv4": "surprise"}) is False
     assert mms_command_tools.runtime_force_ipv4(None) is False
+    official_hosts = ("api.anthropic.com", "claude.ai")
+    assert mms_command_tools.url_matches_host_suffix("https://api.anthropic.com/v1/messages", official_hosts) is True
+    assert mms_command_tools.url_matches_host_suffix("https://console.claude.ai", official_hosts) is True
+    assert mms_command_tools.url_matches_host_suffix("https://evilclaude.ai.example", official_hosts) is False
+    assert mms_command_tools.url_matches_host_suffix("not-a-url", official_hosts) is False
+    assert mms_command_tools.runtime_should_disable_ambient_env(
+        {},
+        target_url="https://api.anthropic.com/v1/messages",
+        official_hosts=official_hosts,
+    ) is True
+    assert mms_command_tools.runtime_should_disable_ambient_env(
+        {"proxy": "http://proxy:8080"},
+        target_url="https://relay.example/v1",
+        official_hosts=official_hosts,
+    ) is True
+    assert mms_command_tools.runtime_should_disable_ambient_env(
+        {},
+        target_url="https://relay.example/v1",
+        official_hosts=official_hosts,
+    ) is False
+    assert mms_command_tools.runtime_httpx_kwargs(
+        {"proxy": " http://proxy:8080 ", "force_ipv4": "enabled"},
+        target_url="https://relay.example/v1",
+        official_hosts=official_hosts,
+    ) == {"proxy": "http://proxy:8080", "trust_env": False, "local_address": "0.0.0.0"}
+    assert mms_command_tools.runtime_httpx_kwargs(
+        {"force_ipv4": False},
+        target_url="https://api.anthropic.com",
+        official_hosts=official_hosts,
+    ) == {"trust_env": False}
+    assert mms_command_tools.runtime_httpx_kwargs(
+        {"force_ipv4": "off"},
+        target_url="https://relay.example/v1",
+        official_hosts=official_hosts,
+    ) == {}
 
 
 def test_account_normalization_helpers_preserve_oauth_profile_shape(tmp_path):

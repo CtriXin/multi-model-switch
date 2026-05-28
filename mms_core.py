@@ -880,31 +880,20 @@ _ACCOUNT_CA_ENV_KEYS = (
 
 
 def _url_matches_host_suffix(url, host_suffixes):
-    raw = str(url or "").strip()
-    if not raw:
-        return False
-    try:
-        host = (urlparse(raw).hostname or "").strip().lower()
-    except Exception:
-        host = ""
-    if not host:
-        return False
-    for suffix in host_suffixes:
-        normalized = str(suffix or "").strip().lower().lstrip(".")
-        if not normalized:
-            continue
-        if host == normalized or host.endswith("." + normalized):
-            return True
-    return False
+    from mms_command_tools import url_matches_host_suffix
+
+    return url_matches_host_suffix(url, host_suffixes)
 
 
 def _runtime_should_disable_ambient_env(runtime, *, target_url=""):
-    runtime = runtime if isinstance(runtime, dict) else {}
-    if str(runtime.get("proxy") or "").strip():
-        return True
-    # 只对官方 Anthropic 目标 fail-closed，避免把普通 provider 的既有 ambient proxy
-    # 行为一刀切打掉。
-    return _url_matches_host_suffix(target_url, _ANTHROPIC_OFFICIAL_HOSTS)
+    from mms_command_tools import runtime_should_disable_ambient_env
+
+    return runtime_should_disable_ambient_env(
+        runtime,
+        target_url=target_url,
+        official_hosts=_ANTHROPIC_OFFICIAL_HOSTS,
+        url_matches_host_suffix=_url_matches_host_suffix,
+    )
 
 
 def _scrub_account_command_env(env):
@@ -920,15 +909,18 @@ def _scrub_account_command_env(env):
 
 
 def _runtime_httpx_kwargs(runtime, *, target_url=""):
-    transport_kwargs = {}
-    proxy_url = str((runtime or {}).get("proxy") or "").strip()
-    if proxy_url:
-        transport_kwargs["proxy"] = proxy_url
-    if _runtime_should_disable_ambient_env(runtime, target_url=target_url):
-        transport_kwargs["trust_env"] = False
-    if _runtime_force_ipv4(runtime):
-        transport_kwargs["local_address"] = "0.0.0.0"
-    return transport_kwargs
+    from mms_command_tools import runtime_httpx_kwargs
+
+    def should_disable(current, *, target_url, official_hosts):
+        return _runtime_should_disable_ambient_env(current, target_url=target_url)
+
+    return runtime_httpx_kwargs(
+        runtime,
+        target_url=target_url,
+        official_hosts=_ANTHROPIC_OFFICIAL_HOSTS,
+        runtime_force_ipv4=_runtime_force_ipv4,
+        runtime_should_disable_ambient_env=should_disable,
+    )
 
 
 def _runtime_force_ipv4(runtime):
