@@ -2563,6 +2563,72 @@ def provider_options_for_model(
     return options
 
 
+def account_options_for_model(
+    cfg,
+    cli_name,
+    default_models,
+    model_info=None,
+    *,
+    allow_selected_model=False,
+    resolve_model_name=resolve_model_name,
+    infer_model_family,
+    oauth_capable_clis,
+    model_matches_account_cli,
+    resolve_account_context,
+    runtime_with_priority,
+    runtime_choice_label,
+    account_label,
+    default_priority,
+):
+    selected_model = resolve_model_name(model_info) if model_info else ""
+    selected_family, _ = infer_model_family(selected_model) if selected_model else ("", "")
+    options = []
+    defaults = cfg.get("account", {}).get("defaults", {})
+
+    for account_def in cfg.get("accounts", []):
+        if not isinstance(account_def, dict) or not account_def.get("enabled", True):
+            continue
+        account_cli = account_def.get("cli")
+        if account_cli not in oauth_capable_clis:
+            continue
+        bridgeable_to_claude = False
+        if account_cli != cli_name and not bridgeable_to_claude:
+            continue
+        if selected_model and not allow_selected_model and not bridgeable_to_claude:
+            continue
+        if selected_model and not model_matches_account_cli(account_cli, selected_model):
+            continue
+        runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=account_cli)
+        launch_cli = account_cli
+        desc = "官方"
+        if bridgeable_to_claude:
+            bridged = dict(runtime)
+            bridged["auth_mode"] = "oauth_bridge"
+            bridged["bridge_source_cli"] = account_cli
+            bridged["bridge_target_cli"] = "claude"
+            bridged["bridge_model"] = selected_model
+            bridged["bridge_account_id"] = runtime.get("id")
+            runtime = bridged
+            launch_cli = "claude"
+            desc = "官方桥接"
+        runtime = runtime_with_priority(runtime, model_name=selected_model, family_name=selected_family)
+        options.append({
+            "kind": "account",
+            "id": runtime.get("id"),
+            "runtime": runtime,
+            "models": [selected_model] if selected_model else list(default_models or []),
+            "label": runtime_choice_label(runtime),
+            "title": account_label(runtime),
+            "desc": desc,
+            "icon": "🔑",
+            "priority": runtime.get("priority", default_priority),
+            "priority_family": selected_family,
+            "is_default": runtime.get("id") == defaults.get(account_cli),
+            "launch_cli": launch_cli,
+        })
+    return options
+
+
 def http_status_is_success(value):
     try:
         status_code = int(str(value or "").strip())

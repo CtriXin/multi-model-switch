@@ -6088,54 +6088,24 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
 
 
 def _account_options_for_model(cfg, cli_name, default_models, model_info=None, allow_selected_model=False):
-    selected_model = _resolve_model_name(model_info) if model_info else ""
-    selected_family, _ = _infer_model_family(selected_model) if selected_model else ("", "")
-    options = []
-    defaults = cfg.get("account", {}).get("defaults", {})
+    from mms_command_tools import account_options_for_model
 
-    for account_def in cfg.get("accounts", []):
-        if not isinstance(account_def, dict) or not account_def.get("enabled", True):
-            continue
-        account_cli = account_def.get("cli")
-        if account_cli not in OAUTH_CAPABLE_CLIS:
-            continue
-        # 止血：临时禁用 Gemini/Codex 官方账号经由 Claude session 的桥接入口。
-        bridgeable_to_claude = False
-        if account_cli != cli_name and not bridgeable_to_claude:
-            continue
-        if selected_model and not allow_selected_model and not bridgeable_to_claude:
-            continue
-        if selected_model and not _model_matches_account_cli(account_cli, selected_model):
-            continue
-        runtime = resolve_account_context(cfg, account_id=account_def["id"], cli_name=account_cli)
-        launch_cli = account_cli
-        desc = "官方"
-        if bridgeable_to_claude:
-            bridged = dict(runtime)
-            bridged["auth_mode"] = "oauth_bridge"
-            bridged["bridge_source_cli"] = account_cli
-            bridged["bridge_target_cli"] = "claude"
-            bridged["bridge_model"] = selected_model
-            bridged["bridge_account_id"] = runtime.get("id")
-            runtime = bridged
-            launch_cli = "claude"
-            desc = "官方桥接"
-        runtime = _runtime_with_priority(runtime, model_name=selected_model, family_name=selected_family)
-        options.append({
-            "kind": "account",
-            "id": runtime.get("id"),
-            "runtime": runtime,
-            "models": [selected_model] if selected_model else list(default_models or []),
-            "label": _runtime_choice_label(runtime),
-            "title": _account_label(runtime),
-            "desc": desc,
-            "icon": "🔑",
-            "priority": runtime.get("priority", DEFAULT_PRIORITY),
-            "priority_family": selected_family,
-            "is_default": runtime.get("id") == defaults.get(account_cli),
-            "launch_cli": launch_cli,
-        })
-    return options
+    return account_options_for_model(
+        cfg,
+        cli_name,
+        default_models,
+        model_info=model_info,
+        allow_selected_model=allow_selected_model,
+        resolve_model_name=_resolve_model_name,
+        infer_model_family=_infer_model_family,
+        oauth_capable_clis=OAUTH_CAPABLE_CLIS,
+        model_matches_account_cli=_model_matches_account_cli,
+        resolve_account_context=resolve_account_context,
+        runtime_with_priority=_runtime_with_priority,
+        runtime_choice_label=_runtime_choice_label,
+        account_label=_account_label,
+        default_priority=DEFAULT_PRIORITY,
+    )
 
 
 def _broker_options_for_cli(cfg, cli_name, model_info=None):

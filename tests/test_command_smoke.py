@@ -1645,6 +1645,73 @@ def test_provider_options_helper_preserves_selected_model_filtering():
     assert option["is_default"] is True
 
 
+def test_account_options_helper_preserves_oauth_filtering_and_default_marker():
+    import mms_command_tools
+
+    cfg = {
+        "accounts": [
+            {"id": "codex-main", "name": "Codex Main", "cli": "codex", "enabled": True},
+            {"id": "claude-main", "name": "Claude Main", "cli": "claude", "enabled": True},
+            {"id": "disabled", "name": "Disabled", "cli": "codex", "enabled": False},
+            {"id": "bad", "name": "Bad", "cli": "badcli", "enabled": True},
+        ],
+        "account": {"defaults": {"codex": "codex-main"}},
+    }
+    accounts = {
+        "codex-main": {"id": "codex-main", "name": "Codex Main", "cli": "codex", "priority": 250},
+        "claude-main": {"id": "claude-main", "name": "Claude Main", "cli": "claude", "priority": 300},
+    }
+
+    assert mms_command_tools.account_options_for_model(
+        cfg,
+        "codex",
+        ["gpt-5.5"],
+        model_info={"model": "gpt-5.5"},
+        allow_selected_model=False,
+        infer_model_family=lambda model_name: ("GPT", "GPT") if model_name.startswith("gpt-") else ("Other", "Other"),
+        oauth_capable_clis=("claude", "codex"),
+        model_matches_account_cli=lambda cli_name, model_name: cli_name == "codex" and model_name.startswith("gpt-"),
+        resolve_account_context=lambda _cfg, account_id, cli_name: accounts[account_id],
+        runtime_with_priority=lambda runtime, model_name="", family_name="": {
+            **runtime,
+            "runtime_model": model_name,
+            "priority_family": family_name,
+        },
+        runtime_choice_label=lambda runtime: f"runtime:{runtime['id']}",
+        account_label=lambda account: account["name"],
+        default_priority=100,
+    ) == []
+
+    options = mms_command_tools.account_options_for_model(
+        cfg,
+        "codex",
+        ["gpt-5.5", "gpt-5.4"],
+        model_info={"model": "gpt-5.5"},
+        allow_selected_model=True,
+        infer_model_family=lambda model_name: ("GPT", "GPT") if model_name.startswith("gpt-") else ("Other", "Other"),
+        oauth_capable_clis=("claude", "codex"),
+        model_matches_account_cli=lambda cli_name, model_name: cli_name == "codex" and model_name.startswith("gpt-"),
+        resolve_account_context=lambda _cfg, account_id, cli_name: accounts[account_id],
+        runtime_with_priority=lambda runtime, model_name="", family_name="": {
+            **runtime,
+            "runtime_model": model_name,
+            "priority_family": family_name,
+        },
+        runtime_choice_label=lambda runtime: f"runtime:{runtime['id']}",
+        account_label=lambda account: account["name"],
+        default_priority=100,
+    )
+
+    assert len(options) == 1
+    option = options[0]
+    assert option["id"] == "codex-main"
+    assert option["models"] == ["gpt-5.5"]
+    assert option["priority"] == 250
+    assert option["priority_family"] == "GPT"
+    assert option["is_default"] is True
+    assert option["launch_cli"] == "codex"
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 
