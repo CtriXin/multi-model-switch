@@ -4174,6 +4174,32 @@ def test_warm_probe_cache_helper_preserves_skip_and_refresh_rules(monkeypatch):
     ]
 
 
+def test_warm_command_small_helpers_preserve_delegation(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    cfg = {"providers": [{"id": "relay"}]}
+    assert mms_command_tools.select_provider_for_warm(
+        cfg,
+        select_provider_for_models=lambda current: ("selected", current),
+    ) == ("selected", cfg)
+
+    calls = []
+    assert mms_command_tools.fetch_models(
+        {"id": "relay"},
+        probe_models=lambda provider, **kwargs: calls.append((provider, kwargs)) or {"models": ["gpt-5.5"]},
+    ) == ["gpt-5.5"]
+    assert calls == [({"id": "relay"}, {"emit_output": True})]
+
+    monkeypatch.setattr(mms_core, "_select_provider_for_models", lambda current: ("core-selected", current))
+    assert mms_core._select_provider_for_warm(cfg) == ("core-selected", cfg)
+
+    calls.clear()
+    monkeypatch.setattr(mms_core, "_probe_models", lambda provider, **kwargs: calls.append((provider, kwargs)) or {"models": ["claude"]})
+    assert mms_core.fetch_models({"id": "core-relay"}) == ["claude"]
+    assert calls == [({"id": "core-relay"}, {"emit_output": True})]
+
+
 def test_runtime_normalization_helpers_preserve_provider_and_model_semantics():
     import mms_command_tools
 

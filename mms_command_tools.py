@@ -3294,6 +3294,14 @@ def warm_probe_cache_async(
         schedule_probe_refresh(resolve_provider_context(cfg, provider_id), cfg, reason="startup_warm")
 
 
+def select_provider_for_warm(cfg, *, select_provider_for_models):
+    return select_provider_for_models(cfg)
+
+
+def fetch_models(provider, *, probe_models):
+    return probe_models(provider, emit_output=True).get("models")
+
+
 def provider_supports_mimo_anthropic_selectors(provider):
     provider = provider if isinstance(provider, dict) else {}
     identity = " ".join(

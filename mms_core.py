@@ -3565,7 +3565,9 @@ def _select_provider_for_models(cfg):
 
 
 def _select_provider_for_warm(cfg):
-    return _select_provider_for_models(cfg)
+    from mms_command_tools import select_provider_for_warm
+
+    return select_provider_for_warm(cfg, select_provider_for_models=_select_provider_for_models)
 
 
 def _recent_models_for_provider(provider_id):
@@ -4405,7 +4407,9 @@ def _warm_probe_cache_async(cfg, default_provider):
 
 
 def fetch_models(provider):
-    return _probe_models(provider, emit_output=True).get("models")
+    from mms_command_tools import fetch_models as fetch_models_helper
+
+    return fetch_models_helper(provider, probe_models=_probe_models)
 
 
 def _model_validation_findings(provider, probe):
