@@ -251,6 +251,64 @@ def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     assert panel.kwargs == {"title": "校验详情", "border_style": "yellow"}
 
 
+def test_rescue_report_payload_helpers_preserve_safe_local_outputs():
+    import mms_command_tools
+
+    localize = lambda zh, en: zh
+    title, rows, note = mms_command_tools.rescue_default_fallback_report_payload(
+        "deepseek-v4-flash",
+        localize=localize,
+    )
+    hot_title, hot_rows, hot_note = mms_command_tools.rescue_default_fallback_report_payload(
+        "deepseek-v4-flash",
+        hot_fallback_enabled=True,
+        localize=localize,
+    )
+    clear_title, clear_rows, clear_note = mms_command_tools.rescue_default_fallback_report_payload(
+        "",
+        cleared=True,
+        localize=localize,
+    )
+    blocked_title, blocked_rows, _blocked_note = mms_command_tools.rescue_hot_fallback_toggle_report_payload(
+        True,
+        has_default=False,
+        localize=localize,
+    )
+    demo_title, demo_rows, _demo_note = mms_command_tools.rescue_demo_packet_report_payload(
+        {"artifacts": {"markdown": "/tmp/rescue.md", "json": "/tmp/rescue.json"}},
+        localize=localize,
+    )
+    paths_title, paths_rows, _paths_note = mms_command_tools.rescue_paths_report_payload(
+        {"artifact_markdown": "/tmp/current.md", "artifact_json": "/tmp/current.json"},
+        localize=localize,
+    )
+    handover_title, handover_rows, handover_note = mms_command_tools.rescue_handover_report_payload(
+        {"artifacts": {"markdown": "/tmp/handover.md", "latest_markdown": "/tmp/latest.md"}},
+        "deepseek-v4-flash",
+        localize=localize,
+    )
+
+    assert title == "全局 fallback 已设置"
+    assert ("Model", "deepseek-v4-flash") in rows
+    assert ("Hot fallback", "关闭") in rows
+    assert "只记录 rescue / fallback handoff" in note
+    assert hot_title == "全局 fallback 已设置"
+    assert ("Hot fallback", "开启") in hot_rows
+    assert "routed model" in hot_note
+    assert clear_title == "全局 fallback 已清除"
+    assert ("保存位置", "[rescue].fallback_model") in clear_rows
+    assert clear_note == ""
+    assert blocked_title == "无法开启 hot fallback"
+    assert ("原因", "请先设置全局 fallback model") in blocked_rows
+    assert demo_title == "测试 rescue packet 已生成"
+    assert ("rescue.md", "/tmp/rescue.md") in demo_rows
+    assert paths_title == "Rescue 文件路径"
+    assert ("rescue.json", "/tmp/current.json") in paths_rows
+    assert handover_title == "fallback handover 已生成"
+    assert ("latest", "/tmp/latest.md") in handover_rows
+    assert "不切换当前 session" in handover_note
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

@@ -4994,90 +4994,38 @@ def _print_settings_error_report(title, exc):
 
 
 def _rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False):
-    if cleared:
-        return (
-            _L("全局 fallback 已清除", "Global fallback cleared"),
-            [
-                (_L("保存位置", "saved at"), "[rescue].fallback_model"),
-                (_L("安全边界", "safety"), "routed providers only; no global OAuth"),
-            ],
-            "",
-        )
-    return (
-        _L("全局 fallback 已设置", "Global fallback set"),
-        [
-            ("Model", model or "-"),
-            ("Hot fallback", _L("开启", "on") if hot_fallback_enabled else _L("关闭", "off")),
-            (_L("保存位置", "saved at"), "[rescue].fallback_model"),
-            (_L("生效方式", "applies"), "bridge failure -> model-routes.json"),
-            (_L("安全边界", "safety"), "no global OAuth"),
-        ],
-        (
-            _L("真实 failure 会先写 rescue packet，再尝试该 routed model。", "Real failures write a rescue packet before trying this routed model.")
-            if hot_fallback_enabled
-            else _L("默认只记录 rescue / fallback handoff；开启 hot fallback 后才会自动模型调用。", "By default MMS records rescue / fallback handoff only; automatic model calls require hot fallback to be enabled.")
-        ),
+    from mms_command_tools import rescue_default_fallback_report_payload
+
+    return rescue_default_fallback_report_payload(
+        model,
+        cleared=cleared,
+        hot_fallback_enabled=hot_fallback_enabled,
+        localize=_L,
     )
 
 
 def _rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True):
-    if enabled and not has_default:
-        return (
-            _L("无法开启 hot fallback", "Cannot enable hot fallback"),
-            [
-                (_L("原因", "reason"), _L("请先设置全局 fallback model", "Set a global fallback model first")),
-                (_L("安全边界", "safety"), "no global OAuth"),
-            ],
-            "",
-        )
-    return (
-        _L("hot fallback 已开启", "hot fallback enabled") if enabled else _L("hot fallback 已关闭", "hot fallback disabled"),
-        [
-            ("Hot fallback", _L("开启", "on") if enabled else _L("关闭", "off")),
-            (_L("前置条件", "requires"), "[rescue].fallback_model"),
-            (_L("默认行为", "default"), _L("关闭时只记录 rescue / handoff", "off means rescue / handoff only")),
-        ],
-        _L("开关保存到 [rescue].hot_fallback_enabled。", "Switch is saved to [rescue].hot_fallback_enabled."),
-    )
+    from mms_command_tools import rescue_hot_fallback_toggle_report_payload
+
+    return rescue_hot_fallback_toggle_report_payload(enabled, has_default=has_default, localize=_L)
 
 
 def _rescue_demo_packet_report_payload(payload):
-    payload = payload if isinstance(payload, dict) else {}
-    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
-    return (
-        _L("测试 rescue packet 已生成", "Demo rescue packet created"),
-        [
-            ("rescue.md", artifacts.get("markdown") or "-"),
-            ("rescue.json", artifacts.get("json") or "-"),
-        ],
-        "",
-    )
+    from mms_command_tools import rescue_demo_packet_report_payload
+
+    return rescue_demo_packet_report_payload(payload, localize=_L)
 
 
 def _rescue_paths_report_payload(selected_rescue):
-    selected_rescue = selected_rescue if isinstance(selected_rescue, dict) else {}
-    return (
-        _L("Rescue 文件路径", "Rescue file paths"),
-        [
-            ("rescue.md", selected_rescue.get("artifact_markdown") or "-"),
-            ("rescue.json", selected_rescue.get("artifact_json") or "-"),
-        ],
-        "",
-    )
+    from mms_command_tools import rescue_paths_report_payload
+
+    return rescue_paths_report_payload(selected_rescue, localize=_L)
 
 
 def _rescue_handover_report_payload(handover, fallback_model):
-    handover = handover if isinstance(handover, dict) else {}
-    artifacts = handover.get("artifacts") if isinstance(handover.get("artifacts"), dict) else {}
-    return (
-        _L("fallback handover 已生成", "fallback handover created"),
-        [
-            ("Model", fallback_model or "-"),
-            ("handover.md", artifacts.get("markdown") or "-"),
-            ("latest", artifacts.get("latest_markdown") or "-"),
-        ],
-        _L("handover 只写本地 rescue artifact；不切换当前 session。", "handover writes local rescue artifacts only; it does not switch the current session."),
-    )
+    from mms_command_tools import rescue_handover_report_payload
+
+    return rescue_handover_report_payload(handover, fallback_model, localize=_L)
 
 
 def _registry_source_staleness_report_payload(summary):

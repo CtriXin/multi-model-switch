@@ -232,6 +232,93 @@ def display_model_probe_details(probe, *, panel_cls, console):
     console.print(panel_cls("\n".join(lines), title="校验详情", border_style="yellow"))
 
 
+def rescue_default_fallback_report_payload(model, *, cleared=False, hot_fallback_enabled=False, localize):
+    if cleared:
+        return (
+            localize("全局 fallback 已清除", "Global fallback cleared"),
+            [
+                (localize("保存位置", "saved at"), "[rescue].fallback_model"),
+                (localize("安全边界", "safety"), "routed providers only; no global OAuth"),
+            ],
+            "",
+        )
+    return (
+        localize("全局 fallback 已设置", "Global fallback set"),
+        [
+            ("Model", model or "-"),
+            ("Hot fallback", localize("开启", "on") if hot_fallback_enabled else localize("关闭", "off")),
+            (localize("保存位置", "saved at"), "[rescue].fallback_model"),
+            (localize("生效方式", "applies"), "bridge failure -> model-routes.json"),
+            (localize("安全边界", "safety"), "no global OAuth"),
+        ],
+        (
+            localize("真实 failure 会先写 rescue packet，再尝试该 routed model。", "Real failures write a rescue packet before trying this routed model.")
+            if hot_fallback_enabled
+            else localize("默认只记录 rescue / fallback handoff；开启 hot fallback 后才会自动模型调用。", "By default MMS records rescue / fallback handoff only; automatic model calls require hot fallback to be enabled.")
+        ),
+    )
+
+
+def rescue_hot_fallback_toggle_report_payload(enabled, *, has_default=True, localize):
+    if enabled and not has_default:
+        return (
+            localize("无法开启 hot fallback", "Cannot enable hot fallback"),
+            [
+                (localize("原因", "reason"), localize("请先设置全局 fallback model", "Set a global fallback model first")),
+                (localize("安全边界", "safety"), "no global OAuth"),
+            ],
+            "",
+        )
+    return (
+        localize("hot fallback 已开启", "hot fallback enabled") if enabled else localize("hot fallback 已关闭", "hot fallback disabled"),
+        [
+            ("Hot fallback", localize("开启", "on") if enabled else localize("关闭", "off")),
+            (localize("前置条件", "requires"), "[rescue].fallback_model"),
+            (localize("默认行为", "default"), localize("关闭时只记录 rescue / handoff", "off means rescue / handoff only")),
+        ],
+        localize("开关保存到 [rescue].hot_fallback_enabled。", "Switch is saved to [rescue].hot_fallback_enabled."),
+    )
+
+
+def rescue_demo_packet_report_payload(payload, *, localize):
+    payload = payload if isinstance(payload, dict) else {}
+    artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
+    return (
+        localize("测试 rescue packet 已生成", "Demo rescue packet created"),
+        [
+            ("rescue.md", artifacts.get("markdown") or "-"),
+            ("rescue.json", artifacts.get("json") or "-"),
+        ],
+        "",
+    )
+
+
+def rescue_paths_report_payload(selected_rescue, *, localize):
+    selected_rescue = selected_rescue if isinstance(selected_rescue, dict) else {}
+    return (
+        localize("Rescue 文件路径", "Rescue file paths"),
+        [
+            ("rescue.md", selected_rescue.get("artifact_markdown") or "-"),
+            ("rescue.json", selected_rescue.get("artifact_json") or "-"),
+        ],
+        "",
+    )
+
+
+def rescue_handover_report_payload(handover, fallback_model, *, localize):
+    handover = handover if isinstance(handover, dict) else {}
+    artifacts = handover.get("artifacts") if isinstance(handover.get("artifacts"), dict) else {}
+    return (
+        localize("fallback handover 已生成", "fallback handover created"),
+        [
+            ("Model", fallback_model or "-"),
+            ("handover.md", artifacts.get("markdown") or "-"),
+            ("latest", artifacts.get("latest_markdown") or "-"),
+        ],
+        localize("handover 只写本地 rescue artifact；不切换当前 session。", "handover writes local rescue artifacts only; it does not switch the current session."),
+    )
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"
