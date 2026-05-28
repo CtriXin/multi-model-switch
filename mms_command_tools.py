@@ -172,6 +172,31 @@ def sha1_file(path):
     return h.hexdigest()
 
 
+def backup_config_file(
+    config_path,
+    *,
+    config_backup_root,
+    local_now_slug,
+    path_exists=os.path.exists,
+    makedirs=os.makedirs,
+    copy2=shutil.copy2,
+):
+    if not path_exists(config_path):
+        return ""
+    backup_dir = os.path.join(config_backup_root(config_path), f"config-write-{local_now_slug()}")
+    makedirs(backup_dir, exist_ok=True)
+    backup_path = os.path.join(backup_dir, os.path.basename(config_path))
+    copy2(config_path, backup_path)
+    return backup_path
+
+
+def append_config_audit_entry(entry, *, config_path, config_audit_path, makedirs=os.makedirs):
+    audit_path = config_audit_path(config_path)
+    makedirs(os.path.dirname(audit_path), exist_ok=True)
+    with open(audit_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def config_command_hint(*, current_command):
     return f"{current_command()} config api.edit"
 

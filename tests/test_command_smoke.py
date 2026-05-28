@@ -256,6 +256,48 @@ def test_config_path_and_sha1_helpers_preserve_paths_and_hashes(tmp_path, monkey
     assert mms_core._sha1_file(str(config_path)) == hashlib.sha1(b"abc").hexdigest()
 
 
+def test_config_backup_and_audit_helpers_preserve_files(tmp_path, monkeypatch):
+    import json
+
+    import mms_command_tools
+    import mms_core
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('message = "中文"\n', encoding="utf-8")
+    missing_path = tmp_path / "missing.toml"
+
+    backup_path = mms_command_tools.backup_config_file(
+        str(config_path),
+        config_backup_root=lambda path: str(tmp_path / "backups"),
+        local_now_slug=lambda: "20260529-021800",
+    )
+    assert backup_path == str(tmp_path / "backups" / "config-write-20260529-021800" / "config.toml")
+    assert "中文" in (tmp_path / "backups" / "config-write-20260529-021800" / "config.toml").read_text(encoding="utf-8")
+    assert mms_command_tools.backup_config_file(
+        str(missing_path),
+        config_backup_root=lambda path: str(tmp_path / "unused"),
+        local_now_slug=lambda: "20260529-021801",
+    ) == ""
+
+    audit_path = tmp_path / "audit" / "config-audit.jsonl"
+    mms_command_tools.append_config_audit_entry(
+        {"reason": "测试", "count": 1},
+        config_path=str(config_path),
+        config_audit_path=lambda path: str(audit_path),
+    )
+    assert json.loads(audit_path.read_text(encoding="utf-8").strip()) == {"reason": "测试", "count": 1}
+
+    monkeypatch.setattr(mms_core, "_config_backup_root", lambda path: str(tmp_path / "core-backups"))
+    monkeypatch.setattr(mms_core, "_local_now_slug", lambda: "20260529-021802")
+    core_backup_path = mms_core._backup_config_file(str(config_path))
+    assert core_backup_path == str(tmp_path / "core-backups" / "config-write-20260529-021802" / "config.toml")
+
+    core_audit_path = tmp_path / "core-audit" / "config-audit.jsonl"
+    monkeypatch.setattr(mms_core, "_config_audit_path", lambda path: str(core_audit_path))
+    mms_core._append_config_audit_entry({"reason": "core"}, config_path=str(config_path))
+    assert json.loads(core_audit_path.read_text(encoding="utf-8").strip()) == {"reason": "core"}
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

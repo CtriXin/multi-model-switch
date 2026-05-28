@@ -1796,20 +1796,19 @@ def _locked_state_file(path):
 
 
 def _backup_config_file(config_path):
-    if not os.path.exists(config_path):
-        return ""
-    backup_dir = os.path.join(_config_backup_root(config_path), f"config-write-{_local_now_slug()}")
-    os.makedirs(backup_dir, exist_ok=True)
-    backup_path = os.path.join(backup_dir, os.path.basename(config_path))
-    shutil.copy2(config_path, backup_path)
-    return backup_path
+    from mms_command_tools import backup_config_file
+
+    return backup_config_file(
+        config_path,
+        config_backup_root=_config_backup_root,
+        local_now_slug=_local_now_slug,
+    )
 
 
 def _append_config_audit_entry(entry, *, config_path):
-    audit_path = _config_audit_path(config_path)
-    os.makedirs(os.path.dirname(audit_path), exist_ok=True)
-    with open(audit_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    from mms_command_tools import append_config_audit_entry
+
+    return append_config_audit_entry(entry, config_path=config_path, config_audit_path=_config_audit_path)
 
 
 def _atomic_write_toml(path, cfg):
