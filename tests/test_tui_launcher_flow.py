@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mms_tui_launcher_flow import (
     apply_confirm_bypass_flag,
+    apply_claude_network_guard_preview,
     apply_confirm_runtime_preferences,
     apply_tui_priority_changes,
     build_confirm_capability_context,
@@ -66,6 +67,56 @@ def test_config_help_omits_load_balance_commands(monkeypatch) -> None:
     help_text = "\n".join(messages)
     assert "load-balance" not in help_text
     assert "Load Balance" not in help_text
+
+
+def test_apply_claude_network_guard_preview_sets_preview_or_fallback() -> None:
+    calls = []
+    runtime = {"auth_mode": "api_key", "bypass": True}
+
+    def loader():
+        return (
+            lambda runtime_arg, *, require_proxy: calls.append(("preview", runtime_arg, require_proxy)) or {"status": "ok"},
+            lambda runtime_arg: calls.append(("requires_proxy", runtime_arg)) or True,
+        )
+
+    assert apply_claude_network_guard_preview(
+        runtime,
+        "claude",
+        network_guard_preview_loader=loader,
+    ) is runtime
+    assert runtime["_network_guard"] == {"status": "ok"}
+    assert calls == [
+        ("requires_proxy", runtime),
+        ("preview", runtime, True),
+    ]
+
+    fallback_runtime = {"auth_mode": "oauth", "bypass": False}
+    apply_claude_network_guard_preview(
+        fallback_runtime,
+        "claude",
+        network_guard_preview_loader=lambda: (_ for _ in ()).throw(RuntimeError("unavailable")),
+    )
+    assert fallback_runtime["_network_guard"] == {
+        "status": "unknown",
+        "dns_mode": "unknown",
+        "ipv4_egress": "-",
+        "ipv6_egress": "-",
+        "targets": [],
+        "no_proxy_conflicts": [],
+    }
+
+
+def test_apply_claude_network_guard_preview_skips_non_claude_or_non_auth_mode() -> None:
+    for cli_name, runtime in [
+        ("codex", {"auth_mode": "api_key"}),
+        ("claude", {"auth_mode": "managed"}),
+        ("claude", None),
+    ]:
+        assert apply_claude_network_guard_preview(
+            runtime,
+            cli_name,
+            network_guard_preview_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+        ) is runtime
 
 
 def test_handle_tui_broker_action_delegates_and_maps_status() -> None:

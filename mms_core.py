@@ -5461,22 +5461,16 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
 
         clean_model_info = _clean_model_info(model_info)
         env_vars = get_export_env(cli, runtime_runtime)
-        if cli == "claude" and runtime_runtime and runtime_runtime.get("auth_mode") in {"oauth", "api_key"}:
-            try:
-                from mms_launchers import get_claude_network_guard_preview, _claude_bypass_requires_proxy
-                runtime_runtime["_network_guard"] = get_claude_network_guard_preview(
-                    runtime_runtime,
-                    require_proxy=bool(runtime_runtime.get("bypass")) and _claude_bypass_requires_proxy(runtime_runtime),
+        runtime_runtime = tui_flow.apply_claude_network_guard_preview(
+            runtime_runtime,
+            cli,
+            network_guard_preview_loader=lambda: (
+                lambda launchers: (
+                    launchers.get_claude_network_guard_preview,
+                    launchers._claude_bypass_requires_proxy,
                 )
-            except Exception:
-                runtime_runtime["_network_guard"] = {
-                    "status": "unknown",
-                    "dns_mode": "unknown",
-                    "ipv4_egress": "-",
-                    "ipv6_egress": "-",
-                    "targets": [],
-                    "no_proxy_conflicts": [],
-                }
+            )(__import__("mms_launchers", fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"])),
+        )
 
         confirm_context = tui_flow.build_confirm_capability_context(
             cli,

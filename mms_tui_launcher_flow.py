@@ -1288,3 +1288,28 @@ def confirm_tui_options(
 def apply_confirm_bypass_flag(runtime, cli_name, bypass):
     if cli_name in {"claude", "codex", "opencode", "agy"}:
         runtime["bypass"] = bool(bypass)
+
+
+def apply_claude_network_guard_preview(runtime, cli_name, *, network_guard_preview_loader):
+    if not (
+        cli_name == "claude"
+        and runtime
+        and runtime.get("auth_mode") in {"oauth", "api_key"}
+    ):
+        return runtime
+    try:
+        get_claude_network_guard_preview, claude_bypass_requires_proxy = network_guard_preview_loader()
+        runtime["_network_guard"] = get_claude_network_guard_preview(
+            runtime,
+            require_proxy=bool(runtime.get("bypass")) and claude_bypass_requires_proxy(runtime),
+        )
+    except Exception:
+        runtime["_network_guard"] = {
+            "status": "unknown",
+            "dns_mode": "unknown",
+            "ipv4_egress": "-",
+            "ipv6_egress": "-",
+            "targets": [],
+            "no_proxy_conflicts": [],
+        }
+    return runtime
