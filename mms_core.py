@@ -462,40 +462,21 @@ def _semver_tag_gap(installed_version, known_tags, latest_tag=""):
 
 
 def _update_notice():
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return None
+    from mms_command_tools import update_notice
 
-    version_meta = _load_version_meta()
-    installed_version, installed_semver = _installed_update_semver(version_meta)
-    if installed_semver is None:
-        return None
-
-    cache = _load_update_check_cache()
-    latest_tag = str(cache.get("latest_tag") or "").strip()
-    latest_semver = _parse_semver_tag(latest_tag)
-    if latest_semver is None or latest_semver <= installed_semver:
-        return None
-
-    gap_count = _semver_tag_gap(installed_version, cache.get("semver_tags"), latest_tag)
-    is_major_upgrade = latest_semver[0] > installed_semver[0]
-    if not is_major_upgrade and (gap_count is None or gap_count < UPDATE_NOTICE_VERSION_GAP):
-        return None
-
-    now = time.time()
-    last_prompted_for = str(cache.get("last_prompted_for") or "").strip()
-    last_prompted_at = float(cache.get("last_prompted_at") or 0)
-    if last_prompted_for == latest_tag and now - last_prompted_at < UPDATE_PROMPT_INTERVAL_SEC:
-        return None
-
-    cache["last_prompted_for"] = latest_tag
-    cache["last_prompted_at"] = now
-    _save_update_check_cache(cache)
-    return {
-        "installed_version": installed_version,
-        "latest_tag": latest_tag,
-        "gap_count": gap_count,
-        "upgrade_command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
-    }
+    return update_notice(
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        load_version_meta=_load_version_meta,
+        installed_update_semver=_installed_update_semver,
+        load_update_check_cache=_load_update_check_cache,
+        parse_semver_tag=_parse_semver_tag,
+        semver_tag_gap=_semver_tag_gap,
+        save_update_check_cache=_save_update_check_cache,
+        now=time.time,
+        version_gap=UPDATE_NOTICE_VERSION_GAP,
+        prompt_interval_sec=UPDATE_PROMPT_INTERVAL_SEC,
+    )
 
 
 def _major_update_notice():

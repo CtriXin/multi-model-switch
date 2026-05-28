@@ -2227,6 +2227,67 @@ def test_update_status_helpers_preserve_install_and_about_status_semantics():
     assert mms_command_tools.mms_update_status({"installed_version": "v1.2.4"}, {"latest_tag": "v1.2.4"}, localize=localize)["status"] == "最新"
 
 
+def test_update_notice_preserves_prompt_payload_and_throttle():
+    import mms_command_tools
+
+    class TTY:
+        def __init__(self, enabled=True):
+            self.enabled = enabled
+
+        def isatty(self):
+            return self.enabled
+
+    saved = []
+    notice = mms_command_tools.update_notice(
+        stdin=TTY(),
+        stdout=TTY(),
+        load_version_meta=lambda: {"source": "install.sh", "installed_version": "v1.16.3"},
+        installed_update_semver=lambda meta: ("v1.16.3", (1, 16, 3)),
+        load_update_check_cache=lambda: {"latest_tag": "v1.16.6", "semver_tags": ["v1.16.6", "v1.16.5", "v1.16.4", "v1.16.3"]},
+        parse_semver_tag=mms_command_tools.parse_semver_tag,
+        semver_tag_gap=mms_command_tools.semver_tag_gap,
+        save_update_check_cache=saved.append,
+        now=lambda: 1000.0,
+        version_gap=3,
+        prompt_interval_sec=600,
+    )
+    assert notice == {
+        "installed_version": "v1.16.3",
+        "latest_tag": "v1.16.6",
+        "gap_count": 3,
+        "upgrade_command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
+    }
+    assert saved[-1]["last_prompted_for"] == "v1.16.6"
+    assert saved[-1]["last_prompted_at"] == 1000.0
+
+    assert mms_command_tools.update_notice(
+        stdin=TTY(False),
+        stdout=TTY(),
+        load_version_meta=lambda: (_ for _ in ()).throw(AssertionError("should not load")),
+        installed_update_semver=lambda meta: (None, None),
+        load_update_check_cache=lambda: {},
+        parse_semver_tag=mms_command_tools.parse_semver_tag,
+        semver_tag_gap=mms_command_tools.semver_tag_gap,
+        save_update_check_cache=saved.append,
+        now=lambda: 1000.0,
+        version_gap=3,
+        prompt_interval_sec=600,
+    ) is None
+    assert mms_command_tools.update_notice(
+        stdin=TTY(),
+        stdout=TTY(),
+        load_version_meta=lambda: {"source": "install.sh", "installed_version": "v1.16.3"},
+        installed_update_semver=lambda meta: ("v1.16.3", (1, 16, 3)),
+        load_update_check_cache=lambda: {"latest_tag": "v1.16.6", "last_prompted_for": "v1.16.6", "last_prompted_at": 950.0},
+        parse_semver_tag=mms_command_tools.parse_semver_tag,
+        semver_tag_gap=mms_command_tools.semver_tag_gap,
+        save_update_check_cache=saved.append,
+        now=lambda: 1000.0,
+        version_gap=3,
+        prompt_interval_sec=600,
+    ) is None
+
+
 def test_release_version_info_preserves_installed_and_git_fallbacks():
     import mms_command_tools
 

@@ -2898,6 +2898,56 @@ def installed_update_semver(version_meta, *, update_notice_sources):
     return installed_version, installed_semver
 
 
+def update_notice(
+    *,
+    stdin,
+    stdout,
+    load_version_meta,
+    installed_update_semver,
+    load_update_check_cache,
+    parse_semver_tag,
+    semver_tag_gap,
+    save_update_check_cache,
+    now,
+    version_gap,
+    prompt_interval_sec,
+):
+    if not (stdin.isatty() and stdout.isatty()):
+        return None
+
+    version_meta = load_version_meta()
+    installed_version, installed_semver = installed_update_semver(version_meta)
+    if installed_semver is None:
+        return None
+
+    cache = load_update_check_cache()
+    latest_tag = str(cache.get("latest_tag") or "").strip()
+    latest_semver = parse_semver_tag(latest_tag)
+    if latest_semver is None or latest_semver <= installed_semver:
+        return None
+
+    gap_count = semver_tag_gap(installed_version, cache.get("semver_tags"), latest_tag)
+    is_major_upgrade = latest_semver[0] > installed_semver[0]
+    if not is_major_upgrade and (gap_count is None or gap_count < version_gap):
+        return None
+
+    now_value = now()
+    last_prompted_for = str(cache.get("last_prompted_for") or "").strip()
+    last_prompted_at = float(cache.get("last_prompted_at") or 0)
+    if last_prompted_for == latest_tag and now_value - last_prompted_at < prompt_interval_sec:
+        return None
+
+    cache["last_prompted_for"] = latest_tag
+    cache["last_prompted_at"] = now_value
+    save_update_check_cache(cache)
+    return {
+        "installed_version": installed_version,
+        "latest_tag": latest_tag,
+        "gap_count": gap_count,
+        "upgrade_command": "curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash",
+    }
+
+
 def mms_update_status(version_info, cache, *, localize):
     current = str(version_info.get("installed_version") or version_info.get("release") or "").strip()
     latest = str(cache.get("latest_tag") or "").strip()
