@@ -2997,6 +2997,7 @@ def _resolve_nsr_root():
         candidates.append(os.path.abspath(os.path.expanduser(nsr_home)))
     candidates.extend([
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor", "non-stop-run"),
+        _real_user_path("auto-skills", "shared-skills", "nsr"),
         _real_user_path("auto-skills", "Non-Stop-Run"),
         _real_user_path("auto-skills", "shared-skills", "looop.deprecated"),
     ])

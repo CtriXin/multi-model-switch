@@ -864,6 +864,28 @@ def test_resolve_caveman_root_prefers_bundled_vendor_before_legacy_home(monkeypa
     assert mms_launchers._resolve_caveman_root() == str(bundled_root)
 
 
+def test_resolve_nsr_root_prefers_current_shared_skill_before_deprecated_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    current_root = real_home / "auto-skills" / "shared-skills" / "nsr"
+    deprecated_root = real_home / "auto-skills" / "shared-skills" / "looop.deprecated"
+    for root in (current_root, deprecated_root):
+        scripts_dir = root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "codex_hook.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        (scripts_dir / "claude_hook.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    monkeypatch.delenv("MMS_NSR_ROOT", raising=False)
+    monkeypatch.delenv("NSR_ROOT", raising=False)
+    monkeypatch.delenv("NSR_HOME", raising=False)
+    monkeypatch.setattr(mms_launchers, "_asset_root_preference", lambda name: "")
+    monkeypatch.setattr(mms_launchers, "_real_user_path", lambda *parts: str(real_home.joinpath(*parts)))
+    monkeypatch.setattr(mms_launchers, "__file__", str(tmp_path / "mms-install" / "mms_launchers.py"))
+
+    assert mms_launchers._resolve_nsr_root() == str(current_root)
+
+
 def test_resolve_agent_pack_roots_prefer_mms_installed_packs(monkeypatch, tmp_path):
     import mms_launchers
 
