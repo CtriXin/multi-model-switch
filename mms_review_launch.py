@@ -685,6 +685,12 @@ def _provider_from_router_leaf(leaf: dict[str, Any], *, route_source: str) -> di
     }
 
 
+def _latest_approved_route_source(bundle: dict[str, Any]) -> str:
+    manifest = bundle.get("manifest") if isinstance(bundle.get("manifest"), dict) else {}
+    revision = str(manifest.get("bundle_revision") or "").strip()
+    return f"mms:latest-approved:{revision}" if revision else "mms:latest-approved"
+
+
 def _latest_approved_router_candidates(
     *,
     model_name: str,
@@ -712,6 +718,7 @@ def _latest_approved_router_candidates(
         return [], f"latest-approved bundle invalid for review-launch routing: {exc}", True
 
     payloads = bundle.get("payloads") if isinstance(bundle.get("payloads"), dict) else {}
+    route_source = _latest_approved_route_source(bundle)
     router = payloads.get("router") if isinstance(payloads.get("router"), dict) else {}
     routes = router.get("routes") if isinstance(router.get("routes"), dict) else {}
     canonical_model, entry = _route_entry_for_model(routes, model_name)
@@ -727,7 +734,7 @@ def _latest_approved_router_candidates(
     for leaf in leaves:
         if not isinstance(leaf, dict):
             continue
-        provider = _provider_from_router_leaf(leaf, route_source="mms:latest-approved")
+        provider = _provider_from_router_leaf(leaf, route_source=route_source)
         provider_id = str(provider.get("id") or "")
         if allowed_provider_ids and provider_id not in allowed_provider_ids:
             continue

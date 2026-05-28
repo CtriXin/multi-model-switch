@@ -68,6 +68,7 @@ def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
         "atomic temp-file + rename",
         "generated/model-registry.latest-approved.json",
         "legacy root files",
+        "mms:latest-approved:<bundle_revision>",
     ]
 
     missing = [term for term in required_terms if term not in text]
@@ -151,6 +152,7 @@ def test_downstream_consumer_bundle_runbook_is_fail_closed() -> None:
         "Do not silently fallback to stable",
         "global OAuth state",
         "cache_transport_evidence.v1",
+        "route_source=mms:latest-approved:<bundle_revision>",
         "mmf config bundle --json",
         "mms config bundle --json",
         "from mms_consumer_bundle import load_verified_consumer_bundle",

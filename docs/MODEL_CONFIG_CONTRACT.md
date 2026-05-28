@@ -311,7 +311,7 @@ This is a runtime output contract, not another route table.
   "protocol": "anthropic_messages",
   "request_url": "http://127.0.0.1:4001/v1/messages",
   "request_path": "/v1/messages",
-  "route_source": "mms:latest-approved/generated/model-routes.json",
+  "route_source": "mms:latest-approved:<bundle_revision>",
   "provider_profile": "deepseek",
   "fallback_used": false,
   "fallback_reason": "",

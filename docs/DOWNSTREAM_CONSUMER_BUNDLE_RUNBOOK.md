@@ -47,7 +47,8 @@ Consumer algorithm:
 6. Record `bundle_revision`, `route_revision`, `policy_revision`,
    `profile_revision`, and `capability_revision` in the consumer run artifact.
 7. Emit `cache_transport_evidence.v1` for real model calls, including actual
-   request URL/path when available.
+   request URL/path when available, and set
+   `route_source=mms:latest-approved:<bundle_revision>`.
 
 Fail closed when the manifest is missing, unreadable, has a wrong schema, points
 to missing files, or any hash mismatches. Do not silently fallback to stable

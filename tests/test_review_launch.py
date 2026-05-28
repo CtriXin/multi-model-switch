@@ -21,6 +21,7 @@ def _write_latest_approved_router_manifest(config_root: Path, *, router_payload:
     router_path.write_bytes(router_bytes)
     manifest = {
         "schema": "mms.model_registry.latest_approved.v1",
+        "bundle_revision": "bundle_review_test",
         "files": {
             "router": {
                 "canonical_path": "generated/model-routes.json",
@@ -494,7 +495,7 @@ def test_review_launch_uses_verified_latest_approved_router_with_explicit_root(t
     assert error == ""
     assert len(candidates) == 1
     assert candidates[0]["provider"]["id"] == "verified-review-provider"
-    assert candidates[0]["provider"]["route_source"] == "mms:latest-approved"
+    assert candidates[0]["provider"]["route_source"] == "mms:latest-approved:bundle_review_test"
     assert candidates[0]["protocol"] == ANTHROPIC_MESSAGES_PROTOCOL
     assert candidates[0]["model_name"] == "Review-Model"
 
