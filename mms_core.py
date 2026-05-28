@@ -2744,29 +2744,21 @@ def _trace_record(source, **kv):
 
 
 def _trace_runtime_provider_id(runtime):
-    if not isinstance(runtime, dict):
-        return ""
-    if runtime.get("runtime_kind") == "provider" or runtime.get("auth_mode") == "api_key":
-        return str(runtime.get("id", "")).strip()
-    return ""
+    from mms_command_tools import trace_runtime_provider_id
+
+    return trace_runtime_provider_id(runtime)
 
 
 def _trace_runtime_account_id(runtime):
-    if not isinstance(runtime, dict):
-        return ""
-    if runtime.get("auth_mode") == "oauth_bridge":
-        return str(runtime.get("bridge_account_id") or runtime.get("id") or "").strip()
-    if runtime.get("auth_mode") == "oauth":
-        return str(runtime.get("id") or runtime.get("account_id") or "").strip()
-    return str(runtime.get("account_id") or "").strip()
+    from mms_command_tools import trace_runtime_account_id
+
+    return trace_runtime_account_id(runtime)
 
 
 def _trace_runtime_bridge(runtime):
-    if not isinstance(runtime, dict):
-        return ""
-    if runtime.get("auth_mode") != "oauth_bridge":
-        return ""
-    return str(runtime.get("bridge_url") or runtime.get("base_url") or "").strip()
+    from mms_command_tools import trace_runtime_bridge
+
+    return trace_runtime_bridge(runtime)
 
 
 def _trace_runtime_choice(source, runtime, launch_cli=None, choice=None):
@@ -6114,33 +6106,22 @@ def _broker_options_for_cli(cfg, cli_name, model_info=None):
 
 
 def _resolve_provider_for_cli(cfg, cli_name, default_provider, default_models):
-    options = _provider_options_for_model(cfg, cli_name, default_provider, default_models)
-    for option in options:
-        runtime = option["runtime"]
-        models = option["models"]
-        if cli_name not in CLI_MODEL_FAMILY_HINTS:
-            return runtime, models
-        if models:
-            return runtime, models
-    return None, []
+    from mms_command_tools import resolve_provider_for_cli
+
+    return resolve_provider_for_cli(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        provider_options_for_model=_provider_options_for_model,
+        cli_model_family_hints=CLI_MODEL_FAMILY_HINTS,
+    )
 
 
 def _resolve_source_default_index(options, preferred_cli):
-    if not options:
-        return 0
-    for idx, option in enumerate(options):
-        if option.get("kind") == "provider" and option.get("launch_cli") == preferred_cli and option.get("is_default"):
-            return idx
-    for idx, option in enumerate(options):
-        if option.get("launch_cli") == preferred_cli and option.get("is_default"):
-            return idx
-    for idx, option in enumerate(options):
-        if option.get("launch_cli") == preferred_cli:
-            return idx
-    for idx, option in enumerate(options):
-        if option.get("is_default"):
-            return idx
-    return 0
+    from mms_command_tools import resolve_source_default_index
+
+    return resolve_source_default_index(options, preferred_cli)
 
 
 def _resolve_launch_runtime(cfg, cli_name, default_provider, default_models, account_id=None, provider_id=None):
@@ -6164,35 +6145,27 @@ def _resolve_provider_runtime(cfg, cli_name, default_provider, default_models, p
 
 
 def _runtime_choice_label(runtime):
-    if runtime.get("auth_mode") == "broker_profile":
-        return f"Broker / {runtime.get('name', runtime.get('id', 'broker'))}"
-    if runtime.get("auth_mode") == "oauth_bridge":
-        return f"官方桥接 / {_account_label(runtime)}"
-    if runtime.get("auth_mode") == "oauth":
-        return f"官方 / {_account_label(runtime)}"
-    return f"网关 / {_provider_label(runtime)}"
+    from mms_command_tools import runtime_choice_label
+
+    return runtime_choice_label(runtime, account_label=_account_label, provider_label=_provider_label)
 
 
 def _list_runtime_sources(cfg, cli_name, default_provider, default_models, model_info=None, allow_selected_model_accounts=False):
-    options = _provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=model_info)
-    options.extend(
-        _account_options_for_model(
-            cfg,
-            cli_name,
-            default_models,
-            model_info=model_info,
-            allow_selected_model=allow_selected_model_accounts,
-        )
+    from mms_command_tools import list_runtime_sources
+
+    return list_runtime_sources(
+        cfg,
+        cli_name,
+        default_provider,
+        default_models,
+        model_info=model_info,
+        allow_selected_model_accounts=allow_selected_model_accounts,
+        provider_options_for_model=_provider_options_for_model,
+        account_options_for_model=_account_options_for_model,
+        broker_options_for_cli=_broker_options_for_cli,
+        resolve_source_default_index=_resolve_source_default_index,
+        default_priority=DEFAULT_PRIORITY,
     )
-    options.extend(_broker_options_for_cli(cfg, cli_name, model_info=model_info))
-    options.sort(key=lambda item: (
-        -int(item.get("priority", DEFAULT_PRIORITY) or DEFAULT_PRIORITY),
-        0 if item.get("launch_cli") == cli_name else 1,
-        0 if item["kind"] == "provider" else 1 if item["kind"] == "account" else 2,
-        item.get("title", ""),
-    ))
-    default_choice = _resolve_source_default_index(options, cli_name)
-    return options, default_choice
 
 
 def _runtime_source_kind_label(runtime):

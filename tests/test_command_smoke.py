@@ -1712,6 +1712,87 @@ def test_account_options_helper_preserves_oauth_filtering_and_default_marker():
     assert option["launch_cli"] == "codex"
 
 
+def test_runtime_source_selection_helpers_preserve_sort_defaults_and_trace_ids():
+    import mms_command_tools
+
+    provider_options = [
+        {
+            "kind": "provider",
+            "id": "relay",
+            "runtime": {"id": "relay", "runtime_kind": "provider", "auth_mode": "api_key"},
+            "models": ["gpt-5.5"],
+            "priority": 100,
+            "launch_cli": "codex",
+            "is_default": True,
+            "title": "Relay",
+        }
+    ]
+    account_options = [
+        {
+            "kind": "account",
+            "id": "codex-main",
+            "runtime": {"id": "codex-main", "auth_mode": "oauth"},
+            "models": ["gpt-5.5"],
+            "priority": 200,
+            "launch_cli": "codex",
+            "is_default": False,
+            "title": "Codex Main",
+        }
+    ]
+    broker_options = [
+        {
+            "kind": "broker",
+            "id": "broker",
+            "runtime": {"id": "broker", "auth_mode": "broker_profile", "name": "Broker"},
+            "models": ["gpt-5.5"],
+            "priority": 200,
+            "launch_cli": "claude",
+            "is_default": False,
+            "title": "Broker",
+        }
+    ]
+
+    runtime, models = mms_command_tools.resolve_provider_for_cli(
+        {},
+        "codex",
+        {},
+        [],
+        provider_options_for_model=lambda *_args, **_kwargs: provider_options,
+        cli_model_family_hints={"codex": "GPT"},
+    )
+    assert runtime["id"] == "relay"
+    assert models == ["gpt-5.5"]
+    assert mms_command_tools.resolve_source_default_index(account_options + provider_options, "codex") == 1
+
+    options, default_choice = mms_command_tools.list_runtime_sources(
+        {},
+        "codex",
+        {},
+        [],
+        provider_options_for_model=lambda *_args, **_kwargs: list(provider_options),
+        account_options_for_model=lambda *_args, **_kwargs: list(account_options),
+        broker_options_for_cli=lambda *_args, **_kwargs: list(broker_options),
+        default_priority=100,
+    )
+    assert [item["id"] for item in options] == ["codex-main", "broker", "relay"]
+    assert default_choice == 2
+
+    assert mms_command_tools.runtime_choice_label(
+        {"id": "relay", "auth_mode": "api_key"},
+        account_label=lambda runtime: runtime["id"],
+        provider_label=lambda runtime: runtime["id"],
+    ) == "网关 / relay"
+    assert mms_command_tools.runtime_choice_label(
+        {"id": "codex-main", "auth_mode": "oauth"},
+        account_label=lambda runtime: runtime["id"],
+        provider_label=lambda runtime: runtime["id"],
+    ) == "官方 / codex-main"
+    assert mms_command_tools.trace_runtime_provider_id({"id": "relay", "auth_mode": "api_key"}) == "relay"
+    assert mms_command_tools.trace_runtime_account_id({"id": "codex-main", "auth_mode": "oauth"}) == "codex-main"
+    assert mms_command_tools.trace_runtime_account_id({"id": "bridge", "auth_mode": "oauth_bridge", "bridge_account_id": "acct"}) == "acct"
+    assert mms_command_tools.trace_runtime_bridge({"auth_mode": "oauth_bridge", "bridge_url": "http://bridge"}) == "http://bridge"
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

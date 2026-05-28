@@ -2629,6 +2629,107 @@ def account_options_for_model(
     return options
 
 
+def resolve_provider_for_cli(cfg, cli_name, default_provider, default_models, *, provider_options_for_model, cli_model_family_hints):
+    options = provider_options_for_model(cfg, cli_name, default_provider, default_models)
+    for option in options:
+        runtime = option["runtime"]
+        models = option["models"]
+        if cli_name not in cli_model_family_hints:
+            return runtime, models
+        if models:
+            return runtime, models
+    return None, []
+
+
+def resolve_source_default_index(options, preferred_cli):
+    if not options:
+        return 0
+    for idx, option in enumerate(options):
+        if option.get("kind") == "provider" and option.get("launch_cli") == preferred_cli and option.get("is_default"):
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("launch_cli") == preferred_cli and option.get("is_default"):
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("launch_cli") == preferred_cli:
+            return idx
+    for idx, option in enumerate(options):
+        if option.get("is_default"):
+            return idx
+    return 0
+
+
+def runtime_choice_label(runtime, *, account_label, provider_label):
+    if runtime.get("auth_mode") == "broker_profile":
+        return f"Broker / {runtime.get('name', runtime.get('id', 'broker'))}"
+    if runtime.get("auth_mode") == "oauth_bridge":
+        return f"官方桥接 / {account_label(runtime)}"
+    if runtime.get("auth_mode") == "oauth":
+        return f"官方 / {account_label(runtime)}"
+    return f"网关 / {provider_label(runtime)}"
+
+
+def list_runtime_sources(
+    cfg,
+    cli_name,
+    default_provider,
+    default_models,
+    *,
+    model_info=None,
+    allow_selected_model_accounts=False,
+    provider_options_for_model,
+    account_options_for_model,
+    broker_options_for_cli,
+    resolve_source_default_index=resolve_source_default_index,
+    default_priority,
+):
+    options = provider_options_for_model(cfg, cli_name, default_provider, default_models, model_info=model_info)
+    options.extend(
+        account_options_for_model(
+            cfg,
+            cli_name,
+            default_models,
+            model_info=model_info,
+            allow_selected_model=allow_selected_model_accounts,
+        )
+    )
+    options.extend(broker_options_for_cli(cfg, cli_name, model_info=model_info))
+    options.sort(key=lambda item: (
+        -int(item.get("priority", default_priority) or default_priority),
+        0 if item.get("launch_cli") == cli_name else 1,
+        0 if item["kind"] == "provider" else 1 if item["kind"] == "account" else 2,
+        item.get("title", ""),
+    ))
+    default_choice = resolve_source_default_index(options, cli_name)
+    return options, default_choice
+
+
+def trace_runtime_provider_id(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("runtime_kind") == "provider" or runtime.get("auth_mode") == "api_key":
+        return str(runtime.get("id", "")).strip()
+    return ""
+
+
+def trace_runtime_account_id(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("auth_mode") == "oauth_bridge":
+        return str(runtime.get("bridge_account_id") or runtime.get("id") or "").strip()
+    if runtime.get("auth_mode") == "oauth":
+        return str(runtime.get("id") or runtime.get("account_id") or "").strip()
+    return str(runtime.get("account_id") or "").strip()
+
+
+def trace_runtime_bridge(runtime):
+    if not isinstance(runtime, dict):
+        return ""
+    if runtime.get("auth_mode") != "oauth_bridge":
+        return ""
+    return str(runtime.get("bridge_url") or runtime.get("base_url") or "").strip()
+
+
 def http_status_is_success(value):
     try:
         status_code = int(str(value or "").strip())
