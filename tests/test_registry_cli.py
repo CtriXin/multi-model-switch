@@ -1961,6 +1961,8 @@ def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: 
     assert payload["bundle"]["runtime_ready"] is True
     assert payload["secrets"]["secret_count"] == 1
     assert payload["next_actions"][0]["command"].startswith("scripts/mms_health_watchdog.py")
+    assert f"--config-dir {config_dir}" in payload["next_actions"][0]["command"]
+    assert "$MMS_CONFIG_ROOT" not in payload["next_actions"][0]["command"]
     assert "sk-doctor-ready-secret" not in combined
 
 

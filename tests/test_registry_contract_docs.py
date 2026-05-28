@@ -116,6 +116,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "missing route base URLs",
         "single preview rebuild command `mmf preview prepare --from ~/.config/mms --json`",
         "if keys are missing too, the command includes `--include-secrets`",
+        "Ready-state watchdog hints use the concrete selected config root instead of `$MMS_CONFIG_ROOT`",
         "every route leaf has an `anthropic_base_url` or `openai_base_url`",
         "`stable_legacy_writes`",
         "`preview_v2_writes`",

@@ -755,7 +755,11 @@ def preview_doctor(
             next_actions.append({"label": "Inspect preview bundle readiness", "command": "./mmf config doctor --json"})
     else:
         overall = "ready"
-        next_actions.append({"label": "Optional: run read-only watchdog check", "command": "scripts/mms_health_watchdog.py --config-dir \"$MMS_CONFIG_ROOT\" --require-bundle --dry-run --print-json"})
+        watchdog_root = shlex.quote(str(root))
+        next_actions.append({
+            "label": "Optional: run read-only watchdog check",
+            "command": f"scripts/mms_health_watchdog.py --config-dir {watchdog_root} --require-bundle --dry-run --print-json",
+        })
 
     return {
         "schema": "mms.preview_doctor.v1",
