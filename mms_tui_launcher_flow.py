@@ -1317,6 +1317,65 @@ def confirm_tui_options(
     }
 
 
+def run_confirm_tui_prompt(
+    cli_name,
+    clean_model_info,
+    runtime,
+    *,
+    env_vars,
+    once,
+    confirm_tui,
+    confirm_context_lines,
+    caveman_available_for_cli,
+    nsr_available_for_cli,
+    ecc_available_for_claude,
+    omc_available_for_claude,
+    model_info_looks_domestic,
+    default_reasoning_effort_for_model_info,
+    build_confirm_preview_catalog,
+):
+    confirm_context = build_confirm_capability_context(
+        cli_name,
+        runtime,
+        clean_model_info,
+        confirm_context_lines=confirm_context_lines,
+        caveman_available_for_cli=caveman_available_for_cli,
+        nsr_available_for_cli=nsr_available_for_cli,
+        ecc_available_for_claude=ecc_available_for_claude,
+        omc_available_for_claude=omc_available_for_claude,
+        model_info_looks_domestic=model_info_looks_domestic,
+        default_reasoning_effort_for_model_info=default_reasoning_effort_for_model_info,
+        build_confirm_preview_catalog=build_confirm_preview_catalog,
+    )
+    result = safe_tui_call(
+        confirm_tui,
+        cli_name,
+        clean_model_info,
+        **confirm_tui_options(
+            env_vars=env_vars,
+            once=once,
+            context_lines=confirm_context["context_lines"],
+            has_caveman=confirm_context["has_caveman"],
+            has_nsr=confirm_context["has_nsr"],
+            has_ecc=confirm_context["has_ecc"],
+            has_omc=confirm_context["has_omc"],
+            runtime=runtime,
+            default_reasoning_effort=confirm_context["default_reasoning_effort"],
+            preview_catalog=confirm_context["preview_catalog"],
+        ),
+    )
+    if result == "__interrupt__":
+        return {"status": "interrupt"}
+    return {
+        "status": "continue",
+        "confirm_result": normalize_confirm_result(
+            result,
+            confirm_context["default_reasoning_effort"],
+        ),
+        "has_nsr": confirm_context["has_nsr"],
+    }
+
+
 def apply_confirm_bypass_flag(runtime, cli_name, bypass):
     if cli_name in {"claude", "codex", "opencode", "agy"}:
         runtime["bypass"] = bool(bypass)

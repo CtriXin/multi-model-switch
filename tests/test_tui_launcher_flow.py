@@ -37,6 +37,7 @@ from mms_tui_launcher_flow import (
     provider_browse_options,
     refresh_tui_runtime_state_after_config_change,
     resolve_last_used_launch_context,
+    run_confirm_tui_prompt,
     safe_tui_call,
     selected_model_launch_context,
 )
@@ -2003,6 +2004,84 @@ def test_confirm_tui_options_preserves_confirm_defaults() -> None:
         "preview_catalog": {"preview": True},
         "runtime": runtime,
     }
+
+
+def test_run_confirm_tui_prompt_builds_options_and_normalizes_result() -> None:
+    calls = []
+    runtime = {"reasoning_effort": "LOW", "nsr_mode": "enable"}
+    model_info = {"model": "qwen3-max"}
+
+    def confirm_tui(cli_name, clean_model_info, **kwargs):
+        calls.append(("confirm", cli_name, clean_model_info, kwargs))
+        return ("", True, True, False, "omc", False, "medium", {"toon": True}, True)
+
+    result = run_confirm_tui_prompt(
+        "claude",
+        model_info,
+        runtime,
+        env_vars={"A": "B"},
+        once=True,
+        confirm_tui=confirm_tui,
+        confirm_context_lines=lambda cli_name, runtime_arg: calls.append(("context", cli_name, runtime_arg)) or ["ctx"],
+        caveman_available_for_cli=lambda cli_name: cli_name == "claude",
+        nsr_available_for_cli=lambda cli_name: cli_name == "claude",
+        ecc_available_for_claude=lambda: True,
+        omc_available_for_claude=lambda: True,
+        model_info_looks_domestic=lambda model_info_arg: model_info_arg is model_info,
+        default_reasoning_effort_for_model_info=lambda _model_info: "high",
+        build_confirm_preview_catalog=lambda cli_name, runtime_arg, **kwargs: calls.append(("preview", cli_name, runtime_arg, kwargs)) or {"preview": kwargs},
+    )
+
+    assert result == {
+        "status": "continue",
+        "confirm_result": {
+            "action": "",
+            "bypass": True,
+            "claude_1m_enabled": True,
+            "caveman_enabled": False,
+            "agent_pack": "omc",
+            "thinking_enabled": False,
+            "reasoning_effort": "medium",
+            "disabled_session_surfaces": {"toon": True},
+            "nsr_enabled": True,
+            "confirm_returned_surfaces": True,
+        },
+        "has_nsr": True,
+    }
+    assert calls[0] == ("context", "claude", runtime)
+    assert calls[1] == (
+        "preview",
+        "claude",
+        runtime,
+        {"has_caveman": True, "has_nsr": True, "has_ecc": True, "has_omc": True},
+    )
+    assert calls[2][0:3] == ("confirm", "claude", model_info)
+    assert calls[2][3]["env_vars"] == {"A": "B"}
+    assert calls[2][3]["once"] is True
+    assert calls[2][3]["context_lines"] == ["ctx"]
+    assert calls[2][3]["reasoning_effort_default"] == "low"
+    assert calls[2][3]["preview_catalog"] == {
+        "preview": {"has_caveman": True, "has_nsr": True, "has_ecc": True, "has_omc": True}
+    }
+
+
+def test_run_confirm_tui_prompt_handles_interrupt() -> None:
+    assert run_confirm_tui_prompt(
+        "codex",
+        {"model": "gpt-5.4"},
+        {},
+        env_vars={},
+        once=False,
+        confirm_tui=lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
+        confirm_context_lines=lambda *_args: [],
+        caveman_available_for_cli=lambda _cli: False,
+        nsr_available_for_cli=lambda _cli: False,
+        ecc_available_for_claude=lambda: False,
+        omc_available_for_claude=lambda: False,
+        model_info_looks_domestic=lambda _model_info: False,
+        default_reasoning_effort_for_model_info=lambda _model_info: "high",
+        build_confirm_preview_catalog=lambda *_args, **_kwargs: {},
+    ) == {"status": "interrupt"}
 
 
 def test_apply_confirm_bypass_flag_only_for_launch_clis() -> None:

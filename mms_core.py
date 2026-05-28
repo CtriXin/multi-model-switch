@@ -5486,10 +5486,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             )(__import__("mms_launchers", fromlist=["get_claude_network_guard_preview", "_claude_bypass_requires_proxy"])),
         )
 
-        confirm_context = tui_flow.build_confirm_capability_context(
+        confirm_prompt = tui_flow.run_confirm_tui_prompt(
             cli,
-            runtime_runtime,
             clean_model_info,
+            runtime_runtime,
+            env_vars=env_vars,
+            once=once,
+            confirm_tui=confirm_tui,
             confirm_context_lines=_confirm_context_lines,
             caveman_available_for_cli=_caveman_available_for_cli,
             nsr_available_for_cli=_nsr_available_for_cli,
@@ -5499,35 +5502,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             default_reasoning_effort_for_model_info=_default_reasoning_effort_for_model_info,
             build_confirm_preview_catalog=_build_confirm_preview_catalog,
         )
-        context_lines = confirm_context["context_lines"]
-        has_caveman = confirm_context["has_caveman"]
-        has_nsr = confirm_context["has_nsr"]
-        has_ecc = confirm_context["has_ecc"]
-        has_omc = confirm_context["has_omc"]
-        default_reasoning_effort = confirm_context["default_reasoning_effort"]
-        preview_catalog = confirm_context["preview_catalog"]
-
-        result = tui_flow.safe_tui_call(
-            confirm_tui,
-            cli,
-            clean_model_info,
-            **tui_flow.confirm_tui_options(
-                env_vars=env_vars,
-                once=once,
-                context_lines=context_lines,
-                has_caveman=has_caveman,
-                has_nsr=has_nsr,
-                has_ecc=has_ecc,
-                has_omc=has_omc,
-                runtime=runtime_runtime,
-                default_reasoning_effort=default_reasoning_effort,
-                preview_catalog=preview_catalog,
-            ),
-        )
-        if result == "__interrupt__":
+        if confirm_prompt["status"] == "interrupt":
             return True
 
-        confirm_result = tui_flow.normalize_confirm_result(result, default_reasoning_effort)
+        confirm_result = confirm_prompt["confirm_result"]
+        has_nsr = confirm_prompt["has_nsr"]
         action = confirm_result["action"]
         bypass = confirm_result["bypass"]
         claude_1m_enabled = confirm_result["claude_1m_enabled"]
