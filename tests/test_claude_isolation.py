@@ -323,6 +323,39 @@ def test_home_context_defaults_to_stable_root_without_explicit_root(monkeypatch,
     assert context["config_root_explicit"] is False
 
 
+def test_model_context_overrides_follow_selected_config_root(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    stable_root = real_home / ".config" / "mms"
+    preview_root = real_home / ".config" / "mms-next"
+    stable_root.mkdir(parents=True)
+    preview_root.mkdir(parents=True)
+    (stable_root / "model-context-overrides.json").write_text(
+        json.dumps({"models": {"root-selected-model": 111_000}}),
+        encoding="utf-8",
+    )
+    (preview_root / "model-context-overrides.json").write_text(
+        json.dumps({"models": {"root-selected-model": 222_000}}),
+        encoding="utf-8",
+    )
+    mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE.update({"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}})
+
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.delenv("MMS_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("MMS_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    assert mms_launchers._lookup_context_window("root-selected-model") == 111_000
+
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_launchers._lookup_context_window("root-selected-model") == 222_000
+    assert mms_launchers._MODEL_CONTEXT_OVERRIDES_CACHE["path"] == str(preview_root / "model-context-overrides.json")
+
+
 def test_mmf_wrapper_selects_mms_next_without_stable_fallback(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     real_home = tmp_path / "real-home"

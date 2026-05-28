@@ -377,21 +377,31 @@ def _coerce_context_window(value):
     return window if window > 0 else None
 
 
-def _load_model_context_overrides():
+def _model_context_overrides_path():
     try:
-        mtime = os.path.getmtime(_MODEL_CONTEXT_OVERRIDES_PATH)
+        config_root = _resolve_mms_config_dir()
+    except Exception:
+        config_root = _real_user_path(".config", "mms")
+    return os.path.join(config_root, "model-context-overrides.json")
+
+
+def _load_model_context_overrides():
+    overrides_path = _model_context_overrides_path()
+    try:
+        mtime = os.path.getmtime(overrides_path)
     except OSError:
+        _MODEL_CONTEXT_OVERRIDES_CACHE["path"] = overrides_path
         _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = None
         _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {"models": {}, "provider_overrides": {}}
         return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
 
-    if _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] == mtime:
+    if _MODEL_CONTEXT_OVERRIDES_CACHE.get("path") == overrides_path and _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] == mtime:
         return _MODEL_CONTEXT_OVERRIDES_CACHE["data"]
 
     models = {}
     provider_overrides = {}
     try:
-        with open(_MODEL_CONTEXT_OVERRIDES_PATH, "r", encoding="utf-8") as f:
+        with open(overrides_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception:
         payload = {}
@@ -422,6 +432,7 @@ def _load_model_context_overrides():
                     if window:
                         provider_overrides[str(key).strip()] = window
 
+    _MODEL_CONTEXT_OVERRIDES_CACHE["path"] = overrides_path
     _MODEL_CONTEXT_OVERRIDES_CACHE["mtime"] = mtime
     _MODEL_CONTEXT_OVERRIDES_CACHE["data"] = {
         "models": models,
@@ -886,8 +897,7 @@ def _record_account_guard_finalize(account_id, *, exit_code=None, stale_cleanup=
         atomic_write_json(path, state, mode=0o600)
 
 
-_MODEL_CONTEXT_OVERRIDES_PATH = _real_user_path(".config", "mms", "model-context-overrides.json")
-_MODEL_CONTEXT_OVERRIDES_CACHE = {"mtime": None, "data": {"models": {}, "provider_overrides": {}}}
+_MODEL_CONTEXT_OVERRIDES_CACHE = {"path": None, "mtime": None, "data": {"models": {}, "provider_overrides": {}}}
 _CLAUDE_NETWORK_GUARD_CACHE: dict = {}
 _CLAUDE_NETWORK_GUARD_TTL_SEC = 20.0
 _SESSION_GUARD_MARKER_NAME = ".mms-session-guard.json"
