@@ -5054,13 +5054,13 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 if language_result["status"] == "interrupt":
                     return True
             elif settings_action == "routes_export":
-                try:
-                    from mms_router import MODEL_ROUTES_PATH, export_model_routes
-
-                    export_model_routes(current_cfg, force=True)
-                    console.print(f"[green]✓ 已导出 {MODEL_ROUTES_PATH}[/green]")
-                except Exception as e:
-                    console.print(f"[red]导出失败: {e}[/red]")
+                tui_flow.handle_tui_routes_export_settings_action(
+                    current_cfg,
+                    export_model_routes_loader=lambda: (
+                        lambda router: (router.MODEL_ROUTES_PATH, router.export_model_routes)
+                    )(__import__("mms_router", fromlist=["MODEL_ROUTES_PATH", "export_model_routes"])),
+                    console=console,
+                )
             elif settings_action == "registry":
                 from mms_registry_cli import diff_openrouter_catalog, fetch_openrouter_catalog, publish_approved_bundle, refresh_source_snapshots, registry_status, scheduled_refresh, source_freshness, verify_approved_bundle
 

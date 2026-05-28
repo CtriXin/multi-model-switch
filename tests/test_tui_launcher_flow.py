@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     handle_tui_provider_browse_action,
     handle_tui_provider_mgmt_settings_action,
     handle_tui_profile_action,
+    handle_tui_routes_export_settings_action,
     handle_tui_selected_model_action,
     last_used_model_info,
     normalize_confirm_result,
@@ -1029,6 +1030,60 @@ def test_handle_tui_language_settings_action_skips_cancel_invalid_and_interrupt(
     ) == {"status": "interrupt", "changed": False}
 
     assert calls == []
+
+
+def test_handle_tui_routes_export_settings_action_exports_and_reports_success() -> None:
+    calls = []
+
+    class Console:
+        @staticmethod
+        def print(message):
+            calls.append(("print", message))
+
+    def export_model_routes(cfg, *, force):
+        calls.append(("export", cfg, force))
+
+    result = handle_tui_routes_export_settings_action(
+        {"cfg": True},
+        export_model_routes_loader=lambda: ("/tmp/model-routes.json", export_model_routes),
+        console=Console(),
+    )
+
+    assert result == {"status": "continue", "success": True}
+    assert calls == [
+        ("export", {"cfg": True}, True),
+        ("print", "[green]✓ 已导出 /tmp/model-routes.json[/green]"),
+    ]
+
+
+def test_handle_tui_routes_export_settings_action_reports_loader_or_export_failure() -> None:
+    messages = []
+
+    class Console:
+        @staticmethod
+        def print(message):
+            messages.append(message)
+
+    assert handle_tui_routes_export_settings_action(
+        {},
+        export_model_routes_loader=lambda: (_ for _ in ()).throw(RuntimeError("loader failed")),
+        console=Console(),
+    ) == {"status": "continue", "success": False}
+
+    def export_model_routes(_cfg, *, force):
+        assert force is True
+        raise RuntimeError("export failed")
+
+    assert handle_tui_routes_export_settings_action(
+        {},
+        export_model_routes_loader=lambda: ("/tmp/model-routes.json", export_model_routes),
+        console=Console(),
+    ) == {"status": "continue", "success": False}
+
+    assert messages == [
+        "[red]导出失败: loader failed[/red]",
+        "[red]导出失败: export failed[/red]",
+    ]
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

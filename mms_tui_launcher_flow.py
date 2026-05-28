@@ -745,6 +745,22 @@ def handle_tui_language_settings_action(
     return {"status": "continue", "changed": False}
 
 
+def handle_tui_routes_export_settings_action(
+    cfg,
+    *,
+    export_model_routes_loader,
+    console,
+):
+    try:
+        model_routes_path, export_model_routes = export_model_routes_loader()
+        export_model_routes(cfg, force=True)
+        console.print(f"[green]✓ 已导出 {model_routes_path}[/green]")
+        return {"status": "continue", "success": True}
+    except Exception as e:
+        console.print(f"[red]导出失败: {e}[/red]")
+        return {"status": "continue", "success": False}
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:
