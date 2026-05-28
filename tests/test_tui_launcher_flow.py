@@ -36,6 +36,7 @@ from mms_tui_launcher_flow import (
     handle_tui_profile_action,
     handle_tui_registry_settings_action,
     handle_tui_routes_export_settings_action,
+    handle_tui_rescue_settings_action,
     handle_rescue_packet_action,
     handle_tui_selected_model_action,
     handle_tui_submodel_action,
@@ -2858,6 +2859,154 @@ def test_handle_rescue_packet_action_unknown_is_noop() -> None:
     )
 
     assert result == {"status": "continue", "cfg": cfg, "result": None}
+
+
+def test_handle_tui_rescue_settings_action_interrupts_from_landing_menu() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    result = handle_tui_rescue_settings_action(
+        cfg,
+        "/repo",
+        rescue_default_fallback=lambda cfg_arg: calls.append(("default", cfg_arg)) or {"model": "old"},
+        rescue_hot_fallback_enabled_cfg=lambda cfg_arg: calls.append(("hot", cfg_arg)) or False,
+        rescue_route_fallback_model_candidates=lambda **kwargs: calls.append(("routes", kwargs)) or ["route-model"],
+        list_rescue_events=lambda *, repo_root, limit: calls.append(("events", repo_root, limit)) or [],
+        latest_rescue_hot_fallback_event=lambda: calls.append(("latest",)) or None,
+        rescue_landing_tui_payload=lambda *args: calls.append(("payload", args)) or ([("info", "value")], [("back", "返回")]),
+        select_channel_action_tui=lambda *args: calls.append(("select", args)) or "__interrupt__",
+        set_rescue_default_fallback=unused,
+        save_config=unused,
+        rescue_default_fallback_report_payload=unused,
+        print_settings_result_report=unused,
+        pause_after_tui_report=unused,
+        select_model_tui_loader=unused,
+        set_rescue_hot_fallback_enabled=unused,
+        rescue_hot_fallback_toggle_report_payload=unused,
+        write_demo_rescue_packet=unused,
+        rescue_demo_packet_report_payload=unused,
+        localize=lambda zh, _en: zh,
+        select_rescue_event_tui=unused,
+        rescue_fallback_model_candidates=unused,
+        write_fallback_handover=unused,
+        rescue_handover_report_payload=unused,
+        rescue_paths_report_payload=unused,
+        console=object(),
+        print_settings_error_report=unused,
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {"status": "interrupt", "cfg": cfg}
+    assert calls[-1] == ("select", ("Rescue / Current-session Fallback", [("info", "value")], [("back", "返回")]))
+
+
+def test_handle_tui_rescue_settings_action_view_packets_without_events_reports() -> None:
+    calls = []
+    cfg = {"rescue": {}}
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    result = handle_tui_rescue_settings_action(
+        cfg,
+        "/repo",
+        rescue_default_fallback=lambda _cfg: {"model": ""},
+        rescue_hot_fallback_enabled_cfg=lambda _cfg: False,
+        rescue_route_fallback_model_candidates=lambda **_kwargs: [],
+        list_rescue_events=lambda *, repo_root, limit: calls.append(("events", repo_root, limit)) or [],
+        latest_rescue_hot_fallback_event=lambda: None,
+        rescue_landing_tui_payload=lambda *args: calls.append(("payload", args)) or ([("default", args[0])], [("view_packets", "查看")]),
+        select_channel_action_tui=lambda *args: calls.append(("select", args)) or "view_packets",
+        set_rescue_default_fallback=unused,
+        save_config=unused,
+        rescue_default_fallback_report_payload=unused,
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        select_model_tui_loader=unused,
+        set_rescue_hot_fallback_enabled=unused,
+        rescue_hot_fallback_toggle_report_payload=unused,
+        write_demo_rescue_packet=unused,
+        rescue_demo_packet_report_payload=unused,
+        localize=lambda zh, _en: zh,
+        select_rescue_event_tui=unused,
+        rescue_fallback_model_candidates=unused,
+        write_fallback_handover=unused,
+        rescue_handover_report_payload=unused,
+        rescue_paths_report_payload=unused,
+        console=object(),
+        print_settings_error_report=unused,
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {"status": "continue", "cfg": cfg}
+    assert ("events", "/repo", 20) in calls
+    assert ("report", ("没有 rescue packet", [("状态", "当前没有可查看记录")]), {"ok": False}) in calls
+    assert ("pause", "按 Enter 返回设置") in calls
+
+
+def test_handle_tui_rescue_settings_action_dispatches_packet_and_updates_cfg() -> None:
+    calls = []
+    cfg = {"rescue": {"fallback_model": "old"}}
+    cleared_cfg = {"rescue": {}}
+    selected_rescue = {"failed_model": "gpt-5.5"}
+    actions = iter(["view_packets", "clear_default"])
+
+    def unused(*_args, **_kwargs):
+        raise AssertionError("unused")
+
+    def route_candidates(**kwargs):
+        calls.append(("routes", kwargs))
+        return ["route-model"]
+
+    def set_default(cfg_arg, *, model):
+        calls.append(("set_default", cfg_arg, model))
+        assert model == ""
+        return cleared_cfg
+
+    result = handle_tui_rescue_settings_action(
+        cfg,
+        "/repo",
+        rescue_default_fallback=lambda cfg_arg: calls.append(("default", cfg_arg)) or {"model": "old"},
+        rescue_hot_fallback_enabled_cfg=lambda cfg_arg: calls.append(("hot", cfg_arg)) or False,
+        rescue_route_fallback_model_candidates=route_candidates,
+        list_rescue_events=lambda *, repo_root, limit: calls.append(("events", repo_root, limit)) or [selected_rescue],
+        latest_rescue_hot_fallback_event=lambda: calls.append(("latest",)) or None,
+        rescue_landing_tui_payload=lambda *args: calls.append(("payload", args)) or ([("default", args[0])], [("view_packets", "查看")]),
+        select_channel_action_tui=lambda *args: calls.append(("select", args)) or next(actions),
+        set_rescue_default_fallback=set_default,
+        save_config=lambda cfg_arg, *, reason: calls.append(("save", cfg_arg, reason)),
+        rescue_default_fallback_report_payload=lambda fallback, **kwargs: calls.append(("default_payload", fallback, kwargs)) or ("default", [("fallback", fallback)]),
+        print_settings_result_report=lambda *args, **kwargs: calls.append(("report", args, kwargs)),
+        pause_after_tui_report=lambda message: calls.append(("pause", message)),
+        select_model_tui_loader=unused,
+        set_rescue_hot_fallback_enabled=unused,
+        rescue_hot_fallback_toggle_report_payload=unused,
+        write_demo_rescue_packet=unused,
+        rescue_demo_packet_report_payload=unused,
+        localize=lambda zh, _en: zh,
+        select_rescue_event_tui=lambda events: calls.append(("event_select", events)) or selected_rescue,
+        rescue_fallback_model_candidates=lambda cfg_arg, rescue_arg, *, limit: calls.append(("fallbacks", cfg_arg, rescue_arg, limit)) or ["fallback-model"],
+        write_fallback_handover=unused,
+        rescue_handover_report_payload=unused,
+        rescue_paths_report_payload=unused,
+        console=object(),
+        print_settings_error_report=unused,
+        ensure_rich=unused,
+        prompt_cls=type("Prompt", (), {"ask": staticmethod(unused)}),
+    )
+
+    assert result == {"status": "continue", "cfg": cleared_cfg}
+    assert ("select", ("Rescue / Current-session Fallback", [("default", "old")], [("view_packets", "查看")])) in calls
+    assert ("event_select", [selected_rescue]) in calls
+    assert ("set_default", cfg, "") in calls
+    assert ("save", cleared_cfg, "tui:clear_rescue_default_fallback") in calls
+    assert ("report", ("default", [("fallback", "")]), {}) in calls
+    assert ("pause", "按 Enter 返回设置") in calls
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

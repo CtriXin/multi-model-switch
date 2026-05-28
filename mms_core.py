@@ -5133,20 +5133,12 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             elif settings_action == "rescue":
                 from mms_rescue import list_rescue_events, write_demo_rescue_packet, write_fallback_handover
 
-                def _apply_rescue_default_action(fallback_model, *, cleared=False):
-                    return tui_flow.apply_rescue_default_fallback_action(
-                        current_cfg,
-                        fallback_model,
-                        cleared=cleared,
-                        set_rescue_default_fallback=_set_rescue_default_fallback,
-                        save_config=save_config,
-                        rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
-                        rescue_hot_fallback_enabled_cfg=_rescue_hot_fallback_enabled_cfg,
-                        print_settings_result_report=_print_settings_result_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
+                def _select_model_tui_loader():
+                    from mms_tui import select_model_tui
 
-                landing_context = tui_flow.rescue_landing_action_context(
+                    return select_model_tui
+
+                rescue_settings = tui_flow.handle_tui_rescue_settings_action(
                     current_cfg,
                     os.getcwd(),
                     rescue_default_fallback=_rescue_default_fallback,
@@ -5155,104 +5147,31 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                     list_rescue_events=list_rescue_events,
                     latest_rescue_hot_fallback_event=_latest_rescue_hot_fallback_event,
                     rescue_landing_tui_payload=_rescue_landing_tui_payload,
-                )
-                default_fallback = landing_context["default_fallback"]
-                default_label = landing_context["default_label"]
-                route_fallback_candidates = landing_context["route_fallback_candidates"]
-                rescue_events = landing_context["rescue_events"]
-                landing_result = tui_flow.select_rescue_menu_action(
-                    "Rescue / Current-session Fallback",
-                    landing_context["landing_info"],
-                    landing_context["landing_actions"],
                     select_channel_action_tui=select_channel_action_tui,
-                )
-                if landing_result["status"] == "interrupt":
-                    return True
-                if landing_result["status"] != "action":
-                    continue
-                landing_action = landing_result["action"]
-
-                def _select_model_tui_loader():
-                    from mms_tui import select_model_tui
-
-                    return select_model_tui
-
-                landing_dispatch = tui_flow.handle_rescue_landing_action(
-                    current_cfg,
-                    landing_action,
-                    default_fallback,
-                    route_fallback_candidates,
-                    os.getcwd(),
-                    apply_rescue_default_action=_apply_rescue_default_action,
+                    set_rescue_default_fallback=_set_rescue_default_fallback,
+                    save_config=save_config,
+                    rescue_default_fallback_report_payload=_rescue_default_fallback_report_payload,
+                    print_settings_result_report=_print_settings_result_report,
+                    pause_after_tui_report=_pause_after_tui_report,
                     select_model_tui_loader=_select_model_tui_loader,
                     set_rescue_hot_fallback_enabled=_set_rescue_hot_fallback_enabled,
-                    save_config=save_config,
                     rescue_hot_fallback_toggle_report_payload=_rescue_hot_fallback_toggle_report_payload,
                     write_demo_rescue_packet=write_demo_rescue_packet,
                     rescue_demo_packet_report_payload=_rescue_demo_packet_report_payload,
-                    print_settings_result_report=_print_settings_result_report,
-                    pause_after_tui_report=_pause_after_tui_report,
-                    ensure_rich=_ensure_rich,
-                    prompt_cls=Prompt,
-                )
-                current_cfg = landing_dispatch["cfg"]
-                if landing_dispatch["status"] != "view_packets":
-                    continue
-                if not rescue_events:
-                    tui_flow.show_rescue_no_packets_report(
-                        localize=_L,
-                        print_settings_result_report=_print_settings_result_report,
-                        pause_after_tui_report=_pause_after_tui_report,
-                    )
-                    continue
-                selected_result = tui_flow.select_rescue_event_action(
-                    rescue_events,
+                    localize=_L,
                     select_rescue_event_tui=select_rescue_event_tui,
-                )
-                if selected_result["status"] == "interrupt":
-                    return True
-                if selected_result["status"] != "selected":
-                    continue
-                selected_rescue = selected_result["selected_rescue"]
-                packet_menu = tui_flow.rescue_packet_action_menu_context(
-                    current_cfg,
-                    selected_rescue,
-                    default_label,
                     rescue_fallback_model_candidates=_rescue_fallback_model_candidates,
-                    rescue_route_fallback_model_candidates=_rescue_route_fallback_model_candidates,
-                )
-                route_fallback_candidates = packet_menu["route_fallback_candidates"]
-                rescue_result = tui_flow.select_rescue_menu_action(
-                    "Rescue Packet",
-                    packet_menu["info_lines"],
-                    packet_menu["actions"],
-                    select_channel_action_tui=select_channel_action_tui,
-                )
-                if rescue_result["status"] == "interrupt":
-                    return True
-                if rescue_result["status"] != "action":
-                    continue
-                rescue_action = rescue_result["action"]
-                packet_dispatch = tui_flow.handle_rescue_packet_action(
-                    current_cfg,
-                    selected_rescue,
-                    rescue_action,
-                    default_fallback,
-                    route_fallback_candidates,
-                    select_model_tui_loader=_select_model_tui_loader,
-                    apply_rescue_default_action=_apply_rescue_default_action,
                     write_fallback_handover=write_fallback_handover,
                     rescue_handover_report_payload=_rescue_handover_report_payload,
                     rescue_paths_report_payload=_rescue_paths_report_payload,
-                    localize=_L,
                     console=console,
-                    print_settings_result_report=_print_settings_result_report,
                     print_settings_error_report=_print_settings_error_report,
-                    pause_after_tui_report=_pause_after_tui_report,
                     ensure_rich=_ensure_rich,
                     prompt_cls=Prompt,
                 )
-                current_cfg = packet_dispatch["cfg"]
+                current_cfg = rescue_settings["cfg"]
+                if rescue_settings["status"] == "interrupt":
+                    return True
             continue
 
         # ── 上次使用 ──

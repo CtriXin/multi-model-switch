@@ -1653,6 +1653,158 @@ def handle_rescue_packet_action(
     return {"status": "continue", "cfg": cfg, "result": None}
 
 
+def handle_tui_rescue_settings_action(
+    cfg,
+    repo_root,
+    *,
+    rescue_default_fallback,
+    rescue_hot_fallback_enabled_cfg,
+    rescue_route_fallback_model_candidates,
+    list_rescue_events,
+    latest_rescue_hot_fallback_event,
+    rescue_landing_tui_payload,
+    select_channel_action_tui,
+    set_rescue_default_fallback,
+    save_config,
+    rescue_default_fallback_report_payload,
+    print_settings_result_report,
+    pause_after_tui_report,
+    select_model_tui_loader,
+    set_rescue_hot_fallback_enabled,
+    rescue_hot_fallback_toggle_report_payload,
+    write_demo_rescue_packet,
+    rescue_demo_packet_report_payload,
+    localize,
+    select_rescue_event_tui,
+    rescue_fallback_model_candidates,
+    write_fallback_handover,
+    rescue_handover_report_payload,
+    rescue_paths_report_payload,
+    console,
+    print_settings_error_report,
+    ensure_rich,
+    prompt_cls,
+):
+    current_cfg = cfg
+
+    def apply_rescue_default_action(fallback_model, *, cleared=False):
+        return apply_rescue_default_fallback_action(
+            current_cfg,
+            fallback_model,
+            cleared=cleared,
+            set_rescue_default_fallback=set_rescue_default_fallback,
+            save_config=save_config,
+            rescue_default_fallback_report_payload=rescue_default_fallback_report_payload,
+            rescue_hot_fallback_enabled_cfg=rescue_hot_fallback_enabled_cfg,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+
+    landing_context = rescue_landing_action_context(
+        current_cfg,
+        repo_root,
+        rescue_default_fallback=rescue_default_fallback,
+        rescue_hot_fallback_enabled_cfg=rescue_hot_fallback_enabled_cfg,
+        rescue_route_fallback_model_candidates=rescue_route_fallback_model_candidates,
+        list_rescue_events=list_rescue_events,
+        latest_rescue_hot_fallback_event=latest_rescue_hot_fallback_event,
+        rescue_landing_tui_payload=rescue_landing_tui_payload,
+    )
+    default_fallback = landing_context["default_fallback"]
+    default_label = landing_context["default_label"]
+    route_fallback_candidates = landing_context["route_fallback_candidates"]
+    rescue_events = landing_context["rescue_events"]
+    landing_result = select_rescue_menu_action(
+        "Rescue / Current-session Fallback",
+        landing_context["landing_info"],
+        landing_context["landing_actions"],
+        select_channel_action_tui=select_channel_action_tui,
+    )
+    if landing_result["status"] == "interrupt":
+        return {"status": "interrupt", "cfg": current_cfg}
+    if landing_result["status"] != "action":
+        return {"status": "continue", "cfg": current_cfg}
+
+    landing_dispatch = handle_rescue_landing_action(
+        current_cfg,
+        landing_result["action"],
+        default_fallback,
+        route_fallback_candidates,
+        repo_root,
+        apply_rescue_default_action=apply_rescue_default_action,
+        select_model_tui_loader=select_model_tui_loader,
+        set_rescue_hot_fallback_enabled=set_rescue_hot_fallback_enabled,
+        save_config=save_config,
+        rescue_hot_fallback_toggle_report_payload=rescue_hot_fallback_toggle_report_payload,
+        write_demo_rescue_packet=write_demo_rescue_packet,
+        rescue_demo_packet_report_payload=rescue_demo_packet_report_payload,
+        print_settings_result_report=print_settings_result_report,
+        pause_after_tui_report=pause_after_tui_report,
+        ensure_rich=ensure_rich,
+        prompt_cls=prompt_cls,
+    )
+    current_cfg = landing_dispatch["cfg"]
+    if landing_dispatch["status"] != "view_packets":
+        return {"status": "continue", "cfg": current_cfg}
+    if not rescue_events:
+        show_rescue_no_packets_report(
+            localize=localize,
+            print_settings_result_report=print_settings_result_report,
+            pause_after_tui_report=pause_after_tui_report,
+        )
+        return {"status": "continue", "cfg": current_cfg}
+
+    selected_result = select_rescue_event_action(
+        rescue_events,
+        select_rescue_event_tui=select_rescue_event_tui,
+    )
+    if selected_result["status"] == "interrupt":
+        return {"status": "interrupt", "cfg": current_cfg}
+    if selected_result["status"] != "selected":
+        return {"status": "continue", "cfg": current_cfg}
+
+    selected_rescue = selected_result["selected_rescue"]
+    packet_menu = rescue_packet_action_menu_context(
+        current_cfg,
+        selected_rescue,
+        default_label,
+        rescue_fallback_model_candidates=rescue_fallback_model_candidates,
+        rescue_route_fallback_model_candidates=rescue_route_fallback_model_candidates,
+    )
+    route_fallback_candidates = packet_menu["route_fallback_candidates"]
+    rescue_result = select_rescue_menu_action(
+        "Rescue Packet",
+        packet_menu["info_lines"],
+        packet_menu["actions"],
+        select_channel_action_tui=select_channel_action_tui,
+    )
+    if rescue_result["status"] == "interrupt":
+        return {"status": "interrupt", "cfg": current_cfg}
+    if rescue_result["status"] != "action":
+        return {"status": "continue", "cfg": current_cfg}
+
+    packet_dispatch = handle_rescue_packet_action(
+        current_cfg,
+        selected_rescue,
+        rescue_result["action"],
+        default_fallback,
+        route_fallback_candidates,
+        select_model_tui_loader=select_model_tui_loader,
+        apply_rescue_default_action=apply_rescue_default_action,
+        write_fallback_handover=write_fallback_handover,
+        rescue_handover_report_payload=rescue_handover_report_payload,
+        rescue_paths_report_payload=rescue_paths_report_payload,
+        localize=localize,
+        console=console,
+        print_settings_result_report=print_settings_result_report,
+        print_settings_error_report=print_settings_error_report,
+        pause_after_tui_report=pause_after_tui_report,
+        ensure_rich=ensure_rich,
+        prompt_cls=prompt_cls,
+    )
+    return {"status": packet_dispatch["status"], "cfg": packet_dispatch["cfg"]}
+
+
 def ensure_cli_installed_for_launch(cli_name, *, check_cli_installed, check_and_offer_install_loader):
     if check_cli_installed(cli_name):
         return {"status": "continue"}
