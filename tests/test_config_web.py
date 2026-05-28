@@ -150,7 +150,10 @@ def test_config_web_channel_html_has_sticky_editor_and_enabled_sort():
     assert "/api/registry-v2/apply" in html
     assert "写入预览DB" in html
     assert "Preview root 下 legacy 确认保存会被阻止" in html
-    assert "renderStatus();renderSourceStatus();" in html
+    assert "function renderSaveControls()" in html
+    assert "saveBtn').disabled=preview" in html
+    assert "applyV2Preview').disabled=!preview" in html
+    assert "renderStatus();renderSaveControls();renderSourceStatus();" in html
     assert "card span8 provider-editor" in html
     assert ".provider-editor{position:sticky" in html
     assert "function providerEntries()" in html
