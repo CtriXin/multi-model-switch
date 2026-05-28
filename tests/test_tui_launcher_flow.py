@@ -59,6 +59,7 @@ from mms_tui_launcher_flow import (
     resolve_rescue_action_fallback_model,
     resolve_last_used_launch_context,
     resolve_confirm_launch_action,
+    resolve_tui_launch_action_result,
     run_confirm_tui_prompt,
     safe_tui_call,
     select_rescue_event_action,
@@ -1435,6 +1436,47 @@ def test_apply_tui_launcher_state_result_merges_changed_and_unchanged_results() 
         ["claude"],
         True,
     )
+
+
+def test_resolve_tui_launch_action_result_prints_and_maps_statuses() -> None:
+    messages = []
+
+    class Console:
+        @staticmethod
+        def print(message):
+            messages.append(message)
+
+    assert resolve_tui_launch_action_result(
+        {"status": "continue", "message": "missing runtime", "families_dirty": True},
+        "claude",
+        console=Console(),
+    ) == {"status": "continue", "families_dirty": True}
+    assert messages == ["[yellow]missing runtime[/yellow]"]
+
+    assert resolve_tui_launch_action_result(
+        {"status": "interrupt"},
+        "claude",
+        console=Console(),
+    ) == {"status": "exit", "families_dirty": False}
+
+    runtime = {"id": "runtime"}
+    model_info = {"model": "gpt-5.4"}
+    assert resolve_tui_launch_action_result(
+        {
+            "status": "launch",
+            "model_info": model_info,
+            "runtime": runtime,
+            "cli": "codex",
+        },
+        "claude",
+        console=Console(),
+    ) == {
+        "status": "launch",
+        "model_info": model_info,
+        "runtime": runtime,
+        "cli": "codex",
+        "families_dirty": False,
+    }
 
 
 def test_apply_tui_priority_changes_saves_then_exports() -> None:

@@ -865,6 +865,28 @@ def apply_tui_launcher_state_result(
     return cfg, current_provider, default_models, current_cli_names, families_dirty
 
 
+def resolve_tui_launch_action_result(result, cli_name, *, console):
+    if result.get("message"):
+        console.print(f"[yellow]{result['message']}[/yellow]")
+    if result.get("status") in {"exit", "interrupt"}:
+        return {
+            "status": "exit",
+            "families_dirty": bool(result.get("families_dirty")),
+        }
+    if result.get("status") != "launch":
+        return {
+            "status": "continue",
+            "families_dirty": bool(result.get("families_dirty")),
+        }
+    return {
+        "status": "launch",
+        "model_info": result["model_info"],
+        "runtime": result["runtime"],
+        "cli": result.get("cli", cli_name),
+        "families_dirty": bool(result.get("families_dirty")),
+    }
+
+
 def apply_tui_priority_changes(
     cfg,
     priority_changes,

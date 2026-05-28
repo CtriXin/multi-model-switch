@@ -4893,6 +4893,10 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
         )
 
+    cli = None
+    model_info = None
+    runtime_runtime = None
+
     def _apply_launcher_state_result(result):
         nonlocal current_cfg, current_provider, default_models, current_cli_names, _families_dirty
 
@@ -4906,6 +4910,23 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 result,
             )
         )
+
+    def _apply_action_launch_result(result):
+        nonlocal cli, model_info, runtime_runtime, _families_dirty
+
+        launch_action = tui_flow.resolve_tui_launch_action_result(
+            result,
+            cli,
+            console=console,
+        )
+        if launch_action["families_dirty"]:
+            _families_dirty = True
+        if launch_action["status"] != "launch":
+            return launch_action["status"]
+        model_info = launch_action["model_info"]
+        runtime_runtime = launch_action["runtime"]
+        cli = launch_action["cli"]
+        return "launch"
 
     while True:
         if _families_dirty:
@@ -4984,12 +5005,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 trace_runtime_choice=_trace_runtime_choice,
             )
             _apply_launcher_state_result(profile_action)
-            if profile_action.get("message"):
-                console.print(f"[yellow]{profile_action['message']}[/yellow]")
-            if profile_action["status"] != "launch":
+            launch_status = _apply_action_launch_result(profile_action)
+            if launch_status == "exit":
+                return True
+            if launch_status != "launch":
                 continue
-            model_info = profile_action["model_info"]
-            runtime_runtime = profile_action["runtime"]
             # fall through to confirm
 
         # ── Provider 浏览 ──
@@ -5013,14 +5033,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if browse_result.get("message"):
-                console.print(f"[yellow]{browse_result['message']}[/yellow]")
-            if browse_result["status"] == "exit":
+            launch_status = _apply_action_launch_result(browse_result)
+            if launch_status == "exit":
                 return True
-            if browse_result["status"] != "launch":
+            if launch_status != "launch":
                 continue
-            model_info = browse_result["model_info"]
-            runtime_runtime = browse_result["runtime"]
             # fall through to confirm
 
         # ── 设置 ──
@@ -5114,13 +5131,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 choose_runtime_source=_choose_runtime_source,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if last_action.get("message"):
-                console.print(f"[yellow]{last_action['message']}[/yellow]")
-            if last_action["status"] != "launch":
+            launch_status = _apply_action_launch_result(last_action)
+            if launch_status == "exit":
+                return True
+            if launch_status != "launch":
                 continue
-            model_info = last_action["model_info"]
-            runtime_runtime = last_action["runtime"]
-            cli = last_action["cli"]
             # fall through to confirm
 
         # ── 品类选择 → 子模型 ──
@@ -5136,14 +5151,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if selected_action["families_dirty"]:
-                _families_dirty = True
-            if selected_action.get("message"):
-                console.print(f"[yellow]{selected_action['message']}[/yellow]")
-            if selected_action["status"] != "launch":
+            launch_status = _apply_action_launch_result(selected_action)
+            if launch_status == "exit":
+                return True
+            if launch_status != "launch":
                 continue
-            model_info = selected_action["model_info"]
-            runtime_runtime = selected_action["runtime"]
             # fall through to confirm
 
         elif action_type == "family":
@@ -5166,17 +5178,11 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if family_action["status"] == "interrupt":
+            launch_status = _apply_action_launch_result(family_action)
+            if launch_status == "exit":
                 return True
-            if family_action["families_dirty"]:
-                _families_dirty = True
-            if family_action.get("message"):
-                console.print(f"[yellow]{family_action['message']}[/yellow]")
-            if family_action["status"] != "launch":
+            if launch_status != "launch":
                 continue
-            model_info = family_action["model_info"]
-            runtime_runtime = family_action["runtime"]
-            cli = family_action.get("cli", cli)
             # fall through to confirm
         elif action_type == "profile" and cli not in {"opencode", "agy"}:
             continue
