@@ -208,22 +208,13 @@ def build_cases(
             continue
         runtime = mms_core.resolve_provider_context(cfg, provider_id)
         try:
-            probe_result = mms_launchers._probe_models(runtime, emit_output=False)
+            models = list(mms_launchers._pi_exposed_model_names(runtime))
         except Exception as exc:
             runtime["_pi_probe_error"] = str(exc)
-            models: list[str] = []
-        else:
             models = []
-            seen = set()
-            for model_name in (probe_result or {}).get("models") or []:
-                text = str(model_name or "").strip()
-                if not text or text in seen or not mms_launchers._pi_model_supported(text):
-                    continue
-                if model_filters and not any(token in text.lower() for token in model_filters):
-                    continue
-                seen.add(text)
-                models.append(text)
-        if not models and model_filters:
+        if model_filters:
+            models = [text for text in models if any(token in text.lower() for token in model_filters)]
+        if not models:
             continue
         cases.append((provider_id, runtime, models))
     return cases
@@ -363,31 +354,14 @@ def main() -> int:
             print(f"[{index}/{total}] skip {provider_id} {model_name or '<no-models>'}")
             continue
 
-        if not model_name:
-            probe_error = str(runtime.get("_pi_probe_error") or "").strip()
-            result = {
-                "provider": provider_id,
-                "provider_name": str(runtime.get("name") or provider_id).strip() or provider_id,
-                "model": "",
-                "status": "probe_fail" if probe_error else "no_models",
-                "provider_ref": "",
-                "api": "",
-                "content": "",
-                "stopReason": "",
-                "errorMessage": probe_error,
-                "rc": None,
-                "elapsed_sec": 0.0,
-                "stderr_tail": "",
-            }
-        else:
-            result = run_case(
-                provider_id=provider_id,
-                runtime=runtime,
-                model_name=model_name,
-                prompt=args.prompt,
-                timeout_sec=args.timeout,
-                accepted_text=accepted_text,
-            )
+        result = run_case(
+            provider_id=provider_id,
+            runtime=runtime,
+            model_name=model_name,
+            prompt=args.prompt,
+            timeout_sec=args.timeout,
+            accepted_text=accepted_text,
+        )
         results.append(result)
         seen.add(case_key)
         executed += 1

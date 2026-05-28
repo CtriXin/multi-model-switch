@@ -10735,6 +10735,39 @@ _PI_MODEL_UNSUPPORTED_HINTS = {
     "gpt-image-2",
 }
 
+# Fail closed for provider/model pairs that currently surface in probe results but
+# are not actually usable through Pi in live smoke. Keep Pi's exposed model list
+# aligned with what the runner can really launch today.
+_PI_PROVIDER_MODEL_BLOCK_REASONS = {
+    "newapi-personal-tokyo": {
+        "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
+        "claude-opus-4-6": "2026-05-28 live Pi smoke returned model_not_found on this relay",
+        "claude-opus-4-6-thinking": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "gemini-3-flash-agent(high)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "gemini-3-flash-agent(low)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "gemini-3-flash-agent(medium)": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "gemini-3.1-flash-lite": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+        "gemini-3.1-pro-low": "2026-05-28 live Pi smoke returned upstream 500 on this relay",
+    },
+    "openrouter": {
+        "anthropic/claude-opus-4.7": "2026-05-28 live Pi smoke returned key-limit 403 on this relay",
+    },
+    "us-cpa-local-antigravity": {
+        "gemini-3-pro-high": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
+        "gemini-3-pro-low": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
+    },
+    "us-cpa-local-codex": {
+        "gpt-5.3-codex": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
+        "gpt-5.3-codex-spark": "2026-05-28 live Pi smoke returned 400 empty-body upstream error on this relay",
+        "gpt-5.4-mini": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
+        "gpt-5.5": "2026-05-28 live Pi smoke returned 401 token invalidated on this relay",
+    },
+    "xin": {
+        "gpt-5.3-codex": "2026-05-28 live Pi smoke returned upstream 402 internal server error on this relay",
+        "gpt-5.4": "2026-05-28 live Pi smoke returned upstream 402 internal server error on this relay",
+    },
+}
+
 _PI_CAPABILITY_REFERENCE_CACHE = None
 _PI_CAPABILITY_REFERENCE_INDEX = None
 
@@ -10836,6 +10869,40 @@ def _pi_model_supported(model_name):
     if normalized in _PI_MODEL_UNSUPPORTED_HINTS:
         return False
     return _pi_reference_supports_vision(model_name) != "image_generation"
+
+
+def _pi_model_block_reason(runtime, model_name):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip().lower()
+    if not provider_id:
+        return ""
+    candidates = _PI_PROVIDER_MODEL_BLOCK_REASONS.get(provider_id) or {}
+    normalized = _pi_normalize_model_key(model_name)
+    for blocked_name, reason in candidates.items():
+        if _pi_normalize_model_key(blocked_name) == normalized:
+            return str(reason or "").strip()
+    return ""
+
+
+def _pi_model_available_for_runtime(runtime, model_name):
+    if not _pi_model_supported(model_name):
+        return False
+    return not _pi_model_block_reason(runtime, model_name)
+
+
+def _pi_exposed_model_names(runtime, selected_model=""):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    names = []
+    seen = set()
+    for model_name in _pi_runtime_model_names(runtime, selected_model=selected_model):
+        text = str(model_name or "").strip()
+        if not text or text in seen:
+            continue
+        if not _pi_model_available_for_runtime(runtime, text):
+            continue
+        seen.add(text)
+        names.append(text)
+    return names
 
 
 def _pi_model_input_types(model_name):
@@ -11214,11 +11281,14 @@ def _pi_build_models_payload(runtime, model_name):
     model = str(model_name or _resolve_model(runtime) or "").strip()
     if not model:
         raise RuntimeError("Pi runtime requires a selected model")
-    model_names = _pi_runtime_model_names(runtime, selected_model=model)
-    if not model_names:
-        raise RuntimeError("Pi runtime requires at least one available model")
     if not _pi_model_supported(model):
         raise RuntimeError(f"Pi runner does not support image-generation-only model '{model}'")
+    block_reason = _pi_model_block_reason(runtime, model)
+    if block_reason:
+        raise RuntimeError(f"Pi runner currently blocks model '{model}': {block_reason}")
+    model_names = _pi_exposed_model_names(runtime, selected_model=model)
+    if not model_names:
+        raise RuntimeError("Pi runtime requires at least one available model")
 
     base_ref = _pi_provider_ref(runtime)
     base_name = str(runtime.get("name") or runtime.get("id") or base_ref).strip() or base_ref

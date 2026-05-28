@@ -7826,6 +7826,11 @@ def _provider_supports_cli_name(provider, cli_name):
 
 def _provider_supports_model_for_cli(provider, cli_name, model_name=None):
     normalized_model = str(model_name or "").strip()
+    if cli_name == "pi" and normalized_model:
+        from mms_launchers import _pi_model_available_for_runtime
+
+        if not _pi_model_available_for_runtime(provider, normalized_model):
+            return False
     if cli_name == "claude" and normalized_model:
         if _model_matches_account_cli("claude", normalized_model):
             return _provider_supports_cli_name(provider, "claude")
@@ -7856,10 +7861,16 @@ def _provider_candidates(cfg, default_provider, default_models):
     return candidates
 
 
-def _provider_models_for_cli(cli_name, models):
+def _provider_models_for_cli(cli_name, models, provider=None):
     if cli_name in CLI_MODEL_FAMILY_HINTS:
-        return _models_for_cli_family(cli_name, models)
-    return list(models or [])
+        result = _models_for_cli_family(cli_name, models)
+    else:
+        result = list(models or [])
+    if cli_name == "pi" and isinstance(provider, dict):
+        from mms_launchers import _pi_model_available_for_runtime
+
+        result = [model_name for model_name in result if _pi_model_available_for_runtime(provider, model_name)]
+    return result
 
 
 def _provider_effective_models(provider, cached_models, cfg=None):
@@ -8132,7 +8143,7 @@ def _provider_options_for_model(cfg, cli_name, default_provider, default_models,
         else:
             _probe_debug_logger.debug("  %s: cached_models=%s (len=%d)", pid, type(cached_models).__name__, len(cached_models))
         models = _provider_effective_models(provider, models, cfg)
-        cli_models = _provider_models_for_cli(cli_name, models)
+        cli_models = _provider_models_for_cli(cli_name, models, provider)
 
         if selected_model:
             if not _provider_supports_model_for_cli(provider, cli_name, selected_model):

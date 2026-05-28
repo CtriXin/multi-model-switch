@@ -628,6 +628,71 @@ def test_pi_rejects_selected_image_generation_only_model(monkeypatch):
         )
 
 
+def test_pi_skips_runtime_blocked_models(monkeypatch, tmp_path):
+    import mms_launchers
+
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {
+            "models": ["gemini-3-pro-high", "gemini-3.1-pro-low"],
+        },
+    )
+
+    exports = mms_launchers.get_export_env(
+        "pi",
+        {
+            "id": "us-cpa-local-antigravity",
+            "name": "Antigravity",
+            "enabled": True,
+            "auth_mode": "api_key",
+            "api_key": "sk-antigravity",
+            "anthropic_base_url": "https://relay.example.com/v1",
+            "protocols": ["anthropic_messages"],
+            "supported_clis": ["pi"],
+        },
+        model_info={"model": "gemini-3.1-pro-low"},
+    )
+
+    payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
+    provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
+    assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low"]
+
+
+def test_pi_rejects_selected_runtime_blocked_model(monkeypatch):
+    import mms_launchers
+    import pytest
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gemini-3-pro-high"]},
+    )
+
+    with pytest.raises(RuntimeError, match="currently blocks model 'gemini-3-pro-high'"):
+        mms_launchers._pi_build_models_payload(
+            {
+                "id": "us-cpa-local-antigravity",
+                "name": "Antigravity",
+                "enabled": True,
+                "auth_mode": "api_key",
+                "api_key": "sk-antigravity",
+                "anthropic_base_url": "https://relay.example.com/v1",
+                "protocols": ["anthropic_messages"],
+                "supported_clis": ["pi"],
+            },
+            "gemini-3-pro-high",
+        )
+
+
 def test_pi_builtin_hints_cover_new_qwen_flash_and_max_models(monkeypatch, tmp_path):
     import mms_launchers
 
