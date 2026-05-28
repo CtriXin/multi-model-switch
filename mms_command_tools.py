@@ -37,6 +37,25 @@ CONFIG_HELP_TOPICS = {
 }
 
 
+def load_json_file(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else default
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def save_json_file(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+
+
 def trace_source_for(field, value, trace_overrides):
     expected = str(value or "").strip()
     if not expected:

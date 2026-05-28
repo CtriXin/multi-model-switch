@@ -348,22 +348,15 @@ def _parse_semver_tag(tag):
 
 
 def _load_json_file(path, default):
-    if not os.path.exists(path):
-        return default
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else default
-    except (OSError, json.JSONDecodeError):
-        return default
+    from mms_command_tools import load_json_file
+
+    return load_json_file(path, default)
 
 
 def _save_json_file(path, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-    os.chmod(path, 0o600)
+    from mms_command_tools import save_json_file
+
+    return save_json_file(path, payload)
 
 
 def _http_status_is_success(value):

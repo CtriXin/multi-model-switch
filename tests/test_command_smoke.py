@@ -27,6 +27,32 @@ class _CollectingConsole:
         self.items.append(args[0] if args else "")
 
 
+def test_json_file_helpers_preserve_dict_only_load_and_secure_save(tmp_path):
+    import json
+    import stat
+
+    import mms_command_tools
+
+    default = {"fallback": True}
+    missing_path = tmp_path / "missing.json"
+    assert mms_command_tools.load_json_file(str(missing_path), default) is default
+
+    list_path = tmp_path / "list.json"
+    list_path.write_text("[1, 2, 3]", encoding="utf-8")
+    assert mms_command_tools.load_json_file(str(list_path), default) is default
+
+    broken_path = tmp_path / "broken.json"
+    broken_path.write_text("{bad", encoding="utf-8")
+    assert mms_command_tools.load_json_file(str(broken_path), default) is default
+
+    saved_path = tmp_path / "nested" / "state.json"
+    payload = {"message": "中文", "count": 2}
+    mms_command_tools.save_json_file(str(saved_path), payload)
+    assert json.loads(saved_path.read_text(encoding="utf-8")) == payload
+    assert "中文" in saved_path.read_text(encoding="utf-8")
+    assert stat.S_IMODE(saved_path.stat().st_mode) == 0o600
+
+
 def test_usage_main_initializes_rich_before_render(monkeypatch):
     import mms_account_state
     import mms_usage
