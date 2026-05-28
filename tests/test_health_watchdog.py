@@ -342,6 +342,48 @@ def test_watchdog_fails_closed_on_non_secret_bundle_secret_leak(tmp_path: Path) 
     assert "sk-leaked-secret" not in json.dumps(report, ensure_ascii=False)
 
 
+def test_watchdog_allows_non_secret_profile_auth_header_schema(tmp_path: Path) -> None:
+    watchdog = _load_watchdog()
+    _write_latest_bundle(
+        tmp_path,
+        {
+            "fresh-model": {
+                "primary": {
+                    "provider_id": "fresh",
+                    "openai_base_url": "https://fresh.example/v1",
+                    "api_key": "sk-fresh-secret",
+                },
+                "fallbacks": [],
+            }
+        },
+    )
+    profile_path = tmp_path / "generated" / "provider-profiles.generated.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "profiles": {
+                    "fresh": {
+                        "models_endpoint": "manual",
+                        "auth_headers": ["Authorization"],
+                        "header_aliases": {"anthropic-beta": "anthropic-beta"},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "generated" / "model-registry.latest-approved.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["profile"]["sha256"] = mms_registry.sha256_hex(profile_path.read_bytes())
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = watchdog.build_report(tmp_path, timeout=1, require_bundle=True)
+
+    assert report["route_source"] == "latest-approved"
+    assert report["status"] == "ok"
+
+
 def test_watchdog_requires_bundle_for_explicit_config_root(monkeypatch, tmp_path: Path) -> None:
     watchdog = _load_watchdog()
     monkeypatch.setenv("MMS_CONFIG_ROOT", str(tmp_path))

@@ -42,6 +42,7 @@ _SECRET_FIELD_PARTS = (
     "cookie",
 )
 _SECRET_REFERENCE_KEYS = {"secret_ref", "secret_refs", "secret_fingerprint", "secret_hash", "key_fingerprint"}
+_NON_SECRET_SCHEMA_KEYS = {"auth_headers", "auth_header_names", "required_auth_headers", "header_aliases"}
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{8,}\b"),
@@ -137,6 +138,9 @@ def _validate_non_secret_payload(payload: Any, *, context: str) -> None:
                 key = str(raw_key)
                 normalized = key.lower().replace("-", "_")
                 child_path = f"{path}.{key}" if path else key
+                if normalized in _NON_SECRET_SCHEMA_KEYS:
+                    walk(item, child_path)
+                    continue
                 if normalized in _SECRET_REFERENCE_KEYS:
                     if _looks_like_plaintext_secret(item):
                         raise ConsumerBundleError(f"{child_path} contains a plaintext secret, not a reference")

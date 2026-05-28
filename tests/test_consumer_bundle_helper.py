@@ -176,3 +176,40 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
     with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="secret-looking field in non-secret data") as exc:
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=non_secret_leak)
     assert "sk-leaked-secret" not in str(exc.value)
+
+    profile_schema = tmp_path / "profile-schema"
+    paths = _write_bundle(profile_schema)
+    _write_json(
+        paths["profile"],
+        {
+            "schema_version": 1,
+            "profiles": {
+                "header-provider": {
+                    "auth_headers": ["Authorization"],
+                    "header_aliases": {"anthropic-beta": "anthropic-beta"},
+                }
+            },
+        },
+    )
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["files"]["profile"]["sha256"] = _sha256(paths["profile"])
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    bundle = mms_consumer_bundle.load_verified_consumer_bundle(config_root=profile_schema)
+    assert bundle["payloads"]["profile"]["profiles"]["header-provider"]["auth_headers"] == ["Authorization"]
+
+    _write_json(
+        paths["profile"],
+        {
+            "schema_version": 1,
+            "profiles": {
+                "header-provider": {
+                    "auth_headers": ["Bearer leaked-secret-123456789"],
+                }
+            },
+        },
+    )
+    manifest["files"]["profile"]["sha256"] = _sha256(paths["profile"])
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="secret-looking value") as exc:
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=profile_schema)
+    assert "Bearer leaked" not in str(exc.value)
