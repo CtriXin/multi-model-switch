@@ -130,6 +130,9 @@ Bundle rules:
 See `docs/REGISTRY_ARCHITECTURE.md` for the full source/candidate/approved/
 runtime/health layer contract, `privacy_boundary` gates, deletion/tombstone
 rules, and reference-snapshot ingestion boundaries.
+See `docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md` for the cutover checklist and
+portable manifest/hash verifier that downstream projects can adopt before they
+switch from legacy root files to the latest-approved bundle.
 
 ## Responsibilities
 

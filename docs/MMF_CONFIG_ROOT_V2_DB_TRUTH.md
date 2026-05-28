@@ -521,6 +521,7 @@ Current TUI/settings boundary:
 - Hive/Pilot/Ant/Mobius read `MMS_CONFIG_ROOT` and latest-approved manifest.
 - Remove project-specific fixed `~/.config/mms` assumptions.
 - Keep strict evidence requirements.
+- Current cutover runbook lives at `docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md`; it defines the manifest/hash verifier, fail-closed cases, secret redaction rule, and artifact evidence checklist before touching external repos.
 
 ### Stage 8 - Promotion / Public Version
 

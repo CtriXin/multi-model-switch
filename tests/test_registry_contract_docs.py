@@ -11,6 +11,7 @@ CONTRACT_DOCS = [
     ROOT / "docs/REGISTRY_ARCHITECTURE.md",
 ]
 MMF_V2_DOC = ROOT / "docs/MMF_CONFIG_ROOT_V2_DB_TRUTH.md"
+DOWNSTREAM_CONSUMER_RUNBOOK = ROOT / "docs/DOWNSTREAM_CONSUMER_BUNDLE_RUNBOOK.md"
 RESCUE_DOC = ROOT / "docs/RESCUE_FALLBACK.md"
 LLM_OPERATION_GUIDE = ROOT / "docs/LLM_OPERATION_GUIDE.md"
 ARCHITECTURE_DOCS = [
@@ -30,6 +31,10 @@ def _contract_text() -> str:
 
 def _mmf_v2_text() -> str:
     return MMF_V2_DOC.read_text(encoding="utf-8")
+
+
+def _downstream_consumer_runbook_text() -> str:
+    return DOWNSTREAM_CONSUMER_RUNBOOK.read_text(encoding="utf-8")
 
 
 def _rescue_text() -> str:
@@ -130,6 +135,39 @@ def test_registry_contract_docs_forbid_direct_downstream_sqlite_dependency() -> 
     assert "MUST NOT query SQLite tables" in text
     assert "must not read the\nSQLite schema directly" in text
     assert "cache_transport_evidence.v1" in text
+
+
+def test_downstream_consumer_bundle_runbook_is_fail_closed() -> None:
+    text = _downstream_consumer_runbook_text()
+
+    required_terms = [
+        "Hive, Pilot, Ant, Mobius/Moebius",
+        "MMS_CONFIG_ROOT -> <root>",
+        "<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json",
+        "Do not read these as primary truth",
+        "<MMS_CONFIG_ROOT>/registry/model-registry.sqlite",
+        "schema == \"mms.model_registry.latest_approved.v1\"",
+        "compute sha256",
+        "Do not silently fallback to stable",
+        "global OAuth state",
+        "cache_transport_evidence.v1",
+        "mmf config bundle --json",
+        "mms config bundle --json",
+        "missing manifest -> fail closed",
+        "hash mismatch -> fail closed",
+        "SQLite not queried",
+        "secrets redacted from logs/artifacts",
+    ]
+    forbidden_terms = [
+        "read SQLite",
+        "fallback to ~/.config/mms",
+        "read root model-routes.json first",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    present = [term for term in forbidden_terms if term in text]
+    assert missing == []
+    assert present == []
 
 
 def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
