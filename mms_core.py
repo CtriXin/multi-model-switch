@@ -7841,25 +7841,17 @@ def _validate_user_role(raw_value):
 
 
 def _handle_provider_default_config(cfg, args_rest):
-    default_id = cfg.get("provider", {}).get("default", DEFAULT_PROVIDER_ID)
-    if not args_rest:
-        console.print(f"[cyan]provider.default[/cyan] = {default_id}")
-        console.print("[dim]当前默认模型源[/dim]")
-        return
+    from mms_command_tools import handle_provider_default_config
 
-    requested_id = args_rest[0].strip()
-    providers = _provider_map(cfg)
-    if requested_id not in providers:
-        console.print(f"[red]未找到 provider: {requested_id}[/red]")
-        console.print(f"[dim]可用 provider: {', '.join(providers.keys())}[/dim]")
-        return
-
-    cfg.setdefault("provider", {})
-    cfg["provider"]["default"] = requested_id
-    save_config(cfg)
-    _refresh_routes_export_for_hive(force=True, quiet=False)
-    console.print(f"[green]✓ provider.default = {requested_id}[/green]")
-    console.print("[dim]默认模型源已更新[/dim]")
+    return handle_provider_default_config(
+        cfg,
+        args_rest,
+        default_provider_id=DEFAULT_PROVIDER_ID,
+        provider_map=_provider_map,
+        save_config=save_config,
+        refresh_routes_export_for_hive=_refresh_routes_export_for_hive,
+        console=console,
+    )
 
 
 def _handle_provider_add_config(cfg, args_rest):

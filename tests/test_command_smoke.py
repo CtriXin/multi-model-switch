@@ -3306,6 +3306,53 @@ def test_handle_config_migrate_preserves_backup_save_and_report_flow():
     ]
 
 
+def test_provider_default_handler_preserves_show_missing_and_save_refresh_flow():
+    import mms_command_tools
+
+    cfg = {"provider": {"default": "demo-a"}, "providers": [{"id": "demo-a"}, {"id": "demo-b"}]}
+    console = _CollectingConsole()
+    calls = []
+
+    mms_command_tools.handle_provider_default_config(
+        cfg,
+        [],
+        default_provider_id="default",
+        provider_map=lambda current: {item["id"]: item for item in current["providers"]},
+        save_config=lambda updated: calls.append(("save", updated["provider"]["default"])),
+        refresh_routes_export_for_hive=lambda **kwargs: calls.append(("refresh", kwargs)),
+        console=console,
+    )
+    assert "[cyan]provider.default[/cyan] = demo-a" in console.items
+    assert calls == []
+
+    console.items.clear()
+    mms_command_tools.handle_provider_default_config(
+        cfg,
+        ["missing"],
+        default_provider_id="default",
+        provider_map=lambda current: {item["id"]: item for item in current["providers"]},
+        save_config=lambda updated: calls.append(("save", updated["provider"]["default"])),
+        refresh_routes_export_for_hive=lambda **kwargs: calls.append(("refresh", kwargs)),
+        console=console,
+    )
+    assert any("未找到 provider: missing" in str(item) for item in console.items)
+    assert calls == []
+
+    console.items.clear()
+    mms_command_tools.handle_provider_default_config(
+        cfg,
+        ["demo-b"],
+        default_provider_id="default",
+        provider_map=lambda current: {item["id"]: item for item in current["providers"]},
+        save_config=lambda updated: calls.append(("save", updated["provider"]["default"])),
+        refresh_routes_export_for_hive=lambda **kwargs: calls.append(("refresh", kwargs)),
+        console=console,
+    )
+    assert cfg["provider"]["default"] == "demo-b"
+    assert calls == [("save", "demo-b"), ("refresh", {"force": True, "quiet": False})]
+    assert "[green]✓ provider.default = demo-b[/green]" in console.items
+
+
 def test_config_normalization_helpers_preserve_legacy_shapes():
     import mms_command_tools
     import mms_core

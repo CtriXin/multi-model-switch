@@ -3945,6 +3945,37 @@ def handle_config_migrate(
     console.print(f"[dim]备份目录: {backup_dir}[/dim]")
 
 
+def handle_provider_default_config(
+    cfg,
+    args_rest,
+    *,
+    default_provider_id,
+    provider_map,
+    save_config,
+    refresh_routes_export_for_hive,
+    console,
+):
+    default_id = cfg.get("provider", {}).get("default", default_provider_id)
+    if not args_rest:
+        console.print(f"[cyan]provider.default[/cyan] = {default_id}")
+        console.print("[dim]当前默认模型源[/dim]")
+        return
+
+    requested_id = args_rest[0].strip()
+    providers = provider_map(cfg)
+    if requested_id not in providers:
+        console.print(f"[red]未找到 provider: {requested_id}[/red]")
+        console.print(f"[dim]可用 provider: {', '.join(providers.keys())}[/dim]")
+        return
+
+    cfg.setdefault("provider", {})
+    cfg["provider"]["default"] = requested_id
+    save_config(cfg)
+    refresh_routes_export_for_hive(force=True, quiet=False)
+    console.print(f"[green]✓ provider.default = {requested_id}[/green]")
+    console.print("[dim]默认模型源已更新[/dim]")
+
+
 def session_status_label(item):
     session_id = str(item.get("session_id") or "").strip()
     if not session_id:
