@@ -3703,19 +3703,9 @@ def _select_provider_for_warm(cfg):
 
 
 def _recent_models_for_provider(provider_id):
-    recent = []
-    seen = set()
-    for item in _usage_rows_for_runtime("provider", provider_id):
-        last_model = str(item.get("last_model", "")).strip()
-        if last_model and last_model not in seen:
-            seen.add(last_model)
-            recent.append(last_model)
-        for model_name, _count in sorted((item.get("models") or {}).items(), key=lambda pair: pair[1], reverse=True):
-            model_name = str(model_name or "").strip()
-            if model_name and model_name not in seen:
-                seen.add(model_name)
-                recent.append(model_name)
-    return recent
+    from mms_command_tools import recent_models_for_provider
+
+    return recent_models_for_provider(provider_id, usage_rows_for_runtime=_usage_rows_for_runtime)
 
 
 def _pick_manual_models(models):

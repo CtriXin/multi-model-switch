@@ -4851,6 +4851,23 @@ def test_models_command_unknown_provider_exits_with_available_list():
 def test_warm_command_uses_recent_models_without_live_requests():
     import mms_command_tools
 
+    rows = [
+        {
+            "last_model": "gpt-5.5",
+            "models": {"gpt-5.4": 3, "gpt-5.5": 7, "": 99},
+        },
+        {
+            "last_model": "gpt-5.4",
+            "models": {"qwen3.6-plus": 10, "gpt-5.5": 2},
+        },
+    ]
+    assert mms_command_tools.recent_models_for_provider(
+        "relay",
+        usage_rows_for_runtime=lambda runtime_kind, runtime_id: rows
+        if (runtime_kind, runtime_id) == ("provider", "relay")
+        else [],
+    ) == ["gpt-5.5", "gpt-5.4", "qwen3.6-plus"]
+
     class Panel:
         def __init__(self, *args, **kwargs):
             self.args = args
