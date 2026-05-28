@@ -28,6 +28,7 @@ if argv and argv[0] == "preview" and (len(argv) == 1 or argv[1] in {"help", "-h"
                 f"config_root={os.environ['MMS_CONFIG_ROOT']}",
                 "",
                 "Read-only:",
+                "  mmf preview check [--json]        one command readiness check; strict exit by default",
                 "  mmf preview doctor [--json]       show current state and one next action",
                 "  mmf preview doctor --strict-exit  return non-zero unless runtime-ready",
                 "  mmf preview status [--json]       show full model source status",
@@ -140,6 +141,12 @@ if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"status", "source"}:
     forwarded = ["source-status", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
     raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
 
+if len(argv) >= 2 and argv[0] == "preview" and argv[1] in {"check", "ready", "smoke"}:
+    from mms_registry_cli import handle_registry_command
+
+    forwarded = ["preview-check", "--config-dir", os.environ["MMS_CONFIG_ROOT"], *argv[2:]]
+    raise SystemExit(handle_registry_command(forwarded, command_name="mmf preview"))
+
 if len(argv) >= 2 and argv[0] == "preview" and argv[1] == "doctor":
     from mms_registry_cli import handle_registry_command
 
@@ -192,6 +199,16 @@ if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"doctor", "preview-doc
     else:
         _print_preview_doctor(summary)
     raise SystemExit(0 if "--strict-exit" not in argv[2:] or summary.get("ready") is True else 2)
+
+if len(argv) >= 2 and argv[0] == "config" and argv[1] in {"check", "preview-check", "preview.check", "v2-check"}:
+    from mms_registry_cli import _print_preview_check, preview_check
+
+    summary = preview_check(config_dir=os.environ["MMS_CONFIG_ROOT"], command_name="mmf config check")
+    if "--json" in argv[2:]:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_check(summary)
+    raise SystemExit(0 if "--no-strict-exit" in argv[2:] or summary.get("ready") is True else 2)
 
 from mms_core import main
 

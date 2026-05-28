@@ -305,6 +305,8 @@ Current Stage 1 / Stage 2 preview commands that are safe to run without writing 
 ```text
 ./mmf config root --json
 ./mmf config source --json
+./mmf preview check --json
+./mmf config check --json
 ./mmf config save-plan --json
 ./mmf config apply-plan --plan-json <webui-plan.json> --apply --confirm-preview-apply --json
 ./mmf preview --help
@@ -392,6 +394,7 @@ Current Stage 3a implementation:
 - Installer: future installs copy/rewrite the `mmf` preview entrypoint and link it to `~/.local/bin/mmf`, so users do not need to remember `./mmf` from a source checkout after upgrading.
 - CLI: `mms config source [--json]` / `mmf config source [--json]`.
 - CLI: Model Source status now starts with a compact `result` / `ready` / `status` / `headline` / `next_action`, so the first lines answer what to check before the detailed DB/legacy/bundle counters.
+- CLI: `mmf preview check [--json]` / `mms config check [--json]` is the single read-only readiness command. It is strict by default and exits non-zero unless the selected preview root is runtime-ready; `--no-strict-exit` is available for diagnostics.
 - CLI: `mms config save-plan [--json]` / `mmf config save-plan [--json]` shows the same read-only v2 DB-truth save sequence without writing DB, secrets, generated bundle, or legacy files.
 - CLI: `mms config doctor [--json]` / `mmf config doctor [--json]` exposes the read-only preview readiness doctor under the `config` entry.
 - WebUI: `/api/state` includes `model_source_status`; the first panel shows root, registry DB, legacy conflict, legacy candidate import counts, and latest-approved bundle status.

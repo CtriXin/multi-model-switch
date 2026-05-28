@@ -11993,6 +11993,7 @@ def _display_config_help():
     console.print(f"  {command} config file")
     console.print(f"  {command} config root [--json]")
     console.print(f"  {command} config source [--json]")
+    console.print(f"  {command} config check [--json]")
     console.print(f"  {command} config save-plan [--json]")
     console.print(f"  {command} config apply-plan --plan-json <file> [--apply --confirm-preview-apply] [--json]")
     console.print(f"  {command} config doctor [--json]")
@@ -12085,6 +12086,17 @@ def _display_preview_doctor(json_output=False, strict_exit=False):
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
     else:
         _print_preview_doctor(summary)
+    return 0 if not strict_exit or summary.get("ready") is True else 2
+
+
+def _display_preview_check(json_output=False, strict_exit=True):
+    from mms_registry_cli import _print_preview_check, preview_check
+
+    summary = preview_check(config_dir=PRIMARY_CONFIG_DIR, command_name=f"{current_command()} config check")
+    if json_output:
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        _print_preview_check(summary)
     return 0 if not strict_exit or summary.get("ready") is True else 2
 
 
@@ -13455,6 +13467,10 @@ def _is_config_help_request(args_rest):
         "root",
         "root.status",
         "status.root",
+        "check",
+        "preview-check",
+        "preview.check",
+        "v2-check",
         "save-plan",
         "save.plan",
         "v2-save-plan",
@@ -13494,6 +13510,12 @@ def _is_config_registry_v2_save_plan_request(argv):
     if len(argv) < 2 or argv[0] != "config":
         return False
     return str(argv[1] or "").strip() in {"save-plan", "save.plan", "v2-save-plan", "registry-save-plan"}
+
+
+def _is_config_preview_check_request(argv):
+    if len(argv) < 2 or argv[0] != "config":
+        return False
+    return str(argv[1] or "").strip() in {"check", "preview-check", "preview.check", "v2-check"}
 
 
 def _is_config_registry_v2_apply_plan_request(argv):
@@ -13549,6 +13571,11 @@ def main():
         return
     if _is_config_registry_v2_save_plan_request(argv):
         _display_registry_v2_save_plan(json_output="--json" in argv[2:])
+        return
+    if _is_config_preview_check_request(argv):
+        code = _display_preview_check(json_output="--json" in argv[2:], strict_exit="--no-strict-exit" not in argv[2:])
+        if code:
+            raise SystemExit(code)
         return
     if _is_config_registry_v2_apply_plan_request(argv):
         from mms_registry_cli import handle_registry_command

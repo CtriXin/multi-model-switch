@@ -577,6 +577,7 @@ def test_mmf_preview_help_is_short_and_read_only(tmp_path: Path) -> None:
     combined = result.stdout + result.stderr
 
     assert "MMF preview commands" in result.stdout
+    assert "mmf preview check [--json]" in result.stdout
     assert "mmf preview doctor [--json]" in result.stdout
     assert "mmf config doctor [--json]" in result.stdout
     assert "mmf preview prepare --from ~/.config/mms --include-secrets --json" in result.stdout
@@ -585,6 +586,57 @@ def test_mmf_preview_help_is_short_and_read_only(tmp_path: Path) -> None:
     assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
     assert not (config_dir / "registry").exists()
     assert not (config_dir / "cache").exists()
+
+
+def test_mmf_preview_check_is_single_read_only_strict_check(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-config"
+    config_dir.mkdir()
+    original_config = """
+    [api]
+    base_url = "https://config-default.example/v1"
+    api_key = "sk-config-default-secret"
+    """
+    (config_dir / "config.toml").write_text(original_config, encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 2
+    assert payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert payload["read_only"] is True
+    assert payload["result"] == "NOT_READY"
+    assert payload["ready"] is False
+    assert payload["status"] == "needs_init"
+    assert payload["next_action"]["command"] == "./mmf preview init --json"
+    assert "sk-config-default-secret" not in combined
+    assert (config_dir / "config.toml").read_text(encoding="utf-8") == original_config
+    assert not (config_dir / "registry").exists()
+    assert not (config_dir / "cache").exists()
+
+    non_strict = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "config", "check", "--json", "--no-strict-exit"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    non_strict_payload = json.loads(non_strict.stdout)
+    assert non_strict.returncode == 0
+    assert non_strict_payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert non_strict_payload["status"] == "needs_init"
 
 
 def test_mmf_config_source_status_is_read_only_and_reports_preview_state(tmp_path: Path) -> None:
@@ -2172,6 +2224,41 @@ def test_mmf_preview_doctor_wrapper_reports_ready_with_secret_backend(tmp_path: 
     assert f"--config-dir {config_dir}" in payload["next_actions"][0]["command"]
     assert "$MMS_CONFIG_ROOT" not in payload["next_actions"][0]["command"]
     assert "sk-doctor-ready-secret" not in combined
+
+
+def test_mmf_preview_check_reports_ready_with_strict_success(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    _write_preview_doctor_provider(config_dir, api_key="sk-check-ready-secret")
+    mms_registry_cli.import_legacy_config(
+        config_dir=config_dir,
+        apply=True,
+        include_secrets=True,
+        command_name="mmf preview",
+    )
+    mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    env = os.environ.copy()
+    env.update({"MMS_CONFIG_ROOT": str(config_dir), "PYTHONPATH": str(ROOT)})
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "mmf"), "preview", "check", "--json"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    payload = json.loads(result.stdout)
+    combined = result.stdout + result.stderr
+
+    assert payload["schema"] == mms_registry_cli.PREVIEW_CHECK_SCHEMA
+    assert payload["result"] == "READY"
+    assert payload["ready"] is True
+    assert payload["status"] == "ready"
+    assert "Preview root is ready" in payload["headline"]
+    assert payload["bundle"]["verified"] is True
+    assert payload["bundle"]["runtime_ready"] is True
+    assert payload["next_action"]["command"].startswith("scripts/mms_health_watchdog.py")
+    assert "sk-check-ready-secret" not in combined
 
 
 def test_mmf_preview_doctor_strict_exit_distinguishes_ready_state(tmp_path: Path) -> None:

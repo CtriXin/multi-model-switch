@@ -28,6 +28,7 @@ CONFIG_ROOT_INIT_SCHEMA = "mms.config_root_init.v1"
 REGISTRY_V2_SAVE_PLAN_SCHEMA = "mms.setup_web.registry_v2_save_plan.v1"
 REGISTRY_V2_SAVE_CANDIDATE_SCHEMA = "mms.registry_v2_save_candidate.v1"
 REGISTRY_V2_APPLY_PLAN_SCHEMA = "mms.registry_v2_apply_plan.v1"
+PREVIEW_CHECK_SCHEMA = "mms.preview_check.v1"
 REGISTRY_V2_GENERATED_FILES = (
     "model-registry.latest-approved.json",
     "model-routes.json",
@@ -892,6 +893,38 @@ def preview_doctor(
             "secret_count": secrets.get("secret_count", 0),
         },
         "next_actions": next_actions,
+        "read_only": True,
+    }
+
+
+def preview_check(
+    *,
+    config_dir: str | Path | None = None,
+    command_name: str = "mmf preview check",
+) -> dict[str, Any]:
+    """Single read-only readiness check for humans and scripts."""
+    root = Path(config_dir) if config_dir is not None else Path(resolve_mms_config_dir())
+    root = root.expanduser()
+    source = model_source_status(config_dir=root, command_name=command_name)
+    doctor = preview_doctor(config_dir=root, command_name=command_name)
+    next_actions = [item for item in (doctor.get("next_actions") or []) if isinstance(item, dict)]
+    next_action = next_actions[0] if next_actions else source.get("next_action") if isinstance(source.get("next_action"), dict) else {}
+    return {
+        "schema": PREVIEW_CHECK_SCHEMA,
+        "result": doctor.get("result"),
+        "ready": doctor.get("ready") is True,
+        "status": doctor.get("status"),
+        "headline": source.get("headline") or "",
+        "config_root": str(root),
+        "next_action": next_action,
+        "checks": doctor.get("checks") or [],
+        "counts": doctor.get("counts") or {},
+        "bundle": doctor.get("bundle") or {},
+        "source": {
+            "result": source.get("result"),
+            "ready": source.get("ready"),
+            "status": source.get("status"),
+        },
         "read_only": True,
     }
 
@@ -3154,6 +3187,26 @@ def _print_preview_doctor(summary: dict[str, Any]) -> None:
         print(f"next_command={first.get('command', '')}")
 
 
+def _print_preview_check(summary: dict[str, Any]) -> None:
+    print("MMF Preview Check")
+    print(f"result={summary.get('result')}")
+    print(f"ready={summary.get('ready')}")
+    print(f"status={summary.get('status')}")
+    print(f"headline={summary.get('headline', '')}")
+    print(f"config_root={summary.get('config_root')}")
+    print(f"read_only={summary.get('read_only', False)}")
+    bundle = summary.get("bundle") if isinstance(summary.get("bundle"), dict) else {}
+    counts = summary.get("counts") if isinstance(summary.get("counts"), dict) else {}
+    print(f"bundle_verified={bundle.get('verified', False)}")
+    print(f"bundle_runtime_ready={bundle.get('runtime_ready')}")
+    print(f"candidate_provider_routes={counts.get('candidate_provider_routes', 0)}")
+    print(f"missing_api_keys={counts.get('missing_api_keys', 0)}")
+    print(f"missing_base_urls={counts.get('missing_base_urls', 0)}")
+    next_action = summary.get("next_action") if isinstance(summary.get("next_action"), dict) else {}
+    print(f"next_action={next_action.get('label', '')}")
+    print(f"next_command={next_action.get('command', '')}")
+
+
 def _print_preview_prepare(summary: dict[str, Any]) -> None:
     print("MMF Preview Prepare")
     print(f"result={summary.get('result')}")
@@ -3256,6 +3309,10 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
     preview_doctor_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
     preview_doctor_parser.add_argument("--json", action="store_true", help="Print the full doctor summary as JSON")
     preview_doctor_parser.add_argument("--strict-exit", action="store_true", help="Exit non-zero unless preview root is runtime-ready")
+    preview_check_parser = subparsers.add_parser("preview-check", help="Single read-only preview readiness check; strict by default")
+    preview_check_parser.add_argument("--config-dir", default="", help="Override MMS config dir to inspect")
+    preview_check_parser.add_argument("--json", action="store_true", help="Print the full check summary as JSON")
+    preview_check_parser.add_argument("--no-strict-exit", action="store_true", help="Return zero even when preview is not ready")
     preview_prepare_parser = subparsers.add_parser("preview-prepare", help="Initialize, import, publish, verify, and doctor a preview root")
     preview_prepare_parser.add_argument("--config-dir", default="", help="Override MMS config dir to prepare")
     preview_prepare_parser.add_argument("--source-config-dir", default="", help="Read legacy config artifacts from this root")
@@ -3430,6 +3487,13 @@ def handle_registry_command(argv: list[str], *, command_name: str = "mms registr
         else:
             _print_preview_doctor(summary)
         return 0 if not bool(args.strict_exit) or summary.get("ready") is True else 2
+    if args.subcommand == "preview-check":
+        summary = preview_check(config_dir=args.config_dir or None, command_name=command_name)
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            _print_preview_check(summary)
+        return 0 if bool(args.no_strict_exit) or summary.get("ready") is True else 2
     if args.subcommand == "preview-prepare":
         try:
             summary = preview_prepare(
@@ -3606,6 +3670,7 @@ __all__ = [
     "import_legacy_config",
     "init_config_root",
     "model_source_status",
+    "preview_check",
     "preview_doctor",
     "preview_prepare",
     "apply_registry_v2_plan",
