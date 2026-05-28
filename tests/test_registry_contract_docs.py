@@ -114,7 +114,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "must not import plaintext route-artifact API keys",
         "enabled providers only",
         "missing route base URLs",
-        "preview import + publish + verify rebuild command",
+        "single preview rebuild command `mmf preview prepare --from ~/.config/mms --json`",
         "every route leaf has an `anthropic_base_url` or `openai_base_url`",
         "`stable_legacy_writes`",
         "`preview_v2_writes`",

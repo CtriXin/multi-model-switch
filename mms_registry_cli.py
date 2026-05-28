@@ -744,7 +744,7 @@ def preview_doctor(
     elif bundle.get("runtime_ready") is not True:
         overall = "verified_not_runtime_ready"
         if int(bundle.get("router_missing_base_url_count") or 0) > 0:
-            next_actions.append({"label": "Rebuild preview routes from legacy source", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --json && ./mmf preview publish --json && ./mmf preview verify --json"})
+            next_actions.append({"label": "Rebuild preview routes from legacy source", "command": "./mmf preview prepare --from ~/.config/mms --json"})
         elif int(bundle.get("router_missing_api_key_count") or 0) > 0:
             next_actions.append({"label": "Optional: import keys into preview secret backend", "command": "./mmf preview import-legacy --from ~/.config/mms --apply --include-secrets --json && ./mmf preview publish --json"})
         else:
