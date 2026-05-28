@@ -2566,6 +2566,69 @@ def test_config_truthy_and_csv_helpers_preserve_cli_prompt_semantics():
     ]
 
 
+def test_provider_template_helpers_preserve_payload_copy_and_generic_collapse():
+    import mms_command_tools
+
+    console = _CollectingConsole()
+    templates = {
+        "generic": {
+            "id": "generic",
+            "name": "Generic",
+            "protocols": ["openai_chat_completions"],
+            "supported_clis": ["codex"],
+            "priority": 10,
+            "note": "generic note",
+        },
+        "openrouter": {
+            "id": "openrouter",
+            "name": "OpenRouter",
+            "protocols": ["openai_chat_completions", "anthropic_messages"],
+            "supported_clis": ["codex", "claude"],
+            "priority": 50,
+            "note": "openrouter note",
+            "default_openai_base_url": "https://openrouter.ai/api/v1",
+            "default_anthropic_base_url": "https://openrouter.ai/api/anthropic",
+            "key_prefix": "sk-or-",
+            "fallback_models": ["openrouter/auto"],
+            "models_endpoint": "/models",
+            "provider_profile": "openrouter",
+            "extension": {"http_referer": "https://mms.local"},
+            "capabilities": {"vision": True},
+        },
+    }
+
+    payload = mms_command_tools.provider_template_payload("openrouter", provider_templates=templates)
+    assert payload == {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "protocols": ["openai_chat_completions", "anthropic_messages"],
+        "supported_clis": ["codex", "claude"],
+        "enabled": True,
+        "priority": 50,
+        "note": "openrouter note",
+        "default_openai_base_url": "https://openrouter.ai/api/v1",
+        "default_anthropic_base_url": "https://openrouter.ai/api/anthropic",
+        "key_prefix": "sk-or-",
+        "fallback_models": ["openrouter/auto"],
+        "models_endpoint": "/models",
+        "provider_profile": "openrouter",
+        "extension": {"http_referer": "https://mms.local"},
+        "capabilities": {"vision": True},
+    }
+    payload["protocols"].append("mutated")
+    payload["fallback_models"].append("mutated")
+    payload["capabilities"]["vision"] = False
+    assert templates["openrouter"]["protocols"] == ["openai_chat_completions", "anthropic_messages"]
+    assert templates["openrouter"]["fallback_models"] == ["openrouter/auto"]
+    assert templates["openrouter"]["capabilities"] == {"vision": True}
+    assert mms_command_tools.provider_template_payload("missing", provider_templates=templates)["id"] == "generic"
+
+    assert mms_command_tools.select_provider_template("openrouter", console=console) == "openrouter"
+    assert mms_command_tools.select_provider_template(None, console=console) == "generic"
+    assert mms_command_tools.select_provider_template("qwen", console=console) == "generic"
+    assert "已统一收敛为“通用兼容网关”" in console.items[-1]
+
+
 def test_model_family_visibility_helpers_preserve_display_filter_semantics():
     import mms_command_tools
 

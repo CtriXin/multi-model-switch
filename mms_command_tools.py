@@ -2192,6 +2192,44 @@ def config_truthy(value, default=False):
     return str(value).strip().lower() not in {"0", "false", "no", "off", "disable", "disabled"}
 
 
+def provider_template_payload(template_key, *, provider_templates):
+    template = provider_templates.get(template_key) or provider_templates["generic"]
+    payload = {
+        "id": template["id"],
+        "name": template["name"],
+        "protocols": list(template["protocols"]),
+        "supported_clis": list(template["supported_clis"]),
+        "enabled": True,
+        "priority": template["priority"],
+        "note": template["note"],
+    }
+    if "default_openai_base_url" in template:
+        payload["default_openai_base_url"] = template["default_openai_base_url"]
+    if "default_anthropic_base_url" in template:
+        payload["default_anthropic_base_url"] = template["default_anthropic_base_url"]
+    if "key_prefix" in template:
+        payload["key_prefix"] = template["key_prefix"]
+    if "fallback_models" in template:
+        payload["fallback_models"] = list(template["fallback_models"])
+    if "models_endpoint" in template:
+        payload["models_endpoint"] = template["models_endpoint"]
+    if "provider_profile" in template:
+        payload["provider_profile"] = template["provider_profile"]
+    if "extension" in template:
+        payload["extension"] = template["extension"]
+    if "capabilities" in template:
+        payload["capabilities"] = dict(template["capabilities"])
+    return payload
+
+
+def select_provider_template(preset_id=None, *, console):
+    if preset_id == "openrouter":
+        return "openrouter"
+    if preset_id and preset_id != "generic":
+        console.print("[yellow]已统一收敛为“通用兼容网关”，将直接进入通用网关配置。[/yellow]")
+    return "generic"
+
+
 def parse_csv_values(raw_value, allowed_values=None, *, console=None):
     values = []
     for chunk in str(raw_value or "").split(","):

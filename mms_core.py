@@ -2718,41 +2718,15 @@ def _prompt_provider_metadata(existing=None, preset_id=None):
 
 
 def _provider_template_payload(template_key):
-    template = PROVIDER_TEMPLATES.get(template_key) or PROVIDER_TEMPLATES["generic"]
-    payload = {
-        "id": template["id"],
-        "name": template["name"],
-        "protocols": list(template["protocols"]),
-        "supported_clis": list(template["supported_clis"]),
-        "enabled": True,
-        "priority": template["priority"],
-        "note": template["note"],
-    }
-    if "default_openai_base_url" in template:
-        payload["default_openai_base_url"] = template["default_openai_base_url"]
-    if "default_anthropic_base_url" in template:
-        payload["default_anthropic_base_url"] = template["default_anthropic_base_url"]
-    if "key_prefix" in template:
-        payload["key_prefix"] = template["key_prefix"]
-    if "fallback_models" in template:
-        payload["fallback_models"] = list(template["fallback_models"])
-    if "models_endpoint" in template:
-        payload["models_endpoint"] = template["models_endpoint"]
-    if "provider_profile" in template:
-        payload["provider_profile"] = template["provider_profile"]
-    if "extension" in template:
-        payload["extension"] = template["extension"]
-    if "capabilities" in template:
-        payload["capabilities"] = dict(template["capabilities"])
-    return payload
+    from mms_command_tools import provider_template_payload
+
+    return provider_template_payload(template_key, provider_templates=PROVIDER_TEMPLATES)
 
 
 def _select_provider_template(preset_id=None):
-    if preset_id == "openrouter":
-        return "openrouter"
-    if preset_id and preset_id != "generic":
-        console.print("[yellow]已统一收敛为“通用兼容网关”，将直接进入通用网关配置。[/yellow]")
-    return "generic"
+    from mms_command_tools import select_provider_template
+
+    return select_provider_template(preset_id, console=console)
 
 
 def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
