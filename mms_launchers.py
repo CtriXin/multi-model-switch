@@ -10800,6 +10800,16 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
     },
 }
 
+_PI_PROVIDER_MODEL_REPLACEMENTS = {
+    "us-cpa-local-antigravity": {
+        # Upstream now responds with a deprecation notice that explicitly points
+        # callers at Gemini 3.1 Pro, so MMS rewrites the old Pi selection to the
+        # current live alias when that replacement is actually present.
+        "gemini-3-pro-high": "gemini-3.1-pro-low",
+        "gemini-3-pro-low": "gemini-3.1-pro-low",
+    },
+}
+
 _PI_CAPABILITY_REFERENCE_CACHE = None
 _PI_CAPABILITY_REFERENCE_INDEX = None
 
@@ -10903,10 +10913,35 @@ def _pi_model_supported(model_name):
     return _pi_reference_supports_vision(model_name) != "image_generation"
 
 
+def _pi_model_replacement(runtime, model_name):
+    runtime = runtime if isinstance(runtime, dict) else {}
+    provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip().lower()
+    if not provider_id:
+        return ""
+    candidates = _PI_PROVIDER_MODEL_REPLACEMENTS.get(provider_id) or {}
+    normalized = _pi_normalize_model_key(model_name)
+    replacement = ""
+    for source_name, target_name in candidates.items():
+        if _pi_normalize_model_key(source_name) == normalized:
+            replacement = str(target_name or "").strip()
+            break
+    if not replacement:
+        return ""
+
+    available = {
+        _pi_normalize_model_key(candidate): str(candidate or "").strip()
+        for candidate in _pi_runtime_model_names(runtime, selected_model=model_name)
+        if str(candidate or "").strip()
+    }
+    return available.get(_pi_normalize_model_key(replacement), "")
+
+
 def _pi_model_block_reason(runtime, model_name):
     runtime = runtime if isinstance(runtime, dict) else {}
     provider_id = str(runtime.get("id") or runtime.get("provider_id") or "").strip().lower()
     if not provider_id:
+        return ""
+    if _pi_model_replacement(runtime, model_name):
         return ""
     candidates = _PI_PROVIDER_MODEL_BLOCK_REASONS.get(provider_id) or {}
     normalized = _pi_normalize_model_key(model_name)
@@ -11207,6 +11242,11 @@ def _pi_model_thinking_level_map(profile_id, protocol, model_name, caps):
     }
 
 
+def _pi_effective_selected_model(runtime, model_name):
+    replacement = _pi_model_replacement(runtime, model_name)
+    return replacement or str(model_name or "").strip()
+
+
 def _pi_wire_model_name(runtime, model_name, protocol):
     protocol_name = str(protocol or "").strip()
     runtime = runtime if isinstance(runtime, dict) else {}
@@ -11398,7 +11438,8 @@ def _write_pi_settings_config(agent_dir):
 
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
-    model = _resolve_model(model_info or runtime)
+    requested_model = _resolve_model(model_info or runtime)
+    model = _pi_effective_selected_model(runtime, requested_model)
     gateway_base = _real_user_path(".config", "mms", "pi-gateway")
     os.makedirs(gateway_base, exist_ok=True)
     sessions_dir = os.path.join(gateway_base, "s")
@@ -11410,7 +11451,7 @@ def _pi_gateway_env(runtime, model_info=None):
     _scrub_inherited_runtime_env(env, strip_openai=True, strip_proxy=True)
     _inject_real_home_hints(env, include_xdg=True)
     _inject_host_capability_hints(env)
-    _inject_selected_model_name(env, model, model_info=model_info)
+    _inject_selected_model_name(env, requested_model or model, model_info=model_info)
     _set_session_home_hint(env, session_home)
     env["HOME"] = _real_user_path()
     env["MMS_HOME_ISOLATION_MODE"] = "soft"
@@ -11428,6 +11469,7 @@ def _pi_gateway_env(runtime, model_info=None):
     env["MMS_PI_MODELS_JSON"] = models_path
     env["MMS_PI_SETTINGS_JSON"] = settings_path
     env["MMS_PI_PROVIDER"] = provider_ref
+    env["MMS_PI_SELECTED_MODEL"] = model
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
     wrapper_path = _pi_wrapper_path()
     if wrapper_path:
@@ -11456,11 +11498,12 @@ def _pi_gateway_env(runtime, model_info=None):
 
 def _pi_provider_export_env(runtime, model):
     runtime = runtime if isinstance(runtime, dict) else {}
+    effective_model = _pi_effective_selected_model(runtime, model or runtime.get("model"))
     provider_ref = _opencode_config_slug(runtime.get("id") or runtime.get("name"), "provider")
-    model_ref = _opencode_config_slug(model or runtime.get("model"), "model")
+    model_ref = _opencode_config_slug(effective_model or runtime.get("model"), "model")
     agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
     session_dir = os.path.join(agent_dir, "sessions")
-    models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, model)
+    models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, effective_model)
     settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
     exports = {
@@ -11470,6 +11513,7 @@ def _pi_provider_export_env(runtime, model):
         "MMS_PI_MODELS_JSON": models_path,
         "MMS_PI_SETTINGS_JSON": settings_path,
         "MMS_PI_PROVIDER": selected_provider_ref,
+        "MMS_PI_SELECTED_MODEL": effective_model,
         "MMS_PI_NPX_CACHE": _pi_npx_cache_dir(),
     }
     wrapper_path = _pi_wrapper_path()
@@ -11485,7 +11529,8 @@ def launch_pi(model_info, runtime, once=False, extra_args=None):
         console.print("[red]Pi 当前只支持模型源/API key 模式；官方 /login 请直接在 Pi 内使用[/red]")
         sys.exit(1)
 
-    model = _resolve_model(model_info)
+    requested_model = _resolve_model(model_info)
+    model = _pi_effective_selected_model(runtime, requested_model)
     env = _pi_gateway_env(runtime, model_info=model_info)
     provider_ref = str(env.get("MMS_PI_PROVIDER") or _pi_provider_ref(runtime)).strip()
     cmd = ["pi", "--provider", provider_ref]

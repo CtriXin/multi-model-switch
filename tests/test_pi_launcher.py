@@ -109,6 +109,74 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
+def test_launch_pi_rewrites_deprecated_antigravity_gemini_alias_to_live_replacement(monkeypatch, tmp_path):
+    import mms_launchers
+
+    captured = {}
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+
+    monkeypatch.setattr(
+        mms_launchers,
+        "_real_user_path",
+        lambda *parts: str(real_home.joinpath(*parts)),
+    )
+    monkeypatch.setattr(mms_launchers, "_cleanup_stale_sessions", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_scrub_inherited_runtime_env", lambda env, **_kwargs: env)
+    monkeypatch.setattr(mms_launchers, "_inject_real_home_hints", lambda env, include_xdg=False: env)
+    monkeypatch.setattr(mms_launchers, "_inject_host_capability_hints", lambda env: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_network_profile", lambda env, runtime, validate_proxy=False: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_locale_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_apply_runtime_ip_stack_profile", lambda env, runtime: env)
+    monkeypatch.setattr(mms_launchers, "_install_session_command_wrappers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(mms_launchers, "_install_session_packet_env", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(mms_launchers, "_resolve_web_access_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_weber_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_toon_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_token_saver_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_resolve_xmem_root", lambda: "")
+    monkeypatch.setattr(mms_launchers, "_pi_wrapper_path", lambda: "/tmp/pi-wrapper")
+    monkeypatch.setattr(
+        mms_launchers,
+        "_probe_models",
+        lambda runtime, emit_output=False: {"models": ["gemini-3-pro-high", "gemini-3.1-pro-low"]},
+    )
+    monkeypatch.setattr(mms_launchers.os, "getpid", lambda: 4242)
+
+    def fake_exec(cmd, env, once, **_kwargs):
+        captured["cmd"] = cmd
+        captured["env"] = dict(env)
+        captured["once"] = once
+
+    monkeypatch.setattr(mms_launchers, "_exec_or_run", fake_exec)
+
+    runtime = {
+        "id": "us-cpa-local-antigravity",
+        "name": "Antigravity",
+        "enabled": True,
+        "auth_mode": "api_key",
+        "api_key": "sk-antigravity",
+        "openai_base_url": "https://relay.example.com/v1",
+        "protocols": ["openai_chat_completions"],
+        "supported_clis": ["codex"],
+        "thinking_mode": "disable",
+    }
+
+    mms_launchers.launch_pi({"model": "gemini-3-pro-high"}, runtime, once=True)
+
+    assert captured["cmd"] == [
+        "pi",
+        "--provider",
+        "mms-us-cpa-local-antigravity",
+        "--model",
+        "gemini-3.1-pro-low",
+        "--thinking",
+        "off",
+    ]
+    assert captured["once"] is True
+    assert captured["env"]["MMS_PI_SELECTED_MODEL"] == "gemini-3.1-pro-low"
+
+
 def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_path):
     import mms_launchers
 
@@ -237,6 +305,7 @@ def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatc
         model_info={"model": "qwen3.6-plus"},
     )
 
+    assert exports["MMS_PI_SELECTED_MODEL"] == "qwen3.6-plus"
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     assert set(payload["providers"]) == {
         "mms-newapi-personal-tokyo-anthropic",
@@ -286,6 +355,7 @@ def test_pi_openai_provider_compat_uses_profile_specific_flags(monkeypatch, tmp_
         model_info={"model": "deepseek-v4-pro"},
     )
 
+    assert exports["MMS_PI_SELECTED_MODEL"] == "deepseek-v4-pro"
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-deepseek-direct"]
     assert provider["compat"] == {
@@ -335,6 +405,7 @@ def test_pi_shared_root_openai_base_url_is_normalized_to_v1(monkeypatch, tmp_pat
         model_info={"model": "gpt-5.4"},
     )
 
+    assert exports["MMS_PI_SELECTED_MODEL"] == "gpt-5.4"
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     openai_providers = [provider for provider in payload["providers"].values() if provider["api"].startswith("openai-")]
     assert openai_providers
@@ -648,7 +719,7 @@ def test_pi_rejects_selected_image_generation_only_model(monkeypatch):
         )
 
 
-def test_pi_skips_runtime_blocked_models(monkeypatch, tmp_path):
+def test_pi_reopens_deprecated_antigravity_gemini_alias_when_replacement_available(monkeypatch, tmp_path):
     import mms_launchers
 
     real_home = tmp_path / "real-home"
@@ -679,12 +750,12 @@ def test_pi_skips_runtime_blocked_models(monkeypatch, tmp_path):
             "protocols": ["anthropic_messages"],
             "supported_clis": ["pi"],
         },
-        model_info={"model": "gemini-3.1-pro-low"},
+        model_info={"model": "gemini-3-pro-high"},
     )
 
     payload = json.loads(Path(exports["MMS_PI_MODELS_JSON"]).read_text(encoding="utf-8"))
     provider = payload["providers"][exports["MMS_PI_PROVIDER"]]
-    assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low"]
+    assert [item["id"] for item in provider["models"]] == ["gemini-3.1-pro-low", "gemini-3-pro-high"]
 
 
 def test_pi_exposed_model_names_recover_antigravity_opus_after_retry_hardening(monkeypatch):

@@ -368,12 +368,13 @@ def run_case(
             env["MMS_REAL_HOME"] = temp_home
             env["REAL_HOME"] = temp_home
             env["ORIGINAL_HOME"] = temp_home
+            selected_model = str(exports.get("MMS_PI_SELECTED_MODEL") or model_name).strip() or model_name
             cmd = [
                 exports["MMS_PI_BIN"],
                 "--provider",
                 exports["MMS_PI_PROVIDER"],
                 "--model",
-                model_name,
+                selected_model,
                 "--mode",
                 "json",
                 "--no-session",

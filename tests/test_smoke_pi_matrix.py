@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -297,3 +298,45 @@ def test_run_direct_check_tries_alternate_supported_cli(monkeypatch):
             "rc": 0,
         }
     ]
+
+
+def test_run_case_uses_effective_pi_selected_model(monkeypatch):
+    smoke_pi_matrix = _load_smoke_pi_matrix()
+
+    monkeypatch.setattr(
+        smoke_pi_matrix.mms_launchers,
+        "get_export_env",
+        lambda cli, runtime, model_info=None: {
+            "MMS_PI_BIN": "/tmp/pi-wrapper",
+            "MMS_PI_PROVIDER": "mms-relay-a",
+            "MMS_PI_SELECTED_MODEL": "gemini-3.1-pro-low",
+        },
+    )
+
+    class _Completed:
+        returncode = 0
+        stdout = '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"PONG"}],"stopReason":"stop"}}\n'
+        stderr = ""
+
+    captured = {}
+
+    def fake_run(cmd, env, capture_output, text, timeout):
+        captured["cmd"] = list(cmd)
+        raise_result = _Completed()
+        return raise_result
+
+    monkeypatch.setattr(smoke_pi_matrix.subprocess, "run", fake_run)
+
+    result = smoke_pi_matrix.run_case(
+        provider_id="relay-a",
+        runtime={"id": "relay-a"},
+        model_name="gemini-3-pro-high",
+        prompt="Reply with exactly PONG.",
+        timeout_sec=30,
+        accepted_text={"PONG"},
+        blocked_reason="",
+    )
+
+    assert captured["cmd"][0] == "/tmp/pi-wrapper"
+    assert captured["cmd"][4] == "gemini-3.1-pro-low"
+    assert result["status"] == "pass"
