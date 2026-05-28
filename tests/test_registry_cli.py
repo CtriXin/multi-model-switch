@@ -869,6 +869,15 @@ def test_registry_v2_save_candidate_writes_preview_db_without_secrets(tmp_path: 
             ))
         }
         assert sources == {"registry-v2-save-candidate"}
+        candidate_ids = {
+            json.loads(row[0])["candidate_id"]
+            for row in db.execute("SELECT metadata_json FROM registry_revision WHERE revision_id IN (?, ?, ?)", (
+                summary["route_candidates"]["revision_id"],
+                summary["policy_candidate"]["revision_id"],
+                summary["profile_candidate"]["revision_id"],
+            ))
+        }
+        assert candidate_ids == {summary["candidate_id"]}
     finally:
         db.close()
 
@@ -1041,6 +1050,56 @@ def test_publish_preview_bundle_prefers_latest_registry_v2_save_candidate(tmp_pa
     assert profile_payload["source"] == "registry-preview-v2-save-candidate"
     assert profile_payload["profiles"]["primary-local"]["models_endpoint"] == "/models"
     assert "sk-primary-local-secret" not in generated_text
+
+
+def test_publish_preview_bundle_does_not_mix_foreign_registry_v2_policy_revision(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mms-next"
+    cfg = _registry_v2_candidate_config()
+    policy = {
+        "version": 1,
+        "models": {
+            "shared-model": {"visible": True, "favorite": True},
+            "manual-model": {"visible": False},
+        },
+    }
+    candidate = mms_registry_cli.apply_registry_v2_save_candidate(
+        config_dir=config_dir,
+        config_payload=cfg,
+        policy_payload=policy,
+        apply=True,
+        command_name="mmf registry",
+    )
+    foreign_policy = {
+        "version": 1,
+        "models": {"manual-model": {"visible": True, "source": "foreign-candidate"}},
+    }
+    foreign_digest = mms_registry.sha256_hex(json.dumps(foreign_policy, ensure_ascii=False, sort_keys=True))
+    db = mms_registry.open_registry(config_dir / "registry" / "model-registry.sqlite")
+    try:
+        mms_registry.create_revision(
+            db,
+            "registry_v2_policy_foreign_candidate",
+            "policy",
+            status="candidate",
+            revision_hash=foreign_digest,
+            created_at="2999-01-01T00:00:00Z",
+            metadata={
+                "source": "registry-v2-save-candidate",
+                "candidate_id": "foreign-candidate",
+                "payload": foreign_policy,
+                "model_count": 1,
+            },
+        )
+    finally:
+        db.close()
+
+    publish_summary = mms_registry_cli.publish_preview_bundle(config_dir=config_dir)
+    policy_payload = json.loads((config_dir / "generated" / "model-policy.effective.json").read_text(encoding="utf-8"))
+
+    assert publish_summary["candidate_id"] == candidate["candidate_id"]
+    assert publish_summary["policy_revision"] == candidate["policy_candidate"]["revision_id"]
+    assert policy_payload["models"]["manual-model"]["visible"] is False
+    assert policy_payload["models"]["manual-model"].get("source") != "foreign-candidate"
 
 
 def test_mmf_preview_init_creates_preview_layout_without_stable_fallback(tmp_path: Path) -> None:

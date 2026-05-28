@@ -1280,7 +1280,13 @@ def _latest_legacy_import_route_revision(db: sqlite3.Connection) -> sqlite3.Row:
     raise RegistryValidationError("latest preview route candidate is not a legacy import candidate")
 
 
-def _latest_revision_payload_for_source(db: sqlite3.Connection, revision_class: str, source: str) -> tuple[str, dict[str, Any]]:
+def _latest_revision_payload_for_source(
+    db: sqlite3.Connection,
+    revision_class: str,
+    source: str,
+    *,
+    candidate_id: str = "",
+) -> tuple[str, dict[str, Any]]:
     rows = db.execute(
         """
         SELECT revision_id, metadata_json
@@ -1293,6 +1299,8 @@ def _latest_revision_payload_for_source(db: sqlite3.Connection, revision_class: 
     for row in rows:
         metadata = _metadata_dict(row["metadata_json"])
         if str(metadata.get("source") or "") != source:
+            continue
+        if candidate_id and str(metadata.get("candidate_id") or "") != candidate_id:
             continue
         payload = metadata.get("payload") if isinstance(metadata.get("payload"), dict) else {}
         if payload:
@@ -1510,8 +1518,24 @@ def publish_latest_approved_bundle_from_legacy_candidates(
         route_revision_row, preview_source = _latest_preview_route_revision(db)
         source_label = _PREVIEW_ROUTE_SOURCE_LABELS.get(preview_source, "registry-preview")
         route_revision = str(route_revision_row["revision_id"] or "")
-        policy_revision_override, policy_payload_override = _latest_revision_payload_for_source(db, "policy", preview_source)
-        profile_revision_override, profile_payload_override = _latest_revision_payload_for_source(db, "profile", preview_source)
+        route_metadata = _metadata_dict(route_revision_row["metadata_json"])
+        candidate_id = str(route_metadata.get("candidate_id") or "")
+        policy_revision_override, policy_payload_override = _latest_revision_payload_for_source(
+            db,
+            "policy",
+            preview_source,
+            candidate_id=candidate_id,
+        )
+        profile_revision_override, profile_payload_override = _latest_revision_payload_for_source(
+            db,
+            "profile",
+            preview_source,
+            candidate_id=candidate_id,
+        )
+        if preview_source == "registry-v2-save-candidate" and candidate_id and (not policy_revision_override or not profile_revision_override):
+            raise RegistryValidationError(
+                f"registry v2 candidate {candidate_id} is missing matching policy/profile revisions"
+            )
         payloads = _build_preview_bundle_payloads_from_route_revision(
             db,
             route_revision_id=route_revision,
@@ -1660,6 +1684,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
                             "manifest_path": str(manifest_path),
                             "route_revision": route_revision,
                             "preview_source": preview_source,
+                            "candidate_id": candidate_id,
                             "runtime_ready": False,
                         }
                     ),
@@ -1669,6 +1694,7 @@ def publish_latest_approved_bundle_from_legacy_candidates(
             "schema": "mms.preview_bundle_publish.v1",
             "source": source_label,
             "preview_source": preview_source,
+            "candidate_id": candidate_id,
             "manifest": manifest,
             "manifest_path": str(manifest_path),
             "generated_dir": str(generated_dir),

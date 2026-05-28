@@ -121,6 +121,7 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "every route leaf has an `anthropic_base_url` or `openai_base_url`",
         "`stable_legacy_writes`",
         "`preview_v2_writes`",
+        "same-`candidate_id` route/policy/profile revisions",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",
         "not presented as the v2 truth/publish path",
     ]

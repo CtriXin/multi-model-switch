@@ -475,6 +475,7 @@ Current Stage 4a implementation:
 - Route candidates store `secret_ref` / fingerprint only. Plaintext keys are not stored in DB; legacy compatibility files are not written in this slice.
 - If candidate write fails after backup, the preview DB is restored from the pre-write backup.
 - `publish-preview` now prefers the latest preview route candidate, including `registry-v2-save-candidate`, and reuses matching DB candidate policy/profile revisions when generating the latest-approved bundle.
+- `registry-v2-save-candidate` route/policy/profile revisions share a `candidate_id`; `publish-preview` uses that id to avoid mixing a route revision from one candidate with policy/profile revisions from another candidate.
 - WebUI has a preview-only `写入预览 DB + 发布` action backed by `/api/registry-v2/apply`. It requires the confirmation phrase `写入预览DB`, refuses stable roots, writes DB candidates, writes `<preview-root>/secrets/webui-secrets.json` only when explicit plaintext credential updates are submitted, publishes `generated/model-registry.latest-approved.json`, and verifies hashes.
 - WebUI plaintext credential updates are stored only in the preview secret backend; DB candidate rows keep `secret_ref` / fingerprint, the API response is sanitized, and generated Router entries become `runtime_ready=true` only when matching preview secret values exist and every route leaf has an `anthropic_base_url` or `openai_base_url`.
 - If WebUI preview publish/verify fails, the action attempts to roll back the preview DB candidate, WebUI secret backend file, and generated bundle files from the pre-publish snapshot.
@@ -492,7 +493,7 @@ Current TUI/settings boundary:
 
 - Generate Router/Lineup/Profile/Policy from DB truth.
 - Keep legacy export fallback behind explicit compatibility mode.
-- Add contract tests for no mixed revisions.
+- Add contract tests for no mixed revisions. Current v2 save candidate publish already enforces same-`candidate_id` route/policy/profile revisions.
 
 ### Stage 6 - Launcher Adoption
 

@@ -1131,7 +1131,10 @@ def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dic
     route_entries = [item for item in (payload.get("route_entries") or []) if isinstance(item, dict)]
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
     source = "registry-v2-save-candidate"
+    candidate_digest = mms_registry.sha256_hex(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    candidate_id = f"registry_v2_candidate_{stamp}_{candidate_digest[:12]}"
     result: dict[str, Any] = {
+        "candidate_id": candidate_id,
         "route": {"revision_id": "", "route_group_count": 0, "provider_route_count": 0},
         "policy": {"revision_id": "", "model_count": 0},
         "profile": {"revision_id": "", "provider_count": 0},
@@ -1145,7 +1148,7 @@ def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dic
             "route",
             status="candidate",
             revision_hash=digest,
-            metadata={"source": source, "route_count": len(route_entries)},
+            metadata={"source": source, "candidate_id": candidate_id, "route_count": len(route_entries)},
         )
         groups: set[str] = set()
         for idx, entry in enumerate(route_entries, start=1):
@@ -1192,7 +1195,7 @@ def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dic
         "policy",
         status="candidate",
         revision_hash=policy_digest,
-        metadata={"source": source, "payload": policy_payload, "model_count": len(policy_models)},
+        metadata={"source": source, "candidate_id": candidate_id, "payload": policy_payload, "model_count": len(policy_models)},
     )
     result["policy"] = {"revision_id": policy_revision_id, "model_count": len(policy_models)}
 
@@ -1206,7 +1209,7 @@ def _insert_registry_v2_candidate_revisions(db: sqlite3.Connection, payload: dic
         "profile",
         status="candidate",
         revision_hash=profile_digest,
-        metadata={"source": source, "payload": profile_payload, "provider_count": len(profiles)},
+        metadata={"source": source, "candidate_id": candidate_id, "payload": profile_payload, "provider_count": len(profiles)},
     )
     result["profile"] = {"revision_id": profile_revision_id, "provider_count": len(profiles)}
 
@@ -1818,6 +1821,7 @@ def apply_registry_v2_save_candidate(
     summary.update(
         {
             "skipped": False,
+            "candidate_id": revisions.get("candidate_id", ""),
             "route_candidates": revisions.get("route", {}),
             "policy_candidate": revisions.get("policy", {}),
             "profile_candidate": revisions.get("profile", {}),
