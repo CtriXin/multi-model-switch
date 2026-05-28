@@ -11,6 +11,7 @@ CONTRACT_DOCS = [
     ROOT / "docs/REGISTRY_ARCHITECTURE.md",
 ]
 MMF_V2_DOC = ROOT / "docs/MMF_CONFIG_ROOT_V2_DB_TRUTH.md"
+RESCUE_DOC = ROOT / "docs/RESCUE_FALLBACK.md"
 
 
 def _contract_text() -> str:
@@ -19,6 +20,10 @@ def _contract_text() -> str:
 
 def _mmf_v2_text() -> str:
     return MMF_V2_DOC.read_text(encoding="utf-8")
+
+
+def _rescue_text() -> str:
+    return RESCUE_DOC.read_text(encoding="utf-8")
 
 
 def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
@@ -125,6 +130,20 @@ def test_mmf_v2_docs_record_current_preview_boundaries() -> None:
         "same-`candidate_id` route/policy/profile revisions",
         "TUI Settings labels direct `model-routes.json` export as `Legacy",
         "not presented as the v2 truth/publish path",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    assert missing == []
+
+
+def test_rescue_docs_record_latest_approved_route_boundary() -> None:
+    text = _rescue_text()
+
+    required_terms = [
+        "generated/model-registry.latest-approved.json",
+        "verified Router payload",
+        "invalid manifests fail closed",
+        "legacy generated/root `model-routes.json` files remain compatibility fallbacks",
     ]
 
     missing = [term for term in required_terms if term not in text]
