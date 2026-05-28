@@ -37,6 +37,37 @@ def test_registry_contract_docs_define_latest_approved_bundle_terms() -> None:
     assert missing == []
 
 
+def test_registry_contract_docs_make_latest_approved_downstream_entrypoint() -> None:
+    text = _contract_text()
+
+    required_terms = [
+        "<MMS_CONFIG_ROOT>/generated/model-registry.latest-approved.json",
+        "Hive / Pilot / Ant / Moebius / Mobius and future downstream consumers MUST use",
+        "from the config root as primary truth",
+        "Verify latest-approved manifest",
+        "Legacy route/policy/profile files remain compatibility",
+    ]
+
+    missing = [term for term in required_terms if term not in text]
+    assert missing == []
+
+
+def test_registry_contract_docs_do_not_make_legacy_root_files_primary() -> None:
+    text = _contract_text()
+
+    forbidden_guidance = [
+        "| How do I call a model? | Read `model-routes.json`;",
+        "| What is the model context window? | Read `model-routes.lineup.json`;",
+        "| Why does a provider need a special body/header/model alias? | Read `provider-profiles.json`.",
+        "| Should this model be visible or preferred in a specific project? | Read `model-policy.json`.",
+        "is maintained in `model-policy.json`",
+        "Sync server-private copies of Router/Lineup/Profile/Policy during deploy",
+    ]
+
+    present = [phrase for phrase in forbidden_guidance if phrase in text]
+    assert present == []
+
+
 def test_registry_contract_docs_define_truth_layers_and_privacy_boundary() -> None:
     text = _contract_text()
 
