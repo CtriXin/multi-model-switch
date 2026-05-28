@@ -9315,6 +9315,123 @@ def test_provider_add_credentials_handlers_preserve_dispatch_and_validation():
     assert "[red]未找到模型源: missing[/red]" in console.items
 
 
+def test_provider_credential_prompt_helper_preserves_defaults_keep_and_core_wrapper(monkeypatch):
+    import pytest
+
+    import mms_command_tools
+    import mms_core
+
+    console = _CollectingConsole()
+    ensured = []
+    prompt_calls = []
+    answers = ["https://typed.example/v1/", "new-key"]
+
+    def prompt_ask(message, **kwargs):
+        prompt_calls.append((message, kwargs))
+        return answers.pop(0)
+
+    assert mms_command_tools.prompt_provider_credentials(
+        {"id": "relay", "name": "Relay", "protocols": []},
+        "https://existing.example/v1",
+        "",
+        False,
+        stdin_isatty=lambda: True,
+        console=console,
+        current_command=lambda: "mmg",
+        config_command_hint=lambda: "mmg config api.edit",
+        localize=lambda zh, _en: zh,
+        ensure_rich=lambda: ensured.append("rich"),
+        default_base_url="https://default.example/v1",
+        provider_label=lambda provider: provider["name"],
+        prompt_ask=prompt_ask,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    ) == ("https://typed.example/v1", "new-key", "", "")
+    assert ensured == ["rich"]
+    assert prompt_calls[0] == (
+        "请输入接口地址 / Base URL（请求地址，通道: Relay）",
+        {"default": "https://existing.example/v1"},
+    )
+    assert prompt_calls[1] == (
+        "请输入 API Key（通道: Relay）",
+        {"password": True},
+    )
+
+    prompt_calls.clear()
+    answers[:] = ["https://open.example/v1/", "https://anth.example/v1/", ""]
+    assert mms_command_tools.prompt_provider_credentials(
+        {
+            "id": "dual",
+            "name": "Dual",
+            "protocols": ["openai_chat_completions", "anthropic_messages"],
+            "default_openai_base_url": "https://default-open.example/v1",
+            "default_anthropic_base_url": "https://default-anth.example/v1",
+        },
+        "",
+        "old-key",
+        True,
+        stdin_isatty=lambda: True,
+        console=console,
+        current_command=lambda: "mmg",
+        config_command_hint=lambda: "mmg config api.edit",
+        localize=lambda zh, _en: zh,
+        ensure_rich=lambda: ensured.append("rich"),
+        default_base_url="https://default.example/v1",
+        provider_label=lambda provider: provider["name"],
+        prompt_ask=prompt_ask,
+        exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+    ) == ("https://anth.example/v1", "old-key", "https://open.example/v1", "https://anth.example/v1")
+    assert prompt_calls[0][1] == {"default": "https://default-open.example/v1"}
+    assert prompt_calls[1][1] == {"default": "https://default-anth.example/v1"}
+    assert prompt_calls[2] == (
+        "请输入 API Key（通道: Dual，留空保持不变）",
+        {"password": True, "default": ""},
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        mms_command_tools.prompt_provider_credentials(
+            {"id": "relay", "name": "Relay"},
+            stdin_isatty=lambda: False,
+            console=console,
+            current_command=lambda: "mmg",
+            config_command_hint=lambda: "mmg config api.edit",
+            localize=lambda zh, _en: zh,
+            ensure_rich=lambda: ensured.append("unexpected"),
+            default_base_url="https://default.example/v1",
+            provider_label=lambda provider: provider["name"],
+            prompt_ask=prompt_ask,
+            exit_func=lambda code: (_ for _ in ()).throw(SystemExit(code)),
+        )
+    assert exc.value.code == 1
+    assert any("mmg config api.edit" in str(item) for item in console.items)
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    core_calls = []
+    monkeypatch.setattr(mms_core.sys, "stdin", FakeStdin())
+    monkeypatch.setattr(mms_core, "_ensure_rich", lambda: core_calls.append("core-rich"))
+    monkeypatch.setattr(mms_core, "_provider_label", lambda provider: provider["name"])
+    monkeypatch.setattr(
+        mms_core,
+        "Prompt",
+        type(
+            "FakePrompt",
+            (),
+            {"ask": staticmethod(lambda *args, **kwargs: core_calls.append((args, kwargs)) or "core-key")},
+        ),
+    )
+    assert mms_core._prompt_provider_credentials({"id": "core", "name": "Core", "protocols": []}) == (
+        "core-key",
+        "core-key",
+        "",
+        "",
+    )
+    assert core_calls[0] == "core-rich"
+    assert core_calls[1][0][0] == "请输入接口地址 / Base URL（请求地址，通道: Core）"
+    assert core_calls[2][0][0] == "请输入 API Key（通道: Core）"
+
+
 def test_update_provider_model_overrides_preserves_patch_normalize_and_cache_invalidation():
     import mms_command_tools
 

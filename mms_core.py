@@ -2666,73 +2666,24 @@ def _prompt_account_metadata(existing=None, preset_id=None, preset_cli=None):
 
 
 def _prompt_provider_credentials(provider, existing_base_url="", existing_api_key="", allow_keep=False):
-    if not sys.stdin.isatty():
-        console.print(
-            f"[red]{_L('当前不是交互终端，无法输入 API URL / API Key，请在终端里运行', 'Not running in an interactive terminal. Please run')} {current_command()} "
-            f"{_L('或执行', 'or')} {config_command_hint()}[/red]"
-        )
-        sys.exit(1)
-    _ensure_rich()
+    from mms_command_tools import prompt_provider_credentials
 
-    default_openai = provider.get("default_openai_base_url", "")
-    default_anthropic = provider.get("default_anthropic_base_url", "")
-    current_openai = provider.get("openai_base_url", "") or existing_base_url
-    current_anthropic = provider.get("anthropic_base_url", "") or existing_base_url
-    protocols = provider.get("protocols", [])
-    needs_openai = "openai_chat_completions" in protocols
-    needs_anthropic = "anthropic_messages" in protocols
-
-    base_url = ""
-    openai_base_url = ""
-    anthropic_base_url = ""
-
-    if needs_openai and needs_anthropic and default_openai and default_anthropic and default_openai != default_anthropic:
-        openai_base_url = Prompt.ask(
-            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
-            default=current_openai or default_openai,
-        ).rstrip("/")
-        anthropic_base_url = Prompt.ask(
-            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
-            default=current_anthropic or default_anthropic,
-        ).rstrip("/")
-        base_url = anthropic_base_url or openai_base_url
-    elif needs_openai and not needs_anthropic:
-        openai_base_url = Prompt.ask(
-            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
-            default=current_openai or default_openai or existing_base_url or DEFAULT_BASE_URL,
-        ).rstrip("/")
-        base_url = openai_base_url
-    elif needs_anthropic and not needs_openai:
-        anthropic_base_url = Prompt.ask(
-            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
-            default=current_anthropic or default_anthropic or existing_base_url or DEFAULT_BASE_URL,
-        ).rstrip("/")
-        base_url = anthropic_base_url
-    else:
-        base_default = existing_base_url or DEFAULT_BASE_URL
-        base_url = Prompt.ask(
-            f"请输入接口地址 / Base URL（请求地址，通道: {_provider_label(provider)}）",
-            default=base_default,
-        ).rstrip("/")
-        openai_base_url = base_url if needs_openai else ""
-        anthropic_base_url = base_url if needs_anthropic else ""
-
-        key_prompt = f"{_L('请输入 API Key', 'Enter API key')}（{_L('通道', 'channel')}: {_provider_label(provider)}）"
-    if allow_keep and existing_api_key:
-        key_prompt = f"{_L('请输入 API Key', 'Enter API key')}（{_L('通道', 'channel')}: {_provider_label(provider)}，{_L('留空保持不变', 'leave empty to keep current value')}）"
-
-    prompt_kwargs = {"password": True}
-    if allow_keep:
-        prompt_kwargs["default"] = ""
-    api_key = Prompt.ask(key_prompt, **prompt_kwargs)
-    if allow_keep and existing_api_key and not api_key:
-        api_key = existing_api_key
-
-    if not api_key:
-        console.print(f"[red]{_L('API Key 不能为空', 'API key cannot be empty')}[/red]")
-        sys.exit(1)
-
-    return base_url, api_key, openai_base_url, anthropic_base_url
+    return prompt_provider_credentials(
+        provider,
+        existing_base_url,
+        existing_api_key,
+        allow_keep,
+        stdin_isatty=lambda: sys.stdin.isatty(),
+        console=console,
+        current_command=current_command,
+        config_command_hint=config_command_hint,
+        localize=_L,
+        ensure_rich=_ensure_rich,
+        default_base_url=DEFAULT_BASE_URL,
+        provider_label=_provider_label,
+        prompt_ask=lambda *args, **kwargs: Prompt.ask(*args, **kwargs),
+        exit_func=sys.exit,
+    )
 
 
 def _save_provider_credentials_with_probe(provider, base_url, api_key, openai_base_url="", anthropic_base_url=""):

@@ -3980,6 +3980,92 @@ def check_cli_installed(cli_name, *, resolve_cli_binary):
     return bool(resolve_cli_binary(cli_name))
 
 
+def prompt_provider_credentials(
+    provider,
+    existing_base_url="",
+    existing_api_key="",
+    allow_keep=False,
+    *,
+    stdin_isatty,
+    console,
+    current_command,
+    config_command_hint,
+    localize,
+    ensure_rich,
+    default_base_url,
+    provider_label,
+    prompt_ask,
+    exit_func,
+):
+    if not stdin_isatty():
+        console.print(
+            f"[red]{localize('当前不是交互终端，无法输入 API URL / API Key，请在终端里运行', 'Not running in an interactive terminal. Please run')} {current_command()} "
+            f"{localize('或执行', 'or')} {config_command_hint()}[/red]"
+        )
+        exit_func(1)
+    ensure_rich()
+
+    default_openai = provider.get("default_openai_base_url", "")
+    default_anthropic = provider.get("default_anthropic_base_url", "")
+    current_openai = provider.get("openai_base_url", "") or existing_base_url
+    current_anthropic = provider.get("anthropic_base_url", "") or existing_base_url
+    protocols = provider.get("protocols", [])
+    needs_openai = "openai_chat_completions" in protocols
+    needs_anthropic = "anthropic_messages" in protocols
+
+    base_url = ""
+    openai_base_url = ""
+    anthropic_base_url = ""
+
+    if needs_openai and needs_anthropic and default_openai and default_anthropic and default_openai != default_anthropic:
+        openai_base_url = prompt_ask(
+            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {provider_label(provider)}）",
+            default=current_openai or default_openai,
+        ).rstrip("/")
+        anthropic_base_url = prompt_ask(
+            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {provider_label(provider)}）",
+            default=current_anthropic or default_anthropic,
+        ).rstrip("/")
+        base_url = anthropic_base_url or openai_base_url
+    elif needs_openai and not needs_anthropic:
+        openai_base_url = prompt_ask(
+            f"请输入 OpenAI 接口地址 / Base URL（请求地址，通道: {provider_label(provider)}）",
+            default=current_openai or default_openai or existing_base_url or default_base_url,
+        ).rstrip("/")
+        base_url = openai_base_url
+    elif needs_anthropic and not needs_openai:
+        anthropic_base_url = prompt_ask(
+            f"请输入 Anthropic 接口地址 / Base URL（请求地址，通道: {provider_label(provider)}）",
+            default=current_anthropic or default_anthropic or existing_base_url or default_base_url,
+        ).rstrip("/")
+        base_url = anthropic_base_url
+    else:
+        base_default = existing_base_url or default_base_url
+        base_url = prompt_ask(
+            f"请输入接口地址 / Base URL（请求地址，通道: {provider_label(provider)}）",
+            default=base_default,
+        ).rstrip("/")
+        openai_base_url = base_url if needs_openai else ""
+        anthropic_base_url = base_url if needs_anthropic else ""
+
+        key_prompt = f"{localize('请输入 API Key', 'Enter API key')}（{localize('通道', 'channel')}: {provider_label(provider)}）"
+    if allow_keep and existing_api_key:
+        key_prompt = f"{localize('请输入 API Key', 'Enter API key')}（{localize('通道', 'channel')}: {provider_label(provider)}，{localize('留空保持不变', 'leave empty to keep current value')}）"
+
+    prompt_kwargs = {"password": True}
+    if allow_keep:
+        prompt_kwargs["default"] = ""
+    api_key = prompt_ask(key_prompt, **prompt_kwargs)
+    if allow_keep and existing_api_key and not api_key:
+        api_key = existing_api_key
+
+    if not api_key:
+        console.print(f"[red]{localize('API Key 不能为空', 'API key cannot be empty')}[/red]")
+        exit_func(1)
+
+    return base_url, api_key, openai_base_url, anthropic_base_url
+
+
 def select_cli(
     cli_names,
     *,
