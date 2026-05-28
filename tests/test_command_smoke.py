@@ -3368,6 +3368,48 @@ def test_session_list_info_display_helpers():
     assert any("找不到 session: missing" in str(item) for item in console.items)
 
 
+def test_session_gateway_stale_helpers_preserve_roots_size_and_sorting(tmp_path):
+    import os
+
+    import mms_command_tools
+    import mms_core
+
+    real_home = tmp_path / "home"
+    roots = dict(mms_command_tools.session_gateway_roots("all", real_home=str(real_home)))
+    assert set(roots) == {"claude", "codex", "opencode"}
+    assert roots["claude"].endswith(os.path.join(".config", "mms", "claude-gateway", "s"))
+
+    active = os.path.join(roots["claude"], "active")
+    small = os.path.join(roots["claude"], "small")
+    large = os.path.join(roots["codex"], "large")
+    os.makedirs(active)
+    os.makedirs(small)
+    os.makedirs(large)
+    (tmp_path / "linked-target").write_text("ignored", encoding="utf-8")
+    with open(os.path.join(small, "a.txt"), "w", encoding="utf-8") as handle:
+        handle.write("1234")
+    with open(os.path.join(large, "b.txt"), "w", encoding="utf-8") as handle:
+        handle.write("12345678")
+    try:
+        os.symlink(str(tmp_path / "linked-target"), os.path.join(large, "linked"))
+    except OSError:
+        pass
+
+    rows = mms_command_tools.list_stale_gateway_sessions(
+        "all",
+        session_gateway_roots=lambda _cli: [("claude", roots["claude"]), ("codex", roots["codex"])],
+        session_home_is_active=lambda path: path == active,
+        session_dir_size_bytes=mms_command_tools.session_dir_size_bytes,
+    )
+
+    assert [(row["cli"], row["name"], row["size"]) for row in rows] == [
+        ("codex", "large", 8),
+        ("claude", "small", 4),
+    ]
+    assert mms_command_tools.format_bytes(1536) == "1.5K"
+    assert mms_core._format_bytes(0) == "0B"
+
+
 def test_session_prune_handler_dry_run_and_apply_with_injected_remove():
     import mms_command_tools
 

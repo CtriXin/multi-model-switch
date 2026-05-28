@@ -8652,71 +8652,33 @@ def _handle_session_info(session_id, cli_name):
 
 
 def _session_gateway_roots(cli_name):
-    real_home = resolve_real_user_home()
-    gateway_names = []
-    if cli_name in {"all", "claude"}:
-        gateway_names.append(("claude", "claude-gateway"))
-    if cli_name in {"all", "codex"}:
-        gateway_names.append(("codex", "codex-gateway"))
-    if cli_name in {"all", "opencode"}:
-        gateway_names.append(("opencode", "opencode-gateway"))
-    return [
-        (cli, os.path.join(real_home, ".config", "mms", gateway_name, "s"))
-        for cli, gateway_name in gateway_names
-    ]
+    from mms_command_tools import session_gateway_roots
+
+    return session_gateway_roots(cli_name, real_home=resolve_real_user_home())
 
 
 def _session_dir_size_bytes(path):
-    total = 0
-    for root, _dirnames, filenames in os.walk(path):
-        for filename in filenames:
-            file_path = os.path.join(root, filename)
-            try:
-                if os.path.islink(file_path):
-                    continue
-                total += os.path.getsize(file_path)
-            except OSError:
-                continue
-    return total
+    from mms_command_tools import session_dir_size_bytes
+
+    return session_dir_size_bytes(path)
 
 
 def _format_bytes(size):
-    value = float(max(0, int(size or 0)))
-    for unit in ("B", "K", "M", "G"):
-        if value < 1024 or unit == "G":
-            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
-        value /= 1024
-    return f"{value:.1f}G"
+    from mms_command_tools import format_bytes
+
+    return format_bytes(size)
 
 
 def _list_stale_gateway_sessions(cli_name):
     from mms_launchers import _session_home_is_active
+    from mms_command_tools import list_stale_gateway_sessions
 
-    rows = []
-    for cli, root in _session_gateway_roots(cli_name):
-        if not os.path.isdir(root):
-            continue
-        for name in sorted(os.listdir(root)):
-            session_home = os.path.join(root, name)
-            if not os.path.isdir(session_home) or os.path.islink(session_home):
-                continue
-            if _session_home_is_active(session_home):
-                continue
-            try:
-                mtime = datetime.fromtimestamp(os.path.getmtime(session_home)).isoformat(timespec="seconds")
-            except OSError:
-                mtime = "-"
-            rows.append(
-                {
-                    "cli": cli,
-                    "name": name,
-                    "path": session_home,
-                    "size": _session_dir_size_bytes(session_home),
-                    "mtime": mtime,
-                }
-            )
-    rows.sort(key=lambda item: (int(item.get("size") or 0), str(item.get("mtime") or "")), reverse=True)
-    return rows
+    return list_stale_gateway_sessions(
+        cli_name,
+        session_gateway_roots=_session_gateway_roots,
+        session_home_is_active=_session_home_is_active,
+        session_dir_size_bytes=_session_dir_size_bytes,
+    )
 
 
 def _handle_session_prune(cli_name, *, apply=False, yes=False):
