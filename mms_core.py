@@ -4935,10 +4935,9 @@ def _registry_truth_tui_payload(status):
 
 
 def _compact_tui_report_value(value, max_len=96):
-    text = str(value if value is not None else "-").replace("\n", " ").strip()
-    if len(text) <= max_len:
-        return text or "-"
-    return text[: max(1, max_len - 1)].rstrip() + "…"
+    from mms_command_tools import compact_tui_report_value
+
+    return compact_tui_report_value(value, max_len=max_len)
 
 
 _SETTINGS_RESULT_RENDERED_TUI = False
@@ -4954,19 +4953,9 @@ def _settings_result_tui_available():
 
 
 def _settings_result_tui_payload(title, rows, note="", *, ok=True):
-    prefix = "✓ " if ok else "✗ "
-    info_lines = [(_L("状态", "Status"), _L("成功", "OK") if ok else _L("失败", "Failed"))]
-    info_lines.extend(
-        (str(label or "-"), _compact_tui_report_value(value, max_len=120))
-        for label, value in list(rows or [])
-    )
-    if note:
-        info_lines.append((_L("说明", "Note"), _compact_tui_report_value(note, max_len=160)))
-    return (
-        f"{prefix}{title}",
-        info_lines,
-        [("back", _L("返回", "Back"))],
-    )
+    from mms_command_tools import settings_result_tui_payload
+
+    return settings_result_tui_payload(title, rows, note, ok=ok, localize=_L)
 
 
 def _select_settings_result_tui(title, rows, note="", *, ok=True):
@@ -4990,13 +4979,9 @@ def _print_settings_result_report(title, rows, note="", *, ok=True):
             return
 
     _ensure_rich()
-    color = "green" if ok else "red"
-    prefix = "✓ " if ok else "✗ "
-    console.print(f"[{color}]{prefix}{title}[/{color}]")
-    for label, value in rows:
-        console.print(f"[cyan]{label}[/cyan] {_compact_tui_report_value(value)}")
-    if note:
-        console.print(f"[dim]{note}[/dim]")
+    from mms_command_tools import display_settings_result_report
+
+    return display_settings_result_report(title, rows, note, ok=ok, console=console)
 
 
 def _print_settings_error_report(title, exc):

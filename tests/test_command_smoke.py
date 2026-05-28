@@ -178,6 +178,37 @@ def test_launch_trace_formatter_preserves_sources_and_override_chain():
     assert "empty           -> (none)" in report
 
 
+def test_settings_result_display_helpers_format_payload_and_fallback_report():
+    import mms_command_tools
+
+    payload = mms_command_tools.settings_result_tui_payload(
+        "done",
+        [("Key", "value"), ("Blank", "")],
+        "note",
+        localize=lambda zh, en: zh,
+    )
+    assert payload == (
+        "✓ done",
+        [("状态", "成功"), ("Key", "value"), ("Blank", "-"), ("说明", "note")],
+        [("back", "返回")],
+    )
+    assert mms_command_tools.compact_tui_report_value("x" * 12, max_len=5) == "xxxx…"
+
+    console = _CollectingConsole()
+    mms_command_tools.display_settings_result_report(
+        "failed",
+        [("Reason", "line1\nline2")],
+        "try again",
+        ok=False,
+        console=console,
+    )
+    assert console.items == [
+        "[red]✗ failed[/red]",
+        "[cyan]Reason[/cyan] line1 line2",
+        "[dim]try again[/dim]",
+    ]
+
+
 def test_env_command_renders_and_writes_export_file(tmp_path):
     import mms_command_tools
 

@@ -100,6 +100,39 @@ def format_launch_trace(
     return "\n".join(lines)
 
 
+def compact_tui_report_value(value, max_len=96):
+    text = str(value if value is not None else "-").replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text or "-"
+    return text[: max(1, max_len - 1)].rstrip() + "…"
+
+
+def settings_result_tui_payload(title, rows, note="", *, ok=True, localize):
+    prefix = "✓ " if ok else "✗ "
+    info_lines = [(localize("状态", "Status"), localize("成功", "OK") if ok else localize("失败", "Failed"))]
+    info_lines.extend(
+        (str(label or "-"), compact_tui_report_value(value, max_len=120))
+        for label, value in list(rows or [])
+    )
+    if note:
+        info_lines.append((localize("说明", "Note"), compact_tui_report_value(note, max_len=160)))
+    return (
+        f"{prefix}{title}",
+        info_lines,
+        [("back", localize("返回", "Back"))],
+    )
+
+
+def display_settings_result_report(title, rows, note="", *, ok=True, console):
+    color = "green" if ok else "red"
+    prefix = "✓ " if ok else "✗ "
+    console.print(f"[{color}]{prefix}{title}[/{color}]")
+    for label, value in rows:
+        console.print(f"[cyan]{label}[/cyan] {compact_tui_report_value(value)}")
+    if note:
+        console.print(f"[dim]{note}[/dim]")
+
+
 def mask_key(value):
     if len(value) <= 8:
         return "****"
