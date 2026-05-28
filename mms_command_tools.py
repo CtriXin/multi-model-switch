@@ -37,6 +37,65 @@ CONFIG_HELP_TOPICS = {
 }
 
 
+def normalize_ui_config(cfg, *, normalize_language, default_language="zh"):
+    cfg = dict(cfg)
+    raw_ui = cfg.get("ui")
+    current = raw_ui if isinstance(raw_ui, dict) else {}
+    lang = normalize_language(current.get("language", "")) or default_language
+    new_cfg = dict(cfg)
+    new_cfg["ui"] = {"language": lang}
+    return new_cfg, new_cfg != cfg
+
+
+def resolve_ui_language(
+    cfg=None,
+    cli_override=None,
+    *,
+    normalize_language,
+    load_version_meta,
+    environ=None,
+    default_language="zh",
+):
+    environ = os.environ if environ is None else environ
+    cli_lang = normalize_language(cli_override)
+    if cli_lang:
+        return cli_lang
+    env_lang = normalize_language(environ.get("MMS_LANG", ""))
+    if env_lang:
+        return env_lang
+    if isinstance(cfg, dict):
+        ui_lang = normalize_language((cfg.get("ui") or {}).get("language", ""))
+        if ui_lang:
+            return ui_lang
+    locale_lang = normalize_language(environ.get("LC_ALL", "") or environ.get("LANG", ""))
+    if locale_lang:
+        return locale_lang
+    version_meta = load_version_meta()
+    version_lang = normalize_language(
+        version_meta.get("preferred_language", "") if isinstance(version_meta, dict) else ""
+    )
+    if version_lang:
+        return version_lang
+    return default_language
+
+
+def extract_global_lang(argv, *, normalize_language):
+    cleaned = []
+    lang = ""
+    idx = 0
+    while idx < len(argv):
+        item = argv[idx]
+        if item == "--lang" and idx + 1 < len(argv):
+            candidate = normalize_language(argv[idx + 1])
+            if candidate:
+                lang = candidate
+                idx += 2
+                continue
+        cleaned.append(item)
+        idx += 1
+    return cleaned, lang
+
+
 def load_json_file(path, default):
     if not os.path.exists(path):
         return default

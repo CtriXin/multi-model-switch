@@ -53,6 +53,76 @@ def test_json_file_helpers_preserve_dict_only_load_and_secure_save(tmp_path):
     assert stat.S_IMODE(saved_path.stat().st_mode) == 0o600
 
 
+def test_ui_language_helpers_preserve_precedence_and_global_arg_cleaning(monkeypatch):
+    import mms_command_tools
+    import mms_core
+
+    def normalize(raw):
+        return {
+            "zh": "zh",
+            "en": "en",
+            "zh_CN.UTF-8": "zh",
+            "en_US.UTF-8": "en",
+        }.get(str(raw or "").strip(), "")
+
+    cfg, changed = mms_command_tools.normalize_ui_config(
+        {"ui": {"language": "en"}},
+        normalize_language=normalize,
+    )
+    assert cfg == {"ui": {"language": "en"}}
+    assert changed is False
+
+    cfg, changed = mms_command_tools.normalize_ui_config(
+        {"ui": {"language": "fr", "theme": "ignored"}},
+        normalize_language=normalize,
+    )
+    assert cfg == {"ui": {"language": "zh"}}
+    assert changed is True
+
+    environ = {"MMS_LANG": "zh", "LC_ALL": "en_US.UTF-8", "LANG": "en_US.UTF-8"}
+    assert mms_command_tools.resolve_ui_language(
+        {"ui": {"language": "en"}},
+        "en",
+        normalize_language=normalize,
+        load_version_meta=lambda: {"preferred_language": "zh"},
+        environ=environ,
+    ) == "en"
+    assert mms_command_tools.resolve_ui_language(
+        {"ui": {"language": "en"}},
+        "",
+        normalize_language=normalize,
+        load_version_meta=lambda: {"preferred_language": "zh"},
+        environ=environ,
+    ) == "zh"
+    assert mms_command_tools.resolve_ui_language(
+        {"ui": {"language": "en"}},
+        "",
+        normalize_language=normalize,
+        load_version_meta=lambda: {"preferred_language": "zh"},
+        environ={"LC_ALL": "zh_CN.UTF-8"},
+    ) == "en"
+    assert mms_command_tools.resolve_ui_language(
+        {},
+        "",
+        normalize_language=normalize,
+        load_version_meta=lambda: {"preferred_language": "en"},
+        environ={},
+    ) == "en"
+
+    assert mms_command_tools.extract_global_lang(
+        ["config", "--lang", "en", "provider.default", "--lang"],
+        normalize_language=normalize,
+    ) == (["config", "provider.default", "--lang"], "en")
+
+    monkeypatch.delenv("MMS_LANG", raising=False)
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    monkeypatch.setattr(mms_core, "_load_version_meta", lambda: {"preferred_language": "zh"})
+    assert mms_core._normalize_ui_config({"ui": {"language": "en"}}) == ({"ui": {"language": "en"}}, False)
+    assert mms_core._resolve_ui_language({}, None) == "en"
+    assert mms_core._extract_global_lang(["--lang", "zh", "codex"]) == (["codex"], "zh")
+
+
 def test_usage_main_initializes_rich_before_render(monkeypatch):
     import mms_account_state
     import mms_usage

@@ -725,50 +725,26 @@ def normalize_user_role(role):
 
 
 def _normalize_ui_config(cfg):
-    cfg = dict(cfg)
-    raw_ui = cfg.get("ui")
-    current = raw_ui if isinstance(raw_ui, dict) else {}
-    lang = normalize_language(current.get("language", "")) or "zh"
-    new_cfg = dict(cfg)
-    new_cfg["ui"] = {"language": lang}
-    return new_cfg, new_cfg != cfg
+    from mms_command_tools import normalize_ui_config
+
+    return normalize_ui_config(cfg, normalize_language=normalize_language)
 
 
 def _resolve_ui_language(cfg=None, cli_override=None):
-    cli_lang = normalize_language(cli_override)
-    if cli_lang:
-        return cli_lang
-    env_lang = normalize_language(os.environ.get("MMS_LANG", ""))
-    if env_lang:
-        return env_lang
-    if isinstance(cfg, dict):
-        ui_lang = normalize_language((cfg.get("ui") or {}).get("language", ""))
-        if ui_lang:
-            return ui_lang
-    locale_lang = normalize_language(os.environ.get("LC_ALL", "") or os.environ.get("LANG", ""))
-    if locale_lang:
-        return locale_lang
-    version_lang = normalize_language(_load_version_meta().get("preferred_language", ""))
-    if version_lang:
-        return version_lang
-    return "zh"
+    from mms_command_tools import resolve_ui_language
+
+    return resolve_ui_language(
+        cfg,
+        cli_override,
+        normalize_language=normalize_language,
+        load_version_meta=_load_version_meta,
+    )
 
 
 def _extract_global_lang(argv):
-    cleaned = []
-    lang = ""
-    idx = 0
-    while idx < len(argv):
-        item = argv[idx]
-        if item == "--lang" and idx + 1 < len(argv):
-            candidate = normalize_language(argv[idx + 1])
-            if candidate:
-                lang = candidate
-                idx += 2
-                continue
-        cleaned.append(item)
-        idx += 1
-    return cleaned, lang
+    from mms_command_tools import extract_global_lang
+
+    return extract_global_lang(argv, normalize_language=normalize_language)
 
 
 ROLE_WEIGHTS = {"primary": 0, "auto": 1, "fallback": 2}
