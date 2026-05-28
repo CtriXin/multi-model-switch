@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 LATEST_APPROVED_SCHEMA = "mms.model_registry.latest_approved.v1"
 DEFAULT_MANIFEST_RELATIVE_PATH = Path("generated") / "model-registry.latest-approved.json"
+REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
 
 
 class ConsumerBundleError(RuntimeError):
@@ -112,6 +113,9 @@ def load_verified_consumer_bundle(
     files = manifest_payload.get("files")
     if not isinstance(files, dict) or not files:
         raise ConsumerBundleError("latest-approved manifest has no files")
+    missing_files = [name for name in REQUIRED_BUNDLE_FILES if name not in files]
+    if missing_files:
+        raise ConsumerBundleError("latest-approved manifest missing required files: " + ", ".join(missing_files))
 
     verified_files: dict[str, dict[str, Any]] = {}
     payloads: dict[str, Any] = {}
@@ -171,6 +175,7 @@ __all__ = [
     "ConsumerBundleError",
     "DEFAULT_MANIFEST_RELATIVE_PATH",
     "LATEST_APPROVED_SCHEMA",
+    "REQUIRED_BUNDLE_FILES",
     "load_verified_consumer_bundle",
     "resolve_consumer_config_root",
 ]

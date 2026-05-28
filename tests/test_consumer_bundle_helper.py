@@ -21,13 +21,24 @@ def _sha256(path: Path) -> str:
 def _write_bundle(root: Path, *, schema: str = mms_consumer_bundle.LATEST_APPROVED_SCHEMA, bad_hash: bool = False, escape_path: bool = False) -> dict[str, Path]:
     generated = root / "generated"
     router = generated / "model-routes.json"
+    lineup = generated / "model-routes.lineup.json"
+    profile = generated / "provider-profiles.generated.json"
     policy = generated / "model-policy.effective.json"
+    capabilities = generated / "model-capabilities.approved.json"
     _write_json(router, {"version": 1, "routes": {"gpt-test": {"primary": {"api_key": "sk-test-secret"}}}})
+    _write_json(lineup, {"version": 1, "routes": {"gpt-test": {"primary": {"model_id": "gpt-test"}}}})
+    _write_json(profile, {"schema_version": 1, "profiles": {"test-provider": {"models_endpoint": "manual"}}})
     _write_json(policy, {"version": 1, "models": {"gpt-test": {"visible": True}}})
-    router_hash = _sha256(router)
-    policy_hash = _sha256(policy)
+    _write_json(capabilities, {"version": 1, "models": {"gpt-test": {"families": ["GPT"]}}})
+    hashes = {
+        "router": _sha256(router),
+        "lineup": _sha256(lineup),
+        "profile": _sha256(profile),
+        "policy": _sha256(policy),
+        "capabilities": _sha256(capabilities),
+    }
     if bad_hash:
-        policy_hash = "0" * 64
+        hashes["policy"] = "0" * 64
     router_canonical = "../model-routes.json" if escape_path else "generated/model-routes.json"
     manifest = generated / "model-registry.latest-approved.json"
     _write_json(
@@ -44,19 +55,35 @@ def _write_bundle(root: Path, *, schema: str = mms_consumer_bundle.LATEST_APPROV
                 "router": {
                     "canonical_path": router_canonical,
                     "legacy_alias_path": "model-routes.json",
-                    "sha256": router_hash,
+                    "sha256": hashes["router"],
                     "sensitivity": "secret",
+                },
+                "lineup": {
+                    "canonical_path": "generated/model-routes.lineup.json",
+                    "legacy_alias_path": "model-routes.lineup.json",
+                    "sha256": hashes["lineup"],
+                    "sensitivity": "non-secret",
+                },
+                "profile": {
+                    "canonical_path": "generated/provider-profiles.generated.json",
+                    "sha256": hashes["profile"],
+                    "sensitivity": "non-secret",
                 },
                 "policy": {
                     "canonical_path": "generated/model-policy.effective.json",
                     "legacy_alias_path": "model-policy.json",
-                    "sha256": policy_hash,
+                    "sha256": hashes["policy"],
+                    "sensitivity": "non-secret",
+                },
+                "capabilities": {
+                    "canonical_path": "generated/model-capabilities.approved.json",
+                    "sha256": hashes["capabilities"],
                     "sensitivity": "non-secret",
                 },
             },
         },
     )
-    return {"manifest": manifest, "router": router, "policy": policy}
+    return {"manifest": manifest, "router": router, "lineup": lineup, "profile": profile, "policy": policy, "capabilities": capabilities}
 
 
 def test_load_verified_consumer_bundle_verifies_hashes_and_omits_secrets(tmp_path: Path) -> None:
@@ -107,3 +134,11 @@ def test_load_verified_consumer_bundle_fails_closed_for_invalid_manifest(tmp_pat
     _write_bundle(escaping, escape_path=True)
     with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="escapes config root"):
         mms_consumer_bundle.load_verified_consumer_bundle(config_root=escaping)
+
+    incomplete = tmp_path / "incomplete"
+    paths = _write_bundle(incomplete)
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    manifest["files"].pop("profile")
+    paths["manifest"].write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    with pytest.raises(mms_consumer_bundle.ConsumerBundleError, match="missing required files: profile"):
+        mms_consumer_bundle.load_verified_consumer_bundle(config_root=incomplete)
