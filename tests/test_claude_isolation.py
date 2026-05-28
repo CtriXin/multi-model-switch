@@ -232,6 +232,20 @@ def test_mms_config_root_overrides_gateway_real_home(monkeypatch, tmp_path):
         importlib.reload(mms_core)
 
 
+def test_project_store_uses_selected_config_root(monkeypatch, tmp_path):
+    import mms_project_store
+
+    real_home = tmp_path / "real-home"
+    preview_root = tmp_path / "mms-next"
+    monkeypatch.setenv("MMS_REAL_HOME", str(real_home))
+    monkeypatch.setenv("REAL_HOME", str(real_home))
+    monkeypatch.setenv("ORIGINAL_HOME", str(real_home))
+    monkeypatch.setenv("MMS_CONFIG_ROOT", str(preview_root))
+
+    assert mms_project_store.get_primary_config_dir() == preview_root
+    assert mms_project_store.get_projects_dir() == preview_root / "projects"
+
+
 def test_rescue_launch_env_uses_selected_config_root(monkeypatch, tmp_path):
     import mms_launchers
 
