@@ -10,6 +10,7 @@ from mms_tui_launcher_flow import (
     handle_tui_connect_action,
     handle_tui_last_used_action,
     handle_tui_provider_browse_action,
+    handle_tui_provider_mgmt_settings_action,
     handle_tui_profile_action,
     handle_tui_selected_model_action,
     last_used_model_info,
@@ -895,6 +896,91 @@ def test_apply_tui_priority_changes_skips_save_without_changes() -> None:
 
     assert changed is False
     assert calls == []
+
+
+def test_handle_tui_provider_mgmt_settings_action_updates_priorities_and_refreshes() -> None:
+    calls = []
+    cfg = {
+        "providers": [
+            {"id": "p1", "role": "auto", "priority": 100},
+            {"id": "p2", "role": "fallback", "priority": 10},
+        ]
+    }
+
+    class ProbeCache(dict):
+        def clear(self):
+            calls.append(("clear",))
+            super().clear()
+
+    def export_model_routes(cfg_arg, *, force):
+        calls.append(("export", cfg_arg, force))
+
+    result = handle_tui_provider_mgmt_settings_action(
+        cfg,
+        select_provider_mgmt_tui=lambda providers: calls.append(("select", providers)) or [
+            {"id": "p1", "role": "primary", "priority": 500},
+            {"id": "missing", "role": "fallback", "priority": 1},
+        ],
+        save_config=lambda cfg_arg: calls.append(("save", cfg_arg)),
+        probe_cache=ProbeCache({"p1": "cached"}),
+        ensure_provider_credentials=lambda cfg_arg: calls.append(("ensure", cfg_arg)) or {"id": "p1"},
+        probe_models=lambda provider, *, emit_output: calls.append(("probe", provider, emit_output)) or {"models": ["gpt-5.4"]},
+        export_model_routes_loader=lambda: export_model_routes,
+    )
+
+    assert result == {
+        "status": "continue",
+        "changed": True,
+        "current_provider": {"id": "p1"},
+        "default_models": ["gpt-5.4"],
+        "families_dirty": True,
+    }
+    assert cfg["providers"] == [
+        {"id": "p1", "role": "primary", "priority": 500},
+        {"id": "p2", "role": "fallback", "priority": 10},
+    ]
+    assert calls == [
+        ("select", cfg["providers"]),
+        ("save", cfg),
+        ("clear",),
+        ("ensure", cfg),
+        ("probe", {"id": "p1"}, False),
+        ("export", cfg, True),
+    ]
+
+
+def test_handle_tui_provider_mgmt_settings_action_handles_cancel_interrupt_and_export_failure() -> None:
+    assert handle_tui_provider_mgmt_settings_action(
+        {"providers": []},
+        select_provider_mgmt_tui=lambda _providers: None,
+        save_config=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        probe_cache={},
+        ensure_provider_credentials=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        export_model_routes_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    ) == {"status": "continue", "changed": False}
+
+    assert handle_tui_provider_mgmt_settings_action(
+        {"providers": []},
+        select_provider_mgmt_tui=lambda _providers: (_ for _ in ()).throw(KeyboardInterrupt),
+        save_config=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        probe_cache={},
+        ensure_provider_credentials=lambda *_args: (_ for _ in ()).throw(AssertionError("unused")),
+        probe_models=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unused")),
+        export_model_routes_loader=lambda: (_ for _ in ()).throw(AssertionError("unused")),
+    ) == {"status": "interrupt"}
+
+    cfg = {"providers": [{"id": "p1"}]}
+    result = handle_tui_provider_mgmt_settings_action(
+        cfg,
+        select_provider_mgmt_tui=lambda _providers: [{"id": "p1"}],
+        save_config=lambda *_args: None,
+        probe_cache={},
+        ensure_provider_credentials=lambda _cfg: {"id": "p1"},
+        probe_models=lambda _provider, *, emit_output: {"models": []},
+        export_model_routes_loader=lambda: (_ for _ in ()).throw(RuntimeError("export unavailable")),
+    )
+    assert result["changed"] is True
 
 
 def test_confirm_agent_pack_accepts_new_and_legacy_values() -> None:

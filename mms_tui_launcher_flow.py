@@ -686,6 +686,47 @@ def apply_tui_priority_changes(
     return True
 
 
+def handle_tui_provider_mgmt_settings_action(
+    cfg,
+    *,
+    select_provider_mgmt_tui,
+    save_config,
+    probe_cache,
+    ensure_provider_credentials,
+    probe_models,
+    export_model_routes_loader,
+):
+    providers_raw = cfg.get("providers", [])
+    result_providers = safe_tui_call(select_provider_mgmt_tui, providers_raw)
+    if result_providers == "__interrupt__":
+        return {"status": "interrupt"}
+    if result_providers is None:
+        return {"status": "continue", "changed": False}
+
+    for updated_provider in result_providers:
+        provider_id = updated_provider.get("id")
+        for original in cfg.get("providers", []):
+            if original.get("id") == provider_id:
+                original["role"] = updated_provider.get("role", "auto")
+                original["priority"] = updated_provider.get("priority", 100)
+                break
+    save_config(cfg)
+    probe_cache.clear()
+    current_provider = ensure_provider_credentials(cfg)
+    default_models = probe_models(current_provider, emit_output=False).get("models")
+    try:
+        export_model_routes_loader()(cfg, force=True)
+    except Exception:
+        pass
+    return {
+        "status": "continue",
+        "changed": True,
+        "current_provider": current_provider,
+        "default_models": default_models,
+        "families_dirty": True,
+    }
+
+
 def confirm_agent_pack(value):
     raw = str(value or "").strip().lower()
     if raw in {"ecc", "omc", "none"}:

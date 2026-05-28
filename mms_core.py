@@ -5029,30 +5029,21 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             if settings_action is None:
                 continue
             if settings_action == "provider_mgmt":
-                providers_raw = current_cfg.get("providers", [])
-                result_providers = tui_flow.safe_tui_call(select_provider_mgmt_tui, providers_raw)
-                if result_providers == "__interrupt__":
+                provider_mgmt_result = tui_flow.handle_tui_provider_mgmt_settings_action(
+                    current_cfg,
+                    select_provider_mgmt_tui=select_provider_mgmt_tui,
+                    save_config=save_config,
+                    probe_cache=_PROBE_CACHE,
+                    ensure_provider_credentials=ensure_provider_credentials,
+                    probe_models=_probe_models,
+                    export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
+                )
+                if provider_mgmt_result["status"] == "interrupt":
                     return True
-                if result_providers is not None:
-                    # 回写 role/priority 到 config
-                    for rp in result_providers:
-                        pid = rp.get("id")
-                        for orig in current_cfg.get("providers", []):
-                            if orig.get("id") == pid:
-                                orig["role"] = rp.get("role", "auto")
-                                orig["priority"] = rp.get("priority", 100)
-                                break
-                    save_config(current_cfg)
-                    _PROBE_CACHE.clear()
-                    current_provider = ensure_provider_credentials(current_cfg)
-                    default_models = _probe_models(current_provider, emit_output=False).get("models")
-                    _families_dirty = True
-                    # 自动重新生成 routes
-                    try:
-                        from mms_router import export_model_routes
-                        export_model_routes(current_cfg, force=True)
-                    except Exception:
-                        pass
+                if provider_mgmt_result.get("changed"):
+                    current_provider = provider_mgmt_result["current_provider"]
+                    default_models = provider_mgmt_result["default_models"]
+                    _families_dirty = provider_mgmt_result["families_dirty"]
             elif settings_action == "language":
                 chosen_lang = tui_flow.safe_tui_call(select_language_tui)
                 if chosen_lang == "__interrupt__":
