@@ -43,6 +43,7 @@ STATE_FILE_NAME = "state.json"
 LATEST_FILE_NAME = "latest.json"
 LOG_FILE_NAME = "health-watchdog.log"
 ENV_FILE_NAME = "health-watchdog.env"
+REQUIRED_BUNDLE_FILES = ("router", "lineup", "profile", "policy", "capabilities")
 
 OLD_ROUTE_MARKERS = {
     "http://82.156.121.141:4001": "xin fallback should use https://apple.clawopen.online",
@@ -162,6 +163,20 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def manifest_file_path(config_dir: Path, canonical_path: str, *, name: str) -> Path:
+    relative = Path(str(canonical_path or "").strip())
+    if not str(canonical_path or "").strip():
+        raise ValueError(f"manifest file entry missing canonical_path: {name}")
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"manifest file entry escapes config root: {name}")
+    path = config_dir / relative
+    try:
+        path.expanduser().resolve().relative_to(config_dir.expanduser().resolve())
+    except Exception as exc:
+        raise ValueError(f"manifest file entry escapes config root: {name}") from exc
+    return path
+
+
 def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
     manifest_path = config_dir / "generated" / "model-registry.latest-approved.json"
     if not manifest_path.exists():
@@ -181,6 +196,14 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
             "payloads": {},
         }
     files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    missing_files = [name for name in REQUIRED_BUNDLE_FILES if name not in files]
+    if missing_files:
+        return {
+            "status": "invalid",
+            "manifest_path": str(manifest_path),
+            "detail": "manifest files missing: " + ", ".join(missing_files),
+            "payloads": {},
+        }
     payloads: dict[str, Any] = {}
     verified_files: dict[str, str] = {}
     for name, entry in files.items():
@@ -200,7 +223,15 @@ def load_verified_latest_bundle(config_dir: Path) -> dict[str, Any]:
                 "detail": f"manifest file entry missing path/hash: {name}",
                 "payloads": {},
             }
-        path = config_dir / canonical
+        try:
+            path = manifest_file_path(config_dir, canonical, name=str(name))
+        except ValueError as exc:
+            return {
+                "status": "invalid",
+                "manifest_path": str(manifest_path),
+                "detail": str(exc),
+                "payloads": {},
+            }
         if not path.exists():
             return {
                 "status": "invalid",

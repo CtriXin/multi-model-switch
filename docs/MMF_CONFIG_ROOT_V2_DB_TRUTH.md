@@ -453,6 +453,7 @@ Current watchdog consumer implementation:
 - It prefers a verified `<config_root>/generated/model-registry.latest-approved.json` bundle over root legacy `model-routes.json` / `model-policy.json`.
 - When using a verified bundle, it reads generated Profile metadata such as `models_endpoint` for provider checks instead of requiring root `config.toml` provider metadata.
 - If a manifest exists but is invalid or hash-mismatched, watchdog reports `stale_or_invalid_bundle` and does not silently fall back to legacy route files.
+- Watchdog rejects incomplete latest-approved manifests and manifest paths that escape the selected config root; it requires Router, Lineup, Profile, Policy, and Capabilities entries.
 - If the manifest is missing, explicit selected roots (`MMS_CONFIG_ROOT` / `MMS_CONFIG_DIR`) require the latest-approved bundle and fail closed by default; no-explicit-root stable watchdog behavior remains legacy-compatible.
 - `--require-bundle` still forces fail-closed behavior, and `MMS_WATCHDOG_REQUIRE_BUNDLE=0` remains an explicit diagnostic override for an explicit root.
 - `--dry-run` is read-only for watchdog persistence: it prints JSON and skips `health-watchdog/latest.json`, `health-watchdog/state.json`, and `logs/health-watchdog.log` writes.
