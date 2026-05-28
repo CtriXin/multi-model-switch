@@ -899,6 +899,16 @@ def _assistant_reasoning_content_from_blocks(content):
     return "\n\n".join(parts).strip()
 
 
+def _assistant_has_thinking_block(content):
+    for block in _normalize_message_content(content):
+        if block.get("type") != "thinking":
+            continue
+        text = block.get("thinking")
+        if isinstance(text, str) and text.strip():
+            return True
+    return False
+
+
 def _assistant_messages_with_reasoning_slots(payload):
     messages = []
     for message in payload.get("messages", []):
@@ -924,6 +934,11 @@ def _preserve_domestic_reasoning_roundtrip(payload, model_name):
         return
     assistant_messages = _assistant_messages_with_reasoning_slots(payload)
     for message in assistant_messages:
+        content = _normalize_message_content(message.get("content"))
+        reasoning_content = str(message.get("reasoning_content") or "").strip()
+        if reasoning_content and not _assistant_has_thinking_block(content):
+            message["content"] = [{"type": "thinking", "thinking": reasoning_content}] + content
+            content = message["content"]
         reasoning_content = _assistant_reasoning_content_from_blocks(message.get("content"))
         if reasoning_content:
             # Some OpenAI-compatible relays (notably DeepSeek thinking/tool-use paths)

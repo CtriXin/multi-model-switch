@@ -235,7 +235,9 @@ def _combined_check_text(check: dict[str, Any]) -> str:
 def _classify_error(check: dict[str, Any], route: dict[str, Any]) -> str:
     evidence = check.get("cache_transport_evidence") if isinstance(check.get("cache_transport_evidence"), dict) else {}
     text = _combined_check_text(check)
-    if "reasoning_content" in text and "must be passed back" in text:
+    if "must be passed back" in text and (
+        "reasoning_content" in text or "content[].thinking" in text
+    ):
         return "reasoning_content_roundtrip_required"
     if not _protocol_correct(route, evidence):
         return "cache_sensitive_wrong_protocol"
