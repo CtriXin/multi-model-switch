@@ -4974,6 +4974,76 @@ def session_resume_model(session_record):
     return ""
 
 
+def resolve_resume_runtime_and_model(
+    cfg,
+    cli,
+    args,
+    default_provider,
+    default_models,
+    session_record,
+    *,
+    get_scene_usage,
+    session_resume_model=session_resume_model,
+    resolve_last_used_runtime,
+    trace_runtime_choice,
+    choose_runtime_source,
+    resolve_model_name=resolve_model_name,
+    first_resume_model=first_resume_model,
+    uses_managed_entry,
+    runtime_with_launch_preferences,
+):
+    requested_model = str(args.model or "").strip()
+    if requested_model:
+        model_info = {"model": requested_model}
+    elif cli == "claude" and session_resume_model(session_record):
+        model_info = {"model": session_resume_model(session_record)}
+    else:
+        last_by_cli, _scene_counts = get_scene_usage()
+        last_item = last_by_cli.get(cli)
+        last_model_info = last_item.get("model_info") if isinstance(last_item, dict) else None
+        model_info = last_model_info if isinstance(last_model_info, dict) else {}
+
+    account_id = str(args.account or "").strip()
+    provider_id = str(args.provider or "").strip()
+    if cli == "claude" and not account_id and not provider_id and isinstance(session_record, dict):
+        source_id = str(session_record.get("account_id") or "").strip()
+        runtime_kind = str(session_record.get("runtime_kind") or "").strip()
+        if source_id and runtime_kind == "api_key":
+            provider_id = source_id
+        elif source_id and runtime_kind == "oauth":
+            account_id = source_id
+
+    runtime = cli_models = launch_cli_name = None
+    if not account_id and not provider_id:
+        last_by_cli, _scene_counts = get_scene_usage()
+        last_item = last_by_cli.get(cli)
+        runtime, cli_models, choice = resolve_last_used_runtime(cfg, cli, last_item, default_models)
+        if runtime is not None:
+            launch_cli_name = cli
+            trace_runtime_choice("runtime resolve", runtime, launch_cli=cli, choice=choice)
+    if runtime is None:
+        runtime, cli_models, launch_cli_name = choose_runtime_source(
+            cfg,
+            cli,
+            default_provider,
+            default_models,
+            account_id=account_id or None,
+            provider_id=provider_id or None,
+            model_info=model_info or None,
+            allow_selected_model_accounts=True,
+        )
+
+    if not isinstance(model_info, dict) or not resolve_model_name(model_info):
+        model_name = first_resume_model(cli_models, default_models, cfg.get("recommend", {}).get("models", []))
+        model_info = {"model": model_name} if model_name else {}
+    if resolve_model_name(model_info) == "official-default" and not uses_managed_entry(runtime or {}, cli):
+        model_name = first_resume_model(cli_models, default_models, cfg.get("recommend", {}).get("models", []))
+        if model_name:
+            model_info = {"model": model_name}
+    runtime = runtime_with_launch_preferences(cfg, runtime, launch_cli_name or cli)
+    return runtime, cli_models or [], launch_cli_name or cli, model_info
+
+
 def handle_resume_command(
     argv,
     preloaded_command_cfg=None,

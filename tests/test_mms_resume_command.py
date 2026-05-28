@@ -143,6 +143,85 @@ def test_command_tools_handle_resume_command_preserves_parse_and_launch_flow():
     assert any("恢复 codex session" in item for item in console.items)
 
 
+def test_command_tools_resolve_resume_runtime_preserves_last_used_and_session_source_paths():
+    import mms_command_tools
+
+    cfg = {"recommend": {"models": ["gpt-5.5"]}}
+    default_provider = {"id": "default-provider"}
+    default_models = [{"model": "gpt-5.4"}, {"model": "gpt-5.5"}]
+    calls = []
+    last_by_cli = {"codex": {"model_info": {"model": "official-default"}, "runtime_hint": {"provider_id": "last"}}}
+
+    def get_scene_usage():
+        calls.append(("usage",))
+        return last_by_cli, {}
+
+    def resolve_last_used_runtime(current_cfg, cli, last_item, models):
+        calls.append(("last", cli, last_item, models))
+        return {"id": "last", "auth_mode": "api_key"}, ["gpt-5.4", "gpt-5.5"], "last used provider:last"
+
+    def choose_runtime_source(*args, **kwargs):
+        calls.append(("choose", args, kwargs))
+        return {"id": "chosen"}, ["chosen-model"], args[1]
+
+    runtime, cli_models, launch_cli, model_info = mms_command_tools.resolve_resume_runtime_and_model(
+        cfg,
+        "codex",
+        SimpleNamespace(model="", account="", provider=""),
+        default_provider,
+        default_models,
+        {"id": "codex-session"},
+        get_scene_usage=get_scene_usage,
+        resolve_last_used_runtime=resolve_last_used_runtime,
+        trace_runtime_choice=lambda source, runtime, **kwargs: calls.append(("trace", source, runtime, kwargs)),
+        choose_runtime_source=choose_runtime_source,
+        uses_managed_entry=lambda runtime, cli: False,
+        runtime_with_launch_preferences=lambda current_cfg, runtime, cli: {**runtime, "prefs_for": cli},
+    )
+
+    assert runtime == {"id": "last", "auth_mode": "api_key", "prefs_for": "codex"}
+    assert cli_models == ["gpt-5.4", "gpt-5.5"]
+    assert launch_cli == "codex"
+    assert model_info == {"model": "gpt-5.5"}
+    assert calls[1][0] == "usage"
+    assert calls[2][0] == "last"
+    assert calls[3][0] == "trace"
+    assert not any(call[0] == "choose" for call in calls)
+
+    calls.clear()
+    runtime, cli_models, launch_cli, model_info = mms_command_tools.resolve_resume_runtime_and_model(
+        cfg,
+        "claude",
+        SimpleNamespace(model="", account="", provider=""),
+        default_provider,
+        default_models,
+        {"session_id": "claude-session", "account_id": "relay-a", "runtime_kind": "api_key", "resume_model": "gpt-5.4"},
+        get_scene_usage=lambda: ({}, {}),
+        resolve_last_used_runtime=resolve_last_used_runtime,
+        trace_runtime_choice=lambda *args, **kwargs: calls.append(("unexpected-trace", args, kwargs)),
+        choose_runtime_source=choose_runtime_source,
+        uses_managed_entry=lambda runtime, cli: True,
+        runtime_with_launch_preferences=lambda current_cfg, runtime, cli: {**runtime, "prefs_for": cli},
+    )
+
+    assert runtime == {"id": "chosen", "prefs_for": "claude"}
+    assert cli_models == ["chosen-model"]
+    assert launch_cli == "claude"
+    assert model_info == {"model": "gpt-5.4"}
+    assert calls == [
+        (
+            "choose",
+            (cfg, "claude", default_provider, default_models),
+            {
+                "account_id": None,
+                "provider_id": "relay-a",
+                "model_info": {"model": "gpt-5.4"},
+                "allow_selected_model_accounts": True,
+            },
+        )
+    ]
+
+
 def test_resolve_codex_resume_ref_from_bounded_index(monkeypatch, tmp_path):
     import mms_core
 
