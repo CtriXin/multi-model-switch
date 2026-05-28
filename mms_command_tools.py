@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -211,6 +212,29 @@ def atomic_write_toml(path, cfg, *, tomli_w_module):
                 os.remove(temp_path)
             except OSError:
                 pass
+
+
+def config_write_caller(
+    *,
+    current_file,
+    stack_getter=inspect.stack,
+    skip_functions=("save_config",),
+):
+    current = os.path.abspath(current_file)
+    stack = stack_getter()
+    try:
+        for frame in stack[1:]:
+            filename = os.path.abspath(str(frame.filename))
+            if filename == current and frame.function in skip_functions:
+                continue
+            return {
+                "path": filename,
+                "line": int(frame.lineno),
+                "function": str(frame.function or ""),
+            }
+    finally:
+        del stack
+    return {"path": current, "line": 0, "function": "unknown"}
 
 
 def config_command_hint(*, current_command):

@@ -319,6 +319,56 @@ def test_atomic_write_toml_helper_preserves_replace_and_temp_cleanup(tmp_path, m
     assert list(core_path.parent.glob("config.toml.*.tmp")) == []
 
 
+def test_config_write_caller_helper_preserves_skip_semantics(tmp_path):
+    import os
+
+    import mms_command_tools
+    import mms_core
+
+    class Frame:
+        def __init__(self, filename, function, lineno):
+            self.filename = filename
+            self.function = function
+            self.lineno = lineno
+
+    current_file = tmp_path / "mms_core.py"
+    caller_file = tmp_path / "caller.py"
+
+    result = mms_command_tools.config_write_caller(
+        current_file=str(current_file),
+        stack_getter=lambda: [
+            Frame(str(current_file), "config_write_caller", 1),
+            Frame(str(current_file), "_config_write_caller", 2),
+            Frame(str(current_file), "save_config", 3),
+            Frame(str(caller_file), "manual_restore", 12),
+        ],
+        skip_functions=("_config_write_caller", "save_config"),
+    )
+    assert result == {
+        "path": os.path.abspath(str(caller_file)),
+        "line": 12,
+        "function": "manual_restore",
+    }
+
+    fallback = mms_command_tools.config_write_caller(
+        current_file=str(current_file),
+        stack_getter=lambda: [
+            Frame(str(current_file), "config_write_caller", 1),
+            Frame(str(current_file), "_config_write_caller", 2),
+            Frame(str(current_file), "save_config", 3),
+        ],
+        skip_functions=("_config_write_caller", "save_config"),
+    )
+    assert fallback == {"path": os.path.abspath(str(current_file)), "line": 0, "function": "unknown"}
+
+    def call_wrapper():
+        return mms_core._config_write_caller()
+
+    wrapper_result = call_wrapper()
+    assert wrapper_result["function"] == "call_wrapper"
+    assert wrapper_result["path"] == os.path.abspath(__file__)
+
+
 def test_gateway_active_and_snapshot_path_helpers_preserve_resolution(tmp_path):
     import os
 

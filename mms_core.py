@@ -10,7 +10,6 @@ import shutil
 import logging
 import threading
 import time
-import inspect
 import re
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
@@ -1746,21 +1745,12 @@ def _sha1_file(path):
 
 
 def _config_write_caller():
-    current = os.path.abspath(__file__)
-    stack = inspect.stack()
-    try:
-        for frame in stack[1:]:
-            filename = os.path.abspath(str(frame.filename))
-            if filename == current and frame.function == "save_config":
-                continue
-            return {
-                "path": filename,
-                "line": int(frame.lineno),
-                "function": str(frame.function or ""),
-            }
-    finally:
-        del stack
-    return {"path": current, "line": 0, "function": "unknown"}
+    from mms_command_tools import config_write_caller
+
+    return config_write_caller(
+        current_file=__file__,
+        skip_functions=("_config_write_caller", "save_config"),
+    )
 
 
 @contextmanager
