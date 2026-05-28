@@ -60,6 +60,12 @@ MMS also bundles the generic `xmem` skill plus a quiet session closeout hook. It
 curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/main/install.sh | bash -s --
 ```
 
+Stable install pinned to `v3.3.0`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CtriXin/multi-model-switch/v3.3.0/install.sh | bash -s --
+```
+
 Default behavior:
 
 - installs the latest semver tag
