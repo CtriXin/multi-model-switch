@@ -373,7 +373,6 @@ def run_case(
                 "--no-tools",
                 "--no-context-files",
                 "--no-skills",
-                "--no-extensions",
                 "--no-prompt-templates",
                 "--no-themes",
                 "--thinking",

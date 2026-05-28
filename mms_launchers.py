@@ -10634,8 +10634,33 @@ def _pi_wrapper_path():
     return ""
 
 
+def _pi_retry_extension_path():
+    extension_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "scripts",
+        "pi-retry-extension.mjs",
+    )
+    if os.path.isfile(extension_path):
+        return extension_path
+    return ""
+
+
 def _pi_npx_cache_dir():
     return str(Path(__file__).resolve().parent / ".ai" / "cache" / "pi-npx")
+
+
+def _pi_settings_payload():
+    payload = {
+        "retry": {
+            "enabled": True,
+            "maxRetries": 5,
+            "baseDelayMs": 1000,
+        }
+    }
+    extension_path = _pi_retry_extension_path()
+    if extension_path:
+        payload["extensions"] = [extension_path]
+    return payload
 
 
 def _pi_provider_ref(runtime):
@@ -10761,13 +10786,6 @@ _PI_PROVIDER_MODEL_BLOCK_REASONS = {
         "claude-opus-4-6-thinking": "2026-05-28 stability recheck was mixed (4 pass / 1 request_fail across 5 attempts), so Pi keeps this relay fail-closed",
         "gemini-3-pro-high": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
         "gemini-3-pro-low": "Gemini 3 Pro is deprecated upstream; live Pi smoke now returns a switch-to-Gemini-3.1 notice",
-    },
-    "us-cpa-local-codex": {
-        "gpt-5.3-codex": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
-        "gpt-5.3-codex-spark": "2026-05-28 targeted recheck passed 6/6, but the broader current-surface rerun still hit 401 token invalidated on this relay, so Pi keeps it fail-closed",
-        "gpt-5.4": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
-        "gpt-5.4-mini": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
-        "gpt-5.5": "2026-05-28 blocked-only recheck was mixed (2 pass / 1 request_fail across 3 attempts), so Pi keeps this relay fail-closed",
     },
     "xin": {
         "anthropic/claude-opus-4.6": "2026-05-28 current-surface rerun returned region-blocked 403 on this relay",
@@ -11373,6 +11391,13 @@ def _write_pi_models_config(agent_dir, runtime, model_name):
     return models_path, provider_ref
 
 
+def _write_pi_settings_config(agent_dir):
+    settings_path = os.path.join(agent_dir, "settings.json")
+    os.makedirs(agent_dir, exist_ok=True)
+    atomic_write_text(settings_path, json.dumps(_pi_settings_payload(), indent=2) + "\n", mode=0o600)
+    return settings_path
+
+
 def _pi_gateway_env(runtime, model_info=None):
     runtime = runtime if isinstance(runtime, dict) else {}
     model = _resolve_model(model_info or runtime)
@@ -11397,11 +11422,13 @@ def _pi_gateway_env(runtime, model_info=None):
     agent_dir = os.path.join(session_home, ".pi", "agent")
     session_dir = os.path.join(agent_dir, "sessions")
     models_path, provider_ref = _write_pi_models_config(agent_dir, runtime, model)
+    settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
     env["PI_CODING_AGENT_DIR"] = agent_dir
     env["PI_CODING_AGENT_SESSION_DIR"] = session_dir
     env["PI_TELEMETRY"] = "0"
     env["MMS_PI_MODELS_JSON"] = models_path
+    env["MMS_PI_SETTINGS_JSON"] = settings_path
     env["MMS_PI_PROVIDER"] = provider_ref
     env["MMS_PI_NPX_CACHE"] = _pi_npx_cache_dir()
     wrapper_path = _pi_wrapper_path()
@@ -11436,12 +11463,14 @@ def _pi_provider_export_env(runtime, model):
     agent_dir = _real_user_path(".config", "mms", "pi-gateway", "exports", f"{provider_ref}-{model_ref}", "agent")
     session_dir = os.path.join(agent_dir, "sessions")
     models_path, selected_provider_ref = _write_pi_models_config(agent_dir, runtime, model)
+    settings_path = _write_pi_settings_config(agent_dir)
     os.makedirs(session_dir, exist_ok=True)
     exports = {
         "PI_CODING_AGENT_DIR": agent_dir,
         "PI_CODING_AGENT_SESSION_DIR": session_dir,
         "PI_TELEMETRY": "0",
         "MMS_PI_MODELS_JSON": models_path,
+        "MMS_PI_SETTINGS_JSON": settings_path,
         "MMS_PI_PROVIDER": selected_provider_ref,
         "MMS_PI_NPX_CACHE": _pi_npx_cache_dir(),
     }

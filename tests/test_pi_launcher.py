@@ -90,6 +90,7 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert captured["once"] is True
     assert captured["env"]["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert captured["env"]["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
+    assert captured["env"]["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
 
     models_path = real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
@@ -99,6 +100,13 @@ def test_launch_pi_writes_openai_models_config_and_uses_wrapper(monkeypatch, tmp
     assert provider["apiKey"] == "sk-openai"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
+    settings_payload = json.loads(
+        (real_home / ".config" / "mms" / "pi-gateway" / "s" / "4242" / ".pi" / "agent" / "settings.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
 def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_path):
@@ -135,6 +143,7 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
 
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
+    assert exports["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
     models_path = real_home / ".config" / "mms" / "pi-gateway" / "exports" / "relay-b-claude-sonnet-4-6" / "agent" / "models.json"
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-b"]
@@ -148,6 +157,9 @@ def test_get_export_env_for_pi_writes_anthropic_models_config(monkeypatch, tmp_p
     assert provider["models"][0]["maxTokens"] == 64_000
     assert provider["models"][0]["compat"] == {"forceAdaptiveThinking": True}
     assert provider["models"][1]["compat"] == {"forceAdaptiveThinking": True}
+    settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
 def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monkeypatch, tmp_path):
@@ -180,12 +192,16 @@ def test_get_export_env_for_pi_accepts_model_info_when_runtime_has_no_model(monk
 
     assert exports["MMS_PI_BIN"] == "/tmp/pi-wrapper"
     assert exports["MMS_PI_NPX_CACHE"].endswith(".ai/cache/pi-npx")
+    assert exports["MMS_PI_SETTINGS_JSON"].endswith("settings.json")
     models_path = Path(exports["MMS_PI_MODELS_JSON"])
     payload = json.loads(models_path.read_text(encoding="utf-8"))
     provider = payload["providers"]["mms-relay-c"]
     assert provider["api"] == "openai-responses"
     assert provider["models"][0]["id"] == "gpt-5.4"
     assert provider["models"][1]["id"] == "gpt-5.5"
+    settings_payload = json.loads(Path(exports["MMS_PI_SETTINGS_JSON"]).read_text(encoding="utf-8"))
+    assert settings_payload["retry"] == {"enabled": True, "maxRetries": 5, "baseDelayMs": 1000}
+    assert settings_payload["extensions"][0].endswith("scripts/pi-retry-extension.mjs")
 
 
 def test_pi_dual_protocol_payload_splits_models_by_preferred_protocol(monkeypatch, tmp_path):
