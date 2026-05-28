@@ -183,6 +183,22 @@ def print_settings_error_report(title, exc, *, print_settings_result_report, loc
     )
 
 
+def pause_after_tui_report(prompt_text="按 Enter 返回", *, tui_rendered, clear_tui_rendered, ensure_rich, input_func, console):
+    if tui_rendered():
+        clear_tui_rendered()
+        return
+
+    ensure_rich()
+    try:
+        console.print(f"[dim]{prompt_text}[/dim]")
+    except Exception:
+        pass
+    try:
+        input_func()
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def display_settings_result_report(title, rows, note="", *, ok=True, console):
     color = "green" if ok else "red"
     prefix = "✓ " if ok else "✗ "

@@ -3973,19 +3973,23 @@ def _display_provider_model_table(provider, probe):
 
 def _pause_after_tui_report(prompt_text="按 Enter 返回"):
     global _SETTINGS_RESULT_RENDERED_TUI
-    if _SETTINGS_RESULT_RENDERED_TUI:
-        _SETTINGS_RESULT_RENDERED_TUI = False
-        return
+    from mms_command_tools import pause_after_tui_report
 
-    _ensure_rich()
-    try:
-        console.print(f"[dim]{prompt_text}[/dim]")
-    except Exception:
-        pass
-    try:
-        input()
-    except (EOFError, KeyboardInterrupt):
-        pass
+    def tui_rendered():
+        return bool(_SETTINGS_RESULT_RENDERED_TUI)
+
+    def clear_tui_rendered():
+        global _SETTINGS_RESULT_RENDERED_TUI
+        _SETTINGS_RESULT_RENDERED_TUI = False
+
+    return pause_after_tui_report(
+        prompt_text,
+        tui_rendered=tui_rendered,
+        clear_tui_rendered=clear_tui_rendered,
+        ensure_rich=_ensure_rich,
+        input_func=input,
+        console=console,
+    )
 
 
 def _manage_provider_models(cfg, provider_id):

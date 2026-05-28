@@ -600,6 +600,46 @@ def test_print_settings_error_report_preserves_error_payload():
     ]
 
 
+def test_pause_after_tui_report_preserves_skip_and_fallback_prompt():
+    import mms_command_tools
+
+    events = []
+
+    mms_command_tools.pause_after_tui_report(
+        "按 Enter 返回设置",
+        tui_rendered=lambda: True,
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        input_func=lambda: events.append(("input",)),
+        console=_CollectingConsole(),
+    )
+    assert events == [("clear",)]
+
+    console = _CollectingConsole()
+    events.clear()
+    mms_command_tools.pause_after_tui_report(
+        "按 Enter 返回设置",
+        tui_rendered=lambda: False,
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        input_func=lambda: events.append(("input",)),
+        console=console,
+    )
+    assert events == [("rich",), ("input",)]
+    assert console.items == ["[dim]按 Enter 返回设置[/dim]"]
+
+    events.clear()
+    mms_command_tools.pause_after_tui_report(
+        "按 Enter 返回设置",
+        tui_rendered=lambda: False,
+        clear_tui_rendered=lambda: events.append(("clear",)),
+        ensure_rich=lambda: events.append(("rich",)),
+        input_func=lambda: (_ for _ in ()).throw(EOFError()),
+        console=_CollectingConsole(),
+    )
+    assert events == [("rich",)]
+
+
 def test_model_probe_recovery_helpers_preserve_findings_actions_and_details():
     import mms_command_tools
 
