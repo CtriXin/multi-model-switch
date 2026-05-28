@@ -848,6 +848,23 @@ def handle_tui_broker_action(cfg, cli_name, *, launch_broker_experiment_interact
     return {"status": "continue"}
 
 
+def apply_tui_launcher_state_result(
+    cfg,
+    current_provider,
+    default_models,
+    current_cli_names,
+    families_dirty,
+    result,
+):
+    cfg = result.get("cfg", cfg)
+    if result.get("changed"):
+        current_provider = result.get("current_provider", current_provider)
+        default_models = result.get("default_models", default_models)
+        current_cli_names = result.get("current_cli_names", current_cli_names)
+        families_dirty = result.get("families_dirty", families_dirty)
+    return cfg, current_provider, default_models, current_cli_names, families_dirty
+
+
 def apply_tui_priority_changes(
     cfg,
     priority_changes,

@@ -13,6 +13,7 @@ from mms_tui_launcher_flow import (
     apply_rescue_demo_packet_action,
     apply_rescue_hot_fallback_toggle_action,
     apply_tui_priority_changes,
+    apply_tui_launcher_state_result,
     build_confirm_capability_context,
     confirm_agent_pack,
     confirm_tui_options,
@@ -1395,6 +1396,44 @@ def test_handle_tui_connect_action_refreshes_changed_state() -> None:
         ("wizard", {"cfg": "initial"}),
         ("refresh", updated_cfg),
     ]
+
+
+def test_apply_tui_launcher_state_result_merges_changed_and_unchanged_results() -> None:
+    state = (
+        {"cfg": "old"},
+        {"id": "old-provider"},
+        ["old-model"],
+        ["claude"],
+        False,
+    )
+
+    assert apply_tui_launcher_state_result(
+        *state,
+        {"cfg": {"cfg": "language"}, "changed": False},
+    ) == (
+        {"cfg": "language"},
+        {"id": "old-provider"},
+        ["old-model"],
+        ["claude"],
+        False,
+    )
+
+    assert apply_tui_launcher_state_result(
+        *state,
+        {
+            "cfg": {"cfg": "new"},
+            "changed": True,
+            "current_provider": {"id": "new-provider"},
+            "default_models": ["new-model"],
+            "families_dirty": True,
+        },
+    ) == (
+        {"cfg": "new"},
+        {"id": "new-provider"},
+        ["new-model"],
+        ["claude"],
+        True,
+    )
 
 
 def test_apply_tui_priority_changes_saves_then_exports() -> None:

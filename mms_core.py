@@ -4893,6 +4893,20 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
             export_model_routes_loader=lambda: __import__("mms_router", fromlist=["export_model_routes"]).export_model_routes,
         )
 
+    def _apply_launcher_state_result(result):
+        nonlocal current_cfg, current_provider, default_models, current_cli_names, _families_dirty
+
+        current_cfg, current_provider, default_models, current_cli_names, _families_dirty = (
+            tui_flow.apply_tui_launcher_state_result(
+                current_cfg,
+                current_provider,
+                default_models,
+                current_cli_names,
+                _families_dirty,
+                result,
+            )
+        )
+
     while True:
         if _families_dirty:
             families_by_cli, families_detail, provider_options_by_cli, provider_options_loader_by_cli = _rebuild_families()
@@ -4934,12 +4948,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 run_connect_wizard=run_connect_wizard,
                 refresh_runtime_state=_refresh_runtime_state_after_config_change,
             )
-            current_cfg = connect_result["cfg"]
-            if connect_result["changed"]:
-                current_provider = connect_result["current_provider"]
-                default_models = connect_result["default_models"]
-                current_cli_names = connect_result["current_cli_names"]
-                _families_dirty = connect_result["families_dirty"]
+            _apply_launcher_state_result(connect_result)
             continue
 
         # ── Broker experiment ──
@@ -4974,12 +4983,7 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 trace_record=_trace_record,
                 trace_runtime_choice=_trace_runtime_choice,
             )
-            if profile_action.get("changed"):
-                current_cfg = profile_action["cfg"]
-                current_provider = profile_action["current_provider"]
-                default_models = profile_action["default_models"]
-                current_cli_names = profile_action["current_cli_names"]
-                _families_dirty = profile_action["families_dirty"]
+            _apply_launcher_state_result(profile_action)
             if profile_action.get("message"):
                 console.print(f"[yellow]{profile_action['message']}[/yellow]")
             if profile_action["status"] != "launch":
@@ -5088,13 +5092,9 @@ def _handle_tui_launcher_selection(cfg, provider, once, cli_names, account_id=No
                 prompt_cls=Prompt,
                 set_language=set_language,
             )
-            current_cfg = settings_result["cfg"]
+            _apply_launcher_state_result(settings_result)
             if settings_result["status"] == "interrupt":
                 return True
-            if settings_result.get("changed"):
-                current_provider = settings_result["current_provider"]
-                default_models = settings_result["default_models"]
-                _families_dirty = settings_result["families_dirty"]
             continue
 
         # ── 上次使用 ──
